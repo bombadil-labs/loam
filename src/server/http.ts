@@ -485,6 +485,10 @@ function federateAdmits(standing: readonly string[] | undefined, container: stri
 // own prop names, and the pointer roles its edge deltas wear. The mutations it derives live under
 // `link<n>_<P>`, a name minted FROM the fenced lens name, so a scoped caller cannot reach a field
 // its own lens does not already own; and a role is delta vocabulary, unowned like an entity id.
+// The reciprocal CONTEXT is the one refs name that lands in ANOTHER entity's fold space — and it
+// grants no new reach either: contexts are delta vocabulary, any writer with standing could
+// already file a delta at any (entity, context) through `_claim`, and whether that bucket folds
+// into anything is the READER's lens choice, never the writer's.
 //
 // AND THE FENCE IS NOT THE WHOLE GATE. Two fields of a registration are not namespace problems at
 // all, and no prefix could ever have contained them — see `scopedRegistrationDefect` below.

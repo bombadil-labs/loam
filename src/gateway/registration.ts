@@ -133,7 +133,9 @@ export function parseRefs(raw: unknown): RefSpecs {
 // mutation pair generates: an exact-role expand (or no matching expand at all — the declaration
 // stands on its own) mints link/unlink; a prefix/inSet match marks the prop as a reference for
 // TYPING only, because a role family has no single canonical role to author. `target` is the
-// matched expand's child schema name — what the undeclared-reciprocal warning points at.
+// matched expand's child READING when it declares one, else its schema ref — the name a reader
+// would look for the fold under, which is what the undeclared-reciprocal warning points at (H6:
+// naming the program where a reading is meant sends the reader to a name sibling lenses share).
 export interface ReferenceProp {
   readonly prop: string;
   readonly role: string;
@@ -150,13 +152,15 @@ export function referenceProps(body: Term, refs: RefSpecs | undefined): Map<stri
   if (refs === undefined) return out;
   // Every expand in the body, by its role matcher — the same traversal edgeRoles runs, plus the
   // set operators it predates (`intersect`/`difference` gather nothing extra but must be walked).
-  const found: { matcher: { kind: string }; schemaName: string }[] = [];
+  const found: { matcher: { kind: string }; target: string }[] = [];
+  const refName = (r: { kind: "name"; name: string } | { kind: "pinned"; hash: string }): string =>
+    r.kind === "name" ? r.name : r.hash;
   const walk = (t: Term): void => {
     switch (t.kind) {
       case "expand":
         found.push({
           matcher: t.role,
-          schemaName: t.schema.kind === "name" ? t.schema.name : t.schema.hash,
+          target: refName(t.reading ?? t.schema),
         });
         walk(t.of);
         break;
@@ -201,7 +205,7 @@ export function referenceProps(body: Term, refs: RefSpecs | undefined): Map<stri
       // Exact → the canonical statement, mint the pair. No matching expand → the declaration
       // still marks the prop and generates (§51.4). A prefix/inSet family → typing only.
       links: family === undefined || family === exact,
-      ...(family === undefined ? {} : { target: family.schemaName }),
+      ...(family === undefined ? {} : { target: family.target }),
     });
   }
   return out;
@@ -393,6 +397,11 @@ export interface Registration {
   readonly resolvers?: ResolverSpecs;
   // Reference declarations (SPEC §51), per prop — the write side of an edge field, derived.
   readonly refs?: RefSpecs;
+  // Why `refs` is absent although the binding's bytes carry a payload: the payload could not be
+  // read. Present ONLY on a stored registration whose declaration was dropped at parse — without
+  // it the drop is silent, and a prop also named in `writable` gets its PrimitiveValue argument
+  // back: the fossil surface, resurrected with nobody told.
+  readonly refsDefect?: string;
 }
 
 const isPrimitive = (v: unknown): v is Primitive =>
@@ -893,6 +902,7 @@ interface Candidate {
   writable?: readonly string[];
   resolvers?: ResolverSpecs;
   refs?: RefSpecs;
+  refsDefect?: string;
   timestamp: number;
   id: string;
   /** The BINDING delta's author — what a declared byAuthorRank policy ranks on (§47). */
@@ -997,15 +1007,19 @@ function survivingCandidates(
         resolvers = undefined;
       }
     }
-    // Reference declarations (SPEC §51): the same quiet drop — the schema binds, the surface
-    // simply serves no derived edge mutations. The loud refusal belongs to publish.
+    // Reference declarations (SPEC §51): the drop is quiet for the BIND (the schema still
+    // serves) and NOT silent for the reader — the defect rides along exactly as a template
+    // defect does, because losing refs can resurrect a writable prop's PrimitiveValue argument,
+    // and a fossil surface nobody was told about is the failure this feature exists to close.
     let refs: RefSpecs | undefined;
+    let refsDefect: string | undefined;
     const refsJson = primitive(delta.claims, "refs");
     if (typeof refsJson === "string") {
       try {
         refs = parseRefs(JSON.parse(refsJson));
-      } catch {
+      } catch (err) {
         refs = undefined;
+        refsDefect = err instanceof Error ? err.message : String(err);
       }
     }
     const schemaEntity = schemaRef.target.entity.id;
@@ -1019,6 +1033,7 @@ function survivingCandidates(
       ...(writable === undefined ? {} : { writable }),
       ...(resolvers === undefined ? {} : { resolvers }),
       ...(refs === undefined ? {} : { refs }),
+      ...(refsDefect === undefined ? {} : { refsDefect }),
       timestamp: delta.claims.timestamp,
       id: delta.id,
       author: delta.claims.author,
@@ -1184,6 +1199,7 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
         ...(cand.writable === undefined ? {} : { writable: cand.writable }),
         ...(cand.resolvers === undefined ? {} : { resolvers: cand.resolvers }),
         ...(cand.refs === undefined ? {} : { refs: cand.refs }),
+        ...(cand.refsDefect === undefined ? {} : { refsDefect: cand.refsDefect }),
       });
     } catch {
       // no surviving (or a malformed) definition/schema: the registration is unbound, not fatal

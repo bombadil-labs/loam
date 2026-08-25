@@ -7,14 +7,33 @@
 // transcribed one-to-one below, each asserted at BOTH levels where the spec says so: the raw delta
 // in the store, and what a reader resolves through the lens.
 //
-// Deliberately NOT asserted here: bilateral reciprocal derivation and typed nested view fields
-// (both DEFERRED by the spec), and the REST door (this ticket generates the GraphQL surface only).
+// Deliberately NOT asserted here, each a named gap rather than a silent one:
+//   - bilateral reciprocal derivation and typed nested view fields (both DEFERRED by the spec);
+//   - REST derives no link/unlink doors (GraphQL only) — but the PRIMITIVE-write overlap is
+//     closed at the mutate seam and railed below, so no door can fossilize a reference prop;
+//   - a blessed (adopt-law) lens carries no `refs` — the manifest's schema exports lack the
+//     field, so an adopted lens serves without derived edge mutations until republished;
+//   - the CLI and admin register doors pass `refs` through and are not railed here (the HTTP and
+//     gateway doors are; all four share parseRegistrationInput and publishRegistration);
+//   - THE CHANGED-ROLE STRAND (documented, not decided): republishing `refs` with a CHANGED role
+//     leaves the caller's own OLD-role edges folding (the context carries the fold) but
+//     unmatchable by unlink — and clear/remove refuse a refs prop — so they are unretractable
+//     through every typed door; only raw _claim + manual retraction reaches them. Widening
+//     unlink's match to old declared roles is a behavior decision for the PR review.
+// FUTURE HAZARD the far-side-after-unlink rail exists for: today one delta carries BOTH folds,
+// so one strike closes both sides by construction. If the authored edge ever splits into two
+// deltas (root-side + target-side), unlink retracting only the root half would leave HALF-DEAD
+// links — live on the person, gone on the experience. That rail is the tripwire.
 // All fixtures are MemoryBackend stores; nothing here touches a real home.
 
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   authorForSeed,
   parseTerm,
+  publishHyperSchemaClaims,
   signClaims,
   type Delta,
   type Schema,
@@ -27,9 +46,15 @@ import {
 } from "../../src/gateway/gather.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
-import { parseRegistrationInput, type RefSpecs } from "../../src/gateway/registration.js";
+import {
+  lensOf,
+  parseRegistrationInput,
+  registrationDeltaClaims,
+  type RefSpecs,
+} from "../../src/gateway/registration.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import { MemoryBackend } from "../../src/store/memory.js";
+import { SqliteBackend } from "../../src/store/sqlite.js";
 import { observed } from "../spike/garden.js";
 import { pickLatest } from "./fixtures.js";
 
@@ -43,10 +68,12 @@ const SECOND_SEED = "d2".repeat(32);
 const SECOND = authorForSeed(SECOND_SEED);
 const SYNC_SEED = "d3".repeat(32); // the scoped connection, granted register over `sync:`
 const SYNC = authorForSeed(SYNC_SEED);
+const STRANGER_SEED = "d4".repeat(32); // holds NO write grant anywhere
 
 const MYK = "person:myk";
 const SAGE = "person:sage";
 const EXP = "experience:hike";
+const TRIP = "trip:ridge";
 
 // The repro's own names (Myk's live `sync:` container): the experience lens expands the
 // `experiencer` role into the person's view, and the reciprocal declaration says how the same
@@ -339,17 +366,22 @@ describe("§51 (d) — unlink retracts the caller's own link; history and bystan
       { actor: WRITER_SEED },
     );
     const [writersEdge] = await freshDeltas(gateway, backend, settled);
+    const afterWriter = await idsOf(backend);
     // The SECOND author links the SAME pair — the bystander the retraction must not touch.
     await gateway.query(
       `mutation { linksync_experience_experiencers(entity: "${EXP}", target: "${MYK}") { _hex } }`,
       undefined,
       { actor: SECOND_SEED },
     );
+    const [secondsEdge] = await freshDeltas(gateway, backend, afterWriter);
     const both = await gateway.query(`{ sync_experience(entity: "${EXP}") { experiencers } }`);
     expect(view(both, "sync_experience")["experiencers"]).toMatchObject([
       { name: "Myk" },
       { name: "Myk" },
     ]);
+    // The FAR side before the retraction: both edges fold into the person too.
+    const farBefore = await gateway.query(`{ sync_person(entity: "${MYK}") { experiences } }`);
+    expect(view(farBefore, "sync_person")["experiences"]).toEqual([EXP, EXP]);
 
     const unlinked = await gateway.query(
       `mutation { unlinksync_experience_experiencers(entity: "${EXP}", target: "${MYK}") { experiencers } }`,
@@ -360,9 +392,15 @@ describe("§51 (d) — unlink retracts the caller's own link; history and bystan
     expect(view(unlinked, "unlinksync_experience_experiencers")["experiencers"]).toMatchObject([
       { name: "Myk" },
     ]);
+    // ...and the FAR side agrees: the writer's edge no longer folds into the person, the second
+    // author's still does. One delta carries both folds, so one strike closes both — this rail is
+    // the tripwire for the half-dead-links hazard named in the header.
+    const farAfter = await gateway.query(`{ sync_person(entity: "${MYK}") { experiences } }`);
+    expect(view(farAfter, "sync_person")["experiences"]).toEqual([EXP]);
 
     // DELTA level: retraction is a CLAIM — the original delta survives in the store beside its
-    // negation; nothing was purged. The second author's edge drew no strike at all.
+    // negation; nothing was purged. And the second author's edge drew no strike: its negation
+    // list is EMPTY, asserted directly, not inferred from the view.
     await gateway.flush();
     const all = await idsOf(backend);
     expect(all.has(writersEdge!.id), "the retracted edge delta still exists — history").toBe(true);
@@ -371,6 +409,7 @@ describe("§51 (d) — unlink retracts the caller's own link; history and bystan
     for (const strike of strikes) {
       expect(gateway.reactor.get(strike)?.claims.author).toBe(WRITER); // retract-your-OWN
     }
+    expect(gateway.reactor.negationsOf(secondsEdge!.id)).toEqual([]);
     await gateway.close();
   });
 });
@@ -406,6 +445,9 @@ describe("§51 (e) — an undeclared reciprocal: the mutation still generates, l
     expect(
       atPerson?.target.kind === "entity" ? atPerson.target.entity.context : "wrong-kind",
     ).toBeUndefined();
+    // With no reciprocal there is no R_reverse: the root-side pointer falls back to the
+    // store-wide `subject` role every per-prop write carries — pinned literally.
+    expect(atExperience?.role).toBe("subject");
     expect(
       atExperience?.target.kind === "entity" ? atExperience.target.entity.context : "wrong-kind",
     ).toBe("experiencers");
@@ -612,6 +654,334 @@ describe("§51 — the refs envelope parse refuses malformed declarations loudly
     expect(() =>
       parseRegistrationInput({ ...body, refs: { owner: { role: "owned-by", reciprocal: {} } } }),
     ).toThrow('refs "owner": reciprocal wants { role, context }, both non-empty strings');
+    // "__proto__" arrives as an OWN key from JSON.parse (a literal would set the prototype
+    // instead) — and it must refuse rather than vanish into a plain object's prototype setter.
+    expect(() =>
+      parseRegistrationInput({
+        ...body,
+        refs: JSON.parse('{"__proto__":{"role":"x"}}') as unknown,
+      }),
+    ).toThrow('refs: "__proto__" is not a usable prop name');
+  });
+});
+
+describe("§51 — a corrupted at-rest refs payload drops the pair AND says so", () => {
+  // The mint refusals cannot reach a binding whose bytes are already down, so the at-rest shape
+  // gets its own rail: on replay, a refs payload that will not parse costs the DERIVED MUTATIONS
+  // and nothing else — and the loss leaves a record (`refsDefect`), exactly as a template payload
+  // leaves `mutationsDefect`. Silent would be worse than dropped: with the prop also in
+  // `writable`, the drop resurrects the PrimitiveValue argument — the fossil surface — and only
+  // the defect field tells the operator why.
+  it("replay keeps the lens, sheds the pair, records the defect; a valid sibling serves whole", async () => {
+    const { gateway } = await world();
+    let tick = 5_000;
+    const clock = (): number => (tick += 1);
+
+    // Lens 1: a hand-planted binding whose refs payload is GARBAGE ({"experiencers":42}).
+    const poisoned = registrationDeltaClaims(
+      "hyperschema:sync:experience",
+      "sync:experience",
+      EXPERIENCE_READING,
+      [EXP],
+      OPERATOR,
+      clock,
+      undefined,
+      ["title", "experiencers"], // the overlap that makes the drop consequential
+    );
+    // Lens 2: the two-sided control — a VALID refs payload, planted the same at-rest way.
+    const trek = {
+      name: "sync:trip",
+      alg: 1,
+      body: expandedGatherBody({
+        role: "experiencer",
+        schema: "sync:person",
+        reading: "sync:person",
+      }),
+    };
+    const healthy = registrationDeltaClaims(
+      "hyperschema:sync:trip",
+      "sync:trip",
+      { ...EXPERIENCE_READING, name: "sync:trip" },
+      [TRIP],
+      OPERATOR,
+      clock,
+      undefined,
+      ["title"],
+      undefined,
+      REFS,
+    );
+    await gateway.append([
+      signClaims(
+        publishHyperSchemaClaims(EXPERIENCE, "hyperschema:sync:experience", OPERATOR, clock()),
+        OPERATOR_SEED,
+      ),
+      signClaims(poisoned.living, OPERATOR_SEED),
+      signClaims(poisoned.snapshot, OPERATOR_SEED),
+      signClaims(
+        {
+          ...poisoned.binding,
+          pointers: [
+            ...poisoned.binding.pointers,
+            { role: "refs", target: { kind: "primitive", value: '{"experiencers":42}' } },
+          ],
+        },
+        OPERATOR_SEED,
+      ),
+      signClaims(
+        publishHyperSchemaClaims(trek, "hyperschema:sync:trip", OPERATOR, clock()),
+        OPERATOR_SEED,
+      ),
+      signClaims(healthy.living, OPERATOR_SEED),
+      signClaims(healthy.snapshot, OPERATOR_SEED),
+      signClaims(healthy.binding, OPERATOR_SEED),
+    ]);
+    gateway.replayRegistrations();
+
+    // The poisoned lens BINDS — refs alone fell away — and the loss is on record.
+    const reg = gateway.registered.find((r) => lensOf(r) === "sync:experience");
+    expect(reg).toBeDefined();
+    expect(reg!.refs).toBeUndefined();
+    expect(reg!.refsDefect).toMatch(/refs "experiencers": wants \{ role, reciprocal\? \}/);
+
+    const { fields } = await mutationSurface(gateway);
+    expect(fields.has("linksync_experience_experiencers")).toBe(false);
+    // The consequence the defect field confesses: the prop is in `writable`, so with refs gone
+    // the PrimitiveValue argument is back — a fossil surface an operator must be able to see.
+    expect(fields.get("sync_experience")!.args).toEqual({
+      entity: "ID!",
+      title: "PrimitiveValue",
+      experiencers: "PrimitiveValue",
+    });
+
+    // TWO-SIDED: the valid at-rest payload beside it serves its pair whole, defect-free.
+    const control = gateway.registered.find((r) => lensOf(r) === "sync:trip");
+    expect(control?.refsDefect).toBeUndefined();
+    expect(control?.refs).toEqual(REFS);
+    expect(fields.has("linksync_trip_experiencers")).toBe(true);
+    expect(fields.get("sync_trip")!.args).toEqual({ entity: "ID!", title: "PrimitiveValue" });
+    await gateway.close();
+  });
+});
+
+describe("§51 — refs wins at the MUTATE SEAM, not only on the GraphQL surface", () => {
+  it("a primitive write to a refs prop refuses on every door; a plain writable prop beside it writes", async () => {
+    const { gateway } = await world();
+    // The overlap case: the prop sits in BOTH lists, so `writable` alone would admit it — and
+    // REST or a direct caller reaches hooks.mutate without the GraphQL door's missing argument.
+    await registerExperience(gateway, { writable: ["title", "experiencers"], refs: REFS });
+    const hooks = gateway.gqlHooks();
+    await expect(
+      hooks.mutate("sync:experience", EXP, { experiencers: MYK }, WRITER_SEED),
+    ).rejects.toThrow(/is a reference \(§51\).*linksync_experience_experiencers/);
+    // The plain writable prop beside it still writes through the same seam.
+    const ok = await hooks.mutate("sync:experience", EXP, { title: "The hike" }, WRITER_SEED);
+    expect(ok.view["title"]).toBe("The hike");
+
+    // The refs-ONLY case draws the SAME reference refusal — not "read-only: name it in
+    // writable", which would coach the caller into re-opening the fossil path.
+    await registerExperience(gateway, { writable: ["title"], refs: REFS });
+    await expect(
+      gateway.gqlHooks().mutate("sync:experience", EXP, { experiencers: MYK }, WRITER_SEED),
+    ).rejects.toThrow(/is a reference \(§51\)/);
+    await gateway.close();
+  });
+});
+
+describe("§51 — the persisted refs survive a REBOOT: replay re-derives the pair", () => {
+  it("close, reopen over the same store file: link/unlink serve and the primitive arg stays gone", async () => {
+    // A REAL reboot: sqlite bytes in this test's own temp dir, a closed process, a fresh open.
+    const home = mkdtempSync(join(tmpdir(), "loam-t245-reboot-"));
+    const gateway = await Gateway.open(new SqliteBackend(join(home, "store.sqlite")), {
+      seed: OPERATOR_SEED,
+    });
+    await gateway.append([
+      signClaims(grantClaims(STORE_ENTITY, WRITER, "write", OPERATOR, 9_001), OPERATOR_SEED),
+    ]);
+    await gateway.append([observed(MYK, "name", "Myk", 1_000, WRITER_SEED)]);
+    await gateway.publishRegistration(PERSON, PERSON_READING, [MYK, SAGE]);
+    await registerExperience(gateway, { refs: REFS });
+    await gateway.close();
+
+    const reborn = await Gateway.open(new SqliteBackend(join(home, "store.sqlite")), {
+      seed: OPERATOR_SEED,
+    });
+    const { fields } = await mutationSurface(reborn);
+    expect(fields.has("linksync_experience_experiencers")).toBe(true);
+    expect(fields.has("unlinksync_experience_experiencers")).toBe(true);
+    expect(fields.get("sync_experience")!.args).toEqual({ entity: "ID!", title: "PrimitiveValue" });
+
+    // The replayed declaration drives the WRITE path too, not just the introspected names.
+    const linked = await reborn.query(
+      `mutation { linksync_experience_experiencers(entity: "${EXP}", target: "${MYK}") { experiencers } }`,
+      undefined,
+      { actor: WRITER_SEED },
+    );
+    expect(view(linked, "linksync_experience_experiencers")["experiencers"]).toMatchObject([
+      { name: "Myk" },
+    ]);
+    await reborn.close();
+  });
+});
+
+describe("§51 — a ref must ride an existing prop, refused loudly at publish", () => {
+  it("a phantom prop refuses with the field named; a valid declaration beside it publishes", async () => {
+    const { gateway } = await world();
+    await expect(
+      gateway.publishRegistration(
+        EXPERIENCE,
+        EXPERIENCE_READING,
+        [EXP],
+        undefined,
+        undefined,
+        undefined,
+        ["title"],
+        undefined,
+        { phantom: { role: "experiencer" } },
+      ),
+    ).rejects.toThrow('refs "phantom": no such field in the schema');
+    // Two-sided: the same shape with a REAL prop publishes and serves its pair.
+    const outcome = await registerExperience(gateway, { refs: REFS });
+    expect(outcome.bound).toBe(true);
+    const { fields } = await mutationSurface(gateway);
+    expect(fields.has("linksync_experience_experiencers")).toBe(true);
+    await gateway.close();
+  });
+});
+
+describe("§51 — sibling readings and a capital-initial prop (H6's documented blind spot)", () => {
+  // Every other fixture here has lens == program and mangle-invariant props, so a regression
+  // from the LENS name to the PROGRAM name — or a GraphQL mangling leaking into a delta — would
+  // pass byte-identically there. This one separates all three names.
+  it("each reading mints its own pair under ITS name; the delta carries store-native names", async () => {
+    const { gateway, backend } = await world();
+    // A sibling reading over the person PROGRAM: readings and programs now genuinely differ.
+    await gateway.publishRegistration(
+      PERSON,
+      { name: "PersonCard", props: new Map([["name", pickLatest]]), default: pickLatest },
+      [MYK, SAGE],
+    );
+    const TREK = {
+      name: "sync:trek",
+      alg: 1,
+      body: expandedGatherBody({ role: "companion", schema: "sync:person", reading: "PersonCard" }),
+    } as const;
+    const allAsc = { kind: "all", order: { kind: "byTimestamp", dir: "asc" } } as const;
+    // Reading 1 over sync:trek, with a reciprocal.
+    const trekOutcome = await gateway.publishRegistration(
+      TREK,
+      {
+        name: "Trek",
+        props: new Map([
+          ["Companions", allAsc],
+          ["title", pickLatest],
+        ]),
+        default: pickLatest,
+      },
+      [TRIP],
+      undefined,
+      undefined,
+      undefined,
+      ["title"],
+      undefined,
+      { Companions: { role: "companion", reciprocal: { role: "companion-of", context: "treks" } } },
+    );
+    expect(trekOutcome.bound).toBe(true);
+    // Reading 2 over the SAME program, no reciprocal: the warning names the expand's READING —
+    // where a reader would look for the fold — never the program both readings share (H6).
+    const voyageOutcome = await gateway.publishRegistration(
+      TREK,
+      { name: "Voyage", props: new Map([["Companions", allAsc]]), default: pickLatest },
+      [TRIP],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { Companions: { role: "companion" } },
+    );
+    expect(voyageOutcome.bound).toBe(true);
+    expect(voyageOutcome.warnings ?? []).toContain(
+      "reciprocal context for Voyage.Companions undeclared; " +
+        "link deltas will not fold on the PersonCard side",
+    );
+
+    // Each reading's pair is named from ITS lens; the program-name shape exists for neither.
+    const { fields } = await mutationSurface(gateway);
+    expect(fields.has("linktrek_Companions")).toBe(true);
+    expect(fields.has("unlinktrek_Companions")).toBe(true);
+    expect(fields.has("linkvoyage_Companions")).toBe(true);
+    expect(fields.has("unlinkvoyage_Companions")).toBe(true);
+    expect(fields.has("linksync_trek_Companions")).toBe(false);
+
+    // The authored delta carries STORE-NATIVE names: the capital-initial prop as declared,
+    // never a GraphQL mangling leaked into a pointer context.
+    const settled = await idsOf(backend);
+    const linked = await gateway.query(
+      `mutation { linktrek_Companions(entity: "${TRIP}", target: "${MYK}") { Companions } }`,
+      undefined,
+      { actor: WRITER_SEED },
+    );
+    expect(view(linked, "linktrek_Companions")["Companions"]).toMatchObject([{ name: "Myk" }]);
+    const [edge] = await freshDeltas(gateway, backend, settled);
+    expect(shapeOf(edge!)).toEqual(
+      shapeOf({
+        id: "x",
+        claims: {
+          timestamp: 0,
+          author: WRITER,
+          pointers: [
+            {
+              role: "companion",
+              target: { kind: "entity", entity: { id: MYK, context: "treks" } },
+            },
+            {
+              role: "companion-of",
+              target: { kind: "entity", entity: { id: TRIP, context: "Companions" } },
+            },
+          ],
+        },
+      }),
+    );
+    await gateway.close();
+  });
+});
+
+describe("§51 — a republish where ONLY refs changes regenerates the surface", () => {
+  it("same schema, same roots, same writable — adding refs alone mints the pair", async () => {
+    const { gateway } = await world();
+    await registerExperience(gateway, {}); // no refs; writable stays the default ["title"]
+    const before = await mutationSurface(gateway);
+    expect(before.fields.has("linksync_experience_experiencers")).toBe(false);
+
+    await registerExperience(gateway, { refs: REFS }); // the ONE field that differs
+    const after = await mutationSurface(gateway);
+    expect(after.fields.has("linksync_experience_experiencers")).toBe(true);
+    expect(after.fields.has("unlinksync_experience_experiencers")).toBe(true);
+    await gateway.close();
+  });
+});
+
+describe("§51 — link signs as the actor, and standing still gates the append", () => {
+  it("an ungranted actor's link refuses at the door; the granted writer's lands", async () => {
+    const { gateway } = await world();
+    await registerExperience(gateway, { refs: REFS });
+    const denied = await gateway.query(
+      `mutation { linksync_experience_experiencers(entity: "${EXP}", target: "${MYK}") { _hex } }`,
+      undefined,
+      { actor: STRANGER_SEED },
+    );
+    expect(denied.errors?.join(" ")).toMatch(/append rejected/);
+    // Two-sided: the same mutation under a GRANTED actor lands — the refusal above is standing,
+    // not a broken door.
+    const granted = await gateway.query(
+      `mutation { linksync_experience_experiencers(entity: "${EXP}", target: "${MYK}") { experiencers } }`,
+      undefined,
+      { actor: WRITER_SEED },
+    );
+    expect(view(granted, "linksync_experience_experiencers")["experiencers"]).toMatchObject([
+      { name: "Myk" },
+    ]);
+    await gateway.close();
   });
 });
 

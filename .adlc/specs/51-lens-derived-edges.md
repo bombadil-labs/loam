@@ -51,7 +51,9 @@ One new optional envelope field:
 Precedence for the reciprocal pair: (1) the explicit `refs` annotation; (2) bilateral derivation
 from the target schema's own declarations — DEFERRED to a follow-up; (3) neither: the link
 mutation still generates, the target-side pointer carries no context, and registration warns
-`reciprocal context for <N>.<P> undeclared; link deltas will not fold on the <S> side`. A
+`reciprocal context for <N>.<P> undeclared; link deltas will not fold on the <S> side` — where
+`<S>` is the matched expand's declared `reading`, falling back to its `schema` ref (the reading
+is the name a reader looks for the fold under; the program is a name sibling lenses share). A
 `refs.role` declared with no matching `expand` in the body still marks the prop and generates the
 mutations. Fence note: `refs` carries NAMES, not code — it rides a scoped registration exactly as
 `roots`/`writable` do.
