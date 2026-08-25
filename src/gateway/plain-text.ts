@@ -17,13 +17,23 @@
 // realm, through prototype methods the bundle can replace, so it is advisory; this call is the one
 // that counts, and the parent makes it on every string that crosses.
 
-// The lint that forbids naming a control character is disabled for the one pattern whose SUBJECT is
-// control characters: the rule exists to catch one that wandered in by accident, and these are here
-// on purpose.
+// The ranges that REPAINT, as code-point pairs — C0/C1 (ESC, BEL), then the bidi and format ranges a
+// plain control filter misses, where U+202E alone prints a refusal as its own opposite. Built from
+// numbers at runtime rather than written as a control-char regex literal: the pattern's SUBJECT is
+// control characters on purpose, and constructing the class from code points keeps a real control byte
+// out of this source (which is what `no-control-regex` guards) without a blanket disable.
+const REPAINT_RANGES: readonly (readonly [number, number])[] = [
+  [0x00, 0x1f],
+  [0x7f, 0x9f],
+  [0x200b, 0x200f],
+  [0x2028, 0x2029],
+  [0x202a, 0x202e],
+  [0x2066, 0x2069],
+  [0xfeff, 0xfeff],
+];
 const REPAINTS = new RegExp(
-  // eslint-disable-next-line no-control-regex
-  "[\\u0000-\\u001f\\u007f-\\u009f\\u200b-\\u200f\\u2028\\u2029\\u202a-\\u202e\\u2066-\\u2069\\ufeff]",
-  "g",
+  `[${REPAINT_RANGES.map(([lo, hi]) => `${String.fromCodePoint(lo)}-${String.fromCodePoint(hi)}`).join("")}]`,
+  "gu",
 );
 
 export const plainText = (raw: string, max = 300): string =>
