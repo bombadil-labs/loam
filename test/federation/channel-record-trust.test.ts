@@ -59,6 +59,7 @@ import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { CTX_CHANNEL, channelRecordClaims } from "../../src/federation/channel.js";
 import { exportOffer } from "../../src/federation/offer.js";
+import { channelLens } from "../../src/gateway/reads.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import { FERN, observed } from "../spike/garden.js";
@@ -578,6 +579,14 @@ describe("T217 — an illegible prefix refuses the read rather than answering fr
     await expect(
       me.subscribe(`subscription { alice_Plant(entity: "${FERN}") { height } }`),
     ).rejects.toThrow(/federation channel/);
+
+    // ...and it must answer for THIS lens's channel rather than for whichever illegible channel
+    // happens to exist. Asked directly, because the difference is only visible for a namespaced
+    // lens that belongs to NO channel — and such a lens is by construction not registered here, so
+    // no door can be driven to show it. A reader that matched any illegible channel would refuse
+    // ordinary namespaced reads right across the store.
+    expect(channelLens(me, "alice:Plant")).toBe(true);
+    expect(channelLens(me, "zed:Plant")).toBe(false);
 
     // Two-sided on that door: an ordinary lens, in a store with no channel at all, still
     // subscribes. Without this a `channelLens` that answered TRUE for everything would satisfy the
