@@ -158,6 +158,9 @@ exist and are easy to miss.
 | `pen`      | provision a renderer pen: mint its seed, grant it write standing             |
 | `artifact` | ask whether a route may be published as an artifact, and what it could do    |
 | `repair`   | list and settle a store's quarantine                                         |
+| `slate`    | read the erasure slates staged over this store                               |
+| `erase`    | forget one delta at the bytes, on every tier, and leave a receipt             |
+| `tombstones` | read the receipts: which ids this store forgot, for whom, and why           |
 
 ## The HTTP API
 
@@ -627,6 +630,21 @@ on what remains. What stays is a **tombstone**: a signed, append-only claim reco
 id was forgotten, by whom, and when — never the content. The store remembers that it forgot. The
 door refuses the id's return thereafter (un-erasure is striking the tombstone). Content addressing
 is what makes this honest: retaining a hash retains zero bytes.
+
+The same machinery has a terminal surface, so a compliance officer needs no script:
+
+```sh
+loam slate list --home ./mine        # what is staged for erasure, who asked, and when it is due
+loam erase <deltaId> --reason "GDPR art. 17 request #4821" --home ./mine
+loam tombstones list --home ./mine   # every receipt: which id, whose record, when, and why
+loam tombstones show <id> --home ./mine
+```
+
+`--reason` is required and has no default: the receipt is all that outlives the record, and one
+that cannot say why is a receipt made less honest. If this home has a cold archive its
+`config.json` does not name — `loam serve --archive vault` does not write the name there — `erase`
+spots it and refuses until you name it with `--archive`, rather than sweep the primary and report a
+completeness it never verified. A vault parked outside the home is beyond that check.
 
 **The boundary, stated plainly: erasure is instance-level — Loam cannot retroactively retract a
 delta that has already federated to another instance.** The physics is email you have already
