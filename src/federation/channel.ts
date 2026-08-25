@@ -1344,7 +1344,13 @@ async function syncChannel(
   const from = before?.from ?? opts.from ?? "";
   // What an earlier sync accepted and could not stamp. It is read here and written back on every
   // exit, so no path silently forgets a debt the record was carrying.
-  const owed = before?.unattested ?? [];
+  //
+  // FILTERED TO WHAT THE POOL STILL HOLDS. A real debt is always a delta an earlier sync accepted,
+  // so it is always in the pool; a ref naming nothing the pool holds is the self-correcting tail of
+  // the optimistic journal below (T222) — an id declared before `federate` that the door then
+  // rejected never arrived, so there is no custody to carry forward or to stamp. Dropping it is what
+  // keeps the over-declared journal honest: the trail never names a delta the pool does not hold.
+  const owed = (before?.unattested ?? []).filter((id) => ground.reactor.get(id) !== undefined);
   // FROZEN: read the toggle from the ground on every sync, so a freeze takes effect on the next
   // poll without restarting anything — the same "state is data" discipline as `loam:trust`. A
   // frozen channel reports honestly rather than silently doing nothing: it did not fail, and it
@@ -1393,6 +1399,48 @@ async function syncChannel(
       false,
     );
     throw err;
+  }
+  // THE CUSTODY CRASH WINDOW (T222). `federate` landing the peer's deltas and `attestArrival`
+  // stamping them are two writes with no transaction between them. A process that dies AFTER the
+  // first and BEFORE the second leaves the arrivals in the pool with nothing saying a stamp is owed:
+  // no catch below runs, and the next poll holds those deltas already, so it accepts none and would
+  // never stamp them. The gap is invisible without a scan of the pool against its own stamps.
+  //
+  // Journal the INTENT first — append the ids about to be federated as an OPTIMISTIC debt. The crash
+  // window then becomes an over-declared debt a later sync settles, never a silent omission; a
+  // completed sync clears it with the success stamp below. The `owed` filter above is the other side
+  // of this net: a ref the door rejects never arrives, so it is dropped rather than stamped.
+  //
+  //  - UNION, never overwrite. A debt already on the record is a reported failure's unpaid custody,
+  //    which the frozen T207 heal rail names exactly; declaring only the new ids would strand it.
+  //  - DEDUPED against what the pool already holds. A delta already pooled was accepted by an earlier
+  //    sync and is stamped or already owed, so re-declaring it would make a later heal re-stamp a ref
+  //    that already stands.
+  //  - ONLY WHEN IT ADDS SOMETHING. A quiet poll and a pure heal declare nothing new, so neither
+  //    writes a record — the net costs one write per ACCEPTING sync, not one per poll.
+  const pooled = new Set(
+    offered.filter((d) => ground.reactor.get(d.id) !== undefined).map((d) => d.id),
+  );
+  const declared = [
+    ...new Set([...owed, ...offered.map((d) => d.id).filter((id) => !pooled.has(id))]),
+  ];
+  if (declared.length > owed.length) {
+    await stamp(
+      gw,
+      {
+        name,
+        into: opts.into,
+        prefix: opts.prefix,
+        receiving: before?.receiving ?? true,
+        blessing: before?.blessing ?? opts.bless !== false,
+        lastSyncedAt: before?.lastSyncedAt ?? 0,
+        consecutiveFailures: before?.consecutiveFailures ?? 0,
+        from,
+        unattested: declared,
+      },
+      illegible,
+      false,
+    );
   }
   // `federate`, never `append`. Admission and authorship are different axes (§28.1): a peer's
   // deltas carry the PEER's signatures and hold no write standing here, so the governed write door
