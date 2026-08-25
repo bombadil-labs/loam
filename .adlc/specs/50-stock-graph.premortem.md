@@ -1,4 +1,4 @@
-# Premortem — §49 "the stock graph" (T243)
+# Premortem — §50 "the stock graph" (T244)
 
 Independent premortem, fresh-context subagent, 2026-08-25. Findings in severity order.
 Resolutions are recorded in the working spec's "Changes after premortem" section.
@@ -11,16 +11,16 @@ Person not at all — so "org installs person" is underivable from the bytes, an
 ("derived, never declared") and story 1 cannot both hold.
 
 ## 2. The convergence hash cannot see the graph
-`versionedSchemaHash` (registration.ts:374) covers Schema props+default ONLY. Every §49 addition
+`versionedSchemaHash` (registration.ts:374) covers Schema props+default ONLY. Every §50 addition
 (expands, edge-reading assignments) lives in the hyperschema body, which the hash excludes. The
-divergence warning stays silent on exactly the divergences §49 introduces.
+divergence warning stays silent on exactly the divergences §50 introduces.
 
 ## 3. ShallowReference fails the frozen T85 rail
 test/cli/stock.test.ts asserts every STOCK_SCHEMAS entry has props.size > 0 and
 writable.length > 0. An { id }-only universal reading violates both, and the rail is frozen.
 
 ## 4. Criterion 5 tested the wrong re-run
-Same-bytes-twice cannot see the §42→§49 body evolution: the qualified does-not-bind outcome,
+Same-bytes-twice cannot see the §42→§50 body evolution: the qualified does-not-bind outcome,
 old flat prop data orphaned under a new expand, H4 dedup limits.
 
 ## 5. Reading-name → shelf-entry-name mapping was non-derivable

@@ -1,4 +1,4 @@
-# §49 — The stock graph (working spec, T243)
+# §50 — The stock graph (working spec, T244)
 
 The stock shelf (§42) grows from four flat strangers into an interconnected standard library.
 The goal is convergence: two stores that install the same stock shapes share the same schema
@@ -9,7 +9,7 @@ divergence visible enough, that forking is a deliberate act rather than an accid
 margins.
 
 Design settled with Myk in chat, 2026-08-25; amended the same day after the independent
-premortem (`49-stock-graph.premortem.md`). The three amendments that changed an approved
+premortem (`50-stock-graph.premortem.md`). The three amendments that changed an approved
 decision — story 1's install set, the thread split, ShallowReference dropped — were approved
 by Myk in chat the same day.
 
@@ -24,9 +24,11 @@ by Myk in chat the same day.
 2. Ada replies to a post. Her reply carries `replyTo` (the parent) and `thread` (the anchor).
    A `PostThread` query at the anchor returns every post in the conversation in one read, no
    tree walk.
-3. Priya already has her own bespoke `Person` reading. She runs `--stock org`. The install
-   composes with her reading and warns that it is not stock — naming both layers it compared
-   (schema snapshot hash and gather body).
+3. Priya already has her own bespoke `ShallowPerson` reading, under that program name. She runs
+   `--stock org`. The install composes with her reading and warns that it is not stock — naming
+   both layers it compared (schema snapshot hash and gather body). Had she bound the lens under
+   a different program name, the install would instead refuse in the open, touching nothing,
+   because the substrate cannot compose across a program rename and Loam will not evict her.
 4. Two stores each ran stock. They federate. One person entity, claimed in both stores, appears
    in both stores' org views under the same reading.
 5. The operator strikes a stranger's post out of a thread — the membership pointer at the
@@ -98,11 +100,19 @@ writable non-empty). Heterogeneous edges (`comment.on`, `collection.items`) stay
   `publishRegistration` — the §42.1 invariant holds: `--stock` changes only how the JSON is
   obtained, and obtaining several files is still only that.
 - **Skip-if-bound keys on the LENS name** (`lensOf`, never the program name — H6; premortem
-  finding 6). A required lens already bound is skipped and reported, whatever program serves it.
+  finding 6). A required lens already bound is skipped and reported.
 - **Divergence composes and warns, at both layers (Myk).** A bound reading is stock-identical
   only when its schema snapshot hash AND its hyperschema gather body both match the shelf's
   (`versionedSchemaHash` covers props+default alone — premortem finding 2). On either mismatch
-  the install composes and prints one warning naming what differed. Never a refusal; exit 0.
+  the install composes and prints one warning naming what differed. Divergence is never refused.
+- **A lens under a foreign program name cannot compose, and the install refuses in the open**
+  (discovered at build, 2026-08-25: the substrate resolves an expand's `schema` ref by PROGRAM
+  name, and the registry admits one reading per lens name). A bespoke reading bound under a
+  program named differently from the reference can never serve the dependent body, and
+  installing stock beside it would EVICT the bespoke binding (latest-per-lens) — the exact
+  destruction H6 warns about. So the install pre-flights the whole closure and refuses, exit 2,
+  BEFORE any delta lands: the store is untouched, the refusal names the program mismatch and
+  the remedy. Sovereignty outranks convergence when the two collide.
 - **Re-run is evolve-with-report (Myk).** Re-running a stock name takes the ordinary evolve
   path and says so — including the qualified `does not bind` outcome when a rival body answers
   the program name.
@@ -146,11 +156,14 @@ and writable non-empty).
 3. `loam register --stock org` on a fresh store registers shallow-person then org, in
    dependency order, and reports each name it installed, driven through the real CLI.
    Verification: `npx vitest run test/cli/stock-install.test.ts`.
-4. Skip-if-bound keys on the lens name: on a store whose bound lens `ShallowPerson` is served
-   by a program with a DIFFERENT name (lens ≠ program, pinning H6), `--stock org` skips it,
-   composes, prints one stderr warning naming both compared layers (schema snapshot hash and
-   gather body), still installs org, and exits 0. Verification:
-   `npx vitest run test/cli/stock-install.test.ts`.
+4. Skip-if-bound keys on the lens name, and both bespoke fixtures hold: (a) a bespoke
+   `ShallowPerson` under the SAME program name with a divergent body is skipped and composed
+   with — one stderr warning names the layers compared, the divergence is detected by the BODY
+   hash (the schema hashes agree by construction), org installs, binds through the bespoke
+   program, exit 0; (b) a bespoke lens `ShallowPerson` under a foreign program name (lens ≠
+   program, pinning H6) is refused in the open, exit 2, BEFORE any delta lands — the bespoke
+   binding survives untouched, org is not installed, and the refusal names the program mismatch
+   and the remedy. Verification: `npx vitest run test/cli/stock-install.test.ts`.
 5. An upgrade rail starts from a §42-era fixture store: re-running the four existing names
    leaves their gather bodies byte-identical, evolves schema props only, keeps old data (a
    follows list, an event location) serving, reports the evolve, and exercises the qualified
@@ -186,3 +199,9 @@ split into three entries; (6) skip-if-bound keys on `lensOf`, fixture requires l
 (7) moderation names the membership delta, husk case pinned; (8) closure test carries a
 hand-written table; (9) curator-signed stated as convention with §42.2's exits; (10) criterion
 6 asserts the gather level beside the door.
+
+One further amendment landed at build time (2026-08-25): the substrate resolves an expand's
+`schema` reference by program name and admits one reading per lens, so the H6 fixture (lens
+under a foreign program) cannot compose — the install refuses in the open before any delta
+lands, and criterion 4 now pins both bespoke fixtures. The divergence-composes promise is
+unchanged where composition is possible.

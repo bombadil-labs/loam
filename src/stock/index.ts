@@ -9,10 +9,14 @@
 // design — a stock schema is a CONVENIENCE, never a second door. If one of these were malformed,
 // the ordinary validator would say so in the ordinary voice.
 //
-// They are deliberately plain. Every one is `entityGatherJson()` — everything pointing at the
+// The BASE shapes are deliberately plain — `entityGatherJson()`, everything pointing at the
 // root, bucketed by context — because that is the shape an ordinary entity wants, and a reader who
-// outgrows it has README's "Schemas are data" waiting. No expands, no claim templates: the
-// interesting choices belong to the reader who has a reason for them.
+// outgrows it has README's "Schemas are data" waiting. Since §50 the shelf ALSO carries the stock
+// graph: shapes whose bodies `expand` an edge into a child reading (`org.members` nests
+// ShallowPerson), and narrowed shallow readings for exactly that nesting. Every expand names its
+// child reading, dependencies are DERIVED from the bodies (src/stock/graph.ts — never a declared
+// list), and `--stock` installs the closure. No claim templates, still: the write discipline
+// belongs to the reader who has a reason for it.
 //
 // A STOCK SHAPE IS UNGOVERNED IN BOTH DIRECTIONS, and both are worth naming rather than leaving to
 // be discovered. Neither is a defect; together they are why the shelf is a starting point rather
@@ -43,7 +47,7 @@
 // 1025th read throws rather than growing the reactor without bound. A store meant to serve more
 // names its roots — which is a deployment decision, made by re-registering your own file.
 
-import { entityGatherJson } from "../gateway/gather.js";
+import { entityGatherJson, expandedGatherJson } from "../gateway/gather.js";
 
 /** One shelf entry: the `--stock` name, the line `--help` prints, and the registration itself. */
 export interface StockSchema {
@@ -82,13 +86,33 @@ function plain(
   name: string,
   props: Readonly<Record<string, unknown>>,
   writable: readonly string[],
+  body: Record<string, unknown> = entityGatherJson(),
 ): Readonly<Record<string, unknown>> {
   return deepFreeze({
-    hyperschema: { name, alg: 1, body: entityGatherJson() },
+    hyperschema: { name, alg: 1, body },
     schema: { name, alg: 1, props: { ...props }, default: LATEST() },
     roots: [] as string[],
     writable: [...writable],
   });
+}
+
+// A SHALLOW reading's gather: the plain-entity program with its select narrowed to the named
+// contexts, so the buckets the gather admits ARE the declared props — narrowing in the program,
+// never in the Schema. A Schema that merely omitted a prop would still gather every bucket into
+// the HView, and every non-GraphQL door would serve what one door hid (§50; H6's cousin at the
+// layer boundary). This is the context-narrowed idiom gather.ts names and declines to own.
+function shallowGatherJson(contexts: readonly string[]): Record<string, unknown> {
+  const context =
+    contexts.length === 1 ? { exact: contexts[0] } : { inSet: [...contexts] as string[] };
+  return {
+    op: "group",
+    key: "byTargetContext",
+    in: {
+      op: "select",
+      pred: { hasPointer: { targetEntity: { var: "root" }, context } },
+      in: { op: "mask", policy: "drop", in: "input" },
+    },
+  };
 }
 
 /**
@@ -122,6 +146,19 @@ export const STOCK_SCHEMAS: readonly StockSchema[] = deepFreeze<readonly StockSc
     ]),
   },
   {
+    // The first stock-graph shape (§50): `members` is an EDGE — the body expands the `members`
+    // role into each member's ShallowPerson view, so an org query returns its people by name
+    // without returning their graphs. Written with `linkOrg(entity, field: "members", target)`.
+    name: "org",
+    summary: "an organization — a name, a description, a website, and members read shallow",
+    registration: plain(
+      "Org",
+      { name: LATEST(), description: LATEST(), website: LATEST(), members: EVERY() },
+      ["name", "description", "website", "members"],
+      expandedGatherJson({ role: "members", schema: "ShallowPerson", reading: "ShallowPerson" }),
+    ),
+  },
+  {
     name: "person",
     summary: "somebody — a name, a bio, a way to reach them, and who they follow",
     registration: plain(
@@ -143,6 +180,16 @@ export const STOCK_SCHEMAS: readonly StockSchema[] = deepFreeze<readonly StockSc
       { title: LATEST(), body: LATEST(), publishedAt: LATEST(), tags: EVERY() },
       ["title", "body", "publishedAt", "tags"],
     ),
+  },
+  {
+    // A person read SHALLOW: the one bucket other views nest. The narrowing lives in the gather
+    // (only `name`-context claims are admitted), never in the Schema — so no door, GraphQL or
+    // otherwise, can serve a bucket the program never gathered. `writable: ["name"]` is real: a
+    // name written through this reading is the same claim Person.name resolves, one entity under
+    // two lenses — the hypergraph, plainly.
+    name: "shallow-person",
+    summary: "a person read shallow — the name alone, for nesting inside other views",
+    registration: plain("ShallowPerson", { name: LATEST() }, ["name"], shallowGatherJson(["name"])),
   },
 ]);
 
