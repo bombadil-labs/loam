@@ -3,5 +3,8 @@
   "category": "feature",
   "duration": 3,
   "id": "T242",
+  "rails": [
+    "test/server/oauth-cimd.test.ts"
+  ],
   "title": "The OAuth door reads a client-id metadata document — CIMD, no registration write"
 }

@@ -625,6 +625,8 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     }
     discovery = makeOAuthDoors({
       publicUrl: canonicalPublicUrl(options.publicUrl),
+      // The spread carries `cimdAllowPrivateOrigins` along INERTLY — the register door reads no
+      // CIMD field; the seam binds only where makeConsentDoor threads it below.
       ...(options.connectors === undefined
         ? {}
         : { registration: { ...options.connectors, redeeming } }),
@@ -2188,6 +2190,9 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         gate: userDoors.gate,
         home: options.connectors.home,
         ...(forUsers.monotonicNow === undefined ? {} : { now: forUsers.monotonicNow }),
+        ...(options.connectors.cimdAllowPrivateOrigins === undefined
+          ? {}
+          : { cimdAllowPrivateOrigins: options.connectors.cimdAllowPrivateOrigins }),
       });
       // The token exchange signs the operator-signed write grant with the home's own operator seed —
       // the same key `loam serve` opened the gateway with (cmdServe reads it from here). Read once, at
