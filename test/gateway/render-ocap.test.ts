@@ -320,15 +320,110 @@ describe("T172 — the MODULE BODY reaches nothing ambient", () => {
     expect(out.body).not.toContain("BroadcastChannel");
   });
 
+  it("the realm's WHOLE inventory is a hand-written golden — nothing arrives unexamined", async () => {
+    // H10: an expected value must not be derived from the subject. The list above names 24 chosen
+    // names, but the allowlist's LARGER half is computed at runtime from a fresh `vm` context — so
+    // most of what survives was asserted by nothing, and a future V8 that puts an authority-carrying
+    // name in a bare context would land it on the allowlist automatically, where the realm's own
+    // self-check cannot see it BECAUSE IT IS ON THE ALLOWLIST.
+    //
+    // So the golden is written out by hand, once, and any platform change reads as a red bar that a
+    // person then judges. That is the intended cost: a Node upgrade should not widen what a
+    // stranger's code can touch without somebody looking.
+    const out = await rendered(
+      `const seen = Object.getOwnPropertyNames(globalThis).sort().join(",");\n` +
+        `const syms = Object.getOwnPropertySymbols(globalThis).length;\n` +
+        `export default () => "<p>" + syms + "|" + seen + "</p>";`,
+    );
+    const inventory =
+      "AggregateError,Array,ArrayBuffer,AsyncDisposableStack,Atomics,BigInt,BigInt64Array," +
+      "BigUint64Array,Boolean,Buffer,DataView,Date,DisposableStack,Error,EvalError,Event," +
+      "EventTarget,FinalizationRegistry,Float16Array,Float32Array,Float64Array,Function,Infinity," +
+      "Int16Array,Int32Array,Int8Array,Intl,Iterator,JSON,Map,Math,MessageChannel,MessageEvent," +
+      "MessagePort,NaN,Number,Object,Promise,Proxy,RangeError,ReferenceError,Reflect,RegExp,Set," +
+      "SharedArrayBuffer,String,SuppressedError,Symbol,SyntaxError,TextDecoder,TextEncoder,TypeError," +
+      "URIError,URL,URLSearchParams,Uint16Array,Uint32Array,Uint8Array,Uint8ClampedArray,WeakMap," +
+      "WeakRef,WeakSet,WebAssembly,atob,btoa,clearImmediate,clearInterval,clearTimeout,console," +
+      "decodeURI,decodeURIComponent,encodeURI,encodeURIComponent,escape,eval,global,globalThis," +
+      "isFinite,isNaN,parseFloat,parseInt,queueMicrotask,setImmediate,setInterval,setTimeout," +
+      "structuredClone,undefined,unescape";
+    // The leading `0` is the symbol count: `getOwnPropertyNames` is string-keyed, so a symbol-keyed
+    // global would survive a scrub that reports itself complete.
+    expect(out.body).toBe(`<p>0|${inventory}</p>`);
+  });
+
+  it("a bundle that patches the reply channel cannot kill the serving thread or forge a verdict", async () => {
+    // THE WORST DEFECT THIS TICKET FOUND, and it was in the fix rather than in the code being fixed.
+    // The bootstrap replies through `MessagePort.prototype.postMessage` — a method the bundle shares a
+    // realm with. Patched to post `null`, the parent read `.kind` off it and the WHOLE PROCESS died on
+    // an uncaught TypeError; `prepareRoute` runs ahead of every cap, so one unauthenticated GET was
+    // enough. Patched to post `{kind:'ok'}`, it forged an ADMISSION for a bundle with no default
+    // export — §23.4's "proven at push" defeated by the thing doing the proving.
+    //
+    // Removing `MessagePort` from the allowlist does NOT close this: the prototype stays reachable as
+    // `Object.getPrototypeOf(new MessageChannel().port1)`. The close is the captured primordial, so
+    // the patch is simply inert — which is why the first case below renders NORMALLY.
+    const patch = `const proto = Object.getPrototypeOf(new MessageChannel().port1);\n`;
+    const silenced = await rendered(
+      patch + `proto.postMessage = function () {};\nexport default () => "<p>alive</p>";`,
+    );
+    expect(silenced.status).toBe(200);
+    expect(silenced.body).toBe("<p>alive</p>"); // the patch reached nothing the bootstrap uses
+
+    // The forged verdict: no default export at all, so an honest realm must refuse to mount it.
+    const gw = await store();
+    await expect(
+      publish(
+        gw,
+        "forged",
+        patch +
+          `const real = proto.postMessage;\n` +
+          `proto.postMessage = function () { return real.call(this, { kind: "ok" }); };\n` +
+          `export const notDefault = 1;`,
+      ),
+    ).rejects.toThrow(/export default/);
+    expect(gw.renderers().some((r) => r.route === "forged")).toBe(false);
+    await gw.close();
+  }, 30_000);
+
+  it("a bundle cannot smuggle terminal escapes into the refusal an operator reads", async () => {
+    // The refusal text is BUNDLE-AUTHORED and lands in an operator's terminal. The worker scrubs it —
+    // through `String.prototype.replace`, which the bundle can replace with the identity function, so
+    // that scrub is advisory. The parent repeats it, and the parent's copy is the one that counts.
+    const ESC = String.fromCharCode(0x1b);
+    const RTL = String.fromCharCode(0x202e);
+    const gw = await store();
+    const refusal = await publish(
+      gw,
+      "escapes",
+      `String.prototype.replace = function () { return this; };\n` +
+        `String.prototype.slice = function () { return this; };\n` +
+        `throw new Error(${JSON.stringify(`${ESC}[31mADMITTED${RTL}`)} + "x".repeat(5000));\n` +
+        `export default () => "<p>x</p>";`,
+    ).then(
+      () => "the door accepted it",
+      (e: unknown) => (e instanceof Error ? e.message : String(e)),
+    );
+    expect(refusal).toContain("the bundle did not load");
+    expect(refusal).not.toContain(ESC); // cannot repaint
+    expect(refusal).not.toContain(RTL); // cannot read as its own opposite
+    expect(refusal.length).toBeLessThan(400); // cannot scroll a screen (300 + the door's own prefix)
+    await gw.close();
+  }, 30_000);
+
   it("a render cannot queue work onto the host's threadpool and outlive its own worker", async () => {
     // THE ESCAPE THAT LOOKED PURE. A name can open no file itself and still hand work to libuv's
     // process-wide threadpool, which the render clock, `resourceLimits` and `terminate()` all fail to
     // reach — the queued work outlives the thread that queued it and blocks the SERVING thread's own
     // filesystem I/O. Measured with `crypto` on the allowlist: one render bought 30 seconds of it.
     //
-    // The assertion is the EFFECT, not the absence of a name: this render finishes, and the serving
-    // thread is still responsive AFTERWARDS. A rail that only checked `typeof crypto` would go green
-    // the moment some other threadpool-dispatching name joined the allowlist.
+    // WHAT THIS RAIL IS AND IS NOT. It is the REGRESSION rail for the one name that did it: a bundle
+    // reaching `crypto.subtle` is denied, and the serving thread is measurably unharmed afterwards.
+    // It is NOT a guard on the CLASS — it only ever exercises `crypto`, so a different
+    // threadpool-dispatching name joining the allowlist would leave it green. The class is held by
+    // two other things and they are the ones to keep honest: the allowlist test stated in
+    // `render-worker.ts` ("authority-free AND synchronous-or-cancellable"), and the golden-inventory
+    // rail above, which turns any new surviving global into a red bar somebody has to read.
     const probe = join(dir, "latency-probe.txt");
     writeFileSync(probe, "x", "utf8");
     const latency = async (): Promise<number> => {

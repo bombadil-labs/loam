@@ -27,8 +27,14 @@
 // memory ceiling. The REACH half is no longer open: §24.5's standing flag ("a worker can still reach
 // `node:fs` or open a socket") was closed by T172, and a pool's renders now run in a confined realm with
 // no filesystem, no network and no process authority (`render-worker.ts`). The two halves compose here
-// rather than replacing one another — a pool's declared clock and memory ceiling BOUND its ADMISSIONS
+// rather than replacing one another — a pool's declared clock and memory ceiling reach its ADMISSIONS
 // as well as its renders, so a stranger's module body runs against the ceiling the operator wrote down.
+//
+// READ `maxMemoryMb` PRECISELY, because it promises less than its name. It reaches the Worker's
+// `resourceLimits`, which cap V8's HEAP — an `ArrayBuffer` backing store is allocated outside it, and
+// a measured body took 600MB under a declared 128MB ceiling. So the dimension bounds a runaway object
+// graph and does not bound a pool's appetite. That residual is `render-worker.ts`'s to close and it is
+// named there; what this file must not do is print a number an operator would read as a wall.
 //
 // BOUND, not BILLED, and the distinction is this file's own: an admission increments no counter, holds
 // no slot, and appears nowhere in `envelopeReports()`. The counters below mean RENDERS, and a module

@@ -3,8 +3,8 @@
 // timeout — so an infinite-loop bundle wedged EVERY mount (the capability-security panel's headline
 // residual on #99, on the anonymous door with an attacker-chosen entity). Each render runs in a Node
 // `worker_threads` Worker with a HARD timeout (terminate on overrun — which `node:vm`'s timeout cannot
-// guarantee against an async escape) and `resourceLimits` (a bundle cannot OOM the host). A second route
-// keeps answering while a bundle spins.
+// guarantee against an async escape) and `resourceLimits` (which bound the V8 HEAP, and only that — see
+// the residuals below). A second route keeps answering while a bundle spins.
 //
 // THE WORKER BOUNDS COST; THE CONFINED REALM BOUNDS REACH, and they are different questions. A bare
 // Worker is not object-capability isolation: measured, a bundle in one read and wrote any file, read
@@ -32,10 +32,25 @@
 // `artifact-realm.ts` the browser sibling (a denylist SEAL there, because a Worker global scope is small
 // and known; an allowlist here, because Node's is neither).
 //
-// WHAT IS STILL NOT BOUNDED, stated so no one over-trusts this either: CPU and wall clock inside the
-// realm are the timeout's and the envelope's, unchanged. §22 RESOLVERS are not confined at all — a
-// derived function is called synchronously by the resolution program and cannot cross a thread — so they
-// keep §22's in-process floor (`esm.ts` states it precisely).
+// WHAT IS STILL NOT BOUNDED, stated so no one over-trusts this either.
+//
+//   MEMORY IS NOT ACTUALLY BOUNDED, and this file used to say it was. `resourceLimits` caps V8's
+//   HEAP; an `ArrayBuffer`'s backing store is allocated outside it, so a bundle reaches whatever the
+//   host has: measured, a body allocating 600MB under a declared 128MB old-generation ceiling ran to
+//   completion and took the host's RSS from 45MB to 665MB. §24.5's `maxMemoryMb` is translated into
+//   exactly those two knobs, so a pool prints a ceiling it does not enforce — and this slice makes
+//   that worse, because untrusted module bodies now run at publish, bind and bless, at routes nobody
+//   requested. A real bound needs an rlimit or a cgroup around the process, or a periodic sample of
+//   the worker's own usage; neither is here. The claim was softened rather than the code fixed
+//   because a false bound is worse than a named one — this is a §23.9/§24.5 widening and its own
+//   ticket. What resourceLimits DOES still do is bound heap growth, which is the OOM shape a runaway
+//   JS object graph takes.
+//
+//   CPU and wall clock inside the realm are the timeout's and the envelope's, unchanged.
+//
+//   §22 RESOLVERS are not confined at all — a derived function is called synchronously by the
+//   resolution program and cannot cross a thread — so they keep §22's in-process floor (`esm.ts`
+//   states it precisely).
 //
 // A function cannot cross the thread boundary, so we pass the bundle SOURCE + the (already §23.7-enveloped,
 // so JSON/structured-clone-safe) node; the worker imports the bundle from a `data:` URL and calls
@@ -46,10 +61,12 @@
 // leaks nothing of the bundle's internals (serveRoute's own discipline, now enforced across the boundary).
 
 import { runInNewContext } from "node:vm";
+import { plainText } from "./plain-text.js";
 import { Worker } from "node:worker_threads";
 
 // Tunable ceilings (exported so a host may tighten them). The timeout bounds a hanging bundle; the memory
-// limits bound one that tries to exhaust the host. Conservative defaults for a single v1 render.
+// limits bound its V8 HEAP and not its whole appetite (see the residual in the header). Conservative
+// defaults for a single v1 render.
 export const RENDER_TIMEOUT_MS = 500;
 // The SPAWN ceiling is a SEPARATE clock with a separate job. It bounds thread start, isolate init and
 // first schedule — host scheduling no bundle can reach, since a bundle cannot run before `online`. So it
@@ -203,9 +220,32 @@ const workerSource = (): string => `
 const __parentPort = require('worker_threads').parentPort;
 const __hooks = require('module').registerHooks;
 
-// Captured BEFORE any bundle code can patch a prototype the gate reads (measured escape).
+// EVERY PRIMORDIAL THE BOOTSTRAP USES AFTER THE BUNDLE CAN RUN, CAPTURED NOW. The bootstrap shares a
+// realm with the bundle, so any prototype method it reaches for LATER is a method the bundle can
+// replace first. Two of these were measured escapes and neither was theoretical:
+//
+//   \`MessagePort.prototype.postMessage\` — the reply channel itself. Patched, the bootstrap posted
+//   \`null\`, the parent read \`.kind\` off it, and the SERVING PROCESS died on an uncaught TypeError:
+//   one unauthenticated GET, because \`prepareRoute\` runs ahead of every cap. The same patch returning
+//   \`{kind:'ok'}\` forged an ADMISSION for a bundle with no default export, which is §23.4's
+//   "proven at push" defeated. Dropping \`MessagePort\` from the allowlist does NOT close it — the
+//   prototype is still reachable through \`Object.getPrototypeOf(new MessageChannel().port1)\`.
+//
+//   \`String.prototype.replace\` / \`.slice\` — the refusal sanitiser, which a bundle could turn into
+//   the identity function and write escapes straight to the operator's terminal.
+//
+// The parent re-does both jobs on its own side regardless (a total read of the message, and its own
+// scrub of the text), because a worker's copy of anything is never the trustworthy one. This capture
+// is what keeps the WORKER honest; that is what keeps the PARENT safe.
 const __apply = Reflect.apply;
 const __startsWith = String.prototype.startsWith;
+const __replace = String.prototype.replace;
+const __slice = String.prototype.slice;
+const __post = MessagePort.prototype.postMessage;
+const __ownNames = Object.getOwnPropertyNames;
+const __ownSymbols = Object.getOwnPropertySymbols;
+const __from = Buffer.from;
+const __reply = (msg) => __apply(__post, __parentPort, [msg]);
 const __isData = (s) => typeof s === 'string' && __apply(__startsWith, s, ['data:']);
 __hooks({
   resolve(specifier, context, next) {
@@ -215,9 +255,15 @@ __hooks({
 });
 
 const __allowed = new Set(${JSON.stringify([...pureIntrinsics(), ...PURE_PLATFORM])});
-for (const __name of Object.getOwnPropertyNames(globalThis)) {
+for (const __name of __ownNames(globalThis)) {
   if (__allowed.has(__name)) continue;
   try { delete globalThis[__name]; } catch (e) { /* verified below, never assumed */ }
+}
+// SYMBOL KEYS TOO. \`getOwnPropertyNames\` returns string keys only, so a symbol-keyed global would
+// survive a scrub that reports itself complete. Node puts \`Symbol.toStringTag\` here today and nothing
+// authority-bearing — but "today" is exactly the word the receipt below exists to remove.
+for (const __sym of __ownSymbols(globalThis)) {
+  try { delete globalThis[__sym]; } catch (e) { /* verified below, never assumed */ }
 }
 const __noop = function () { return undefined; };
 globalThis.console = {
@@ -234,9 +280,10 @@ globalThis.console = {
 // in a Node nobody has shipped yet, that this has to catch. A realm that did not close throws before a
 // single bundle byte is read (H7 at the realm boundary: the difference between confinement and a
 // report of confinement).
-for (const __name of Object.getOwnPropertyNames(globalThis)) {
+for (const __name of __ownNames(globalThis)) {
   if (!__allowed.has(__name)) throw new Error('the renderer realm did not close: ' + __name);
 }
+if (__ownSymbols(globalThis).length !== 0) throw new Error('the renderer realm kept a symbol global');
 for (const __name of ${JSON.stringify(MUST_BE_GONE)}) {
   if (__name in globalThis) throw new Error('the renderer realm did not close: ' + __name);
 }
@@ -244,25 +291,26 @@ if ('Console' in globalThis.console) throw new Error('the renderer realm kept th
 
 __parentPort.on('message', async ({ bundle, node, admit }) => {
   try {
-    const url = 'data:text/javascript;base64,' + Buffer.from(bundle, 'utf8').toString('base64');
+    const url = 'data:text/javascript;base64,' + __apply(__from, Buffer, [bundle, 'utf8']).toString('base64');
     const mod = await import(url);
     const fn = mod && mod.default;
-    if (typeof fn !== 'function') { __parentPort.postMessage({ kind: 'notHtml' }); return; }
-    if (admit === true) { __parentPort.postMessage({ kind: 'ok' }); return; }
+    if (typeof fn !== 'function') { __reply({ kind: 'notHtml' }); return; }
+    if (admit === true) { __reply({ kind: 'ok' }); return; }
     const html = fn(node);
-    if (typeof html !== 'string') { __parentPort.postMessage({ kind: 'notHtml' }); return; }
-    __parentPort.postMessage({ kind: 'ok', html });
+    if (typeof html !== 'string') { __reply({ kind: 'notHtml' }); return; }
+    __reply({ kind: 'ok', html });
   } catch (e) {
     // \`why\` is read ONLY on the admission path, where the reader is the operator publishing the
     // bundle. The render path drops it: a serve refusal leaks nothing of a bundle's internals.
-    // It is BUNDLE-AUTHORED text on its way to an operator's terminal and log, so the characters that
-    // REPAINT go first — a refusal must not be able to read as its own opposite. C0/C1 covers ESC and
-    // BEL; the bidi and format range is the half that a control-character filter misses, and U+202E
-    // alone is enough to print a refusal backwards.
-    const raw = e && e.message ? String(e.message) : 'the bundle did not evaluate';
+    //
+    // BUNDLE-AUTHORED TEXT ON ITS WAY TO AN OPERATOR'S TERMINAL, so the characters that REPAINT go —
+    // a refusal must not be able to read as its own opposite. Reading \`.message\` can itself run a
+    // getter the bundle wrote, so even that is inside a try. This scrub is BEST EFFORT and the parent
+    // repeats it: everything here runs in the bundle's own realm and is advisory by construction.
+    let raw = 'the bundle did not evaluate';
+    try { if (e && typeof e.message === 'string') raw = e.message; } catch (ignored) { /* a hostile getter */ }
     const repaint = /[\\u0000-\\u001f\\u007f-\\u009f\\u200b-\\u200f\\u2028\\u2029\\u202a-\\u202e\\u2066-\\u2069\\ufeff]/g;
-    const why = raw.replace(repaint, ' ').slice(0, 300);
-    __parentPort.postMessage({ kind: 'fault', why });
+    __reply({ kind: 'fault', why: __apply(__slice, __apply(__replace, raw, [repaint, ' ']), [0, 300]) });
   }
 });
 `;
@@ -302,10 +350,18 @@ function inConfinedWorker(
         },
       });
     } catch {
+      // `noStart`, not `fault`. This catch's own subject is ERR_WORKER_INIT_FAILED under fd or thread
+      // exhaustion — the HOST failing, which is the exact condition the two verdicts exist to tell
+      // apart. Calling it `fault` told an operator the module body ran and told the admission cache
+      // the answer was settled, so one bout of fd exhaustion darkened a route for the process's life.
       opts.onOutcome?.("fault");
-      resolve({ stage: "fault" });
+      resolve({ stage: "noStart" });
       return;
     }
+    // Did the thread ever begin executing? An `error` or `exit` BEFORE `online` is the host failing to
+    // start it; the same events AFTER `online` are the bundle (a resourceLimits reclaim arrives this
+    // way). One flag separates two verdicts that the events themselves cannot.
+    let started = false;
     let settled = false;
     const finish = (answer: Answer): void => {
       if (settled) return;
@@ -337,11 +393,19 @@ function inConfinedWorker(
     const spawnBudget = opts.spawnTimeoutMs ?? RENDER_SPAWN_TIMEOUT_MS;
     let timer = setTimeout(() => finish({ stage: "noStart" }), spawnBudget);
     worker.once("online", () => {
+      started = true;
       if (settled) return;
       clearTimeout(timer);
       timer = setTimeout(() => finish({ stage: "timeout" }), budget);
     });
-    worker.on("message", (msg: { kind?: string; html?: string; why?: string }) => {
+    // THE READ IS TOTAL, and that is a security property rather than tidiness. The bootstrap replies
+    // through a captured primordial precisely so a bundle cannot choose what lands here — but this
+    // side must survive being wrong about that, because THIS runs on the serving thread. Reading
+    // `.kind` off a value a bundle chose threw an uncaught TypeError and killed the whole process on
+    // one request. Anything not recognised is a fault, and nothing is dereferenced unguarded.
+    worker.on("message", (raw: unknown) => {
+      const msg: { kind?: unknown; html?: unknown; why?: unknown } =
+        typeof raw === "object" && raw !== null ? raw : {};
       if (msg.kind === "ok") {
         finish(
           typeof msg.html === "string"
@@ -356,9 +420,18 @@ function inConfinedWorker(
         finish({ stage: "fault", ...(typeof msg.why === "string" ? { why: msg.why } : {}) });
       }
     });
-    worker.on("error", () => finish({ stage: "fault" }));
-    worker.on("exit", () => finish({ stage: "fault" })); // exited before posting (e.g. OOM-reclaimed) → clean refusal
-    worker.postMessage(message);
+    worker.on("error", () => finish({ stage: started ? "fault" : "noStart" }));
+    // Exited before posting: after `online` that is the bundle (an OOM reclaim lands here); before it,
+    // the host never ran a line. Either way a clean refusal — but not the same verdict.
+    worker.on("exit", () => finish({ stage: started ? "fault" : "noStart" }));
+    // Outside the constructor's catch and inside the executor, so a throw here would REJECT a promise
+    // this function's contract says never rejects — and the door would leak a Node error instead of a
+    // refusal. It folds like everything else.
+    try {
+      worker.postMessage(message);
+    } catch {
+      finish({ stage: "noStart" });
+    }
   });
 }
 
@@ -384,13 +457,27 @@ export async function renderInWorker(
 export interface Admission {
   readonly ok: boolean;
   readonly why?: string;
-  // Is this verdict a property of the BUNDLE, or of the moment? A refused import, a syntax error, a
-  // module body that overran its budget — those are the bundle, and the same bytes under the same
-  // ceiling answer the same way, so a caller may remember them. A thread the HOST could not start is
-  // the moment, and remembering it would darken a route for the life of the process over a transient
-  // fd exhaustion. Only a settled verdict may be cached; the caller cannot tell them apart from `why`.
+  // Is this verdict a property of the BUNDLE, or of the moment? A refused import, a syntax error, an
+  // export that is not a function — those are the bundle, and the same bytes answer the same way, so
+  // a caller may remember them for good. Anything the HOST decided is the moment: a thread that could
+  // not start, and A TIMEOUT.
+  //
+  // The timeout belongs on this side of the line and the first draft had it on the other, which was
+  // measured wrong: the same bytes under the same 100ms ceiling answered ok, refused, refused, ok, ok
+  // across eight attempts, because a module body's wall clock includes whatever else the box is
+  // doing. Remembering that verdict darkened a healthy federated route until the process restarted,
+  // with no republish available to clear it. So a timeout is remembered only briefly (see
+  // `TIMEOUT_MEMO_MS`), never for good.
   readonly settled: boolean;
+  // May a caller remember this refusal FOREVER, or only for a while? Absent means forever.
+  readonly memoMs?: number;
 }
+
+// How long a TIMEOUT refusal is remembered. It exists to bound a cost, not to record a fact: without
+// a memo an unadmittable body costs a confined worker and its whole budget on EVERY request, and with
+// a permanent one a bundle that was slow once is dark until restart. A cooldown pays a bounded price
+// for both — at most one attempt per bundle per minute, and a route that recovers on its own.
+export const TIMEOUT_MEMO_MS = 60_000;
 
 // EVALUATE a bundle's module body — the harder call class, and the one that used to run on the serving
 // thread at publish, bind and bless. Nothing crosses back but a boolean and, on refusal, a reason: no
@@ -421,16 +508,26 @@ export async function admitInWorker(
       why: "its `export default` is not a function (node) => html",
     };
   }
+  // SETTLED, BUT ONLY FOR A WHILE. A wall clock measures the box as much as the bundle, so a verdict
+  // that a body was too slow is worth remembering to bound the cost and not worth keeping to record a
+  // fact. See `Admission.settled` for the measurement that moved this.
   if (answer.stage === "timeout") {
     return {
       ok: false,
       settled: true,
+      memoMs: TIMEOUT_MEMO_MS,
       why: `its module body did not finish inside ${timeoutMs ?? RENDER_ADMIT_TIMEOUT_MS}ms`,
     };
   }
-  // The ONE unsettled verdict: the host, not the bundle. See `Admission.settled`.
+  // The HOST, not the bundle — never remembered at all. See `Admission.settled`.
   if (answer.stage === "noStart") {
     return { ok: false, settled: false, why: "the host could not start a confined thread" };
   }
-  return { ok: false, settled: true, why: answer.why ?? "its module body did not evaluate" };
+  // The reason came from the worker, so the parent does its own scrub: the worker's copy ran in the
+  // bundle's realm, through prototype methods the bundle could have replaced.
+  return {
+    ok: false,
+    settled: true,
+    why: plainText(answer.why ?? "its module body did not evaluate"),
+  };
 }

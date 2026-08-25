@@ -47,7 +47,12 @@ import {
   type ResolverSpecs,
   lensNameFor,
 } from "./registration.js";
-import { admitRenderers, readRenderers, rendererAdmissionBudget } from "./renderers.js";
+import {
+  admitRenderers,
+  readRenderers,
+  rendererAdmissionBudget,
+  reportUnmounted,
+} from "./renderers.js";
 import {
   interpretBindingPolicy,
   readBindingPolicy,
@@ -793,20 +798,15 @@ export async function preloadResolversImpl(gw: Gateway): Promise<void> {
   //
   // AND IT SAYS WHICH ONE. A route that goes dark silently is a swallowed error (H9): the operator sees
   // a 404 and has nothing to read that names the cause, which for a federated bundle is the difference
-  // between "the peer sent code that reaches for the filesystem" and "my store is broken". One stderr
-  // line per refused route, at bind — not per request, because the refusal memo means a request path
-  // asks once.
+  // between "the peer sent code that reaches for the filesystem" and "my store is broken". The write
+  // goes through `reportUnmounted` — host-guarded, because a peer that has no `process` still binds,
+  // and both peer-chosen strings scrubbed before a person reads them.
   const bindings = readRenderers(gw.reactor, gw.operatorAuthor);
   const refused = await admitRenderers(
     bindings.map((r) => r.bundle),
     rendererAdmissionBudget(gw),
   );
-  for (const { bundle, why } of refused) {
-    const routes = bindings.filter((r) => r.bundle === bundle).map((r) => r.route);
-    process.stderr.write(
-      `loam: the renderer at ${routes.map((r) => `"${r}"`).join(", ")} is unmounted — ${why}\n`,
-    );
-  }
+  for (const { bundle, why } of refused) reportUnmounted(bindings, bundle, why);
 }
 
 // Publish a schema and its registration as data, then bind them (the body of
