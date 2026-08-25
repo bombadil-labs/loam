@@ -43,6 +43,7 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { loadedEsm } from "../../src/gateway/esm.js";
 import { rendererBindingClaims } from "../../src/gateway/renderers.js";
 import { ENVELOPE_ANY, envelopeClaims } from "../../src/gateway/envelope.js";
+import { plainText } from "../../src/gateway/plain-text.js";
 import { RENDER_TIMEOUT_MS } from "../../src/gateway/render-worker.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 import { FERN, observed } from "../spike/garden.js";
@@ -556,6 +557,34 @@ describe("T172 — no module body runs on the serving thread", () => {
   });
 });
 
+describe("T172 — the scrub that guards an operator's terminal", () => {
+  it("`plainText` drops what repaints, keeps what reads, and caps the length exactly", () => {
+    // A unit rail on a security control, beside the end-to-end one. The door rail proves the scrub is
+    // WIRED; this proves it is CORRECT — and the two failures it catches are the ones an end-to-end
+    // assertion is too coarse to see: an off-by-one in the cap, and a slice that quietly eats the
+    // first character of every refusal an operator reads.
+    const ESC = String.fromCharCode(0x1b);
+    const RTL = String.fromCharCode(0x202e);
+    const BEL = String.fromCharCode(0x07);
+    const ZWSP = String.fromCharCode(0x200b);
+    // Nothing ordinary is touched, INCLUDING the first character — `slice(1, max)` passes every test
+    // that only asks whether the escapes are gone.
+    expect(plainText('a renderer may not import "node:fs"')).toBe(
+      'a renderer may not import "node:fs"',
+    );
+    expect(plainText("héllo — ünicode is fine")).toBe("héllo — ünicode is fine");
+    // Every repainting class becomes ONE space, written out literally rather than computed — an
+    // expected value derived from the subject asserts nothing (H10). Four characters go in (ESC, BEL,
+    // RTL, ZWSP) and four spaces come out, in their places.
+    expect(plainText(`${ESC}[31mred${BEL}${RTL}${ZWSP}x`)).toBe(" [31mred   x");
+    for (const bad of [ESC, RTL, BEL, ZWSP]) expect(plainText(`a${bad}b`)).not.toContain(bad);
+    // The cap is EXACT, and it is a cap on the output rather than a suggestion.
+    expect(plainText("z".repeat(1000))).toHaveLength(300);
+    expect(plainText("z".repeat(1000), 12)).toHaveLength(12);
+    expect(plainText("short", 12)).toBe("short");
+  });
+});
+
 describe("T172 — the confinement composes with the budget, and a good renderer is untouched", () => {
   it("a well-behaved renderer still renders, and the pure ambient it may use still works", async () => {
     const gw = await store();
@@ -713,6 +742,10 @@ describe("T172 — the confinement composes with the budget, and a good renderer
     };
     const verdict = await stub.admitInWorker();
     expect(verdict.ok).toBe(false);
+    // `settled: false` is the OTHER field that must not flip. A peer that cannot confine is a
+    // statement about the HOST, so no caller may memoise it — flipped, every route on that peer
+    // would be permanently unmountable rather than unmountable-for-now.
+    expect((verdict as { settled?: boolean }).settled).toBe(false);
     expect(verdict.why).toContain("confine");
 
     // While the stub is in hand: its `RENDER_TIMEOUT_MS` is required to stay byte-equal to this
