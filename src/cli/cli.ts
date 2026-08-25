@@ -66,11 +66,17 @@ import {
   honoredStrikeOn,
 } from "../gateway/accounts.js";
 import {
+  lensNameFor,
+  lensOf,
   parseRegistrationInput,
+  programOf,
+  readRegistrations,
   schemaEntityFor,
+  type Registration,
   type RegistrationInput,
 } from "../gateway/registration.js";
 import { STOCK_SCHEMAS, stockNames, stockSchema } from "../stock/index.js";
+import { divergenceOf, entryLensName, installOrder, stockIdentityOf } from "../stock/graph.js";
 import { CTX_PEN, penEntity, penRecordClaims } from "../gateway/renderers.js";
 import { serve, type ServerHandle } from "../server/http.js";
 import { revokeConnector } from "../server/oauth.js";
@@ -989,6 +995,8 @@ const stockShelf = (): string => stockNames().join(", ");
 interface RegistrationSource {
   readonly origin: string;
   readonly json: unknown;
+  /** Set when the source is the shelf: the stock name, so the install can walk its closure. */
+  readonly stockName?: string;
 }
 
 // Resolve `loam register`'s arguments to one source, or to an exit code and a said reason.
@@ -1014,7 +1022,11 @@ function registrationSource(parsed: Parsed, io: IO): RegistrationSource | number
     // A CLONE, deliberately: `parseRegistrationInput` passes arrays through by reference, and the
     // shelf is a module-level constant shared by every call in the process. Handing it out once
     // would let a downstream mutation rewrite the shape every later `--stock` registers.
-    return { origin: `--stock ${entry.name}`, json: structuredClone(entry.registration) };
+    return {
+      origin: `--stock ${entry.name}`,
+      json: structuredClone(entry.registration),
+      stockName: entry.name,
+    };
   }
   if (file === undefined) {
     io.err(
@@ -1077,7 +1089,100 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
     },
   );
   let outcome: PublishOutcome;
+  let evolves = false;
   try {
+    // THE STOCK GRAPH (§50): a shelf entry's body may expand edges into other shelf readings, so
+    // `--stock <name>` installs the entry's dependency CLOSURE, sinks first — each dependency the
+    // same verbatim registration through the same validator (§42.1: what changes is only how the
+    // JSON is obtained, and obtaining several files is still only that). A required lens already
+    // bound is SKIPPED, keyed on the LENS name (a bespoke reading may live under any program
+    // name — H6), and composed with; when the bound reading is not stock-identical, one stderr
+    // line says so, naming both compared layers. Never a refusal: sovereignty stays, drift
+    // becomes visible.
+    if (source.stockName !== undefined) {
+      // EVERY contender per lens, not latest-arbitrary: a contested lens (two entities claiming
+      // one name) must not be projected down to whichever row a Map insertion kept, because the
+      // pre-flight refusal below is a sovereignty decision and would otherwise decide from half
+      // the picture.
+      const contenders = new Map<string, Registration[]>();
+      for (const r of readRegistrations(gateway.reactor, gateway.operatorAuthor)) {
+        const lens = lensOf(r) as string;
+        const rows = contenders.get(lens);
+        if (rows === undefined) contenders.set(lens, [r]);
+        else rows.push(r);
+      }
+      const order = installOrder(source.stockName);
+      const deps = order.slice(0, -1);
+      // An EVOLVE is a republish at the SAME registration entity — never mere lens membership. A
+      // bespoke binding holding this lens from another entity is a contest, and the qualified
+      // `does not bind` report below is that case's honest voice (§42.4); an "evolves" line there
+      // would claim an act that did not happen.
+      const targetEntity = schemaEntityFor(input.hyperschema, input.entity);
+      evolves = (contenders.get(entryLensName(order[order.length - 1]!)) ?? []).some(
+        (r) => r.entity === targetEntity,
+      );
+      // PRE-FLIGHT, before any delta lands — the WHOLE order, target included. The substrate
+      // resolves an expand's `schema` ref by PROGRAM name and admits one reading per lens, so a
+      // required lens is composable only when some contender serves it under the program name
+      // the stock body references. When none does, publishing stock beside it would evict or
+      // crash — the exact destruction H6 warns about — so refuse here, with the store untouched:
+      // sovereignty outranks convergence when the two collide (§50). A bespoke binding that
+      // SHARES the program name passes through to the ordinary §42.4 qualified outcome.
+      for (const dep of order) {
+        const lens = entryLensName(dep);
+        const rows = contenders.get(lens);
+        if (rows === undefined) continue;
+        const stockProgram = programOf(dep.registration as { hyperschema: { name: string } });
+        if (!rows.some((r) => programOf(r) === stockProgram)) {
+          const theirs = [...new Set(rows.map((r) => programOf(r) as string))].join('", "');
+          io.err(
+            `register: --stock ${source.stockName} needs the reading ${lens} served by a ` +
+              `program of the same name, and this store serves it from the program ` +
+              `"${theirs}". Installing stock ${dep.name} beside it would evict your ` +
+              `reading, so nothing was installed. To compose, republish your reading under ` +
+              `the program name ${stockProgram}; to adopt stock, retire yours first.`,
+          );
+          await gateway.close();
+          return 2;
+        }
+      }
+      for (const dep of deps) {
+        const lens = entryLensName(dep);
+        const rows = contenders.get(lens);
+        if (rows !== undefined) {
+          io.out(`loam: ${dep.name} already bound — skipped`);
+          // Compare against the contender that actually serves the reference — the pre-flight
+          // proved one exists — never an arbitrary row of a contested name.
+          const stockProgram = programOf(dep.registration as { hyperschema: { name: string } });
+          const serving = rows.find((r) => programOf(r) === stockProgram)!;
+          const differs = divergenceOf(dep, serving);
+          if (differs !== undefined) {
+            io.err(
+              `loam: ${dep.name} is bound to a reading that is not stock ` +
+                `${lens}@${stockIdentityOf(dep).schemaHash} — composing with it (differs: ${differs})`,
+            );
+          }
+          continue;
+        }
+        const depInput = parseRegistrationInput(structuredClone(dep.registration));
+        const depOutcome = await gateway.publishRegistration(
+          depInput.hyperschema,
+          depInput.schema,
+          depInput.roots,
+          undefined,
+          depInput.entity,
+          depInput.mutations,
+          depInput.writable,
+          depInput.resolvers,
+        );
+        io.out(`loam: also installed ${dep.name}`);
+        if (!depOutcome.bound) {
+          io.err(
+            `loam: the deltas landed, but ${dep.name} does not bind here — ${depOutcome.reason}`,
+          );
+        }
+      }
+    }
     outcome = await gateway.publishRegistration(
       input.hyperschema,
       input.schema,
@@ -1093,6 +1198,13 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
     throw err;
   }
   await gateway.close();
+  // Re-registering is the ordinary evolve path, and the report says which kind of act this was —
+  // a store upgrading its stock reading should read "evolve", not a second identical "registered".
+  if (evolves) {
+    io.out(
+      `loam: ${lensNameFor(input.hyperschema, input.schema)} was already bound — this publish evolves it`,
+    );
+  }
   io.out(
     `loam: registered ${input.hyperschema.name} at ${schemaEntityFor(input.hyperschema, input.entity)}\n` +
       `  the definition is deltas now — the next serve grows the surface from it`,
