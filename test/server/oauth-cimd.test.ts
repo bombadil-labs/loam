@@ -70,7 +70,7 @@ const CIMD_REDIRECT = "https://claude.example/api/callback";
 const META_NAME = "Metadata Connector";
 // Control bytes (BEL, CR, LF), a bidi override (U+202E), a bidi isolate (U+2066), and markup — the
 // hostile shapes a fetched client_name can carry into a consent page or a terminal.
-const HOSTILE_NAME = "Evil‮name⁦ Connector\r\n<b>bold</b>";
+const HOSTILE_NAME = "Evil\u0007\u202Ename\u2066 Connector\r\n<b>bold</b>";
 const HOSTILE_SCRUBBED = "Evilname Connector<b>bold</b>";
 const HOSTILE_ESCAPED = "Evilname Connector&lt;b&gt;bold&lt;/b&gt;";
 
@@ -628,7 +628,7 @@ describe("T242 (e) — untrusted display text", () => {
     expect(page.status).toBe(200);
     const html = await page.text();
     expect(html).toContain(HOSTILE_ESCAPED);
-    for (const hostile of ["", "‮", "⁦", "\r\n<b>"]) {
+    for (const hostile of ["\u0007", "\u202E", "\u2066", "\r\n<b>"]) {
       expect(html).not.toContain(hostile);
     }
 
@@ -642,7 +642,7 @@ describe("T242 (e) — untrusted display text", () => {
   it("plainText strips what a terminal or a bidi reader would obey, and nothing else", () => {
     expect(plainText(HOSTILE_NAME)).toBe(HOSTILE_SCRUBBED);
     expect(plainText("Ordinary Name 42 — ünïcode")).toBe("Ordinary Name 42 — ünïcode");
-    expect(plainText("‮ ")).toBe("");
+    expect(plainText("\u202E\u0000\u009B")).toBe("");
   });
 });
 
