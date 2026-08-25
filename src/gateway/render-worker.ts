@@ -1,14 +1,41 @@
-// Bounded renderer execution (SPEC §23.9). A renderer bundle is author-provided code, and §23 v1 ran it
-// SYNCHRONOUSLY on the event loop with no timeout — so an infinite-loop bundle wedged EVERY mount (the
-// capability-security panel's headline residual on #99, on the anonymous door with an attacker-chosen
-// entity). This runs each render in a Node `worker_threads` Worker with a HARD timeout (terminate on
-// overrun — which `node:vm`'s timeout cannot guarantee against an async escape) and `resourceLimits` (a
-// bundle cannot OOM the host). A second route keeps answering while a bundle spins: the wedge is closed.
+// Bounded AND CONFINED renderer execution (SPEC §23.9; the ocap half is §24.5's open flag, T172). A
+// renderer bundle is author-provided code, and §23 v1 ran it SYNCHRONOUSLY on the event loop with no
+// timeout — so an infinite-loop bundle wedged EVERY mount (the capability-security panel's headline
+// residual on #99, on the anonymous door with an attacker-chosen entity). Each render runs in a Node
+// `worker_threads` Worker with a HARD timeout (terminate on overrun — which `node:vm`'s timeout cannot
+// guarantee against an async escape) and `resourceLimits` (a bundle cannot OOM the host). A second route
+// keeps answering while a bundle spins.
 //
-// HONEST SCOPE (stated so no one over-trusts it): a Worker bounds the HANG / crash / memory. It is NOT
-// full object-capability isolation — a worker can still `import('node:fs')` or open a socket. True
-// no-fs/no-net ocap (SES-in-worker or isolated-vm) is a FURTHER hardening, deferred to §24 / a deeper
-// slice. This closes the wedge the panel named, not ambient authority.
+// THE WORKER BOUNDS COST; THE CONFINED REALM BOUNDS REACH, and they are different questions. A bare
+// Worker is not object-capability isolation: measured, a bundle in one read and wrote any file, read
+// `process.env`, called `globalThis.require` (an eval worker carries it as a GLOBAL), called `fetch`, and
+// ran `node:child_process`. So a realm is built inside the worker before any bundle byte evaluates, in
+// two halves — neither sufficient alone:
+//
+//   THE MODULE GATE. `module.registerHooks` refuses every specifier that is not a `data:` URL, so
+//   `node:fs`, a bare `fs`, `file:`, `http:` and anything a nested `data:` module names all fail to
+//   resolve. Its predicate is built from PRIMORDIALS CAPTURED FIRST: the gate runs in the same realm as
+//   the bundle, so a gate asking `specifier.startsWith("data:")` through the live prototype is defeated
+//   by a bundle that patches `String.prototype.startsWith` before importing (measured, not theorised).
+//
+//   THE GLOBAL SCRUB, BY ALLOWLIST. The allowlist is the bare-JS global set of a fresh `vm` context plus
+//   the authority-free platform names a `(node) => string` render may want; everything else on the
+//   worker's `globalThis` is deleted. An allowlist rather than a denylist because the denylist is the
+//   half that rots: `globalThis` grows with every Node release, and a name nobody thought of must be
+//   DENIED by default rather than admitted by default. The scrub then VERIFIES itself and refuses to run
+//   the bundle if a denied name survived — a confinement that reports success it did not achieve is H7
+//   at the realm boundary. `console` is REPLACED (not kept) with in-realm no-ops: a bundle's writes into
+//   the operator's log are a channel out of the realm, and §23.9 already leaks nothing of a bundle's
+//   internals.
+//
+// This is §30's ENFORCING half for the server host — `artifact-scan.ts` is its cheap decidable half and
+// `artifact-realm.ts` the browser sibling (a denylist SEAL there, because a Worker global scope is small
+// and known; an allowlist here, because Node's is neither).
+//
+// WHAT IS STILL NOT BOUNDED, stated so no one over-trusts this either: CPU and wall clock inside the
+// realm are the timeout's and the envelope's, unchanged. §22 RESOLVERS are not confined at all — a
+// derived function is called synchronously by the resolution program and cannot cross a thread — so they
+// keep §22's in-process floor (`esm.ts` states it precisely).
 //
 // A function cannot cross the thread boundary, so we pass the bundle SOURCE + the (already §23.7-enveloped,
 // so JSON/structured-clone-safe) node; the worker imports the bundle from a `data:` URL and calls
@@ -18,6 +45,7 @@
 // data. Warming the threads themselves is still unbuilt. Every failure — timeout, throw, crash, non-string — folds into a CLEAN refusal that
 // leaks nothing of the bundle's internals (serveRoute's own discipline, now enforced across the boundary).
 
+import { runInNewContext } from "node:vm";
 import { Worker } from "node:worker_threads";
 
 // Tunable ceilings (exported so a host may tighten them). The timeout bounds a hanging bundle; the memory
@@ -32,6 +60,13 @@ export const RENDER_TIMEOUT_MS = 500;
 export const RENDER_SPAWN_TIMEOUT_MS = 10_000;
 export const RENDER_MAX_OLD_MB = 128;
 export const RENDER_MAX_YOUNG_MB = 32;
+// The MODULE BODY's own clock, and a SEPARATE budget again for the same reason the spawn clock is: it
+// bounds a different thing. Evaluating a bundle's top level happens at publish / bind / bless — never on
+// a request — and a real bundle (a packed React renderer) legitimately spends longer parsing and
+// evaluating than a warm render spends drawing. Charging it the render's 500ms would refuse honest law
+// at the door. A pool's admission does NOT use this: an untrusted bundle is admitted on the ceiling its
+// operator declared (§24.5), and fails closed against it.
+export const RENDER_ADMIT_TIMEOUT_MS = 5_000;
 
 // What a caller may learn about a render's fate WITHOUT reading its body. §24.5's envelope needs to
 // tell an operator which limit a pool hit; comparing refusal strings would couple the accounting to
@@ -74,36 +109,168 @@ const notHtml: RenderResult = {
   body: "the renderer did not return HTML",
 };
 
+// The platform names the realm KEEPS, beyond the language's own. Every one is authority-free by
+// inspection: it computes over values the bundle already holds and opens no file, socket, thread or
+// process. `console` is listed because the scrub would otherwise remove the binding the preamble
+// replaces. Timers are here because they cannot outlive a terminated worker, so the clock still bounds
+// them.
+//
+// `MessageChannel` / `MessagePort` ARE here, and the distinction from `BroadcastChannel` is the one to
+// read carefully. A BroadcastChannel is reachable BY NAME from any thread in the process: constructing
+// one is opening a door outward, so it stays denied. A MessageChannel is a pair the bundle just made,
+// connected to nothing — the only ways to hand a port to another thread are a port that is ALREADY
+// connected to one (`parentPort`, absent from this realm) or the ability to start one
+// (`node:worker_threads`, refused by the module gate). It is realm-local async plumbing, no more
+// reaching than `queueMicrotask`. It is also what React's scheduler schedules on, so the measured cost
+// of denying it was every real React renderer refused at the door.
+//
+// What is deliberately ABSENT is as load-bearing as what is present: no `fetch` kit (`Request` /
+// `Response` / `Headers` / `FormData`), no `WebSocket`, no `BroadcastChannel`, no streams (a
+// `(node) => string` render returns a string), no `navigator` (a dedicated worker's `navigator.storage`
+// is persistent bytes).
+const PURE_PLATFORM: readonly string[] = [
+  "globalThis",
+  "global",
+  "console",
+  "TextEncoder",
+  "TextDecoder",
+  "URL",
+  "URLSearchParams",
+  "structuredClone",
+  "queueMicrotask",
+  "setTimeout",
+  "clearTimeout",
+  "setInterval",
+  "clearInterval",
+  "setImmediate",
+  "clearImmediate",
+  "MessageChannel",
+  "MessagePort",
+  "MessageEvent",
+  "Event",
+  "EventTarget",
+  "Buffer",
+  "atob",
+  "btoa",
+  "crypto",
+  "performance",
+];
+
+// The names the scrub must have removed. NOT the mechanism — the allowlist is — but the RECEIPT: a
+// scrub whose `delete` silently failed (a non-configurable property, a future Node that pins one) would
+// leave a realm that reports itself confined and is not. Fail closed instead, before the bundle runs.
+const MUST_BE_GONE: readonly string[] = [
+  "process",
+  "require",
+  "module",
+  "fetch",
+  "WebSocket",
+  "EventSource",
+  "XMLHttpRequest",
+  "BroadcastChannel",
+  "navigator",
+  "indexedDB",
+  "caches",
+  "localStorage",
+];
+
+// The language's own globals, read from a FRESH `vm` context rather than written down: a hand-kept list
+// of ECMAScript intrinsics goes stale on every V8 upgrade, and a stale one deletes something real. The
+// context is bare JS — it carries no `process`, no `fetch`, no Node global — so it is exactly the "pure
+// computation" half of the allowlist and nothing more. Memoised: one context per process, built on the
+// first worker rather than at import, so a peer that never renders never pays for it.
+let intrinsics: readonly string[] | undefined;
+const pureIntrinsics = (): readonly string[] =>
+  (intrinsics ??= runInNewContext("Object.getOwnPropertyNames(globalThis)") as string[]);
+
 // The worker's entry, run via `{ eval: true }` so no separate file must ship in dist. Eval workers are
-// CommonJS (so `require` + dynamic `import()` are both available, even in this `type: module` package): the
-// async handler awaits the bundle import, calls its default export with the node, and posts the HTML — or a
-// generic marker, never the bundle's own error text.
-const WORKER_SRC = `
-const { parentPort } = require('worker_threads');
-parentPort.on('message', async ({ bundle, node }) => {
+// CommonJS (so `require` + dynamic `import()` are both available, even in this `type: module` package).
+// ORDER IS THE WHOLE DESIGN HERE: capture what the bootstrap needs, install the module gate, scrub the
+// realm, verify the scrub, and only then listen for work. Everything the bootstrap keeps lives in
+// `const`s of this module's own scope, which the imported bundle cannot name.
+//
+// TWO MODES over one realm, deliberately one worker source and not two: `render` calls the default
+// export, `admit` only asks whether the bundle HAS one. If admission ran anywhere less confined than the
+// render, the module body — the half that runs at publish, bind and bless — would be the unguarded one.
+const workerSource = (): string => `
+const __parentPort = require('worker_threads').parentPort;
+const __hooks = require('module').registerHooks;
+
+// Captured BEFORE any bundle code can patch a prototype the gate reads (measured escape).
+const __apply = Reflect.apply;
+const __startsWith = String.prototype.startsWith;
+const __isData = (s) => typeof s === 'string' && __apply(__startsWith, s, ['data:']);
+__hooks({
+  resolve(specifier, context, next) {
+    if (__isData(specifier)) return next(specifier, context);
+    throw new Error('this renderer may not import "' + specifier + '"');
+  },
+});
+
+const __allowed = new Set(${JSON.stringify([...pureIntrinsics(), ...PURE_PLATFORM])});
+for (const __name of Object.getOwnPropertyNames(globalThis)) {
+  if (__allowed.has(__name)) continue;
+  try { delete globalThis[__name]; } catch (e) { /* verified below, never assumed */ }
+}
+const __noop = function () { return undefined; };
+globalThis.console = {
+  log: __noop, info: __noop, warn: __noop, error: __noop, debug: __noop, trace: __noop,
+  dir: __noop, table: __noop, group: __noop, groupEnd: __noop, time: __noop, timeEnd: __noop,
+  assert: __noop, count: __noop,
+};
+
+// THE RECEIPT, and it covers the console too. An eval worker's bootstrap is SLOPPY-MODE CommonJS,
+// where a failed \`delete\` returns false and an assignment to a non-writable property does nothing —
+// both SILENTLY. Every step above is therefore verified rather than assumed, and a realm that did not
+// close throws here, before a single bundle byte is read (H7 at the realm boundary: this is the
+// difference between confinement and a report of confinement).
+for (const __name of ${JSON.stringify(MUST_BE_GONE)}) {
+  if (__name in globalThis) throw new Error('the renderer realm did not close: ' + __name);
+}
+if ('Console' in globalThis.console) throw new Error('the renderer realm kept the host console');
+
+__parentPort.on('message', async ({ bundle, node, admit }) => {
   try {
     const url = 'data:text/javascript;base64,' + Buffer.from(bundle, 'utf8').toString('base64');
     const mod = await import(url);
     const fn = mod && mod.default;
-    if (typeof fn !== 'function') { parentPort.postMessage({ kind: 'notHtml' }); return; }
+    if (typeof fn !== 'function') { __parentPort.postMessage({ kind: 'notHtml' }); return; }
+    if (admit === true) { __parentPort.postMessage({ kind: 'ok' }); return; }
     const html = fn(node);
-    if (typeof html !== 'string') { parentPort.postMessage({ kind: 'notHtml' }); return; }
-    parentPort.postMessage({ kind: 'ok', html });
-  } catch {
-    parentPort.postMessage({ kind: 'fault' });
+    if (typeof html !== 'string') { __parentPort.postMessage({ kind: 'notHtml' }); return; }
+    __parentPort.postMessage({ kind: 'ok', html });
+  } catch (e) {
+    // \`why\` is read ONLY on the admission path, where the reader is the operator publishing the
+    // bundle. The render path drops it: a serve refusal leaks nothing of a bundle's internals.
+    // It is BUNDLE-AUTHORED text on its way to an operator's terminal and log, so control characters
+    // go first — a refusal must not be able to repaint the screen it is printed on.
+    const raw = e && e.message ? String(e.message) : 'the bundle did not evaluate';
+    const why = raw.replace(/[\\u0000-\\u001f\\u007f-\\u009f]/g, ' ').slice(0, 300);
+    __parentPort.postMessage({ kind: 'fault', why });
   }
 });
 `;
 
-// Run one render in a bounded worker. Resolves to a RenderResult, NEVER rejects — every failure folds into
-// a clean refusal, and the worker is always terminated (no leak of the thread on the timeout path).
-export function renderInWorker(
-  bundle: string,
-  node: unknown,
-  timeoutMs: number | undefined = RENDER_TIMEOUT_MS,
-  opts: RenderWorkerOptions = {},
-): Promise<RenderResult> {
-  return new Promise((resolve) => {
+// How one confined run ENDED, before a caller decides what that means. `noStart` is kept distinct from
+// `timeout` all the way out here for §23.9's own reason: a thread that never started ran no bundle, and
+// telling an operator otherwise sends them to widen a clock that cannot help.
+type Stage = "ok" | "notHtml" | "fault" | "timeout" | "noStart";
+interface Answer {
+  readonly stage: Stage;
+  readonly html?: string;
+  readonly why?: string;
+}
+
+// ONE confined run, shared by both call classes. Resolves, NEVER rejects — every failure folds into a
+// stage, and the worker is always terminated (no leak of the thread on the timeout path). Both public
+// entries below go through here, which is what keeps a bundle's MODULE BODY from ever meeting a weaker
+// realm than its render does.
+function inConfinedWorker(
+  message: { bundle: string; node?: unknown; admit?: boolean },
+  timeoutMs: number | undefined,
+  opts: RenderWorkerOptions,
+): Promise<Answer> {
+  return new Promise<Answer>((resolve) => {
     // The thread may refuse to start at all (ERR_WORKER_INIT_FAILED, under fd or thread exhaustion) —
     // exactly the state a resource envelope exists for. An uncaught constructor throw would REJECT
     // this promise, which the header above promises never happens: the door would leak a Node error
@@ -111,7 +278,7 @@ export function renderInWorker(
     // failed. So it folds like every other failure, and it counts.
     let worker: Worker;
     try {
-      worker = new Worker(WORKER_SRC, {
+      worker = new Worker(workerSource(), {
         eval: true,
         resourceLimits: {
           maxOldGenerationSizeMb: opts.maxOldMb ?? RENDER_MAX_OLD_MB,
@@ -120,17 +287,19 @@ export function renderInWorker(
       });
     } catch {
       opts.onOutcome?.("fault");
-      resolve(faulted);
+      resolve({ stage: "fault" });
       return;
     }
     let settled = false;
-    const finish = (r: RenderResult, outcome: RenderOutcome): void => {
+    const finish = (answer: Answer): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       void worker.terminate();
-      opts.onOutcome?.(outcome);
-      resolve(r);
+      // `noStart` is the HOST failing, not the pool's clock firing on a render — §24.5 has no finer
+      // bucket than `faulted`, and that contract already covers "the worker died".
+      opts.onOutcome?.(answer.stage === "noStart" ? "fault" : answer.stage);
+      resolve(answer);
     };
     // TWO clocks, not one, AND TWO BUDGETS. Armed only at construction, the timer charged worker
     // SPAWN — thread start, isolate init, first schedule — against the render's budget, and under
@@ -150,23 +319,89 @@ export function renderInWorker(
     // `faulted` (whose own contract already covers a worker that died rather than a bundle that
     // threw). A fifth counter is a §24.5 report widening, and belongs to that section, not here.
     const spawnBudget = opts.spawnTimeoutMs ?? RENDER_SPAWN_TIMEOUT_MS;
-    let timer = setTimeout(() => finish(noStart, "fault"), spawnBudget);
+    let timer = setTimeout(() => finish({ stage: "noStart" }), spawnBudget);
     worker.once("online", () => {
       if (settled) return;
       clearTimeout(timer);
-      timer = setTimeout(() => finish(timedOut, "timeout"), budget);
+      timer = setTimeout(() => finish({ stage: "timeout" }), budget);
     });
-    worker.on("message", (msg: { kind?: string; html?: string }) => {
-      if (msg.kind === "ok" && typeof msg.html === "string") {
-        finish({ status: 200, contentType: HTML, body: msg.html }, "ok");
+    worker.on("message", (msg: { kind?: string; html?: string; why?: string }) => {
+      if (msg.kind === "ok") {
+        finish(
+          typeof msg.html === "string"
+            ? { stage: "ok", html: msg.html }
+            : message.admit === true
+              ? { stage: "ok" }
+              : { stage: "fault" },
+        );
       } else if (msg.kind === "notHtml") {
-        finish(notHtml, "notHtml");
+        finish({ stage: "notHtml" });
       } else {
-        finish(faulted, "fault");
+        finish({ stage: "fault", ...(typeof msg.why === "string" ? { why: msg.why } : {}) });
       }
     });
-    worker.on("error", () => finish(faulted, "fault"));
-    worker.on("exit", () => finish(faulted, "fault")); // exited before posting (e.g. OOM-reclaimed) → clean refusal
-    worker.postMessage({ bundle, node });
+    worker.on("error", () => finish({ stage: "fault" }));
+    worker.on("exit", () => finish({ stage: "fault" })); // exited before posting (e.g. OOM-reclaimed) → clean refusal
+    worker.postMessage(message);
   });
+}
+
+// Run one render in a confined, bounded worker. Never rejects; every failure folds into a clean refusal
+// that leaks nothing of the bundle's internals — `why` is deliberately dropped on this path.
+export async function renderInWorker(
+  bundle: string,
+  node: unknown,
+  timeoutMs: number | undefined = RENDER_TIMEOUT_MS,
+  opts: RenderWorkerOptions = {},
+): Promise<RenderResult> {
+  const answer = await inConfinedWorker({ bundle, node }, timeoutMs, opts);
+  if (answer.stage === "ok" && typeof answer.html === "string") {
+    return { status: 200, contentType: HTML, body: answer.html };
+  }
+  if (answer.stage === "notHtml") return notHtml;
+  if (answer.stage === "timeout") return timedOut;
+  if (answer.stage === "noStart") return noStart;
+  return faulted;
+}
+
+// What a bundle's MODULE BODY did, evaluated in the same confined realm its render will meet.
+export interface Admission {
+  readonly ok: boolean;
+  readonly why?: string;
+}
+
+// EVALUATE a bundle's module body — the harder call class, and the one that used to run on the serving
+// thread at publish, bind and bless. Nothing crosses back but a boolean and, on refusal, a reason: no
+// namespace, no function, no source. The caller learns only whether the bundle IS a renderer.
+//
+// The reason IS returned here, unlike on the render path, because the reader is different: an operator
+// publishing a bundle needs to know it named an import the realm refuses, or has a syntax error. A
+// stranger asking for a route learns nothing.
+export async function admitInWorker(
+  bundle: string,
+  timeoutMs: number | undefined = RENDER_ADMIT_TIMEOUT_MS,
+  opts: RenderWorkerOptions = {},
+): Promise<Admission> {
+  // `onOutcome` is REBUILT rather than spread through: an admission is not a render, and §24.5's
+  // counters mean renders. A pool that admits a bad bundle must not read as a pool whose renders
+  // faulted, so the callback is dropped by naming the fields that DO cross rather than by subtracting
+  // one — a later option added to the bag then defaults to not crossing.
+  const answer = await inConfinedWorker({ bundle, admit: true }, timeoutMs, {
+    spawnTimeoutMs: opts.spawnTimeoutMs,
+    ...(opts.maxOldMb === undefined ? {} : { maxOldMb: opts.maxOldMb }),
+    ...(opts.maxYoungMb === undefined ? {} : { maxYoungMb: opts.maxYoungMb }),
+  });
+  if (answer.stage === "ok") return { ok: true };
+  if (answer.stage === "notHtml") {
+    return { ok: false, why: "its `export default` is not a function (node) => html" };
+  }
+  if (answer.stage === "timeout") {
+    return {
+      ok: false,
+      why: `its module body did not finish inside ${timeoutMs ?? RENDER_ADMIT_TIMEOUT_MS}ms`,
+    };
+  }
+  if (answer.stage === "noStart")
+    return { ok: false, why: "the host could not start a confined thread" };
+  return { ok: false, why: answer.why ?? "its module body did not evaluate" };
 }

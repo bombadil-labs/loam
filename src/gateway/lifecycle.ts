@@ -47,7 +47,7 @@ import {
   type ResolverSpecs,
   lensNameFor,
 } from "./registration.js";
-import { loadRenderers, readRenderers } from "./renderers.js";
+import { admitRenderers, readRenderers, rendererAdmissionBudget } from "./renderers.js";
 import {
   interpretBindingPolicy,
   readBindingPolicy,
@@ -786,9 +786,14 @@ export async function preloadResolversImpl(gw: Gateway): Promise<void> {
     ...gw.registrationVersions().map((v) => v.resolvers),
   ];
   await loadResolvers(specs);
-  // Renderer bundles ride the same content-addressed ESM loader (SPEC §23/§22.3), pre-loaded here so
-  // the synchronous serve path always finds its function.
-  await loadRenderers(readRenderers(gw.reactor, gw.operatorAuthor).map((r) => r.bundle));
+  // Renderer bundles do NOT ride that loader (SPEC §23.9 / T172): a renderer's module body is evaluated
+  // in the confined worker realm and never on this thread, so what this call establishes is ADMISSION —
+  // which routes may mount — rather than a loaded namespace. Tolerant by construction: one bundle the
+  // realm will not admit leaves one route unmounted, and never fails the bind.
+  await admitRenderers(
+    readRenderers(gw.reactor, gw.operatorAuthor).map((r) => r.bundle),
+    rendererAdmissionBudget(gw),
+  );
 }
 
 // Publish a schema and its registration as data, then bind them (the body of

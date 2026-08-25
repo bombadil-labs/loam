@@ -7,6 +7,18 @@ export function renderInWorker() {
   throw new Error("the renderer sandbox (worker_threads) is not part of the browser peer");
 }
 
+// Admission is the OTHER half of the same boundary (T172): a renderer's module body is evaluated in the
+// confined worker realm, never on the thread that serves. This peer has no such realm, so it admits no
+// renderer — and that refusal is the rule stated exactly, not a gap: no confinement, no execution. It
+// REFUSES rather than throwing, because admission is tolerant by design — the caller leaves the route
+// unmounted (a uniform 404) rather than failing a bind the browser peer performs on every boot.
+export function admitInWorker() {
+  return Promise.resolve({
+    ok: false,
+    why: "this peer cannot confine a renderer, so it admits none",
+  });
+}
+
 // The per-render wall-clock BUDGET, on the other hand, is a floor value rather than a mechanism: it is
 // the number the artifact host adopts so the two hosts carry visibly the same clock (SPEC §30), and an
 // emitted page must state it whether or not this peer can run a worker. Kept byte-equal to

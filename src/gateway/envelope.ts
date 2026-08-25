@@ -23,11 +23,15 @@
 //     because they are the operator's own grantee. An unmetered quarantine is exactly the unbounded
 //     bill this file exists to close, so the built-in envelope is the floor everyone starts from.
 //
-// HONEST SCOPE, restated because §24.5 states it and this file must not outgrow it: a Worker bounds
-// HANG, CRASH, and MEMORY. It does NOT bound ambient authority — a worker can still reach `node:fs`
-// or open a socket. Until the full no-fs/no-net ocap layer ships (SES-in-worker or isolated-vm,
-// §23.9's named further work), a quarantine that admits effectful code bounds resource exhaustion and
-// does not bound reach. This is the resource half only.
+// HONEST SCOPE, and it changed. This file is still the RESOURCE half only — slots, a wall clock, a
+// memory ceiling. The REACH half is no longer open: §24.5's standing flag ("a worker can still reach
+// `node:fs` or open a socket") was closed by T172, and a pool's renders now run in a confined realm with
+// no filesystem, no network and no process authority (`render-worker.ts`). The two halves compose here
+// rather than replacing one another — a pool's declared clock and memory ceiling govern its ADMISSIONS
+// as well as its renders, so a stranger's module body is billed to the pool that hosts it.
+//
+// What is still NOT bounded by either half: CPU inside the realm past the clock (`terminate()` is the
+// answer, and it is the timeout's), and §22 resolvers, which are not confined at all (`esm.ts`).
 
 import type { Claims, Reactor } from "@bombadil/rhizomatic";
 import type { Gateway } from "./gateway.js";
