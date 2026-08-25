@@ -126,6 +126,9 @@ describe("loam register --stock installs the closure", () => {
     const rival = join(home, "their-shallow.json");
     writeFileSync(rival, bespokeShallow("ShallowPerson"));
     expect(await run(["register", rival, "--home", home], io())).toBe(0);
+    // A FILE registration takes no stock closure and reports no evolve — the evolve line is the
+    // stock path's report, and printing it here would be a false claim about a first publish.
+    expect(out.join("\n")).not.toMatch(/evolves it/);
 
     out.length = 0;
     err.length = 0;
