@@ -109,6 +109,7 @@ import {
   deriveReceiptImpl,
   readGraveyards,
   slateReportsImpl,
+  type CitationTier,
   type CutReport,
   type GraveyardRecord,
   type Receipt,
@@ -781,6 +782,8 @@ export class Gateway {
   ): Promise<{
     erased: string;
     citations: string[];
+    /** The citations manifest attributed to the tier each dangler lives on (T216, `CitationTier`). */
+    citationTiers: CitationTier[];
     kept: string[];
     tombstone: string;
     /** False when a standing tombstone was REUSED — a retry after a fault records no new reason. */

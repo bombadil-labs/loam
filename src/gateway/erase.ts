@@ -28,11 +28,13 @@ import { programMaskJson } from "./listing.js";
 import { unreachableStoreReport } from "./container.js";
 import {
   CTX_SLATE,
+  danglingCitations,
   forgivenHealth,
   readClosedIds,
   readSlates,
   slateHealth,
   slatePointer,
+  type CitationTier,
   type ForgivenHealth,
   type SlateHealth,
 } from "./slate.js";
@@ -732,6 +734,7 @@ export async function eraseImpl(
 ): Promise<{
   erased: string;
   citations: string[];
+  citationTiers: CitationTier[];
   kept: string[];
   tombstone: string;
   minted: boolean;
@@ -814,17 +817,15 @@ export async function eraseImpl(
       seed,
     );
   // The manifest: every delta citing the id (negations, provenance links) — the holes the
-  // cut will leave, enumerated before it is made. Cascade is the caller's choice.
+  // cut will leave, enumerated before it is made, across every WALKABLE tier the byte verdict walks
+  // (T216, `reachableTiers`): the primary AND each directly-attached pool, so a pool-resident citation
+  // (a T207 arrival stamp echoing the target) is named rather than omitted. A wall the verdict names
+  // `unproven` cannot be reached to enumerate, so it carries no entry. Cascade is the caller's choice.
   // Excluded BY IDENTITY: only the tombstone this erasure mints or reuses. A shape filter would
   // both catch it on retry (a manifest that varies between attempts, a cascading caller sent to
   // erase the cut itself) and wrongly drop a struck tombstone from a forgiven earlier erasure —
   // a surviving delta dangling at the hole, which the manifest exists to enumerate.
-  const citations = [...gw.reactor.snapshot()]
-    .filter((d) => d.id !== tombstone.id)
-    .filter((d) =>
-      d.claims.pointers.some((p) => p.target.kind === "delta" && p.target.deltaRef.delta === id),
-    )
-    .map((d) => d.id);
+  const { citations, citationTiers } = danglingCitations(gw, id, (dId) => dId === tombstone.id);
   if (already === undefined) {
     await gw.append([tombstone]);
     await gw.flush(); // the tombstone must be ground before the target stops being ground
@@ -894,6 +895,7 @@ export async function eraseImpl(
   return {
     erased: id,
     citations,
+    citationTiers,
     kept: stores.kept,
     tombstone: tombstone.id,
     minted: already === undefined,

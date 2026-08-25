@@ -102,6 +102,7 @@ export {
   slateDefect,
   slatePointer,
   type ByteVerdict,
+  type CitationTier,
   type CompletenessCheck,
   type CutMemberReport,
   type CutReport,

@@ -1091,14 +1091,30 @@ export interface TierVerdict {
   readonly holds: ByteVerdict;
 }
 
+/**
+ * The citations manifest, ATTRIBUTED to the tier each dangler lives on (T216). The flat `citations`
+ * id list stays a bare `string[]` (a frozen T64 shape), and this rides beside it — one entry per tier
+ * the byte verdict walks, so a reader can never learn absence multi-tier while reading danglers
+ * single-tier. `citations` carries no `holds`, so it is not a byte verdict and never a §29.7
+ * observation field: it names WHICH deltas point at the hole on WHICH tier, a fact about the ground.
+ */
+export interface CitationTier {
+  readonly tier: string;
+  readonly citations: readonly string[];
+}
+
 export interface CutMemberReport {
   readonly member: string;
   readonly tombstone: string;
   readonly spokenBy: string;
   /** OBSERVATION, at `window.cutAt`. Non-authoritative for a re-issue — see RECEIPT_FIELDS. */
   readonly tiers: readonly TierVerdict[];
-  /** §11's citations manifest: the surviving deltas that dangle at this hole. */
+  /** §11's citations manifest: the surviving deltas that dangle at this hole, across every tier. */
   readonly citations: readonly string[];
+  /** The same manifest, attributed to the tier each dangler lives on (T216) — the additive half of
+   * the flat `citations` list. Not in RECEIPT_FIELDS: that partition is frozen (T64), and this is a
+   * refinement of `citations` (history), carrying no byte verdict a formatter could misread. */
+  readonly citationTiers: readonly CitationTier[];
 }
 
 export interface CutReport {
@@ -1358,6 +1374,7 @@ export async function cutImpl(
           spokenBy: result.spokenBy ?? "",
           tiers: await tierVerdicts(gw, id, notReached),
           citations: result.citations,
+          citationTiers: result.citationTiers,
         });
       } else {
         const tomb = tombs.find((t) => tombstoneTarget(t.claims) === id)!;
@@ -1367,6 +1384,7 @@ export async function cutImpl(
           spokenBy: spokenByOf(tomb.claims) ?? "",
           tiers: await tierVerdicts(gw, id, notReached),
           citations: [],
+          citationTiers: [],
         });
       }
     } catch (err) {
@@ -1474,6 +1492,69 @@ const spokenByOf = (claims: Claims): string | undefined => {
     : undefined;
 };
 
+// The DIRECT tiers a §11 sweep can WALK: this store's primary, then each attached quarantine pool (the
+// operator's own replicas), labeled by the pool's declared container name or `pool:N` when anonymous.
+// Named ONCE, here, so the byte verdict and the citations manifest walk the SAME set — a walkable tier
+// the verdict probes is a walkable tier the manifest enumerates, and neither can name one the other
+// skips. Two limits are inherited from the old `tierVerdicts`, not introduced here:
+//   - A WALL (unreachable — a `kept`/faulted store) is not walkable, so it is NOT in this set. The
+//     byte verdict adds walls as `unproven` (`notReached`, added by callers); the manifest cannot
+//     enumerate a store it cannot reach, so it carries no entry for one. `tiers` is therefore a strict
+//     superset of `citationTiers` BY TIER NAME whenever a wall stands — the honest relation, since a
+//     store you cannot reach cannot be proven clean OR enumerated for danglers.
+//   - This reach is FLAT: primary plus the DIRECTLY-attached pools. The erase fan-out and `health()`
+//     recurse into nested pools; the verdict and the manifest do not itemize a pool-of-a-pool. The
+//     nested byte is still SWEPT and guaranteed by §11's recursive throw — it is just not a named row.
+//   - `pool:N` is SYNTHESIZED, so a container literally named `pool:1` collides with an anonymous
+//     pool's synthetic label — a consumer keying by tier name resolves it ambiguously (H8, low, old).
+export function reachableTiers(gw: Gateway): { tier: string; gw: Gateway }[] {
+  const out: { tier: string; gw: Gateway }[] = [{ tier: "primary", gw }];
+  const named = new Map([...gw.attachedContainers].map(([name, pool]) => [pool, name]));
+  let anon = 0;
+  for (const pool of gw.quarantinePools) {
+    out.push({ tier: named.get(pool) ?? `pool:${(anon += 1)}`, gw: pool });
+  }
+  return out;
+}
+
+// Every surviving delta that dangles at the hole `id` leaves, enumerated across every WALKABLE tier
+// (T216) — the same reachable set the byte verdict walks (`reachableTiers`: primary plus the directly-
+// attached pools). Before this, both callers walked the primary's reactor alone, so a pool-resident
+// citation (a T207 arrival stamp echoing an erased delta, a federated negation) was omitted while a
+// gather still served a signed pointer at the hole.
+//
+// The flat `citations` list is deduplicated across tiers and sorted, so it is stable across a re-issue
+// and a bare `string[]` (the frozen T64 shape). `citationTiers` carries one entry PER walkable tier,
+// empty ones included. It is NOT the verdict's whole tier set: the verdict additionally names any WALL
+// (`notReached`) as `unproven`, and a wall cannot be walked for citations, so `citationTiers` covers
+// the walkable tiers and the verdict's `tiers` is a superset by tier name whenever a wall stands.
+// `exclude` drops a delta by identity on every tier (erase.ts excludes the tombstone it mints from its
+// own manifest); a re-issue passes none.
+export function danglingCitations(
+  gw: Gateway,
+  id: string,
+  exclude: (deltaId: string) => boolean = () => false,
+): { citations: string[]; citationTiers: CitationTier[] } {
+  const seen = new Set<string>();
+  const flat: string[] = [];
+  const citationTiers: CitationTier[] = [];
+  const cites = (d: Delta): boolean =>
+    d.claims.pointers.some((p) => p.target.kind === "delta" && p.target.deltaRef.delta === id);
+  for (const { tier, gw: g } of reachableTiers(gw)) {
+    const here: string[] = [];
+    for (const d of g.reactor.snapshot()) {
+      if (exclude(d.id) || !cites(d)) continue;
+      here.push(d.id);
+      if (!seen.has(d.id)) {
+        seen.add(d.id);
+        flat.push(d.id);
+      }
+    }
+    citationTiers.push({ tier, citations: here.sort() });
+  }
+  return { citations: flat.sort(), citationTiers };
+}
+
 // The per-tier byte verdict, asked of the BYTES and tri-state. A tier that cannot answer is
 // `unproven`, never `false` — and a `kept` wall the operator signed `accepts-incomplete` over is
 // `unproven` too, because nobody looked.
@@ -1483,19 +1564,12 @@ async function tierVerdicts(
   notReached: readonly { readonly wall: string }[],
 ): Promise<TierVerdict[]> {
   const out: TierVerdict[] = [];
-  const probe = async (label: string, g: Gateway): Promise<void> => {
+  for (const { tier, gw: g } of reachableTiers(gw)) {
     try {
-      out.push({ tier: label, holds: await g.backend.holds(id) });
+      out.push({ tier, holds: await g.backend.holds(id) });
     } catch {
-      out.push({ tier: label, holds: "unproven" }); // proven nothing (H9), never proven clean
+      out.push({ tier, holds: "unproven" }); // proven nothing (H9), never proven clean
     }
-  };
-  await probe("primary", gw);
-  const named = new Map([...gw.attachedContainers].map(([name, pool]) => [pool, name]));
-  let anon = 0;
-  for (const pool of gw.quarantinePools) {
-    const label = named.get(pool) ?? `pool:${(anon += 1)}`;
-    await probe(label, pool);
   }
   for (const wall of notReached) out.push({ tier: wall.wall, holds: "unproven" });
   return out;
@@ -1699,6 +1773,8 @@ export interface ReceiptMember {
   /** RE-PROBED at `issuedAt`, never reprinted from the CutReport. */
   readonly tiers: readonly TierVerdict[];
   readonly citations: readonly string[];
+  /** The citations manifest attributed per tier (T216) — see `CitationTier`. */
+  readonly citationTiers: readonly CitationTier[];
 }
 
 export interface Receipt {
@@ -1748,6 +1824,11 @@ export async function deriveReceiptImpl(
     const tomb = surviving.get(member);
     const strike =
       tomb === undefined ? strikeOf(gw.reactor, operator!, negated, member) : undefined;
+    // The manifest walks the SAME tier set the byte verdict does (T216) — primary plus every attached
+    // pool — so a surviving pool-resident dangler (a T207 arrival stamp echoing the erased member) is
+    // named rather than omitted. No exclusion: at re-issue the tombstone genuinely dangles at the hole
+    // and belongs in the manifest, exactly as before this widened past the primary.
+    const dangling = danglingCitations(gw, member);
     members.push({
       member,
       ...(tomb === undefined ? {} : { tombstone: tomb.id }),
@@ -1758,14 +1839,8 @@ export async function deriveReceiptImpl(
       // Reading only `kept` made a faulted tier appear NOWHERE, which reads as "not a tier" rather
       // than `unproven` (H9). `cutImpl` refuses on faults; a RE-ISSUE cannot refuse, so it confesses.
       tiers: await tierVerdicts(gw, member, unreachedTiers(walls)),
-      citations: [...gw.reactor.snapshot()]
-        .filter((d) =>
-          d.claims.pointers.some(
-            (p) => p.target.kind === "delta" && p.target.deltaRef.delta === member,
-          ),
-        )
-        .map((d) => d.id)
-        .sort(),
+      citations: dangling.citations,
+      citationTiers: dangling.citationTiers,
     });
   }
   return {
