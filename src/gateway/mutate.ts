@@ -320,7 +320,7 @@ export async function linkRefEntityImpl(
 // (entity, target) pair — the remove*/clear family's semantics: retraction is a claim, history
 // survives, another author's edge stands. Matches on the prop's bucket and the edge role's
 // pointer at the target, so a hand-authored _claim of the same shape retracts identically.
-export function unlinkRefEntityImpl(
+export async function unlinkRefEntityImpl(
   gw: Gateway,
   name: string,
   entity: string,

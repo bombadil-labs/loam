@@ -27,7 +27,7 @@ import {
 } from "../../src/gateway/gather.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
-import type { RefSpecs } from "../../src/gateway/registration.js";
+import { parseRegistrationInput, type RefSpecs } from "../../src/gateway/registration.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { observed } from "../spike/garden.js";
@@ -558,7 +558,44 @@ describe("§51 (h) — a prefix/inSet role expand: a reference for typing only",
     // ...but NO link mutation is generated: there is no single canonical role to author.
     expect(fields.has("linksync_activity_contacts")).toBe(false);
     expect(fields.has("unlinksync_activity_contacts")).toBe(false);
+
+    // The guard holds BELOW the surface too: the write hooks refuse a typing-only reference
+    // by hand (the missing mutation is not the only wall), with the crafted refusal, not a crash.
+    const hooks = gateway.gqlHooks();
+    await expect(
+      hooks.linkRef("sync:activity", "activity:walk", "contacts", MYK, WRITER_SEED),
+    ).rejects.toThrow(/declares no reference prop "contacts" to link/);
+    await expect(
+      hooks.unlinkRef("sync:activity", "activity:walk", "contacts", MYK, WRITER_SEED),
+    ).rejects.toThrow(/declares no reference prop "contacts" to link/);
+    // ...and an entirely undeclared prop draws the same refusal, same wording.
+    await expect(
+      hooks.linkRef("sync:activity", "activity:walk", "note", MYK, WRITER_SEED),
+    ).rejects.toThrow(/declares no reference prop "note" to link/);
     await gateway.close();
+  });
+});
+
+describe("§51 — the refs envelope parse refuses malformed declarations loudly", () => {
+  it("names the defect: a non-object refs, a roleless prop, a half reciprocal", () => {
+    const pick = { pick: { order: { byTimestamp: "desc" } } };
+    const body = {
+      hyperschema: { name: "sync:thing", alg: 1, body: entityGatherJson() },
+      schema: { props: { owner: pick }, default: pick },
+      roots: ["thing:1"],
+    };
+    expect(() => parseRegistrationInput({ ...body, refs: 42 })).toThrow(
+      "refs must be an object of per-prop reference declarations",
+    );
+    expect(() => parseRegistrationInput({ ...body, refs: null })).toThrow(
+      "refs must be an object of per-prop reference declarations",
+    );
+    expect(() => parseRegistrationInput({ ...body, refs: { owner: {} } })).toThrow(
+      'refs "owner": role must be a non-empty string',
+    );
+    expect(() =>
+      parseRegistrationInput({ ...body, refs: { owner: { role: "owned-by", reciprocal: {} } } }),
+    ).toThrow('refs "owner": reciprocal wants { role, context }, both non-empty strings');
   });
 });
 
