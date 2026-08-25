@@ -3,5 +3,8 @@
   "category": "bug",
   "duration": 1,
   "id": "T222",
+  "rails": [
+    "test/federation/crash-window.test.ts"
+  ],
   "title": "The custody crash window — federate and attest are two non-atomic writes"
 }
