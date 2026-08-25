@@ -41,6 +41,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { loadedEsm } from "../../src/gateway/esm.js";
 import { rendererBindingClaims } from "../../src/gateway/renderers.js";
+import { RENDER_TIMEOUT_MS } from "../../src/gateway/render-worker.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 import { FERN, observed } from "../spike/garden.js";
 
@@ -374,40 +375,46 @@ describe("T172 — no module body runs on the serving thread", () => {
     await gw.close();
   }, 30_000);
 
-  it("a renderer binding that ARRIVES rather than being published still mounts nothing it cannot confine", async () => {
-    // The T209 shape: a peer's binding lands by append/federation, past the publish door. The route
-    // must stay a uniform 404 — never a mounted renderer, never a boot failure.
+  it("a renderer binding that FEDERATES in still mounts nothing the realm cannot confine", async () => {
+    // The T209 shape exactly: a peer's binding arrives over the wire, past the publish door, and the
+    // door admits it at serve time through `prepareRoute`. Federation — not `append` — is what makes
+    // this rail load-bearing: an appended binding is admitted by the rebind that follows the append,
+    // so `prepareRoute` would contribute nothing and its removal would go unnoticed. A federated
+    // binding is a 404 until prepareRoute runs, which is asserted here in both states.
     const gw = await store();
-    const bundle = `import fs from ${q("node:fs")}; export default () => "<p>" + fs.readFileSync(${q(secretPath)}, "utf8") + "</p>";`;
-    await gw.append([
-      signClaims(
-        rendererBindingClaims(
-          { route: "arrived", schemaName: "Plant" as never, consumes: ["height"], bundle },
-          undefined,
-          OP,
-          2000,
-        ),
-        OP_SEED,
-      ),
-    ]);
+    const reaching = `import fs from ${q("node:fs")}; export default () => "<p>" + fs.readFileSync(${q(secretPath)}, "utf8") + "</p>";`;
+    const arrive = (route: string, bundle: string, ts: number): Promise<unknown> =>
+      gw.federate(
+        [
+          signClaims(
+            rendererBindingClaims(
+              { route, schemaName: "Plant" as never, consumes: ["height"], bundle },
+              undefined,
+              OP,
+              ts,
+            ),
+            OP_SEED,
+          ),
+        ],
+        { admit: () => true },
+      );
+
+    await arrive("arrived", reaching, 2000);
     await gw.prepareRoute("arrived");
     const out = await serve(gw, "arrived");
     expect(out.status).toBe(404); // unmounted, not a 500 and not a leak
     expect(out.body).not.toContain(SECRET);
-    // Two-sided: an ordinary binding arriving the SAME way does mount and serve.
-    await gw.append([
-      signClaims(
-        rendererBindingClaims(
-          { route: "arrived-ok", schemaName: "Plant" as never, consumes: ["height"], bundle: OK },
-          undefined,
-          OP,
-          2001,
-        ),
-        OP_SEED,
-      ),
-    ]);
+
+    // Two-sided, and it proves the DOOR still works rather than that federation is broken: the same
+    // arrival path with an ordinary bundle is 404 before the door admits it and 200 after. The bundle
+    // is SOURCE-UNIQUE to this rail on purpose — admission is keyed by content address and the set
+    // spans the process, so reusing `OK` here would find it already admitted by an earlier rail and
+    // the 404 would never be observed.
+    const fresh = "export default (n) => `<p>federated: ${n.view.height}</p>`;";
+    await arrive("arrived-ok", fresh, 2001);
+    expect((await serve(gw, "arrived-ok")).status).toBe(404);
     await gw.prepareRoute("arrived-ok");
-    expect((await serve(gw, "arrived-ok")).body).toBe("<p>height: 42</p>");
+    expect((await serve(gw, "arrived-ok")).body).toBe("<p>federated: 42</p>");
     await gw.close();
   });
 });
@@ -473,5 +480,12 @@ describe("T172 — the confinement composes with the budget, and a good renderer
     const verdict = await stub.admitInWorker();
     expect(verdict.ok).toBe(false);
     expect(verdict.why).toContain("confine");
+
+    // While the stub is in hand: its `RENDER_TIMEOUT_MS` is required to stay byte-equal to this
+    // module's, because §30 has the two hosts state visibly the same clock behind ONE content
+    // address. Two files holding the same number is a promise nothing was checking, and a number
+    // that drifts in one of them is exactly the divergence the export exists to prevent.
+    const held = stub as unknown as { RENDER_TIMEOUT_MS: number };
+    expect(held.RENDER_TIMEOUT_MS).toBe(RENDER_TIMEOUT_MS);
   });
 });

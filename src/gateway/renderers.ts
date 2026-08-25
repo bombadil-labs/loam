@@ -422,6 +422,13 @@ export function readForeignRenderers(reactor: Reactor, operator: string): Render
 // it does for a §22 resolver: a hash of forgotten bytes is not the forgotten bytes, and a renderer
 // admitted before an erasure keeps nothing executable behind (`esm.ts` states the resolver half, which
 // is unchanged).
+// THE SET SPANS THE PROCESS, not the gateway — the same reach the ESM cache it replaces always had,
+// and worth stating because the budget above it is per-gateway. A bundle admitted on the primary is
+// admitted in a pool too, since admissibility is a property of the SOURCE (does it evaluate to a
+// default function in a realm that reaches nothing) and not of who asked. What the pool's tighter
+// clock still governs is the RENDER, so the only thing this sharing can cost is a route that mounts
+// in a pool and then times out per render, instead of 404ing — a refusal either way, and never a
+// reach the pool's own ceiling would have refused.
 const admitted = new Set<string>();
 
 // Admit ONE bundle, LOUDLY. The publish door's "proven at push, not hoped at runtime" (§23.4) — the
