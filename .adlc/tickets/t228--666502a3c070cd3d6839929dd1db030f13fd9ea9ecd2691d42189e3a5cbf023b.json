@@ -1,0 +1,7 @@
+{
+  "body": "T227's arc builds its stranger file in-lesson through parseOffer, so no lesson reads\ndemos/tutorial/packets/ anymore — yet the packets ship in the site build (build-site.mjs\ncopies them), build.test.ts asserts they are emitted, and pages.yml gates their generator.\nCommitted data nobody consumes is drift waiting to be trusted.\n\nBuild: decide by reading, then do one of two things. (a) If the packets serve NO current\npurpose (check the deployed tutorial page and any external doc that links them), delete them,\ntheir build copy, their build.test.ts assertions, and the pages.yml gate in one change. (b) If\nsomething external genuinely fetches them, name that consumer in a comment beside the\ngenerator and keep the gate. The T227 lane's read says (a); verify before believing it.\n\nAcceptance criteria:\n(a) Either no packets/ references remain in the tree (grep transcript in the PR), or every\n    surviving reference names its consumer. Verify: grep -rn \"packets\" over demos/, scripts/,\n    test/, .github/.\n(b) npm run check green; the site build emits no orphaned files. Verify: the check run.\n\nMerge tier: chore/repair — self-merge on green.",
+  "category": "chore",
+  "duration": 1,
+  "id": "T228",
+  "title": "The tutorial packets are orphaned — committed data with a gate and no reader"
+}
