@@ -108,11 +108,17 @@ async function store(options: { renderTimeoutMs?: number } = {}): Promise<Gatewa
 const publish = (gw: Gateway, route: string, bundle: string): Promise<void> =>
   gw.publishRenderer({ route, schema: "Plant", consumes: ["height"], bundle });
 
-const serve = (gw: Gateway, route: string): Promise<{ status: number; body: string }> =>
+const serve = (
+  gw: Gateway,
+  route: string,
+): Promise<{ status: number; contentType: string; body: string }> =>
   gw.serveRoute(route, FERN, "full");
 
 // Publish and render in one breath, for the rails whose whole question is what the HTML says.
-async function rendered(bundle: string, gw?: Gateway): Promise<{ status: number; body: string }> {
+async function rendered(
+  bundle: string,
+  gw?: Gateway,
+): Promise<{ status: number; contentType: string; body: string }> {
   const own = gw ?? (await store());
   try {
     await publish(own, "probe", bundle);
@@ -410,7 +416,13 @@ describe("T172 — the confinement composes with the budget, and a good renderer
   it("a well-behaved renderer still renders, and the pure ambient it may use still works", async () => {
     const gw = await store();
     await publish(gw, "ok", OK);
-    expect((await serve(gw, "ok")).body).toBe("<p>height: 42</p>");
+    const ok = await serve(gw, "ok");
+    expect(ok.body).toBe("<p>height: 42</p>");
+    // The whole served answer, not just its body: a realm that changed what a good render RETURNS
+    // would be a cost this slice never advertised, and `toContain("text/html")` cannot see a charset
+    // move underneath it.
+    expect(ok.status).toBe(200);
+    expect(ok.contentType).toBe("text/html; charset=utf-8");
     // Pure computation is not authority, and confining reach must not cost a renderer its language.
     await publish(
       gw,
@@ -437,11 +449,29 @@ describe("T172 — the confinement composes with the budget, and a good renderer
     });
     const out = await pool.gateway.serveRoute("reach", FERN, "full");
     expect(out.status).toBe(500);
+    expect(out.contentType).toBe("text/plain; charset=utf-8"); // a refusal is text, and stays text
     expect(out.body).not.toContain(SECRET);
     // §24.5's accounting is untouched by §23.9's new realm: the operator still reads which pool
     // spent what. A confinement that bypassed the envelope would leave this row at zero.
     expect(gw.envelopeReports()[0]!.faulted).toBe(1);
     await pool.drop();
     await gw.close();
+  });
+
+  it("a peer that cannot confine a renderer admits none — no confinement, no execution", async () => {
+    // The browser peer has no `worker_threads`, so `scripts/browser-render-worker-stub.mjs` stands in
+    // for this module in every browser-safe bundle. It is the ONE place the rule could quietly invert:
+    // a stub answering `ok: true` would mount routes on a peer that can confine nothing, and no rail
+    // above would see it (they all drive the Node host). So the stub is asserted directly, and the
+    // assertion is on the VERDICT, which is the field that would have to flip.
+    // Imported through a computed URL because the stub is untyped plain ESM that only ever rides an
+    // esbuild bundle; a literal specifier would want a declaration file it will never have.
+    const url = new URL("../../scripts/browser-render-worker-stub.mjs", import.meta.url).href;
+    const stub = (await import(url)) as {
+      admitInWorker: () => Promise<{ ok: boolean; why?: string }>;
+    };
+    const verdict = await stub.admitInWorker();
+    expect(verdict.ok).toBe(false);
+    expect(verdict.why).toContain("confine");
   });
 });
