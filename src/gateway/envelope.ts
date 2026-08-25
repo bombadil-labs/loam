@@ -27,8 +27,14 @@
 // memory ceiling. The REACH half is no longer open: §24.5's standing flag ("a worker can still reach
 // `node:fs` or open a socket") was closed by T172, and a pool's renders now run in a confined realm with
 // no filesystem, no network and no process authority (`render-worker.ts`). The two halves compose here
-// rather than replacing one another — a pool's declared clock and memory ceiling govern its ADMISSIONS
-// as well as its renders, so a stranger's module body is billed to the pool that hosts it.
+// rather than replacing one another — a pool's declared clock and memory ceiling BOUND its ADMISSIONS
+// as well as its renders, so a stranger's module body runs against the ceiling the operator wrote down.
+//
+// BOUND, not BILLED, and the distinction is this file's own: an admission increments no counter, holds
+// no slot, and appears nowhere in `envelopeReports()`. The counters below mean RENDERS, and a module
+// body evaluated at publish or bind is not one. So an operator reads the ceiling an admission ran
+// against, and cannot read that it ran. Naming a fifth counter for it is a §24.5 report widening and
+// belongs to that section.
 //
 // What is still NOT bounded by either half: CPU inside the realm past the clock (`terminate()` is the
 // answer, and it is the timeout's), and §22 resolvers, which are not confined at all (`esm.ts`).

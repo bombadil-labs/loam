@@ -27,7 +27,12 @@ import { holdsGrant } from "./accounts.js";
 import { STORE_ENTITY } from "./genesis.js";
 import { frameAsOf } from "./asof.js";
 import { frameProbation } from "./probation.js";
-import { admitInWorker, renderInWorker, type RenderWorkerOptions } from "./render-worker.js";
+import {
+  admitInWorker,
+  renderInWorker,
+  type Admission,
+  type RenderWorkerOptions,
+} from "./render-worker.js";
 import { workerLimitsOf } from "./envelope.js";
 import { lawfulNegated, lawfulSnapshot, lensOf, type LensName } from "./registration.js";
 
@@ -422,47 +427,106 @@ export function readForeignRenderers(reactor: Reactor, operator: string): Render
 // it does for a §22 resolver: a hash of forgotten bytes is not the forgotten bytes, and a renderer
 // admitted before an erasure keeps nothing executable behind (`esm.ts` states the resolver half, which
 // is unchanged).
-// THE SET SPANS THE PROCESS, not the gateway — the same reach the ESM cache it replaces always had,
-// and worth stating because the budget above it is per-gateway. A bundle admitted on the primary is
-// admitted in a pool too, since admissibility is a property of the SOURCE (does it evaluate to a
-// default function in a realm that reaches nothing) and not of who asked. What the pool's tighter
-// clock still governs is the RENDER, so the only thing this sharing can cost is a route that mounts
-// in a pool and then times out per render, instead of 404ing — a refusal either way, and never a
-// reach the pool's own ceiling would have refused.
+// THE KEY IS THE SOURCE AND THE BUDGET, NOT THE SOURCE ALONE. Admissibility looks like a property of
+// the bytes, and it is not: a module body that finishes inside the primary's 5s clock and blows a
+// pool's declared 500ms is admissible under one bill and not the other. Keying by content address
+// alone would let a verdict earned on the primary satisfy a quarantine that declared a tighter
+// ceiling — §24.5's one undelegatable power, waved through by a cache. So the ceilings ride the key,
+// and a pool asks its own question.
+//
+// The maps span the PROCESS, which is the same reach the ESM cache they replace always had. That is
+// safe now precisely because the budget is in the key: what is shared is "these bytes, under this
+// bill", and two gateways sharing an entry agree on both halves of it.
+const keyOf = (bundle: string, budget: AdmissionBudget): string =>
+  [
+    esmAddress(bundle),
+    budget.timeoutMs ?? "",
+    budget.maxOldMb ?? "",
+    budget.maxYoungMb ?? "",
+    budget.spawnTimeoutMs ?? "",
+  ].join("|");
+
+export type AdmissionBudget = RenderWorkerOptions & { readonly timeoutMs?: number };
+
 const admitted = new Set<string>();
+// REFUSALS ARE REMEMBERED TOO, and this is a bound rather than an optimisation. `prepareRoute` runs on
+// EVERY request for a route, ahead of the anonymous fan cap and ahead of a pool's slot count — so a
+// binding that arrived past the publish door with an unadmittable body would buy one confined worker
+// and its whole admit budget per GET, at unbounded concurrency. Measured before this map existed: six
+// concurrent requests behind a fan cap of one spawned six workers and burned five CPU-seconds each.
+// Only a SETTLED verdict lands here (`Admission.settled`): a host that could not start a thread is the
+// moment, not the bundle, and caching it would darken a route until the process restarts.
+const refused = new Map<string, string>();
+// One flight per key. Two requests arriving together for the same un-admitted bundle must share a
+// worker, not race to spawn two — the memo above only helps the SECOND request if there was a first.
+const inFlight = new Map<string, Promise<Admission>>();
+
+async function attempt(bundle: string, budget: AdmissionBudget): Promise<Admission> {
+  const key = keyOf(bundle, budget);
+  if (admitted.has(key)) return { ok: true, settled: true };
+  const held = inFlight.get(key);
+  if (held !== undefined) return held;
+  const { timeoutMs, ...limits } = budget;
+  const flight = admitInWorker(bundle, timeoutMs, limits)
+    .then((verdict) => {
+      if (verdict.ok) admitted.add(key);
+      else if (verdict.settled) refused.set(key, verdict.why ?? "it did not evaluate");
+      return verdict;
+    })
+    .finally(() => inFlight.delete(key));
+  inFlight.set(key, flight);
+  return flight;
+}
 
 // Admit ONE bundle, LOUDLY. The publish door's "proven at push, not hoped at runtime" (§23.4) — the
 // reason names what the realm refused, because the reader is the operator publishing it.
-export async function admitRenderer(
-  bundle: string,
-  budget: RenderWorkerOptions & { readonly timeoutMs?: number } = {},
-): Promise<void> {
-  const address = esmAddress(bundle);
-  if (admitted.has(address)) return; // idempotent, keyed by content address exactly as the loader was
-  const { timeoutMs, ...limits } = budget;
-  const verdict = await admitInWorker(bundle, timeoutMs, limits);
+//
+// It does NOT consult the refusal memo. Publishing is an operator's deliberate act, it is rare, and an
+// operator who republishes the same bytes is entitled to a fresh attempt rather than an answer from
+// the last one. The memo exists to bound the per-REQUEST path, and only that path reads it.
+export async function admitRenderer(bundle: string, budget: AdmissionBudget = {}): Promise<void> {
+  const verdict = await attempt(bundle, budget);
   if (!verdict.ok) {
     throw new Error(`renderer: the bundle did not load — ${verdict.why ?? "it did not evaluate"}`);
   }
-  admitted.add(address);
 }
 
-// Admit a set, TOLERANTLY. Bind and prepare-route run over whatever law is already on the ground,
-// including law that arrived by federation past the publish door, so one unadmittable bundle must
-// leave one route unmounted (a uniform 404, §23.5's own discipline) rather than fail the boot.
+// Admit a set, TOLERANTLY, and SAY WHAT WAS REFUSED. Bind and prepare-route run over whatever law is
+// already on the ground, including law that arrived by federation past the publish door, so one
+// unadmittable bundle must leave one route unmounted (a uniform 404, §23.5's own discipline) rather
+// than fail the boot. The reason is RETURNED rather than swallowed: this is the path a stranger's
+// bundle actually takes, and a route that goes dark with nobody able to say why is a swallowed error
+// with extra steps (H9). The caller decides who hears it.
 export async function admitRenderers(
   bundles: ReadonlyArray<string>,
-  budget: RenderWorkerOptions & { readonly timeoutMs?: number } = {},
-): Promise<void> {
+  budget: AdmissionBudget = {},
+): Promise<Array<{ bundle: string; why: string }>> {
+  const seen = [...new Set(bundles)];
+  const held = seen.map((b) => keyOf(b, budget));
+  const out: Array<{ bundle: string; why: string }> = [];
   await Promise.all(
-    [...new Set(bundles)].map((b) => admitRenderer(b, budget).catch(() => undefined)),
+    seen.map(async (bundle, i) => {
+      const memo = refused.get(held[i]!);
+      if (memo !== undefined) {
+        out.push({ bundle, why: memo });
+        return;
+      }
+      const verdict = await attempt(bundle, budget).catch(() => ({
+        ok: false,
+        settled: false,
+        why: "the confined thread did not answer",
+      }));
+      if (!verdict.ok) out.push({ bundle, why: verdict.why ?? "it did not evaluate" });
+    }),
   );
+  return out;
 }
 
-// Has this bundle been admitted (the synchronous serve-path lookup)? An un-admitted renderer is
-// UNMOUNTED — a 404, never a 500 — which is exactly what `loadedRenderer` meant before it, and now
-// answers without holding the code.
-export const rendererAdmitted = (bundle: string): boolean => admitted.has(esmAddress(bundle));
+// Has this bundle been admitted UNDER THIS BILL (the synchronous serve-path lookup)? An un-admitted
+// renderer is UNMOUNTED — a 404, never a 500 — which is exactly what `loadedRenderer` meant before it,
+// and now answers without holding the code.
+export const rendererAdmitted = (bundle: string, budget: AdmissionBudget = {}): boolean =>
+  admitted.has(keyOf(bundle, budget));
 
 // --- the Gateway's renderer-serving behaviors (ticket T19: the bodies live beside their vocabulary) ---
 // The implementations behind `Gateway.publishRenderer` / `prepareRoute` / `serveRoute` / `writeRoute` /
@@ -783,7 +847,7 @@ export async function serveRouteImpl(
   // it on the serve path). The read-discipline + resolve above stayed on THIS thread (authority never
   // leaves it); the untrusted render runs in the confined, bounded worker (SPEC §23.9), and so did the
   // module body that got it admitted.
-  if (!rendererAdmitted(binding.bundle)) return gone;
+  if (!rendererAdmitted(binding.bundle, rendererAdmissionBudget(gw))) return gone;
   // The floor's mediated reads (SPEC §30), resolved HERE, in the gateway, under this door's own
   // discipline — the request never leaves the authority boundary. FULL DOOR ONLY: the anonymous door's
   // whole posture is that every refusal is a uniform 404 leaking nothing about what exists (§17), so a

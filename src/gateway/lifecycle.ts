@@ -790,10 +790,23 @@ export async function preloadResolversImpl(gw: Gateway): Promise<void> {
   // in the confined worker realm and never on this thread, so what this call establishes is ADMISSION —
   // which routes may mount — rather than a loaded namespace. Tolerant by construction: one bundle the
   // realm will not admit leaves one route unmounted, and never fails the bind.
-  await admitRenderers(
-    readRenderers(gw.reactor, gw.operatorAuthor).map((r) => r.bundle),
+  //
+  // AND IT SAYS WHICH ONE. A route that goes dark silently is a swallowed error (H9): the operator sees
+  // a 404 and has nothing to read that names the cause, which for a federated bundle is the difference
+  // between "the peer sent code that reaches for the filesystem" and "my store is broken". One stderr
+  // line per refused route, at bind — not per request, because the refusal memo means a request path
+  // asks once.
+  const bindings = readRenderers(gw.reactor, gw.operatorAuthor);
+  const refused = await admitRenderers(
+    bindings.map((r) => r.bundle),
     rendererAdmissionBudget(gw),
   );
+  for (const { bundle, why } of refused) {
+    const routes = bindings.filter((r) => r.bundle === bundle).map((r) => r.route);
+    process.stderr.write(
+      `loam: the renderer at ${routes.map((r) => `"${r}"`).join(", ")} is unmounted — ${why}\n`,
+    );
+  }
 }
 
 // Publish a schema and its registration as data, then bind them (the body of

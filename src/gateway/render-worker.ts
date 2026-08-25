@@ -109,11 +109,18 @@ const notHtml: RenderResult = {
   body: "the renderer did not return HTML",
 };
 
-// The platform names the realm KEEPS, beyond the language's own. Every one is authority-free by
-// inspection: it computes over values the bundle already holds and opens no file, socket, thread or
-// process. `console` is listed because the scrub would otherwise remove the binding the preamble
-// replaces. Timers are here because they cannot outlive a terminated worker, so the clock still bounds
-// them.
+// The platform names the realm KEEPS, beyond the language's own. Every one must be authority-free AND
+// SYNCHRONOUS-OR-CANCELLABLE, and the second half of that test is the one that is easy to fail: a name
+// can open no file itself and still DISPATCH WORK TO LIBUV'S SHARED THREADPOOL, which `terminate()`
+// cannot recall. Measured: `crypto.subtle.deriveBits` with a large PBKDF2 iteration count, queued
+// sixteen deep by a module body, kept running after its worker was terminated and blocked the SERVING
+// thread's own filesystem I/O for 30 seconds — one anonymous GET, past every clock, past
+// `resourceLimits`, past `maxPublicRenders`, past a pool's slot count. That is §23.9's wedge rebuilt
+// out of a name that looked pure. So `crypto` and `performance` are NOT here; a `(node) => string`
+// render needs neither, and `Math.random()` covers an id.
+//
+// `console` is listed because the scrub would otherwise remove the binding the preamble replaces.
+// Timers are here because they run on the worker's OWN event loop, which dies with the thread.
 //
 // `MessageChannel` / `MessagePort` ARE here, and the distinction from `BroadcastChannel` is the one to
 // read carefully. A BroadcastChannel is reachable BY NAME from any thread in the process: constructing
@@ -152,13 +159,13 @@ const PURE_PLATFORM: readonly string[] = [
   "Buffer",
   "atob",
   "btoa",
-  "crypto",
-  "performance",
 ];
 
-// The names the scrub must have removed. NOT the mechanism — the allowlist is — but the RECEIPT: a
-// scrub whose `delete` silently failed (a non-configurable property, a future Node that pins one) would
-// leave a realm that reports itself confined and is not. Fail closed instead, before the bundle runs.
+// A FLOOR under the receipt, not the receipt itself. The receipt is universal — every surviving global
+// must be on the allowlist — and this list adds nothing to it today. It is kept because the receipt
+// tests a set that MOVES: widen `PURE_PLATFORM` by one careless line and the universal check goes on
+// passing, while these names going missing from it would be the widening that matters. A named floor
+// turns that into a red bar instead of a quiet one.
 const MUST_BE_GONE: readonly string[] = [
   "process",
   "require",
@@ -219,11 +226,17 @@ globalThis.console = {
   assert: __noop, count: __noop,
 };
 
-// THE RECEIPT, and it covers the console too. An eval worker's bootstrap is SLOPPY-MODE CommonJS,
-// where a failed \`delete\` returns false and an assignment to a non-writable property does nothing —
-// both SILENTLY. Every step above is therefore verified rather than assumed, and a realm that did not
-// close throws here, before a single bundle byte is read (H7 at the realm boundary: this is the
-// difference between confinement and a report of confinement).
+// THE RECEIPT, and it is UNIVERSAL rather than a list. An eval worker's bootstrap is SLOPPY-MODE
+// CommonJS, where a failed \`delete\` returns false and an assignment to a non-writable property does
+// nothing — both SILENTLY. So the scrub is re-asked as a question: is anything still here that the
+// allowlist does not name? A hand-written denylist could only catch the names somebody thought of,
+// which is the same rot the allowlist exists to avoid — and it is the FUTURE non-configurable global,
+// in a Node nobody has shipped yet, that this has to catch. A realm that did not close throws before a
+// single bundle byte is read (H7 at the realm boundary: the difference between confinement and a
+// report of confinement).
+for (const __name of Object.getOwnPropertyNames(globalThis)) {
+  if (!__allowed.has(__name)) throw new Error('the renderer realm did not close: ' + __name);
+}
 for (const __name of ${JSON.stringify(MUST_BE_GONE)}) {
   if (__name in globalThis) throw new Error('the renderer realm did not close: ' + __name);
 }
@@ -242,10 +255,13 @@ __parentPort.on('message', async ({ bundle, node, admit }) => {
   } catch (e) {
     // \`why\` is read ONLY on the admission path, where the reader is the operator publishing the
     // bundle. The render path drops it: a serve refusal leaks nothing of a bundle's internals.
-    // It is BUNDLE-AUTHORED text on its way to an operator's terminal and log, so control characters
-    // go first — a refusal must not be able to repaint the screen it is printed on.
+    // It is BUNDLE-AUTHORED text on its way to an operator's terminal and log, so the characters that
+    // REPAINT go first — a refusal must not be able to read as its own opposite. C0/C1 covers ESC and
+    // BEL; the bidi and format range is the half that a control-character filter misses, and U+202E
+    // alone is enough to print a refusal backwards.
     const raw = e && e.message ? String(e.message) : 'the bundle did not evaluate';
-    const why = raw.replace(/[\\u0000-\\u001f\\u007f-\\u009f]/g, ' ').slice(0, 300);
+    const repaint = /[\\u0000-\\u001f\\u007f-\\u009f\\u200b-\\u200f\\u2028\\u2029\\u202a-\\u202e\\u2066-\\u2069\\ufeff]/g;
+    const why = raw.replace(repaint, ' ').slice(0, 300);
     __parentPort.postMessage({ kind: 'fault', why });
   }
 });
@@ -368,6 +384,12 @@ export async function renderInWorker(
 export interface Admission {
   readonly ok: boolean;
   readonly why?: string;
+  // Is this verdict a property of the BUNDLE, or of the moment? A refused import, a syntax error, a
+  // module body that overran its budget — those are the bundle, and the same bytes under the same
+  // ceiling answer the same way, so a caller may remember them. A thread the HOST could not start is
+  // the moment, and remembering it would darken a route for the life of the process over a transient
+  // fd exhaustion. Only a settled verdict may be cached; the caller cannot tell them apart from `why`.
+  readonly settled: boolean;
 }
 
 // EVALUATE a bundle's module body — the harder call class, and the one that used to run on the serving
@@ -391,17 +413,24 @@ export async function admitInWorker(
     ...(opts.maxOldMb === undefined ? {} : { maxOldMb: opts.maxOldMb }),
     ...(opts.maxYoungMb === undefined ? {} : { maxYoungMb: opts.maxYoungMb }),
   });
-  if (answer.stage === "ok") return { ok: true };
+  if (answer.stage === "ok") return { ok: true, settled: true };
   if (answer.stage === "notHtml") {
-    return { ok: false, why: "its `export default` is not a function (node) => html" };
+    return {
+      ok: false,
+      settled: true,
+      why: "its `export default` is not a function (node) => html",
+    };
   }
   if (answer.stage === "timeout") {
     return {
       ok: false,
+      settled: true,
       why: `its module body did not finish inside ${timeoutMs ?? RENDER_ADMIT_TIMEOUT_MS}ms`,
     };
   }
-  if (answer.stage === "noStart")
-    return { ok: false, why: "the host could not start a confined thread" };
-  return { ok: false, why: answer.why ?? "its module body did not evaluate" };
+  // The ONE unsettled verdict: the host, not the bundle. See `Admission.settled`.
+  if (answer.stage === "noStart") {
+    return { ok: false, settled: false, why: "the host could not start a confined thread" };
+  }
+  return { ok: false, settled: true, why: answer.why ?? "its module body did not evaluate" };
 }

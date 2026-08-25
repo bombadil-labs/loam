@@ -33,6 +33,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createServer, type Server } from "node:http";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
@@ -41,6 +42,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { loadedEsm } from "../../src/gateway/esm.js";
 import { rendererBindingClaims } from "../../src/gateway/renderers.js";
+import { ENVELOPE_ANY, envelopeClaims } from "../../src/gateway/envelope.js";
 import { RENDER_TIMEOUT_MS } from "../../src/gateway/render-worker.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 import { FERN, observed } from "../spike/garden.js";
@@ -288,6 +290,11 @@ describe("T172 — the MODULE BODY reaches nothing ambient", () => {
       "FormData",
       "Blob",
       "ReadableStream",
+      // `crypto` and `performance` are ABSENT, and they are the two that look pure. `crypto.subtle`
+      // dispatches to libuv's process-wide threadpool, which `terminate()` cannot recall — see the
+      // rail below, which measures what admitting it costs.
+      "crypto",
+      "performance",
       // must be present — pure computation a renderer may legitimately want
       "JSON",
       "Math",
@@ -297,7 +304,6 @@ describe("T172 — the MODULE BODY reaches nothing ambient", () => {
       "structuredClone",
       "setTimeout",
       "MessageChannel",
-      "crypto",
       "console",
     ];
     const out = await rendered(
@@ -306,13 +312,49 @@ describe("T172 — the MODULE BODY reaches nothing ambient", () => {
         `export default () => "<p>" + seen.join(",") + "</p>";`,
     );
     expect(out.body).toBe(
-      "<p>JSON,Math,TextEncoder,URL,Buffer,structuredClone,setTimeout,MessageChannel,crypto,console</p>",
+      "<p>JSON,Math,TextEncoder,URL,Buffer,structuredClone,setTimeout,MessageChannel,console</p>",
     );
     // `BroadcastChannel` is the one worth stating twice: it is REACHABLE BY NAME from any thread in
     // the process, so admitting it would hand a confined bundle a channel to the serving thread — and
     // it sits one letter-group away from the `MessageChannel` this realm does keep.
     expect(out.body).not.toContain("BroadcastChannel");
   });
+
+  it("a render cannot queue work onto the host's threadpool and outlive its own worker", async () => {
+    // THE ESCAPE THAT LOOKED PURE. A name can open no file itself and still hand work to libuv's
+    // process-wide threadpool, which the render clock, `resourceLimits` and `terminate()` all fail to
+    // reach — the queued work outlives the thread that queued it and blocks the SERVING thread's own
+    // filesystem I/O. Measured with `crypto` on the allowlist: one render bought 30 seconds of it.
+    //
+    // The assertion is the EFFECT, not the absence of a name: this render finishes, and the serving
+    // thread is still responsive AFTERWARDS. A rail that only checked `typeof crypto` would go green
+    // the moment some other threadpool-dispatching name joined the allowlist.
+    const probe = join(dir, "latency-probe.txt");
+    writeFileSync(probe, "x", "utf8");
+    const latency = async (): Promise<number> => {
+      const t0 = Date.now();
+      for (let i = 0; i < 8; i += 1) await readFile(probe, "utf8");
+      return Date.now() - t0;
+    };
+    const before = await latency();
+    const out = await rendered(
+      `let queued = "denied";\n` +
+        `try {\n` +
+        `  const key = await crypto.subtle.importKey("raw", new Uint8Array(8), "PBKDF2", false, ["deriveBits"]);\n` +
+        `  for (let i = 0; i < 16; i++) {\n` +
+        `    crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-512", salt: new Uint8Array(8), iterations: 8000000 }, key, 256).catch(() => {});\n` +
+        `  }\n` +
+        `  queued = "queued";\n` +
+        `} catch (e) { queued = "denied"; }\n` +
+        `export default () => "<p>" + queued + "</p>";`,
+    );
+    expect(out.body).toBe("<p>denied</p>");
+    // The serving thread's own I/O, after the render returned and its worker was terminated. The
+    // measured breach was ~1000x this baseline, so the margin is generous enough not to flake on a
+    // loaded box while still failing loudly on a real one.
+    const after = await latency();
+    expect(after).toBeLessThan(Math.max(before, 50) * 20);
+  }, 60_000);
 
   it("`console` writes nothing into the operator's log", async () => {
     // The realm keeps a `console` binding so a bundle that logs does not throw, and it is a REPLACEMENT
@@ -464,6 +506,103 @@ describe("T172 — the confinement composes with the budget, and a good renderer
     await pool.drop();
     await gw.close();
   });
+
+  it("a pool admits on ITS OWN declared ceiling, even for bytes the primary already admitted", async () => {
+    // §24.5's undelegatable power, at the admission door. Admissibility LOOKS like a property of the
+    // bytes and is not: the same module body is admissible under the primary's clock and not under a
+    // pool's tighter declared one. A cache keyed by content address alone would hand the pool a verdict
+    // the pool never asked for — the operator's one ceiling, waved through by a memo.
+    const slow =
+      `const until = Date.now() + 600; while (Date.now() < until) {}\n` +
+      `export default (n) => "<p>slow: " + n.view.height + "</p>";`;
+    const gw = await store();
+    // The primary admits it: 600ms of module body, well inside the admission clock.
+    await publish(gw, "slow", slow);
+    expect((await serve(gw, "slow")).body).toBe("<p>slow: 42</p>");
+
+    // The operator declares a 100ms ceiling for every pool, on the PARENT's ground, as data.
+    await gw.append([
+      signClaims(envelopeClaims(ENVELOPE_ANY, { renderTimeoutMs: 100 }, OP, 3000), OP_SEED),
+    ]);
+    const pool = await gw.openQuarantine();
+    expect(gw.envelopeReports()[0]!.envelope.renderTimeoutMs).toBe(100);
+    // The SAME BYTES, already admitted on the primary, must still meet the pool's own number.
+    await expect(
+      pool.gateway.publishRenderer({
+        route: "slow",
+        schema: "Plant",
+        consumes: ["height"],
+        bundle: slow,
+      }),
+    ).rejects.toThrow(/did not finish inside 100ms/);
+    // Two-sided: the pool is not simply refusing everything — an ordinary bundle publishes and serves
+    // under the very same declared ceiling.
+    await pool.gateway.publishRenderer({
+      route: "quick",
+      schema: "Plant",
+      consumes: ["height"],
+      bundle: OK,
+    });
+    // `toContain`, not `toBe`: a pool's 200 is wrapped in §24.7's probation chrome, which is a
+    // different promise and belongs to its own rails.
+    expect((await pool.gateway.serveRoute("quick", FERN, "full")).body).toContain(
+      "<p>height: 42</p>",
+    );
+    await pool.drop();
+    await gw.close();
+  }, 30_000);
+
+  it("a route the realm will not admit is refused FROM MEMORY, not re-attempted per request", async () => {
+    // `prepareRoute` runs on every request for a route, AHEAD of the anonymous fan cap and ahead of a
+    // pool's slot count. Without a memo, a binding that arrived past the publish door with an
+    // unadmittable body buys one confined worker and its whole admit budget per GET — a fan cap of one
+    // measured six concurrent workers. The observable is TIME: the first attempt pays the budget, and
+    // every attempt after it is answered without a thread.
+    //
+    // NOT ASSERTED HERE: that two SIMULTANEOUS first requests share a single worker (the in-flight
+    // map). Wall clock cannot see it — concurrent attempts finish together whether they share a thread
+    // or spawn one each — and the rail that would see it needs a thread count this process cannot ask
+    // for. The memo below is what bounds the repeated case; the map bounds the simultaneous one.
+    const gw = await store();
+    const spinning =
+      `const until = Date.now() + 60000; while (Date.now() < until) {}\n` +
+      `export default () => "<p>never</p>";`;
+    await gw.federate(
+      [
+        signClaims(
+          rendererBindingClaims(
+            {
+              route: "wedge",
+              schemaName: "Plant" as never,
+              consumes: ["height"],
+              bundle: spinning,
+            },
+            undefined,
+            OP,
+            2100,
+          ),
+          OP_SEED,
+        ),
+      ],
+      { admit: () => true },
+    );
+    const t0 = Date.now();
+    await gw.prepareRoute("wedge");
+    const first = Date.now() - t0;
+    const t1 = Date.now();
+    await gw.prepareRoute("wedge");
+    await gw.prepareRoute("wedge");
+    const repeats = Date.now() - t1;
+
+    expect((await serve(gw, "wedge")).status).toBe(404); // never mounted, either way
+    // The first attempt really did run the budget out — otherwise "the repeats were fast" would be
+    // true of a code path that never attempts anything.
+    expect(first).toBeGreaterThan(1000);
+    // Two further attempts, together, cost a small fraction of one. A per-request re-attempt would
+    // cost at least another whole budget.
+    expect(repeats).toBeLessThan(first / 4);
+    await gw.close();
+  }, 60_000);
 
   it("a peer that cannot confine a renderer admits none — no confinement, no execution", async () => {
     // The browser peer has no `worker_threads`, so `scripts/browser-render-worker-stub.mjs` stands in

@@ -9,12 +9,19 @@ export function renderInWorker() {
 
 // Admission is the OTHER half of the same boundary (T172): a renderer's module body is evaluated in the
 // confined worker realm, never on the thread that serves. This peer has no such realm, so it admits no
-// renderer — and that refusal is the rule stated exactly, not a gap: no confinement, no execution. It
-// REFUSES rather than throwing, because admission is tolerant by design — the caller leaves the route
-// unmounted (a uniform 404) rather than failing a bind the browser peer performs on every boot.
+// renderer — and that refusal is the rule stated exactly, not a gap: no confinement, no execution.
+//
+// It answers a VERDICT rather than throwing, and the two callers then part company, which is worth
+// stating because only one of them is quiet. `admitRenderers` (bind, boot, prepareRoute) is tolerant:
+// the route stays unmounted, a uniform 404, and the browser peer boots exactly as before. But
+// `admitRenderer` — the publish door — turns any refusal into a throw, so `publishRenderer` on this
+// peer now FAILS where it used to succeed and only broke later at serve time. That is deliberate: a
+// peer that cannot confine a renderer must not record one as published. `settled: false` says the
+// verdict is about this host rather than about the bundle, so no caller memoises it.
 export function admitInWorker() {
   return Promise.resolve({
     ok: false,
+    settled: false,
     why: "this peer cannot confine a renderer, so it admits none",
   });
 }
