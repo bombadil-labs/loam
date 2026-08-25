@@ -43,6 +43,7 @@ import { authorizationServerDocument } from "../../src/server/oauth.js";
 import {
   CIMD_CACHE_TTL_MS,
   CIMD_MAX_BYTES,
+  CIMD_MAX_URIS,
   CIMD_TIMEOUT_MS,
   makeCimdFetcher,
   plainText,
@@ -130,6 +131,19 @@ async function startMeta(): Promise<Meta> {
       return;
     }
     if (path === "/huge.json") return json(`{"pad":"${"x".repeat(80 * 1024)}"}`);
+    // The uri-bound fixtures: a filler uri of an exact length, and lists at the count cap's edges.
+    const padded = (length: number): string =>
+      `https://claude.example/cb?pad=${"a".repeat(length - "https://claude.example/cb?pad=".length)}`;
+    const fillers = (count: number): string[] =>
+      Array.from({ length: count }, (_, i) => `https://claude.example/cb/${i}`);
+    if (path === "/uris-32.json")
+      return json(doc({ redirect_uris: [...fillers(31), CIMD_REDIRECT] }));
+    if (path === "/uris-33.json")
+      return json(doc({ redirect_uris: [...fillers(32), CIMD_REDIRECT] }));
+    if (path === "/uri-2048.json")
+      return json(doc({ redirect_uris: [CIMD_REDIRECT, padded(2048)] }));
+    if (path === "/uri-2049.json")
+      return json(doc({ redirect_uris: [CIMD_REDIRECT, padded(2049)] }));
     if (path === "/html.json") {
       res.writeHead(200, { "content-type": "text/html" });
       res.end("<html></html>");
@@ -306,12 +320,14 @@ describe("T242 (a) — the CIMD round-trip", () => {
 
     const token = await roundTrip(base, sessionId, clientId);
 
-    // The consent page named the client by its URL — the identity a person approves.
-    // (Re-rendered here so the assertion reads the served page, not this test's memory of it.)
+    // The consent page named the client by its URL — the identity a person approves. The whole
+    // line is pinned, markup included: this is the surface a person judges a connector by.
     const { challenge } = pkce();
     const again = await authorize(base, sessionId, clientId, CIMD_REDIRECT, challenge);
     expect(again.status).toBe(200);
-    expect(await again.text()).toContain(clientId);
+    expect(await again.text()).toContain(
+      `Its identity is its own address: <code>${clientId}</code>`,
+    );
 
     // FILE LEVEL: the URL is the clientId on the client row, the grant, and the token record.
     const file = readOAuthFile(home);
@@ -562,6 +578,16 @@ describe("T242 (b) — the SSRF fences", () => {
     expect(CIMD_MAX_BYTES).toBe(64 * 1024);
     expect(CIMD_TIMEOUT_MS).toBe(5000);
     expect(CIMD_CACHE_TTL_MS).toBe(5 * 60 * 1000);
+    expect(CIMD_MAX_URIS).toBe(32);
+  });
+
+  it("the uri bounds hold at their exact edges: 32 uris and 2048 characters pass, one more of either refuses", async () => {
+    const meta = await startMeta();
+    const fetcher = makeCimdFetcher({ allowPrivateOrigins: [meta.origin] });
+    expect((await fetcher.fetch(meta.url("/uris-32.json"))).kind).toBe("ok");
+    expect((await fetcher.fetch(meta.url("/uris-33.json"))).kind).toBe("refused");
+    expect((await fetcher.fetch(meta.url("/uri-2048.json"))).kind).toBe("ok");
+    expect((await fetcher.fetch(meta.url("/uri-2049.json"))).kind).toBe("refused");
   });
 });
 
