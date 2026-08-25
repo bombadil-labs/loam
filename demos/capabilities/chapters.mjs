@@ -1646,7 +1646,7 @@ export const CHAPTERS = [
     body: [
       {
         kind: "prose",
-        text: "Pulling moved bytes; a channel moves meaning. You name a container to receive into and assign the peer a prefix, their deltas land in a nested pool, and the law they published binds under your prefix — no schema written by you, no name chosen by them. Two friends who both started from the stock shelf each get their own name on the other's store, and severing a channel takes its law with its data, because the binding was never anywhere but the pool.",
+        text: "Pulling moved bytes; a channel moves meaning. You name a container to receive into and assign the peer a prefix, their deltas land in a nested pool, and the law they published binds under your prefix — no schema written by you, no name chosen by them. Two friends who both started from the stock shelf each get their own name on the other's store, and severing a channel takes its law with its data, because the binding was never anywhere but the pool. One cost is still real and ticketed: opening a channel today asks the peer for their operator token, which reads everything — the container-scoped offer credential that replaces it is designed and queued (T230).",
       },
       {
         kind: "claims",
