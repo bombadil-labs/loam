@@ -2775,6 +2775,10 @@ async function cmdGrantMint(
       `  the grant is in ${path}; \`loam grant revoke ${clientId}\` strikes it, and the next ` +
       `request refuses`,
   );
+  // The fence re-reads standing per request, but from the SERVER's own reactor, which
+  // materialized at boot — a live server sees this grant only after a restart.
+  const staleness = servingWarning(home, path);
+  if (staleness !== undefined) io.err(`loam: ${staleness}`);
   return 0;
 }
 
@@ -3190,6 +3194,12 @@ async function cmdGrantRevoke(
             `write grant is struck in ${path}\n` +
             `  its past deltas are untouched — they keep naming their author`,
         );
+        {
+          // Same boot-materialization trap as the mint above: the strike is in the file, and a
+          // live server keeps honoring the grant it booted with until it restarts.
+          const staleness = servingWarning(home, path);
+          if (staleness !== undefined) io.err(`loam: ${staleness}`);
+        }
         return 0;
     }
   } finally {

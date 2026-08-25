@@ -1,0 +1,10 @@
+{
+  "body": "T103(a) built the honest sentence: a CLI verb that writes into a served home warns on stderr that the running server answers from boot-time memory and will not see what just landed until it restarts. Five writers carry it - register, pull, user create, pen, erase. loam grant (mint and revoke) writes ground deltas the same way and was left silent.\n\nMeasured cost, 2026-08-25: a register grant minted under a live server drew the constitutional refusal until a restart nobody knew was owed. The connector agent burned three probes triangulating a guard that was working correctly against a store that had not heard the news. The revoke direction is worse: a struck grant keeps HONORING on the live server - an operator who revoked believes standing is gone while the fence keeps admitting it.\n\nBuild: cmdGrantMint and cmdGrantRevoke print servingWarning after their write, exactly as the five siblings do. Never a refusal; the write still lands, exit 0.\n\nAcceptance criteria:\n(a) A mint beside a live-pid serving record lands AND warns; with no record, and beside a provably dead pid, the earned silences stay silent. Verify: test/cli/grant-serving-warning.test.ts (new file; the T103(a) rail is frozen and untouched).\n(b) A revoke beside a live-pid serving record warns the same way. Verify: same file.\n\nHorizon, not this ticket: grants minted through a door would bind live with no restart - that direction belongs with T230/T196 (where a credential lives).\n\nMerge tier: a report made more honest - self-merge.",
+  "category": "bug",
+  "duration": 1,
+  "id": "T243",
+  "rails": [
+    "test/cli/grant-serving-warning.test.ts"
+  ],
+  "title": "loam grant is the sixth writer, and the one the serving warning forgot"
+}
