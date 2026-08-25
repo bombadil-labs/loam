@@ -246,6 +246,20 @@ it?* Then, before reaching for infrastructure, check the cheap fixes first — t
   embodies this: it keeps an `onDisk` set that `append` consults to skip rewrites, and `purge`
   deliberately never asks it what to remove.
 
+**The dual hazard — a scan you must NOT remove.** The cure above removes redundant scans; the mirror
+hazard is removing one that was never redundant. A scan on a WRITE or a SAFETY decision may be a
+STAMP-TIME FRESHNESS read, not a recompute of something a caller already holds. If any `await` sits
+between the value's earlier read and its use, another operation can run at that yield and change the
+state — so the cached value answers *was this true THEN*, and the guard silently reads it as *is this
+safe NOW*. T233: the severed-channel guard walked `channelStatus` on every stamp, which reads exactly
+like an H8 redundant scan — the sync already read the status at poll-top. Caching that poll-top read to
+skip the walk reopened the precise resurrection the guard exists to refuse: a `drop` landing during the
+sync's `await pull()` made the cached value stale, and the guard admitted a severed channel back into
+existence. Three independent lenses flagged the scan as redundant before one traced that it was a
+freshness re-read. The scan stays; T237 makes it O(1) with an index of live-channel names (work
+COMPLETED, per above) — never a cached read carried across the await. **The tell:** the "redundant"
+value decides a safety matter, AND an `await` separates its read from its use.
+
 **Be judicious.** Durable state you did not need is another thing that goes stale and lies. Measure
 after the cheap fix before adding any.
 
