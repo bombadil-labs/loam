@@ -3,5 +3,8 @@
   "category": "bug",
   "duration": 1,
   "id": "T215",
+  "rails": [
+    "test/federation/prefix-collision.test.ts"
+  ],
   "title": "standingPrefixes splits the pool name at the first colon — the collision guard misses and phantom-refuses"
 }
