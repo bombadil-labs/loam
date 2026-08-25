@@ -643,7 +643,7 @@ export const CHAPTERS = [
           "Generating a typed client from a published reading is designed and not queued. You write your own client today.",
           "Only the REST door is versioned by path; asking GraphQL for a specific past generation is additive and queued, not silently present.",
           "A hosted, replicated storage driver is a one-file addition when a deployment needs one, and is not vendored here.",
-          "When two published definitions collide on a name, the winner is decided by a fixed rule rather than by a [[Policy]] you can configure — the one place in the system where resolution is not yours to choose. It has a ticket and no design yet (T89).",
+          "When two published definitions collide on a name, the winner is decided by law you declare — spec 47: one operator-signed declaration picks the mode (latest wins, mine outranks a peer, or serve neither and name both), it is data you can change or strike, and a store that declares nothing keeps its old loud collision. The gap this admission once named closed when law learned to resolve like data.",
         ],
       },
     ],
@@ -1646,7 +1646,7 @@ export const CHAPTERS = [
     body: [
       {
         kind: "prose",
-        text: "Pulling moved bytes; a channel moves meaning. You name a container to receive into and assign the peer a prefix, their deltas land in a nested pool, and the law they published binds under your prefix — no schema written by you, no name chosen by them. Two friends who both started from the stock shelf each get their own name on the other's store, and severing a channel takes its law with its data, because the binding was never anywhere but the pool.",
+        text: "Pulling moved bytes; a channel moves meaning. You name a container to receive into and assign the peer a prefix, their deltas land in a nested pool, and the law they published binds under your prefix — no schema written by you, no name chosen by them. Two friends who both started from the stock shelf each get their own name on the other's store, and severing a channel takes its law with its data, because the binding was never anywhere but the pool. One cost is still real and ticketed: opening a channel today asks the peer for their operator token, which reads everything — the container-scoped offer credential that replaces it is designed and queued (T230).",
       },
       {
         kind: "claims",

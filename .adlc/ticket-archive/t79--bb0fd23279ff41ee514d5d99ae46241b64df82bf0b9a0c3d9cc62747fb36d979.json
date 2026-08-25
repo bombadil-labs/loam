@@ -1,0 +1,48 @@
+{
+  "_adlcArchive": {
+    "archivedAt": "2026-08-25T06:29:26.899Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "0be7fc6b47eb8e7c3ad378b384b7ac1ad9f41da2e8c7616b9f87f8081f8e8f36",
+    "ticketHash": "c4885baa4ae1e2e93c54c20f62463f5bf6ae7bda8cf569296c120e4f4c94945e",
+    "version": 1
+  },
+  "body": "DESIGN-STAGE (Myk's merge, P6 — it widens what a renderer IS). ORIGIN (Myk, 2026-07-24, goodnight message): support renderers rendered EITHER by the React router/app Loam ships OR by Claude Interactive Artifacts, with support for pass-through MCPs. This is the deployment half of the demo vision ('ingest these deltas, run your own artifact, provisioned to your account, serve my app that way' — the $10M conversation): a Claude artifact is a valid, zero-infra deployment surface for a Loam app.\n\nTHE SHAPE TO DESIGN (recommendations to carry into the working spec):\n(1) A renderer binding gains a TARGET declaration — 'host' (today's worker-rendered HTML, the default; nothing changes for existing bindings) vs 'artifact' (a self-contained page intended to run inside Claude's artifact sandbox). Shape-distinguishable vocabulary per the §20 corollary; absent target reads as 'host', so no migration.\n(2) The DATA PATH is the door, not the bundle: an artifact cannot import the store, so it speaks to a Loam server over the network — and the artifact sandbox's CSP blocks direct fetch, which is exactly what pass-through MCP solves: the viewer's claude.ai MCP connector calls the store's MCP door (already served at /:mount/mcp) with the VIEWER'S credentials. So 'provisioned to your account' is literal: each viewer's artifact talks to their own store (or a shared one) through their own connector — identity rides the connector, never the bundle.\n(3) WHAT LOAM EMITS for an artifact target: a build/pack door that renders the artifact page — bundle + the mount/schema coordinates it should speak to — as a single self-contained HTML the operator (or Claude) publishes as the artifact. The renderer bundle stays deltas; the artifact page is an EMISSION from them (content-addressed like any §23.10 build product), so the §23.6 law ('an app never outlives its source') keeps holding: withdraw the binding and the pack door stops emitting.\n(4) CAPABILITY HONESTY: an artifact-target renderer runs OUTSIDE §23.9's worker confinement — its confinement is Claude's sandbox, and its authority is the viewer's MCP grant. The working spec must state this trust swap plainly: host-target = operator's sandbox + operator's doors; artifact-target = Anthropic's sandbox + viewer's credentials. Neither is weaker; they are different trust roots, and the binding's target declaration is what makes the difference legible.\n(5) FEDERATION FIT: the artifact story composes with T77's bridges and §28 — 'interacting through Claude' is interacting via federation channels (Myk, 2026-07-23): the artifact's writes land wherever the viewer's MCP door points, subject to that store's admission.\n\nDESIGN QUESTIONS for P1: does the pack door live on the gateway (a §23 sibling of serveRoute) or in the CLI (a build step)? Recommendation: gateway door — it must respect withdrawal live. Does an artifact-target binding still declare `consumes` (yes — the pack embeds the field coordinates so the artifact queries only what the binding promised)? What is the smallest MCP tool-surface an artifact needs (query + mutate + subscribe-poll)? — enumerate against the existing /:mount/mcp handler rather than inventing.\n\nEvidence: the 2026-07-23 investor-demo conversation (claude artifacts as deployment surface, window.claude.mcp capability); the 2026-07-24 goodnight message; src/server/http.ts handleMcp (the door that already exists).\n\nPREREQUISITE SATISFIED (2026-07-25): T78 (dynamic container mounts) landed as #209 and is recorded as SPEC §31 — a module's app is reachable at its own mount on the RUNNING server, which is exactly what this ticket's edge was waiting for. The edge itself is dropped rather than kept, for a reason worth stating: an inbound edge to a realized ticket blocks `adlc ticket archive`, and the archive is what keeps that ticket's rails inside the frozen set the CI backstop reads (T69) — so holding a satisfied edge un-freezes the rails at the exact moment they start protecting landed behavior. The design dependency is unchanged and still true: an artifact-target renderer addresses a mounted app over the network door, and §31 is where that mount now comes from.\n\nOVERTAKEN (stale sweep, 2026-08-25): Landed as PR #205 (\"T79: The dual target is a host, not a renderer — Claude Artifacts as a zero-infra deployment surface\") plus follow-ups #251 (loam.artifact declaration + packArtifact door) and #268 (assessment door + CLI relay): src/gateway/artifact.ts, artifact-page.ts, artifact-scan.ts, artifact-realm.ts and all eleven declared rails exist and are implemented on main. Residue: the shard still reads status \"todo\", SPEC.md still reserves §30 for it (lines 90-92), and the ticket is unarchived — the spec/30 file + archive ceremony are owed at a landing pass, but the capability itself shipped.",
+  "edges": [],
+  "id": "T79",
+  "phase": "P1",
+  "rails": [
+    "test/gateway/artifact-pack.test.ts",
+    "test/gateway/artifact-capability-text.test.ts",
+    "test/gateway/artifact-realm.test.ts",
+    "test/gateway/artifact-scan.test.ts",
+    "test/gateway/render-gesture.test.ts",
+    "test/gateway/name-derivation.test.ts",
+    "test/server/artifact-door.test.ts",
+    "test/server/artifact-write.test.ts",
+    "test/site/artifact-shell.test.ts",
+    "test/site/eval-page.test.ts",
+    "test/cli/artifact.test.ts"
+  ],
+  "scope": [
+    "package-lock.json",
+    "package.json",
+    "scripts/browser-render-worker-stub.mjs",
+    "spec/23-renderers.md",
+    "src/cli/cli.ts",
+    "src/gateway/accounts.ts",
+    "src/gateway/artifact-page.ts",
+    "src/gateway/artifact-realm.ts",
+    "src/gateway/artifact-scan.ts",
+    "src/gateway/artifact.ts",
+    "src/gateway/gateway.ts",
+    "src/gateway/gql.ts",
+    "src/gateway/ingest.ts",
+    "src/gateway/renderers.ts",
+    "src/index.ts",
+    "src/server/http.ts",
+    "test/site/eval-page.ts"
+  ],
+  "status": "todo",
+  "title": "Renderer dual-target: Loam's shipped React host OR a Claude Interactive Artifact, with pass-through MCP"
+}

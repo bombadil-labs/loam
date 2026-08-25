@@ -1,0 +1,24 @@
+{
+  "_adlcArchive": {
+    "archivedAt": "2026-08-25T06:29:15.833Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "a94f87bf3b09af0df8ed07e71b2011286ac6b4a262e2c2bea2f2272e3facfe1d",
+    "ticketHash": "ae366ae2e5a139d5bd61c1240c017ccfce6aeebf0844a5c70e013630f1ff6263",
+    "version": 1
+  },
+  "body": "FOUND BY THE 2026-08-05 AUDIT (fresh-operator journey + report-honesty lens, each CONFIRMED with the exact command). The overall newcomer experience measured GOOD — errors mostly name their cure; these are the exceptions. One ticket, six itemized criteria; each is small and independent.\n\n1. A malformed Schema Policy refuses with rhizomatic's bare parse error: `expected object for order` — no prop path, no expected shape. README shows Policy kinds `pick / all / merge` but only ever specifies pick's JSON. Wrap parse failures at the register door with the prop path (schema.props.<name>) and the expected shape; document each Policy kind's JSON in README. (src/gateway/registration.ts)\n2. `loam store --home ./nowhere` prints a raw `ENOENT ... nowhere/config.json`. Catch it; refuse naming `loam init`. (src/cli/cli.ts)\n3. `loam artifact --help`: long option names overrun the padding column and concatenate with their descriptions (`--acknowledge-writableyes, I know...`); and --connector is required but listed as ordinary. Widen/wrap the column; mark required. (src/cli/cli.ts)\n4. After a pull lands a peer's definitions, the empty-surface refusal (`nothing is registered: the gateway has no queryable surface yet`) stops one sentence short: when the store HOLDS definitions that do not bind (foreign law inert), say so and name `loam register` / POST /:mount/register as the cure. (src/gateway/gql.ts)\n5. The admin federate result page counts an IN-PASTE duplicate as \"already held\" — held by the store is not the same fact as repeated in your paste; the report is wrong about which. Count them separately or name the union honestly. (src/server/admin.ts — mind the frozen admin rails; new assertions go in a new file)\n6. README names `.adlc/tickets.json` twice (the organization section and the backlog note); the store is the sharded `.adlc/tickets/` directory. Fix both. (README.md)\n\nRAILS: one new test file per touched surface, asserting the improved message VERBATIM enough to go red on regression; README claims are doc edits with no rail beyond review.\n\nWHO MERGES: ordinary bar — every item makes a report more honest or a doc more true; none widens a door.\n\nOVERTAKEN (stale sweep, 2026-08-25): All six items landed on main (0ea62b6 item 1, 9dfab5f items 2+3, cf255da items 4-6, plus P5 rounds); verified in code: registration.ts:530-560 wraps the bare parse error with schema.props.<name> and the expected shape, admin-federation.ts:405-429 counts in-paste repeats separately from already-held, and README now names the sharded .adlc/tickets/ store. Archive candidate.",
+  "edges": [],
+  "id": "T150",
+  "phase": "P0",
+  "rails": [],
+  "scope": [
+    "src/gateway/registration.ts",
+    "src/cli/cli.ts",
+    "src/gateway/gql.ts",
+    "src/server/admin.ts",
+    "README.md"
+  ],
+  "status": "todo",
+  "title": "Newcomer paper-cuts, itemized: six places the polish slips on the documented path"
+}

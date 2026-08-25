@@ -1,0 +1,25 @@
+{
+  "_adlcArchive": {
+    "archivedAt": "2026-08-25T06:29:07.676Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "2dbadc3832e277d7d2999542e8c4349a5b34a242e2055e1b7936d0551a39dfc3",
+    "ticketHash": "e5262c27dfc83c9d05ce424e4a6d4259ca2d4a79b346e7947902aabaac6cc0e6",
+    "version": 1
+  },
+  "body": "FOUND BY THE OPERATOR REVIEW, 2026-07-26 (the two-store postcard/telegram run). Write-enabled renderers (§23.3) need the pen's SEED provisioned at boot — `GatewayOptions.pens: Record<name, seed>` — and the CLI exposes no way to supply it: no flag, no `config.json` field, no env var. So a pure-CLI operator can publish a write-enabled renderer whose form answers 403 \"this renderer's pen is not provisioned\" FOREVER, and the only cure is abandoning `loam serve` for an embedding script (which is exactly what the review had to do). The demo path README/§23 sells is CLI-servable right up to the one feature that makes a page an app.\n\nDESIGN QUESTIONS FOR P1: where does a pen seed live for a CLI operator — a `pens` map in `config.json` (a second secret in the home beside `operator.seed`, same 0600 discipline), per-pen seed files (`pens/<name>.seed`), or env (`LOAM_PEN_<NAME>`)? Files match the operator.seed precedent and survive restarts; recommend that, with config.json carrying only the NAMES. Also: `loam init --pen <name>` to mint one, and `loam store` should LIST provisioned-vs-ground-granted pens so the two-sided requirement (provisioned AND granted) is inspectable — the review burned twenty minutes on a 403 that a status line would have named.\n\nTWO ADJACENT PAPER CUTS to fix in the same pass, both found the same hour: (a) the renderer binding's `pen` field takes a provisioning NAME while `grantClaims` takes the pen's AUTHOR string — nothing validates at publish time that the name resolves, so a binding naming an unprovisioned pen is accepted silently and fails only at the first form POST; `parseRendererInput` could at least warn through the same channel that pack-time refusals use. (b) DOCS: a peer that rosters a store should roster its PENS too — the review's first pull silently dropped the pen-authored facts until the roster named the pen author. One sentence in README's federation section (\"a store's pens are part of its voice\") saves the next operator the same puzzle.\n\nRAILS when built: a CLI-served store with a pen provisioned the new way accepts a form POST end-to-end (the review's exact loop, as a test); `loam store` output naming both pen states; the publish-time warning. Self-merge bar: this RESTORES a stated §23.3 behavior for CLI operators — repair, not promise-change — but the config surface is new, so flag the shape in the PR and let Myk glance.\n\nOVERTAKEN (stale sweep, 2026-08-25): The work landed and earned its own spec section: spec/45-pens.md (§45 row in SPEC.md, landed via T171's #413 with the strike report from #406) whose Provenance footer names exactly this ticket's scope — penSeedPath/readPenSeeds in src/cli/config.ts (header cites T102), `loam pen create` (cmdPen in src/cli/cli.ts:306/2102+), the serve boot path naming provisioned pens (cli.ts:777), the two-door 403 in src/gateway/renderers.ts:823, and the frozen rail test/cli/pen.test.ts. The shard's in-progress status is stale; archive it.",
+  "edges": [],
+  "id": "T102",
+  "phase": "P4",
+  "rails": [
+    "test/cli/pen.test.ts"
+  ],
+  "scope": [
+    "src/cli/cli.ts",
+    "src/cli/config.ts",
+    "src/server/http.ts",
+    "test/cli/"
+  ],
+  "status": "in-progress",
+  "title": "`loam serve` cannot provision a pen — §23.3 form writes are unreachable for a CLI operator"
+}
