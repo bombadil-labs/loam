@@ -87,6 +87,26 @@ describe("the pin — §50's editorial content is protocol", () => {
     }
   });
 
+  // `alg: 1` is protocol too: it travels in the published definition deltas, so a shelf that
+  // shipped a different alg would mint different definitions on every store that upgraded.
+  it("every entry publishes alg 1, on the hyperschema and the schema alike", () => {
+    for (const entry of STOCK_SCHEMAS) {
+      const parsed = parseRegistrationInput(entry.registration);
+      expect(parsed.hyperschema.alg, `${entry.name} hyperschema.alg`).toBe(1);
+      expect(parsed.schema.alg, `${entry.name} schema.alg`).toBe(1);
+    }
+  });
+
+  // The shallow narrowing's exact BYTES are protocol: `{ exact: "name" }` and `{ inSet: ["name"] }`
+  // narrow identically, but they are different bytes — a different body hash, which is the
+  // convergence token two stranger stores compare. The choice is pinned so it cannot drift.
+  it("shallow-person narrows with a single exact context, in those bytes", () => {
+    const entry = STOCK_SCHEMAS.find((e) => e.name === "shallow-person")!;
+    const body = entry.registration["hyperschema"] as { body: Record<string, unknown> };
+    const select = (body.body["in"] as { pred: { hasPointer: { context: unknown } } }).pred;
+    expect(select.hasPointer.context).toEqual({ exact: "name" });
+  });
+
   // The frozen T85 per-entry invariants, restated over the GROWN shelf: T85's own file loops
   // every entry too, but a defect here should name this ticket's contract, and this file is the
   // one a §50 reviewer reads. Non-empty props and writable is also what admits a shallow entry

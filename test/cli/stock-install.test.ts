@@ -66,7 +66,9 @@ describe("loam register --stock installs the closure", () => {
     expect(printed.indexOf("also installed shallow-person")).toBeLessThan(
       printed.search(/registered\s+Org/i),
     );
-    // No divergence and no bind trouble on a fresh home.
+    // No divergence and no bind trouble on a fresh home — and no evolve report either: nothing
+    // was bound before this install, so "evolves it" here would be a false report (H7's shape).
+    expect(printed).not.toMatch(/evolves it/);
     expect(err.join("\n")).not.toMatch(/not stock|does not bind/);
 
     // DELTA LEVEL: reopened cold, both lenses bind for this home's operator.

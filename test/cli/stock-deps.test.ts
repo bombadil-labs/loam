@@ -80,6 +80,19 @@ describe("stock dependencies are derived from the bytes", () => {
     }
   });
 
+  // The kebab rule on names today's shelf does not exercise: digits stay attached to their word.
+  // Pinned because the rule is PROTOCOL — a future entry must map the same way on every store.
+  it("cliNameOf keeps digits with their word", () => {
+    expect(cliNameOf("Sha256Sum")).toBe("sha256-sum");
+    expect(cliNameOf("ShallowPerson")).toBe("shallow-person");
+  });
+
+  it("entryLensName refuses a shelf entry that carries no lens name at all", () => {
+    expect(() =>
+      entryLensName({ name: "broken", summary: "", registration: {} }),
+    ).toThrow(/no lens name/);
+  });
+
   // The walk sees the expand's BOTH names — the child program (`schema`) and the child reading
   // (`reading`). A walk that collected only one would still pass a shelf where the two coincide,
   // so this asserts against a body where they are made to differ.
