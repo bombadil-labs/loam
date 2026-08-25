@@ -245,7 +245,15 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
       htmlOut(res, 200, pages.createOfferPage(session.user, session.formToken));
       return;
     }
-    htmlOut(res, 200, pages.dashboardPage(gw, session.user, table, reach, session.formToken));
+    // The orphaned-channels block is store-wide, so it asks for the OPERATOR role — the same read the
+    // register door makes, from the GROUND where roles live (a session carries a name, never a
+    // privilege). A non-operator sees nothing there: the orphans are outside every subtree (T218).
+    const isOperator = rolesOf(gw.reactor, gw.operatorAuthor, session.user).has("operator");
+    htmlOut(
+      res,
+      200,
+      pages.dashboardPage(gw, session.user, table, reach, session.formToken, isOperator),
+    );
   };
 
   const getContainer = (req: IncomingMessage, res: ServerResponse): void => {

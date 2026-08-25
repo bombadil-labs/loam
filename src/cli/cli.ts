@@ -1197,6 +1197,10 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
   try {
     if (verb === "list") {
       const rows = gateway.channelStatus();
+      // The container table, read ONCE for the whole listing (H8): a channel whose `into` no longer
+      // resolves here is ORPHANED — the receiving container was struck, so its pool sits outside
+      // every subtree and no page shows it, yet it still receives (T218).
+      const containers = gateway.containers().containers;
       // Read ONCE for the whole listing. `channelApps` walks the ground to find the channels, so
       // asking it per row would make a listing quadratic in the store (H8).
       const appsByChannel = new Map<string, ReturnType<typeof gateway.channelApps>>();
@@ -1331,10 +1335,20 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
               `\n  lens "${lens}" — its computed fields REFUSE: the peer's resolver code is not run here\n` +
               `    to run it: \`loam federate bless-app --channel ${r.name} --resolvers "${lens}"\``,
           );
+        // ORPHANED — the receiving container is gone. A resumed sync keeps writing this peer's bytes
+        // to a pool nothing reads, so the marker names the two verbs that release it: drop forgets
+        // the pool whole, `set --receiving false` freezes the pull. Read from the same table every
+        // row consults, so it costs no extra walk.
+        const orphaned = !containers.has(r.into)
+          ? `\n  orphaned — its receiving container "${r.into}" is gone: no subtree reaches this ` +
+            `pool and no page shows it, yet it still receives. Release it: \`loam federate drop ` +
+            `--channel ${r.name} --yes\`, or freeze the pull with \`loam federate set --channel ` +
+            `${r.name} --receiving false\``
+          : "";
         io.out(
           `${r.name}\n  into ${r.into}, serving the peer's law under "${r.prefix}:"\n` +
             `  ${r.receiving ? "receiving" : "FROZEN"}, ${r.blessing ? "blessing" : "NOT blessing"}\n` +
-            `  ${when}${trouble}${withheld.join("")}${apps.join("")}`,
+            `  ${when}${trouble}${orphaned}${withheld.join("")}${apps.join("")}`,
         );
       }
       return 0;
