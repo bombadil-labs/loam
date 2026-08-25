@@ -202,4 +202,61 @@ describe("T216 (c) — the slate receipt's citations name the same tier set as t
 
     await gw.close();
   });
+
+  it("a pool AND a wall together: the enumeration spans the pool but still omits the wall", async () => {
+    // The combined shape no single case above pins: `citationTiers` = [primary, pool:1] WHILE `tiers` =
+    // [primary, pool:1, wall]. Case (c) proves agreement with a pool and no wall (2 == 2); the wall case
+    // proves the strict subset with a wall and no pool (1 < 2, primary vs primary+wall). Only here does a
+    // walkable POOL sit INSIDE the enumeration while a wall sits OUTSIDE it at the same time — the manifest
+    // must span the pool AND confess-but-not-walk the wall in one receipt.
+    const gw = await bootSlateStore();
+    const member = observed(FERN, "height", 30, 1000, OP_SEED);
+    const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
+    await gw.append([member, bystander]);
+
+    const pool = await gw.openQuarantine({ backend: new MemoryBackend() });
+    const stamp = arrivalStamp(member.id, 2000);
+    await pool.gateway.append([stamp]);
+
+    const stood = await standSlate(gw, { members: [member], closes: ["egress"] });
+    const report = await gw.cut(stood.container, { now: BEFORE_DEADLINE });
+
+    // A separate, never-attached container declared AFTER the cut — the wall the re-issue confesses.
+    await gw.append([
+      declareContainer(
+        { container: "container:cold", trust: "curated", posture: "separate" },
+        60_000,
+      ),
+    ]);
+    const receipt = await gw.receipt(report.graveyard, { now: BEFORE_DEADLINE + 1 });
+    const row = receipt.members.find((m) => m.member === member.id)!;
+
+    // The verdict names all three tiers; the wall is `unproven` (H9, never `false`).
+    expect(row.tiers.find((v) => v.tier === "primary")!.holds).toBe(false);
+    expect(row.tiers.find((v) => v.tier === "pool:1")!.holds).toBe(false);
+    expect(row.tiers.find((v) => v.tier === "container:cold")!.holds).toBe("unproven");
+
+    // The enumeration spans the walkable set — primary AND the pool — but never the wall.
+    expect([...row.citationTiers].map((t) => t.tier).sort()).toEqual(["pool:1", "primary"]);
+    expect(row.citationTiers.some((t) => t.tier === "container:cold")).toBe(false);
+
+    // Delta + report level: the surviving stamp is in the flat list and attributed to the pool.
+    expect(row.citations).toContain(stamp.id);
+    expect(row.citationTiers.find((t) => t.tier === "pool:1")!.citations).toContain(stamp.id);
+
+    // Strict subset by tier name: [primary, pool:1] sits inside [primary, pool:1, wall].
+    const verdictTiers = new Set(row.tiers.map((v) => v.tier));
+    expect(row.citationTiers.every((t) => verdictTiers.has(t.tier))).toBe(true);
+    expect(row.citationTiers.length).toBe(2);
+    expect(row.tiers.length).toBe(3);
+
+    // Two-sided: the bystander survived both walkable tiers and is enumerated on neither.
+    expect(await gw.backend.holds(bystander.id)).toBe(true);
+    expect(await pool.gateway.backend.holds(bystander.id)).toBe(true);
+    expect(row.citations).not.toContain(bystander.id);
+    expect(row.citationTiers.every((t) => !t.citations.includes(bystander.id))).toBe(true);
+
+    await pool.drop();
+    await gw.close();
+  });
 });
