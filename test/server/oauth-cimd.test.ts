@@ -799,6 +799,8 @@ describe("T242 (e) — untrusted display text", () => {
   it("plainText strips what a terminal or a bidi reader would obey, and nothing else", () => {
     expect(plainText(HOSTILE_NAME)).toBe(HOSTILE_SCRUBBED);
     expect(plainText("Ordinary Name 42 — ünïcode")).toBe("Ordinary Name 42 — ünïcode");
+    // The Unicode line/paragraph separators — a terminal breaks a row on them, exactly as on LF.
+    expect(plainText("a\u2028b\u2029c")).toBe("abc");
     expect(plainText("\u202E\u0000\u009B")).toBe("");
   });
 });
