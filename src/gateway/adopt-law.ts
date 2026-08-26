@@ -1454,6 +1454,10 @@ async function publish(
       ex.mutations,
       ex.writable,
       resolvers,
+      // Reference declarations do not ride a blessing: the manifest's schema exports carry no
+      // `refs`, so an adopted lens serves without derived edge mutations (§51) until the operator
+      // republishes it with a declaration of their own.
+      undefined,
       { clock, negates },
     );
     if (!outcome.bound) {

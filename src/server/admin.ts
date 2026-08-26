@@ -1047,6 +1047,7 @@ this lens does not gather; the lens may read ground this container does not hold
         input.mutations,
         input.writable,
         input.resolvers,
+        input.refs,
       );
     } catch (err) {
       onFault(

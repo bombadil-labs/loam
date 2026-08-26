@@ -33,7 +33,13 @@ import {
 import type { Primitive, Policy } from "@bombadil/rhizomatic";
 import { isWithheldResolver } from "./adopt-law.js";
 import { bytesEnvelope } from "./bytes.js";
-import { lensOf, edgeRoles, type ClaimTemplates, type ResolverOutputType } from "./registration.js";
+import {
+  lensOf,
+  edgeRoles,
+  referenceProps,
+  type ClaimTemplates,
+  type ResolverOutputType,
+} from "./registration.js";
 import type {
   ClaimPointerSpec,
   PatchNode,
@@ -449,10 +455,18 @@ export function buildGqlSchema(
     // Only WRITABLE props are offered as per-prop mutation args (SPEC §14): a read-only field is
     // simply absent from the write surface. Immutable-by-default (§21): absent `writable` → NO prop
     // is writable, so a registration that names none offers a bare mutate field (entity only).
+    // A REFERENCE prop (SPEC §51) never takes a primitive argument, whatever `writable` says —
+    // a prop is a reference or a primitive, never both; keeping the argument would regenerate the
+    // string-fossil path the derived link mutations exist to close. Skipping a ref naming a prop
+    // the schema lacks is deliberate: publish refuses that loudly, and a stray on replayed ground
+    // must not unbind the lens.
     const writable = new Set(def.writable ?? []);
+    const refSpecs = referenceProps(def.hyperschema.body, def.refs);
+    const references = [...def.schema.props.keys()].filter((prop) => refSpecs.has(prop));
     const propArgs: Record<string, { type: typeof PrimitiveValue }> = {};
     for (const [prop] of def.schema.props) {
-      if (writable.has(prop)) propArgs[legal(prop)] = { type: PrimitiveValue };
+      if (writable.has(prop) && !refSpecs.has(prop))
+        propArgs[legal(prop)] = { type: PrimitiveValue };
     }
     // The mutation namespace is shared between per-prop fields and TEMPLATE fields of every
     // schema — check it explicitly (queryFields' check does not cover an earlier schema's
@@ -465,8 +479,12 @@ export function buildGqlSchema(
     // An unopened prop has no argument at all, so GraphQL refuses it with a bare "Unknown
     // argument" — true, and no help to a reader who cannot see WHY the field is missing. The
     // description is the only place left to hand them the thread: it names the knob (`writable`)
-    // and the props this registration left shut.
-    const shut = [...def.schema.props.keys()].filter((prop) => !writable.has(prop));
+    // and the props this registration left shut — and, separately, the REFERENCE props, which are
+    // not shut at all: each writes through its own link/unlink mutation pair (§51), or is typed a
+    // reference with no single canonical role to author (a prefix/inSet family).
+    const shut = [...def.schema.props.keys()].filter(
+      (prop) => !writable.has(prop) && !refSpecs.has(prop),
+    );
     mutationFields[fieldName] = {
       type: new GraphQLNonNull(viewType),
       description:
@@ -475,7 +493,11 @@ export function buildGqlSchema(
         (shut.length === 0
           ? "" // nothing is shut: no argument is missing, so there is nothing to explain
           : ` Read-only here, absent from the registration's \`writable\` list and so offered as ` +
-            `no argument (immutable-by-default, §21): ${shut.join(", ")}.`),
+            `no argument (immutable-by-default, §21): ${shut.join(", ")}.`) +
+        (references.length === 0
+          ? ""
+          : ` Reference props (§51), never a primitive argument — write each through its own ` +
+            `link/unlink mutation pair where one is served: ${references.join(", ")}.`),
       args: { ...entityArg, ...propArgs },
       resolve: (_src, args: Record<string, unknown>, ctx: unknown) => {
         const actor = (ctx as { actor?: string } | undefined)?.actor;
@@ -624,6 +646,70 @@ export function buildGqlSchema(
             args["entity"] as string,
             field,
             (args["targets"] as string[] | undefined) ?? undefined,
+            actor,
+          );
+        },
+      };
+    }
+
+    // Lens-derived edge mutations (SPEC §51): for each declared reference prop with a single
+    // canonical role, the adjoint of the read program — `link<n>_<P>` asserts the symmetric
+    // two-pointer edge delta the lens's `expand` follows, `unlink<n>_<P>` retracts the caller's
+    // own. Typed ID! on both args, so a cold introspecting client is taught the truth instead of
+    // the string-fossil path. A prefix/inSet family (`links: false`) types the prop as a
+    // reference (its primitive argument is already gone, above) and mints nothing here.
+    for (const [prop, ref] of refSpecs) {
+      if (!ref.links || !def.schema.props.has(prop)) continue;
+      const edgeArgs = {
+        entity: { type: new GraphQLNonNull(GraphQLID) },
+        target: { type: new GraphQLNonNull(GraphQLID) },
+      };
+      const linkRefField = `link${fieldName}_${legal(prop)}`;
+      if (Object.hasOwn(mutationFields, linkRefField)) {
+        throw new Error(
+          `schema ${lensOf(def)}: its mutation field "${linkRefField}" collides with an existing mutation`,
+        );
+      }
+      mutationFields[linkRefField] = {
+        type: new GraphQLNonNull(viewType),
+        description:
+          `Link \`target\` into ${lensOf(def)}.${prop}: one signed delta carrying the ` +
+          `"${ref.role}" edge role, resolved into the target's nested view` +
+          (ref.reciprocal === undefined
+            ? ""
+            : ` and folding into the target's own "${ref.reciprocal.context}"`) +
+          `. Returns the re-resolved view.`,
+        args: edgeArgs,
+        resolve: (_src, args: Record<string, unknown>, ctx: unknown) => {
+          const actor = (ctx as { actor?: string } | undefined)?.actor;
+          return hooks.linkRef(
+            lensOf(def),
+            args["entity"] as string,
+            prop,
+            args["target"] as string,
+            actor,
+          );
+        },
+      };
+      const unlinkRefField = `unlink${fieldName}_${legal(prop)}`;
+      if (Object.hasOwn(mutationFields, unlinkRefField)) {
+        throw new Error(
+          `schema ${lensOf(def)}: its mutation field "${unlinkRefField}" collides with an existing mutation`,
+        );
+      }
+      mutationFields[unlinkRefField] = {
+        type: new GraphQLNonNull(viewType),
+        description:
+          `Retract YOUR OWN "${ref.role}" edge(s) at \`target\` from ${lensOf(def)}.${prop} — ` +
+          `history survives, another author's edge stands. Returns the re-resolved view.`,
+        args: edgeArgs,
+        resolve: (_src, args: Record<string, unknown>, ctx: unknown) => {
+          const actor = (ctx as { actor?: string } | undefined)?.actor;
+          return hooks.unlinkRef(
+            lensOf(def),
+            args["entity"] as string,
+            prop,
+            args["target"] as string,
             actor,
           );
         },

@@ -1722,4 +1722,58 @@ export const CHAPTERS = [
       },
     ],
   },
+  {
+    n: 18,
+    slug: "the-adjoint-pen",
+    title: "The adjoint pen",
+    thesis:
+      "The read program already describes the deltas it consumes, so the write side of a " +
+      "reference is generated from it — one declaration, both directions, and the introspected " +
+      "surface teaches the truth instead of the string-fossil path.",
+    covers: ["spec/51-lens-derived-edges.md"],
+    body: [
+      {
+        kind: "prose",
+        text:
+          "A cold MCP client reads nothing but the introspected surface. Before this chapter it " +
+          "advertised PrimitiveValue for every writable property, and the first client to write a " +
+          "reference minted an inert string where an edge belonged. Now a registration declares " +
+          "its reference properties, the generator mints typed link and unlink mutations as the " +
+          "adjoint of the lens, and the primitive argument that taught the fossil path is gone.",
+      },
+      {
+        kind: "claims",
+        claims: [
+          {
+            says:
+              "A registration may declare reference properties, under an ordinary scoped register " +
+              "grant, and the surface then serves link and unlink mutations typed ID! while the " +
+              "reference property offers no primitive argument at all.",
+            spec: "spec/51-lens-derived-edges.md",
+            proof: "test/gateway/edge-mutations.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "A link mints one symmetric two-pointer delta — the edge role at the target under " +
+              "the reciprocal context, the reverse role at the entity under the property's own " +
+              "context — and the entity re-resolves with the target folded in.",
+            spec: "spec/51-lens-derived-edges.md",
+            proof: "test/gateway/edge-mutations.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "Unlink retracts only the caller's own link claims and history survives — the " +
+              "original delta, the retraction, and a second author's link to the same pair all " +
+              "remain; an undeclared reciprocal still generates the mutations and warns loudly at " +
+              "register time.",
+            spec: "spec/51-lens-derived-edges.md",
+            proof: "test/gateway/edge-mutations.test.ts",
+            door: null,
+          },
+        ],
+      },
+    ],
+  },
 ];
