@@ -49,12 +49,13 @@ const PIN: Record<string, Pin> = {
     },
   },
   person: {
-    // `follows` is still primitive-writable — phase A honesty (T246): the frozen depth rail owns
-    // its fossil path until the phase B ceremony retrofits it.
+    // `follows` is a declared reference with NO expand (T246 phase B): the reading stays flat by
+    // design, which keeps the depth rail's `["person:bob"]` assertion true. No edge row here —
+    // edges pin expand assignments, and this reference deliberately has none.
     props: ["name", "bio", "email", "follows"],
     edges: {},
-    writable: ["name", "bio", "email", "follows"],
-    refs: {},
+    writable: ["name", "bio", "email"],
+    refs: { follows: { role: "follows", reciprocal: { role: "followedBy", context: "followers" } } },
   },
   post: {
     props: ["title", "body", "publishedAt", "tags"],

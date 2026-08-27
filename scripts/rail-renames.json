@@ -94,31 +94,6 @@
       "authorized": "Myk, 2026-08-20, in chat (T200 slice 3): blessings land in the pool, so the repeat-witness law counter reads the pool's ground — the rail froze when T200 declared it in #442, and the counter must move with the architecture it counts."
     },
     {
-      "from": "const SERVED: Record<string, () => Promise<void>> = {",
-      "to": "const SERVED: Record<string, () => Promise<void>> = { resources: async () => { AAA1 },",
-      "files": ["test/server/mcp-discover.test.ts"],
-      "authorized": "PENDING MYK - a branch cannot self-authorize, so merging this entry IS the authorization.",
-      "//": "T247 (loam_docs): the MCP door gains the `resources` capability, and this frozen rail is DESIGNED to redden until a probe is added to its SERVED map — its own failure message says \"add the probe, or stop announcing it\". Four chained pairs build the five probe lines; AAA1-3 are placeholders consumed by the chain. Pair 1's `from` is a prefix of its `to`, so a re-application would nest — REMOVE ALL FOUR the moment the edit PR merges. The edit branch (t247-loam-docs) was verified byte-identical to base + these pairs + the repo's prettier, with the same algorithm rails-guard-ci runs."
-    },
-    {
-      "from": "AAA1",
-      "to": "const r = await rpc({ id: 8, method: \"resources/list\", params: {} }, \"alice-token\"); AAA2",
-      "files": ["test/server/mcp-discover.test.ts"],
-      "authorized": "PENDING MYK - chained pair 2 of 4 (see pair 1's note)."
-    },
-    {
-      "from": "AAA2",
-      "to": "const body = (await r.json()) as { result: { resources: unknown[] } }; AAA3",
-      "files": ["test/server/mcp-discover.test.ts"],
-      "authorized": "PENDING MYK - chained pair 3 of 4."
-    },
-    {
-      "from": "AAA3",
-      "to": "expect(body.result.resources.length).toBeGreaterThan(0);",
-      "files": ["test/server/mcp-discover.test.ts"],
-      "authorized": "PENDING MYK - chained pair 4 of 4."
-    },
-    {
       "from": "        `mutation { person(entity: \"person:ada\", follows: \"person:bob\") { name } }`,",
       "to": "        `mutation { linkperson_follows(entity: \"person:ada\", target: \"person:bob\") { name } }`,",
       "files": ["test/cli/stock-depth.test.ts"],

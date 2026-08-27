@@ -3,5 +3,8 @@
   "category": "bug",
   "duration": 2,
   "id": "T246",
+  "rails": [
+    "test/cli/stock-refs.test.ts"
+  ],
   "title": "The stock shelf learns refs - fossils closed, edges typed, one frozen rail evolved"
 }
