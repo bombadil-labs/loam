@@ -12,11 +12,15 @@
 // The BASE shapes are deliberately plain — `entityGatherJson()`, everything pointing at the
 // root, bucketed by context — because that is the shape an ordinary entity wants, and a reader who
 // outgrows it has README's "Schemas are data" waiting. Since §50 the shelf ALSO carries the stock
-// graph: shapes whose bodies `expand` an edge into a child reading (`org.members` nests
-// ShallowPerson), and narrowed shallow readings for exactly that nesting. Every expand names its
-// child reading, dependencies are DERIVED from the bodies (src/stock/graph.ts — never a declared
-// list), and `--stock` installs the closure. No claim templates, still: the write discipline
-// belongs to the reader who has a reason for it.
+// graph: shapes whose bodies `expand` an edge into a child reading (`org.members` and
+// `event.attending` nest ShallowPerson), and narrowed shallow readings for exactly that nesting.
+// Every expand names its child reading, dependencies are DERIVED from the bodies
+// (src/stock/graph.ts — never a declared list), and `--stock` installs the closure. Since §52 the
+// reference props DECLARE themselves (`refs`, SPEC §51): each writes through its generated
+// link/unlink pair and offers no primitive argument, so the introspected surface cannot teach a
+// cold client the string-fossil path. A refs prop leaves `writable` — the declaration is the
+// write opening (§51.5). No claim templates, still: the write discipline belongs to the reader
+// who has a reason for it.
 //
 // A STOCK SHAPE IS UNGOVERNED IN BOTH DIRECTIONS, and both are worth naming rather than leaving to
 // be discovered. Neither is a defect; together they are why the shelf is a starting point rather
@@ -81,18 +85,24 @@ function deepFreeze<T>(value: T): T {
   return Object.freeze(value);
 }
 
-/** A plain-entity registration over `props`, with `writable` the fields a surface may claim. */
+/**
+ * A plain-entity registration over `props`, with `writable` the fields a surface may claim and
+ * `refs` the declared reference props (SPEC §51) — each writing through its link/unlink pair
+ * rather than any primitive argument, and therefore absent from `writable`.
+ */
 function plain(
   name: string,
   props: Readonly<Record<string, unknown>>,
   writable: readonly string[],
   body: Record<string, unknown> = entityGatherJson(),
+  refs?: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, unknown>> {
   return deepFreeze({
     hyperschema: { name, alg: 1, body },
     schema: { name, alg: 1, props: { ...props }, default: LATEST() },
     roots: [] as string[],
     writable: [...writable],
+    ...(refs === undefined ? {} : { refs }),
   });
 }
 
@@ -121,8 +131,12 @@ function shallowGatherJson(contexts: readonly string[]): Record<string, unknown>
  */
 export const STOCK_SCHEMAS: readonly StockSchema[] = deepFreeze<readonly StockSchema[]>([
   {
+    // `attending` is a declared REFERENCE (§52): the body expands the `attending` role into each
+    // attendee's ShallowPerson view, and the refs block generates `linkevent_attending` /
+    // `unlinkevent_attending` while the primitive argument disappears. Legacy primitive values
+    // written before the retrofit keep resolving beside real edges in the mixed array (§51).
     name: "event",
-    summary: "something happening — a title, when and where, and who is coming",
+    summary: "something happening — a title, when and where, and who is coming, read shallow",
     registration: plain(
       "Event",
       {
@@ -133,7 +147,9 @@ export const STOCK_SCHEMAS: readonly StockSchema[] = deepFreeze<readonly StockSc
         notes: LATEST(),
         attending: EVERY(),
       },
-      ["title", "startsAt", "endsAt", "location", "notes", "attending"],
+      ["title", "startsAt", "endsAt", "location", "notes"],
+      expandedGatherJson({ role: "attending", schema: "ShallowPerson", reading: "ShallowPerson" }),
+      { attending: { role: "attending", reciprocal: { role: "attends", context: "attending" } } },
     ),
   },
   {
@@ -148,17 +164,24 @@ export const STOCK_SCHEMAS: readonly StockSchema[] = deepFreeze<readonly StockSc
   {
     // The first stock-graph shape (§50): `members` is an EDGE — the body expands the `members`
     // role into each member's ShallowPerson view, so an org query returns its people by name
-    // without returning their graphs. Written with `linkOrg(entity, field: "members", target)`.
+    // without returning their graphs. Since §52 it is a declared reference too: written with
+    // `linkorg_members` or the §14 `linkOrg(entity, field: "members", target)` verb, both
+    // authorized by the refs declaration. The refs role MUST stay `members` — §14-written edges
+    // carry that role, and a changed role would strand them outside the expand.
     name: "org",
     summary: "an organization — a name, a description, a website, and members read shallow",
     registration: plain(
       "Org",
       { name: LATEST(), description: LATEST(), website: LATEST(), members: EVERY() },
-      ["name", "description", "website", "members"],
+      ["name", "description", "website"],
       expandedGatherJson({ role: "members", schema: "ShallowPerson", reading: "ShallowPerson" }),
+      { members: { role: "members", reciprocal: { role: "memberOf", context: "memberOf" } } },
     ),
   },
   {
+    // `follows` still writes as a PRIMITIVE — the one fossil path left on the shelf, deliberately:
+    // a frozen rail owns it, and its refs retrofit rides the declared-substitution ceremony
+    // (T246 phase B) rather than an edit no gate would bless.
     name: "person",
     summary: "somebody — a name, a bio, a way to reach them, and who they follow",
     registration: plain(

@@ -4,11 +4,12 @@
 // The convergence goal makes prop lists protocol: every edit moves the snapshot hash two
 // federated strangers would otherwise share, so an editorial change must be a deliberate act —
 // which is exactly what editing the PIN table below in the same change forces. The pin covers
-// three things per entry: the exact prop set, the exact edge assignments (role → child program
-// and reading, walked from the body), and the shelf-wide ban on claimed identity fields.
+// four things per entry: the exact prop set, the exact edge assignments (role → child program
+// and reading, walked from the body), the exact reference declarations (§51 `refs` — role and
+// reciprocal, since §52), and the shelf-wide ban on claimed identity fields.
 
 import { describe, expect, it } from "vitest";
-import { parseRegistrationInput } from "../../src/gateway/registration.js";
+import { parseRegistrationInput, type RefSpecs } from "../../src/gateway/registration.js";
 import { STOCK_SCHEMAS, stockNames } from "../../src/stock/index.js";
 import { edgeAssignments } from "../../src/stock/graph.js";
 
@@ -17,40 +18,55 @@ interface Pin {
   /** role → "ChildProgram/ChildReading", walked from the body's expands. */
   readonly edges: Readonly<Record<string, string>>;
   readonly writable: readonly string[];
+  /** The §51 reference declarations, verbatim — a refs prop never sits in `writable` (§51.5). */
+  readonly refs: RefSpecs;
 }
 
-// BY HAND, entry by entry — the §50 catalog, transcribed. Editing the shelf means editing this
-// table in the same change; that friction is the feature.
+// BY HAND, entry by entry — the §50 catalog as §52 retrofitted it, transcribed. Editing the shelf
+// means editing this table in the same change; that friction is the feature.
 const PIN: Record<string, Pin> = {
   event: {
     props: ["title", "startsAt", "endsAt", "location", "notes", "attending"],
-    edges: {},
-    writable: ["title", "startsAt", "endsAt", "location", "notes", "attending"],
+    edges: { attending: "ShallowPerson/ShallowPerson" },
+    writable: ["title", "startsAt", "endsAt", "location", "notes"],
+    refs: {
+      attending: { role: "attending", reciprocal: { role: "attends", context: "attending" } },
+    },
   },
   note: {
     props: ["title", "body", "tags"],
     edges: {},
     writable: ["title", "body", "tags"],
+    refs: {},
   },
   org: {
     props: ["name", "description", "website", "members"],
     edges: { members: "ShallowPerson/ShallowPerson" },
-    writable: ["name", "description", "website", "members"],
+    writable: ["name", "description", "website"],
+    // The role stays `members` — §14 `linkOrg` edges carry it, and the existing expand follows it.
+    refs: {
+      members: { role: "members", reciprocal: { role: "memberOf", context: "memberOf" } },
+    },
   },
   person: {
+    // `follows` is still primitive-writable — phase A honesty (T246): the frozen depth rail owns
+    // its fossil path until the phase B ceremony retrofits it.
     props: ["name", "bio", "email", "follows"],
     edges: {},
     writable: ["name", "bio", "email", "follows"],
+    refs: {},
   },
   post: {
     props: ["title", "body", "publishedAt", "tags"],
     edges: {},
     writable: ["title", "body", "publishedAt", "tags"],
+    refs: {},
   },
   "shallow-person": {
     props: ["name"],
     edges: {},
     writable: ["name"],
+    refs: {},
   },
 };
 
@@ -64,7 +80,7 @@ describe("the pin — §50's editorial content is protocol", () => {
     expect(Object.keys(PIN).sort()).toEqual([...stockNames()].sort());
   });
 
-  it("every entry's props, edges, and writable match the pin exactly", () => {
+  it("every entry's props, edges, writable, and refs match the pin exactly", () => {
     for (const entry of STOCK_SCHEMAS) {
       const pin = PIN[entry.name]!;
       const parsed = parseRegistrationInput(entry.registration);
@@ -75,6 +91,19 @@ describe("the pin — §50's editorial content is protocol", () => {
       const edges: Record<string, string> = {};
       for (const e of edgeAssignments(entry)) edges[e.role] = `${e.schema}/${e.reading}`;
       expect(edges, `${entry.name} edges`).toEqual(PIN[entry.name]!.edges);
+      expect(parsed.refs ?? {}, `${entry.name} refs`).toEqual(pin.refs);
+    }
+  });
+
+  // §51.5 as a shelf-wide law, asserted from the PIN (the hand-written side, so a shelf that
+  // drifted into the overlap fails against the table rather than against itself — H10): a
+  // reference prop is never also writable, and every declared ref rides an existing prop.
+  it("no pinned ref overlaps writable, and every pinned ref names a pinned prop", () => {
+    for (const [name, pin] of Object.entries(PIN)) {
+      for (const prop of Object.keys(pin.refs)) {
+        expect(pin.writable, `${name}.${prop} must not be writable`).not.toContain(prop);
+        expect(pin.props, `${name}.${prop} must be a declared prop`).toContain(prop);
+      }
     }
   });
 

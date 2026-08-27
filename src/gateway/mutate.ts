@@ -196,10 +196,16 @@ export async function linkEntityImpl(
   if (seed === undefined) {
     throw new Error("this gateway holds no signing seed and cannot write");
   }
-  if (!gw.def(name).schema.props.has(field)) {
+  const def = gw.def(name);
+  if (!def.schema.props.has(field)) {
     throw new Error(`schema ${name} has no field "${field}" to link`);
   }
-  assertWritable(gw, name, [field]);
+  // A refs-declared field is authorized by the declaration itself (SPEC §52, §51.5's rule carried
+  // to the §14 verb): a reference prop leaves `writable` — its primitive path is closed — and its
+  // edge writes must not die with it. Non-refs fields keep the writable requirement exactly.
+  if (!referenceProps(def.hyperschema.body, def.refs).has(field)) {
+    assertWritable(gw, name, [field]);
+  }
   const role = edgeRoleFor(gw, name, field);
   const author = authorForSeed(seed);
   const delta = signClaims(

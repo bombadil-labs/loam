@@ -24,7 +24,7 @@ import {
 // the row set is. Editing the shelf means editing this table in the same change — that is a
 // feature, not a chore: the table is the human-legible dependency contract.
 const EXPECTED: Record<string, readonly string[]> = {
-  event: [],
+  event: ["shallow-person"], // §52: attending expands into ShallowPerson, exactly as org.members
   note: [],
   org: ["shallow-person"],
   person: [],
