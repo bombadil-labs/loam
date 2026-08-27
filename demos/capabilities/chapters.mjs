@@ -1776,4 +1776,73 @@ export const CHAPTERS = [
       },
     ],
   },
+  {
+    n: 19,
+    slug: "the-shelf-declares-its-references",
+    title: "The shelf declares its references",
+    thesis:
+      "Every reference on the stock shelf is a typed edge - link and unlink derived from the " +
+      "lens, no primitive argument left to teach the fossil, and legacy data resolving beside " +
+      "the new edges on both sides.",
+    covers: ["spec/52-stock-refs.md"],
+    body: [
+      {
+        kind: "claims",
+        claims: [
+          {
+            says:
+              "org.members, event.attending, and person.follows serve typed link/unlink pairs " +
+              "and offer no primitive argument; the section-14 generic verb authorizes a refs " +
+              "field only when the declared role agrees with the role it would mint.",
+            spec: "spec/52-stock-refs.md",
+            proof: "test/cli/stock-refs.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "Legacy primitive values written before the retrofit keep resolving in the mixed " +
+              "array beside nested views, and section-14-written member edges keep resolving " +
+              "through the unchanged role.",
+            spec: "spec/52-stock-refs.md",
+            proof: "test/cli/stock-refs.test.ts",
+            door: null,
+          },
+        ],
+      },
+    ],
+  },
+  {
+    n: 20,
+    slug: "the-manual-in-the-door",
+    title: "The manual in the door",
+    thesis:
+      "The store serves its own documentation, compiled from the deployed build, and the " +
+      "refusal that needs it points at it - an agent that guesses a term op is one call from " +
+      "the grammar.",
+    covers: ["spec/53-loam-docs.md"],
+    body: [
+      {
+        kind: "claims",
+        claims: [
+          {
+            says:
+              "loam_docs lists topics and serves compiled markdown that versions with the " +
+              "build; the unknown-term-op refusal - and only that family - carries the pointer " +
+              "to it.",
+            spec: "spec/53-loam-docs.md",
+            proof: "test/server/loam-docs.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "The served grammar is probed against the live parser in both directions: a " +
+              "phantom op in the doc and a real op missing from the doc each redden the build.",
+            spec: "spec/53-loam-docs.md",
+            proof: "test/server/loam-docs.test.ts",
+            door: null,
+          },
+        ],
+      },
+    ],
+  },
 ];
