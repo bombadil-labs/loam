@@ -117,6 +117,13 @@
       "to": "expect(body.result.resources.length).toBeGreaterThan(0);",
       "files": ["test/server/mcp-discover.test.ts"],
       "authorized": "PENDING MYK - chained pair 4 of 4."
+    },
+    {
+      "from": "        `mutation { person(entity: \"person:ada\", follows: \"person:bob\") { name } }`,",
+      "to": "        `mutation { linkperson_follows(entity: \"person:ada\", target: \"person:bob\") { name } }`,",
+      "files": ["test/cli/stock-depth.test.ts"],
+      "authorized": "PENDING MYK - a branch cannot self-authorize, so merging this entry IS the authorization.",
+      "//": "T246 phase B: person.follows becomes a declared reference (refs, NO expand), so the frozen rail's one primitive follows write becomes the typed link. The read assertion follows: [\"person:bob\"] is NOT substituted - a probe on 2026-08-27 verified an entity pointer under EVERY() with no expand resolves to the bare id string, so the flat read stays true unchanged. The from-line occurs exactly once in the file and the substitution is prettier-stable (verified by the T246 build lane). REMOVE once the phase B edit merges."
     }
   ]
 }
