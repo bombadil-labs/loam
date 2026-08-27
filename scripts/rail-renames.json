@@ -1,10 +1,10 @@
 {
   "//": [
-    "Authorized vocabulary renames inside FROZEN rails \u2014 read by scripts/rails-guard-ci.mjs.",
+    "Authorized vocabulary renames inside FROZEN rails — read by scripts/rails-guard-ci.mjs.",
     "",
     "THE GATE READS THIS FILE FROM THE BASE TREE, NEVER FROM THE BRANCH. That is the entire",
     "security model: a branch cannot self-authorize, because the entry that exempts its edit",
-    "must already be on main \u2014 i.e. it arrived through a PR a human reviewed. Two-PR",
+    "must already be on main — i.e. it arrived through a PR a human reviewed. Two-PR",
     "discipline, enforced mechanically (Myk, 2026-07-26): first land the authorization here,",
     "then open the rename.",
     "",
@@ -14,7 +14,7 @@
     "",
     "Shape: { from, to, files?, authorized }. `files` limits the pair to exact paths; an",
     "UNSCOPED pair applies to every frozen rail and must be word-shaped (identifier or quoted",
-    "literal) \u2014 a SCOPED pair may carry wider literals (a regex fragment, a title phrase)",
+    "literal) — a SCOPED pair may carry wider literals (a regex fragment, a title phrase)",
     "because the reviewer reads it against the named files. `authorized` names who and when.",
     "Remove entries once the rename that consumed them has merged; a spent entry is inert",
     "(the substitution no longer produces the base) but tidiness keeps this file reviewable."
@@ -61,37 +61,62 @@
       "from": "// And the dropped peer's lens no longer ANSWERS. It stays registered",
       "to": "// And the dropped peer's lens is GONE from the surface entirely. The binding",
       "files": ["test/federation/drop-two-sided.test.ts"],
-      "authorized": "Myk, 2026-08-20, in chat (T200 slice 3, 'keep it rollin'): bindings live in the channel's pool, so a drop takes them and the severed-lens guard case stops existing \u2014 the rail's refusal assertion flips to the name being gone from the surface."
+      "authorized": "Myk, 2026-08-20, in chat (T200 slice 3, 'keep it rollin'): bindings live in the channel's pool, so a drop takes them and the severed-lens guard case stops existing — the rail's refusal assertion flips to the name being gone from the surface."
     },
     {
       "from": "// not the receiver's own bindings",
       "to": "// lived in the pool and left with it (S47 slice 3)",
       "files": ["test/federation/drop-two-sided.test.ts"],
-      "authorized": "Myk, 2026-08-20, in chat (T200 slice 3, 'keep it rollin'): bindings live in the channel's pool, so a drop takes them and the severed-lens guard case stops existing \u2014 the rail's refusal assertion flips to the name being gone from the surface."
+      "authorized": "Myk, 2026-08-20, in chat (T200 slice 3, 'keep it rollin'): bindings live in the channel's pool, so a drop takes them and the severed-lens guard case stops existing — the rail's refusal assertion flips to the name being gone from the surface."
     },
     {
       "from": "but reading it must refuse rather than fall back to this",
       "to": "so the name resolves as never registered, and cannot fall back to this",
       "files": ["test/federation/drop-two-sided.test.ts"],
-      "authorized": "Myk, 2026-08-20, in chat (T200 slice 3, 'keep it rollin'): bindings live in the channel's pool, so a drop takes them and the severed-lens guard case stops existing \u2014 the rail's refusal assertion flips to the name being gone from the surface."
+      "authorized": "Myk, 2026-08-20, in chat (T200 slice 3, 'keep it rollin'): bindings live in the channel's pool, so a drop takes them and the severed-lens guard case stops existing — the rail's refusal assertion flips to the name being gone from the surface."
     },
     {
       "from": "expect(orphaned.errors?.join(\" \")).toMatch(/severed/);",
       "to": "expect(orphaned.errors?.join(\" \")).toMatch(/Cannot query field/);",
       "files": ["test/federation/drop-two-sided.test.ts"],
-      "authorized": "Myk, 2026-08-20, in chat (T200 slice 3, 'keep it rollin'): bindings live in the channel's pool, so a drop takes them and the severed-lens guard case stops existing \u2014 the rail's refusal assertion flips to the name being gone from the surface."
+      "authorized": "Myk, 2026-08-20, in chat (T200 slice 3, 'keep it rollin'): bindings live in the channel's pool, so a drop takes them and the severed-lens guard case stops existing — the rail's refusal assertion flips to the name being gone from the surface."
     },
     {
       "from": "// LAW deltas only: every sync stamps a channel record, so the raw count always moves. What",
       "to": "// LAW deltas in the POOL, where blessings land (S47 slice 3); the raw count always moves. What",
       "files": ["test/federation/identical-law-two-peers.test.ts"],
-      "authorized": "Myk, 2026-08-20, in chat (T200 slice 3): blessings land in the pool, so the repeat-witness law counter reads the pool's ground \u2014 the rail froze when T200 declared it in #442, and the counter must move with the architecture it counts."
+      "authorized": "Myk, 2026-08-20, in chat (T200 slice 3): blessings land in the pool, so the repeat-witness law counter reads the pool's ground — the rail froze when T200 declared it in #442, and the counter must move with the architecture it counts."
     },
     {
       "from": "[...me.reactor.snapshot()].filter((d) =>",
       "to": "[...ch.pool.gateway!.reactor.snapshot()].filter((d) =>",
       "files": ["test/federation/identical-law-two-peers.test.ts"],
-      "authorized": "Myk, 2026-08-20, in chat (T200 slice 3): blessings land in the pool, so the repeat-witness law counter reads the pool's ground \u2014 the rail froze when T200 declared it in #442, and the counter must move with the architecture it counts."
+      "authorized": "Myk, 2026-08-20, in chat (T200 slice 3): blessings land in the pool, so the repeat-witness law counter reads the pool's ground — the rail froze when T200 declared it in #442, and the counter must move with the architecture it counts."
+    },
+    {
+      "from": "const SERVED: Record<string, () => Promise<void>> = {",
+      "to": "const SERVED: Record<string, () => Promise<void>> = { resources: async () => { AAA1 },",
+      "files": ["test/server/mcp-discover.test.ts"],
+      "authorized": "PENDING MYK - a branch cannot self-authorize, so merging this entry IS the authorization.",
+      "//": "T247 (loam_docs): the MCP door gains the `resources` capability, and this frozen rail is DESIGNED to redden until a probe is added to its SERVED map — its own failure message says \"add the probe, or stop announcing it\". Four chained pairs build the five probe lines; AAA1-3 are placeholders consumed by the chain. Pair 1's `from` is a prefix of its `to`, so a re-application would nest — REMOVE ALL FOUR the moment the edit PR merges. The edit branch (t247-loam-docs) was verified byte-identical to base + these pairs + the repo's prettier, with the same algorithm rails-guard-ci runs."
+    },
+    {
+      "from": "AAA1",
+      "to": "const r = await rpc({ id: 8, method: \"resources/list\", params: {} }, \"alice-token\"); AAA2",
+      "files": ["test/server/mcp-discover.test.ts"],
+      "authorized": "PENDING MYK - chained pair 2 of 4 (see pair 1's note)."
+    },
+    {
+      "from": "AAA2",
+      "to": "const body = (await r.json()) as { result: { resources: unknown[] } }; AAA3",
+      "files": ["test/server/mcp-discover.test.ts"],
+      "authorized": "PENDING MYK - chained pair 3 of 4."
+    },
+    {
+      "from": "AAA3",
+      "to": "expect(body.result.resources.length).toBeGreaterThan(0);",
+      "files": ["test/server/mcp-discover.test.ts"],
+      "authorized": "PENDING MYK - chained pair 4 of 4."
     }
   ]
 }
