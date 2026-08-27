@@ -179,18 +179,21 @@ export const STOCK_SCHEMAS: readonly StockSchema[] = deepFreeze<readonly StockSc
     ),
   },
   {
-    // `follows` still writes as a PRIMITIVE — the one fossil path left on the shelf, deliberately:
-    // a frozen rail owns it, and its refs retrofit rides the declared-substitution ceremony
-    // (T246 phase B) rather than an edit no gate would bless. Phase B, know this: event-link
-    // reciprocal pointers already land at each attendee under the context `attending`, so a
-    // Person that ever DECLARES an `attending` prop folds every author's event links into it on
-    // this ungoverned shelf — name that prop knowingly or not at all.
+    // `follows` is a declared reference WITHOUT an expand, deliberately: the reading stays flat
+    // (an entity pointer with no expand resolves to the bare id), which is exactly what keeps the
+    // frozen depth rail's `follows: ["person:bob"]` assertion true across the T246 phase B
+    // retrofit. Nesting is a later, unfrozen evolution. Inherited warning for whoever grows this
+    // entry: event-link reciprocal pointers already land at each attendee under the context
+    // `attending`, so a Person that ever DECLARES an `attending` prop folds every author's event
+    // links into it on this ungoverned shelf — name that prop knowingly or not at all.
     name: "person",
     summary: "somebody — a name, a bio, a way to reach them, and who they follow",
     registration: plain(
       "Person",
       { name: LATEST(), bio: LATEST(), email: LATEST(), follows: EVERY() },
-      ["name", "bio", "email", "follows"],
+      ["name", "bio", "email"],
+      entityGatherJson(),
+      { follows: { role: "follows", reciprocal: { role: "followedBy", context: "followers" } } },
     ),
   },
   {

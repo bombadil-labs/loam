@@ -1,12 +1,13 @@
-// T246 phase A — the stock shelf learns refs (working spec §52, criteria a–f, plus the two
+// T246 — the stock shelf learns refs (working spec §52, criteria a–f and i, plus the two
 // §14/§51 agreement rails: a §14-written edge is retractable through the §51 pair, and a refs
 // declaration the body does not back cannot open the §14 door).
 //
 // `event.attending` and `org.members` become DECLARED references (§51): each serves its typed
 // link/unlink pair, offers no primitive argument, and leaves `writable` — the refs declaration is
 // the write opening, for the §51 verbs and for the §14 `link<Type>` verb alike. Legacy primitive
-// values keep resolving in the mixed array beside real edges. `person.follows` still teaches the
-// fossil path ON PURPOSE (phase A honesty): a frozen rail owns it until the phase B ceremony.
+// values keep resolving in the mixed array beside real edges. `person.follows` joined in phase B
+// through the declared-substitution ceremony — flat reads by design, so the frozen depth rail's
+// assertion stays true; §52 (i) pins that parity beside it.
 //
 // TWO LEVELS, as P3 requires. Object level: the real CLI — init, register, serve, GraphQL over
 // HTTP — because the introspected surface is the cold client's entire documentation. Delta level:
@@ -128,8 +129,8 @@ async function mutationSurface(
   );
 }
 
-describe("§52 (a) — the introspected shelf teaches the truth, and phase A is honest about follows", () => {
-  it("event and org serve typed pairs with no primitive argument; person still offers follows", async () => {
+describe("§52 (a) — the introspected shelf teaches the truth, all three references typed", () => {
+  it("event, org, and person serve typed pairs; no reference offers a primitive argument", async () => {
     await run(["init", "--home", home], io());
     expect(await run(["register", "--stock", "event", "--home", home], io())).toBe(0);
     expect(await run(["register", "--stock", "org", "--home", home], io())).toBe(0);
@@ -171,16 +172,16 @@ describe("§52 (a) — the introspected shelf teaches the truth, and phase A is 
       expect(fields.get("event")!.description).toContain("attending");
       expect(fields.get("event")!.description).not.toMatch(/Read-only here.*attending/);
 
-      // PHASE A HONESTY: person.follows still writes as a primitive, and no pair serves for it.
+      // PHASE B: person.follows is a declared reference too — the last fossil path closes. The
+      // primitive argument is gone and the typed pair serves, ID! on both args.
       expect(fields.get("person")!.args).toEqual({
         entity: "ID!",
         name: "PrimitiveValue",
         bio: "PrimitiveValue",
         email: "PrimitiveValue",
-        follows: "PrimitiveValue",
       });
-      expect(fields.has("linkperson_follows")).toBe(false);
-      expect(fields.has("unlinkperson_follows")).toBe(false);
+      expect(fields.get("linkperson_follows")!.args).toEqual({ entity: "ID!", target: "ID!" });
+      expect(fields.get("unlinkperson_follows")!.args).toEqual({ entity: "ID!", target: "ID!" });
     } finally {
       await handle.close();
     }
@@ -726,5 +727,57 @@ describe("§52 — a refs declaration the body does not back cannot open the §1
     );
     expect(view(linked, "linkEvent")["attending"]).toMatchObject([{ name: "Myk" }]);
     await gateway.close();
+  });
+});
+
+describe("§52 (i) — phase B: follows links typed, and the flat read the frozen rail asserts survives", () => {
+  // The reading deliberately has NO expand, so an entity pointer resolves to the bare id — the
+  // exact bytes frozen stock-depth.test.ts asserts as `follows: ["person:bob"]`. This rail proves
+  // that parity BESIDE the frozen file, so the equivalence cannot drift silently: if a future
+  // change nests the resolution, this reddens here before the frozen rail can be blamed.
+  // Two-sided unlink at the delta level (second author survives, history kept) is §52 (f)'s rail
+  // on the shared unlinkRefEntityImpl; this file asserts the follows round-trip at the door.
+  it("link resolves flat, folds the far side, refuses the fossil, and unlinks clean", async () => {
+    await run(["init", "--home", home], io());
+    expect(await run(["register", "--stock", "person", "--home", home], io())).toBe(0);
+    const handle = await serveDetached(["--home", home, "--port", "0", "--token", "t"]);
+    try {
+      // The typed link — the same call the evolved depth rail now makes.
+      let res = await gql(
+        handle.url,
+        `mutation { linkperson_follows(entity: "person:ada", target: "person:bob") { name } }`,
+      );
+      expect(res.errors, JSON.stringify(res.errors)).toBeUndefined();
+
+      // FLAT-READ PARITY: the resolved value is the bare id string, exactly the frozen assertion.
+      const read = await gql(handle.url, `{ person(entity: "person:ada") { follows } }`);
+      expect(read.errors, JSON.stringify(read.errors)).toBeUndefined();
+      expect((read.data?.["person"] as { follows: unknown }).follows).toEqual(["person:bob"]);
+
+      // The far side folds under the declared reciprocal context, no expand needed.
+      const far = await gql(handle.url, `{ person(entity: "person:bob") { _view } }`);
+      expect(far.errors, JSON.stringify(far.errors)).toBeUndefined();
+      const view = (far.data?.["person"] as { _view: Record<string, unknown> })._view;
+      expect(view["followers"]).toEqual("person:ada");
+
+      // The fossil path is CLOSED at the schema itself: the argument no longer exists.
+      const fossil = await gql(
+        handle.url,
+        `mutation { person(entity: "person:ada", follows: "person:carol") { name } }`,
+      );
+      expect(JSON.stringify(fossil.errors)).toMatch(/Unknown argument/);
+
+      // Unlink round-trip: the caller's own edge retracts and the read empties.
+      res = await gql(
+        handle.url,
+        `mutation { unlinkperson_follows(entity: "person:ada", target: "person:bob") { name } }`,
+      );
+      expect(res.errors, JSON.stringify(res.errors)).toBeUndefined();
+      const after = await gql(handle.url, `{ person(entity: "person:ada") { follows } }`);
+      const follows = (after.data?.["person"] as { follows: unknown }).follows;
+      expect(follows === null || (Array.isArray(follows) && follows.length === 0)).toBe(true);
+    } finally {
+      await handle.close();
+    }
   });
 });
