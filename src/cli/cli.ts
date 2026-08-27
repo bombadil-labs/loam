@@ -176,6 +176,14 @@ interface CommandSpec {
   readonly notes?: readonly string[]; // the prose a flag list cannot carry
 }
 
+// The shelf listing `--help` prints, its column sized to the longest NAME — a fixed pad narrower
+// than `shallow-person` concatenated that name with its summary, the exact defect the help-column
+// layout exists to prevent. A function declaration so both COMMANDS entries below can call it.
+function stockShelfLines(): string[] {
+  const width = Math.max(...STOCK_SCHEMAS.map((s) => s.name.length)) + 2;
+  return STOCK_SCHEMAS.map((s) => `  ${s.name.padEnd(width)}${s.summary}`);
+}
+
 // Each command's vocabulary, ONCE: the sets `--help` prints are the very sets the parser and the
 // allowlist are handed (via parseFor), so a command's manual cannot drift from what it accepts.
 const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
@@ -193,7 +201,7 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "(--stock takes a comma-separated selection, or `all`, the default), and prints the serve",
       "command. Piped and flagless it stays the bare two-file init, so scripts keep their",
       "contract. The shelf:",
-      ...STOCK_SCHEMAS.map((s) => `  ${s.name.padEnd(8)}${s.summary}`),
+      ...stockShelfLines(),
     ],
   },
   serve: {
@@ -226,7 +234,7 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "single-writer, so register before serving (a running server takes the same body over HTTP).",
       "",
       "--stock registers a shipped shape instead, so day one needs no hand-written gather term:",
-      ...STOCK_SCHEMAS.map((s) => `  ${s.name.padEnd(8)}${s.summary}`),
+      ...stockShelfLines(),
       "It is an ordinary registration through the ordinary door — the very object you could have",
       "typed. So it is ungoverned in both directions, as every hand-written example is: any",
       "negation binds, whoever signed it, AND the gather names no author, so any peer's claim binds",

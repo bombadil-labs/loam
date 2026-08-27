@@ -154,6 +154,24 @@ describe("§54 the trigger (isGuidedInit)", () => {
 });
 
 // ---------------------------------------------------------------------------------------------
+// The shelf listing in --help: the column is sized to the longest name, so no name concatenates
+// with its summary (help-columns' defect, found live here — `shallow-persona person read …`).
+
+describe("§54 the shelf listing in --help", () => {
+  it("no shelf name concatenates with its summary — init and register alike", async () => {
+    for (const command of ["init", "register"]) {
+      out.length = 0;
+      err.length = 0;
+      const code = await run([command, "--help"], io());
+      expect(code, command).toBe(0);
+      const printed = [...out, ...err].join("\n");
+      expect(printed, command).not.toContain("shallow-persona");
+      expect(printed, command).toMatch(/shallow-person\s{2,}a person read shallow/);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
 // (b) BARE COMPAT — the literal pre-§54 strings, the exact two files, no prompts, exit 0.
 
 describe("§54(b) the bare init survives byte-for-byte", () => {
@@ -460,10 +478,10 @@ describe("§54(e) promptLine — the terminal name prompt", () => {
     const fake = new FakeInput();
     Object.defineProperty(process, "stdin", { value: fake, configurable: true });
     const written: string[] = [];
-    process.stdout.write = ((chunk: string | Uint8Array) => {
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
       written.push(String(chunk));
       return true;
-    }) as typeof process.stdout.write;
+    };
     const answer = promptLine("a name for the store's first user: ");
     fake.emit("data", "  ada \n");
     await expect(answer).resolves.toBe("ada");
