@@ -114,6 +114,11 @@ const tools = async (): Promise<Array<{ name: string }>> => {
 // to be true. A key with no entry here is an announcement no rail can back, and the capability rail
 // fails on it by name rather than skipping it.
 const SERVED: Record<string, () => Promise<void>> = {
+  resources: async () => {
+    const r = await rpc({ id: 8, method: "resources/list", params: {} }, "alice-token");
+    const body = (await r.json()) as { result: { resources: unknown[] } };
+    expect(body.result.resources.length).toBeGreaterThan(0);
+  },
   tools: async () => {
     expect((await tools()).length).toBeGreaterThan(0);
   },

@@ -73,6 +73,7 @@ import {
 } from "../gateway/accounts.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
 import { readSeed } from "../cli/config.js";
+import { DOC_TOPICS } from "./docs-content.js";
 import { CSP, makeUserDoors, type UserDoorOptions, type UserDoors } from "./session.js";
 import { makeAdminDoor, type AdminDoor } from "./admin.js";
 import { ADMIN_CONTAINER_PATH } from "./admin-pages.js";
@@ -242,8 +243,23 @@ const CORS = { "access-control-allow-origin": "*" } as const;
 // must be the same values rather than two copies of them — an announcement the door does not honour
 // is a report that can be false (H7), and no later exchange could catch it.
 export const MCP_PROTOCOLS: readonly string[] = ["2025-06-18", "2025-03-26"];
-export const MCP_CAPABILITIES = { tools: {} } as const;
+export const MCP_CAPABILITIES = { tools: {}, resources: {} } as const;
 export const MCP_SERVER_INFO = { name: "loam", version: "0.2.0" } as const;
+// The guidance both `initialize` and `server/discover` hand a client — ONE string, same as the
+// constants above: two copies would be free to drift, and a client reads whichever method it
+// spoke first. Every `loam_*` name here must be a tool `tools/list` returns (a frozen rail holds
+// that line); naming fewer than exist is deliberately fine.
+export const MCP_INSTRUCTIONS =
+  "This is a Loam store. `loam_query` reads it with GraphQL and `loam_mutate` writes " +
+  "to it as your token's identity; call tools/list for their schemas. Every answer is " +
+  "resolved through the store's registered schemas, so a field you cannot see MAY be a " +
+  "field you are not granted — it may equally be unset, or resolved absent by the " +
+  "schema. Absence is not a refusal. `loam_docs` serves this store's own manual, " +
+  "compiled into the running build — call it with no arguments to list the topics.";
+// Where a compiled doc topic lives as an MCP resource (§53): the same DOC_TOPICS entry `loam_docs`
+// serves, addressed. One derivation, used by list and read alike, so an advertised uri always reads.
+const docUri = (topic: string): string => `loam://docs/${topic}`;
+
 const preflight = (res: ServerResponse): void => {
   res.writeHead(204, {
     ...CORS,
@@ -558,7 +574,24 @@ async function performRegistration(
   // authority gate above. A caller with NO register standing never reaches this function, so it
   // never draws a shape complaint and cannot fingerprint the registration format by probing.
   // A caller WITH standing is entitled to the shape complaint, whatever name it sent.
-  const input = parseRegistrationInput(raw);
+  //
+  // ONE family of shape complaints earns a pointer at the manual (§53): the term parser's
+  // `unknown term op …`, which is the refusal a cold agent draws by guessing the algebra. The
+  // parser's own words survive intact — the wrap appends, never rephrases — and ONLY that family
+  // is wrapped: a fence, pred, policy, or missing-field refusal is not a grammar problem, and a
+  // pointer on it would send the caller to a page that cannot help. Wrapped HERE, on Loam's side
+  // of the frozen substrate, and at this door specifically — the pointer names an MCP tool, so it
+  // rides the doors an MCP caller can reach (tools/call and POST /register, both through this
+  // function), not the CLI's or the admin page's.
+  let input: RegistrationInput;
+  try {
+    input = parseRegistrationInput(raw);
+  } catch (err) {
+    if (err instanceof Error && /^unknown term op /.test(err.message)) {
+      throw new Error(`${err.message} — call loam_docs(topic: "register-grammar")`);
+    }
+    throw err;
+  }
   if (fence.length > 0) {
     // The FIELD gate runs before the NAME gate on purpose: `resolvers` is refused whatever it is
     // called, so a caller cannot learn anything about the fence by attaching code to a name probe.
@@ -1029,6 +1062,24 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       },
       annotations: { readOnlyHint: false },
     },
+    // §53 (T247). The manual rides a TOOL rather than the descriptions above because the register
+    // grammar is ~10KB and a description taxes every session's context; a topic is fetched at the
+    // moment it is needed — usually the moment a refusal names it.
+    {
+      name: "loam_docs",
+      description:
+        "Read this store's own documentation. The pages are compiled into the running build, so " +
+        "they describe exactly the code that is serving you. No arguments lists the topics, each " +
+        "with a one-line summary; { topic } returns the full markdown. Read " +
+        '"register-grammar" before composing a loam_register body.',
+      inputSchema: {
+        type: "object",
+        properties: {
+          topic: { type: "string", description: "a topic name from the no-argument listing" },
+        },
+      },
+      annotations: { readOnlyHint: true },
+    },
     // §46 over MCP (T188). FIVE tools rather than one `federate` passthrough, because tools are the
     // unit of CONSENT: a client applies policy per tool, so an operator can auto-approve `status`
     // while `drop` always asks. One tool collapses that to allow-or-deny-all-federation, and the
@@ -1183,6 +1234,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             typeof asked === "string" && MCP_PROTOCOLS.includes(asked) ? asked : MCP_PROTOCOLS[0],
           capabilities: MCP_CAPABILITIES,
           serverInfo: MCP_SERVER_INFO,
+          instructions: MCP_INSTRUCTIONS,
         });
         return;
       }
@@ -1219,12 +1271,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           resultType: "complete",
           supportedVersions: [...MCP_PROTOCOLS],
           capabilities: MCP_CAPABILITIES,
-          instructions:
-            "This is a Loam store. `loam_query` reads it with GraphQL and `loam_mutate` writes " +
-            "to it as your token's identity; call tools/list for their schemas. Every answer is " +
-            "resolved through the store's registered schemas, so a field you cannot see MAY be a " +
-            "field you are not granted — it may equally be unset, or resolved absent by the " +
-            "schema. Absence is not a refusal.",
+          instructions: MCP_INSTRUCTIONS,
           _meta: { "io.modelcontextprotocol/serverInfo": MCP_SERVER_INFO },
         });
         return;
@@ -1235,6 +1282,42 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       case "tools/list":
         reply({ tools: MCP_TOOLS });
         return;
+      // The compiled docs again, as MCP RESOURCES (§53) — for clients that surface those. The same
+      // DOC_TOPICS module answers here and in the loam_docs tool below: one compiled source, so
+      // the two doors cannot disagree about the bytes.
+      case "resources/list":
+        reply({
+          resources: DOC_TOPICS.map((d) => ({
+            uri: docUri(d.topic),
+            name: d.topic,
+            description: d.summary,
+            mimeType: "text/markdown",
+          })),
+        });
+        return;
+      case "resources/read": {
+        const uri = (rpc.params ?? {})["uri"];
+        const doc = DOC_TOPICS.find((d) => docUri(d.topic) === uri);
+        if (doc === undefined) {
+          // -32002 is MCP's resource-not-found. The docs are the same for every caller, so
+          // naming the real uris is a cure, not an oracle.
+          json(res, 200, {
+            jsonrpc: "2.0",
+            id: rpc.id ?? null,
+            error: {
+              code: -32002,
+              message:
+                `no such resource — this store serves: ` +
+                DOC_TOPICS.map((d) => docUri(d.topic)).join(", "),
+            },
+          });
+          return;
+        }
+        reply({
+          contents: [{ uri: docUri(doc.topic), mimeType: "text/markdown", text: doc.markdown }],
+        });
+        return;
+      }
       case "tools/call": {
         const params = rpc.params ?? {};
         const name = params["name"];
@@ -1258,6 +1341,44 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
               isError: true,
             });
           }
+          return;
+        }
+        if (name === "loam_docs") {
+          // Read-only and identical for every token — the manual is the same book on every door.
+          // The bearer gate is the MCP door's own, above: no token, no page, exactly as siblings.
+          const topic = ((params["arguments"] ?? {}) as { topic?: unknown }).topic;
+          if (topic === undefined) {
+            const listing = DOC_TOPICS.map((d) => `- ${d.topic} — ${d.summary}`).join("\n");
+            reply({
+              content: [
+                {
+                  type: "text",
+                  text:
+                    `This store's own manual, compiled into the build that is serving you:\n\n` +
+                    `${listing}\n\nCall loam_docs with { topic: "<name>" } for the full markdown.`,
+                },
+              ],
+            });
+            return;
+          }
+          const doc = DOC_TOPICS.find((d) => d.topic === topic);
+          if (doc === undefined) {
+            const asked = typeof topic === "string" ? JSON.stringify(topic) : "that";
+            reply({
+              content: [
+                {
+                  type: "text",
+                  text:
+                    `no topic ${asked} here — the topics are: ` +
+                    `${DOC_TOPICS.map((d) => d.topic).join(", ")}. Call loam_docs with no ` +
+                    `arguments for their summaries.`,
+                },
+              ],
+              isError: true,
+            });
+            return;
+          }
+          reply({ content: [{ type: "text", text: doc.markdown }] });
           return;
         }
         const args = (params["arguments"] ?? {}) as {
