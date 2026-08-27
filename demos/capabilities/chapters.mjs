@@ -1845,4 +1845,40 @@ export const CHAPTERS = [
       },
     ],
   },
+  {
+    n: 21,
+    slug: "one-command-to-a-living-store",
+    title: "One command to a living store",
+    thesis:
+      "loam init finishes the job: an identity, a user whose name is never invented, a stocked " +
+      "shelf, and the printed next step - while a flagless pipe keeps yesterday's bare init " +
+      "byte-for-byte.",
+    covers: ["spec/54-guided-init.md"],
+    body: [
+      {
+        kind: "claims",
+        claims: [
+          {
+            says:
+              "A guided init - TTY or any guided flag - creates the operator, the named user, " +
+              "and the selected shelf in one run, and a flagless non-TTY init is byte-identical " +
+              "to the bare init that two hundred existing rails call.",
+            spec: "spec/54-guided-init.md",
+            proof: "test/cli/guided-init.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "The flow keeps its word under interruption: every refusal before the home exists " +
+              "leaves the directory untouched, a cancelled prompt exits as cancelled rather " +
+              "than succeeding, and a guided re-run against a served home draws the staleness " +
+              "warning every writing verb prints.",
+            spec: "spec/54-guided-init.md",
+            proof: "test/cli/guided-init.test.ts",
+            door: null,
+          },
+        ],
+      },
+    ],
+  },
 ];
