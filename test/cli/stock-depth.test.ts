@@ -71,7 +71,7 @@ describe("org nests members shallow — story 1, end to end", () => {
       expect(res.errors, JSON.stringify(res.errors)).toBeUndefined();
       res = await gql(
         handle.url,
-        `mutation { person(entity: "person:ada", follows: "person:bob") { name } }`,
+        `mutation { linkperson_follows(entity: "person:ada", target: "person:bob") { name } }`,
       );
       expect(res.errors, JSON.stringify(res.errors)).toBeUndefined();
 
