@@ -158,11 +158,18 @@ export function removeEntityImpl(
   );
 }
 
+// The single role the §14 verbs would mint for `field`, or undefined: one expand role covers a
+// byTargetContext gather's fields; a body with several distinct edge roles disambiguates by the
+// field's own name. Shared by `edgeRoleFor` (which turns undefined into a refusal) and the §14
+// link authorization below (which must ask the SAME question without throwing) — one selection,
+// so the two can never drift into authorizing one role and minting another.
+const mintedRole = (roles: readonly string[], field: string): string | undefined =>
+  roles.length === 1 ? roles[0] : roles.includes(field) ? field : undefined;
+
 // The edge role a gather declares for `field` (SPEC §14 edge verbs): the pointer role an edge
 // write must carry so the body's `expand` follows it into the child's view. Read from the
 // PUBLISHED hyperschema gather, never the resolution Schema. A gather with no `expand` resolves no
-// edges — link/sever are meaningless there and refuse. One expand role covers a byTargetContext
-// gather's fields; a body with several distinct edge roles disambiguates by the field's own name.
+// edges — link/sever are meaningless there and refuse.
 function edgeRoleFor(gw: Gateway, name: string, field: string): string {
   const roles = edgeRoles(gw.def(name).hyperschema.body);
   if (roles.length === 0) {
@@ -171,12 +178,14 @@ function edgeRoleFor(gw: Gateway, name: string, field: string): string {
         `value, not a relation`,
     );
   }
-  if (roles.length === 1) return roles[0]!;
-  if (roles.includes(field)) return field;
-  throw new Error(
-    `schema ${name} declares several edge roles (${roles.join(", ")}); wave A links a gather ` +
-      `whose edge role is unambiguous for "${field}"`,
-  );
+  const role = mintedRole(roles, field);
+  if (role === undefined) {
+    throw new Error(
+      `schema ${name} declares several edge roles (${roles.join(", ")}); wave A links a gather ` +
+        `whose edge role is unambiguous for "${field}"`,
+    );
+  }
+  return role;
 }
 
 // Link an edge (SPEC §14 edge verbs): assert ONE edge delta — the same per-prop write shape, its
@@ -203,7 +212,20 @@ export async function linkEntityImpl(
   // A refs-declared field is authorized by the declaration itself (SPEC §52, §51.5's rule carried
   // to the §14 verb): a reference prop leaves `writable` — its primitive path is closed — and its
   // edge writes must not die with it. Non-refs fields keep the writable requirement exactly.
-  if (!referenceProps(def.hyperschema.body, def.refs).has(field)) {
+  //
+  // But ONLY where the declaration and the gather AGREE: the ref mints a pair (`links`) and its
+  // declared role is exactly the role this verb would mint. The agreement is load-bearing — a
+  // mismatched declaration (a role no expand matches, a prefix/inSet family) bypassing here would
+  // mint an edge under some OTHER expand's role, folding into this prop's bucket while the §51
+  // unlink matches only the DECLARED role and sever/clear/remove refuse the unwritable prop: a
+  // delta writable through exactly one door and retractable through none. Fail closed instead:
+  // the mismatch falls back to the writable gate, which refuses in §14's own read-only voice.
+  const ref = referenceProps(def.hyperschema.body, def.refs).get(field);
+  if (
+    ref === undefined ||
+    !ref.links ||
+    ref.role !== mintedRole(edgeRoles(def.hyperschema.body), field)
+  ) {
     assertWritable(gw, name, [field]);
   }
   const role = edgeRoleFor(gw, name, field);

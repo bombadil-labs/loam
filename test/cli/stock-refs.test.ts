@@ -1,4 +1,6 @@
-// T246 phase A — the stock shelf learns refs (working spec §52, criteria a–f).
+// T246 phase A — the stock shelf learns refs (working spec §52, criteria a–f, plus the two
+// §14/§51 agreement rails: a §14-written edge is retractable through the §51 pair, and a refs
+// declaration the body does not back cannot open the §14 door).
 //
 // `event.attending` and `org.members` become DECLARED references (§51): each serves its typed
 // link/unlink pair, offers no primitive argument, and leaves `writable` — the refs declaration is
@@ -27,7 +29,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
+import { authorForSeed, parseTerm, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { run } from "../../src/cli/cli.js";
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { entityGatherJson, expandedGatherJson } from "../../src/gateway/gather.js";
@@ -37,6 +39,7 @@ import { parseRegistrationInput } from "../../src/gateway/registration.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { installOrder } from "../../src/stock/graph.js";
 import { stockSchema } from "../../src/stock/index.js";
+import { pickLatest } from "../gateway/fixtures.js";
 import { observed } from "../spike/garden.js";
 
 vi.setConfig({ testTimeout: 30_000 }); // real HTTP servers and sqlite stores, twice over
@@ -277,9 +280,10 @@ describe("§52 (d) — COMPAT: a pre-retrofit primitive keeps resolving beside a
   it("write under the OLD registration, republish the NEW one, and the mixed array holds both", async () => {
     await run(["init", "--home", home], io());
 
-    // ACT 1 — the pre-§52 shelf, byte-shape: entityGather body, attending primitive-writable.
-    // Hand-written rather than derived from the shelf (H10): this is yesterday's registration,
-    // which the code under test no longer carries anywhere.
+    // ACT 1 — the pre-§52 registration, its load-bearing facts literal in this fixture: NO
+    // expand in the body, no refs, `attending` in `writable` and typed primitive. The plain
+    // gather itself rides entityGatherJson() — the substrate helper yesterday's shelf shared,
+    // untouched by the retrofit — so what is pinned by hand is exactly what the retrofit moved.
     const oldEvent = join(home, "old-event.json");
     const LATEST = { pick: { order: { byTimestamp: "desc" } } };
     const EVERY = { all: { order: { byTimestamp: "asc" } } };
@@ -580,6 +584,147 @@ describe("§52 (f) — unlink retracts the caller's own edge only; the legacy va
       expect(gateway.reactor.get(strike)?.claims.author, "retract-your-OWN").toBe(WRITER);
     }
     expect(gateway.reactor.negationsOf(secondsEdge!.id)).toEqual([]);
+    await gateway.close();
+  });
+});
+
+describe("§52 — a §14-written edge is retractable through the §51 pair (the role coincidence, live)", () => {
+  // The refs role and the role the §14 verb mints COINCIDE on the shelf (`members`, both ways) —
+  // that coincidence is what lets `unlinkorg_members` strike an edge `linkOrg` wrote. Here it
+  // becomes load-bearing: a shelf or verb change that breaks the agreement fails this rail,
+  // rather than leaving a user's store holding edges no typed door can retract.
+  it("linkOrg mints the edge, unlinkorg_members strikes it; a second author's edge survives", async () => {
+    const { gateway, backend } = await world();
+    await publishStock(gateway, "org");
+    const named = await gateway.query(
+      `mutation { shallowPerson(entity: "${MYK}", name: "Myk") { name } }`,
+    );
+    expect(named.errors, JSON.stringify(named.errors)).toBeUndefined();
+
+    const settled = await idsOf(backend);
+    await gateway.query(
+      `mutation { linkOrg(entity: "org:labs", field: "members", target: "${MYK}") { name } }`,
+      undefined,
+      { actor: WRITER_SEED },
+    );
+    const [writersEdge] = await freshDeltas(gateway, backend, settled);
+    // The premise, on the delta itself: the §14 edge carries the SAME role the refs declare —
+    // the agreement the unlink match below stands on.
+    expect(
+      writersEdge!.claims.pointers.some(
+        (p) => p.role === "members" && p.target.kind === "entity" && p.target.entity.id === MYK,
+      ),
+      "the §14 edge carries the declared refs role",
+    ).toBe(true);
+    const afterWriter = await idsOf(backend);
+    await gateway.query(
+      `mutation { linkOrg(entity: "org:labs", field: "members", target: "${MYK}") { name } }`,
+      undefined,
+      { actor: SECOND_SEED },
+    );
+    const [secondsEdge] = await freshDeltas(gateway, backend, afterWriter);
+    const before = await gateway.query(`{ org(entity: "org:labs") { members } }`);
+    expect(view(before, "org")["members"]).toMatchObject([{ name: "Myk" }, { name: "Myk" }]);
+
+    const unlinked = await gateway.query(
+      `mutation { unlinkorg_members(entity: "org:labs", target: "${MYK}") { members } }`,
+      undefined,
+      { actor: WRITER_SEED },
+    );
+    // OBJECT level, two-sided: the writer's §14 edge is gone; the second author's stands.
+    expect(view(unlinked, "unlinkorg_members")["members"]).toMatchObject([{ name: "Myk" }]);
+
+    // DELTA level: the §51 retraction landed on the §14 delta — the writer's own strike, the
+    // second author's edge untouched, nothing purged.
+    await gateway.flush();
+    expect((await idsOf(backend)).has(writersEdge!.id), "history survives").toBe(true);
+    const strikes = gateway.reactor.negationsOf(writersEdge!.id);
+    expect(strikes.length, "the §14 edge is negated").toBeGreaterThan(0);
+    for (const strike of strikes) {
+      expect(gateway.reactor.get(strike)?.claims.author, "retract-your-OWN").toBe(WRITER);
+    }
+    expect(gateway.reactor.negationsOf(secondsEdge!.id)).toEqual([]);
+    await gateway.close();
+  });
+});
+
+describe("§52 — a refs declaration the body does not back cannot open the §14 door", () => {
+  // The two mismatch shapes, each refused in §14's own read-only voice: a declared role NO
+  // expand matches (the verb would mint the other prop's role), and a prefix-family role
+  // (`links` false — no single canonical role exists). Either one bypassing the writable gate
+  // would mint an edge folding into the prop's bucket under a role its own unlink can never
+  // match — writable through exactly one door, retractable through none.
+  it("both mismatch shapes refuse read-only; the agreeing shelf prop still links", async () => {
+    const { gateway } = await world();
+    const allAsc = { kind: "all", order: { kind: "byTimestamp", dir: "asc" } } as const;
+    const outcome = await gateway.publishRegistration(
+      {
+        name: "Advisory",
+        alg: 1,
+        body: parseTerm({
+          op: "expand",
+          role: { exact: "members" },
+          schema: "ShallowPerson",
+          reading: "ShallowPerson",
+          in: {
+            op: "expand",
+            role: { prefix: "rel:" },
+            schema: "ShallowPerson",
+            reading: "ShallowPerson",
+            in: entityGatherJson(),
+          },
+        }),
+      },
+      {
+        name: "Advisory",
+        props: new Map([
+          ["name", pickLatest],
+          ["members", allAsc],
+          ["advisors", allAsc],
+          ["contacts", allAsc],
+        ]),
+        default: pickLatest,
+      },
+      [],
+      undefined,
+      undefined,
+      undefined,
+      ["name"],
+      undefined,
+      {
+        advisors: { role: "advises", reciprocal: { role: "advisedBy", context: "advisories" } },
+        contacts: { role: "rel:knows" },
+      },
+    );
+    expect(outcome.bound).toBe(true);
+
+    // Shape 1: the declared role "advises" matches no expand — the verb would mint "members".
+    const noExpand = await gateway.query(
+      `mutation { linkAdvisory(entity: "advisory:board", field: "advisors", target: "${MYK}") { name } }`,
+      undefined,
+      { actor: WRITER_SEED },
+    );
+    expect(noExpand.errors?.join(" ")).toMatch(/"advisors" of Advisory is read-only/);
+    // Shape 2: a prefix-family reference — typing only, no single canonical role to author.
+    const family = await gateway.query(
+      `mutation { linkAdvisory(entity: "advisory:board", field: "contacts", target: "${MYK}") { name } }`,
+      undefined,
+      { actor: WRITER_SEED },
+    );
+    expect(family.errors?.join(" ")).toMatch(/"contacts" of Advisory is read-only/);
+
+    // Two-sided: an AGREEING declaration on the same store still opens the door — the shelf's
+    // own event.attending, through the same §14 verb.
+    const named = await gateway.query(
+      `mutation { shallowPerson(entity: "${MYK}", name: "Myk") { name } }`,
+    );
+    expect(named.errors, JSON.stringify(named.errors)).toBeUndefined();
+    const linked = await gateway.query(
+      `mutation { linkEvent(entity: "${EVENT}", field: "attending", target: "${MYK}") { attending } }`,
+      undefined,
+      { actor: WRITER_SEED },
+    );
+    expect(view(linked, "linkEvent")["attending"]).toMatchObject([{ name: "Myk" }]);
     await gateway.close();
   });
 });
