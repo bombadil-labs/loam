@@ -57,7 +57,7 @@
     "esbuild@0.25.12": true
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node scripts/build-bundles.mjs",
+    "build": "node scripts/build-docs.mjs --check && tsc -p tsconfig.build.json && node scripts/build-bundles.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
