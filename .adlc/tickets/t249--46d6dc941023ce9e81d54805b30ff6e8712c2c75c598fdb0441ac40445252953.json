@@ -3,5 +3,8 @@
   "category": "feature",
   "duration": 2,
   "id": "T249",
+  "rails": [
+    "test/cli/guided-init.test.ts"
+  ],
   "title": "loam init finishes the job - a guided first run from npm i to a living store"
 }

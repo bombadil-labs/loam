@@ -7,17 +7,19 @@
 // (the introspected surface, the virgin-store refusal). Delta level: the store reopened cold —
 // which lenses bind, which roles the ground resolves, what the credential file holds.
 //
-// NAMED GAPS. The TTY-true side of the trigger is pinned at the exported pure predicate; no pty
-// drives the real terminal prompts here (test/cli/prompt.test.ts owns promptSecret's terminal
-// contract, and the flow past the trigger is one code path for both entries). The staleness
+// NAMED GAPS. The TTY-true side of the trigger is pinned at the exported pure predicate, and
+// promptLine's terminal half against a fake stdin (prompt.test.ts's idiom) — no real pty runs
+// here, and test/cli/prompt.test.ts owns promptSecret's own terminal contract. The staleness
 // warning under a concurrently running server is the user-create machinery's own, asserted in
 // its own rails, not re-asserted here.
 
+import { EventEmitter } from "node:events";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isGuidedInit, run } from "../../src/cli/cli.js";
+import { promptLine } from "../../src/cli/prompt.js";
 import { readSeed, storePath } from "../../src/cli/config.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -424,5 +426,47 @@ describe("§54(h) --password-file", () => {
     expect(code).toBe(1);
     expect(err.join("\n")).toContain(missing);
     expect(existsSync(join(home, "config.json"))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// (e)'s terminal half — promptLine, the seam's default. Driven against a fake stdin, the same
+// idiom prompt.test.ts uses for promptSecret: every other test here injects `readInput`, so
+// without these the terminal path would ship with zero coverage of its own two sides.
+
+class FakeInput extends EventEmitter {
+  isTTY = true;
+  resume(): void {}
+  pause(): void {}
+  setEncoding(): void {}
+}
+
+describe("§54(e) promptLine — the terminal name prompt", () => {
+  const originalStdin = process.stdin;
+  let originalWrite: typeof process.stdout.write;
+  beforeEach(() => {
+    originalWrite = process.stdout.write.bind(process.stdout);
+  });
+  afterEach(() => {
+    Object.defineProperty(process, "stdin", { value: originalStdin, configurable: true });
+    process.stdout.write = originalWrite;
+  });
+
+  it("without a terminal it refuses and names the readInput option", async () => {
+    await expect(promptLine("a name: ")).rejects.toThrow(/wants a terminal.*readInput/s);
+  });
+
+  it("at a terminal it asks in the open and returns the trimmed answer", async () => {
+    const fake = new FakeInput();
+    Object.defineProperty(process, "stdin", { value: fake, configurable: true });
+    const written: string[] = [];
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      written.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+    const answer = promptLine("a name for the store's first user: ");
+    fake.emit("data", "  ada \n");
+    await expect(answer).resolves.toBe("ada");
+    expect(written.join("")).toContain("a name for the store's first user: ");
   });
 });
