@@ -1174,6 +1174,7 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
           depInput.mutations,
           depInput.writable,
           depInput.resolvers,
+          depInput.refs,
         );
         io.out(`loam: also installed ${dep.name}`);
         if (!depOutcome.bound) {

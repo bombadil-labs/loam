@@ -3,9 +3,5 @@
   "category": "feature",
   "duration": 2,
   "id": "T247",
-  "rails": [
-    "test/server/loam-docs.test.ts",
-    "test/cli/pack-docs.test.ts"
-  ],
   "title": "loam_docs - the store hands the agent its own manual at the moment of refusal"
 }
