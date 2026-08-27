@@ -24,7 +24,10 @@
 //
 // Deliberately NOT asserted: the CLI and admin register doors' refusal text — the pointer names an
 // MCP tool, and it is the MCP-facing register door (both spellings: tools/call and POST /register)
-// that wraps. Those doors keep the parser's raw words.
+// that wraps. Those doors keep the parser's raw words. And POST /register's pointer-FREE legs:
+// only the MCP spelling proves them. Today the gap is unreachable — both spellings share
+// performRegistration and the POST handler renders err.message verbatim — but a future door-local
+// pointer on the POST path would not redden this file.
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -56,7 +59,14 @@ const envelope = (name: string, body: unknown): Record<string, unknown> => ({
   schema: { props: { name: PICK }, default: PICK },
   roots: [`${name}:1`],
 });
-const VALID_BODY = { op: "mask", policy: "drop", in: "input" };
+// The canonical §7 shape: registration validates that a body YIELDS a hyperview (a group over the
+// gathered deltas), so "valid" here must mean publishable, not merely parseable — the positive
+// control below registers this for real.
+const VALID_BODY = {
+  op: "group",
+  key: "byTargetContext",
+  in: { op: "mask", policy: "drop", in: "input" },
+};
 const UNKNOWN_OP_BODY = { op: "latest", in: "input" };
 
 let handle: ServerHandle;
@@ -197,6 +207,16 @@ describe("(b) the register refusal points at the manual — and ONLY the unknown
     expect(refused.content[0]!.text).not.toContain("loam_docs");
   });
 
+  it("the fence fixture's positive control: sylvie registers inside her prefix", async () => {
+    // Without this, the fence test above could pass with no grant at all — the no-standing
+    // refusal is the same sentence by design, so only a registration that SUCCEEDS proves the
+    // refusal it pairs with was the fence speaking and not the standing gate.
+    const ok = await call("loam_register", envelope("sync:thing", VALID_BODY), "sylvie-token");
+    expect(ok.isError).not.toBe(true);
+    const outcome = JSON.parse(ok.content[0]!.text) as { registered: string };
+    expect(outcome.registered).toBe("sync:thing");
+  });
+
   it("an absent prop is pointer-free — a shape complaint is not a grammar lesson", async () => {
     const noRoots: Record<string, unknown> = { ...envelope("sync:thing", VALID_BODY) };
     delete noRoots["roots"];
@@ -262,6 +282,9 @@ describe("(c) anti-drift: the served doc's §3 and the parser agree, both direct
 
     // Parser side: the dispatch labels of rhizomatic's own shipped parseTerm — read from the
     // subject, then each label verified against the live parser, never copied from the doc (H10).
+    // The scrape's blind spot, named: an op dispatched via an `if` BESIDE the switch would carry
+    // no case label and silently drop from direction two. The substrate is frozen, so that shape
+    // arriving is remote — but it is this scrape's failure mode, not a covered case.
     const require = createRequire(import.meta.url);
     const termJson = join(dirname(require.resolve("@bombadil/rhizomatic")), "term-json.js");
     const source = readFileSync(termJson, "utf8");

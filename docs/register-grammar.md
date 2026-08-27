@@ -42,7 +42,7 @@ nothing else. The examples use the `sync:` namespace.
 | `roots` | required. Seed entity id(s) the surface starts from. |
 | `writable` | which props the generated mutation accepts. Anything absent is immutable-by-default. |
 | `entity` | optional explicit registration entity; if sent it must equal the derived one — scoped callers gain nothing by sending it. |
-| `resolvers`, `templates` | **refused for scoped callers.** Code and mutation templates arrive by federation and blessing, never through a grant. |
+| `resolvers`, `mutations` | **refused for scoped callers.** Code and mutation templates (the `mutations` field) arrive by federation and blessing, never through a grant. |
 
 Republishing at the same name **evolves** the schema for every reader. You can evolve what you
 named; you cannot touch a neighbouring namespace.
@@ -295,4 +295,4 @@ Rules, all mechanical:
 | `unknown term op …` | the body used an op outside §3's list. |
 | `pred must be true \| false \| match \| hasPointer \| and \| or \| not \| inView` | a predicate node without a recognized key. |
 | `propPolicy must be pick \| all \| merge \| conflicts \| absentAs` | a policy node without a recognized key. |
-| about `resolvers` / `templates` | code never rides a scoped registration — it arrives by federation and blessing. |
+| about `resolvers` / `mutations` | code never rides a scoped registration — it arrives by federation and blessing. |

@@ -34,6 +34,17 @@ const SUMMARIES = {
 const INTERNAL = new Set(["wsl-migration"]);
 
 export async function generate() {
+  // The rosters must be disjoint, checked FIRST: a topic in both would be silently skipped by the
+  // INTERNAL branch below while the later existence check still passes — a doc the roster says is
+  // served and the package does not carry.
+  for (const topic of Object.keys(SUMMARIES)) {
+    if (INTERNAL.has(topic)) {
+      throw new Error(
+        `build-docs: "${topic}" is in BOTH rosters — SUMMARIES serves it and INTERNAL hides it; ` +
+          `pick one`,
+      );
+    }
+  }
   const files = readdirSync(join(root, "docs"))
     .filter((f) => f.endsWith(".md"))
     .sort();

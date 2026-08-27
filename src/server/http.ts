@@ -258,6 +258,8 @@ export const MCP_INSTRUCTIONS =
   "compiled into the running build — call it with no arguments to list the topics.";
 // Where a compiled doc topic lives as an MCP resource (§53): the same DOC_TOPICS entry `loam_docs`
 // serves, addressed. One derivation, used by list and read alike, so an advertised uri always reads.
+// No percent-encoding and no character guard — safe while every topic is a plain filename slug;
+// build-docs owes a topic-character guard the day a second doc arrives with anything wilder.
 const docUri = (topic: string): string => `loam://docs/${topic}`;
 
 const preflight = (res: ServerResponse): void => {
