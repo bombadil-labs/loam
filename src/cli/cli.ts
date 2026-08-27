@@ -75,7 +75,7 @@ import {
   type Registration,
   type RegistrationInput,
 } from "../gateway/registration.js";
-import { STOCK_SCHEMAS, stockNames, stockSchema } from "../stock/index.js";
+import { STOCK_SCHEMAS, stockNames, stockSchema, type StockSchema } from "../stock/index.js";
 import { divergenceOf, entryLensName, installOrder, stockIdentityOf } from "../stock/graph.js";
 import { CTX_PEN, penEntity, penRecordClaims } from "../gateway/renderers.js";
 import { serve, type ServerHandle } from "../server/http.js";
@@ -107,7 +107,7 @@ import {
   userRoleDefect,
   type UserRole,
 } from "../server/users.js";
-import { promptSecret } from "./prompt.js";
+import { promptLine, promptSecret } from "./prompt.js";
 import type { StoreBackend } from "../store/backend.js";
 import { ArchiveBackend } from "../store/archive.js";
 import { MirrorBackend } from "../store/mirror.js";
@@ -141,9 +141,11 @@ export interface IO {
 export interface RunOptions {
   readonly detach?: boolean; // serve: return the handle instead of blocking
   readonly version?: string; // override the reported version (tests)
-  /** `user create`: ask for a secret some other way than the terminal (embedders; tests). */
+  /** `user create` and guided `init`: ask for a secret some other way than the terminal (embedders; tests). */
   readonly readSecret?: (prompt: string) => Promise<string>;
-  /** `user create`: the scrypt cost, for a caller that must not pay the interactive default (tests). */
+  /** guided `init`: ask in the open — the first user's name — some other way than the terminal. */
+  readonly readInput?: (prompt: string) => Promise<string>;
+  /** `user create` and guided `init`: the scrypt cost, for a caller that must not pay the interactive default (tests). */
   readonly scrypt?: ScryptParams;
 }
 
@@ -178,10 +180,21 @@ interface CommandSpec {
 // allowlist are handed (via parseFor), so a command's manual cannot drift from what it accepts.
 const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
   init: {
-    summary: "create a home, mint or import the operator seed, write config",
+    summary: "create a home — and at a terminal, a first user and a stocked shelf with it",
     usage: "loam init [options]",
-    flags: new Set(["home", "seed"]),
-    notes: ["The seed is written 0600 and never printed. A second init keeps the first identity."],
+    flags: new Set(["home", "seed", "user", "password-file", "stock", "no-user", "no-stock"]),
+    booleans: new Set(["no-user", "no-stock"]),
+    notes: [
+      "The seed is written 0600 and never printed. A second init keeps the first identity.",
+      "",
+      "At a terminal — or with any flag past --home/--seed — init finishes the job (§54): it",
+      "creates a first user with the operator role (--user <name>, or a prompt; the password is",
+      "asked twice with the echo off, or read from --password-file), registers the stock shelf",
+      "(--stock takes a comma-separated selection, or `all`, the default), and prints the serve",
+      "command. Piped and flagless it stays the bare two-file init, so scripts keep their",
+      "contract. The shelf:",
+      ...STOCK_SCHEMAS.map((s) => `  ${s.name.padEnd(8)}${s.summary}`),
+    ],
   },
   serve: {
     summary: "boot a store and serve it (GraphQL + SSE + MCP over HTTP)",
@@ -555,6 +568,16 @@ const FLAG_HELP: Readonly<
   },
   role: { arg: "<role>", note: "operator | actor" },
   operator: { arg: "", note: "give the new user the operator role (default: a plain actor)" },
+  user: { arg: "<name>", note: "the first user to create — operator role, never invented" },
+  "password-file": {
+    arg: "<path>",
+    note: "read the first user's password here instead of prompting (a flag would reach shell history)",
+  },
+  "no-user": { arg: "", note: "skip user creation — /login stays dark until `loam user create`" },
+  "no-stock": {
+    arg: "",
+    note: "skip the stock shelf — the surface stays empty until `loam register`",
+  },
 };
 
 function topHelp(): string {
@@ -707,7 +730,23 @@ function servingWarning(home: string, store: string): string | undefined {
   );
 }
 
-function cmdInit(args: readonly string[], io: IO): number {
+// §54 — the guided flow's trigger, PURE and exported for its rail: the TTY bit is an argument, so
+// both sides (a terminal with no flags; a pipe with one guided flag) are pinnable without a pty.
+// `--home` and `--seed` are deliberately absent from the list: they belong to the bare init that
+// hundreds of scripts and frozen rails call flagless through a pipe, and a flag that means "the
+// same init, elsewhere" must not change which flow runs.
+export function isGuidedInit(parsed: Pick<Parsed, "flags" | "booleans">, tty: boolean): boolean {
+  return (
+    tty ||
+    parsed.flags.has("user") ||
+    parsed.flags.has("password-file") ||
+    parsed.flags.has("stock") ||
+    parsed.booleans.has("no-user") ||
+    parsed.booleans.has("no-stock")
+  );
+}
+
+async function cmdInit(args: readonly string[], io: IO, options: RunOptions): Promise<number> {
   const parsed = parseFor("init", args);
   if (parsed.positionals.length > 0) {
     // `loam init <seed>` is the natural typo for `--seed <seed>` — refuse it, and NEVER echo
@@ -715,13 +754,306 @@ function cmdInit(args: readonly string[], io: IO): number {
     io.err("init takes no positional arguments (import a seed with `loam init --seed <hex>`)");
     return 2;
   }
-  const home = parsed.flags.get("home") ?? defaultHome();
-  const result = initHome(home, parsed.flags.get("seed"));
-  io.out(
-    result.created
-      ? `loam: initialized ${home}\n  operator ${result.operator}`
-      : `loam: ${home} already initialized\n  operator ${result.operator}`,
+  if (!isGuidedInit(parsed, process.stdin.isTTY === true)) {
+    // The bare init, byte-for-byte (§54 rule 3): the two files, the one line, nothing asked.
+    const home = parsed.flags.get("home") ?? defaultHome();
+    const result = initHome(home, parsed.flags.get("seed"));
+    io.out(
+      result.created
+        ? `loam: initialized ${home}\n  operator ${result.operator}`
+        : `loam: ${home} already initialized\n  operator ${result.operator}`,
+    );
+    return 0;
+  }
+  return cmdInitGuided(parsed, io, options);
+}
+
+// The `--stock` selection, validated WHOLE before anything lands — a typo'd third name must not
+// surface after two entries installed.
+function stockSelection(chosen: string, io: IO): readonly StockSchema[] | number {
+  if (chosen === "all") return STOCK_SCHEMAS;
+  const picked: StockSchema[] = [];
+  for (const part of chosen.split(",").map((p) => p.trim())) {
+    if (part === "") {
+      io.err(
+        "init: --stock has an empty entry — name shelf entries separated by commas, or `all`. " +
+          "Nothing was done.",
+      );
+      return 2;
+    }
+    if (part === "all") {
+      io.err(
+        "init: --stock `all` is the whole shelf — name entries, or `all` alone. Nothing was done.",
+      );
+      return 2;
+    }
+    const entry = stockSchema(part);
+    if (entry === undefined) {
+      io.err(
+        `init: no stock schema named "${part}" — the shelf is: ${stockShelf()}, or \`all\`. ` +
+          "Nothing was done.",
+      );
+      return 2;
+    }
+    picked.push(entry);
+  }
+  return picked;
+}
+
+// §54's shelf pass — the same §50 machinery `register --stock` runs (installOrder for the
+// closure, skip-if-bound keyed on the LENS name, the pre-flight contest refusal, the divergence
+// warning), over the UNION of the selection and with the skip applied to EVERY entry, targets
+// included: rule 7 makes a guided re-run the ordinary skip-if-bound install, where `register`'s
+// own door deliberately re-publishes its target (the evolve path). cmdRegister's dep loop is
+// this loop's sibling; a change to either's report should visit both. No staleness warning here:
+// init precedes serve by construction (§54 rule 4), and the user step voices its own.
+async function installStock(
+  home: string,
+  selection: readonly StockSchema[],
+  io: IO,
+): Promise<number> {
+  // The union closure, sinks first: each entry's own installOrder is topological, and
+  // first-arrival dedup keeps every dependency ahead of its dependents.
+  const order: StockSchema[] = [];
+  const seen = new Set<string>();
+  for (const chosen of selection) {
+    for (const entry of installOrder(chosen.name)) {
+      if (!seen.has(entry.name)) {
+        seen.add(entry.name);
+        order.push(entry);
+      }
+    }
+  }
+  const path = storePath(home, undefined);
+  const gateway = await Gateway.boot(
+    openStore(path, io),
+    assembleGenesis({ operatorSeed: readSeed(home) }),
+    {
+      channelBackend: channelBackendFor(home, io),
+      channelToken: (c) => {
+        const held = readChannelToken(home, c);
+        return held.kind === "present" ? held.seed : undefined;
+      },
+    },
   );
+  try {
+    const contenders = new Map<string, Registration[]>();
+    for (const r of readRegistrations(gateway.reactor, gateway.operatorAuthor)) {
+      const lens = lensOf(r) as string;
+      const rows = contenders.get(lens);
+      if (rows === undefined) contenders.set(lens, [r]);
+      else rows.push(r);
+    }
+    // Pre-flight, the whole order before any delta lands (§50): a lens served by a foreign-named
+    // program cannot compose with stock, and installing beside it would evict it.
+    for (const entry of order) {
+      const lens = entryLensName(entry);
+      const rows = contenders.get(lens);
+      if (rows === undefined) continue;
+      const stockProgram = programOf(entry.registration as { hyperschema: { name: string } });
+      if (!rows.some((r) => programOf(r) === stockProgram)) {
+        const theirs = [...new Set(rows.map((r) => programOf(r) as string))].join('", "');
+        io.err(
+          `init: stock ${entry.name} needs the reading ${lens} served by a program of the same ` +
+            `name, and this store serves it from the program "${theirs}". Installing stock ` +
+            `beside it would evict your reading, so nothing was installed. To compose, republish ` +
+            `your reading under the program name ${stockProgram}; to adopt stock, retire yours first.`,
+        );
+        await gateway.close();
+        return 2;
+      }
+    }
+    for (const entry of order) {
+      const lens = entryLensName(entry);
+      const rows = contenders.get(lens);
+      if (rows !== undefined) {
+        io.out(`loam: ${entry.name} already bound — skipped`);
+        // Compare against the contender that actually serves the reference — the pre-flight
+        // proved one exists — never an arbitrary row of a contested name.
+        const stockProgram = programOf(entry.registration as { hyperschema: { name: string } });
+        const serving = rows.find((r) => programOf(r) === stockProgram)!;
+        const differs = divergenceOf(entry, serving);
+        if (differs !== undefined) {
+          io.err(
+            `loam: ${entry.name} is bound to a reading that is not stock ` +
+              `${lens}@${stockIdentityOf(entry).schemaHash} — composing with it (differs: ${differs})`,
+          );
+        }
+        continue;
+      }
+      const input = parseRegistrationInput(structuredClone(entry.registration));
+      const outcome = await gateway.publishRegistration(
+        input.hyperschema,
+        input.schema,
+        input.roots,
+        undefined,
+        input.entity,
+        input.mutations,
+        input.writable,
+        input.resolvers,
+        input.refs,
+      );
+      io.out(`loam: stocked ${entry.name}`);
+      for (const warning of outcome.warnings ?? []) io.err(`loam: ${warning}`);
+      if (!outcome.bound) {
+        io.err(`loam: the deltas landed, but ${entry.name} does not bind here — ${outcome.reason}`);
+      }
+    }
+  } catch (err) {
+    await gateway.close().catch(() => {}); // never let a close failure mask the real refusal
+    throw err;
+  }
+  await gateway.close();
+  return 0;
+}
+
+// §54 — the guided flow: operator, first user (operator role — rule 5: the first user owns the
+// box), the stock shelf, the printed next step. Every refusal that precedes initHome leaves the
+// directory untouched — a guided invocation that cannot finish must not half-start.
+async function cmdInitGuided(parsed: Parsed, io: IO, options: RunOptions): Promise<number> {
+  const skipUser = parsed.booleans.has("no-user");
+  const skipStock = parsed.booleans.has("no-stock");
+  // Rule 2: skipping is explicit, so a skip beside its own subject is a contradiction, refused
+  // rather than ranked.
+  if (parsed.flags.has("user") && skipUser) {
+    io.err(
+      "init: --user and --no-user contradict — name the first user, or skip creating one, " +
+        "not both. Nothing was done.",
+    );
+    return 2;
+  }
+  if (parsed.flags.has("password-file") && skipUser) {
+    io.err(
+      "init: --password-file and --no-user contradict — that password would belong to a user " +
+        "this run will not create. Nothing was done.",
+    );
+    return 2;
+  }
+  if (parsed.flags.has("stock") && skipStock) {
+    io.err(
+      "init: --stock and --no-stock contradict — select from the shelf, or skip it, not both. " +
+        "Nothing was done.",
+    );
+    return 2;
+  }
+  const tty = process.stdin.isTTY === true;
+  const named = parsed.flags.get("user");
+  // Rule 1, failed closed before any write: the name is never invented, so a flow that cannot
+  // obtain one refuses, naming its two exits.
+  if (!skipUser && named === undefined && !tty && options.readInput === undefined) {
+    io.err(
+      "init: the guided flow creates the store's first user, and this run has no terminal to " +
+        "ask a name on — pass --user <name> to name one, or --no-user to skip user creation. " +
+        "Nothing was done.",
+    );
+    return 2;
+  }
+  const passwordPath = parsed.flags.get("password-file");
+  // Rule 1's other half, the same posture: the password arrives at a terminal or from a file,
+  // never invented and never guessed at off a pipe.
+  if (!skipUser && passwordPath === undefined && !tty && options.readSecret === undefined) {
+    io.err(
+      "init: the first user's password wants a terminal to be asked on — pass " +
+        "--password-file <path>, or run interactively (--no-user skips user creation). " +
+        "Nothing was done.",
+    );
+    return 2;
+  }
+  let selection: readonly StockSchema[] = [];
+  if (!skipStock) {
+    const picked = stockSelection(parsed.flags.get("stock") ?? "all", io);
+    if (typeof picked === "number") return picked;
+    selection = picked;
+  }
+  let filePassword: string | undefined;
+  if (!skipUser && passwordPath !== undefined) {
+    try {
+      // One trailing newline (or several) is how editors and `echo` leave a file; inside the
+      // password proper a newline cannot be typed at a login form, so stripping the tail is
+      // tolerance, not truncation.
+      filePassword = readFileSync(passwordPath, "utf8").replace(/(?:\r?\n)+$/, "");
+    } catch (err) {
+      io.err(
+        `init: cannot read --password-file ${passwordPath}: ` +
+          `${err instanceof Error ? err.message : String(err)}. Nothing was done.`,
+      );
+      return 1;
+    }
+  }
+
+  // From here the flow writes, step by step, each step voicing its own report.
+  const home = parsed.flags.get("home") ?? defaultHome();
+  const init = initHome(home, parsed.flags.get("seed"));
+  io.out(
+    init.created
+      ? `loam: initialized ${home}\n  operator ${init.operator}`
+      : `loam: ${home} already initialized\n  operator ${init.operator}`,
+  );
+
+  let exit = 0;
+  let userName: string | undefined;
+  if (!skipUser) {
+    const name =
+      named ?? (await (options.readInput ?? promptLine)("a name for the store's first user: "));
+    if (name.length === 0) {
+      io.err(
+        "init: a user name is required — pass --user <name>, or --no-user to skip user creation",
+      );
+      return 2;
+    }
+    const defect = userNameDefect(name);
+    if (defect !== undefined) {
+      io.err(`init: ${defect}`);
+      return 2;
+    }
+    // Rule 7: a re-run's duplicate is user-create's own refusal, voiced and then stepped PAST —
+    // the shelf still deserves its skip-if-bound pass — while any other failure stops the flow
+    // (stocking the shelf behind a mistyped password would be side effects behind a refusal).
+    // The pre-read only steers control; the message stays the machinery's own.
+    let dupBefore = false;
+    try {
+      dupBefore = entryFor(readCredentials(home), name) !== undefined;
+    } catch {
+      // unreadable credentials: cmdUserCreate names it in its own voice, and the flow stops below
+    }
+    const createParsed: Parsed = {
+      flags: new Map(),
+      repeated: new Map(),
+      booleans: new Set(["operator"]),
+      positionals: [],
+    };
+    const fromFile = filePassword;
+    const createOptions: RunOptions =
+      fromFile === undefined
+        ? options
+        : { ...options, readSecret: () => Promise.resolve(fromFile) };
+    const code = await cmdUserCreate(name, createParsed, home, io, createOptions);
+    if (code !== 0) {
+      if (!dupBefore) return code;
+      exit = code;
+    }
+    userName = name;
+  }
+  if (!skipStock) {
+    const code = await installStock(home, selection, io);
+    if (code !== 0) return code;
+  }
+  if (exit !== 0) return exit;
+  // Rule 6: the flow ends with the next step, so the story continues without a manual.
+  const lines = [
+    "loam: the store is ready — the next step:",
+    `  loam serve --http --home ${home} --token <pick-a-secret>`,
+    userName === undefined
+      ? `  /login stays dark until \`loam user create <name> --operator --home ${home}\` gives it someone to be`
+      : `  then sign in at http://127.0.0.1:4321/login as ${userName}`,
+  ];
+  if (skipStock) {
+    lines.push(
+      `  the surface is empty until \`loam register\` grows one — ` +
+        `\`loam register --stock <name> --home ${home}\` stocks a shape`,
+    );
+  }
+  io.out(lines.join("\n"));
   return 0;
 }
 
@@ -4651,7 +4983,7 @@ export async function run(
   try {
     switch (command) {
       case "init":
-        return cmdInit(rest, io);
+        return await cmdInit(rest, io, options);
       case "serve":
         return await cmdServe(rest, io, options);
       case "register":
