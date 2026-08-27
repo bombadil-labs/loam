@@ -55,7 +55,9 @@ const PIN: Record<string, Pin> = {
     props: ["name", "bio", "email", "follows"],
     edges: {},
     writable: ["name", "bio", "email"],
-    refs: { follows: { role: "follows", reciprocal: { role: "followedBy", context: "followers" } } },
+    refs: {
+      follows: { role: "follows", reciprocal: { role: "followedBy", context: "followers" } },
+    },
   },
   post: {
     props: ["title", "body", "publishedAt", "tags"],
