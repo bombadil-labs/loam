@@ -334,8 +334,15 @@ describe("(d) resources: the same bytes, advertised", () => {
       { method: "resources/read", params: { uri: "loam://docs/weeding" } },
       "alice-token",
     );
-    const body = (await res.json()) as { result?: unknown; error?: { message: string } };
+    // 200 with a JSON-RPC error, like every method-level refusal on this door — and the code is
+    // MCP's own resource-not-found, which is the half of the answer a client dispatches on.
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      result?: unknown;
+      error?: { code: number; message: string };
+    };
     expect(body.result).toBeUndefined();
+    expect(body.error?.code).toBe(-32002);
     expect(body.error?.message).toContain("loam://docs/register-grammar");
   });
 });
@@ -380,11 +387,18 @@ describe("(f) the anonymous door is unchanged", () => {
 describe("the compiled source is docs/*.md, exactly", () => {
   it("the committed module regenerates byte-identically from docs/", () => {
     // The generator's own --check: the committed src/server/docs-content.ts is exactly what
-    // docs/*.md compiles to. Exit 0 or this throws with the script's message.
-    execFileSync(process.execPath, [join(root, "scripts", "build-docs.mjs"), "--check"], {
-      cwd: root,
-      encoding: "utf8",
-    });
+    // docs/*.md compiles to. Exit 0 or this throws with the script's message — AND the verdict
+    // line must appear: a --check that silently did nothing (a broken entry-point guard) exits 0
+    // exactly like a passing one, and only the spoken verdict tells them apart.
+    const out = execFileSync(
+      process.execPath,
+      [join(root, "scripts", "build-docs.mjs"), "--check"],
+      {
+        cwd: root,
+        encoding: "utf8",
+      },
+    );
+    expect(out).toContain("byte-identical");
   });
 
   it("the door serves the docs file's own bytes — and the dropped tail stays dropped", async () => {
