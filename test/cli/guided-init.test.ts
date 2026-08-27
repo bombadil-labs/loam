@@ -13,10 +13,11 @@
 // warning under a concurrently running server is the user-create machinery's own, asserted in
 // its own rails, not re-asserted here.
 
+import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isGuidedInit, run } from "../../src/cli/cli.js";
 import { promptLine } from "../../src/cli/prompt.js";
@@ -114,6 +115,47 @@ const passwordFile = (content: string): string => {
 
 const ALL_LENSES = ["Event", "Note", "Org", "Person", "Post", "ShallowPerson"];
 
+// A bespoke registration over chosen program and lens names — stock-install.test.ts's fixture
+// shape. The body diverges from stock (`annotate` where stock is `drop`); the Schema matches
+// stock shallow-person byte-for-byte, so a divergence warning can only come from the body layer.
+const bespoke = (program: string, lens: string): string =>
+  JSON.stringify({
+    hyperschema: {
+      name: program,
+      alg: 1,
+      body: {
+        op: "group",
+        key: "byTargetContext",
+        in: {
+          op: "select",
+          pred: { hasPointer: { targetEntity: { var: "root" } } },
+          in: { op: "mask", policy: "annotate", in: "input" },
+        },
+      },
+    },
+    schema: {
+      name: lens,
+      alg: 1,
+      props: { name: { pick: { order: { byTimestamp: "desc" } } } },
+      default: { pick: { order: { byTimestamp: "desc" } } },
+    },
+    roots: [],
+    writable: ["name"],
+  });
+
+// T243's fixture pair: a serving record naming a live pid warns; a provably dead pid stays silent.
+const STALENESS = /will not see what just landed until it restarts/;
+const servingRecord = (pid: number): void => {
+  writeFileSync(
+    join(home, "serving.json"),
+    `${JSON.stringify({ pid, url: "http://127.0.0.1:0", store: resolve(storePath(home, undefined)), startedAt: Date.now() })}\n`,
+  );
+};
+const deadPid = (): number => {
+  const child = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+  return child.pid ?? 999999;
+};
+
 // ---------------------------------------------------------------------------------------------
 // The trigger — the pure predicate, both sides (criteria b and c pin the behavior; this pins the
 // decision itself, including the TTY-true side no piped test can reach).
@@ -190,6 +232,24 @@ describe("§54(b) the bare init survives byte-for-byte", () => {
     expect(err).toEqual([]);
     expect(readdirSync(home).sort()).toEqual(["config.json", "operator.seed"]);
   });
+
+  it("injected seams alone cannot trigger the flow — flagless piped init stays bare", async () => {
+    let asked = 0;
+    const code = await run(["init", "--home", home], io(), {
+      readInput: () => {
+        asked += 1;
+        return Promise.resolve("ada");
+      },
+      readSecret: () => {
+        asked += 1;
+        return Promise.resolve("s3cret");
+      },
+    });
+    expect(code).toBe(0);
+    expect(asked).toBe(0);
+    expect(out).toEqual([`loam: initialized ${home}\n  operator ${operatorOf(home)}`]);
+    expect(readdirSync(home).sort()).toEqual(["config.json", "operator.seed"]);
+  });
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -249,6 +309,14 @@ describe("§54(c) a guided flag with no way to a name", () => {
     expect(code).toBe(0);
     expect(existsSync(join(home, "credentials.json"))).toBe(false);
     expect(await boundLenses(home)).toEqual(ALL_LENSES);
+  });
+
+  it("--user alone in a pipe refuses, exit 2, naming --password-file, writing nothing", async () => {
+    const code = await run(["init", "--home", home, "--user", "ada"], io());
+    expect(code).toBe(2);
+    expect(err.join("\n")).toMatch(/--password-file/);
+    expect(existsSync(join(home, "config.json"))).toBe(false);
+    expect(existsSync(join(home, "operator.seed"))).toBe(false);
   });
 });
 
@@ -338,6 +406,19 @@ describe("§54(e) the prompt seams", () => {
     expect(err.join("\n")).toMatch(/did not match/);
     expect(existsSync(join(home, "credentials.json"))).toBe(false);
   });
+
+  it("a cancelled name prompt is exit 1 with the mint already disclosed, not a silent 0", async () => {
+    const code = await run(["init", "--home", home, "--no-stock"], io(), {
+      readInput: () => Promise.reject(new Error("cancelled")),
+      readSecret: () => Promise.resolve("s3cret"),
+      scrypt: CHEAP_SCRYPT,
+    });
+    expect(code).toBe(1);
+    expect(err.join("\n")).toMatch(/cancelled/);
+    // the honest disclosure: the operator mint DID happen, and the line above said so
+    expect(out.join("\n")).toContain(`loam: initialized ${home}`);
+    expect(existsSync(join(home, "credentials.json"))).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -403,6 +484,8 @@ describe("§54(g) a second guided run on the same home", () => {
     const printed = out.join("\n");
     expect(printed).toContain("note already bound — skipped");
     expect(printed).not.toContain("stocked note");
+    // a refused run earns no crown: the next-step block belongs to a clean finish alone
+    expect(printed).not.toContain("the next step");
   });
 });
 
@@ -434,7 +517,7 @@ describe("§54(h) --password-file", () => {
     expect(captured).not.toContain("s3cret");
   });
 
-  it("refuses an absent file with the path named, before anything lands", async () => {
+  it("refuses an absent file with the path named, in init's own sentence, before anything lands", async () => {
     const missing = join(aux, "no-such-file");
     const code = await run(
       ["init", "--home", home, "--user", "ada", "--password-file", missing, "--no-stock"],
@@ -442,8 +525,171 @@ describe("§54(h) --password-file", () => {
       { scrypt: CHEAP_SCRYPT },
     );
     expect(code).toBe(1);
-    expect(err.join("\n")).toContain(missing);
+    const printed = err.join("\n");
+    expect(printed).toContain(missing);
+    expect(printed).toMatch(/cannot read --password-file/);
+    expect(printed).toMatch(/Nothing was done/);
     expect(existsSync(join(home, "config.json"))).toBe(false);
+  });
+
+  it("a lone trailing \\r is stripped too — a \\r no login form can type never enters the hash", async () => {
+    const code = await run(
+      [
+        "init",
+        "--home",
+        home,
+        "--user",
+        "ada",
+        "--password-file",
+        passwordFile("pw\r"),
+        "--no-stock",
+      ],
+      io(),
+      { scrypt: CHEAP_SCRYPT },
+    );
+    expect(code).toBe(0);
+    const entry = entryFor(readCredentials(home), "ada");
+    expect(await verifyPassword(entry, "pw")).toBe(true);
+    expect(await verifyPassword(entry, "pw\r")).toBe(false);
+  });
+
+  it("an empty or whitespace-only file refuses, naming the file, before anything lands", async () => {
+    for (const content of ["", "   \n", "\r\n"]) {
+      out.length = 0;
+      err.length = 0;
+      const code = await run(
+        [
+          "init",
+          "--home",
+          home,
+          "--user",
+          "ada",
+          "--password-file",
+          passwordFile(content),
+          "--no-stock",
+        ],
+        io(),
+        { scrypt: CHEAP_SCRYPT },
+      );
+      expect(code, JSON.stringify(content)).toBe(2);
+      expect(err.join("\n"), JSON.stringify(content)).toContain(join(aux, "pw"));
+      expect(existsSync(join(home, "config.json")), JSON.stringify(content)).toBe(false);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// The selection is validated WHOLE, before anything lands — a typo'd name must never surface
+// after a partial install, so each refusal leaves the directory empty.
+
+describe("§54(f) the selection's own refusals", () => {
+  const cases: ReadonlyArray<readonly [string, RegExp]> = [
+    ["note,,person", /empty entry/],
+    ["all,person", /whole shelf/],
+    ["nope", /no stock schema named "nope"/],
+  ];
+  for (const [value, message] of cases) {
+    it(`--stock ${value} refuses, exit 2, writing nothing`, async () => {
+      const code = await run(["init", "--home", home, "--stock", value, "--no-user"], io());
+      expect(code).toBe(2);
+      expect(err.join("\n")).toMatch(message);
+      expect(existsSync(join(home, "config.json"))).toBe(false);
+      expect(existsSync(join(home, "operator.seed"))).toBe(false);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------------------------
+// The §50 machinery through init's own door: the pre-flight contest refusal and the divergence
+// warning — sibling code to register's loop, reachable by no register rail.
+
+describe("§54 the shelf pass meets a bespoke reading", () => {
+  it("a stock lens under a foreign program refuses whole — nothing from this run lands", async () => {
+    await run(["init", "--home", home], io());
+    const rival = join(aux, "my-shallow.json");
+    writeFileSync(rival, bespoke("MyShallow", "ShallowPerson"));
+    expect(await run(["register", rival, "--home", home], io())).toBe(0);
+
+    out.length = 0;
+    err.length = 0;
+    const code = await run(["init", "--home", home, "--stock", "org", "--no-user"], io());
+    expect(code).toBe(2);
+    expect(err.join("\n")).toMatch(/would evict your reading, so nothing was installed/);
+    // the "nothing was installed" scope holds truly: only the bespoke lens binds, nothing new
+    expect(await boundLenses(home)).toEqual(["ShallowPerson"]);
+  });
+
+  it("a same-program divergent reading is skipped and warned about, by body", async () => {
+    await run(["init", "--home", home], io());
+    const rival = join(aux, "their-shallow.json");
+    writeFileSync(rival, bespoke("ShallowPerson", "ShallowPerson"));
+    expect(await run(["register", rival, "--home", home], io())).toBe(0);
+
+    out.length = 0;
+    err.length = 0;
+    const code = await run(
+      ["init", "--home", home, "--stock", "shallow-person", "--no-user"],
+      io(),
+    );
+    expect(code).toBe(0);
+    expect(out.join("\n")).toContain("shallow-person already bound — skipped");
+    const warned = err.join("\n");
+    expect(warned).toMatch(/shallow-person is bound to a reading that is not stock ShallowPerson@/);
+    expect(warned).toMatch(/differs: body/);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// T243's honest sentence, one level up: a guided RE-RUN is first-class (rule 7), and the home it
+// lands into can be served live — the server keeps answering from boot-time memory. Two-sided:
+// the warning fires beside a live pid, and both earned silences stay silent.
+
+describe("§54 the shelf pass under a live server", () => {
+  it("warns beside a live-pid serving record; a fresh home and a dead pid stay silent", async () => {
+    // the fresh run: no serving record, no warning — the first earned silence
+    expect(await run(["init", "--home", home, "--stock", "note", "--no-user"], io())).toBe(0);
+    expect(err.join("\n")).not.toMatch(STALENESS);
+
+    // a live server holds the store: the re-run's skip pass still says so
+    servingRecord(process.pid);
+    out.length = 0;
+    err.length = 0;
+    expect(await run(["init", "--home", home, "--stock", "note", "--no-user"], io())).toBe(0);
+    expect(out.join("\n")).toContain("note already bound — skipped");
+    expect(err.join("\n")).toMatch(STALENESS);
+
+    // a provably dead pid is the second earned silence
+    servingRecord(deadPid());
+    out.length = 0;
+    err.length = 0;
+    expect(await run(["init", "--home", home, "--stock", "note", "--no-user"], io())).toBe(0);
+    expect(err.join("\n")).not.toMatch(STALENESS);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// The crown never coexists with an unserved surface. Probed exhaustively: a same-lens contender
+// is SKIPPED (whatever its entity — the divergence rail above), and a rival body under the same
+// program name makes the substrate THROW at publish — so `bound: false` is unreachable from
+// init's publish, and installStock collapses that branch to a loud throw (H7) rather than
+// wearing a disclaimer on a dead branch. This rail pins the throw route's honest exit.
+
+describe("§54 a rival program body under the shelf pass", () => {
+  it("the substrate's refusal surfaces as exit 1, and no ready line is crowned", async () => {
+    await run(["init", "--home", home], io());
+    // the program name under a foreign lens: stock note would publish a second Note body
+    const rival = join(aux, "rival-note.json");
+    writeFileSync(rival, bespoke("Note", "MyNote"));
+    expect(await run(["register", rival, "--home", home], io())).toBe(0);
+
+    out.length = 0;
+    err.length = 0;
+    const code = await run(["init", "--home", home, "--stock", "note", "--no-user"], io());
+    expect(code).toBe(1);
+    expect(err.join("\n")).toMatch(/two bindings carry DIFFERENT bodies/);
+    const printed = out.join("\n");
+    expect(printed).not.toContain("the store is ready");
+    expect(printed).not.toContain("the next step:");
   });
 });
 
@@ -486,5 +732,14 @@ describe("§54(e) promptLine — the terminal name prompt", () => {
     fake.emit("data", "  ada \n");
     await expect(answer).resolves.toBe("ada");
     expect(written.join("")).toContain("a name for the store's first user: ");
+  });
+
+  it("a closed stream (the Ctrl-D shape) rejects 'cancelled' rather than never settling", async () => {
+    const fake = new FakeInput();
+    Object.defineProperty(process, "stdin", { value: fake, configurable: true });
+    process.stdout.write = (): boolean => true;
+    const answer = promptLine("a name: ");
+    fake.emit("end"); // readline folds the input's end into close without ever answering
+    await expect(answer).rejects.toThrow(/cancelled/);
   });
 });

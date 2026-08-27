@@ -29,10 +29,21 @@ export function promptLine(prompt: string): Promise<string> {
       return;
     }
     const rl = createInterface({ input: process.stdin, output: process.stdout });
-    rl.question(prompt, (answer) => {
+    // Ctrl-D closes the interface without ever invoking the question callback, and Ctrl-C is
+    // readline's own SIGINT event — either would leave this promise unsettled, and an unsettled
+    // prompt is a process that exits 0 having done half its work. Both reject instead; `run()`
+    // turns the rejection into exit 1.
+    let settled = false;
+    const finish = (answer?: string): void => {
+      if (settled) return;
+      settled = true;
       rl.close();
-      resolve(answer.trim());
-    });
+      if (answer === undefined) reject(new Error("cancelled"));
+      else resolve(answer.trim());
+    };
+    rl.on("close", () => finish());
+    rl.on("SIGINT", () => finish());
+    rl.question(prompt, (answer) => finish(answer));
   });
 }
 

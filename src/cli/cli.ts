@@ -813,8 +813,9 @@ function stockSelection(chosen: string, io: IO): readonly StockSchema[] | number
 // warning), over the UNION of the selection and with the skip applied to EVERY entry, targets
 // included: rule 7 makes a guided re-run the ordinary skip-if-bound install, where `register`'s
 // own door deliberately re-publishes its target (the evolve path). cmdRegister's dep loop is
-// this loop's sibling; a change to either's report should visit both. No staleness warning here:
-// init precedes serve by construction (§54 rule 4), and the user step voices its own.
+// this loop's sibling; a change to either's report should visit both. The staleness warning at
+// the end is T243's: a fresh init precedes serve by construction (§54 rule 4), but a RE-RUN can
+// land into a home a live server answers from boot-time memory.
 async function installStock(
   home: string,
   selection: readonly StockSchema[],
@@ -904,7 +905,13 @@ async function installStock(
       io.out(`loam: stocked ${entry.name}`);
       for (const warning of outcome.warnings ?? []) io.err(`loam: ${warning}`);
       if (!outcome.bound) {
-        io.err(`loam: the deltas landed, but ${entry.name} does not bind here — ${outcome.reason}`);
+        // Unreachable through this door: a same-lens contender is skipped above, and a rival body
+        // under the same program name makes the substrate throw at publish. If the substrate
+        // learns a new way to persist-without-binding, fail loudly rather than crown a surface
+        // that is not there (H7).
+        throw new Error(
+          `init: stock ${entry.name} landed but does not bind here — ${outcome.reason}`,
+        );
       }
     }
   } catch (err) {
@@ -912,6 +919,8 @@ async function installStock(
     throw err;
   }
   await gateway.close();
+  const staleness = servingWarning(home, path);
+  if (staleness !== undefined) io.err(`loam: ${staleness}`);
   return 0;
 }
 
@@ -976,16 +985,22 @@ async function cmdInitGuided(parsed: Parsed, io: IO, options: RunOptions): Promi
   let filePassword: string | undefined;
   if (!skipUser && passwordPath !== undefined) {
     try {
-      // One trailing newline (or several) is how editors and `echo` leave a file; inside the
-      // password proper a newline cannot be typed at a login form, so stripping the tail is
-      // tolerance, not truncation.
-      filePassword = readFileSync(passwordPath, "utf8").replace(/(?:\r?\n)+$/, "");
+      // A trailing newline — or a lone \r — is how editors, `echo`, and Windows leave a file; no
+      // login form can type either, so stripping the tail is tolerance, not truncation.
+      filePassword = readFileSync(passwordPath, "utf8").replace(/[\r\n]+$/, "");
     } catch (err) {
       io.err(
         `init: cannot read --password-file ${passwordPath}: ` +
           `${err instanceof Error ? err.message : String(err)}. Nothing was done.`,
       );
       return 1;
+    }
+    if (filePassword.trim().length === 0) {
+      io.err(
+        `init: --password-file ${passwordPath} holds no password (empty, or whitespace only) — ` +
+          `a password that looks blank cannot be retyped at a login form. Nothing was done.`,
+      );
+      return 2;
     }
   }
 
