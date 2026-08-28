@@ -19,31 +19,5 @@
     "Remove entries once the rename that consumed them has merged; a spent entry is inert",
     "(the substitution no longer produces the base) but tidiness keeps this file reviewable."
   ],
-  "renames": [
-    {
-      "from": "    expect((await pool.gateway.serveRoute(\"quick\", FERN, \"full\")).body).toContain(",
-      "to": "    WIDENBILL expect((await pool.gateway.serveRoute(\"quick\", FERN, \"full\")).body).toContain(",
-      "files": ["test/gateway/render-ocap.test.ts"],
-      "authorized": "PENDING MYK - a branch cannot self-authorize; merging this entry IS the authorization (re-expression of #493, which the gate could not read).",
-      "//": "T248, second declaration - #493's entry was multi-line with section marks, which the gate's own shape guard refuses to read (one line, printable ASCII, 120 chars); Myk authorized the edit there and this re-expresses it in the grammar the gate enforces. The edit: the T172 rail's two-sided serve asserted a pool render completes under a declared 100ms bill, but the pool charges worker SPAWN to that bill by design, so a loaded host refuses while the code keeps its promise (observed: windows CI run 33137867176 on a JSON-only diff, and one loaded local full check 2026-08-27). Four chained pairs prepend three statements to the serve, re-expanded by prettier: widen the envelope by a later delta, assert the widening took, re-admit under the new bill. Every tight-bill assertion stays byte-identical; nothing is deleted or widened; two assertions are ADDED. Measured: edited test 24/24 x9 under load incl. pinned to 2 cores. REMOVE all four pairs once the edit merges."
-    },
-    {
-      "from": "WIDENBILL",
-      "to": "await gw.append([signClaims(envelopeClaims(ENVELOPE_ANY, { renderTimeoutMs: 10_000 }, OP, 4000), OP_SEED)]); WIDENB2",
-      "files": ["test/gateway/render-ocap.test.ts"],
-      "authorized": "PENDING MYK - a branch cannot self-authorize; merging this entry IS the authorization (re-expression of #493, which the gate could not read)."
-    },
-    {
-      "from": "WIDENB2",
-      "to": "expect(gw.envelopeReports()[0]!.envelope.renderTimeoutMs).toBe(10_000); WIDENB3",
-      "files": ["test/gateway/render-ocap.test.ts"],
-      "authorized": "PENDING MYK - a branch cannot self-authorize; merging this entry IS the authorization (re-expression of #493, which the gate could not read)."
-    },
-    {
-      "from": "WIDENB3",
-      "to": "await pool.gateway.prepareRoute(\"quick\");",
-      "files": ["test/gateway/render-ocap.test.ts"],
-      "authorized": "PENDING MYK - a branch cannot self-authorize; merging this entry IS the authorization (re-expression of #493, which the gate could not read)."
-    }
-  ]
+  "renames": []
 }
