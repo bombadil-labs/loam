@@ -25,6 +25,9 @@ const OUT = join(root, "src", "server", "docs-content.ts");
 
 // One line per SERVED topic, shown by `loam_docs` with no arguments and by `resources/list`.
 const SUMMARIES = {
+  "quick-start":
+    "From nothing to a store Claude can reach: install, the guided init, the tailscale funnel, " +
+    "and the MCP connection — every loam command transcribed from the shipped code.",
   "register-grammar":
     "The registration envelope, the term algebra, predicates, mask policies, the resolution " +
     "policy language, and refs/edges — transcribed from the parsers, not paraphrased.",
@@ -52,6 +55,15 @@ export async function generate() {
   for (const file of files) {
     const topic = file.slice(0, -".md".length);
     if (INTERNAL.has(topic)) continue;
+    // A topic is also a lookup key and a resource-uri segment, so its alphabet is the guard:
+    // lowercase slug only, or the uri and the listing would disagree about one name (T247's
+    // named latent case, owed at the second doc — this is the second doc).
+    if (!/^[a-z0-9-]+$/.test(topic)) {
+      throw new Error(
+        `build-docs: docs/${file} would mint topic "${topic}" — a topic is [a-z0-9-]+ only, ` +
+          `because it rides a resource uri verbatim; rename the file`,
+      );
+    }
     const summary = SUMMARIES[topic];
     if (summary === undefined) {
       throw new Error(
