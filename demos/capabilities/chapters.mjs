@@ -1776,4 +1776,109 @@ export const CHAPTERS = [
       },
     ],
   },
+  {
+    n: 19,
+    slug: "the-shelf-declares-its-references",
+    title: "The shelf declares its references",
+    thesis:
+      "Every reference on the stock shelf is a typed edge - link and unlink derived from the " +
+      "lens, no primitive argument left to teach the fossil, and legacy data resolving beside " +
+      "the new edges on both sides.",
+    covers: ["spec/52-stock-refs.md"],
+    body: [
+      {
+        kind: "claims",
+        claims: [
+          {
+            says:
+              "org.members, event.attending, and person.follows serve typed link/unlink pairs " +
+              "and offer no primitive argument; the section-14 generic verb authorizes a refs " +
+              "field only when the declared role agrees with the role it would mint.",
+            spec: "spec/52-stock-refs.md",
+            proof: "test/cli/stock-refs.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "Legacy primitive values written before the retrofit keep resolving in the mixed " +
+              "array beside nested views, and section-14-written member edges keep resolving " +
+              "through the unchanged role.",
+            spec: "spec/52-stock-refs.md",
+            proof: "test/cli/stock-refs.test.ts",
+            door: null,
+          },
+        ],
+      },
+    ],
+  },
+  {
+    n: 20,
+    slug: "the-manual-in-the-door",
+    title: "The manual in the door",
+    thesis:
+      "The store serves its own documentation, compiled from the deployed build, and the " +
+      "refusal that needs it points at it - an agent that guesses a term op is one call from " +
+      "the grammar.",
+    covers: ["spec/53-loam-docs.md"],
+    body: [
+      {
+        kind: "claims",
+        claims: [
+          {
+            says:
+              "loam_docs lists topics and serves compiled markdown that versions with the " +
+              "build; the unknown-term-op refusal - and only that family - carries the pointer " +
+              "to it.",
+            spec: "spec/53-loam-docs.md",
+            proof: "test/server/loam-docs.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "The served grammar is probed against the live parser in both directions: a " +
+              "phantom op in the doc and a real op missing from the doc each redden the build.",
+            spec: "spec/53-loam-docs.md",
+            proof: "test/server/loam-docs.test.ts",
+            door: null,
+          },
+        ],
+      },
+    ],
+  },
+  {
+    n: 21,
+    slug: "one-command-to-a-living-store",
+    title: "One command to a living store",
+    thesis:
+      "loam init finishes the job: an identity, a user whose name is never invented, a stocked " +
+      "shelf, and the printed next step - while a flagless pipe keeps yesterday's bare init " +
+      "byte-for-byte.",
+    covers: ["spec/54-guided-init.md"],
+    body: [
+      {
+        kind: "claims",
+        claims: [
+          {
+            says:
+              "A guided init - TTY or any guided flag - creates the operator, the named user, " +
+              "and the selected shelf in one run, and a flagless non-TTY init is byte-identical " +
+              "to the bare init that two hundred existing rails call.",
+            spec: "spec/54-guided-init.md",
+            proof: "test/cli/guided-init.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "The flow keeps its word under interruption: every refusal before the home exists " +
+              "leaves the directory untouched, a cancelled prompt exits as cancelled rather " +
+              "than succeeding, and a guided re-run against a served home draws the staleness " +
+              "warning every writing verb prints.",
+            spec: "spec/54-guided-init.md",
+            proof: "test/cli/guided-init.test.ts",
+            door: null,
+          },
+        ],
+      },
+    ],
+  },
 ];

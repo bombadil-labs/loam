@@ -1,4 +1,12 @@
 {
+  "_adlcArchive": {
+    "archivedAt": "2026-08-27T22:16:25.734Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "348ebd07c1dd7f58fa5ff04a321bc1beabe80001be4b2b82340e0728f7c077e9",
+    "ticketHash": "727ace7bfb9dc1939a420dcc7b31e08c74a397c0a8383083e8e552160e4dd8bc",
+    "version": 1
+  },
   "body": "A cold MCP agent's entire documentation is the introspected surface plus the tool descriptions, and the register grammar (terms, predicates, orders, policies, refs) cannot ride a description - it is ~10KB and descriptions tax every session's context. The measured cost: a live connector agent burned a session guessing term ops that were never guessable.\n\nBuild:\n1. A read-only MCP tool loam_docs: no args returns the topic list with one-line summaries; topic: <name> returns the full markdown. Content compiles into the package from docs/*.md at build time, so docs version with the deployed code and cannot drift from it. Seed topic: register-grammar (source content at /tmp/claude-1000/-home-mykola-bombadil-labs-loam/f4da344d-ab2f-4efd-a988-8412f5c29d11/scratchpad/register-grammar.md, moved into docs/ - includes the new section 9 on refs/edges; scrub the operational tail about asking the operator to bounce, which predates T243).\n2. The register door's term-parse refusal wraps rhizomatic's error with the pointer: unknown term op X - call loam_docs(topic: \"register-grammar\"). Loam-side wrap only; rhizomatic is frozen.\n3. The initialize instructions string gains one sentence naming loam_docs.\n4. Advertise the same topics as MCP resources (capabilities.resources, resources/list + resources/read) for clients that surface them - same compiled source, no second copy.\n\nAnti-drift rail: the doc's op list is asserted against reality - every op the doc names parses (a registration body using it is accepted or refused for a DIFFERENT reason), and every op in the section-3 list appears in the doc. A doc that names a phantom op or omits a real one goes red.\n\nAcceptance criteria: working spec at .adlc/specs/53-loam-docs.md, each criterion naming its rail.\n\nHorizon, not this ticket: docs as deltas in the store itself (the tutorial-glossary pattern grown up) - bootstrap problem today, noted for the future.\n\nMerge tier: new MCP tool - Myk merges. He ordered it front-of-line.",
   "category": "feature",
   "duration": 2,
