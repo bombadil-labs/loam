@@ -1,4 +1,12 @@
 {
+  "_adlcArchive": {
+    "archivedAt": "2026-08-28T18:56:49.394Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "d2e6bc5174c3d29ae56063800fdc89c995086ca1309c2699cbae991a52802e99",
+    "ticketHash": "67eef49ca2a3971d16d6f8d204d72b7b553fe6ef31dcb681269a90aea955e7c3",
+    "version": 1
+  },
   "body": "T174 made registration grantable: a connection may hold register standing scoped to a name prefix (loam grant <client_id> --verb=register --prefix=<ns>:). The MCP tool description still says '(operator token only)'. On 2026-08-25 that sentence misled a live connector agent into reporting the grant path impossible - it read the stale description plus the terse refusal as consistent old behavior.\n\nThe REFUSAL string is deliberately NOT the fix. test/server/register-verb.test.ts freezes it byte-for-byte, with the rationale in the rail: every denied caller - tokenless stranger or out-of-fence grantee - reads the identical sentence, so a probe cannot learn whether grants exist here. The teaching belongs in the description, which an MCP client reads BEFORE calling.\n\nBuild: rewrite the loam_register description to name both standings (operator; granted namespace), the grant recipe, the namespace rule (the program name and the reading name both sit under the prefix), and the resolver refusal (code never rides a scoped registration). Nothing else changes.\n\nAcceptance criteria:\n(a) tools/list serves a loam_register description that names the grant verb and the prefix rule, and no longer says operator-only. Verify: test/server/http.test.ts (new assertion; the file is unfrozen).\n(b) The refusal constant and every register-verb rail stay byte-identical. Verify: rails-guard-ci clean; test/server/register-verb.test.ts untouched.\n\nMerge tier: a report made more honest - self-merge.",
   "category": "bug",
   "duration": 1,
