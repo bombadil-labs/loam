@@ -244,7 +244,7 @@ const CORS = { "access-control-allow-origin": "*" } as const;
 // is a report that can be false (H7), and no later exchange could catch it.
 export const MCP_PROTOCOLS: readonly string[] = ["2025-06-18", "2025-03-26"];
 export const MCP_CAPABILITIES = { tools: {}, resources: {} } as const;
-export const MCP_SERVER_INFO = { name: "loam", version: "0.3.0" } as const;
+export const MCP_SERVER_INFO = { name: "loam", version: "0.4.0" } as const;
 // The guidance both `initialize` and `server/discover` hand a client — ONE string, same as the
 // constants above: two copies would be free to drift, and a client reads whichever method it
 // spoke first. Every `loam_*` name here must be a tool `tools/list` returns (a frozen rail holds
