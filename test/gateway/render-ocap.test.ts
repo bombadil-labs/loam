@@ -667,19 +667,13 @@ describe("T172 — the confinement composes with the budget, and a good renderer
       consumes: ["height"],
       bundle: OK,
     });
-    // The serve below runs under a WIDENED envelope, appended as a delta (a widening is a delta,
-    // not a restart). §24.5 charges worker SPAWN to the pool's declared clock — the envelope is the
-    // pool's whole bill — so a serve asserted under the tight 100ms bill races host scheduling: on
-    // a loaded box spawn alone overruns it and the pool refuses while keeping its promise. The
-    // admission assertions above stay on the tight ceiling, where the clock bounds the module body
-    // and spawn keeps §23.9's host-sized window; only the render needs a bill the host can meet.
+    // `toContain`, not `toBe`: a pool's 200 is wrapped in §24.7's probation chrome, which is a
+    // different promise and belongs to its own rails.
     await gw.append([
       signClaims(envelopeClaims(ENVELOPE_ANY, { renderTimeoutMs: 10_000 }, OP, 4000), OP_SEED),
     ]);
     expect(gw.envelopeReports()[0]!.envelope.renderTimeoutMs).toBe(10_000);
     await pool.gateway.prepareRoute("quick");
-    // `toContain`, not `toBe`: a pool's 200 is wrapped in §24.7's probation chrome, which is a
-    // different promise and belongs to its own rails.
     expect((await pool.gateway.serveRoute("quick", FERN, "full")).body).toContain(
       "<p>height: 42</p>",
     );
