@@ -1,8 +1,8 @@
 # §49 — Legibility: the store that stays on top of itself
 
-**Working spec (P1 instrument). DESIGN-STAGE: this is the strawman for Myk's precise-detail
-session (T212's gate). Nothing here builds before that conversation.** Realizes T212 when
-settled.
+**Working spec (P1 instrument). SETTLED: Myk held the design session in chat on 2026-08-28,
+accepted all five positions as drafted, and answered every open question — the rulings are
+recorded in place below.** Realizes T212.
 
 ## The problem, in Myk's words
 
@@ -38,7 +38,7 @@ consequence.
 A future operator asks "what happened here in March?" and the answer is a reading — the same
 machinery as everything else — not an archaeology project.
 
-## Strawman positions (for the session to accept, bend, or kill)
+## Positions — ACCEPTED as drafted (Myk, 2026-08-28)
 
 1. **The pulse law (write-side).** Adopt as Loam doctrine what Kyber's D5 states and T207
    already practices: *a pulse is not a fact*. Anything periodic — polls, heartbeats, health
@@ -48,7 +48,8 @@ machinery as everything else — not an archaeology project.
    answers to it at review.
 2. **The since-last-looked reading (read-side).** A per-reader attention surface needs exactly
    one new claim kind: `loam.looked` — a reader's own record that they looked at a container
-   at a moment, superseded in place (one row per reader per container, obeying position 1).
+   at a moment, superseded in place (one row per USER per container — settled question 1 —
+   obeying position 1).
    Everything else is a READING over existing deltas: claims since the looked-moment, grouped
    by author and by consequence class (data / law / trust / erasure), counted not listed,
    with the list one click deeper. No digests are ever written; a digest that is data is soup
@@ -76,16 +77,16 @@ server-side digest generation. Every mechanism above is either a standing record
 in place or a reading over deltas that already exist. Legibility is a lens problem; the
 moment it becomes a storage mutation it inherits erasure's entire burden.
 
-## Acceptance criteria (drafted for the session; they harden after it)
+## Acceptance criteria (hardened at the 2026-08-28 session)
 
 1. THE PULSE LAW. Every periodic writer in the tree either supersedes in place or writes
    nothing on a no-op cycle — verified by an audit case per periodic surface (channel sync,
    any future cron-shaped writer) in their own suites, plus the doctrine sentence landing in
    CLAUDE.md's standing rules.
-2. SINCE-LAST-LOOKED. Recording a look supersedes the reader's prior look for that container;
+2. SINCE-LAST-LOOKED. Recording a look supersedes the user's prior look for that container;
    the summary over a fixture with data, law, trust, and erasure claims groups and counts by
-   class and author; a second reader's looks do not disturb the first's — verified by
-   `test/gateway/attention.test.ts`.
+   class and author; a second user's looks do not disturb the first's, and two keys of ONE
+   user share one looked-moment — verified by `test/gateway/attention.test.ts`.
 3. THE DASHBOARD. The first screen renders the summary; a quiet container collapses; a trust
    claim renders loud — verified by `test/server/admin-attention.test.ts` with the session
    fixture.
@@ -94,14 +95,17 @@ moment it becomes a storage mutation it inherits erasure's entire burden.
 5. THE SOUP METER. A fixture with a metronomic writer is named by the meter; an organic
    writer is not (two-sided) — verified by `test/gateway/soup-meter.test.ts`.
 
-## Open questions for the session (each with a lean)
+## Open questions — SETTLED (Myk, 2026-08-28, in chat)
 
-1. Is `loam.looked` per-user or per-reader-key? Lean: per-user (the admin page's session
-   user), since attention is a person's, not a credential's.
-2. Does the attention surface reach the CLI (`loam status`?) in v1 or admin-page-only? Lean:
-   admin-page-only first; the CLI reads the same reading later.
-3. Should the soup meter's pulse-law heuristic ever gate anything? Lean: never — reports
-   only, tickets follow.
+1. `loam.looked` is PER-USER (the admin page's session user). Attention is a person's, not a
+   credential's: two devices share one unread state, and a connector's looks never clear a
+   human's. Criterion 2 carries the two-keys-one-user rail.
+2. The attention surface is ADMIN-PAGE-ONLY in v1. The CLI reads the same reading later as a
+   fast-follow ticket; no design change is needed to add it.
+3. The soup meter NEVER gates. A heuristic that blocks writes will one day block a true fact.
+   The meter names the writer; a ticket follows; a human decides. The refusals section stands
+   verbatim.
 
 **Provenance.** Drafted 2026-08-25 from T212 (Myk's framing, held verbatim), Kyber's D5, and
-T207's attest-only-non-empty precedent, for the design session T212 gates on.
+T207's attest-only-non-empty precedent. Settled 2026-08-28: Myk accepted all five positions
+and answered the three open questions in the design session held in chat (PR #468).
