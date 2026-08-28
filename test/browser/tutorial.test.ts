@@ -28,8 +28,14 @@
 //   that it was visible at that moment. A visibility test would refuse every step whose evidence
 //   lands in a pane the student is about to open.
 //
-//   THE STUB ARC IS NOT THE CURRICULUM. Coverage of the real fifteen lessons lands with T227,
-//   which extends the headless file; this one is frozen and must not need editing for it.
+//   THE ARC IS T227'S CURRICULUM NOW, read at COLLECTION from `lessons.mjs` (deterministic:
+//   authors derive from fixed seeds), so the walk registers one case per lesson. Each lesson
+//   meets the per-test clock alone — the whole-arc case was 23s of honest browser work in
+//   isolation and a loaded box stretched it past 90s twice (T248's measurements) — and a new
+//   arc re-derives the cases at collection without an edit here. State carries case to case
+//   BY DESIGN: the walk is still one walk, in order, and a failed lesson fails every lesson
+//   after it, exactly as the single case did. The drift guard pins the page's arc to the
+//   registered one, so the two can never diverge silently.
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Browser } from "./cdp.js";
@@ -41,6 +47,8 @@ import {
   type ArcLesson,
   type SiteHandle,
 } from "./tutorial-driver.js";
+import * as loam from "../../src/browser/index.js";
+import { buildArc } from "../../demos/tutorial/lessons.mjs";
 
 vi.setConfig({ testTimeout: 90_000, hookTimeout: 90_000 });
 
@@ -95,18 +103,25 @@ async function playUntil(role: string): Promise<{ arc: ArcLesson[]; target: ArcL
 }
 
 describe("§48 — one step at a time, and every step observed twice", () => {
-  it("renders exactly one pending step, banks it only when BOTH observables hold, and greens the lesson", async () => {
+  const REGISTERED_ARC = buildArc(loam);
+
+  it("the arc opens at its beginning, and the page's arc is the module's", async () => {
     await page.reset();
     const arc = await page.arc();
     expect(arc.length).toBeGreaterThanOrEqual(2);
-
     // The arc names its own beginning: `opening` is a role T227 must keep, so it is read here
     // rather than left as decoration nothing checks.
     expect(arc[0]!.role, "the arc's first lesson does not declare the opening role").toBe(
       "opening",
     );
+    // The drift guard: the per-lesson cases below walk REGISTERED_ARC, so the page must be
+    // playing exactly it — ids and roles both, or the split would assert against a phantom.
+    expect(arc.map((l) => l.id)).toEqual(REGISTERED_ARC.map((l) => l.id));
+    expect(arc.map((l) => l.role)).toEqual(REGISTERED_ARC.map((l) => l.role));
+  });
 
-    for (const lesson of arc) {
+  for (const [at, lesson] of REGISTERED_ARC.entries()) {
+    it(`lesson ${at + 1} of ${REGISTERED_ARC.length}: one pending step, banked only when BOTH observables hold`, async () => {
       expect((await page.position()).lesson, `the page is not on lesson ${lesson.id}`).toBe(
         lesson.id,
       );
@@ -152,11 +167,13 @@ describe("§48 — one step at a time, and every step observed twice", () => {
 
       // A green lesson takes its checkpoint at the boundary, before the student moves on.
       expect(await page.checkpointLessons()).toContain(lesson.id);
-      if (lesson.quiz !== null) expect(await page.exists("#quiz-card")).toBe(true);
-      if (lesson.quiz !== null) await page.click("#quiz-skip");
+      // Truthiness, not !== null: the module leaves a quiz-less lesson undefined, and the
+      // page's own projection is what normalizes that to null.
+      if (lesson.quiz) expect(await page.exists("#quiz-card")).toBe(true);
+      if (lesson.quiz) await page.click("#quiz-skip");
       if (await page.exists("[data-next-lesson]")) await page.click("[data-next-lesson]");
-    }
-  });
+    });
+  }
 
   it("the red probe: a step whose work is neutralized refuses to bank, naming its lesson and step", async () => {
     await page.reset();
