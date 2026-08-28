@@ -1,0 +1,7 @@
+{
+  "body": "From src/gateway/render-worker.ts's own residuals header, promoted to a ticket at the moment\nthe capabilities book stopped calling the whole sandbox unbuilt (T172 archived): the pool's\ndeclared maxMemoryMb translates into worker resourceLimits, which cap the V8 HEAP and only\nthat. An ArrayBuffer's backing store is allocated outside the heap, so a bundle reaches\nwhatever the host has - measured before T172: a body allocating 600MB under a declared 128MB\nceiling ran to completion and took the host's RSS from 45MB to 665MB. The pool therefore\nprints a ceiling it does not fully enforce.\n\nA real bound needs an rlimit or a cgroup around a process, or a periodic sample of the\nworker's own usage. Choosing among those is a design decision - this widens what SPEC sections\n23.9/24.5 promise, so the landing is Myk's merge.\n\nAcceptance criteria:\n- (a) A bundle allocating far past the declared ceiling via ArrayBuffer backing stores is\n  stopped or the render refused, two-sided with a within-ceiling bundle that completes.\n  Verify: test/gateway/render-memory-bound.test.ts.\n- (b) The envelope report never states a ceiling the mechanism cannot enforce - either the\n  bound is real or the report names the soft half explicitly. Verify: the same suite, at the\n  report level.",
+  "category": "bug",
+  "id": "T252",
+  "status": "todo",
+  "title": "The pool's declared memory ceiling bounds the V8 heap, not the appetite"
+}

@@ -896,7 +896,7 @@ export const CHAPTERS = [
       {
         kind: "notYet",
         items: [
-          "Confining a quarantined program from the filesystem and the network is the deeper half of the sandbox and is unbuilt (T172); today the code is bounded but trusted not to reach.",
+          "A quarantined program now runs in a confined realm: the module gate refuses every import that is not a data: URL, and the global scrub deletes every authority-bearing name before a bundle byte evaluates. What stays soft is memory - the declared ceiling caps the V8 heap, and an ArrayBuffer's backing store lives outside it, so a hungry bundle still reaches the host's RAM (T252).",
           "A quarantine sees all the facts it was seeded with — narrowing what it may read is a future design, not a knob.",
           "Sharing only what a peer does not already hold, by chunking a frozen region into a verifiable tree, is designed and deferred (T76); a frozen address today is a flat hash over the whole member set.",
           "Depending on modules that depend on modules — version ranges, a solver, a resolved graph — is named and deferred. A single minimum floor is what exists.",
