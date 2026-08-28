@@ -11,8 +11,10 @@
 //
 // AND THERE IS NO GENERAL ESCAPE HATCH. The installed `@adlc/rails-guard` reads no environment
 // override at all (`ADLC_RAILS_BYPASS` lives in `@adlc/build-gate`, a different gate), and this
-// wrapper adds none. What it adds instead is ONE narrow, mechanical exemption (Myk, 2026-07-26):
-// an AUTHORIZED VOCABULARY RENAME. When the language retires a word that frozen rails quote — the
+// wrapper adds none. What it adds instead is TWO narrow, mechanical exemptions, each declared on
+// the base and each spent at its merge: an AUTHORIZED VOCABULARY RENAME (Myk, 2026-07-26) and an
+// AUTHORIZED WHOLE-FILE REVISION (Myk, 2026-08-28 — the pair grammar cannot express a structural
+// split, and the hash-named revision is the same two-PR discipline at file grain). When the language retires a word that frozen rails quote — the
 // posture rename was the motivating case — the substitution is declared in
 // `scripts/rail-renames.json`, and a frozen-rail edit is exempt iff base + the declared
 // substitutions is byte-identical to the branch's file (directly, or after the repo's own
@@ -190,16 +192,25 @@ let effectiveBase = base;
 if (changed.length > 0) {
   // The declarations, FROM THE BASE TREE. A missing file means no renames are authorized.
   let renames = [];
+  let revisions = [];
   try {
     // stderr piped, not inherited: a repo with no declarations file is the normal state, and
     // git's `fatal:` for it would read as an error in every CI log.
-    renames =
-      JSON.parse(
-        execFileSync("git", ["show", `${base}:scripts/rail-renames.json`], {
-          encoding: "utf8",
-          stdio: ["pipe", "pipe", "pipe"],
-        }),
-      ).renames ?? [];
+    const declared = JSON.parse(
+      execFileSync("git", ["show", `${base}:scripts/rail-renames.json`], {
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "pipe"],
+      }),
+    );
+    renames = declared.renames ?? [];
+    revisions = declared.revisions ?? [];
+    if (!Array.isArray(revisions)) {
+      console.error(
+        `rails-guard-ci: malformed revision list in scripts/rail-renames.json on ${base} ` +
+          `(revisions is not an array) — refusing to guess what is authorized`,
+      );
+      process.exit(1);
+    }
   } catch {
     /* not on base: nothing is authorized, every frozen edit is a plain violation */
   }
@@ -232,6 +243,37 @@ if (changed.length > 0) {
     }
   }
 
+  // The SECOND exemption class (Myk, 2026-08-28): an authorized WHOLE-FILE REVISION, for the
+  // structural evolution a pair cannot express — a split, a reordering, a rewrite. Declared on
+  // the BASE like every authorization, naming the exact file and the sha256 of the intended
+  // branch bytes. The hash is the review surface: the declaring PR commits to bytes that must
+  // already be written, so the human who merges it can read the very content it blesses, and
+  // no other bytes will ever satisfy it.
+  const HEX64 = /^[0-9a-f]{64}$/;
+  for (const r of revisions) {
+    // Null-safe and TYPE-STRICT on purpose: `typeof null.file` throws (a TypeError is exit 1 by
+    // accident, not a refusal by design), and an ARRAY sha256 coerces through a bare regex test
+    // — it fails the strict compare later, but fail-closed-by-accident is one refactor from a
+    // hole, so the guard refuses it here, in words.
+    const ok =
+      r !== null &&
+      typeof r === "object" &&
+      typeof r.file === "string" &&
+      r.file.length > 0 &&
+      typeof r.sha256 === "string" &&
+      HEX64.test(r.sha256) &&
+      typeof r.authorized === "string" &&
+      r.authorized.trim() !== "";
+    if (!ok) {
+      console.error(
+        `rails-guard-ci: malformed revision in scripts/rail-renames.json on ${base} ` +
+          `(file=${JSON.stringify(r?.file)}) — refusing to guess what is authorized`,
+      );
+      process.exit(1);
+    }
+  }
+
+  const { createHash } = await import("node:crypto");
   const { readFileSync, existsSync } = await import("node:fs");
   let prettier = null;
   try {
@@ -242,8 +284,27 @@ if (changed.length > 0) {
 
   const exempt = [];
   for (const file of changed) {
+    if (!existsSync(file)) continue; // deleted: neither a rename nor a revision
+    // Revision first — an exact-bytes match is the strongest claim and needs no base read. A
+    // declared revision whose bytes DON'T match falls through to the pairs, so a stale
+    // declaration cannot shadow a valid rename of the same file.
+    const revision = revisions.find((r) => r.file === file);
+    if (revision !== undefined) {
+      const digest = createHash("sha256").update(readFileSync(file)).digest("hex");
+      if (digest === revision.sha256) {
+        exempt.push(file);
+        console.log(`rails-guard-ci: EXEMPT (authorized revision) ${file}`);
+        console.log(`  the branch's bytes are exactly the declared sha256 ${digest.slice(0, 12)}…`);
+        console.log(`  authorized: ${revision.authorized}`);
+        continue;
+      }
+      console.log(
+        `rails-guard-ci: ${file} carries a revision declaration but the bytes do not match ` +
+          `(declared ${revision.sha256.slice(0, 12)}…, branch ${digest.slice(0, 12)}…)`,
+      );
+    }
     const pairs = renames.filter((r) => !Array.isArray(r.files) || r.files.includes(file));
-    if (pairs.length === 0 || !existsSync(file)) continue; // deleted or undeclared: not a rename
+    if (pairs.length === 0) continue; // undeclared: not a rename
     let baseContent;
     try {
       baseContent = git(["show", `${base}:${file}`]);
@@ -307,11 +368,11 @@ if (changed.length > 0) {
       "-p",
       baseSha,
       "-m",
-      "rails-guard-ci: synthetic base carrying authorized renames",
+      "rails-guard-ci: synthetic base carrying authorized renames and revisions",
     ]).trim();
     console.log(
       `rails-guard-ci: gating against a synthetic base (${effectiveBase.slice(0, 12)}) that ` +
-        `carries the ${exempt.length} authorized rename(s); every other check is unchanged`,
+        `carries the ${exempt.length} authorized exemption(s); every other check is unchanged`,
     );
   }
 }
