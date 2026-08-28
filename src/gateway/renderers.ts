@@ -784,7 +784,9 @@ export function rendererAdmissionBudget(gw: Gateway): RenderWorkerOptions & { ti
 
 // Ensure a route's bundle is ADMITTED (the body of `Gateway.prepareRoute`, SPEC §23) — async, so a
 // renderer binding that arrived by any path (a raw `/append`, a fresh reactor in another process) is
-// runnable before the synchronous serveRoute. Idempotent (keyed by content address). A no-op for an
+// runnable before the synchronous serveRoute. Idempotent per BILL, not per bytes: the admission key
+// is content address PLUS the budget (`keyOf`), so the same bundle must re-admit after an envelope
+// widens or tightens — reading this as content-only makes the call look like a no-op. A no-op for an
 // unknown route, and TOLERANT: a bundle the realm will not admit leaves its route unmounted rather than
 // failing the request that asked for it.
 export async function prepareRouteImpl(
