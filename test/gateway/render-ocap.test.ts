@@ -669,6 +669,11 @@ describe("T172 — the confinement composes with the budget, and a good renderer
     });
     // `toContain`, not `toBe`: a pool's 200 is wrapped in §24.7's probation chrome, which is a
     // different promise and belongs to its own rails.
+    await gw.append([
+      signClaims(envelopeClaims(ENVELOPE_ANY, { renderTimeoutMs: 10_000 }, OP, 4000), OP_SEED),
+    ]);
+    expect(gw.envelopeReports()[0]!.envelope.renderTimeoutMs).toBe(10_000);
+    await pool.gateway.prepareRoute("quick");
     expect((await pool.gateway.serveRoute("quick", FERN, "full")).body).toContain(
       "<p>height: 42</p>",
     );

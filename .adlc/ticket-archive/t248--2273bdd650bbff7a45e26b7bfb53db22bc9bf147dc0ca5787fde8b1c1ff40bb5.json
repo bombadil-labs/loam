@@ -1,4 +1,12 @@
 {
+  "_adlcArchive": {
+    "archivedAt": "2026-08-28T15:31:11.821Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "6630d86cd3ca36599785ce7a83ed8432230e8f3c973b39ea317a49a8ecb652ae",
+    "ticketHash": "ee6380c5bf910bff6cc8716ffc0e7b7946b085545d0fce25db67172819f60cee",
+    "version": 1
+  },
   "body": "During T247's first full check on a loaded worktree, two tests failed once each and were green in isolation and in the final full run:\n- test/browser/tutorial.test.ts - hit its 90s timeout.\n- test/gateway/render-ocap.test.ts - 'the renderer could not start'.\n\nBoth are outside the T247 diff. The flaky rule (CLAUDE.md, Myk 2026-07-23): the moment a test is OBSERVED flaky, fixing it outranks the ticket in hand; measure both directions first (under load and in isolation, on a branch and on main) so blame lands on the test rather than a diff; the fix is never a widened assertion and never a retry loop - determine RAIL bug vs SPEC-ACCURACY bug. This ticket exists so the observation is not lost during a shipping day; triage is due the same day the queue clears.\n\nPrior art: the T139 render-budget flake was a spec-accuracy bug (one number on two clocks - spawn vs bundle); render-ocap's 'could not start' smells like the same family (worker spawn under load). The tutorial timeout may be plain load arithmetic against a 90s ceiling on a machine running parallel builds - measure before concluding.\n\nAcceptance criteria:\n(a) Both tests measured under load and in isolation, on main; the failure mode named. Verify: measurements quoted in this ticket's closing PR or journal note.\n(b) Each fix is a rail fix or a spec-accuracy fix, never a widened assertion; or an honest it.skip with this ticket id if same-day repair is impossible. Verify: the diff of the closing PR.",
   "category": "bug",
   "duration": 1,
