@@ -1,4 +1,12 @@
 {
+  "_adlcArchive": {
+    "archivedAt": "2026-08-28T18:56:50.819Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "26cae8c15ffa81ccb19881921c9edaa4146b7c24e92345a1fdc14e0f294b4b90",
+    "ticketHash": "91a24f7650b34a7d4f16b06b71957a6be51ed723daeb179611f3310b4f4a68a3",
+    "version": 1
+  },
   "body": "Myk's order, 2026-08-27: a user's manual for the quick start. Cover npm i -g, loam init (the guided flow), how tailscale must be configured for the store to be reachable, and how to create the MCP connection in claude.ai.\n\nBuild: docs/quick-start.md, the second loam_docs topic - it rides the T247 machinery (SUMMARIES entry, compiled at build, served by the tool and as a resource). Every loam command transcribed from the code, not from memory: the guided init's printed next step, serve's token requirement, the default port, the two connector flags (--public-url, --oauth-allow-redirect). The tailscale section teaches the standard funnel recipe and says plainly which parts are the reader's platform to verify. Also: the second doc triggers T247's named latent guard - build-docs.mjs gains the topic-character guard (a topic is [a-z0-9-]+, refused otherwise) the lens said was owed when a second doc arrived.\n\nAcceptance criteria:\n(a) loam_docs with no args lists quick-start with its summary; the topic serves markdown containing the install command, the funnel command, and the connector URL shape. Verify: test/server/docs-quick-start.test.ts (new file - the T247 rail is frozen).\n(b) The topic-character guard refuses a doc whose filename would mint a topic outside [a-z0-9-]+, red-proven; both live topics pass. Verify: same file.\n(c) The served bytes match docs/quick-start.md and the resource serves the same bytes (parity, the T247 pattern). Verify: same file.\n\nMerge tier: docs + one build guard - rides the T249 stack; Myk merges the stack.",
   "category": "feature",
   "duration": 1,

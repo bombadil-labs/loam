@@ -1,4 +1,12 @@
 {
+  "_adlcArchive": {
+    "archivedAt": "2026-08-28T18:56:45.315Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "bcae9a9fbbf8c61c341b2f8a988c6b13ebc6263dc0c2c7f9a36a729c22a3b26e",
+    "ticketHash": "38dc5d3d7177b96ee1039a99c1aabd10e2dc090ec114f45b3e01702563fc31c9",
+    "version": 1
+  },
   "body": "The gap the capabilities book has admitted since the quarantine chapter was written, given its own\nshard because the ticket it used to cite (T35) landed a DIFFERENT §24.7 slice -- the sequestered\nframe -- and is archived. The admission must cite an open ticket, and this is it.\n\nWHAT EXISTS. render-worker.ts runs a bundle in a worker_threads Worker: a hard wall clock (split\nspawn/render since T139), resourceLimits on memory, every failure folded to a clean refusal. Its\nown header states the honest scope: a Worker bounds the HANG, the crash and the memory. It is NOT\nobject-capability isolation -- a worker can still import('node:fs') or open a socket.\n\nWHAT THIS TICKET IS. The deeper half: a quarantined renderer that cannot reach the filesystem or\nthe network at all. Candidate mechanisms the render-worker header already names: SES-in-worker, or\nisolated-vm. Each has a real cost (startup, memory, native dependency) that must be measured\nagainst the per-render spawn budget T139 just fought for -- an isolation layer that costs 500ms of\nspawn re-creates the flake the split closed.\n\nRAILS, two-sided like every reach rail: a bundle that imports node:fs or dials out is refused or\nfinds nothing, AND the ordinary OK bundle still renders inside its budgets on both platforms.\n\nUNTIL IT LANDS the book's admission stays, citing this id: the code is bounded but trusted not to\nreach.\n",
   "edges": [],
   "id": "T172",

@@ -1,4 +1,12 @@
 {
+  "_adlcArchive": {
+    "archivedAt": "2026-08-28T18:56:50.328Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "177f4e58a8145c91b6c471ea2292a4abf3594a975af3c43775153ae7f6b3263e",
+    "ticketHash": "1e289b839af839acc78965d742637a3911947365473fb89255e6b2938deba73a",
+    "version": 1
+  },
   "body": "T103(a) built the honest sentence: a CLI verb that writes into a served home warns on stderr that the running server answers from boot-time memory and will not see what just landed until it restarts. Five writers carry it - register, pull, user create, pen, erase. loam grant (mint and revoke) writes ground deltas the same way and was left silent.\n\nMeasured cost, 2026-08-25: a register grant minted under a live server drew the constitutional refusal until a restart nobody knew was owed. The connector agent burned three probes triangulating a guard that was working correctly against a store that had not heard the news. The revoke direction is worse: a struck grant keeps HONORING on the live server - an operator who revoked believes standing is gone while the fence keeps admitting it.\n\nBuild: cmdGrantMint and cmdGrantRevoke print servingWarning after their write, exactly as the five siblings do. Never a refusal; the write still lands, exit 0.\n\nAcceptance criteria:\n(a) A mint beside a live-pid serving record lands AND warns; with no record, and beside a provably dead pid, the earned silences stay silent. Verify: test/cli/grant-serving-warning.test.ts (new file; the T103(a) rail is frozen and untouched).\n(b) A revoke beside a live-pid serving record warns the same way. Verify: same file.\n\nHorizon, not this ticket: grants minted through a door would bind live with no restart - that direction belongs with T230/T196 (where a credential lives).\n\nMerge tier: a report made more honest - self-merge.",
   "category": "bug",
   "duration": 1,

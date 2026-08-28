@@ -1,4 +1,12 @@
 {
+  "_adlcArchive": {
+    "archivedAt": "2026-08-28T18:56:48.985Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "b8d89a1c1758b7870f0fbdaeec1f126233a4191db3d97aa6bd66e0869c0b0855",
+    "ticketHash": "87b439a99c046cf3495d17708234795d9604388cede95abbc2c0a4e363f16f53",
+    "version": 1
+  },
   "body": "Found by T217's review (2026-08-25): a caller holding a channel handle from before a sever\ncan call setChannel/sync-stamp paths after the drop, and the stamp writes a fresh operator-\nsigned channel record — the severed channel reappears in channelStatus with no pool behind\nit. The drop's negation covered the OLD record; the re-stamp mints a new one.\n\nBuild: stamping refuses when the channel's record lineage is severed (the drop's negation\nstands and no open has re-created the channel) — the refusal names the sever and the re-open\npath. Rails: sever, then drive the stale handle's stamp — refused, channelStatus stays empty\n(two-sided: a live channel's stamp still lands).\n\nAcceptance criteria:\n(a) A post-sever stamp through a stale handle refuses, naming the sever; channelStatus and\n    channelsEver agree the channel is severed. Verify: new test in\n    test/federation/curse-authority.test.ts or its own file.\n(b) `loam federate open` after a sever still creates a fresh channel cleanly (the legitimate\n    re-open is untouched). Verify: same file.\n\nMerge tier: repair. Self-merge on the ordinary bar.",
   "category": "bug",
   "duration": 1,
