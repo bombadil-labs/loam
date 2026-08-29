@@ -159,6 +159,32 @@ describe("§55(a) — a parent's inbox pools are physical ELSEWHERE, named by po
   });
 });
 
+describe("§55(b) — the two levels: ground buckets count strikes, lit/dark counts survivors", () => {
+  it("a struck stray stops alarming: not dark, not lit; its strike counts vocabulary; the ground count keeps both", async () => {
+    const { gw, ts } = await store();
+    const stray = strayClaim(2100);
+    await gw.append([stray]);
+    // Ada retracts her own stray: the strike rides the same membership (authoredBy ada).
+    await gw.append([
+      signClaims(
+        {
+          timestamp: ts(),
+          author: ADA,
+          pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: stray.id } } }],
+        } as never,
+        ADA_SEED,
+      ),
+    ]);
+    const census = containerCensusImpl(gw, "garden");
+    // Ground level: both bytes are members — the claim and its strike.
+    expect(census.linked).toBe(2);
+    // Reading level: the struck stray alarms nobody, and the strike is bookkeeping, not soup.
+    expect(census.dark).toBe(0);
+    expect(census.lit).toBe(0);
+    expect(census.vocabulary).toBe(1);
+  });
+});
+
 describe("§55(b) — dark is decided by the surviving-lens context union, two-sided", () => {
   it("a lit member is not dark; a member no lens reads is dark", async () => {
     const { gw } = await store();
@@ -196,6 +222,50 @@ describe("§55(b) — dark is decided by the surviving-lens context union, two-s
     expect(census.dark).toBe(0);
   });
 
+  it("two COEXISTING lens names over one program both keep their contexts in the union", async () => {
+    const { gw } = await store();
+    gw.register(PLANT, PLANT_POLICY, [FERN]);
+    const bound = gw.registered[gw.registered.length - 1]!;
+    // Two NAMED sibling lenses over the SAME hyperschema — the at-rest shape the registration
+    // door mints one-per-schema-name (fabricated pure: the in-process register refuses a
+    // duplicate materialization). The grouping keys lenses by LENS name, so both survive side
+    // by side; a dedup keyed by PROGRAM name would collapse them and the losing sibling's
+    // whole readership would count dark — the H6 substitution this rail exists to see (the
+    // unnamed-schema supersession fixture below shares both names and cannot).
+    const tall = {
+      ...bound,
+      lensName: "Tall",
+      schema: { name: "Tall", props: new Map([["height", pickLatest]]), default: pickLatest },
+    };
+    const tagged = {
+      ...bound,
+      lensName: "Tagged",
+      schema: { name: "Tagged", props: new Map([["tag", pickLatest]]), default: pickLatest },
+    };
+    const union = survivingContextsOf([tall, tagged]);
+    expect(union.has("height")).toBe(true);
+    expect(union.has("tag"), "a coexisting sibling lens lost its contexts").toBe(true);
+  });
+
+  it("the union spans EVERY program: two lenses over two hyperschemas both light their members", async () => {
+    const { gw } = await store();
+    gw.register(PLANT, PLANT_POLICY, [FERN]);
+    // A second PROGRAM (its own hyperschema name, its own body instance), reading `weight`:
+    // a union that read only the last program would leave `height` dark and OVER-ALARM —
+    // the one direction the metric forbids.
+    gw.register(
+      { name: "Scale", alg: 1, body: structuredClone(PLANT.body) },
+      { name: "Scale", props: new Map([["weight", pickLatest]]), default: pickLatest },
+      ["scale:kitchen"],
+    );
+    await gw.append([litClaim(2000)]); // height — PLANT's program
+    await gw.append([observed("scale:kitchen", "weight", 7, 2100, ADA_SEED)]); // Scale's program
+
+    const census = containerCensusImpl(gw, "garden");
+    expect(census.lit).toBe(2);
+    expect(census.dark).toBe(0);
+  });
+
   it("a SUPERSEDED binding's contexts light nothing: the union reads the grouping, not the flat list", async () => {
     const { gw } = await store();
     gw.register(PLANT, PLANT_POLICY, [FERN]);
@@ -208,7 +278,7 @@ describe("§55(b) — dark is decided by the surviving-lens context union, two-s
       ...bound,
       schema: { props: new Map([["girth", pickLatest]]), default: pickLatest },
     };
-    const union = survivingContextsOf([bound, evolved as typeof bound]);
+    const union = survivingContextsOf([bound, evolved]);
     expect(union.has("girth")).toBe(true);
     expect(union.has("height"), "a superseded binding's context survived the union").toBe(false);
   });

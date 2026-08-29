@@ -28,15 +28,21 @@ bucket, not darkness.
    gather composes inbox pools reports the pool contributions as physical-elsewhere (named by
    pool), never silently merged. A primary delta selected by two sibling memberships counts in
    each — right per container; only a store-total would dedupe, and v1 draws none.
-2. **Dark is decided by the surviving-lens context union.** The listing door already maintains
+2. **Two levels, deliberately, and labeled.** The physical/linked/elsewhere buckets count the
+   GROUND — every byte the scope composes, struck and striking alike, because "how many deltas
+   are here" asks about bytes. The lit/dark split counts only SURVIVING data members —
+   readability asks what a reader can still see, and a struck stray alarming dark forever
+   would be the over-alarm this metric forbids. Strikes class law and land in the vocabulary
+   bucket.
+3. **Dark is decided by the surviving-lens context union.** The listing door already maintains
    it (`listingContexts` over `groupPrograms` — H6-safe: a superseded binding's contexts light
    nothing). A DATA-class member (the §49 classifier) none of whose entity-pointer contexts
    appears in any surviving program's union is DARK. This is an approximation in the safe
    direction and the surface says so: a Term can filter a delta whose context matches, so true
    darkness is undercounted — an advisory metric must never over-alarm.
-3. **Law is a bucket, not darkness.** Members classing law/trust/erasure are counted apart.
+4. **Law is a bucket, not darkness.** Members classing law/trust/erasure are counted apart.
    A store's constitution is not soup.
-4. **The census renders on the DETAIL page** — the page that already pays the scope read. The
+5. **The census renders on the DETAIL page** — the page that already pays the scope read. The
    dashboard tree stays byte-unchanged: annotating every node eagerly multiplies the attention
    panel's bill (§49.3's stated cost), and the swept-index follow-on is where that becomes
    affordable. Deferred, stated.
@@ -46,14 +52,15 @@ bucket, not darkness.
 1. PHYSICAL VS LINKED. A separate container's residents count physical; a shared container's
    selected members count linked; each census total equals its scope read's member count —
    verified by `test/gateway/container-census.test.ts`.
-2. DARK, TWO-SIDED. A data-class member no surviving lens reads counts dark; a member a
-   registered lens gathers does not; law/trust/erasure members land in the vocabulary bucket,
+2. DARK, TWO-SIDED AND SURVIVING. A surviving data member no surviving lens reads counts
+   dark; a member a registered lens gathers does not; a STRUCK member is neither lit nor dark
+   and its strike counts vocabulary; law/trust/erasure members land in the vocabulary bucket,
    never dark; a SUPERSEDED binding's contexts light nothing — verified by
    `test/gateway/container-census.test.ts`.
 3. THE PAGE. The container detail page renders physical, linked, dark and the vocabulary
    bucket with `data-census-*` markers, and names the dark count's safe-direction
-   approximation in its own words; the dashboard tree markup is byte-unchanged — verified by
-   `test/server/admin-census.test.ts`.
+   approximation in its own words; the dashboard is census-free, asserted as the proxy it is
+   (no data-census markup anywhere on it) — verified by `test/server/admin-census.test.ts`.
 
 ## Open questions
 

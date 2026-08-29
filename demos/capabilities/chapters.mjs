@@ -1951,4 +1951,58 @@ export const CHAPTERS = [
       },
     ],
   },
+  {
+    n: 23,
+    slug: "the-census-of-a-container",
+    title: "The census of a container",
+    thesis:
+      "Three numbers tell you whether a container is a real place, a reading, or a " +
+      "graveyard - and the dark count never alarms over what a reader cannot see anyway.",
+    covers: ["spec/55-container-census.md"],
+    body: [
+      {
+        kind: "claims",
+        claims: [
+          {
+            says:
+              "A separate container's residents count physical and a shared container's " +
+              "selected members count linked; a parent's inbox pools are named apart as " +
+              "physical elsewhere, and a delta the primary holds is always the primary's, " +
+              "however many pools carry a seeded copy.",
+            spec: "spec/55-container-census.md",
+            proof: "test/gateway/container-census.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "The ground buckets count strikes and struck alike, while lit and dark count " +
+              "only surviving data members: a retracted stray alarms nobody, and its strike " +
+              "lands in the vocabulary bucket with the rest of the constitution.",
+            spec: "spec/55-container-census.md",
+            proof: "test/gateway/container-census.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "Dark is decided by the surviving-lens union read from the grouping: a " +
+              "superseded binding's contexts light nothing, two coexisting sibling lenses " +
+              "both keep theirs, every program contributes, and roles light beside contexts " +
+              "so a role-grouped reading's members are never falsely dark.",
+            spec: "spec/55-container-census.md",
+            proof: "test/gateway/container-census.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "The container detail page renders the census above its members with the " +
+              "undercount named in its own words, and the dashboard stays census-free - the " +
+              "numbers live where the scope read is already paid.",
+            spec: "spec/55-container-census.md",
+            proof: "test/server/admin-census.test.ts",
+            door: null,
+          },
+        ],
+      },
+    ],
+  },
 ];

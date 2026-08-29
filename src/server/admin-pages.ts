@@ -670,18 +670,19 @@ ${signOutFormHtml(formToken)}`,
     const elsewhere = census.physicalElsewhere
       .map(
         (c) =>
-          `<li>${c.count} live in <code>${escapeHtml(c.pool)}</code> — physical elsewhere, ` +
+          `<li>${c.count} held in <code>${escapeHtml(c.pool)}</code> — physical elsewhere, ` +
           `composed into this gather.</li>`,
       )
       .join("\n");
     const censusHtml = `<h2>Census.</h2>
 <ul>
 <li data-census-physical="${census.physical}">${census.physical} live HERE, in this container's own store.</li>
-<li data-census-linked="${census.linked}">${census.linked} linked — selected out of the primary by this container's membership.</li>
+<li data-census-linked="${census.linked}">${census.linked} linked — held by the primary and gathered here, by membership or as a composed pool's copy.</li>
 ${elsewhere}
-<li data-census-dark="${census.dark}">${census.dark} dark — data no registered reading can show anyone. An undercount by design:
-a matching context can still be filtered by a reading's own term, and an advisory number must
-never over-alarm.</li>
+<li data-census-dark="${census.dark}">${census.dark} dark — data a reader can still see that no registered reading can show
+anyone. Counted over surviving claims only (a retracted stray alarms nobody), and an
+undercount by design: a matching context can still be filtered by a reading's own term, and an
+advisory number must never over-alarm.</li>
 <li data-census-vocabulary="${census.vocabulary}">${census.vocabulary} vocabulary — law, trust, and erasure records; the store's
 constitution, counted apart and never as soup.</li>
 </ul>`;

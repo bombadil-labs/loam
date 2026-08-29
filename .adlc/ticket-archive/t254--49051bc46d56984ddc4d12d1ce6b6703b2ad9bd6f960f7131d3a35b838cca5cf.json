@@ -1,7 +1,19 @@
 {
+  "_adlcArchive": {
+    "archivedAt": "2026-08-29T06:00:29.851Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "d99414c755ce077351401903f5b0076e99ef062299e3e6eee4a4110cffe11684",
+    "ticketHash": "84ac68dc20276742f9fe96f97902d324d7eeec2f2eeed1375f22787333df6cbd",
+    "version": 1
+  },
   "body": "Myk's ask (2026-08-29, in chat, design settled in the same conversation): the admin page's\ncontainer view should quantify each container like a filesystem - how many deltas live there\nphysically vs how many are linked in by membership, and how many of the data deltas are DARK:\nbelonging to no hyperview, gatherable by no registered lens. Dark is the read-side soup\ndetector, the complement of SPEC 49.5's write-side metronome.\n\nBuild against the working spec at .adlc/specs/55-container-census.md. The mechanism is settled:\nphysical/linked falls out of the posture model (separate and inbox pools hold residents; shared\nmemberships select primary deltas); dark uses the surviving-lens context union the listing door\nalready maintains (listingContexts over groupPrograms - H6-safe against superseded bindings),\nover DATA-class members only (the SPEC 49 classifier), stated as an approximation in the safe\ndirection (context intersection can say possibly-lit for a delta a Term would filter, so true\ndarkness is undercounted - an advisory metric must not over-alarm). The census renders on the\ncontainer DETAIL page, which already pays the scope read; the dashboard tree stays unannotated\nuntil the swept index exists (H8, stated).\n\nMyk's blessing covers plan, implementation, merges, and a release cut, unless a significant\nobstacle appears.\n\nAcceptance criteria:\n- (a) The census reading: a separate container counts its pool residents as physical; a shared\n  container counts its selected members as linked; totals match the scope read. Verify:\n  test/gateway/container-census.test.ts.\n- (b) Dark counting is two-sided and honest: a data-class member whose contexts no surviving\n  lens reads is counted dark; a member a registered lens gathers is not; law, trust, and\n  erasure vocabulary is its own bucket, never dark; a superseded binding's contexts do not\n  light anything. Verify: test/gateway/container-census.test.ts.\n- (c) The container detail page renders the census with data-census markers - physical, linked,\n  dark - and the dashboard tree is byte-unchanged. Verify: test/server/admin-census.test.ts.",
   "category": "feature",
   "id": "T254",
+  "rails": [
+    "test/gateway/container-census.test.ts",
+    "test/server/admin-census.test.ts"
+  ],
   "status": "todo",
   "title": "The container census: physical, linked, and dark"
 }
