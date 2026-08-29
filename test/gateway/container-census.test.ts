@@ -111,6 +111,54 @@ describe("§55(a) — physical and linked fall out of the posture model", () => 
   });
 });
 
+describe("§55(a) — a parent's inbox pools are physical ELSEWHERE, named by pool", () => {
+  it("the parent's gather composes the pool, the census names it apart, and a stranger's pool is not counted", async () => {
+    const { gw, ts } = await store();
+    // Two parents, one inbox pool each: the census for "garden" must name garden-inbox's
+    // contribution and never other-inbox's — an inverted parent match would swap exactly that.
+    await gw.append([
+      signClaims(
+        containerClaims(
+          {
+            container: "other",
+            trust: "curated",
+            posture: "shared",
+            membership: authoredBy(OPERATOR),
+          },
+          OPERATOR,
+          ts(),
+        ),
+        OPERATOR_SEED,
+      ),
+      signClaims(
+        containerClaims(
+          { container: "garden-in", trust: "untrusted", posture: "separate", inboxOf: "garden" },
+          OPERATOR,
+          ts(),
+        ),
+        OPERATOR_SEED,
+      ),
+      signClaims(
+        containerClaims(
+          { container: "other-in", trust: "untrusted", posture: "separate", inboxOf: "other" },
+          OPERATOR,
+          ts(),
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    await gw.openContainer({ name: "garden-in", backend: new MemoryBackend() });
+    await gw.openContainer({ name: "other-in", backend: new MemoryBackend() });
+    await gw.attachedContainers.get("garden-in")!.federate([litClaim(4000)]);
+
+    const census = containerCensusImpl(gw, "garden");
+    const mine = census.physicalElsewhere.find((c) => c.pool === "garden-in");
+    expect(mine, "the parent's own inbox pool is not named").toBeDefined();
+    expect(mine!.count).toBeGreaterThanOrEqual(1);
+    expect(census.physicalElsewhere.find((c) => c.pool === "other-in")).toBeUndefined();
+  });
+});
+
 describe("§55(b) — dark is decided by the surviving-lens context union, two-sided", () => {
   it("a lit member is not dark; a member no lens reads is dark", async () => {
     const { gw } = await store();

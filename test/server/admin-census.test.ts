@@ -113,6 +113,13 @@ describe("§55(c) — the detail page carries the census; the dashboard tree doe
     expect(html).toContain('data-census-linked="1"');
     expect(html).toContain('data-census-dark="1"');
     expect(html).toContain('data-census-vocabulary="0"');
+    // The full opening tags, not only the attributes: a mangled bracket inside the template
+    // still carries the attribute text, and a person reads tags, not substrings.
+    expect(html).toContain("<li data-census-physical=");
+    expect(html).toContain("<li data-census-linked=");
+    expect(html).toContain("<li data-census-dark=");
+    expect(html).toContain("<li data-census-vocabulary=");
+    expect(html).toContain("<h2>Census.</h2>");
     // The safe-direction sentence, in the page's own words — a dark count rendered bare would
     // overclaim exactly what the metric cannot know.
     expect(html).toContain("undercount by design");
