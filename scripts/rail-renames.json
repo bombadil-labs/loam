@@ -22,12 +22,6 @@
   "renames": [],
   "revisions": [
     {
-      "file": "test/browser/tutorial.test.ts",
-      "sha256": "271e6e382f766a105194d101fdb078562a824bde807b867d876c6cdfebc84488",
-      "authorized": "PENDING MYK - merging this entry IS the authorization. The arc-walk case splits into one case per lesson; every assertion survives; T226's other cases are byte-identical.",
-      "//": "The whole-file revision class's first use (Myk chose the class in chat, 2026-08-28, after the tutorial's 90s ceiling was breached twice under the standard bar - T248's measurements). The declared bytes: the arc-walk `it` becomes a drift-guard case plus one case per lesson registered at collection from lessons.mjs (buildArc is deterministic), state carrying in order exactly as the single walk did; two imports and one stale header note (the pre-T227 stub-arc paragraph) are the only other changes. Measured: 31/31 green, worst per-lesson case 9.2s against the 90s ceiling (was 23s all-in-one); the erasure-family cases keep their ~30s standalone cost on main and branch alike - named as the next candidate, not touched here. REMOVE this entry once the split merges."
-    },
-    {
       "file": "test/federation/arrival-attestations.test.ts",
       "sha256": "0a99c8bd44fa2636ec2fde6550ec520eaf520f1cc8f2d4c1d5a789e39b609123",
       "authorized": "PENDING MYK - merging this entry IS the authorization; the settled SPEC 49 pulse law is the ruling it records.",
