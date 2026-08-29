@@ -77,6 +77,7 @@ name begins with that number.
 | §52 | [The stock shelf declares its references](spec/52-stock-refs.md) |
 | §53 | [The store hands the agent its own manual](spec/53-loam-docs.md) |
 | §54 | [The guided init](spec/54-guided-init.md) |
+| §55 | [The container census — physical, linked, and dark](spec/55-container-census.md) |
 
 _**§21**, **§22**, **§25**, and **§26** are **landed** — design accepted and implemented (see each
 Provenance footer; §21.7's coexistence design is accepted with its implementation queued as ticket T2).
