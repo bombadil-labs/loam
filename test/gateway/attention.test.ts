@@ -73,7 +73,7 @@ const dataClaim = (t: number) =>
       author: ADA,
       pointers: [
         { role: "notes", target: { kind: "entity", entity: { id: "note:day", context: "diary" } } },
-        { role: "text", target: { kind: "primitive", primitive: { value: `entry at ${t}` } } },
+        { role: "text", target: { kind: "primitive", value: `entry at ${t}` } },
       ],
     } as never,
     ADA_SEED,
@@ -96,7 +96,7 @@ describe("§49(b) — the looked-record: one standing row, superseded in place",
     for (const d of rows) expect(gw.reactor.negationsOf(d.id)).toEqual([]);
 
     // Object level: the reading resolves ONE moment, the later one.
-    const summary = await attentionSummaryImpl(gw, "ada", new Set([ADA]));
+    const summary = attentionSummaryImpl(gw, "ada", new Set([ADA]));
     expect(summary.get("garden")?.lookedAt).toBe(7000);
   });
 
@@ -110,9 +110,9 @@ describe("§49(b) — the looked-record: one standing row, superseded in place",
     // rae looks much later; her row must not touch ada's.
     await gw.append([signClaims(lookedClaims("rae", "garden", 9000, RAE, ts()), RAE_SEED)]);
 
-    const ada = await attentionSummaryImpl(gw, "ada", new Set([ADA, ADA_SECOND]));
+    const ada = attentionSummaryImpl(gw, "ada", new Set([ADA, ADA_SECOND]));
     expect(ada.get("garden")?.lookedAt).toBe(8000);
-    const rae = await attentionSummaryImpl(gw, "rae", new Set([RAE]));
+    const rae = attentionSummaryImpl(gw, "rae", new Set([RAE]));
     expect(rae.get("garden")?.lookedAt).toBe(9000);
   });
 
@@ -121,7 +121,7 @@ describe("§49(b) — the looked-record: one standing row, superseded in place",
     await gw.append([signClaims(lookedClaims("ada", "garden", 5000, ADA, ts()), ADA_SEED)]);
     // rae writes a record CLAIMING ada looked later — well-formed, granted, and not ada's key.
     await gw.append([signClaims(lookedClaims("ada", "garden", 9999, RAE, ts()), RAE_SEED)]);
-    const summary = await attentionSummaryImpl(gw, "ada", new Set([ADA]));
+    const summary = attentionSummaryImpl(gw, "ada", new Set([ADA]));
     expect(summary.get("garden")?.lookedAt).toBe(5000);
   });
 });
@@ -135,7 +135,7 @@ describe("§49(b) — the summary: counted by consequence class and author, neve
     await gw.append([dataClaim(3000)]);
     await gw.append([dataClaim(3100)]);
 
-    const summary = await attentionSummaryImpl(gw, "ada", new Set([ADA]));
+    const summary = attentionSummaryImpl(gw, "ada", new Set([ADA]));
     const garden = summary.get("garden");
     expect(garden).toBeDefined();
     expect(garden!.total).toBe(2);
@@ -151,12 +151,12 @@ describe("§49(b) — the summary: counted by consequence class and author, neve
   it("claims at or before the looked-moment do not count; with no look, everything counts", async () => {
     const { gw, ts } = await store();
     await gw.append([dataClaim(3000)]);
-    const before = await attentionSummaryImpl(gw, "ada", new Set([ADA]));
+    const before = attentionSummaryImpl(gw, "ada", new Set([ADA]));
     expect(before.get("garden")?.lookedAt).toBe(0);
     expect(before.get("garden")?.total).toBe(1);
 
     await gw.append([signClaims(lookedClaims("ada", "garden", 3000, ADA, ts()), ADA_SEED)]);
-    const after = await attentionSummaryImpl(gw, "ada", new Set([ADA]));
+    const after = attentionSummaryImpl(gw, "ada", new Set([ADA]));
     expect(after.get("garden")?.total).toBe(0);
   });
 });
@@ -166,8 +166,8 @@ describe("§49(d) — quiet is a READING preference, never a storage state", () 
     const { gw, ts } = await store();
     await gw.append([dataClaim(3000)]);
 
-    const memberIdsBefore = (await gw.containerScope({ containers: ["garden"] }))
-      .get("garden")!
+    const memberIdsBefore = gw
+      .containerScope({ containers: ["garden"] })
       .map((d) => d.id)
       .sort();
     const sizeBefore = gw.reactor.size;
@@ -175,16 +175,16 @@ describe("§49(d) — quiet is a READING preference, never a storage state", () 
     await gw.append([signClaims(quietClaims("garden", true, OPERATOR, ts()), OPERATOR_SEED)]);
     expect(quietContainersImpl(gw).has("garden")).toBe(true);
     // The default attention surface omits it...
-    const surfaced = await attentionSummaryImpl(gw, "ada", new Set([ADA]));
+    const surfaced = attentionSummaryImpl(gw, "ada", new Set([ADA]));
     expect(surfaced.has("garden")).toBe(false);
     // ...and asking past the preference still answers whole.
-    const asked = await attentionSummaryImpl(gw, "ada", new Set([ADA]), { includeQuiet: true });
+    const asked = attentionSummaryImpl(gw, "ada", new Set([ADA]), { includeQuiet: true });
     expect(asked.get("garden")?.total).toBe(1);
 
     // NOTHING moved: the container's members answer identically through the ordinary door,
     // and no delta left the ground (the quiet mark itself is the only addition).
-    const memberIdsAfter = (await gw.containerScope({ containers: ["garden"] }))
-      .get("garden")!
+    const memberIdsAfter = gw
+      .containerScope({ containers: ["garden"] })
       .map((d) => d.id)
       .sort();
     expect(memberIdsAfter).toEqual(memberIdsBefore);
@@ -193,7 +193,7 @@ describe("§49(d) — quiet is a READING preference, never a storage state", () 
     // Two-sided: unmarking restores the default surface.
     await gw.append([signClaims(quietClaims("garden", false, OPERATOR, ts()), OPERATOR_SEED)]);
     expect(quietContainersImpl(gw).has("garden")).toBe(false);
-    const restored = await attentionSummaryImpl(gw, "ada", new Set([ADA]));
+    const restored = attentionSummaryImpl(gw, "ada", new Set([ADA]));
     expect(restored.has("garden")).toBe(true);
   });
 

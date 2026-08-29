@@ -37,7 +37,7 @@ const claim = (author: string, seed: string, entity: string, t: number) =>
       author,
       pointers: [
         { role: "reading", target: { kind: "entity", entity: { id: entity, context: "sensor" } } },
-        { role: "value", target: { kind: "primitive", primitive: { value: t % 97 } } },
+        { role: "value", target: { kind: "primitive", value: t % 97 } },
       ],
     } as never,
     seed,
