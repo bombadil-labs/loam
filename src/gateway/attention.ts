@@ -94,20 +94,31 @@ const primOf = (d: Delta, role: string): string | number | boolean | undefined =
   return undefined;
 };
 
-/** Latest-wins over a marker context: first-seen wins ties, the channel reader's discipline. */
+/**
+ * Latest-wins over EXACTLY-NAMED marker entities: first-seen wins ties, the channel reader's
+ * discipline. Reads through `byTarget` — the reactor's own by-entity index, written at ingest
+ * beside the set it indexes, so it is the safe kind (work completed, cannot lag the ground) —
+ * rather than walking the snapshot: the callers always know their keys, so the walk would be
+ * the items-by-candidates inversion H8 names.
+ */
 function latestByKey(
   gw: Gateway,
   context: string,
+  entityIds: readonly string[],
   accept: (d: Delta) => boolean,
 ): Map<string, Delta> {
   const negated = lawfulNegated(gw.reactor, gw.operatorAuthor);
   const held = new Map<string, { at: number; d: Delta }>();
-  for (const d of gw.reactor.snapshot()) {
-    const key = markerOf(d, context);
-    if (key === undefined || negated(d.id) || !accept(d)) continue;
-    const prior = held.get(key);
-    if (prior !== undefined && prior.at >= d.claims.timestamp) continue;
-    held.set(key, { at: d.claims.timestamp, d });
+  for (const id of entityIds) {
+    for (const deltaId of gw.reactor.byTarget(id)) {
+      const d = gw.reactor.get(deltaId);
+      if (d === undefined) continue;
+      const key = markerOf(d, context);
+      if (key !== id || negated(d.id) || !accept(d)) continue;
+      const prior = held.get(key);
+      if (prior !== undefined && prior.at >= d.claims.timestamp) continue;
+      held.set(key, { at: d.claims.timestamp, d });
+    }
   }
   return new Map([...held].map(([k, v]) => [k, v.d]));
 }
@@ -115,7 +126,13 @@ function latestByKey(
 /** The containers the operator marked quiet — a reading preference, never a storage state. */
 export function quietContainersImpl(gw: Gateway): Set<string> {
   const operator = gw.operatorAuthor;
-  const rows = latestByKey(gw, CTX_QUIET, (d) => d.claims.author === operator);
+  const names = [...gw.containers().containers.keys()];
+  const rows = latestByKey(
+    gw,
+    CTX_QUIET,
+    names.map((n) => `quiet:${n}`),
+    (d) => d.claims.author === operator,
+  );
   const quiet = new Set<string>();
   for (const [key, d] of rows) {
     if (primOf(d, "value") === true) quiet.add(key.slice("quiet:".length));
@@ -128,13 +145,15 @@ export function readLookedImpl(
   gw: Gateway,
   user: string,
   acceptAuthors: ReadonlySet<string>,
+  containers?: readonly string[],
 ): Map<string, number> {
   const prefix = `looked:${user}:`;
+  const names = containers ?? [...gw.containers().containers.keys()];
   const rows = latestByKey(
     gw,
     CTX_LOOKED,
-    (d) =>
-      acceptAuthors.has(d.claims.author) && (markerOf(d, CTX_LOOKED)?.startsWith(prefix) ?? false),
+    names.map((n) => `${prefix}${n}`),
+    (d) => acceptAuthors.has(d.claims.author),
   );
   const looked = new Map<string, number>();
   for (const [key, d] of rows) {
@@ -194,11 +213,13 @@ export interface ContainerAttention {
 /**
  * The since-last-looked summary: per active container, the claims newer than the user's
  * looked-moment, counted by consequence class and author — counts only, never bodies. Quiet
- * containers are omitted unless asked for. COST: one container-scope read per container (the
- * same read the detail page pays per view) — honest O(ground × containers), bounded by the
- * caller's container list; the swept-index affordance (listing.ts's shape) is the named
- * follow-on if a measured store outgrows this (H8: measure after the cheap fix, before
- * infrastructure).
+ * containers are omitted unless asked for. COST, stated whole (H8): one container-scope read
+ * per container — the same read the detail page pays per view — and each of those calls also
+ * re-derives every EXCLUDED container's members and runs its own negation closure, so the
+ * dashboard's bill is O(ground x containers x (1 + exclusions)) plus a closure per call. The
+ * admin door bounds it with the session user's reach; the swept-index affordance (listing.ts's
+ * shape) is the named follow-on if a measured store outgrows this — measure after the cheap
+ * fix, before infrastructure.
  */
 export function attentionSummaryImpl(
   gw: Gateway,
@@ -206,7 +227,8 @@ export function attentionSummaryImpl(
   acceptAuthors: ReadonlySet<string>,
   opts: { containers?: readonly string[]; includeQuiet?: boolean } = {},
 ): Map<string, ContainerAttention> {
-  const looked = readLookedImpl(gw, user, acceptAuthors);
+  const table0 = gw.containers();
+  const looked = readLookedImpl(gw, user, acceptAuthors, [...table0.containers.keys()]);
   const quiet = quietContainersImpl(gw);
   const table = gw.containers();
   const names =

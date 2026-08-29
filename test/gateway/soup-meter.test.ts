@@ -11,7 +11,7 @@
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { describe, expect, it } from "vitest";
 import { grantClaims } from "../../src/gateway/accounts.js";
-import { soupMeterImpl } from "../../src/gateway/soup-meter.js";
+import { PERIODIC_MIN, soupMeterImpl } from "../../src/gateway/soup-meter.js";
 import { containerClaims } from "../../src/gateway/container.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
@@ -108,13 +108,20 @@ describe("§49(e) — the soup meter names the metronome and spares the organic"
     expect(gw.reactor.size).toBe(sizeBefore + 1);
   });
 
-  it("fewer claims than the metronome needs stay unflagged: five ticks are rhythm, not verdict", async () => {
+  it("the verdict begins EXACTLY at PERIODIC_MIN: one tick under is rhythm, the boundary is named", async () => {
     const gw = await store(PULSE);
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < PERIODIC_MIN - 1; i++) {
       await gw.append([claim(PULSE, PULSE_SEED, "probe:health", 10_000 + i * 3_600_000)]);
     }
-    const inbox = soupMeterImpl(gw).get("inbox");
-    expect(inbox!.total).toBe(5);
-    expect(inbox!.periodic).toEqual([]);
+    const under = soupMeterImpl(gw).get("inbox");
+    expect(under!.total).toBe(PERIODIC_MIN - 1);
+    expect(under!.periodic).toEqual([]);
+    // One more metronomic tick reaches the minimum, and the stream is named at the boundary.
+    await gw.append([
+      claim(PULSE, PULSE_SEED, "probe:health", 10_000 + (PERIODIC_MIN - 1) * 3_600_000),
+    ]);
+    const at = soupMeterImpl(gw).get("inbox");
+    expect(at!.periodic.length).toBe(1);
+    expect(at!.periodic[0]!.count).toBe(PERIODIC_MIN);
   });
 });

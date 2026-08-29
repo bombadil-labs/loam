@@ -18,9 +18,9 @@
 //   - OBJECT LEVEL: `channelStatus` and `channelsEver` agree the channel is severed, and the stale
 //     sync REJECTS naming the sever.
 //
-// TWO-SIDED, as every sever rail here is: a named bystander channel that was never dropped keeps
-// stamping — its stale-handle sync still lands — so the guard refuses the severed case and nothing
-// else. And criterion (b) proves the legitimate `federate open` re-creates a fresh channel cleanly,
+// TWO-SIDED, as every sever rail here is: a named bystander channel that was never dropped still
+// COMPLETES its sync — quietly, writing nothing, per the pulse law (SPEC §49.1) — so the guard
+// refuses the severed case and nothing else. And criterion (b) proves the legitimate `federate open` re-creates a fresh channel cleanly,
 // AND fails if the guard is built without its open bypass — a fix that over-refuses freezes a
 // re-opened channel out of its own stamps.
 //

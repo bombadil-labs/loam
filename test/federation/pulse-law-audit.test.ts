@@ -73,10 +73,16 @@ describe("§49(a) — a pulse is not a fact: the channel sync under audit", () =
       pull: (): Promise<unknown[]> => Promise.resolve(handed ? [] : ((handed = true), [arrival])),
     };
     const channel = await gw.openChannel({ into: "friends", prefix: "alice", source: once });
+    const records0 = channelRows(gw);
 
     await channel.sync(); // accepts one delta: record moves, custody stamps land — real facts
     const recordsAfterAccept = channelRows(gw);
     const primaryAfterAccept = gw.reactor.size;
+    // The POSITIVE half, asserted here rather than delegated: an accepting sync DID write, and
+    // the reading still resolves ONE standing row over however many the ground accumulated.
+    expect(recordsAfterAccept).toBeGreaterThan(records0);
+    expect(gw.channelStatus(channel.name)).toHaveLength(1);
+    expect(gw.channelStatus(channel.name)[0]!.lastSyncedAt).toBeGreaterThan(0);
 
     await channel.sync(); // quiet again: nothing to say, nothing written
     expect(gw.reactor.size).toBe(primaryAfterAccept);

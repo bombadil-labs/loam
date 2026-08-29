@@ -308,7 +308,7 @@ ${listing}
     const when =
       c.lastSyncedAt === 0
         ? "never synced"
-        : `last synced ${new Date(c.lastSyncedAt).toISOString()}`;
+        : `last recorded sync ${new Date(c.lastSyncedAt).toISOString()}`;
     if (!resumed) {
       return (
         `<li>${head}<strong>not resumed — this store is not polling this peer</strong> · ` +

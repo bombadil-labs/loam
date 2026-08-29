@@ -167,10 +167,25 @@ describe("§49(c) — the first screen is the summary; the tree is beneath it", 
   it("a trust claim renders LOUD; marking read in the user's own voice quiets the count", async () => {
     const gateway = await seeded();
     await gateway.append([opalNote(20_000)]);
-    // A trust-class claim since the look: a fresh grant, operator-authored, in opal's subtree
-    // reach (the summary is store-law; the row lands via the store's own vocabulary).
+    // A trust-CLASS claim since the look, landing in opal's own membership: an opal-authored
+    // claim wearing the role vocabulary. It binds nothing (only the operator's law binds — and
+    // T137's open arc is why nothing refuses it at the door), which is exactly why it must read
+    // LOUD: an inert trust-shaped claim in your container is someone trying.
     await gateway.append([
-      signClaims(grantClaims(STORE_ENTITY, "ed25519:ff", "write", OPERATOR, 21_000), OPERATOR_SEED),
+      signClaims(
+        {
+          timestamp: 21_000,
+          author: KEYS.opal,
+          pointers: [
+            {
+              role: "user",
+              target: { kind: "entity", entity: { id: "user:guest", context: "loam.role" } },
+            },
+            { role: "role", target: { kind: "primitive", value: "operator" } },
+          ],
+        } as never,
+        SEEDS.opal,
+      ),
     ]);
     const base = await doorOver(gateway);
     const session = await signIn(base, "opal", PASSWORD);
