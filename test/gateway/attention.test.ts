@@ -197,6 +197,28 @@ describe("§49(d) — quiet is a READING preference, never a storage state", () 
     expect(restored.has("garden")).toBe(true);
   });
 
+  it("a container whose members cannot be read is an honest row, not a dead summary", async () => {
+    const { gw, ts } = await store();
+    await gw.append([dataClaim(3000)]);
+    // A separate-posture container with no attached pool: its scope read refuses (H9), and the
+    // summary must carry that refusal as a row while the readable sibling stays whole.
+    await gw.append([
+      signClaims(
+        containerClaims(
+          { container: "vault", trust: "curated", posture: "separate" },
+          OPERATOR,
+          ts(),
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    const summary = attentionSummaryImpl(gw, "ada", new Set([ADA]));
+    expect(summary.get("vault")?.unreadable, "the refusal is not carried").toBeDefined();
+    expect(summary.get("vault")?.total).toBe(0);
+    expect(summary.get("garden")?.total).toBe(1);
+    expect(summary.get("garden")?.unreadable).toBeUndefined();
+  });
+
   it("a quiet mark is vocabulary, not data: it wears the loam context and only the operator's binds", async () => {
     const { gw, ts } = await store();
     await gw.append([signClaims(quietClaims("garden", true, RAE, ts()), RAE_SEED)]);

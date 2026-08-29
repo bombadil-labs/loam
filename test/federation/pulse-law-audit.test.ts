@@ -11,7 +11,7 @@
 //
 // Erasure standing rule: every store here is this file's own memory fixture.
 
-import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
+import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { describe, expect, it } from "vitest";
 import { CTX_CHANNEL } from "../../src/federation/channel.js";
 import { grantClaims } from "../../src/gateway/accounts.js";
@@ -70,7 +70,8 @@ describe("§49(a) — a pulse is not a fact: the channel sync under audit", () =
     );
     let handed = false;
     const once = {
-      pull: (): Promise<unknown[]> => Promise.resolve(handed ? [] : ((handed = true), [arrival])),
+      pull: (): Promise<readonly Delta[]> =>
+        Promise.resolve(handed ? [] : ((handed = true), [arrival])),
     };
     const channel = await gw.openChannel({ into: "friends", prefix: "alice", source: once });
     const records0 = channelRows(gw);

@@ -61,6 +61,12 @@ import { readUserSeed, userSeedPath, writeUserSeed } from "../cli/config.js";
 import { grantClaims } from "../gateway/accounts.js";
 import { rolesOf } from "./users.js";
 import {
+  attentionSummaryImpl,
+  lookedClaims,
+  quietClaims,
+  quietContainersImpl,
+} from "../gateway/attention.js";
+import {
   containerClaims,
   detachClaims,
   survivingDeclarationIds,
@@ -95,6 +101,8 @@ import {
   ADMIN_PROMOTE_PATH,
   ADMIN_FEDERATE_PATH,
   ADMIN_REVOKE_PATH,
+  ADMIN_LOOKED_PATH,
+  ADMIN_QUIET_PATH,
   ADMIN_REVOKE_CONFIRM_PATH,
   adminPages,
 } from "./admin-pages.js";
@@ -249,11 +257,82 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     // register door makes, from the GROUND where roles live (a session carries a name, never a
     // privilege). A non-operator sees nothing there: the orphans are outside every subtree (T218).
     const isOperator = rolesOf(gw.reactor, gw.operatorAuthor, session.user).has("operator");
+    // §49: which keys speak for this user is the DOOR's answer — the ground holds no canonical
+    // user-to-key binding (T137's arc), so the accepted set is the user's own seed on this host
+    // plus the operator. A user whose seed is absent still gets the page; their looked-moments
+    // simply read as never.
+    const seed = readUserSeed(options.home, session.user);
+    const accept = new Set<string>();
+    if (gw.operatorAuthor !== undefined) accept.add(gw.operatorAuthor);
+    if (seed.kind === "present") accept.add(authorForSeed(seed.seed));
+    const attention = {
+      summary: attentionSummaryImpl(gw, session.user, accept, { containers: [...reach] }),
+      quiet: quietContainersImpl(gw),
+    };
     htmlOut(
       res,
       200,
-      pages.dashboardPage(gw, session.user, table, reach, session.formToken, isOperator),
+      pages.dashboardPage(gw, session.user, table, reach, session.formToken, isOperator, attention),
     );
+  };
+
+  // §49: record that the session user looked at a container, NOW, in the user's own voice —
+  // never the operator's, because attention is a person's. One standing row per (user,
+  // container), superseded in place; the page reads quiet immediately after.
+  const postLooked = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const gated = await postGate(req, res);
+    if (gated === undefined) return;
+    const gw = options.ground();
+    if (gw === undefined) {
+      refuse(res, 503, "This store's ground is not reachable, so nothing was done.");
+      return;
+    }
+    const target = targetOf(gw, gated.user, gated.fields, res);
+    if (target === undefined) return;
+    const name = target.name;
+    const seed = readUserSeed(options.home, gated.user);
+    if (seed.kind !== "present") {
+      refuse(
+        res,
+        403,
+        "Your key is not on this host, so a look cannot be recorded in your voice. " +
+          "Create your root here first.",
+      );
+      return;
+    }
+    const author = authorForSeed(seed.seed);
+    await gw.append([
+      signClaims(
+        lookedClaims(gated.user, name, gw.nextTimestamp(), author, gw.nextTimestamp()),
+        seed.seed,
+      ),
+    ]);
+    seeOther(res);
+  };
+
+  // §49: the quiet mark is the OPERATOR's standing record — a preference of the reading, never
+  // a storage state. The role is read fresh from the ground; a session carries a name, never a
+  // privilege.
+  const postQuiet = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const gated = await postGate(req, res);
+    if (gated === undefined) return;
+    const gw = signerGround(res);
+    if (gw === undefined) return;
+    if (!rolesOf(gw.reactor, gw.operatorAuthor, gated.user).has("operator")) {
+      refuse(res, 403, "Quiet is the operator's mark, and this session is not the operator's.");
+      return;
+    }
+    const target = targetOf(gw, gated.user, gated.fields, res);
+    if (target === undefined) return;
+    const name = target.name;
+    const value = gated.fields.get("value") === "true";
+    await gw.append([
+      signClaims(
+        quietClaims(name, value, gw.operatorAuthor!, gw.nextTimestamp()),
+        gw.options.seed!,
+      ),
+    ]);
+    seeOther(res);
   };
 
   const getContainer = (req: IncomingMessage, res: ServerResponse): void => {
@@ -1204,6 +1283,8 @@ forever; the value now survives even if its container is dropped.</p>
     ADMIN_FEDERATE_PATH,
     ADMIN_REVOKE_PATH,
     ADMIN_REVOKE_CONFIRM_PATH,
+    ADMIN_LOOKED_PATH,
+    ADMIN_QUIET_PATH,
   ]);
 
   const POSTS = new Map([
@@ -1218,6 +1299,8 @@ forever; the value now survives even if its container is dropped.</p>
     [ADMIN_FEDERATE_PATH, fed.postFederate],
     [ADMIN_REVOKE_PATH, fed.postRevoke],
     [ADMIN_REVOKE_CONFIRM_PATH, fed.postRevokeConfirm],
+    [ADMIN_LOOKED_PATH, postLooked],
+    [ADMIN_QUIET_PATH, postQuiet],
   ]);
 
   return {

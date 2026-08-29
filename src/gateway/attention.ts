@@ -208,6 +208,10 @@ export interface ContainerAttention {
   readonly total: number;
   readonly byClass: Record<ConsequenceClass, number>;
   readonly byAuthor: Map<string, number>;
+  /** Set when this container's members could not be read (a detached pool, a refused scope):
+   *  the counts above are then 0 BY ABSENCE, not by quiet, and the surface must say so —
+   *  a zero that means "unreadable" rendered as calm would be H9 at the attention layer. */
+  readonly unreadable?: string;
 }
 
 /**
@@ -242,7 +246,23 @@ export function attentionSummaryImpl(
     const byClass: Record<ConsequenceClass, number> = { data: 0, law: 0, trust: 0, erasure: 0 };
     const byAuthor = new Map<string, number>();
     let total = 0;
-    for (const d of gw.containerScope({ containers: [name] })) {
+    // One container whose members cannot be read (an unattached separate pool, a refused
+    // scope) must not take the whole summary down with it — the dashboard is the landing page,
+    // and a dead page teaches less than an honest row.
+    let members;
+    try {
+      members = gw.containerScope({ containers: [name] });
+    } catch (err) {
+      out.set(name, {
+        lookedAt,
+        total: 0,
+        byClass,
+        byAuthor,
+        unreadable: err instanceof Error ? err.message : String(err),
+      });
+      continue;
+    }
+    for (const d of members) {
       if (d.claims.timestamp <= lookedAt) continue;
       const marker = markerOf(d, CTX_LOOKED) ?? markerOf(d, CTX_QUIET);
       if (marker !== undefined) continue; // attention bookkeeping is not attention-worthy
