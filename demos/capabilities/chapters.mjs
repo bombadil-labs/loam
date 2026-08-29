@@ -1881,4 +1881,74 @@ export const CHAPTERS = [
       },
     ],
   },
+  {
+    n: 22,
+    slug: "the-store-that-stays-on-top-of-itself",
+    title: "The store that stays on top of itself",
+    thesis:
+      "A pulse is not a fact, attention is a person's, quiet is a reading, and the store " +
+      "reports its own accumulation without ever gating a write.",
+    covers: ["spec/49-legibility.md"],
+    body: [
+      {
+        kind: "claims",
+        claims: [
+          {
+            says:
+              "A periodic writer with nothing to say writes nothing: thirty quiet channel " +
+              "polls leave the ground's delta count unchanged, while the first success, every " +
+              "failure, every debt clearing, and every legibility repair still stamp - and a " +
+              "quiet completion still refuses over a severed lineage.",
+            spec: "spec/49-legibility.md",
+            proof: "test/federation/pulse-law-audit.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "loam.looked is one standing row per user and container, superseded in place and " +
+              "never struck; two keys of one user share one looked-moment, another user's looks " +
+              "do not disturb it, and an author outside the accepted set cannot move it.",
+            spec: "spec/49-legibility.md",
+            proof: "test/gateway/attention.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "The summary counts claims since the looked-moment by consequence class and " +
+              "author and refuses to list bodies; a container whose members cannot be read is " +
+              "one honest row while its readable siblings stay whole.",
+            spec: "spec/49-legibility.md",
+            proof: "test/gateway/attention.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "The admin page opens with what changed - trust and erasure loud, quiet " +
+              "containers one collapsed line - and the looked-mark posts in the session user's " +
+              "own voice while the quiet-mark is the operator's alone.",
+            spec: "spec/49-legibility.md",
+            proof: "test/server/admin-attention.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "Quiet moves no bytes and changes no door's answer: the members read identically " +
+              "while the container leaves the default surface, and unmarking restores it.",
+            spec: "spec/49-legibility.md",
+            proof: "test/gateway/attention.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "The soup meter names a metronomic stream at exactly its minimum tick count, " +
+              "spares an organic writer, and never gates: a flagged writer's next append lands " +
+              "like any other.",
+            spec: "spec/49-legibility.md",
+            proof: "test/gateway/soup-meter.test.ts",
+            door: null,
+          },
+        ],
+      },
+    ],
+  },
 ];

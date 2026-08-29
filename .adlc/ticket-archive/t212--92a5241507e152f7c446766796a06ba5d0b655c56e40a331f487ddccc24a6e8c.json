@@ -1,7 +1,21 @@
 {
+  "_adlcArchive": {
+    "archivedAt": "2026-08-29T04:35:10.158Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "ee4f5f867af5a5897f94b3a610ff94906cc78d1a3d12e3fa233b2d214195143d",
+    "ticketHash": "15e87ac8db622e6c649505bdae34545ea738342c0c71c9f1d969abce6c3b0b43",
+    "version": 1
+  },
   "body": "DESIGN IS SETTLED - BUILD AGAINST THE WORKING SPEC at .adlc/specs/49-legibility.md.\nMyk held the design session in chat on 2026-08-28 (PR #468): all five positions accepted as\ndrafted, all three open questions answered by him, not by inference. The spec's acceptance\ncriteria are hardened and each names its verification path; they ARE this ticket's rail list\nat P3 (declare rails only when the test files exist).\n\nThe five criteria, transcribed:\n(a) THE PULSE LAW - every periodic writer supersedes in place or writes nothing on a no-op\ncycle; an audit case per periodic surface in its own suite, plus the doctrine sentence in\nCLAUDE.md's standing rules. Verify: the audit cases named in the closing PR.\n(b) SINCE-LAST-LOOKED - loam.looked is PER-USER, superseded in place; the summary groups and\ncounts by consequence class (data/law/trust/erasure) and author; a second user's looks do not\ndisturb the first's; two keys of ONE user share one looked-moment. Verify: test/gateway/attention.test.ts.\n(c) THE DASHBOARD leads with the attention summary; quiet containers collapse; a trust claim\nrenders loud. Admin page only in v1 (settled); the CLI is a later fast-follow. Verify:\ntest/server/admin-attention.test.ts with the session fixture (test/helpers/session-fixture.ts).\n(d) QUIET IS A READING - marking quiet changes no door's answer and moves no bytes; unmarking\nrestores the default surface, two-sided. Verify: test/gateway/attention.test.ts.\n(e) THE SOUP METER - a metronomic writer is named, an organic writer is not (two-sided); the\nmeter NEVER gates a write (settled). Verify: test/gateway/soup-meter.test.ts.\n\nThe refusals stand verbatim: no throttles, no quotas, no auto-archival, no age-deletion, no\nserver-side digest generation. Legibility is a lens problem.\n\nMerge tier: the build is a repair-shaped realization of a spec Myk already settled, but it\nadds a new claim kind and a new admin surface - open the landing PR for Myk's merge (P6), with\nthe spec/49 narrative file and the capabilities chapter aboard.",
   "category": "feature",
   "duration": 1,
   "id": "T212",
+  "rails": [
+    "test/gateway/attention.test.ts",
+    "test/gateway/soup-meter.test.ts",
+    "test/server/admin-attention.test.ts",
+    "test/federation/pulse-law-audit.test.ts"
+  ],
   "title": "Legibility: build SETTLED SPEC 49 - attention, quiet, and the soup meter"
 }

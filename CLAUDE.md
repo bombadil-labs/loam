@@ -532,6 +532,11 @@ busy.
   The diagnostic that keeps this tractable: judge an erasure change by *can this report be false?*
   rather than *does it remove the bytes?* Purging is easy; every erasure bug this repo has paid for
   is in the claiming (H7), not the forgetting.
+- **A PULSE IS NOT A FACT** (SPEC §49.1, settled 2026-08-28). Anything periodic — a poll, a
+  heartbeat, a health probe, a keepalive — either supersedes one standing record in place or
+  writes NOTHING on a no-op cycle. Every future cron-shaped writer owes an audit case beside its
+  own suite proving its quiet cycle is silent (`test/federation/pulse-law-audit.test.ts` is the
+  shape), and review answers for it.
 - **A flaky test is fixed NOW, not managed** (Myk, 2026-07-23). The gates' exit codes are VERDICTS,
   and the rails drive a state machine on top of them: P5 evidence binds a revision, rails freeze at
   landing, a self-merge hangs on a green bar, `hollow-test` refuses a non-green baseline outright. A
