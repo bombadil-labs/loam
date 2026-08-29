@@ -18,6 +18,13 @@ import type { Container, ContainerTable, ResolvedContainer } from "../gateway/co
 import type { ChannelStatus } from "../federation/channel.js";
 import type { ContestedNameReport } from "../gateway/lifecycle.js";
 import type { Gateway } from "../gateway/gateway.js";
+import type { ContainerAttention } from "../gateway/attention.js";
+
+/** What the door computed for the attention panel: the summary plus the quiet set. */
+export interface AttentionView {
+  readonly summary: ReadonlyMap<string, ContainerAttention>;
+  readonly quiet: ReadonlySet<string>;
+}
 
 export const ADMIN_PATH = "/admin";
 export const ADMIN_CREATE_ROOT_PATH = "/admin/create-root";
@@ -33,6 +40,8 @@ export const ADMIN_PROMOTE_PATH = "/admin/promote";
 export const ADMIN_FEDERATE_PATH = "/admin/federate";
 export const ADMIN_REVOKE_PATH = "/admin/revoke";
 export const ADMIN_REVOKE_CONFIRM_PATH = "/admin/revoke-confirm";
+export const ADMIN_LOOKED_PATH = "/admin/looked";
+export const ADMIN_QUIET_PATH = "/admin/quiet";
 
 export type RevokePlan =
   | {
@@ -308,7 +317,7 @@ ${listing}
     const when =
       c.lastSyncedAt === 0
         ? "never synced"
-        : `last synced ${new Date(c.lastSyncedAt).toISOString()}`;
+        : `last recorded sync ${new Date(c.lastSyncedAt).toISOString()}`;
     if (!resumed) {
       return (
         `<li>${head}<strong>not resumed — this store is not polling this peer</strong> · ` +
@@ -399,6 +408,67 @@ ${listing}
 </ul>`;
   };
 
+  // §49 position 3: the dashboard LEADS with what changed — the summary before the tree,
+  // quiet containers collapsed to one line, trust and erasure loud. Counts only; each name's
+  // own page holds the claims. The panel always renders: a quiet week saying so in three lines
+  // is the calm this surface exists to make legible.
+  const attentionPanelHtml = (
+    attention: AttentionView,
+    reach: ReadonlySet<string>,
+    formToken: string,
+    isOperator: boolean,
+  ): string => {
+    const rows: string[] = [];
+    for (const name of [...reach].sort()) {
+      if (attention.quiet.has(name)) {
+        const wake = isOperator
+          ? `\n<form method="post" action="${ADMIN_QUIET_PATH}">
+${hiddenPair(formToken, name)}
+<input type="hidden" name="value" value="false">
+<button type="submit">unquiet</button>
+</form>`
+          : "";
+        rows.push(
+          `<li data-quiet="${escapeHtml(name)}"><code>${escapeHtml(name)}</code> — quiet${wake}</li>`,
+        );
+        continue;
+      }
+      const a = attention.summary.get(name);
+      if (a === undefined) continue;
+      if (a.unreadable !== undefined) {
+        rows.push(
+          `<li data-attention-unreadable="${escapeHtml(name)}"><code>${escapeHtml(name)}</code> — ` +
+            `cannot be read from here: ${escapeHtml(a.unreadable)}</li>`,
+        );
+        continue;
+      }
+      const authors = a.byAuthor.size;
+      const loud =
+        a.byClass.trust > 0 || a.byClass.erasure > 0
+          ? ` <strong class="attention-loud">trust ${a.byClass.trust} · erasure ${a.byClass.erasure}</strong>`
+          : "";
+      const still = isOperator
+        ? `\n<form method="post" action="${ADMIN_QUIET_PATH}">
+${hiddenPair(formToken, name)}
+<input type="hidden" name="value" value="true">
+<button type="submit">quiet</button>
+</form>`
+        : "";
+      rows.push(
+        `<li data-attention-container="${escapeHtml(name)}" data-attention-total="${a.total}">` +
+          `<code>${escapeHtml(name)}</code> — ${a.total} new by ${authors} author${authors === 1 ? "" : "s"}: ` +
+          `data ${a.byClass.data} · law ${a.byClass.law}${loud}` +
+          `${actForm(ADMIN_LOOKED_PATH, formToken, name, "mark read")}${still}</li>`,
+      );
+    }
+    return `<h2>What changed.</h2>
+<p>Since you last looked, per container — counted, never listed. Each name's own page holds the
+claims themselves.</p>
+<ul>
+${rows.join("\n")}
+</ul>`;
+  };
+
   const dashboardPage = (
     gw: Gateway,
     user: string,
@@ -406,10 +476,12 @@ ${listing}
     reach: ReadonlySet<string>,
     formToken: string,
     isOperator: boolean,
+    attention: AttentionView,
   ): string =>
     page(
       "your containers",
-      `<h1>Your containers.</h1>
+      `${attentionPanelHtml(attention, reach, formToken, isOperator)}
+<h1>Your containers.</h1>
 <p>You are <code>${escapeHtml(user)}</code>. Below is your subtree: the container that bears your
 name, and everything declared inside it. Each name opens its own page.</p>
 ${treeHtml(table, reach, user)}

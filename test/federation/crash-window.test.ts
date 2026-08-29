@@ -368,10 +368,10 @@ describe("T222 — a crash between federate and attest heals or names its own ga
     }
   });
 
-  it("(b) anti-soup: a quiet sync writes one record, an accepting sync writes exactly one more", async () => {
+  it("(b) anti-soup: a quiet sync writes NOTHING, an accepting sync writes exactly two records", async () => {
     // The optimistic journal must cost one record per ACCEPTING sync, never one per poll. Counted on
     // the ground, both ways: an accepting sync writes the journal AND the success stamp; a quiet one
-    // writes only the success stamp and no journal at all.
+    // writes nothing at all — a pulse is not a fact (SPEC §49.1).
     const me = await store(ME_SEED);
     try {
       const { offering, source } = peer();
@@ -397,20 +397,18 @@ describe("T222 — a crash between federate and attest heals or names its own ga
       expect(journals[0]!.unattested).toEqual([x.id]);
       expect(me.channelStatus(channel.name)[0]!.unattested).toEqual([]);
 
-      // QUIET: exactly one record — the success stamp — and NO optimistic journal.
+      // QUIET: no record at all — no success stamp, no optimistic journal.
       const beforeQuiet = channelRecords(me);
       const quiet = await channel.sync();
       expect(quiet.accepted).toBe(0);
       const addedQuiet = added(beforeQuiet, channelRecords(me));
-      expect(addedQuiet.length).toBe(1);
-      expect(addedQuiet.every((r) => r.unattested.length === 0)).toBe(true);
+      expect(addedQuiet).toEqual([]);
 
-      // A third poll, for the standing-sync reason: still one record, still no journal.
+      // A third poll, for the standing-sync reason: still nothing.
       const beforeThird = channelRecords(me);
       await channel.sync();
       const addedThird = added(beforeThird, channelRecords(me));
-      expect(addedThird.length).toBe(1);
-      expect(addedThird.every((r) => r.unattested.length === 0)).toBe(true);
+      expect(addedThird).toEqual([]);
     } finally {
       await me.close();
     }

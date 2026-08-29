@@ -1704,7 +1704,7 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
         const when =
           r.lastSyncedAt === 0
             ? "never synced"
-            : `last synced ${new Date(r.lastSyncedAt).toISOString()}`;
+            : `last recorded sync ${new Date(r.lastSyncedAt).toISOString()}`;
         const trouble =
           r.consecutiveFailures > 0 ? `, ${r.consecutiveFailures} failed attempt(s) since` : "";
         // An APP a peer sent is code, and no toggle above mounts it (§24.6). An operator who cannot

@@ -1490,28 +1490,57 @@ async function syncChannel(
     );
     throw err;
   }
-  await stamp(
-    gw,
-    {
-      name,
-      into: opts.into,
-      prefix: opts.prefix,
-      receiving: before?.receiving ?? true,
-      blessing: before?.blessing ?? opts.bless !== false,
-      lastSyncedAt: gw.nextTimestamp(),
-      consecutiveFailures: 0,
-      from,
-      // Cleared, and only here: the stamps for every owed arrival are in the pool above.
-      unattested: [],
-    },
-    // A SUCCESS speaks for the three it just determined. This sync reached the peer, so the clock
-    // reading, the zeroed counter and the emptied debt are facts of THIS act rather than coercions
-    // of the last one — they are legible again even when the record before them was not.
-    illegible.filter(
-      (r) => r !== "lastSyncedAt" && r !== "consecutiveFailures" && r !== "unattested",
-    ),
-    false,
-  );
+  // THE PULSE LAW (SPEC §49.1, T212): a poll with nothing to say writes NOTHING. On a truly
+  // quiet cycle — nothing accepted, no debt on the record and none declared this cycle, no
+  // failure streak to end, every field already legible, and a first success already on the
+  // books — the stamp below would append a row whose only news is the clock, and an hourly
+  // poller would lay seven hundred such rows a month into the ground. The first successful
+  // sync EVER still stamps (lastSyncedAt 0 becoming real is the news that the channel works);
+  // a cycle that declared journal debt still stamps (the clearing is custody, not clock); a
+  // record with an illegible field still stamps (legibility returning is news); and every
+  // failure path above stamps unconditionally, because a failure is always news.
+  const quiet =
+    report.accepted === 0 &&
+    before !== undefined &&
+    before.lastSyncedAt > 0 &&
+    before.consecutiveFailures === 0 &&
+    before.unattested.length === 0 &&
+    declared.length === owed.length &&
+    illegible.length === 0;
+  if (quiet && channelLineageSevered(gw, name)) {
+    // Silence still re-reads liveness (T233): a drop that lands while the poll is parked in
+    // `await pull()` must refuse the sync's completion exactly as the stamp it replaced would
+    // have — a stale handle never finishes quietly over a severed lineage.
+    throw new Error(
+      `refused to stamp "${name}": it was severed and its channel record struck, so a ` +
+        `stale handle cannot re-create it. Re-open it with \`loam federate open\` to receive on it ` +
+        `again.`,
+    );
+  }
+  if (!quiet) {
+    await stamp(
+      gw,
+      {
+        name,
+        into: opts.into,
+        prefix: opts.prefix,
+        receiving: before?.receiving ?? true,
+        blessing: before?.blessing ?? opts.bless !== false,
+        lastSyncedAt: gw.nextTimestamp(),
+        consecutiveFailures: 0,
+        from,
+        // Cleared, and only here: the stamps for every owed arrival are in the pool above.
+        unattested: [],
+      },
+      // A SUCCESS speaks for the three it just determined. This sync reached the peer, so the clock
+      // reading, the zeroed counter and the emptied debt are facts of THIS act rather than coercions
+      // of the last one — they are legible again even when the record before them was not.
+      illegible.filter(
+        (r) => r !== "lastSyncedAt" && r !== "consecutiveFailures" && r !== "unattested",
+      ),
+      false,
+    );
+  }
   return {
     offered: report.offered,
     accepted: report.accepted,

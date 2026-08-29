@@ -72,6 +72,7 @@ name begins with that number.
 | §46 | [Federation is container-to-container](spec/46-federation-channels.md) |
 | §47 | [Law resolves like data](spec/47-law-resolves-like-data.md) |
 | §48 | [The tutorial — a store of your own](spec/48-tutorial-v3.md) |
+| §49 | [Legibility — the store that stays on top of itself](spec/49-legibility.md) |
 | §51 | [The write side of a reference is derived from the read side](spec/51-lens-derived-edges.md) |
 | §52 | [The stock shelf declares its references](spec/52-stock-refs.md) |
 | §53 | [The store hands the agent its own manual](spec/53-loam-docs.md) |

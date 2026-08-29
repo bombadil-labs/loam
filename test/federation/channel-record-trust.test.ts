@@ -686,7 +686,7 @@ describe("T217 (b) — `loam federate list` renders the unreadable record as unr
     // fails if the command simply gave up on every row.
     const good = blockFor(ALICE);
     expect(good).toContain("receiving");
-    expect(good).toMatch(/last synced \d{4}-\d{2}-\d{2}T/);
+    expect(good).toMatch(/last recorded sync \d{4}-\d{2}-\d{2}T/);
     expect(good).not.toContain("UNREADABLE");
 
     for (const [pool, field] of [
@@ -700,7 +700,7 @@ describe("T217 (b) — `loam federate list` renders the unreadable record as unr
       expect(bad).toContain(field);
       // And it invents nothing: no time, no word for a health it cannot read.
       expect(bad).not.toContain("never synced");
-      expect(bad).not.toContain("last synced");
+      expect(bad).not.toContain("last recorded sync");
       expect(bad).not.toContain("NaN");
       expect(bad).not.toContain("Invalid Date");
     }
