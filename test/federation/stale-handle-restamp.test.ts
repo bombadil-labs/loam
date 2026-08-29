@@ -125,15 +125,15 @@ describe("T233 (a) — a stale handle's stamp refuses over a severed lineage", (
     expect(me.channelStatus(ALICE)).toHaveLength(0);
     expect(me.channelsEver(ALICE)).toHaveLength(1);
 
-    // TWO-SIDED: the bystander was never severed, so its stale handle's stamp STILL lands. Without
-    // this, a guard that refused every stamp would pass every assertion above.
+    // TWO-SIDED: the bystander was never severed, so its sync COMPLETES — a guard that refused
+    // every stamp would throw here, which is what keeps this half discriminating. Under the pulse
+    // law (SPEC §49.1) a quiet completion writes nothing: the record holds still and no row is
+    // added, and that stillness is asserted rather than tolerated.
     const before = liveRecords(me, BRAM).length;
     await bram.sync();
     expect(me.channelStatus(BRAM)).toHaveLength(1);
-    // A fresh success stamp landed: the clock is monotonic, so a new record strictly advances it and
-    // adds one more live record. `>=` would pass on a store that stopped stamping entirely.
-    expect(me.channelStatus(BRAM)[0]!.lastSyncedAt).toBeGreaterThan(bramAt);
-    expect(liveRecords(me, BRAM).length).toBeGreaterThan(before);
+    expect(me.channelStatus(BRAM)[0]!.lastSyncedAt).toBe(bramAt);
+    expect(liveRecords(me, BRAM).length).toBe(before);
   });
 
   it("a stale sync whose PULL FAILS after a sever refuses too, and resurrects nothing", async () => {
@@ -247,10 +247,11 @@ describe("T233 (c) — a drop that lands DURING the poll refuses the stamp that 
     expect(me.channelStatus(ALICE)).toHaveLength(0);
     expect(me.channelsEver(ALICE)).toHaveLength(1);
 
-    // Two-sided: the bystander, never dropped, still stamps through the same success path.
+    // Two-sided: the bystander, never dropped, still COMPLETES through the same success path —
+    // and quietly, so its record holds still (SPEC §49.1).
     await bram.sync();
     expect(me.channelStatus(BRAM)).toHaveLength(1);
-    expect(me.channelStatus(BRAM)[0]!.lastSyncedAt).toBeGreaterThan(bramAt);
+    expect(me.channelStatus(BRAM)[0]!.lastSyncedAt).toBe(bramAt);
   });
 
   it("the FAILURE stamp refuses when the drop interleaves before it", async () => {
@@ -274,9 +275,9 @@ describe("T233 (c) — a drop that lands DURING the poll refuses the stamp that 
     expect(me.channelStatus(ALICE)).toHaveLength(0);
     expect(me.channelsEver(ALICE)).toHaveLength(1);
 
-    // Two-sided: the bystander still stamps.
+    // Two-sided: the bystander still completes, quietly (SPEC §49.1).
     await bram.sync();
     expect(me.channelStatus(BRAM)).toHaveLength(1);
-    expect(me.channelStatus(BRAM)[0]!.lastSyncedAt).toBeGreaterThan(bramAt);
+    expect(me.channelStatus(BRAM)[0]!.lastSyncedAt).toBe(bramAt);
   });
 });

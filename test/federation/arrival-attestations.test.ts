@@ -608,8 +608,9 @@ describe("T207 — a sync that accepts deltas stamps its own custody", () => {
       const after = me.channelStatus(channel.name)[0]!;
       expect(after.consecutiveFailures).toBe(0);
       expect(after.unattested).toEqual([]);
-      // The door DID open, and nothing came through it — which is exactly what this clock records.
-      expect(after.lastSyncedAt).toBeGreaterThan(synced);
+      // The door DID open, and nothing came through it — and a poll with nothing to say writes
+      // nothing (SPEC §49.1): the clock holds at the last sync that had something to record.
+      expect(after.lastSyncedAt).toBe(synced);
 
       // ACCEPTING, through the same faulty door: now the fault is a refusal, and it counts.
       await alice.append([observed(FERN, "height", 71, 2000, ALICE_SEED)]);
