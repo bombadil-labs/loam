@@ -26,6 +26,27 @@
       "sha256": "271e6e382f766a105194d101fdb078562a824bde807b867d876c6cdfebc84488",
       "authorized": "PENDING MYK - merging this entry IS the authorization. The arc-walk case splits into one case per lesson; every assertion survives; T226's other cases are byte-identical.",
       "//": "The whole-file revision class's first use (Myk chose the class in chat, 2026-08-28, after the tutorial's 90s ceiling was breached twice under the standard bar - T248's measurements). The declared bytes: the arc-walk `it` becomes a drift-guard case plus one case per lesson registered at collection from lessons.mjs (buildArc is deterministic), state carrying in order exactly as the single walk did; two imports and one stale header note (the pre-T227 stub-arc paragraph) are the only other changes. Measured: 31/31 green, worst per-lesson case 9.2s against the 90s ceiling (was 23s all-in-one); the erasure-family cases keep their ~30s standalone cost on main and branch alike - named as the next candidate, not touched here. REMOVE this entry once the split merges."
+    },
+    {
+      "file": "test/federation/arrival-attestations.test.ts",
+      "sha256": "0a99c8bd44fa2636ec2fde6550ec520eaf520f1cc8f2d4c1d5a789e39b609123",
+      "authorized": "PENDING MYK - merging this entry IS the authorization; the settled SPEC 49 pulse law is the ruling it records.",
+      "//": "T212 revisions - SPEC 49 position 1 (the pulse law, settled by Myk 2026-08-28) supersedes the per-poll channel stamp these four rails pinned: a quiet sync now writes NOTHING (the audit rail test/federation/pulse-law-audit.test.ts found the violation on its first run). arrival-attestations: the quiet-poll clock holds instead of advancing. crash-window (b): a quiet sync adds zero records, not one. stale-handle-restamp: the bystander completes quietly instead of stamping, and the header says so; the sever refusals themselves are UNCHANGED and the quiet path re-reads liveness (red-proven by the existing T233(c) case). channel-record-trust: the human label moves to 'last recorded sync' because lastSyncedAt now names the last EVENTFUL sync - an independent suppression lens flagged the old label as overclaiming. Every edit was lens-reviewed; the full federation suite is 243/243 on the branch. REMOVE all four entries once the T212 build PR merges."
+    },
+    {
+      "file": "test/federation/crash-window.test.ts",
+      "sha256": "d879caf7c4ce07887b9d9941571d5d9e4341cc51120ff02c378e8943b2cb4f94",
+      "authorized": "PENDING MYK - merging this entry IS the authorization; the settled SPEC 49 pulse law is the ruling it records."
+    },
+    {
+      "file": "test/federation/stale-handle-restamp.test.ts",
+      "sha256": "7c0d1cf4df66f96a9fc0ffe15df5ca8ca7651a41cdb2b9c0ccb5e1b3ffe25dbb",
+      "authorized": "PENDING MYK - merging this entry IS the authorization; the settled SPEC 49 pulse law is the ruling it records."
+    },
+    {
+      "file": "test/federation/channel-record-trust.test.ts",
+      "sha256": "6b39605d0d4b02dcdbba873fe6d14e8ab835aa37777d2b9aeee9d2c1fb6d0714",
+      "authorized": "PENDING MYK - merging this entry IS the authorization; the settled SPEC 49 pulse law is the ruling it records."
     }
   ]
 }
