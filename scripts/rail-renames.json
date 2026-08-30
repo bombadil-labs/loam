@@ -19,26 +19,6 @@
     "Remove entries once the rename that consumed them has merged; a spent entry is inert",
     "(the substitution no longer produces the base) but tidiness keeps this file reviewable."
   ],
-  "renames": [
-    {
-      "from": "import { grantClaims, holdsGrant } from \"../../src/gateway/accounts.js\";",
-      "to": "import { grantClaims, holdsGrant } from \"../../src/gateway/accounts.js\"; PBBILL1",
-      "files": ["test/gateway/probation-frame.test.ts"],
-      "authorized": "PENDING MYK - merging this entry IS the authorization; T248's mechanism, third application.",
-      "//": "T253: probation-frame joins the host-sized pool bill by three chained pairs (import via marker, then the bill call before primary()'s return, which publicPrimary shares by delegation). The mechanism is T248's, third application: a pool render charges worker SPAWN to the declared clock, so success assertions under the 500ms default race a loaded host - this file paid the flake on 2026-08-29 (500 for 200, 23/23 in isolation). No assertion changes; the fixture declares the 10s wildcard bill test/helpers/pool-bill.ts carries (landed in #507 with the t209-fixtures half - 57 install-by-federation rails already wear it, no ceremony needed there because t209-fixtures.ts is not a declared rail). Verified: base + pairs + prettier is byte-identical to the prepared branch file; 23/23 green billed. REMOVE all three pairs once the edit merges."
-    },
-    {
-      "from": "PBBILL1",
-      "to": "import { declareHostSizedBill } from \"../helpers/pool-bill.js\";",
-      "files": ["test/gateway/probation-frame.test.ts"],
-      "authorized": "PENDING MYK - merging this entry IS the authorization; T248's mechanism, third application."
-    },
-    {
-      "from": "  return { gw, backend };",
-      "to": "  await declareHostSizedBill(gw, 9_150); return { gw, backend };",
-      "files": ["test/gateway/probation-frame.test.ts"],
-      "authorized": "PENDING MYK - merging this entry IS the authorization; T248's mechanism, third application."
-    }
-  ],
+  "renames": [],
   "revisions": []
 }
