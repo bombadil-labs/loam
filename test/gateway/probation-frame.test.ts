@@ -22,6 +22,7 @@ import {
   type Schema,
 } from "@bombadil/rhizomatic";
 import { grantClaims, holdsGrant } from "../../src/gateway/accounts.js";
+import { declareHostSizedBill } from "../helpers/pool-bill.js";
 import { containerClaims } from "../../src/gateway/container.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -86,6 +87,7 @@ const primary = async (): Promise<{ gw: Gateway; backend: MemoryBackend }> => {
     consumes: ["message", "note"],
     bundle: APP,
   });
+  await declareHostSizedBill(gw, 9_150);
   return { gw, backend };
 };
 
