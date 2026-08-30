@@ -1,4 +1,12 @@
 {
+  "_adlcArchive": {
+    "archivedAt": "2026-08-30T20:10:25.736Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "a7c776f670a50b6202b47b041e407887572caab0b33e22e1471180faed4e866d",
+    "ticketHash": "b675e5d6b2e832c39987ccb9d20b2b77856bea531dc120200eacac7464ad6ee4",
+    "version": 1
+  },
   "body": "Three frozen rails have now flaked the same way under a loaded full bar, one first-observation\neach: test/gateway/render-ocap.test.ts (fixed via the T248 ceremony - the serve half moved to a\nbill the host can meet), test/gateway/probation-frame.test.ts (2026-08-29, 'a quarantined\nroute's write lands in the pool's store': 500 for 200, 23/23 in isolation), and\ntest/federation/install-by-federation.test.ts (2026-08-29, same bar: 'the renderer could not\nstart' where a section was expected, green in isolation). The mechanism is designed and\ndocumented: a POOL render charges worker SPAWN to the pool's declared clock (renderers.ts -\n'the envelope is the pool's whole bill'), so any fixture serving through a pool under a tight\nor default bill races host scheduling whenever the whole suite saturates the box.\n\nThis ticket owns the CLASS, not one file. Triage: enumerate every test that drives a pool\nserveRoute (grep openQuarantine + serveRoute and channel-app blessings that render), measure\nwhich bills they run under, and move each flaking fixture's SERVE half onto a bill the host can\nmeet - the T248 shape: widen the envelope by a delta inside the fixture, assert the widening\ntook, keep every assertion. Frozen files move by declared revision. Consider also whether the\nfixtures should share one helper that declares the generous bill, so the next pool test is born\nload-proof. Never widen an assertion or a product default for a test's sake.\n\nAcceptance criteria:\n- (a) The pool-render test inventory exists with each fixture's effective bill named. Verify:\n  the table quoted in the closing PR.\n- (b) Every fixture that has flaked serves under a host-sized bill with assertions unchanged,\n  via declared revisions. Verify: the diffs of the closing PR.\n- (c) A shared fixture helper exists and the touched tests use it. Verify: the helper's own\n  test plus grep in the closing PR.",
   "category": "bug",
   "id": "T253",
