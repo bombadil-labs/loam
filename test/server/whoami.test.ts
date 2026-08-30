@@ -184,6 +184,8 @@ describe("T255 (a) — four kinds, four distinct truthful answers", () => {
     const a = await restWhoami(base);
     expect(a.kind).toBe("anonymous");
     expect(a.author).toBeNull();
+    expect(a.operator).toBe(false);
+    expect(a.write).toBe(false);
     expect(a.masked).toBe(true);
     // The sentence the synchronicity artifact needed: an empty view for THIS caller is not an
     // empty store.
