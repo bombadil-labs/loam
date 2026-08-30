@@ -30,6 +30,7 @@ import { authorForSeed, contentAddress, type Policy, type Schema } from "@bombad
 import { run } from "../../src/cli/cli.js";
 import { exportOffer } from "../../src/federation/offer.js";
 import { grantClaims } from "../../src/gateway/accounts.js";
+import { declareHostSizedBill } from "../helpers/pool-bill.js";
 import { CTX_MANIFEST } from "../../src/gateway/adopt-law.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -75,8 +76,8 @@ export const CHANNEL = "channel:friends:alice";
 export const store = async (
   seed: string,
   opts?: { pens: Record<string, string> },
-): Promise<Gateway> =>
-  Gateway.boot(
+): Promise<Gateway> => {
+  const gw = await Gateway.boot(
     new MemoryBackend(),
     assembleGenesis({
       operatorSeed: seed,
@@ -87,6 +88,11 @@ export const store = async (
     }),
     opts,
   );
+  // Every receiver in these suites asserts pool-render SUCCESS through channel apps; the
+  // default 500ms bill also clocks worker spawn on the pool path and loses under load (T253).
+  await declareHostSizedBill(gw, 9_010);
+  return gw;
+};
 
 /** A peer who registered a lens, holds one observation, and publishes an app over it. */
 export async function peer(
