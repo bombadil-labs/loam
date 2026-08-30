@@ -69,6 +69,7 @@ import {
   federateContainersOf,
   fenceAdmits,
   grantClaims,
+  holdsGrant,
   registerPrefixesOf,
 } from "../gateway/accounts.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
@@ -832,6 +833,93 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   const contextFor = (identity: TokenIdentity): RequestContext | undefined =>
     identity.actor === undefined ? undefined : { actor: identity.actor };
 
+  // WHOAMI (SPEC §56, T255): who does this door think the caller is, and what standing does
+  // the GROUND currently grant them? Read per request like every standing check, so a
+  // revocation binds on the very next call. The ANONYMOUS answer is the point: under
+  // mask: drop an anonymous reader and an empty store are indistinguishable from outside,
+  // and this is the sentence that separates them.
+  const connectorInfoOf = (
+    req: IncomingMessage,
+  ): { clientId: string; actor: string } | undefined => {
+    const header = req.headers.authorization;
+    if (header === undefined || !header.startsWith("Bearer ")) return undefined;
+    return tokenExchange?.describe(sha(header.slice("Bearer ".length)).toString("hex"));
+  };
+  const whoamiFor = (
+    gateway: Gateway | undefined,
+    identity: TokenIdentity | undefined,
+    connector: { clientId: string; actor: string } | undefined,
+  ): Record<string, unknown> => {
+    if (identity === undefined) {
+      return {
+        kind: "anonymous",
+        author: null,
+        operator: false,
+        write: false,
+        registerPrefixes: [],
+        federateContainers: [],
+        masked: true,
+        note:
+          "Reads on this door are masked: views fold empty for this caller. An empty answer " +
+          "here is not an empty store — present a token, or sign in, to see your standing.",
+      };
+    }
+    if (identity.operator === true) {
+      return {
+        kind: "operator",
+        author: gateway?.operatorAuthor ?? null,
+        operator: true,
+        write: true,
+        registerPrefixes: [],
+        federateContainers: [],
+        masked: false,
+        note: "The operator: unfenced on every door of this store.",
+      };
+    }
+    let author: string | undefined;
+    try {
+      author = identity.actor === undefined ? undefined : authorForSeed(identity.actor);
+    } catch {
+      author = undefined;
+    }
+    if (author === undefined) {
+      return {
+        kind: "anonymous",
+        author: null,
+        operator: false,
+        write: false,
+        registerPrefixes: [],
+        federateContainers: [],
+        masked: true,
+        note:
+          "The presented token names no key, so this caller reads as anonymous: masked, " +
+          "views folding empty.",
+      };
+    }
+    const isConnector = connector !== undefined && connector.actor === author;
+    return {
+      kind: isConnector ? "connector" : "actor",
+      author,
+      ...(isConnector ? { clientId: connector.clientId } : {}),
+      operator: false,
+      write:
+        gateway !== undefined &&
+        holdsGrant(gateway.reactor, STORE_ENTITY, author, "write", gateway.operatorAuthor),
+      registerPrefixes:
+        gateway === undefined
+          ? []
+          : registerPrefixesOf(gateway.reactor, author, gateway.operatorAuthor),
+      federateContainers:
+        gateway === undefined
+          ? []
+          : federateContainersOf(gateway.reactor, author, gateway.operatorAuthor),
+      masked: false,
+      note: isConnector
+        ? "A connector's minted identity: it writes as its own author, inside its grants."
+        : "An actor token: it acts as this key, inside this key's surviving grants.",
+    };
+  };
+
   // Live SSE streams, so close() — and removeMount — can end them instead of leaving clients
   // hanging. Ending the generator makes the handler's own `finally` run: it deletes and res.end()s.
   const streams = new Set<LiveStream>();
@@ -1067,6 +1155,16 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     // §53 (T247). The manual rides a TOOL rather than the descriptions above because the register
     // grammar is ~10KB and a description taxes every session's context; a topic is fetched at the
     // moment it is needed — usually the moment a refusal names it.
+    {
+      name: "loam_whoami",
+      description:
+        "Who does this store think you are, and what standing do you hold? Call this FIRST " +
+        "when a view answers empty: under mask-drop an anonymous reader and an empty store " +
+        "look identical, and this tool says which you are. Returns kind (operator | " +
+        "connector | actor | anonymous), your author key, and your grants - write, register " +
+        "prefixes, federate containers - read fresh from the ground.",
+      inputSchema: { type: "object", properties: {} },
+    },
     {
       name: "loam_docs",
       description:
@@ -1343,6 +1441,17 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
               isError: true,
             });
           }
+          return;
+        }
+        if (name === "loam_whoami") {
+          reply({
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(whoamiFor(gateway, identity, connectorInfoOf(req)), null, 1),
+              },
+            ],
+          });
           return;
         }
         if (name === "loam_docs") {
@@ -1793,6 +1902,18 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         // seeded copy of it: a separate store holds its own snapshot of `loam:public` and moves only
         // on reseed (§24.2), so asking the pool alone would leave a struck declaration open here
         // forever. Both must be open — the host decides WHETHER, the container still decides WHAT.
+        // WHOAMI answers every anonymous caller UNIFORMLY, before any mount fact is consulted:
+        // the anonymous answer names nothing about this store (T255), and answering only on
+        // public-surfaced mounts would mint a mount-existence oracle the refusals below exist
+        // to prevent.
+        if (verb === "whoami" && req.headers.authorization === undefined) {
+          if (req.method !== "GET") {
+            refused(res, verb);
+            return;
+          }
+          json(res, 200, whoamiFor(undefined, undefined, undefined));
+          return;
+        }
         if (
           req.headers.authorization !== undefined ||
           resolved === undefined ||
@@ -1954,6 +2075,14 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         case "mcp":
           await handleMcp(gateway, identity, guard, req, res);
           return;
+        case "whoami": {
+          if (req.method !== "GET") {
+            json(res, 404, { errors: ["no such surface"] });
+            return;
+          }
+          json(res, 200, whoamiFor(gateway, identity, connectorInfoOf(req)));
+          return;
+        }
         // The settling report (T70): has every erasure this store promised settled to bytes?
         // Operator-token GET only. To ANY other identity or method the door does not exist —
         // byte-for-byte the 404 an unknown verb gets — because the outstanding list names ids the
