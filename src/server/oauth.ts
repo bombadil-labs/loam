@@ -1204,6 +1204,8 @@ export interface TokenDoor {
    * pays a file read, to re-check the generation so a cross-process revoke binds at once.
    */
   resolve(digestHex: string): ConnectorIdentity | undefined;
+  /** The public face of a resolved token — the client and its PUBLIC author, for whoami (T255). */
+  describe(digestHex: string): { clientId: string; actor: string } | undefined;
 }
 
 const digestHex = (secret: string): string => createHash("sha256").update(secret).digest("hex");
@@ -1284,6 +1286,24 @@ export function makeTokenDoor(options: TokenDoorOptions): TokenDoor {
     const grant = grantFor(file, token.clientId);
     if (grant === undefined || !grant.standing) return undefined;
     return { actor: grant.actorSeed };
+  };
+
+  // The same ladder as `resolve`, answering the PUBLIC half: which client, which author. Never
+  // the seed — whoami reports identity, and identity is what the store's own deltas carry.
+  const describe = (digest: string): { clientId: string; actor: string } | undefined => {
+    let file: OAuthFile;
+    try {
+      file = readOAuthFile(home);
+    } catch {
+      return undefined;
+    }
+    const token = tokenFor(file, digest);
+    if (token === undefined) return undefined;
+    const client = clientFor(file, token.clientId);
+    if (client === undefined || token.generation !== client.generation) return undefined;
+    const grant = grantFor(file, token.clientId);
+    if (grant === undefined || !grant.standing) return undefined;
+    return { clientId: token.clientId, actor: grant.actor };
   };
 
   // The redemption itself, one attempt. Every early return is a refusal that MINTS NOTHING.
@@ -1464,6 +1484,7 @@ export function makeTokenDoor(options: TokenDoorOptions): TokenDoor {
   return {
     owns: atTokenPath,
     resolve,
+    describe,
     async handle(pathname, req, res) {
       if (req.method !== "POST") {
         refuse(res, 405, "invalid_request", "the token endpoint answers POST");

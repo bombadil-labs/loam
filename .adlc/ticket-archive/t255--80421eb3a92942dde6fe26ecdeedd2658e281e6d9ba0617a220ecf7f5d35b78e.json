@@ -1,7 +1,18 @@
 {
+  "_adlcArchive": {
+    "archivedAt": "2026-08-30T20:30:26.594Z",
+    "reason": "completed",
+    "sourceRevision": null,
+    "sourceStoreHash": "e4bed92231ab69d4167a2db4b52e1048f68965aaaf51a915e083c01d76b787d6",
+    "ticketHash": "e23247a741e4ef376e1d16c607b66384f7d418cc155cadafd9a11a20605c47a3",
+    "version": 1
+  },
   "body": "From the medialog spec (Myk's chat Fable, 2026-08-29) and a trap it hit in production: under\nmask: drop, AN ANONYMOUS READER AND AN EMPTY STORE ARE INDISTINGUISHABLE FROM OUTSIDE. The\nsynchronicity artifact rendered a masked-auth failure as a welcoming empty state - confidently\nwrong in the way only a well-designed UI can be. H9's shape at the door: \"nothing there\" and\n\"nothing shown to YOU\" must not be the same bytes.\n\nBuild a standing-introspection surface: a caller may ask who the door thinks they are and what\nstanding they hold. Two forms, one truth:\n- An MCP tool `loam_whoami` (beside loam_docs in the roster): returns the resolved principal\n  kind (operator | actor key | connector client | anonymous), and the standing the ground\n  currently grants it - verbs with their prefixes, federate containers, roles where a user.\n- The same answer over GraphQL (a `_standing` query field or REST sibling) so non-MCP clients\n  ask the same question.\nRead from the GROUND per request like every standing check (a revocation binds on the next\ncall). The ANONYMOUS answer is the point: it must say plainly that reads are masked and views\nfold empty for this caller - the sentence the trap needed.\n\nAcceptance criteria:\n- (a) An operator token, an actor token, a connector session, and an anonymous caller each get\n  a distinct, truthful answer naming their kind and standing; the anonymous answer names the\n  masking. Verify: test/server/whoami.test.ts.\n- (b) A revoked grant disappears from the answer on the very next call, no restart. Verify:\n  the same suite, two-sided with a live sibling grant.\n- (c) The tool appears in the MCP roster and its description teaches when to call it (the\n  empty-vs-masked question). Verify: the same suite at the tools/list level.",
   "category": "feature",
   "id": "T255",
+  "rails": [
+    "test/server/whoami.test.ts"
+  ],
   "status": "todo",
   "title": "loam_whoami: a caller may ask who the door thinks they are"
 }

@@ -2005,4 +2005,46 @@ export const CHAPTERS = [
       },
     ],
   },
+  {
+    n: 24,
+    slug: "who-the-door-thinks-you-are",
+    title: "Who the door thinks you are",
+    thesis:
+      "An anonymous reader and an empty store must never be the same bytes: any caller may " +
+      "ask their kind and standing, and the anonymous answer says the masking in words.",
+    covers: ["spec/56-whoami.md"],
+    body: [
+      {
+        kind: "claims",
+        claims: [
+          {
+            says:
+              "Operator, connector, actor, and anonymous each draw a distinct truthful " +
+              "answer - the connector named by its client id and public author, the actor by " +
+              "its key and exactly its granted standing - over MCP and over GET whoami alike.",
+            spec: "spec/56-whoami.md",
+            proof: "test/server/whoami.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "The answer reads the ground per request: striking a grant flips the very next " +
+              "call's answer while a sibling's standing survives, with no restart.",
+            spec: "spec/56-whoami.md",
+            proof: "test/server/whoami.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "The anonymous answer is masked: true with the sentence in words, is uniform " +
+              "across every path so it mints no mount-existence oracle, and the roster's " +
+              "description teaches calling it first when a view answers empty.",
+            spec: "spec/56-whoami.md",
+            proof: "test/server/whoami.test.ts",
+            door: null,
+          },
+        ],
+      },
+    ],
+  },
 ];
