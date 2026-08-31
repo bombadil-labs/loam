@@ -80,11 +80,7 @@ import { divergenceOf, entryLensName, installOrder, stockIdentityOf } from "../s
 import { CTX_PEN, penEntity, penRecordClaims } from "../gateway/renderers.js";
 import { serve, type ServerHandle } from "../server/http.js";
 import { revokeConnector } from "../server/oauth.js";
-import {
-  clientSeedPath,
-  readClientsFile,
-  writeClientsFile,
-} from "../server/clients-file.js";
+import { clientSeedPath, readClientsFile, writeClientsFile } from "../server/clients-file.js";
 import {
   grantFor,
   readOAuthFile,

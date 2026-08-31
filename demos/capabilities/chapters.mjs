@@ -2047,4 +2047,48 @@ export const CHAPTERS = [
       },
     ],
   },
+  {
+    n: 25,
+    slug: "a-key-its-grants-and-a-bearer",
+    title: "A key, its grants, and a bearer",
+    thesis:
+      "A script that writes as itself gets its whole credential in one motion: loam client " +
+      "mint keeps the seed, appends the grants, and prints the bearer once - and the printed " +
+      "warning tells the truth about what fences a write.",
+    covers: ["spec/57-client-mint.md"],
+    body: [
+      {
+        kind: "claims",
+        claims: [
+          {
+            says:
+              "A minted client writes through the MCP door as its OWN author, registers " +
+              "inside its granted prefix and is refused outside it, and loam_whoami answers " +
+              "it as an actor with exactly its granted standing.",
+            spec: "spec/57-client-mint.md",
+            proof: "test/cli/client-mint.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "Freshness is split and stated: the bearer binds per request - a mint " +
+              "authenticates and a revoke refuses with no restart - while the grants live in " +
+              "a serving reactor from boot and move at restart.",
+            spec: "spec/57-client-mint.md",
+            proof: "test/cli/client-mint.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "Revoke strikes the key's grants at the delta level and retires its record " +
+              "while a sibling client's key and standing survive; the mint prints the bearer " +
+              "once with the store-wide-write warning and never prints the seed.",
+            spec: "spec/57-client-mint.md",
+            proof: "test/cli/client-mint.test.ts",
+            door: null,
+          },
+        ],
+      },
+    ],
+  },
 ];

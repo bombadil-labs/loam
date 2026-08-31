@@ -98,8 +98,7 @@ const mcp = async (
 const whoami = async (base: string, bearer: string): Promise<Record<string, unknown>> => {
   const r = await mcp(base, bearer, "tools/call", { name: "loam_whoami", arguments: {} });
   expect(r.status).toBe(200);
-  const text = (r.body as { result: { content: Array<{ text: string }> } }).result.content[0]!
-    .text;
+  const text = (r.body as { result: { content: Array<{ text: string }> } }).result.content[0]!.text;
   return JSON.parse(text) as Record<string, unknown>;
 };
 
