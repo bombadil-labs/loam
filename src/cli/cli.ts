@@ -80,7 +80,12 @@ import { divergenceOf, entryLensName, installOrder, stockIdentityOf } from "../s
 import { CTX_PEN, penEntity, penRecordClaims } from "../gateway/renderers.js";
 import { serve, type ServerHandle } from "../server/http.js";
 import { revokeConnector } from "../server/oauth.js";
-import { clientSeedPath, readClientsFile, writeClientsFile } from "../server/clients-file.js";
+import {
+  clientSeedPath,
+  readClientSeed,
+  readClientsFile,
+  writeClientsFile,
+} from "../server/clients-file.js";
 import {
   grantFor,
   readOAuthFile,
@@ -3835,7 +3840,7 @@ async function cmdClientMint(name: string, parsed: Parsed, home: string, io: IO)
   writeFileSync(clientSeedPath(home, name), `${clientSeed}\n`, { mode: 0o600 });
   writeClientsFile(home, {
     version: 1,
-    clients: [...file.clients, { name, digest, actor, mintedAt: Date.now() }],
+    clients: [...file.clients, { name, digest, actor, store: resolve(path), mintedAt: Date.now() }],
   });
 
   io.out(
@@ -3876,9 +3881,20 @@ async function cmdClientRevoke(
     return 1;
   }
   const record = file.clients.find((c) => c.name === name);
-  if (record === undefined) {
-    io.err(`client revoke: this home holds no client "${name}"`);
-    return 2;
+  // A record-less client with a seed file is a mint that died between its two file writes: the
+  // key and its grants are real, only the record is missing — and refusing here would strand
+  // them forever, since mint's own duplicate check sees the seed and says "already exists".
+  // The seed's derived author is the same identity the record would have carried.
+  let actor: string;
+  if (record !== undefined) {
+    actor = record.actor;
+  } else {
+    try {
+      actor = authorForSeed(readClientSeed(home, name));
+    } catch {
+      io.err(`client revoke: this home holds no client "${name}"`);
+      return 2;
+    }
   }
   let seed: string;
   try {
@@ -3892,13 +3908,30 @@ async function cmdClientRevoke(
   }
   const operator = authorForSeed(seed);
   const path = storePath(home, parsed.flags.get("store"));
+  // The closure is only as honest as its operand set. The record remembers which store the
+  // grants landed in; striking over a different one would find nothing, report the grants
+  // struck, and destroy the record this command finds the client by — so a mismatch refuses.
+  if (record !== undefined && resolve(record.store) !== resolve(path)) {
+    io.err(
+      `client revoke: "${name}" was minted into ${record.store}, not ${resolve(path)} — ` +
+        `pass --store pointing at the store that holds its grants, and nothing was revoked`,
+    );
+    return 2;
+  }
   const gateway = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }));
+  let struckCount = 0;
   try {
     // Strike FIRST, retire the record second: a strike is idempotent over the surviving set, so
     // a failure between the two leaves a rerunnable revoke — the other order deletes the record
     // this command finds the client by, and the retry would answer "no such client" while the
     // grants stand.
-    const ids = survivingGrantClaimIds(gateway.reactor, operator, record.actor);
+    //
+    // The strike set is the DOOR's own resolution (`grantsHeldBy`), not a flat scan: it carries
+    // strike survival transitively and includes standing an effective admin minted, so what this
+    // command strikes is exactly what enforcement was honoring — the two levels cannot disagree
+    // about what "revoked" means.
+    const ids = grantsHeldBy(gateway.reactor, actor, operator).map((g) => g.id);
+    struckCount = ids.length;
     if (ids.length > 0) {
       const at = Date.now();
       await gateway.append(
@@ -3918,7 +3951,10 @@ async function cmdClientRevoke(
   rmSync(clientSeedPath(home, name), { force: true });
   io.out(
     `loam: revoked client "${name}"\n` +
-      `  its bearer is refused on the very next request, and its grants are struck in ${path}\n` +
+      `  its bearer is refused on the very next request\n` +
+      (struckCount > 0
+        ? `  its ${struckCount} surviving grant${struckCount === 1 ? " is" : "s are"} struck in ${path}\n`
+        : `  no surviving grant named this key in ${path} — nothing needed striking\n`) +
       `  its past deltas are untouched — they keep naming their author\n` +
       `  a server already running honors the struck GRANTS until a restart; the bearer needs none`,
   );

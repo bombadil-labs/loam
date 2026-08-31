@@ -25,6 +25,12 @@ export interface ClientRecord {
   readonly digest: string;
   /** The client's PUBLIC author — what its deltas name. Never the seed. */
   readonly actor: string;
+  /**
+   * The resolved store file the mint appended this key's grants into. Revoke refuses a
+   * different store rather than striking over the wrong operand set and reporting the grants
+   * gone — a closure evaluated against a store the grants were never in is H7 in file form.
+   */
+  readonly store: string;
   readonly mintedAt: number; // wall clock, for `loam client` listings to come
 }
 
@@ -58,6 +64,9 @@ function checkShape(raw: unknown, path: string): ClientsFile {
     }
     if (typeof c.actor !== "string" || c.actor.length === 0) {
       fail(`client "${String(c.name)}" names no author`);
+    }
+    if (typeof c.store !== "string" || c.store.length === 0) {
+      fail(`client "${String(c.name)}" names no store`);
     }
     if (typeof c.mintedAt !== "number") fail(`client "${String(c.name)}" has no mintedAt`);
   }
