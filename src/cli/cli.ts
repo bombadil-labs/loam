@@ -81,6 +81,11 @@ import { CTX_PEN, penEntity, penRecordClaims } from "../gateway/renderers.js";
 import { serve, type ServerHandle } from "../server/http.js";
 import { revokeConnector } from "../server/oauth.js";
 import {
+  clientSeedPath,
+  readClientsFile,
+  writeClientsFile,
+} from "../server/clients-file.js";
+import {
   grantFor,
   readOAuthFile,
   revocationsFor,
@@ -164,6 +169,7 @@ type CommandName =
   | "user"
   | "pen"
   | "grant"
+  | "client"
   | "slate"
   | "erase"
   | "tombstones";
@@ -445,6 +451,28 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "also strikes the operator-signed write grant in the ground. It NEVER erases the connector's",
       "past deltas — those keep naming their author and keep resolving. Like every role command, this",
       "signs with <home>/operator.seed and needs only home access, never a live session.",
+    ],
+  },
+  client: {
+    summary: "mint and revoke non-interactive client credentials (SPEC §57)",
+    usage: "loam client mint|revoke <name> [options]",
+    flags: new Set(["home", "store", "register-prefix", "federate"]),
+    notes: [
+      "subcommands:",
+      "  mint <name>      a key, its grants, and a bearer, in one motion — for a script, a bot,",
+      "                    or another agent that will write to this store as itself",
+      "  revoke <name>    refuse the bearer on the very next request and strike the key's grants",
+      "",
+      "mint prints the bearer ONCE and records only its sha-256 digest (clients.json); the signing",
+      "seed is written to client.<name>.seed (0600) and never printed. WRITE STANDING IS",
+      "STORE-WIDE BY DESIGN: pointing is free, entity ids are unowned, and the fences are",
+      "attribution — every delta the client appends names its own author — plus each reader's",
+      "trust mask, never a door prefix. --register-prefix fences schema registration to a",
+      "namespace (comma-separated for several); --federate scopes channel verbs to named",
+      "containers. Both are optional; the write grant always comes.",
+      "",
+      "FRESHNESS IS SPLIT. The bearer binds per request — a mint opens doors and a revoke refuses",
+      "with no restart. The grants live in a serving reactor from boot and move at restart.",
     ],
   },
   slate: {
@@ -1245,6 +1273,9 @@ async function cmdServe(
       tokens: { [token]: { operator: true } },
       port,
       host: hostFlag,
+      // Minted client bearers (SPEC §57): the door reads this home's clients.json per request,
+      // so a `loam client mint` or `revoke` beside this server binds with no restart.
+      clients: { home },
       ...(publicUrlFlag === undefined ? {} : { publicUrl: publicUrlFlag }),
       // Connector registration (SPEC §37 phase 13), opt-in: absent, POST /oauth/register resolves
       // as an unrouted path. serve() refuses this beside no --public-url, and boot-validates each
@@ -3678,6 +3709,228 @@ async function cmdGrantRevoke(
   }
 }
 
+// --- minted clients (SPEC §57, T256) -------------------------------------------------------------
+//
+// `loam client mint <name>` is the non-interactive credential in one motion: a signing seed the
+// home keeps, the grants that give its key standing, and a bearer printed once. Write standing is
+// STORE-WIDE by design — pointing is free, entity ids are unowned, and the fences are attribution
+// (every delta names the client's own author) plus each reader's trust mask, never a door prefix.
+// Only register and federate carry a scope, because those verbs reach the store's shared surfaces.
+//
+// The seed file cannot collide with `user.<name>.seed` or `pen.<name>.seed` — it wears its own
+// `client.` stem — and the name is fenced to what a filename can carry, so the record can never
+// point at a path outside the home.
+
+const CLIENT_NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
+
+const splitScopes = (raw: string | undefined): string[] =>
+  raw === undefined
+    ? []
+    : raw
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+
+async function cmdClient(args: readonly string[], io: IO): Promise<number> {
+  const parsed = parseFor("client", args);
+  const sub = parsed.positionals[0];
+  if (sub !== "mint" && sub !== "revoke") {
+    io.err(
+      "client wants a subcommand: `loam client mint <name> [--register-prefix <ns>:]` or " +
+        "`loam client revoke <name>`",
+    );
+    return 2;
+  }
+  const name = parsed.positionals[1];
+  if (name === undefined || parsed.positionals.length > 2) {
+    io.err(`client ${sub} takes exactly one name: \`loam client ${sub} <name>\``);
+    return 2;
+  }
+  const home = parsed.flags.get("home") ?? defaultHome();
+  const unusable = homeDefect(home, { allowMissing: false });
+  if (unusable !== undefined) {
+    io.err(`client ${sub}: ${unusable}`);
+    return 1;
+  }
+  return sub === "mint"
+    ? cmdClientMint(name, parsed, home, io)
+    : cmdClientRevoke(name, parsed, home, io);
+}
+
+async function cmdClientMint(name: string, parsed: Parsed, home: string, io: IO): Promise<number> {
+  if (!CLIENT_NAME_RE.test(name)) {
+    io.err(
+      `client mint: "${name}" is not a name a seed file can carry — start with a letter or ` +
+        `digit, then letters, digits, dots, dashes, underscores, 64 at most`,
+    );
+    return 2;
+  }
+  // A scope flag that resolves to NOTHING is refused rather than read as "no fence wanted": the
+  // caller asked for a fence, and minting without one would hand out more than they asked.
+  const prefixes = splitScopes(parsed.flags.get("register-prefix"));
+  if (parsed.flags.get("register-prefix") !== undefined && prefixes.length === 0) {
+    io.err("client mint: --register-prefix wants a non-empty namespace, like `medialog:`");
+    return 2;
+  }
+  const containers = splitScopes(parsed.flags.get("federate"));
+  if (parsed.flags.get("federate") !== undefined && containers.length === 0) {
+    io.err("client mint: --federate wants a non-empty container name");
+    return 2;
+  }
+  let seed: string;
+  try {
+    seed = readSeed(home);
+  } catch (err) {
+    io.err(
+      `client mint: ${home} has no operator identity — \`loam init\` makes one: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+    return 1;
+  }
+  const operator = authorForSeed(seed);
+  let file;
+  try {
+    file = readClientsFile(home);
+  } catch (err) {
+    io.err(
+      `client mint: ${home}'s client records are unreadable, so this will not mint a second ` +
+        `key over whatever they hold: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return 1;
+  }
+  if (file.clients.some((c) => c.name === name) || existsSync(clientSeedPath(home, name))) {
+    io.err(
+      `client mint: "${name}" already exists — one name, one key. ` +
+        `\`loam client revoke ${name}\` retires it first.`,
+    );
+    return 2;
+  }
+
+  const clientSeed = randomBytes(32).toString("hex");
+  const actor = authorForSeed(clientSeed);
+  const bearer = randomBytes(32).toString("base64url");
+  const digest = createHash("sha256").update(bearer).digest("hex");
+
+  const path = storePath(home, parsed.flags.get("store"));
+  const gateway = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }));
+  try {
+    const at = Date.now();
+    const claims = [
+      grantClaims(STORE_ENTITY, actor, "write", operator, at),
+      ...prefixes.map((p, i) =>
+        grantClaims(STORE_ENTITY, actor, "register", operator, at + 1 + i, p),
+      ),
+      ...containers.map((c, i) =>
+        grantClaims(STORE_ENTITY, actor, "federate", operator, at + 1 + prefixes.length + i, c),
+      ),
+    ];
+    await gateway.append(claims.map((c) => signClaims(c, seed)));
+  } catch (err) {
+    io.err(
+      `client mint: the ground refused this — nothing was minted: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+    return 1;
+  } finally {
+    await gateway.close();
+  }
+  // Grants first, files second: a failure between the two strands standing for a key nobody
+  // holds — inert — where the other order would hand out a bearer whose grants never landed.
+  writeFileSync(clientSeedPath(home, name), `${clientSeed}\n`, { mode: 0o600 });
+  writeClientsFile(home, {
+    version: 1,
+    clients: [...file.clients, { name, digest, actor, mintedAt: Date.now() }],
+  });
+
+  io.out(
+    `loam: minted client "${name}"\n` +
+      `  bearer: ${bearer}\n` +
+      `  shown once — the record keeps its digest, never the bearer\n` +
+      `  its key stays at ${clientSeedPath(home, name)} (0600); the seed is never printed\n` +
+      `  write standing is STORE-WIDE by design: every delta it appends names its own author,\n` +
+      `  and attribution plus each reader's trust mask is the fence — not a door prefix` +
+      (prefixes.length === 0
+        ? ""
+        : `\n  register is fenced to ${prefixes.map((p) => `"${p}"`).join(", ")}`) +
+      (containers.length === 0
+        ? ""
+        : `\n  federate is scoped to ${containers.map((c) => `"${c}"`).join(", ")}`) +
+      `\n  the bearer opens doors on the very next request; a server already running honors\n` +
+      `  the GRANTS only after a restart`,
+  );
+  const staleness = servingWarning(home, path);
+  if (staleness !== undefined) io.err(`loam: ${staleness}`);
+  return 0;
+}
+
+async function cmdClientRevoke(
+  name: string,
+  parsed: Parsed,
+  home: string,
+  io: IO,
+): Promise<number> {
+  let file;
+  try {
+    file = readClientsFile(home);
+  } catch (err) {
+    io.err(
+      `client revoke: ${home}'s client records are unreadable, so nothing was revoked: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+    return 1;
+  }
+  const record = file.clients.find((c) => c.name === name);
+  if (record === undefined) {
+    io.err(`client revoke: this home holds no client "${name}"`);
+    return 2;
+  }
+  let seed: string;
+  try {
+    seed = readSeed(home);
+  } catch (err) {
+    io.err(
+      `client revoke: ${home} has no operator identity — \`loam init\` makes one: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+    return 1;
+  }
+  const operator = authorForSeed(seed);
+  const path = storePath(home, parsed.flags.get("store"));
+  const gateway = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }));
+  try {
+    // Strike FIRST, retire the record second: a strike is idempotent over the surviving set, so
+    // a failure between the two leaves a rerunnable revoke — the other order deletes the record
+    // this command finds the client by, and the retry would answer "no such client" while the
+    // grants stand.
+    const ids = survivingGrantClaimIds(gateway.reactor, operator, record.actor);
+    if (ids.length > 0) {
+      const at = Date.now();
+      await gateway.append(
+        ids.map((id, i) => signClaims(makeNegationClaims(operator, at + i, id), seed)),
+      );
+    }
+  } catch (err) {
+    io.err(
+      `client revoke: the ground refused the strike — the bearer still opens, rerun this: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+    return 1;
+  } finally {
+    await gateway.close();
+  }
+  writeClientsFile(home, { version: 1, clients: file.clients.filter((c) => c.name !== name) });
+  rmSync(clientSeedPath(home, name), { force: true });
+  io.out(
+    `loam: revoked client "${name}"\n` +
+      `  its bearer is refused on the very next request, and its grants are struck in ${path}\n` +
+      `  its past deltas are untouched — they keep naming their author\n` +
+      `  a server already running honors the struck GRANTS until a restart; the bearer needs none`,
+  );
+  const staleness = servingWarning(home, path);
+  if (staleness !== undefined) io.err(`loam: ${staleness}`);
+  return 0;
+}
+
 // --- the erasure surface (SPEC §11, §29; T206) ---------------------------------------------------
 //
 // Two readers over machinery that already exists — §29.1's slate record, printed, and the per-id
@@ -5029,6 +5282,8 @@ export async function run(
         return await cmdPen(rest, io);
       case "grant":
         return await cmdGrant(rest, io);
+      case "client":
+        return await cmdClient(rest, io);
       case "slate":
         return await cmdSlate(rest, io);
       case "erase":

@@ -63,6 +63,7 @@ import {
   type OAuthDoors,
   type TokenDoor,
 } from "./oauth.js";
+import { readClientsFile, readClientSeed } from "./clients-file.js";
 import { sourceFor } from "../federation/channel.js";
 import { parseOffer } from "../federation/offer.js";
 import {
@@ -116,6 +117,15 @@ export interface ServeOptions {
    * unresolvable name, exactly as it was before §36, and no request anywhere reads a cookie.
    */
   readonly users?: UserDoorOptions;
+  /**
+   * Minted client credentials (SPEC §57): the home whose `clients.json` this door honors. Read
+   * PER REQUEST — the token half of §57's freshness split, so a `loam client mint` beside a
+   * running server authenticates immediately and a revoke refuses on the very next request. The
+   * GRANTS a mint appends are the other half: they live in the served reactor from boot and move
+   * at restart. Absent, minted bearers open nothing here — a programmatic serve() states its
+   * tokens in `tokens`.
+   */
+  readonly clients?: { readonly home: string };
 }
 
 const DEFAULT_MAX_BODY = 4 * 1024 * 1024;
@@ -784,6 +794,22 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     sweepSessionTokens(clock());
   };
 
+  // A minted client's bearer (SPEC §57), resolved from the home's own records per request. Keyed
+  // by digest like the session table — same argument: timing on a sha-256 lookup tells an attacker
+  // nothing a preimage would not cost. Every failure is a refusal: no home configured, records
+  // unreadable, digest unknown, seed file gone — none is distinguishable to the caller.
+  const resolveClientBearer = (digest: string): TokenIdentity | undefined => {
+    const home = options.clients?.home;
+    if (home === undefined) return undefined;
+    try {
+      const record = readClientsFile(home).clients.find((c) => c.digest === digest);
+      if (record === undefined) return undefined;
+      return { actor: readClientSeed(home, record.name) };
+    } catch {
+      return undefined;
+    }
+  };
+
   // The identity a presented token names, compared timing-safely; undefined = refuse. A cookie
   // is never consulted here, and that is §36's load-bearing invariant: authority on these doors
   // is an explicit header.
@@ -798,9 +824,13 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     const minted = sessionTokens.get(digest);
     if (minted === undefined) {
       // A connector's bearer token (SPEC §37 phase 15): resolved by the token door, which is BOUNDED
-      // — an unknown token is one in-memory miss with no file read behind it, so a flood of bogus
-      // tokens costs no key derivation. It resolves ONLY to `{ actor }`, never an operator identity.
-      return tokenExchange?.resolve(digest);
+      // — an unknown token is one in-memory miss with no file read behind it. It resolves ONLY to
+      // `{ actor }`, never an operator identity. Then a MINTED CLIENT's bearer (SPEC §57): matched
+      // against `clients.json` read per request — that read is the one file this ladder ever opens
+      // for an unknown token (a small record file, no key derivation), and it is what lets a mint
+      // authenticate and a revoke refuse with no restart. Unreadable records REFUSE rather than
+      // guess, the file's own rule. Like the exchange, it resolves only to `{ actor }`.
+      return tokenExchange?.resolve(digest) ?? resolveClientBearer(digest);
     }
     // TWO expiries, and BOTH bind. The token's own window is the obvious one. The second is the
     // parent SESSION's idle window: sweeping runs only when someone logs in or presents a
