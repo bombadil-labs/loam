@@ -333,6 +333,68 @@ describe("T256 (b) — revoke is two-sided at both levels; the sibling survives"
   });
 });
 
+describe("T256 — the mint's own fences", () => {
+  it("--federate scopes channel standing to the named container", async () => {
+    const home = mkdtempSync(join(tmpdir(), "loam-t256-"));
+    homes.push(home);
+    expect(await run(["init", "--home", home], cap().io)).toBe(0);
+    expect(
+      await run(["client", "mint", "carrier", "--home", home, "--federate", "inbox"], cap().io),
+    ).toBe(0);
+    const audit = await Gateway.open(new SqliteBackend(storePath(home)), {
+      seed: readSeed(home),
+    });
+    gateways.push(audit);
+    const held = grantsHeldBy(
+      audit.reactor,
+      authorForSeed(readClientSeed(home, "carrier")),
+      authorForSeed(readSeed(home)),
+    );
+    expect(held.map((g) => g.verb)).toContain("federate");
+    expect(held.find((g) => g.verb === "federate")?.prefix).toBe("inbox");
+  });
+
+  it("the name fence admits what a seed filename can carry and refuses what it cannot", async () => {
+    const home = mkdtempSync(join(tmpdir(), "loam-t256-"));
+    homes.push(home);
+    expect(await run(["init", "--home", home], cap().io)).toBe(0);
+    expect(await run(["client", "mint", "2pac", "--home", home], cap().io)).toBe(0);
+    const c = cap();
+    expect(await run(["client", "mint", "bad/name", "--home", home], c.io)).toBe(2);
+    expect(c.err.join("\n")).toMatch(/not a name a seed file can carry/);
+  });
+
+  it("an unreadable clients.json refuses the mint with a named reason, never guessing", async () => {
+    const home = mkdtempSync(join(tmpdir(), "loam-t256-"));
+    homes.push(home);
+    expect(await run(["init", "--home", home], cap().io)).toBe(0);
+    writeFileSync(join(home, "clients.json"), "null\n");
+    const c = cap();
+    expect(await run(["client", "mint", "artifact", "--home", home], c.io)).toBe(1);
+    expect(c.err.join("\n")).toMatch(/client records are unreadable/);
+  });
+
+  it("a door with no clients configured refuses an unknown bearer 401, never crashing", async () => {
+    const { home } = await mintedHome();
+    const gateway = await Gateway.open(new SqliteBackend(storePath(home)), {
+      seed: readSeed(home),
+    });
+    gateways.push(gateway);
+    const handle = await serve({
+      mounts: { default: gateway },
+      tokens: { "op-token": { operator: true } },
+      port: 0,
+      host: "127.0.0.1",
+    });
+    handles.push(handle);
+    const r = await mcp(handle.url, "no-such-bearer", "tools/call", {
+      name: "loam_whoami",
+      arguments: {},
+    });
+    expect(r.status).toBe(401);
+  });
+});
+
 describe("T256 (c) — the bearer prints once with the warning; the seed never prints", () => {
   it("output carries the bearer and the store-wide-write warning, not the seed; the seed file is 0600", async () => {
     const home = mkdtempSync(join(tmpdir(), "loam-t256-"));
