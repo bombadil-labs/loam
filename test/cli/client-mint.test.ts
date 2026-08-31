@@ -371,7 +371,10 @@ describe("T256 — the mint's own fences", () => {
     writeFileSync(join(home, "clients.json"), "null\n");
     const c = cap();
     expect(await run(["client", "mint", "artifact", "--home", home], c.io)).toBe(1);
+    // The NAMED reason, not merely a refusal: "cannot determine" must say what it could not
+    // determine, never surface as an accidental TypeError.
     expect(c.err.join("\n")).toMatch(/client records are unreadable/);
+    expect(c.err.join("\n")).toMatch(/not a clients file this build can read/);
   });
 
   it("a door with no clients configured refuses an unknown bearer 401, never crashing", async () => {
