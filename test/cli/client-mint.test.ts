@@ -331,6 +331,39 @@ describe("T256 (b) — revoke is two-sided at both levels; the sibling survives"
     expect(grantsHeldBy(audit.reactor, ghostActor, authorForSeed(readSeed(home)))).toEqual([]);
     expect(existsSync(clientSeedPath(home, "ghost"))).toBe(false);
   });
+
+  it("an orphan whose grants live in a --store is refused against the wrong one, seed kept", async () => {
+    const home = mkdtempSync(join(tmpdir(), "loam-t256-"));
+    homes.push(home);
+    expect(await run(["init", "--home", home], cap().io)).toBe(0);
+    const other = join(home, "other.sqlite");
+    expect(await run(["client", "mint", "stray", "--home", home, "--store", other], cap().io)).toBe(
+      0,
+    );
+    // The crash window again, this time with grants in a non-default store: the record — the
+    // only thing that remembered the store — never landed.
+    writeClientsFile(home, {
+      version: 1,
+      clients: readClientsFile(home).clients.filter((r) => r.name !== "stray"),
+    });
+
+    // Against the default store nothing names this key: the revoke must refuse and must NOT
+    // delete the seed — it is the orphan's only remaining handle on its grants.
+    const c = cap();
+    expect(await run(["client", "revoke", "stray", "--home", home], c.io)).toBe(2);
+    expect(c.err.join("\n")).toMatch(/key file is kept/);
+    expect(existsSync(clientSeedPath(home, "stray"))).toBe(true);
+
+    // Against the store that holds the grants, the same revoke completes.
+    const strayActor = authorForSeed(readClientSeed(home, "stray"));
+    expect(
+      await run(["client", "revoke", "stray", "--home", home, "--store", other], cap().io),
+    ).toBe(0);
+    expect(existsSync(clientSeedPath(home, "stray"))).toBe(false);
+    const audit = await Gateway.open(new SqliteBackend(other), { seed: readSeed(home) });
+    gateways.push(audit);
+    expect(grantsHeldBy(audit.reactor, strayActor, authorForSeed(readSeed(home)))).toEqual([]);
+  });
 });
 
 describe("T256 — the mint's own fences", () => {

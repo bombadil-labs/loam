@@ -3928,10 +3928,30 @@ async function cmdClientRevoke(
     //
     // The strike set is the DOOR's own resolution (`grantsHeldBy`), not a flat scan: it carries
     // strike survival transitively and includes standing an effective admin minted, so what this
-    // command strikes is exactly what enforcement was honoring — the two levels cannot disagree
-    // about what "revoked" means.
+    // command strikes is what enforcement honors as of this read. (A grant naming this key whose
+    // ISSUER's own chain is currently broken survives dormant and unstruck — a property of the
+    // admin chain, shared with every revoke surface, not widened here.)
     const ids = grantsHeldBy(gateway.reactor, actor, operator).map((g) => g.id);
     struckCount = ids.length;
+    // A record carries the store its grants landed in; a record-less orphan carries nothing, so
+    // the store guard above cannot protect it. The fallback: if this store holds NO delta naming
+    // the key at all, this is the wrong store, not a completed rerun — refuse, and above all keep
+    // the seed, which is the orphan's only remaining handle on its grants.
+    if (record === undefined && ids.length === 0) {
+      const everNamed = [...gateway.reactor.snapshot()].some((d) =>
+        d.claims.pointers.some(
+          (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === actor,
+        ),
+      );
+      if (!everNamed) {
+        io.err(
+          `client revoke: nothing in ${path} names this key — "${name}" has no record, so its ` +
+            `grants may live in a --store the mint was given. The key file is kept so a rerun ` +
+            `can reach them; nothing was revoked.`,
+        );
+        return 2;
+      }
+    }
     if (ids.length > 0) {
       const at = Date.now();
       await gateway.append(
@@ -3954,7 +3974,7 @@ async function cmdClientRevoke(
       `  its bearer is refused on the very next request\n` +
       (struckCount > 0
         ? `  its ${struckCount} surviving grant${struckCount === 1 ? " is" : "s are"} struck in ${path}\n`
-        : `  no surviving grant named this key in ${path} — nothing needed striking\n`) +
+        : `  no standing held by this key in ${path} — nothing needed striking\n`) +
       `  its past deltas are untouched — they keep naming their author\n` +
       `  a server already running honors the struck GRANTS until a restart; the bearer needs none`,
   );
