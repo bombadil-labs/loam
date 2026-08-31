@@ -41,6 +41,6 @@ seed file (a mint that died between its two file writes stays revocable), and sa
 needed striking" rather than "struck" when the surviving set is empty. A sibling client's key,
 record, and standing survive untouched, and the rails assert that side too.
 
-**Provenance.** PR #513 (T256); the last gap the medialog federated demo named (2026-08-29).
+**Provenance.** PR #512 (T256); the last gap the medialog federated demo named (2026-08-29).
 Implementation: `cmdClient` in `src/cli/cli.ts`, `src/server/clients-file.ts`, and the
 `resolveClientBearer` rung of identify in `src/server/http.ts`.
