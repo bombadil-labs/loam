@@ -448,7 +448,13 @@ describe("T256 (c) — the bearer prints once with the warning; the seed never p
     expect(existsSync(seedFile)).toBe(true);
     const seed = readFileSync(seedFile, "utf8").trim();
     expect(text).not.toContain(seed);
-    expect(statSync(seedFile).mode & 0o777).toBe(0o600);
+    // 0600 like every other secret this home holds — asserted off win32 only, where chmod is
+    // advisory and stat reports 0o666 for any writable file (source-persisted.test.ts records
+    // the same reasoning). The seed-never-printed assertion above is the load-bearing one and
+    // holds on every platform.
+    if (process.platform !== "win32") {
+      expect(statSync(seedFile).mode & 0o777).toBe(0o600);
+    }
   });
 });
 
