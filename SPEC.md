@@ -79,6 +79,7 @@ name begins with that number.
 | §54 | [The guided init](spec/54-guided-init.md) |
 | §55 | [The container census — physical, linked, and dark](spec/55-container-census.md) |
 | §56 | [Whoami — a caller may ask who the door thinks they are](spec/56-whoami.md) |
+| §57 | [Client mint — a key, its grants, and a bearer in one motion](spec/57-client-mint.md) |
 
 _**§21**, **§22**, **§25**, and **§26** are **landed** — design accepted and implemented (see each
 Provenance footer; §21.7's coexistence design is accepted with its implementation queued as ticket T2).
