@@ -21,7 +21,7 @@
 //
 // Erasure standing rule: every store here is this file's own mkdtemp/memory fixture.
 
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -78,7 +78,7 @@ const authoredBy = (key: string): unknown => ({
  * into the wrong one would split a person into two keys, and one shared directory could never
  * show it.
  */
-async function bareUserServer(): Promise<{
+async function bareUserServer(onFault?: (message: string) => void): Promise<{
   base: string;
   usersHome: string;
   connectorsHome: string;
@@ -113,7 +113,11 @@ async function bareUserServer(): Promise<{
     port: 0,
     host: "127.0.0.1",
     publicUrl: "https://store.example",
-    connectors: { home: connectorsHome, allowRedirectOrigins: [ALLOW_ORIGIN] },
+    connectors: {
+      home: connectorsHome,
+      allowRedirectOrigins: [ALLOW_ORIGIN],
+      ...(onFault === undefined ? {} : { onFault }),
+    },
     users: { home: usersHome, mount: "default" },
   });
   handles.push(handle);
@@ -475,12 +479,42 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     const { base, connectorsHome } = await bareUserServer();
     const ada = await signIn(base, "ada", PASSWORD);
     const html = await consentPage(base, ada);
-    const bad = ["with:colon", "has space", "../up", "x".repeat(80), "-lead", "a.b", "a?b", "a#b"];
+    const bad = ["with:colon", "has space", "../up", "x".repeat(64), "-lead", "a.b", "a?b", "a#b"];
     for (const leaf of bad) {
       const res = await approve(base, ada, html, { bind_new: leaf });
       expect(res.status, leaf).toBe(400);
     }
     expect(readOAuthFile(connectorsHome).codes ?? []).toHaveLength(0);
+    // The boundary itself: 63 is the longest leaf a path carries, and it is created.
+    const longest = "x".repeat(63);
+    expect((await approve(base, ada, html, { bind_new: longest })).status).toBe(302);
+    expect(readOAuthFile(connectorsHome).codes?.[0]).toMatchObject({ container: `ada:${longest}` });
+  });
+
+  it("the record refuses an empty binding name and carries a one-character one", () => {
+    // The parser's own fence, at the bytes: a code whose container is "" cannot be read, and one
+    // whose container is a single character reads back exactly.
+    const home = mkdtempSync(join(tmpdir(), "loam-s1a-record-"));
+    homes.push(home);
+    const code = {
+      digest: "d".repeat(64),
+      clientId: CLIENT_ID,
+      redirectUri: REDIRECT,
+      expiresAt: 1,
+      issuedAt: 1,
+      generation: 1,
+      user: "ada",
+    };
+    const file = (container: string): void =>
+      writeFileSync(
+        join(home, "oauth.json"),
+        JSON.stringify({ ...EMPTY_OAUTH, codes: [{ ...code, container }] }),
+        { mode: 0o600 },
+      );
+    file("a");
+    expect(readOAuthFile(home).codes?.[0]?.container).toBe("a");
+    file("");
+    expect(() => readOAuthFile(home)).toThrow(/non-empty/);
   });
 
   it("a container whose name the record could not carry is neither listed nor bindable", async () => {
@@ -547,14 +581,21 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
   it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
     "when the seed cannot be minted, the approval refuses and keeps nothing partial",
     async () => {
-      const { base, usersHome, connectorsHome, gateway } = await bareUserServer();
+      const faults: string[] = [];
+      const { base, usersHome, connectorsHome, gateway } = await bareUserServer((m) =>
+        faults.push(m),
+      );
       const ada = await signIn(base, "ada", PASSWORD);
       const html = await consentPage(base, ada);
       chmodSync(usersHome, 0o500); // the seed file cannot be written
       const res = await approve(base, ada, html, { bind_new: "journal" });
       expect(res.status).toBe(503);
-      expect(await res.text()).toContain("could not be provisioned");
+      const text = await res.text();
+      expect(text).toContain("could not be provisioned");
       chmodSync(usersHome, 0o700);
+      // The fault reached the operator, naming the person; the person's page names no path.
+      expect(faults.join("\n")).toContain("could not provision a signing key for ada");
+      expect(text).not.toContain(usersHome);
       // Nothing partial: no code, no home, no target, no seed.
       expect(readOAuthFile(connectorsHome).codes ?? []).toHaveLength(0);
       expect(adaNames(gateway)).toEqual([]);
@@ -586,6 +627,26 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     const second = await ensureUserKey(ground, home, "ada", (m) => faults.push(m));
     expect("userSeed" in second).toBe(true);
     expect(existsSync(userSeedPath(home, "ada"))).toBe(true);
+    expect(faults).toHaveLength(1);
+
+    // A ground that cannot sign — no seed, or no operator author — refuses before anything is
+    // written: no seed file, no fault (there is nothing to repair), and the sentence says why.
+    for (const half of [
+      { options: {}, operatorAuthor: OPERATOR },
+      { options: { seed: OPERATOR_SEED }, operatorAuthor: undefined },
+    ]) {
+      const unsigned = {
+        ...half,
+        nextTimestamp: () => 1,
+        append: (): Promise<void> => Promise.resolve(),
+      } as unknown as Gateway;
+      const fresh = mkdtempSync(join(tmpdir(), "loam-s1a-unsigned-"));
+      homes.push(fresh);
+      const refused = await ensureUserKey(unsigned, fresh, "ada", (m) => faults.push(m));
+      expect("refusal" in refused ? refused.refusal : undefined).toMatchObject({ status: 503 });
+      expect("refusal" in refused ? refused.refusal.message : "").toContain("cannot sign");
+      expect(existsSync(userSeedPath(fresh, "ada"))).toBe(false);
+    }
     expect(faults).toHaveLength(1);
   });
 });
