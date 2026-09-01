@@ -18,7 +18,7 @@ of unbuilt work as ADLC tickets in `.adlc/tickets/`. This page is the manual;
 
 **New here? Take [the interactive tutorial](https://bombadil-labs.github.io/loam/tutorial.html)** — it hands
 you a real store running in your browser (no signup, no server, nothing to install until the
-last step) and teaches Loam by growing one: sixteen lessons from "you are the operator" to
+last step) and teaches Loam by growing one: fifteen lessons from "you are the operator" to
 carrying your store out of the tab and serving it from your own machine, the same store proven
 hash for hash.
 
@@ -67,11 +67,14 @@ clone, read that as `node dist/cli/bin.js`.
 ## Quickstart — the CLI
 
 ```sh
-# create a home directory and mint an operator identity (the seed is written 0600, never printed)
+# create a home directory and mint an operator identity (the seed is written 0600, never printed).
+# At a terminal this is guided — it also asks for a first user and stocks the shelf (§54); piped
+# and flagless it stays the bare two-file init.
 loam init --home ./my-store
 
 # give the store a shape. `--stock` registers one Loam ships, so day one needs no hand-written
-# gather term: the shelf is event, note, person, post (`loam register --help` describes each).
+# gather term: the shelf is event, note, org, person, post, and the shallow-person reading
+# they nest (`loam register --help` describes each).
 loam register --stock note --home ./my-store
 
 # inspect a store
@@ -96,11 +99,9 @@ curl -s localhost:4321/default/graphql \
   -d '{"query":"{ note(entity: \"note:groceries\") { title } }"}'
 ```
 
-Run `kill %1` when you are done — **do this before running the test suite.** The quickstart
-backgrounds a server on port 4321 and the suite binds that same port, so a forgotten server makes
-`npm test` fail with `EADDRINUSE` in `test/cli/pull.test.ts`. That failure is the stray server, not
-the repo. To use a second terminal instead, export the same `TOKEN` there — `serve` never prints
-it.
+Run `kill %1` when you are done. The quickstart backgrounds a server on port 4321; the suite
+binds only ephemeral ports, so a forgotten server breaks nothing — it just keeps serving. To use
+a second terminal instead, export the same `TOKEN` there — `serve` never prints it.
 
 A stock schema is an **ordinary registration**, never a shortcut past one: it crosses the same
 door, meets the same validation, and lands the same deltas as a file you wrote. Outgrow the shelf
@@ -141,12 +142,12 @@ so they are listed apart from the table above rather than buried in it:
 
 ## The commands
 
-`loam <command> --help` describes any of these in full. The quickstart uses the first five; the rest
+`loam <command> --help` describes any of these in full. The quickstart uses four of them; the rest
 exist and are easy to miss.
 
 | command    | what it does                                                                |
 | ---------- | --------------------------------------------------------------------------- |
-| `init`     | create a home, mint or import the operator seed, write config                |
+| `init`     | create a home — and at a terminal, a first user and a stocked shelf with it  |
 | `serve`    | boot a store and serve it (GraphQL + SSE + MCP over HTTP)                    |
 | `register` | define a schema from a file and register it in the home's store              |
 | `pull`     | land a peer's deltas — a live URL or a frozen offer file                     |
@@ -154,7 +155,8 @@ exist and are easy to miss.
 | `store`    | inspect a store                                                              |
 | `migrate`  | read an offer, re-express it in the current format, write it back            |
 | `user`     | provision a login user and manage role assignments                           |
-| `grant`    | list or revoke the OAuth connectors this store has granted                   |
+| `grant`    | read the ledger of every author with standing; grant and revoke              |
+| `client`   | mint and revoke non-interactive client credentials — a key, its grants, and a bearer in one motion |
 | `pen`      | provision a renderer pen: mint its seed, grant it write standing             |
 | `artifact` | ask whether a route may be published as an artifact, and what it could do    |
 | `repair`   | list and settle a store's quarantine                                         |
@@ -164,7 +166,7 @@ exist and are easy to miss.
 
 ## The HTTP API
 
-A served store exposes three surfaces per mount, behind a `Bearer` token:
+A served store answers these doors per mount, behind a `Bearer` token:
 
 - **`POST /:mount/graphql`** — `{ query, variables? }` → `{ data, errors }`. Both queries and
   mutations; the mutation acts as the token's identity.
@@ -172,8 +174,12 @@ A served store exposes three surfaces per mount, behind a `Bearer` token:
   `subscription` operation (`subscription { plant(entity: "…") { height _hex _fromHex _changed } }`):
   an initial snapshot, then one `data:` frame per change (`_fromHex → _hex`, `_changed`, and the
   fields).
-- **`POST /:mount/mcp`** — a minimal MCP JSON-RPC surface (`initialize`, `tools/list`,
-  `tools/call`) exposing `loam_query`, `loam_mutate`, and `loam_register`.
+- **`POST /:mount/mcp`** — an MCP JSON-RPC surface (`initialize`, `tools/list`, `tools/call`)
+  exposing `loam_query`, `loam_mutate`, `loam_register`, `loam_whoami`, `loam_docs`, and the
+  four `loam_federate_*` channel tools.
+- **`GET /:mount/whoami`** — who this door resolves the caller to be, and what standing the
+  ground currently grants them (SPEC §56). Answers the anonymous too, uniformly, saying in words
+  that reads are masked — an empty view for an unrecognized caller is not an empty store.
 - **`POST /:mount/register`** — `{ hyperschema: { name, alg?, body }, schema, roots, entity? }` →
   `{ registered, lens, entity, bound }` (operator token only). The hyperschema-schema mutation mechanism, served:
   the definition and its registration land as deltas, and the surface serves the new type
@@ -184,10 +190,14 @@ A served store exposes three surfaces per mount, behind a `Bearer` token:
   **non-custodial door**: a client signs its own deltas and presents them; the token
   authenticates transport only, and each delta is authorized by its own verified author's
   standing. The server never holds the key.
+- **`/:mount/rest/<v1|@hash>/<Schema>/<entity>`** — the REST/OpenAPI door, generated from the
+  same registrations as GraphQL (the `surface/` generator seam).
 - **`GET /:mount/federate`** — the store's published deltas as wire JSON (operator token only).
 
-A junk or missing token is `401`; an unknown mount is `404` (only to the authenticated — an
-unauthenticated caller cannot tell a real mount from a missing one).
+A junk token is `401`; an unknown mount is `404` (only to the authenticated — an unauthenticated
+caller cannot tell a real mount from a missing one). A missing token is `401` too, with two
+deliberate exceptions: `whoami` answers the anonymous with its masked-reads sentence, and a mount
+whose operator opened a public read surface (SPEC §12) serves anonymous reads on it.
 
 ```sh
 curl -s localhost:4321/default/graphql \
@@ -694,8 +704,11 @@ docker run -e LOAM_TOKEN=<secret> -v loam-data:/data -p 4321:4321 loam
 ```
 
 Bind `127.0.0.1` and terminate TLS in front. **Hosted persistence is a driver, not an image
-change**: the `StoreBackend` seam takes any async append/`deltasSince`/close, so a libSQL/Turso
-client drops in beside `SqliteBackend` with no other change.
+change**: the `StoreBackend` seam is five members — `append`, `deltasSince`, `purge`, `holds`,
+`close` — so a libSQL/Turso client drops in beside `SqliteBackend` with no other change. The two
+erasure members are not optional decoration: `purge` must remove bytes on every tier the driver
+owns and `holds` must answer from the bytes, failing closed — a driver that stubs them breaks
+erasure's completeness guarantee (SPEC §11) while looking healthy.
 
 ### Cold storage
 
@@ -735,10 +748,12 @@ reason — so the history reads as a linked chain of supersessions, nothing lost
 
 **Source.** `src/` is the library and CLI, split by seam: `gateway/` (the store's surface —
 GraphQL, mutations, registrations, accounts & capabilities, trust, erasure), `store/` (the
-`StoreBackend` drivers — sqlite, archive/mirror, localStorage), `surface/` (surfaces as
+`StoreBackend` drivers — sqlite, archive/mirror, localStorage), `server/` (the HTTP server
+itself — every door, MCP, login and OAuth, the admin pages), `surface/` (surfaces as
 materializations — the GraphQL and REST/OpenAPI doors from one generator seam), `federation/`
 (offer / pull / wire / translate), `runner/` (derived functions), `migrate/` (format migrations —
-old deltas in, new deltas out), `cli/`, and `browser/` + `client/` (the full in-page store and the
+old deltas in, new deltas out), `stock/` (the schema shelf `init` and `register --stock` read),
+`cli/`, and `browser/` + `client/` (the full in-page store and the
 read-only public client). `test/` mirrors that tree;
 [`demos/`](demos/README.md) holds the [tutorial](https://bombadil-labs.github.io/loam/tutorial.html) and the
 village.
