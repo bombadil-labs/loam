@@ -1,0 +1,17 @@
+{
+  "body": "Slice 3 of the §58 arc (working spec: .adlc/specs/58-a-connection-is-a-peer.md). Myk's merge (new capability). §46 deferred where a runtime federation credential lives; this slice places it. An offer token is minted by a container's owner — on the admin container page, or by loam_container offer for a connection with the offer leeway — for one container; it is a secret and never a delta, stored 0600 in the home beside the channel tokens; presented at /:mount/<container>/federate and nowhere else; rotated and struck from the same page. An offer serves the container's own members and its connections' inboxes — never the channel pools inside it nor the law blessed into them; passing a peer's deltas on is promotion first. The offer serves lenses by their bare names, so under Bob's prefix `ada` the outbox's Post is `ada_Post`. The mount-level /federate stays operator-token-only; a container's offer token presented at /default is refused from the first release (no compatibility window — nothing needed one).\n\nDECIDED positions: §58 positions 1 (offered only to the operator token), 8.\n\nAcceptance criteria (the working spec's 1 offer half, 10, 11, and the CLI half of 12):\n- (a) THE MOUNT AND THE CONTAINER DOOR: /federate refuses a container's offer token and any non-operator credential while the operator token pulls the whole ground; /:mount/ada:outbox/federate serves that container to its offer token and refuses the operator token presented as one. Verify: test/federation/offer-door.test.ts.\n- (b) AN OFFER SERVES ITS OWN: a pull carries the container's members and its connections' inbox writes and none of a channel pool's deltas nor the law blessed into that pool; lenses arrive under the puller's prefix by their bare names (`ada_Post`). Verify: test/federation/offer-scope.test.ts.\n- (c) THE TOKEN'S LIFE: minted on the container page and shown once; rotating refuses the old one on the next pull; striking refuses every pull; it is never a delta and never in an offer. Verify: test/server/offer-token.test.ts.\n- (d) THE FOLLOW STORY: two served stores; Ada's half in a real browser to obtain the token; Bob's half by `loam federate open … --token`. Verify: test/cli/follow-story.test.ts.",
+  "category": "feature",
+  "edges": [
+    {
+      "contract": "The container door and the offer token: S4's share-into needs no token (the person owns both ends) but reuses S3's channel-into-a-descendant path.",
+      "to": "T265"
+    },
+    {
+      "contract": "The per-container offer token is the mechanism a user's own mirror generalizes: the home container offered to its owner's own §36 key.",
+      "to": "T268"
+    }
+  ],
+  "id": "T264",
+  "status": "todo",
+  "title": "§58 S3 — the offer token and the container door"
+}

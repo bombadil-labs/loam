@@ -1,0 +1,13 @@
+{
+  "body": "Slice 4 of the §58 arc (working spec: .adlc/specs/58-a-connection-is-a-peer.md). Myk's merge (new capability). The acts that are a person's, on the admin page: share-into (a channel from one of my containers into a descendant of another, in one store, no token because I own both ends — the source is a container scope, not a URL, so the page's paste-only rule is untouched); promotion with a destination inside my subtree, re-signed with my user seed (§40.2's seam), the destination's membership admitting it — never the primary ground, never the operator's key; leeway edits with the same five lines the consent page shows.\n\nDECIDED positions: §58 position 6.\n\nAcceptance criteria (the working spec's 6, 7, and the page half of 12):\n- (a) SIBLINGS SHARE BY THE PERSON'S ACT: Ada's share-into from `ada:journal` to `ada:agent1:journal` reads the journal through agent1's pool and nothing else; agent1's own request to open that channel refuses while the journal is unoffered; dropping the pool ends the access; the journal is untouched at the bytes. Verify: test/federation/sibling-channel.test.ts.\n- (b) PROMOTION TARGETS A CONTAINER AND SIGNS AS THE OWNER: a delta promoted from `ada:agent1:scratch` into `ada:journal` is a member of `ada:journal` through a View, signed by Ada's user key, absent from the root read; promotion into a container outside her subtree refuses. Verify: test/server/promote-into.test.ts.\n- (c) THE PAGE RAILS: a browser drives share-into, promotion with a destination, and a leeway edit end to end. Verify: test/browser/container-acts.test.ts.",
+  "category": "feature",
+  "edges": [
+    {
+      "contract": "The admin page's declare and share forms: S5's path-parent and injectivity refusals land on the forms S4 leaves in place.",
+      "to": "T266"
+    }
+  ],
+  "id": "T265",
+  "status": "todo",
+  "title": "§58 S4 — the person's acts on the page"
+}

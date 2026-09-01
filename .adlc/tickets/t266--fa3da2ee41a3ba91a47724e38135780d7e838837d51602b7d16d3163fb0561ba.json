@@ -1,0 +1,13 @@
+{
+  "body": "Slice 5 of the §58 arc (working spec: .adlc/specs/58-a-connection-is-a-peer.md). Myk's merge (a widened refusal is a promise change). Path-parent agreement at declaration (a name whose path-parent is not its declared parent refuses; pool names exempt by leading token; a pre-§58 store whose edges and names disagree keeps its edges authoritative and lists the disagreements on the admin page); store-wide injectivity rooted at usernames (each username's mangled form reserved at creation; a container, channel prefix, or lens whose mangled prefix lands on another user's refuses while a person is present; the refusal shown to a connection names only its own name — no oracle). Dissolves T260: every binding target is under a person, so every channel is in someone's reach.\n\nDECIDED positions: §58 position 5. Completes the arc: after this slice the section lands as spec/58-a-connection-is-a-peer.md and T261 archives.\n\nAcceptance criteria (the working spec's 9):\n- (a) NAMES ARE PATHS AND THE TREE AGREES: a declaration whose path-parent is not its declared parent refuses; a username whose mangled form lands on an existing path refuses at creation; a container whose mangled prefix lands on another user's refuses with a message naming only the requester's own name; a peer's law arriving into `ada:agent1:inbox` binds under that path plus the assigned prefix. Verify: test/gateway/path-names.test.ts.\n- (b) THE DISAGREEMENT LISTING: a store with an edge/name disagreement from before this slice lists it on the admin page and keeps the edge authoritative. Verify: test/server/admin-tree-listing.test.ts.",
+  "category": "feature",
+  "edges": [
+    {
+      "contract": "S5 is the last slice the section's landing waits on; the arc ticket archives when spec/58 lands.",
+      "to": "T261"
+    }
+  ],
+  "id": "T266",
+  "status": "todo",
+  "title": "§58 S5 — names and the tree"
+}
