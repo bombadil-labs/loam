@@ -1,0 +1,8 @@
+{
+  "body": "Its own ticket after S2 (DECIDED, §58 open question 4). Myk's merge (a read-surface promise with its own masking rules). A view can name its authors under the declared rule — a `_author` meta field or an authors-of-this-view reading — and a binding attributes a connection's writes to its owner, so an agent can answer 'who said this' and a person sees the same on the page; a masked reader learns nothing it could not already (a public reader must not learn private authors). Absorbs T259's second half. Design questions for P1: is the author a public key or a name the home resolves; does the meta field ride every view type or only where a reading declares it.\n\nAcceptance criteria (draft for P1):\n- (a) A view read through loam_query names its authors under the declared rule; a masked reader's answer carries none. Verify: test/gateway/view-authors.test.ts.\n- (b) A connection's write, read back, is attributed to its owner through the binding, and the connection's own key is named beside it. Verify: test/server/attribution.test.ts.",
+  "category": "feature",
+  "edges": [],
+  "id": "T267",
+  "status": "todo",
+  "title": "§58 S6 — authorship on the read surface"
+}

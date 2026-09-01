@@ -1,0 +1,8 @@
+{
+  "body": "Follow-on to the §58 arc (DECIDED, §58 open question 6). Position 1 offers the whole ground only to the operator token, so a user who is not the operator cannot yet carry their own world out — mirror it, export it, leave with it. The mechanism S3 lands (a per-container offer token) generalizes: the home container is offered to its owner's own §36 signing key and to nobody else, which is how a person mirrors or leaves. Design questions for P1 (Myk): does a home mirror include the pools of channels received into descendants; is the credential the user seed itself or a token it mints; does 'leave' also strike the home here.\n\nAcceptance criteria (draft for P1):\n- (a) A user's own key pulls their home container whole; any other non-operator key is refused; the operator token still pulls the whole store. Verify: test/federation/home-mirror.test.ts.",
+  "category": "design",
+  "edges": [],
+  "id": "T268",
+  "status": "todo",
+  "title": "A user's own mirror: the home container offered to its owner's own key"
+}
