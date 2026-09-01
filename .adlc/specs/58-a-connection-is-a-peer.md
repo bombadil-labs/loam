@@ -51,7 +51,8 @@ shape anything under `ada:journal:` and nothing beside it — not `ada:other:log
 not `ada:journalx:log`. *Surface:* `loam_register` as today. *Rail:* the derived-standing suite.
 
 **3. Ada provisions a daily driver.** On the consent page she creates `ada:agent1` with the
-leeway preset *daily driver*. In conversation, agent1 declares `ada:agent1:scratch`, opens a
+every leeway switch on and a large envelope — she read each switch's line before flipping
+it. In conversation, agent1 declares `ada:agent1:scratch`, opens a
 channel from a colleague's offered container into `ada:agent1:inbox`, offers
 `ada:agent1:outbox`, and binds a helper key to `ada:agent1:helper` — each through a
 `loam_container` tool, each inside `ada:agent1:…`, none able to reach `ada` or the store. The
@@ -143,13 +144,41 @@ none of the pre-binding ids at the bytes.
    envelope, so the blast radius of a blessed renderer is the envelope's. It cannot exceed its envelope
    (§23's bills, set on the container). It cannot erase (§11 is home access).
 
-4. **Leeway is set at provisioning and attenuates downward.** DECIDED as the model; the knob
-   set and presets are the recommendation. Creating a binding target sets five things:
-   *receive* (may it open channels), *offer* (may descendants be offered), *publish* (may
-   lenses be declared public, §12), *delegate* (may it bind further keys), and the *envelope*.
-   The consent page offers presets — *journal* (all off), *assistant* (receive and delegate),
-   *daily driver* (all on, large envelope) — and shows the five beneath the preset. A leeway is
-   a declaration on the container, so changing it is a delta the next request obeys.
+4. **Leeway is five switches, off by default, each explained on the page.** DECIDED. Creating
+   a binding target sets five things: *receive* (may it follow other containers), *offer* (may
+   descendants be offered to other stores), *publish* (may lenses be declared public, §12),
+   *delegate* (may an agent bound here bind further keys), and the *envelope*. There are no
+   presets: a preset is a name for one row of a matrix whose every row stays reachable, and a
+   name a friend has to learn is one more thing between them and the switch. Every switch
+   starts off — the private journal is the default — and every switch carries, on the page and
+   in plain words, what it gives and what it risks; the reader should have no question about
+   either. The copy is part of this spec, because it is the promise:
+
+   - **Receive** — *Let this container follow other stores.* What arrives is kept in a pool of
+     its own, signed by whoever sent it, under a name you assign; you can freeze or drop it
+     later. *The risk:* a store you follow can fill this pool with anything it publishes, and
+     its schemas can bind here under your prefix — nothing arriving can reach outside this
+     container, and nothing binds that you did not allow.
+   - **Offer** — *Let other Loam stores follow this container.* You mint a token per follower;
+     they receive a signed copy of what is here, under a name they choose. *The risk:* whoever
+     holds an offer token can copy this container's own contents and keep that copy after you
+     stop offering. An offer never includes what you follow from others.
+   - **Publish** — *Let anyone on the internet read what you mark public here.* No login, no
+     token: a web address. *The risk:* a public lens is readable by strangers and search
+     engines until you unmark it. Nothing anonymous can ever write. Mark nothing public you
+     would not print.
+   - **Delegate** — *Let an agent bound here hand out keys of its own.* Each helper lives in a
+     sub-container and can do no more than this container allows. *The risk:* this creates new
+     actors that write under their own names. They can never reach outside this container,
+     and revoking the agent revokes them all — but until then, what they write is real.
+   - **Envelope** — *How much compute an agent here may spend running things behind glass:*
+     small, medium, or large. *The risk:* a larger envelope lets a misbehaving app run longer
+     and use more memory before the store stops it. It never grants reach.
+
+   The five are native controls with their labels and descriptions associated in the markup,
+   visible without hovering, never signaled by color alone, so a screen reader and a phone read
+   them the same. A leeway is a declaration on the container, so changing it later — on the
+   container's admin page, with the same five lines — is a delta the next request obeys.
    **Attenuation, folded:** a child a connection declares, and a helper it binds, take a leeway
    that is a subset of the parent's effective leeway — no knob on that the parent has off — and
    an envelope carved out of the parent's, never beyond it; a request for a wider child is
@@ -260,8 +289,8 @@ replacement lands.
    refuses, while a renderer it blesses serves behind glass under its envelope; a request to
    bind, offer, or declare above its root is refused with the sentence naming the rule; its
    envelope binds — verified by `test/server/subtree-walls.test.ts`.
-5. LEEWAY ATTENUATES AND CASCADES. A container created with the *journal* preset refuses
-   receive, offer, publish, and delegate; *daily driver* admits all four; a child asked for a
+5. LEEWAY ATTENUATES AND CASCADES. A container created with every switch off refuses
+   receive, offer, publish, and delegate; with every switch on it admits all four; a child asked for a
    knob its parent lacks is refused and a narrower child binds; a helper's envelope is bounded by
    its parent's; revoking the delegator refuses the helper's next request while an unrelated
    binding is untouched; changing a leeway is a delta the next request obeys — verified by
@@ -301,6 +330,13 @@ replacement lands.
     the page — verified by `test/browser/consent-binding.test.ts`,
     `test/browser/container-acts.test.ts`, `test/server/container-tools.test.ts`, and
     `test/cli/follow-story.test.ts`.
+13. THE FIVE SWITCHES, IN WORDS. The consent page and the container's admin page render the
+    five switches unchecked by default, each a native control whose label and description are
+    associated in the markup and visible without hovering; each description carries the
+    capability sentence and the risk sentence in position 4's words, asserted literally; a
+    browser rail flips one switch and the resulting leeway declaration carries exactly that
+    change — verified by `test/server/leeway-copy.test.ts` and
+    `test/browser/consent-binding.test.ts`.
 
 ## Open questions (Myk)
 
@@ -316,11 +352,12 @@ Answered 2026-09-01, the same day, and folded above:
 6. **A non-operator user's own mirror.** DECIDED: a follow-on ticket — the home container
    offered to its owner's own §36 key — not this arc's.
 
-Still open, in discussion:
+3. **Presets.** DECIDED: none. Five switches, off by default, each with a plain-language
+   description of what it gives and what it risks, accessible on the page — the reader should
+   have no question about either. Every row of the matrix stays reachable; a row earns a name
+   only if evidence shows people keep choosing it.
 
-3. **The preset names and their five values.** The names are the part a friend reads on the
-   consent page. Position 4's set is the current proposal; the settled set lands here before
-   this spec merges.
+Nothing remains open. The spec is whole.
 
 **Provenance.** Drafted 2026-09-01 from the conversation in which Myk named the abstraction and
 settled its shape; §27, §28, §39, §46, and §47 are the precedents it finishes. T258, T259, and
