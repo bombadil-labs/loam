@@ -34,8 +34,9 @@ export const authoredBy = (publicKey: string): unknown => ({
 const said = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /**
- * The user's signing seed, minted and trusted with a write grant when absent. Refuses when the
- * store cannot sign, when a present seed cannot be used, or when minting fails — nothing partial.
+ * The user's signing seed — minted, and its public key trusted with a write grant, when absent.
+ * Refuses when the store cannot sign, when a present seed cannot be used, or when minting fails —
+ * nothing partial.
  */
 export async function ensureUserKey(
   gw: Gateway,
@@ -114,7 +115,10 @@ export async function ensureUserKey(
   };
 }
 
-/** Declare a container gathering what `userSeed` authored — the home (no parent) or a child. */
+/**
+ * Declare a container gathering what the key derived from `userSeed` authors — the home (no
+ * parent) or a child. A SEED, never a public key: the author is derived here.
+ */
 export async function declareOwned(
   gw: Gateway,
   name: string,

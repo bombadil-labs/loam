@@ -220,12 +220,30 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
 
   it("lists the containers already under the person's home and binds an existing one", async () => {
     const { base, connectorsHome, gateway, op } = await bareUserServer();
+    // A grandchild is declared FIRST, before its parent and the home stand, so the table meets it
+    // ahead of both in arrival order: only a walk that runs to a fixpoint reaches it, through the
+    // child the same walk adds. The reach is the whole subtree, at any depth below the home — and
+    // nothing at all while the home does not stand.
+    let ts = 9300;
+    await op(
+      containerClaims(
+        {
+          container: "ada:journal:2025",
+          trust: "curated",
+          posture: "shared",
+          parent: "ada:journal",
+          membership: authoredBy(OPERATOR),
+        },
+        OPERATOR,
+        ts++,
+      ),
+    );
     const ada = await signIn(base, "ada", PASSWORD);
     const first = await consentPage(base, ada);
+    expect(first).not.toContain("ada:journal:2025");
     expect((await approve(base, ada, first, { bind_new: "journal" })).status).toBe(302);
     // Beside the journal: a pool receiving into it (a connection's own, never offered) and a
     // sibling whose name ends in a space — the store's own name, offered and compared as-is.
-    let ts = 9300;
     await op(
       containerClaims(
         {
@@ -246,21 +264,6 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
           trust: "curated",
           posture: "shared",
           parent: "ada",
-          membership: authoredBy(OPERATOR),
-        },
-        OPERATOR,
-        ts++,
-      ),
-    );
-    // And a grandchild, reached only through a child the same walk adds: the reach is the whole
-    // subtree, at any depth below the home.
-    await op(
-      containerClaims(
-        {
-          container: "ada:journal:2025",
-          trust: "curated",
-          posture: "shared",
-          parent: "ada:journal",
           membership: authoredBy(OPERATOR),
         },
         OPERATOR,
@@ -306,14 +309,15 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     expect(readOAuthFile(connectorsHome).codes?.at(-1)).toMatchObject({
       container: "ada:journal:2025",
     });
-    // With the home standing, the home and the pool are still refused — the home in words, the
-    // pool as not-yours — and neither mints nor declares.
+    // With the home standing, the home and the pool are still refused, each by its own reason —
+    // a pool inside the reach hides nothing from its owner, so it is not "not yours" — and
+    // neither mints nor declares.
     const home = await approve(base, ada, second, { bind: "ada" });
     expect(home.status).toBe(400);
     expect(await home.text()).toContain("never bound");
     const pool = await approve(base, ada, second, { bind: "ada:journal:inbox-1" });
-    expect(pool.status).toBe(404);
-    expect(await pool.text()).toContain("Nothing under your name answers to that");
+    expect(pool.status).toBe(400);
+    expect(await pool.text()).toContain("a pool is never bound");
     expect(readOAuthFile(connectorsHome).codes ?? []).toHaveLength(5);
     expect(adaNames(gateway)).toEqual(standing);
     expect(await deltas()).toBe(before);

@@ -827,8 +827,8 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
   const bindingFields = (user: string, bindable: readonly string[]): string =>
     `<fieldset>
 <legend>Bind this connection to</legend>
-<p>A connection lives in one container under your name, and never above it. It reads that
-container and writes into its own pool there.</p>
+<p>A connection lives in one container under your name, and never above it. That container is
+where this connection lives.</p>
 <label for="bind">an existing container</label>
 <select id="bind" name="bind">
 <option value="">—</option>
@@ -874,8 +874,10 @@ ${bindingFields(user, bindable)}
 
   // Where the approval binds (SPEC §58 position 1). Two levels are never bound — the store and the
   // person's home — and a name outside the person's reach draws the same answer whether it is
-  // another person's or nobody's. A leaf under the home may be created here; an existing
-  // container under the home may be chosen. The refusal sentences are the page's own words.
+  // another person's or nobody's. A pool INSIDE the reach — a connection's own — is refused by
+  // its own reason: it hides nothing from its owner, so the uniform answer would only mislead. A
+  // leaf under the home may be created here; an existing container under the home may be
+  // chosen. The refusal sentences are the page's own words.
   type Binding =
     | { readonly kind: "existing"; readonly container: string }
     | { readonly kind: "create"; readonly leaf: string; readonly container: string }
@@ -884,6 +886,13 @@ ${bindingFields(user, bindable)}
     kind: "refuse",
     status: 404,
     message: "Nothing under your name answers to that, so nothing was approved.",
+  };
+  const neverAPool: Binding = {
+    kind: "refuse",
+    status: 400,
+    message:
+      "That is a connection's own pool, and a pool is never bound. Choose a container under " +
+      "your name, or create one.",
   };
   const bindingOf = (gw: Gateway, user: string, bind: string, bindNew: string): Binding => {
     if (bindNew !== "") {
@@ -903,10 +912,10 @@ ${bindingFields(user, bindable)}
       // person does not reach. Inside the reach it is simply the existing container.
       const table = gw.containers();
       if (table.containers.has(container)) {
-        return subtreeOf(table, user).has(container) &&
-          table.containers.get(container)?.inboxOf === undefined
+        if (!subtreeOf(table, user).has(container)) return notYours;
+        return table.containers.get(container)?.inboxOf === undefined
           ? { kind: "existing", container }
-          : notYours;
+          : neverAPool;
       }
       return { kind: "create", leaf: bindNew, container };
     }
@@ -936,9 +945,8 @@ ${bindingFields(user, bindable)}
       };
     }
     const table = gw.containers();
-    if (!subtreeOf(table, user).has(bind) || table.containers.get(bind)?.inboxOf !== undefined) {
-      return notYours;
-    }
+    if (!subtreeOf(table, user).has(bind)) return notYours;
+    if (table.containers.get(bind)?.inboxOf !== undefined) return neverAPool;
     return { kind: "existing", container: bind };
   };
 
