@@ -1,14 +1,15 @@
 // A person's reach in the container tree (SPEC §40, §58): the container named exactly after them,
-// every descendant by `parent` edge, and every inbox pool (`inboxOf`, §39) hanging off a reachable
-// container. Two doors ask this question — the admin page for every act it gates, and the consent
-// page for the containers it may offer as a binding — so the walk lives here, once.
+// every descendant by `parent` edge, and every pool (`inboxOf` — a connection's inbox, §39, or a
+// channel's, §46) hanging off a reachable container. Two doors ask this question — the admin page
+// for every act it gates, and the consent page for the containers it may offer as a binding — so
+// the walk lives here, once.
 
 import type { ContainerTable } from "../gateway/container.js";
 import { CONTROL } from "./oauth-file.js";
 
 /**
- * A fixpoint rather than one pass, because an edge can hang off an inbox pool and the table's
- * iteration order guarantees nothing. Empty when no container bears the root's name.
+ * A fixpoint rather than one pass, because an edge can hang off a pool and the table's iteration
+ * order guarantees nothing. Empty when no container bears the root's name.
  */
 export function subtreeOf(table: ContainerTable, root: string): ReadonlySet<string> {
   const reach = new Set<string>();
@@ -39,8 +40,9 @@ export const isBindableName = (name: string): boolean => name.length > 0 && !CON
 
 /**
  * The containers a binding may name (SPEC §58 position 1): the person's reach minus the home
- * itself and minus every pool — the two levels that are never bound, and the pools (an inbox's
- * or a channel's) that receive into the reach — and minus any name the record could not carry.
+ * itself and minus every pool — the two levels that are never bound, and the pools (a
+ * connection's or a channel's) that receive into the reach — and minus any name the record could
+ * not carry.
  * Sorted, so a page lists them stably.
  */
 export function bindableOf(table: ContainerTable, root: string): string[] {

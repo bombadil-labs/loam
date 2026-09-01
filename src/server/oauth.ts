@@ -874,8 +874,9 @@ ${bindingFields(user, bindable)}
 
   // Where the approval binds (SPEC §58 position 1). Two levels are never bound — the store and the
   // person's home — and a name outside the person's reach draws the same answer whether it is
-  // another person's or nobody's. A pool INSIDE the reach — an inbox's or a channel's — is refused
-  // by its own reason: it hides nothing from its owner, so the uniform answer would only mislead. A
+  // another person's or nobody's. A pool INSIDE the reach — a connection's or a channel's — is
+  // refused by its own reason: it hides nothing from its owner, so the uniform answer would only
+  // mislead. A
   // leaf under the home may be created here; an existing container under the home may be
   // chosen. The refusal sentences are the page's own words.
   type Binding =
@@ -891,7 +892,7 @@ ${bindingFields(user, bindable)}
     kind: "refuse",
     status: 400,
     message:
-      "That is a pool — an inbox's or a channel's — and a pool is never bound. Choose a " +
+      "That is a pool — a connection's or a channel's — and a pool is never bound. Choose a " +
       "container under your name, or create one.",
   };
   const bindingOf = (gw: Gateway, user: string, bind: string, bindNew: string): Binding => {

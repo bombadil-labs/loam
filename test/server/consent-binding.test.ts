@@ -1,8 +1,9 @@
 // §58 S1a (T262, criterion a): the consent page binds a connection to ONE container under the
 // person's home, chosen or created on the page, and provisions the home and the target in one
-// act. Two levels are never bindable: the store root and the user's home container. The
-// approval's code record carries the binding — user and container — so the token exchange (S1b)
-// binds the connection where the person said, never store-wide.
+// act. Two levels are never bindable: the store root and the user's home container — and no
+// pool, a connection's or a channel's, chosen or created into. The approval's code record
+// carries the binding — user and container — so the token exchange (S1b) binds the connection
+// where the person said, never store-wide.
 //
 // Two shapes of "no binding" are told apart on purpose: the page's own form always carries the
 // two fields, so a blank choice refuses in words; a POST carrying NEITHER field (a hand-built
@@ -259,9 +260,11 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     expect(first).not.toContain('value="ada:notes "');
     expect((await approve(base, ada, first, { bind_new: "journal" })).status).toBe(302);
     // Beside the journal: a pool receiving into it, never offered. Its name is ONE level below
-    // the home on purpose — a machine-minted pool (`inbox:…`, `channel:…`) carries two colons and
-    // no leaf can spell it, so the create path's pool arm guards hand-declared law only, and this
-    // is that law, declared by hand.
+    // the home on purpose — a machine-minted pool (`inbox:…`, `channel:…`) carries at least two
+    // colons and no leaf can spell it, so the create path's pool arm guards hand-declared law
+    // only, and this is that law, declared by hand. And a bystander that shares the pool's
+    // posture but not its edge — `separate`, no `inboxOf` — so what is refused is the pool, for
+    // being a pool, and not every separate container.
     await op(
       containerClaims(
         {
@@ -275,15 +278,36 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
         ts++,
       ),
     );
-    const standing = ["ada", "ada:inbox-1", "ada:journal", "ada:journal:2025", "ada:notes "];
+    await op(
+      containerClaims(
+        {
+          container: "ada:vault",
+          trust: "curated",
+          posture: "separate",
+          parent: "ada",
+          membership: authoredBy(OPERATOR),
+        },
+        OPERATOR,
+        ts++,
+      ),
+    );
+    const standing = [
+      "ada",
+      "ada:inbox-1",
+      "ada:journal",
+      "ada:journal:2025",
+      "ada:notes ",
+      "ada:vault",
+    ];
     expect(adaNames(gateway)).toEqual(standing);
 
     const second = await consentPage(base, ada);
-    // The existing containers are offered by name, the grandchild among them; the home itself
-    // and the pool are not.
+    // The existing containers are offered by name, the grandchild and the separate bystander
+    // among them; the home itself and the pool are not.
     expect(second).toContain('value="ada:journal"');
     expect(second).toContain('value="ada:journal:2025"');
     expect(second).toContain('value="ada:notes "');
+    expect(second).toContain('value="ada:vault"');
     expect(second).not.toContain('value="ada"');
     expect(second).not.toContain("inbox-1");
     const res = await approve(base, ada, second, { bind: "ada:journal" });
@@ -308,6 +332,9 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     expect(readOAuthFile(connectorsHome).codes?.at(-1)).toMatchObject({
       container: "ada:journal:2025",
     });
+    // The separate bystander binds: posture is not what makes a pool.
+    expect((await approve(base, ada, second, { bind: "ada:vault" })).status).toBe(302);
+    expect(readOAuthFile(connectorsHome).codes?.at(-1)).toMatchObject({ container: "ada:vault" });
     // With the home standing, the home and the pool are still refused, each by its own reason —
     // a pool inside the reach hides nothing from its owner, so it is not "not yours" — whether
     // the pool is chosen or "created" into; and none of it mints or declares.
@@ -320,7 +347,7 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     const intoPool = await approve(base, ada, second, { bind_new: "inbox-1" });
     expect(intoPool.status).toBe(400);
     expect(await intoPool.text()).toContain("a pool is never bound");
-    expect(readOAuthFile(connectorsHome).codes ?? []).toHaveLength(5);
+    expect(readOAuthFile(connectorsHome).codes ?? []).toHaveLength(6);
     expect(adaNames(gateway)).toEqual(standing);
     expect(await deltas()).toBe(before);
   });
