@@ -5,15 +5,18 @@
 // binds the connection where the person said, never store-wide.
 //
 // Two shapes of "no binding" are told apart on purpose: the page's own form always carries the
-// two fields, so a blank choice refuses in words; a POST carrying NEITHER field (a pre-§58
-// client) mints a code with no container and provisions nothing — the exchange's to refuse.
+// two fields, so a blank choice refuses in words; a POST carrying NEITHER field (a hand-built
+// one) mints a code with no container and provisions nothing. The exchange does not read the
+// binding yet, so that code still redeems as before — this file pins that shape and names it.
 //
-// What this file deliberately does NOT assert, and which rail closes each gap:
+// What this file deliberately does NOT assert, and where each gap closes:
 //   - The exchange's side — the per-(client, user) key, the inbox pool, the absent store-wide
-//     grant, the refusal of an unbound code — is S1b's rail (`consent-exchange.test.ts`).
+//     grant, the refusal of an unbound code — has no rail yet; the exchange's own slice of §58
+//     brings it, and turns the no-fields case below into a refusal.
 //   - The consent page's pre-§58 behaviour (redirect fence, form token, PKCE, the code's shape) —
 //     the frozen phase-14 rail (`oauth-consent.test.ts`), which this change leaves byte-identical.
-//   - The browser walk of story 1 — `test/browser/consent-binding.test.ts` (criterion 12).
+//   - The browser walk of story 1 (criterion 12) has no rail yet; `door-smoke.test.ts` story 2
+//     names a container on the real page, and the full walk lands with the exchange's slice.
 //
 // Erasure standing rule: every store here is this file's own mkdtemp/memory fixture.
 
@@ -23,8 +26,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Claims } from "@bombadil/rhizomatic";
 import { userSeedPath } from "../../src/cli/config.js";
+import { holdsGrant } from "../../src/gateway/accounts.js";
 import { containerClaims } from "../../src/gateway/container.js";
 import { Gateway } from "../../src/gateway/gateway.js";
+import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import { hashPassword, writeCredentials, type ScryptParams } from "../../src/server/credentials.js";
@@ -32,6 +37,7 @@ import { roleClaims, userClaims } from "../../src/server/users.js";
 import { SESSION_COOKIE } from "../../src/server/session.js";
 import { EMPTY_OAUTH, readOAuthFile, writeOAuthFile } from "../../src/server/oauth-file.js";
 import { AUTHORIZE_PATH } from "../../src/server/oauth.js";
+import { ensureUserKey } from "../../src/server/provision.js";
 import { SAME_ORIGIN, signIn } from "../helpers/session-fixture.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
@@ -201,21 +207,60 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     expect(codes).toHaveLength(1);
     expect(codes[0]).toMatchObject({ clientId: CLIENT_ID, user: "ada", container: "ada:journal" });
     const seed = readFileSync(userSeedPath(usersHome, "ada"), "utf8").trim();
+    // And WHOSE: each container gathers what the minted key authors, and that key holds the
+    // store-wide write grant — the standing create-root gives, now given here.
+    const mintedKey = authorForSeed(seed);
+    expect(table.get("ada")!.membership).toEqual(authoredBy(mintedKey));
+    expect(table.get("ada:journal")!.membership).toEqual(authoredBy(mintedKey));
+    expect(holdsGrant(gateway.reactor, STORE_ENTITY, mintedKey, "write", OPERATOR)).toBe(true);
     expect(seed).toMatch(/^[0-9a-f]{64}$/);
     expect(JSON.stringify(readOAuthFile(connectorsHome))).not.toContain(seed);
     expect(await consentPage(base, ada)).not.toContain(seed);
   });
 
   it("lists the containers already under the person's home and binds an existing one", async () => {
-    const { base, connectorsHome, gateway } = await bareUserServer();
+    const { base, connectorsHome, gateway, op } = await bareUserServer();
     const ada = await signIn(base, "ada", PASSWORD);
     const first = await consentPage(base, ada);
     expect((await approve(base, ada, first, { bind_new: "journal" })).status).toBe(302);
+    // Beside the journal: a pool receiving into it (a connection's own, never offered) and a
+    // sibling whose name ends in a space — the store's own name, offered and compared as-is.
+    let ts = 9300;
+    await op(
+      containerClaims(
+        {
+          container: "ada:journal:inbox-1",
+          trust: "curated",
+          posture: "separate",
+          membership: authoredBy(OPERATOR),
+          inboxOf: "ada:journal",
+        },
+        OPERATOR,
+        ts++,
+      ),
+    );
+    await op(
+      containerClaims(
+        {
+          container: "ada:notes ",
+          trust: "curated",
+          posture: "shared",
+          parent: "ada",
+          membership: authoredBy(OPERATOR),
+        },
+        OPERATOR,
+        ts++,
+      ),
+    );
+    const standing = ["ada", "ada:journal", "ada:journal:inbox-1", "ada:notes "];
+    expect(adaNames(gateway)).toEqual(standing);
 
     const second = await consentPage(base, ada);
-    // The existing container is offered by name; the home itself is not an option.
+    // The existing containers are offered by name; the home itself and the pool are not.
     expect(second).toContain('value="ada:journal"');
+    expect(second).toContain('value="ada:notes "');
     expect(second).not.toContain('value="ada"');
+    expect(second).not.toContain("inbox-1");
     const res = await approve(base, ada, second, { bind: "ada:journal" });
     expect(res.status).toBe(302);
     const codes = readOAuthFile(connectorsHome).codes ?? [];
@@ -223,9 +268,21 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     expect(codes[1]).toMatchObject({ user: "ada", container: "ada:journal" });
     // No second declaration: binding an existing container declares nothing new — and asking to
     // CREATE the same leaf again binds the existing one rather than redeclaring it.
-    expect(adaNames(gateway)).toEqual(["ada", "ada:journal"]);
     expect((await approve(base, ada, second, { bind_new: "journal" })).status).toBe(302);
-    expect(adaNames(gateway)).toEqual(["ada", "ada:journal"]);
+    expect(adaNames(gateway)).toEqual(standing);
+    // The name with the space binds exactly as listed — untrimmed.
+    expect((await approve(base, ada, second, { bind: "ada:notes " })).status).toBe(302);
+    expect(readOAuthFile(connectorsHome).codes?.at(-1)).toMatchObject({ container: "ada:notes " });
+    // With the home standing, the home and the pool are still refused — the home in words, the
+    // pool as not-yours — and neither mints.
+    const home = await approve(base, ada, second, { bind: "ada" });
+    expect(home.status).toBe(400);
+    expect(await home.text()).toContain("never bound");
+    const pool = await approve(base, ada, second, { bind: "ada:journal:inbox-1" });
+    expect(pool.status).toBe(404);
+    expect(await pool.text()).toContain("Nothing under your name answers to that");
+    expect(readOAuthFile(connectorsHome).codes ?? []).toHaveLength(4);
+    expect(adaNames(gateway)).toEqual(standing);
   });
 
   it("refuses the two levels that are never bound — the store root and the home — and mints nothing", async () => {
@@ -285,9 +342,32 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
         ts++,
       ),
     );
+    // ada's own home and one child stand too, so the reach is walked for real — bea's child is
+    // refused by the walk, not by ada having no home.
+    await op(
+      containerClaims(
+        { container: "ada", trust: "curated", posture: "shared", membership: authoredBy(OPERATOR) },
+        OPERATOR,
+        ts++,
+      ),
+    );
+    await op(
+      containerClaims(
+        {
+          container: "ada:notes",
+          trust: "curated",
+          posture: "shared",
+          parent: "ada",
+          membership: authoredBy(OPERATOR),
+        },
+        OPERATOR,
+        ts++,
+      ),
+    );
     expect(gateway.containers().containers.has("bea:journal")).toBe(true);
     const ada = await signIn(base, "ada", PASSWORD);
     const html = await consentPage(base, ada);
+    expect(html).toContain('value="ada:notes"');
     expect(html).not.toContain("bea:journal");
     expect(html).not.toContain('value="ada:journal"');
 
@@ -325,34 +405,44 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
         ts++,
       ),
     );
-    // Declaration is looser than the binding: a control character is declarable today.
-    const odd = "ada:x\u0001y";
-    await op(
-      containerClaims(
-        {
-          container: odd,
-          trust: "curated",
-          posture: "shared",
-          parent: "ada",
-          membership: authoredBy(OPERATOR),
-        },
-        OPERATOR,
-        ts++,
-      ),
-    );
-    expect(gateway.containers().containers.has(odd)).toBe(true);
+    // Declaration is looser than the binding: a control character is declarable today — a C0
+    // one and a C1 one (NEL) alike. The fence is the connector record's own predicate, so no
+    // name the page offers can be one the store then refuses to write.
+    const odds = ["ada:x\u0001y", "ada:no\u0085tes"];
+    for (const odd of odds) {
+      await op(
+        containerClaims(
+          {
+            container: odd,
+            trust: "curated",
+            posture: "shared",
+            parent: "ada",
+            membership: authoredBy(OPERATOR),
+          },
+          OPERATOR,
+          ts++,
+        ),
+      );
+      expect(gateway.containers().containers.has(odd)).toBe(true);
+    }
     const ada = await signIn(base, "ada", PASSWORD);
     const html = await consentPage(base, ada);
     expect(html).not.toContain("ada:x");
-    const res = await approve(base, ada, html, { bind: odd });
-    expect(res.status).toBe(400);
-    expect(await res.text()).toContain("cannot be bound");
+    expect(html).not.toContain("ada:no");
+    for (const odd of odds) {
+      const res = await approve(base, ada, html, { bind: odd });
+      expect(res.status, JSON.stringify(odd)).toBe(400);
+      expect(await res.text()).toContain("cannot be bound");
+    }
     expect(readOAuthFile(connectorsHome).codes ?? []).toHaveLength(0);
   });
 
-  it("a POST carrying no binding fields mints a code with no container and provisions nothing", async () => {
-    // A pre-§58 client's approval: not this page's form. The code carries the user and no
-    // container — the exchange's to refuse (S1b) — and the store is untouched.
+  it("a POST carrying no binding fields mints an unbound code the exchange still redeems as before", async () => {
+    // Not this page's form — the page always sends both fields — so only a hand-built POST lands
+    // here. The code carries the user and no container, and the store is untouched. THIS IS AN
+    // OPEN WINDOW, pinned so it is seen: the exchange does not read the binding yet, and this
+    // code redeems to the store-wide grant it always did. The exchange's slice turns this case
+    // into a refusal.
     const { base, usersHome, connectorsHome, gateway } = await bareUserServer();
     const ada = await signIn(base, "ada", PASSWORD);
     const html = await consentPage(base, ada);
@@ -383,4 +473,31 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
       expect(existsSync(userSeedPath(usersHome, "ada"))).toBe(false);
     },
   );
+
+  it("a seed whose grant could not land is taken back, so a retry mints afresh", async () => {
+    // The provisioning act alone, against a ground whose first append fails: the seed file this
+    // act wrote is removed and the refusal says so — otherwise the next attempt would read a
+    // "present" seed that never earned its grant, and keep it forever. The retry succeeds.
+    const home = mkdtempSync(join(tmpdir(), "loam-s1a-grant-"));
+    homes.push(home);
+    const faults: string[] = [];
+    let failures = 1;
+    const ground = {
+      options: { seed: OPERATOR_SEED },
+      operatorAuthor: OPERATOR,
+      nextTimestamp: () => 1,
+      append: (): Promise<void> =>
+        failures-- > 0 ? Promise.reject(new Error("no room on the ground")) : Promise.resolve(),
+    } as unknown as Gateway;
+    const first = await ensureUserKey(ground, home, "ada", (m) => faults.push(m));
+    expect("refusal" in first ? first.refusal : undefined).toMatchObject({ status: 503 });
+    expect("refusal" in first ? first.refusal.message : "").toContain("Nothing partial was kept");
+    expect(faults.join("\n")).toContain("no room on the ground");
+    expect(existsSync(userSeedPath(home, "ada"))).toBe(false);
+
+    const second = await ensureUserKey(ground, home, "ada", (m) => faults.push(m));
+    expect("userKey" in second).toBe(true);
+    expect(existsSync(userSeedPath(home, "ada"))).toBe(true);
+    expect(faults).toHaveLength(1);
+  });
 });

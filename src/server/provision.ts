@@ -8,6 +8,7 @@
 // `onFault` (it names paths); the caller sees only the refusal's status and sentence.
 
 import { randomBytes } from "node:crypto";
+import { rmSync } from "node:fs";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { readUserSeed, userSeedPath, writeUserSeed } from "../cli/config.js";
 import { grantClaims } from "../gateway/accounts.js";
@@ -54,8 +55,10 @@ export async function ensureUserKey(
   if (seed.kind === "present" && /^[0-9a-f]{64}$/.test(seed.seed)) return { userKey: seed.seed };
   if (seed.kind === "absent") {
     const minted = randomBytes(32).toString("hex");
+    let written = false;
     try {
       writeUserSeed(home, user, minted);
+      written = true;
       await gw.append([
         signClaims(
           grantClaims(
@@ -69,13 +72,27 @@ export async function ensureUserKey(
         ),
       ]);
     } catch (err) {
-      onFault(`could not provision a signing key for ${user}: ${said(err)}`);
+      // A seed on disk without its grant would answer the next attempt as "present" and never
+      // earn the grant. So the file THIS act wrote is taken back — only that file: a seed that
+      // stood before took the branch above and is never touched.
+      let survived = false;
+      if (written) {
+        try {
+          rmSync(userSeedPath(home, user), { force: true });
+        } catch {
+          survived = true;
+        }
+      }
+      onFault(
+        `could not provision a signing key for ${user}: ${said(err)}` +
+          (survived ? `; the seed file at ${userSeedPath(home, user)} could not be removed` : ""),
+      );
       return {
         refusal: {
           status: 503,
           message:
-            "Your signing key could not be provisioned, so no container was made. Nothing " +
-            "partial was kept.",
+            "Your signing key could not be provisioned, so no container was made." +
+            (survived ? "" : " Nothing partial was kept."),
         },
       };
     }

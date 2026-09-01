@@ -2496,10 +2496,9 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       consent = makeConsentDoor({
         gate: userDoors.gate,
         home: options.connectors.home,
-        // The binding's ground (§58): the users mount, re-asked per request like every door — and
+        // The binding's side (§58): the users mount, re-asked per request like every door, and
         // the USERS' home, where a provisioned seed belongs (the connectors' home is oauth.json's).
-        ground: () => mounts.resolve(forUsers.mount)?.gateway,
-        usersHome: forUsers.home,
+        users: { ground: () => mounts.resolve(forUsers.mount)?.gateway, home: forUsers.home },
         ...(options.connectors.onFault === undefined
           ? {}
           : { onFault: options.connectors.onFault }),

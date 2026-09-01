@@ -754,17 +754,19 @@ export interface ConsentOptions {
   /** The CIMD document fetcher's test seam (T242) — see `ConnectorRegistration` and `cimd.ts`. */
   readonly cimdAllowPrivateOrigins?: readonly string[];
   /**
-   * The users mount's live gateway, re-asked per request (SPEC §58): the page lists the
+   * The users' side of the binding (SPEC §58), given as ONE thing so it can never be given by
+   * halves. `ground` is the users mount's live gateway, re-asked per request: the page lists the
    * containers under the person's name and provisions the home and the target on approval.
-   * Absent, the page cannot bind and refuses to approve — a connection is never bound nowhere.
+   * `home` is the USERS' home, where `user.<name>.seed` lives (§36) — distinct from the `home`
+   * above, the connectors' (`oauth.json`): `loam serve` passes one directory for both, a
+   * programmatic serve() may not, and a seed provisioned into the wrong one splits a person into
+   * two keys. Absent, the page cannot bind and refuses to approve — a connection is never bound
+   * nowhere.
    */
-  readonly ground?: () => Gateway | undefined;
-  /**
-   * The USERS' home — where `user.<name>.seed` lives (§36). Distinct from `home`, which is the
-   * connectors' (`oauth.json`); `loam serve` passes one directory for both, a programmatic
-   * serve() may not, and a seed provisioned into the wrong one splits a person into two keys.
-   */
-  readonly usersHome?: string;
+  readonly users?: {
+    readonly ground: () => Gateway | undefined;
+    readonly home: string;
+  };
   /** Where a local fault goes; it may name the home's path, so the caller never sees it. */
   readonly onFault?: (message: string) => void;
 }
@@ -1046,7 +1048,7 @@ ${bindingFields(user, bindable)}
     );
     // The containers the person may bind into, read from the live table (§58). No ground, no
     // binding — the page says so rather than offering a form that cannot approve.
-    const gw = options.ground?.();
+    const gw = options.users?.ground();
     if (gw === undefined) {
       refuse(res, 503, "This store's ground is not reachable, so no connection can be bound.");
       return;
@@ -1129,23 +1131,27 @@ ${bindingFields(user, bindable)}
     //
     // TWO SHAPES OF "NO BINDING", told apart on purpose. The page's own form always carries the
     // two fields, so a person who left the choice blank gets the sentence that names the rule. A
-    // POST that carries NEITHER field is not this page's form — a pre-§58 client, or a script —
-    // and it mints a code that carries no container; provisioning nothing. Such a code is the
-    // exchange's to refuse (S1b): a connection is never bound nowhere, and the refusal lands
-    // where the binding would have been used, with the same sentence.
+    // POST that carries NEITHER field is not this page's form — a script — and it mints a code
+    // that carries no container, provisioning nothing. The exchange does not read the binding
+    // yet, so that code redeems as it always did; refusing it — a connection is never bound
+    // nowhere — is the exchange's own slice, and the refusal lands where the binding would have
+    // been used, with the same sentence.
     const user = session.user;
     const bindingOffered = fields.has("bind") || fields.has("bind_new");
     let container: string | undefined;
     if (bindingOffered) {
-      const gw = options.ground?.();
-      if (gw === undefined) {
+      const users = options.users;
+      const gw = users?.ground();
+      if (users === undefined || gw === undefined) {
         refuse(res, 503, "This store's ground is not reachable, so it approved nothing.");
         return;
       }
+      // `bind` is a name the page emitted from the store's own table, compared as-is — a name is
+      // whatever the store holds, spaces and all. Only the typed leaf is trimmed.
       const binding = bindingOf(
         gw,
         user,
-        (fields.get("bind") ?? "").trim(),
+        fields.get("bind") ?? "",
         (fields.get("bind_new") ?? "").trim(),
       );
       if (binding.kind === "refuse") {
@@ -1157,7 +1163,7 @@ ${bindingFields(user, bindable)}
       // page first. The seed lives in the USERS' home; the faults name paths and go to the
       // operator; the person sees the sentence.
       const fault = options.onFault ?? ((): void => undefined);
-      const usersHome = options.usersHome ?? home;
+      const usersHome = users.home;
       const table = gw.containers();
       if (binding.kind === "create" || !table.containers.has(user)) {
         const key = await ensureUserKey(gw, usersHome, user, (m) => fault(`the consent page ${m}`));

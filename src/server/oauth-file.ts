@@ -155,9 +155,10 @@ export interface OAuthCode {
   readonly generation?: number;
   /**
    * The binding (SPEC §58): whose consent this was, and the container the connection will live
-   * in. Recorded at consent, honored at exchange. OPTIONAL only for a code minted before §58 — the
-   * exchange refuses to bind a code that carries no container (greenfield: such a code is
-   * unredeemable).
+   * in. Recorded at consent for the exchange to honor. The exchange does not read them yet: a
+   * code that carries no container still redeems as it always did, and refusing it is the
+   * exchange's own slice of §58. OPTIONAL because a POST that carries no binding fields mints a
+   * code without them.
    */
   readonly user?: string;
   readonly container?: string;
@@ -246,7 +247,7 @@ export const MAX_CLIENT_NAME = 200;
  * Written as a CODE-POINT test rather than a regex character class: a literal control character
  * inside a regex is unreadable in a source file.
  */
-const CONTROL = (text: string): boolean =>
+export const CONTROL = (text: string): boolean =>
   [...text].some((ch) => {
     const code = ch.codePointAt(0)!;
     return code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029;

@@ -4,6 +4,7 @@
 // page for the containers it may offer as a binding — so the walk lives here, once.
 
 import type { ContainerTable } from "../gateway/container.js";
+import { CONTROL } from "./oauth-file.js";
 
 /**
  * A fixpoint rather than one pass, because an edge can hang off an inbox pool and the table's
@@ -30,18 +31,11 @@ export function subtreeOf(table: ContainerTable, root: string): ReadonlySet<stri
 }
 
 /**
- * A name a binding may carry: no control character (the connector records refuse one, and a
- * page must not offer what its own store would then refuse to record), no separator abuse.
- * Declaration is looser than this today; the binding is where a stricter shape is needed.
+ * A name a binding may carry: one the connector records will hold. The predicate IS the record's
+ * own, so the page can never offer a name its store would then refuse to write. Declaration is
+ * looser than this today; the binding is where the stricter shape is needed.
  */
-export const isBindableName = (name: string): boolean => {
-  if (name.length === 0) return false;
-  for (const ch of name) {
-    const c = ch.codePointAt(0)!;
-    if (c < 0x20 || c === 0x7f || c === 0x2028 || c === 0x2029) return false;
-  }
-  return true;
-};
+export const isBindableName = (name: string): boolean => name.length > 0 && !CONTROL(name);
 
 /**
  * The containers a binding may name (SPEC §58 position 1): the person's reach minus the home
