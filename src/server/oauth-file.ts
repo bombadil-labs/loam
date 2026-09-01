@@ -153,6 +153,14 @@ export interface OAuthCode {
    * after it (criterion 8). OPTIONAL for the pre-phase-15 shape: an absent generation fails closed.
    */
   readonly generation?: number;
+  /**
+   * The binding (SPEC §58): whose consent this was, and the container the connection will live
+   * in. Recorded at consent, honored at exchange. OPTIONAL only for a code minted before §58 — the
+   * exchange refuses to bind a code that carries no container (greenfield: such a code is
+   * unredeemable).
+   */
+  readonly user?: string;
+  readonly container?: string;
 }
 
 export interface OAuthFile {
@@ -372,6 +380,20 @@ function checkCode(raw: unknown, where: string): OAuthCode {
     throw new OAuthFileUnreadable(`${where} has a codeChallenge carrying a control character`);
   }
   const generation = optGeneration(raw, where, "generation");
+  // OPTIONAL, §58: the binding. Plain names, no control bytes — the same listing-row rule.
+  const optName = (field: "user" | "container"): string | undefined => {
+    const value = (raw as Record<string, unknown>)[field];
+    if (value === undefined) return undefined;
+    if (typeof value !== "string" || value.length === 0) {
+      throw new OAuthFileUnreadable(`${where} has a ${field} that is not a non-empty string`);
+    }
+    if (CONTROL(value)) {
+      throw new OAuthFileUnreadable(`${where} has a ${field} carrying a control character`);
+    }
+    return value;
+  };
+  const user = optName("user");
+  const container = optName("container");
   return {
     digest,
     clientId: str(raw, where, "clientId"),
@@ -380,6 +402,8 @@ function checkCode(raw: unknown, where: string): OAuthCode {
     issuedAt: num(raw, where, "issuedAt"),
     ...(rawChallenge === undefined ? {} : { codeChallenge: rawChallenge }),
     ...(generation === undefined ? {} : { generation }),
+    ...(user === undefined ? {} : { user }),
+    ...(container === undefined ? {} : { container }),
   };
 }
 

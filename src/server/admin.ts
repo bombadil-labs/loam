@@ -57,8 +57,7 @@ import {
   type Claims,
   type Delta,
 } from "@bombadil/rhizomatic";
-import { readUserSeed, userSeedPath, writeUserSeed } from "../cli/config.js";
-import { grantClaims } from "../gateway/accounts.js";
+import { readUserSeed } from "../cli/config.js";
 import { rolesOf } from "./users.js";
 import {
   attentionSummaryImpl,
@@ -75,7 +74,6 @@ import {
   type ResolvedContainer,
 } from "../gateway/container.js";
 import { Gateway } from "../gateway/gateway.js";
-import { STORE_ENTITY } from "../gateway/genesis.js";
 import { queryFieldFor } from "../gateway/gql.js";
 import {
   lensOf,
@@ -86,6 +84,8 @@ import {
 } from "../gateway/registration.js";
 import { MemoryBackend } from "../store/memory.js";
 import { adminFederation } from "./admin-federation.js";
+import { declareOwned, ensureUserKey } from "./provision.js";
+import { subtreeOf } from "./subtree.js";
 import { CSP, escapeHtml, page, sameSecret, type SessionGate } from "./session.js";
 import {
   ADMIN_PATH,
@@ -144,37 +144,7 @@ export interface AdminDoor {
   handle(pathname: string, req: IncomingMessage, res: ServerResponse): Promise<void>;
 }
 
-/**
- * The containers `root` may see: the root itself, every descendant by `parent` edge, and every
- * inbox pool (`inboxOf`, §39) hanging off a reachable container. A fixpoint rather than one pass,
- * because an edge can hang off an inbox pool and the table's iteration order guarantees nothing.
- */
-function subtreeOf(table: ContainerTable, root: string): ReadonlySet<string> {
-  const reach = new Set<string>();
-  if (!table.containers.has(root)) return reach;
-  reach.add(root);
-  for (;;) {
-    let grew = false;
-    for (const [name, rec] of table.containers) {
-      if (reach.has(name)) continue;
-      const under =
-        (rec.parent !== undefined && reach.has(rec.parent)) ||
-        (rec.inboxOf !== undefined && reach.has(rec.inboxOf));
-      if (under) {
-        reach.add(name);
-        grew = true;
-      }
-    }
-    if (!grew) return reach;
-  }
-}
-
-/** The root container's membership: what its owner authored. The same Term shape §39's inboxes use. */
-const authoredBy = (publicKey: string): unknown => ({
-  op: "select",
-  pred: { match: { field: "author", cmp: "eq", const: publicKey } },
-  in: "input",
-});
+// The subtree walk lives in subtree.ts (§58: the consent page asks the same question).
 
 export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
   const gate = options.gate;
@@ -1025,77 +995,18 @@ this lens does not gather; the lens may read ground this container does not hold
     // others, and trust it with a WRITE grant, all before the declaration. A seed file that
     // EXISTS but cannot be used still fails closed — overwriting a key file because it read
     // wrong would destroy a credential this door cannot prove dead.
-    if (gw.options.seed === undefined || gw.operatorAuthor === undefined) {
-      refuse(res, 503, "This store cannot sign a declaration right now, so nothing was made.");
-      return;
-    }
-    const seed = readUserSeed(options.home, user);
-    let userKey: string;
-    if (seed.kind === "present" && /^[0-9a-f]{64}$/.test(seed.seed)) {
-      userKey = seed.seed;
-    } else if (seed.kind === "absent") {
-      const minted = randomBytes(32).toString("hex");
-      try {
-        writeUserSeed(options.home, user, minted);
-        await gw.append([
-          signClaims(
-            grantClaims(
-              STORE_ENTITY,
-              authorForSeed(minted),
-              "write",
-              gw.operatorAuthor,
-              gw.nextTimestamp(),
-            ),
-            gw.options.seed,
-          ),
-        ]);
-      } catch (err) {
-        onFault(
-          `the admin page could not provision a signing key for ${user}: ` +
-            `${err instanceof Error ? err.message : String(err)}`,
-        );
-        refuse(
-          res,
-          503,
-          "Your signing key could not be provisioned, so no container was made. Nothing partial " +
-            "was kept.",
-        );
-        return;
-      }
-      userKey = minted;
-    } else {
-      onFault(
-        `the admin page cannot use ${userSeedPath(options.home, user)}: ` +
-          (seed.kind === "unreadable"
-            ? seed.detail
-            : "it is present but is not a 64-character hex signing key"),
-      );
-      refuse(
-        res,
-        409,
-        "This user's signing key exists on this store but cannot be used, so no container was " +
-          "made. Ask the store's operator to repair it.",
-      );
+    const key = await ensureUserKey(gw, options.home, user, (m) => onFault(`the admin page ${m}`));
+    if ("refusal" in key) {
+      refuse(res, key.refusal.status, key.refusal.message);
       return;
     }
     // Operator law: the declaration is signed by the store, once the door has proven the target
     // is the session user's own name — which it is by construction here.
-    const spec = {
-      container: user,
-      trust: "curated" as const,
-      posture: "shared" as const,
-      membership: authoredBy(authorForSeed(userKey)),
-    };
-    try {
-      await gw.append([
-        signClaims(containerClaims(spec, gw.operatorAuthor, gw.nextTimestamp()), gw.options.seed),
-      ]);
-    } catch (err) {
-      onFault(
-        `the admin page could not declare the root container for ${user}: ` +
-          `${err instanceof Error ? err.message : String(err)}`,
-      );
-      refuse(res, 503, "This store could not land the declaration, so nothing was made.");
+    const declined = await declareOwned(gw, user, key.userKey, undefined, (m) =>
+      onFault(`the admin page ${m}`),
+    );
+    if (declined !== undefined) {
+      refuse(res, declined.status, declined.message);
       return;
     }
     seeOther(res);

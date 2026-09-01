@@ -2496,6 +2496,11 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       consent = makeConsentDoor({
         gate: userDoors.gate,
         home: options.connectors.home,
+        // The binding's ground (§58): the users mount, re-asked per request like every door.
+        ground: () => mounts.resolve(forUsers.mount)?.gateway,
+        ...(options.connectors.onFault === undefined
+          ? {}
+          : { onFault: options.connectors.onFault }),
         ...(forUsers.monotonicNow === undefined ? {} : { now: forUsers.monotonicNow }),
         ...(options.connectors.cimdAllowPrivateOrigins === undefined
           ? {}

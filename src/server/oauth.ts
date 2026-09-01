@@ -38,6 +38,9 @@ import {
 import { CSP, escapeHtml, page, sameSecret, type SessionGate } from "./session.js";
 import { AUTHORIZE_PATH, authorizeContinuation } from "./continuation.js";
 import { cimdRedirectDefect, isCimdClientId, makeCimdFetcher, type CimdDocument } from "./cimd.js";
+import type { Gateway } from "../gateway/gateway.js";
+import { declareOwned, ensureUserKey, LEAF_RE } from "./provision.js";
+import { bindableOf, subtreeOf } from "./subtree.js";
 
 /** The one scope §37 ships. A scope LIST replaces it when a second one exists. */
 export const CONNECTOR_SCOPE = "loam.connector";
@@ -750,6 +753,14 @@ export interface ConsentOptions {
   readonly now?: () => number;
   /** The CIMD document fetcher's test seam (T242) — see `ConnectorRegistration` and `cimd.ts`. */
   readonly cimdAllowPrivateOrigins?: readonly string[];
+  /**
+   * The users mount's live gateway, re-asked per request (SPEC §58): the page lists the
+   * containers under the person's name and provisions the home and the target on approval.
+   * Absent, the page cannot bind and refuses to approve — a connection is never bound nowhere.
+   */
+  readonly ground?: () => Gateway | undefined;
+  /** Where a local fault goes; it may name the home's path, so the caller never sees it. */
+  readonly onFault?: (message: string) => void;
 }
 
 export interface ConsentDoor {
@@ -801,6 +812,23 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
   const refuse = (res: ServerResponse, status: number, message: string): void =>
     htmlOut(res, status, page("this request was refused", `<h1>Refused.</h1>\n<p>${message}</p>`));
 
+  // The binding field (SPEC §58 position 1): a connection lives in ONE container under the
+  // person's name, chosen here or created here, and never in the home itself. The home is not an
+  // option; the empty option is the refusal, not a default.
+  const bindingFields = (user: string, bindable: readonly string[]): string =>
+    `<fieldset>
+<legend>Bind this connection to</legend>
+<p>A connection lives in one container under your name, and never above it. It reads that
+container and writes into its own pool there.</p>
+<label for="bind">an existing container</label>
+<select id="bind" name="bind">
+<option value="">—</option>
+${bindable.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("\n")}
+</select>
+<label for="bind_new">or create one under <code>${escapeHtml(user)}:</code></label>
+<input id="bind_new" name="bind_new" placeholder="journal" maxlength="63">
+</fieldset>`;
+
   const consentPage = (
     client: Pick<OAuthClient, "clientId" | "clientName">,
     registeredUri: string,
@@ -808,6 +836,8 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
     codeChallenge: string,
     codeChallengeMethod: string,
     formToken: string,
+    user: string,
+    bindable: readonly string[],
   ): string =>
     page(
       "approve a connector",
@@ -828,9 +858,60 @@ ${
 <input type="hidden" name="state" value="${escapeHtml(state)}">
 <input type="hidden" name="code_challenge" value="${escapeHtml(codeChallenge)}">
 <input type="hidden" name="code_challenge_method" value="${escapeHtml(codeChallengeMethod)}">
+${bindingFields(user, bindable)}
 <button type="submit">approve</button>
 </form>`,
     );
+
+  // Where the approval binds (SPEC §58 position 1). Two levels are never bound — the store and the
+  // person's home — and a name outside the person's reach draws the same answer whether it is
+  // another person's or nobody's. A leaf under the home may be created here; an existing
+  // container under the home may be chosen. The refusal sentences are the page's own words.
+  type Binding =
+    | { readonly kind: "existing"; readonly container: string }
+    | { readonly kind: "create"; readonly leaf: string; readonly container: string }
+    | { readonly kind: "refuse"; readonly status: number; readonly message: string };
+  const bindingOf = (gw: Gateway, user: string, bind: string, bindNew: string): Binding => {
+    if (bindNew !== "") {
+      if (!LEAF_RE.test(bindNew)) {
+        return {
+          kind: "refuse",
+          status: 400,
+          message:
+            "A container name here is letters, digits, dashes, and underscores, up to 63 of " +
+            "them — one level below your name.",
+        };
+      }
+      return { kind: "create", leaf: bindNew, container: `${user}:${bindNew}` };
+    }
+    if (bind === "") {
+      return {
+        kind: "refuse",
+        status: 400,
+        message:
+          "A connection is never bound to the store or to your home. Choose a container one " +
+          "level below your name, or create one.",
+      };
+    }
+    if (bind === user) {
+      return {
+        kind: "refuse",
+        status: 400,
+        message:
+          "Your home container is never bound. Choose a container one level below your name, " +
+          "or create one.",
+      };
+    }
+    const table = gw.containers();
+    if (!subtreeOf(table, user).has(bind) || table.containers.get(bind)?.inboxOf !== undefined) {
+      return {
+        kind: "refuse",
+        status: 404,
+        message: "Nothing under your name answers to that, so nothing was approved.",
+      };
+    }
+    return { kind: "existing", container: bind };
+  };
 
   // A registered uri EXACTLY equal to the presented one, byte for byte — never a normalized or
   // reparsed form. `undefined` when the client is unknown or nothing matches.
@@ -937,6 +1018,13 @@ ${
       "form-action 'self'",
       `form-action 'self' ${new URL(redirectUri).origin}`,
     );
+    // The containers the person may bind into, read from the live table (§58). No ground, no
+    // binding — the page says so rather than offering a form that cannot approve.
+    const gw = options.ground?.();
+    if (gw === undefined) {
+      refuse(res, 503, "This store's ground is not reachable, so no connection can be bound.");
+      return;
+    }
     htmlOut(
       res,
       200,
@@ -947,6 +1035,8 @@ ${
         codeChallenge,
         params.get("code_challenge_method") ?? "",
         session.formToken,
+        session.user,
+        bindableOf(gw.containers(), session.user),
       ),
       undefined,
       consentCsp,
@@ -1008,6 +1098,54 @@ ${
     // exact uri, the PKCE challenge, and the client's current generation, with a monotonic deadline
     // recorded now. No seed, no token, no grant (that is phase 15's redemption). `mint` builds the
     // whole next file inside the one locked write.
+    // The binding (§58), judged BEFORE anything is minted or declared: a refused binding leaves
+    // the store exactly as it was — no code, no container, no seed.
+    const gw = options.ground?.();
+    if (gw === undefined) {
+      refuse(res, 503, "This store's ground is not reachable, so it approved nothing.");
+      return;
+    }
+    const user = session.user;
+    const binding = bindingOf(
+      gw,
+      user,
+      (fields.get("bind") ?? "").trim(),
+      (fields.get("bind_new") ?? "").trim(),
+    );
+    if (binding.kind === "refuse") {
+      refuse(res, binding.status, binding.message);
+      return;
+    }
+    // Provision what the binding needs — the person's key and home when absent, the new leaf
+    // when asked for — in the same act as the approval, so a first-day consent needs no admin
+    // page first. The faults name paths and go to the operator; the person sees the sentence.
+    const fault = options.onFault ?? ((): void => undefined);
+    const table = gw.containers();
+    if (binding.kind === "create" || !table.containers.has(user)) {
+      const key = await ensureUserKey(gw, home, user, (m) => fault(`the consent page ${m}`));
+      if ("refusal" in key) {
+        refuse(res, key.refusal.status, key.refusal.message);
+        return;
+      }
+      if (!table.containers.has(user)) {
+        const declined = await declareOwned(gw, user, key.userKey, undefined, (m) =>
+          fault(`the consent page ${m}`),
+        );
+        if (declined !== undefined) {
+          refuse(res, declined.status, declined.message);
+          return;
+        }
+      }
+      if (binding.kind === "create" && !table.containers.has(binding.container)) {
+        const declined = await declareOwned(gw, binding.container, key.userKey, user, (m) =>
+          fault(`the consent page ${m}`),
+        );
+        if (declined !== undefined) {
+          refuse(res, declined.status, declined.message);
+          return;
+        }
+      }
+    }
     const secret = randomBytes(32).toString("base64url");
     const codeRecord = (generation: number): OAuthCode => ({
       digest: digestOf(secret),
@@ -1017,6 +1155,8 @@ ${
       issuedAt: Date.now(),
       codeChallenge,
       generation,
+      user,
+      container: binding.container,
     });
     let mint: (file: OAuthFile) => OAuthFile;
     if (isCimdClientId(clientId)) {

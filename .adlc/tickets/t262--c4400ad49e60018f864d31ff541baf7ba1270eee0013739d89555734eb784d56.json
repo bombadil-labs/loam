@@ -8,6 +8,9 @@
     }
   ],
   "id": "T262",
-  "status": "todo",
+  "rails": [
+    "test/server/consent-binding.test.ts"
+  ],
+  "status": "in_progress",
   "title": "§58 S1 — bind at consent: the container is the grant"
 }

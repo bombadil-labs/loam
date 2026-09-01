@@ -1,0 +1,41 @@
+// A person's reach in the container tree (SPEC §40, §58): the container named exactly after them,
+// every descendant by `parent` edge, and every inbox pool (`inboxOf`, §39) hanging off a reachable
+// container. Two doors ask this question — the admin page for every act it gates, and the consent
+// page for the containers it may offer as a binding — so the walk lives here, once.
+
+import type { ContainerTable } from "../gateway/container.js";
+
+/**
+ * A fixpoint rather than one pass, because an edge can hang off an inbox pool and the table's
+ * iteration order guarantees nothing. Empty when no container bears the root's name.
+ */
+export function subtreeOf(table: ContainerTable, root: string): ReadonlySet<string> {
+  const reach = new Set<string>();
+  if (!table.containers.has(root)) return reach;
+  reach.add(root);
+  for (;;) {
+    let grew = false;
+    for (const [name, rec] of table.containers) {
+      if (reach.has(name)) continue;
+      const under =
+        (rec.parent !== undefined && reach.has(rec.parent)) ||
+        (rec.inboxOf !== undefined && reach.has(rec.inboxOf));
+      if (under) {
+        reach.add(name);
+        grew = true;
+      }
+    }
+    if (!grew) return reach;
+  }
+}
+
+/**
+ * The containers a binding may name (SPEC §58 position 1): the person's reach minus the home
+ * itself and minus every pool — the two levels that are never bound, and the inboxes that are
+ * connections' own. Sorted, so a page lists them stably.
+ */
+export function bindableOf(table: ContainerTable, root: string): string[] {
+  return [...subtreeOf(table, root)]
+    .filter((name) => name !== root && table.containers.get(name)?.inboxOf === undefined)
+    .sort();
+}
