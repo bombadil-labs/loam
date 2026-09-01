@@ -30,12 +30,30 @@ export function subtreeOf(table: ContainerTable, root: string): ReadonlySet<stri
 }
 
 /**
+ * A name a binding may carry: no control character (the connector records refuse one, and a
+ * page must not offer what its own store would then refuse to record), no separator abuse.
+ * Declaration is looser than this today; the binding is where a stricter shape is needed.
+ */
+export const isBindableName = (name: string): boolean => {
+  if (name.length === 0) return false;
+  for (const ch of name) {
+    const c = ch.codePointAt(0)!;
+    if (c < 0x20 || c === 0x7f || c === 0x2028 || c === 0x2029) return false;
+  }
+  return true;
+};
+
+/**
  * The containers a binding may name (SPEC §58 position 1): the person's reach minus the home
  * itself and minus every pool — the two levels that are never bound, and the inboxes that are
- * connections' own. Sorted, so a page lists them stably.
+ * connections' own — and minus any name the record could not carry. Sorted, so a page lists
+ * them stably.
  */
 export function bindableOf(table: ContainerTable, root: string): string[] {
   return [...subtreeOf(table, root)]
-    .filter((name) => name !== root && table.containers.get(name)?.inboxOf === undefined)
+    .filter(
+      (name) =>
+        name !== root && table.containers.get(name)?.inboxOf === undefined && isBindableName(name),
+    )
     .sort();
 }

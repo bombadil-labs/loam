@@ -176,6 +176,8 @@ describe("T143 — the doors, driven by a real browser", () => {
     const authorize = `${base}/oauth/authorize?${query.toString()}`;
     await tab.navigate(authorize);
     expect(await bodyText(tab)).toContain("Approve a connector?");
+    // §58: a connection lives in one container under alice's name, chosen here — she names it.
+    await tab.eval('document.getElementById("bind_new").value = "journal"');
     await submit(tab, "/oauth/authorize");
     const where = (await tab.eval("location.href")) as string;
     expect(where.startsWith(`${landingOrigin}/cb`)).toBe(true);

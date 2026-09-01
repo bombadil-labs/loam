@@ -123,7 +123,10 @@ export async function declareOwned(
       signClaims(containerClaims(spec, gw.operatorAuthor, gw.nextTimestamp()), gw.options.seed),
     ]);
   } catch (err) {
-    onFault(`could not declare ${name}: ${said(err)}`);
+    onFault(
+      `could not declare ${parent === undefined ? `the root container for ${name}` : name}: ` +
+        said(err),
+    );
     return {
       status: 503,
       message: "This store could not land the declaration, so nothing was made.",

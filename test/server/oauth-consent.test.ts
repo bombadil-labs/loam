@@ -268,7 +268,6 @@ describe("§37 phase 14 — the consent page", () => {
       redirect_uri: r.redirectUri,
       state: r.state,
       form_token: r.formToken,
-      bind_new: "journal",
     });
     expect(ok.status).toBe(302);
     expect(ok.headers.get("location")!.startsWith(`${REDIRECT}?code=`)).toBe(true);
@@ -324,7 +323,6 @@ describe("§37 phase 14 — the consent page", () => {
       redirect_uri: r.redirectUri,
       state: r.state,
       form_token: r.formToken,
-      bind_new: "journal",
     });
     expect(ok.status).toBe(302);
     expect(codeCount(home)).toBe(1);
@@ -337,7 +335,6 @@ describe("§37 phase 14 — the consent page", () => {
       client_id: r.clientId,
       redirect_uri: r.redirectUri,
       form_token: r.formToken,
-      bind_new: "journal",
     });
     expect(ok.status).toBe(302);
     const file = readOAuthFile(home);
@@ -361,7 +358,6 @@ describe("§37 phase 14 — the consent page", () => {
       client_id: first.clientId,
       redirect_uri: first.redirectUri,
       form_token: first.formToken,
-      bind_new: "journal",
     });
     expect(ok1.status).toBe(302);
     const afterFirst = readOAuthFile(home).codes ?? [];
@@ -380,7 +376,6 @@ describe("§37 phase 14 — the consent page", () => {
       client_id: second.clientId,
       redirect_uri: second.redirectUri,
       form_token: second.formToken,
-      bind_new: "journal",
     });
     expect(ok2.status).toBe(302);
     const codes = readOAuthFile(home).codes ?? [];
