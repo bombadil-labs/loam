@@ -183,6 +183,8 @@ describe("T143 — the doors, driven by a real browser", () => {
     expect(where.startsWith(`${landingOrigin}/cb`)).toBe(true);
     expect(where).toContain("code=");
     expect(where).toContain("state=st-42");
+    // ...and the store holds what she named: the container stands under her home.
+    expect(gateway.containers().containers.get("alice:journal")?.parent).toBe("alice");
     // Criterion 5's second half: what ARRIVES at the connector carries no authorize URL. A
     // STORE-origin Referer is at most the bare origin — never a path, never the query that holds
     // client_id, state and code_challenge. The landing page's own subresource fetches (Chrome

@@ -42,7 +42,7 @@ export async function ensureUserKey(
   home: string,
   user: string,
   onFault: (message: string) => void,
-): Promise<{ userKey: string } | { refusal: ProvisionRefusal }> {
+): Promise<{ userSeed: string } | { refusal: ProvisionRefusal }> {
   if (gw.options.seed === undefined || gw.operatorAuthor === undefined) {
     return {
       refusal: {
@@ -52,7 +52,7 @@ export async function ensureUserKey(
     };
   }
   const seed = readUserSeed(home, user);
-  if (seed.kind === "present" && /^[0-9a-f]{64}$/.test(seed.seed)) return { userKey: seed.seed };
+  if (seed.kind === "present" && /^[0-9a-f]{64}$/.test(seed.seed)) return { userSeed: seed.seed };
   if (seed.kind === "absent") {
     const minted = randomBytes(32).toString("hex");
     let written = false;
@@ -96,7 +96,7 @@ export async function ensureUserKey(
         },
       };
     }
-    return { userKey: minted };
+    return { userSeed: minted };
   }
   onFault(
     `cannot use ${userSeedPath(home, user)}: ` +
@@ -114,11 +114,11 @@ export async function ensureUserKey(
   };
 }
 
-/** Declare a container gathering what `userKey` authored — the home (no parent) or a child. */
+/** Declare a container gathering what `userSeed` authored — the home (no parent) or a child. */
 export async function declareOwned(
   gw: Gateway,
   name: string,
-  userKey: string,
+  userSeed: string,
   parent: string | undefined,
   onFault: (message: string) => void,
 ): Promise<ProvisionRefusal | undefined> {
@@ -132,7 +132,7 @@ export async function declareOwned(
     container: name,
     trust: "curated" as const,
     posture: "shared" as const,
-    membership: authoredBy(authorForSeed(userKey)),
+    membership: authoredBy(authorForSeed(userSeed)),
     ...(parent === undefined ? {} : { parent }),
   };
   try {

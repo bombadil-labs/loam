@@ -252,12 +252,35 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
         ts++,
       ),
     );
-    const standing = ["ada", "ada:journal", "ada:journal:inbox-1", "ada:notes "];
+    // And a grandchild, reached only through a child the same walk adds: the reach is the whole
+    // subtree, at any depth below the home.
+    await op(
+      containerClaims(
+        {
+          container: "ada:journal:2025",
+          trust: "curated",
+          posture: "shared",
+          parent: "ada:journal",
+          membership: authoredBy(OPERATOR),
+        },
+        OPERATOR,
+        ts++,
+      ),
+    );
+    const standing = [
+      "ada",
+      "ada:journal",
+      "ada:journal:2025",
+      "ada:journal:inbox-1",
+      "ada:notes ",
+    ];
     expect(adaNames(gateway)).toEqual(standing);
 
     const second = await consentPage(base, ada);
-    // The existing containers are offered by name; the home itself and the pool are not.
+    // The existing containers are offered by name, the grandchild among them; the home itself
+    // and the pool are not.
     expect(second).toContain('value="ada:journal"');
+    expect(second).toContain('value="ada:journal:2025"');
     expect(second).toContain('value="ada:notes "');
     expect(second).not.toContain('value="ada"');
     expect(second).not.toContain("inbox-1");
@@ -266,23 +289,34 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     const codes = readOAuthFile(connectorsHome).codes ?? [];
     expect(codes).toHaveLength(2);
     expect(codes[1]).toMatchObject({ user: "ada", container: "ada:journal" });
-    // No second declaration: binding an existing container declares nothing new — and asking to
-    // CREATE the same leaf again binds the existing one rather than redeclaring it.
+    // No second declaration — at the bytes: the ground holds exactly as many deltas after a
+    // repeat CREATE of the same leaf as before it, because a standing name in reach binds the
+    // existing container rather than redeclaring it. (A redeclaration with the same parent and
+    // membership would leave the name set and the resolved table unchanged; only the count sees.)
+    const deltas = async (): Promise<number> =>
+      (await gateway.backend.deltasSince(new Set())).length;
+    const before = await deltas();
     expect((await approve(base, ada, second, { bind_new: "journal" })).status).toBe(302);
+    expect(await deltas()).toBe(before);
     expect(adaNames(gateway)).toEqual(standing);
-    // The name with the space binds exactly as listed — untrimmed.
+    // The name with the space binds exactly as listed — untrimmed — and so does the grandchild.
     expect((await approve(base, ada, second, { bind: "ada:notes " })).status).toBe(302);
     expect(readOAuthFile(connectorsHome).codes?.at(-1)).toMatchObject({ container: "ada:notes " });
+    expect((await approve(base, ada, second, { bind: "ada:journal:2025" })).status).toBe(302);
+    expect(readOAuthFile(connectorsHome).codes?.at(-1)).toMatchObject({
+      container: "ada:journal:2025",
+    });
     // With the home standing, the home and the pool are still refused — the home in words, the
-    // pool as not-yours — and neither mints.
+    // pool as not-yours — and neither mints nor declares.
     const home = await approve(base, ada, second, { bind: "ada" });
     expect(home.status).toBe(400);
     expect(await home.text()).toContain("never bound");
     const pool = await approve(base, ada, second, { bind: "ada:journal:inbox-1" });
     expect(pool.status).toBe(404);
     expect(await pool.text()).toContain("Nothing under your name answers to that");
-    expect(readOAuthFile(connectorsHome).codes ?? []).toHaveLength(4);
+    expect(readOAuthFile(connectorsHome).codes ?? []).toHaveLength(5);
     expect(adaNames(gateway)).toEqual(standing);
+    expect(await deltas()).toBe(before);
   });
 
   it("refuses the two levels that are never bound — the store root and the home — and mints nothing", async () => {
@@ -496,7 +530,7 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     expect(existsSync(userSeedPath(home, "ada"))).toBe(false);
 
     const second = await ensureUserKey(ground, home, "ada", (m) => faults.push(m));
-    expect("userKey" in second).toBe(true);
+    expect("userSeed" in second).toBe(true);
     expect(existsSync(userSeedPath(home, "ada"))).toBe(true);
     expect(faults).toHaveLength(1);
   });

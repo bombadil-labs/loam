@@ -760,8 +760,9 @@ export interface ConsentOptions {
    * `home` is the USERS' home, where `user.<name>.seed` lives (§36) — distinct from the `home`
    * above, the connectors' (`oauth.json`): `loam serve` passes one directory for both, a
    * programmatic serve() may not, and a seed provisioned into the wrong one splits a person into
-   * two keys. Absent, the page cannot bind and refuses to approve — a connection is never bound
-   * nowhere.
+   * two keys. Absent, the page does not render and approves no binding — a connection is never
+   * bound nowhere. (A POST that names no binding at all still mints an unbound code; see the
+   * two shapes of "no binding" in `handlePost`.)
    */
   readonly users?: {
     readonly ground: () => Gateway | undefined;
@@ -921,8 +922,8 @@ ${bindingFields(user, bindable)}
         kind: "refuse",
         status: 400,
         message:
-          "A connection is never bound to the store or to your home. Choose a container one " +
-          "level below your name, or create one.",
+          "A connection is never bound to the store or to your home. Choose a container under " +
+          "your name, or create one.",
       };
     }
     if (bind === user) {
@@ -930,8 +931,8 @@ ${bindingFields(user, bindable)}
         kind: "refuse",
         status: 400,
         message:
-          "Your home container is never bound. Choose a container one level below your name, " +
-          "or create one.",
+          "Your home container is never bound. Choose a container under your name, or create " +
+          "one.",
       };
     }
     const table = gw.containers();
@@ -1172,7 +1173,7 @@ ${bindingFields(user, bindable)}
           return;
         }
         if (!table.containers.has(user)) {
-          const declined = await declareOwned(gw, user, key.userKey, undefined, (m) =>
+          const declined = await declareOwned(gw, user, key.userSeed, undefined, (m) =>
             fault(`the consent page ${m}`),
           );
           if (declined !== undefined) {
@@ -1181,7 +1182,7 @@ ${bindingFields(user, bindable)}
           }
         }
         if (binding.kind === "create") {
-          const declined = await declareOwned(gw, binding.container, key.userKey, user, (m) =>
+          const declined = await declareOwned(gw, binding.container, key.userSeed, user, (m) =>
             fault(`the consent page ${m}`),
           );
           if (declined !== undefined) {
