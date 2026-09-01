@@ -797,6 +797,7 @@ this lens does not gather; the lens may read ground this container does not hold
   type DropPlan =
     | { readonly act: "strike" }
     | { readonly act: "inbox"; readonly handle: Container }
+    | { readonly act: "channel"; readonly handle: Container }
     | { readonly act: "refuse"; readonly status: number; readonly message: string };
 
   const planDrop = (
@@ -825,6 +826,12 @@ this lens does not gather; the lens may read ground this container does not hold
           "Nothing was forgotten.",
       };
     }
+    // A CHANNEL's pool severs through the channel's own act, never a bare pool drop: `dropChannel`
+    // takes the law the channel blessed down beside the bytes and refuses rather than reporting a
+    // purge it cannot prove (§46). It is the act `loam federate drop` runs, and the staged sever
+    // an agent hands a person (`loam_federate_drop`) completes here.
+    const channelPool = gw.channelPools.get(name);
+    if (channelPool !== undefined) return { act: "channel", handle: channelPool };
     const handle = gw.connectionInboxes.get(name);
     if (handle === undefined) {
       return {
@@ -891,7 +898,7 @@ this lens does not gather; the lens may read ground this container does not hold
     let count: number | undefined;
     try {
       count =
-        plan.act === "inbox"
+        plan.act === "inbox" || plan.act === "channel"
           ? plan.handle.members().length
           : gw.containerScope({ containers: [name] }).length;
     } catch {
@@ -944,6 +951,30 @@ this lens does not gather; the lens may read ground this container does not hold
           503,
           "The drop could not be proven at the bytes, so the pool remains attached and nothing " +
             "was reported forgotten.",
+        );
+        return;
+      }
+      seeOther(res);
+      return;
+    }
+    if (plan.act === "channel") {
+      try {
+        await gw.dropChannel(name);
+      } catch (err) {
+        onFault(
+          `the admin page's sever of "${name}" refused: ` +
+            `${err instanceof Error ? err.message : String(err)}`,
+        );
+        // The sever throws from more than one place, and some of them fire AFTER the pool was
+        // purged and verified — so this sentence claims neither that the bytes remain nor that
+        // they are gone. What was verified gone is gone; what could not be struck still stands;
+        // the server log names which (the detail can name paths, so it never reaches the page).
+        refuse(
+          res,
+          503,
+          "The sever did not complete. Whatever was verified gone is gone; whatever could not " +
+            "be struck still stands, and the server log says which. Retry from the command line " +
+            "with `loam federate drop`.",
         );
         return;
       }
