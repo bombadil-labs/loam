@@ -1633,7 +1633,8 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           // already hardened in the ways this needs: a single-use confirm token bound to (user,
           // container) and consumed before the act, and — the property that matters most — the plan
           // is RECOMPUTED at confirm time, so the operator cannot approve something larger than
-          // they read. A channel's pool is an inbox container, which that page already reaches.
+          // they read. A channel's pool is a separate container that page's plan resolves through
+          // the channel's own sever (`dropChannel`), which retires the blessed law beside the bytes.
           const preview = previewDrop(gateway, target.name);
           reply({
             content: [
