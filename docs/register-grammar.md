@@ -58,11 +58,14 @@ outside `[_A-Za-z0-9]` becomes `_`:
 
 | store-native | derived | used for |
 |---|---|---|
-| `sync:person` | `sync_person` | the **view type**, and (initial-lowercased) the **query, subscription, and mutation root field** |
+| `sync:person` | `sync_person` | the **stem**: initial-lowercased, it is the **query, subscription, and mutation root field** |
+| `sync:person` | `sync_personView` | the **view type** (the stem plus `View`; the subscription payload type is the stem plus `Patch`) |
 | prop `name` | `name` | the view field and the mutation argument |
-| — | `clear` + view type | the paired retraction mutation |
+| — | `clear` + stem | the paired retraction mutation — `clearsync_person` |
 
-So after registering `sync:person` you talk to `sync_person(entity: …)`.
+So after registering `sync:person` you talk to the field `sync_person(entity: …)`, and a fragment
+or introspection query names the type `sync_personView` — the bare stem is a field name, never a
+type.
 
 ## 3. The term algebra — `hyperschema.body`
 
@@ -123,9 +126,15 @@ property).
 `{ "var": "root" }` means "the root entity this program is being asked about" — it is how one
 program serves every instance. `inView` is stratified: no `inView` inside its own `term`.
 
-`STRMATCH` is always an object, never a bare string:
-`{ "exact": "name" }` · `{ "prefix": "sync:" }` · `{ "inSet": ["a", "b"] }`.
-`VALMATCH` compares a primitive target value.
+`STRMATCH` is always an object, never a bare string, with four arms:
+`{ "exact": "name" }` · `{ "prefix": "sync:" }` · `{ "inSet": ["a", "b"] }` ·
+`{ "aliased": { "name": "n", "via"?: "entity:id", "trust"?: PRED } }` — the last matches through
+the alias vocabulary, and its `trust` predicate must be closed (no holes, no nested `aliased`).
+
+`VALMATCH` compares a primitive target value, with three arms:
+`{ "vcmp": { "cmp": "eq"|"neq"|"lt"|"lte"|"gt"|"gte"|"prefix", "value": … } }` (set membership is
+not a `cmp` — use the arm below; `prefix` wants a string) ·
+`{ "between": [lo, hi] }` · `{ "inSet": [v, …] }`.
 
 ## 5. Mask policies and the trust boundary
 
@@ -270,9 +279,11 @@ edge mutations from it:
 
 Rules, all mechanical:
 
-- A prop in `refs` **loses its argument** on the base mutation — a primitive write to it now
-  refuses on every door, and the refusal names the link mutation to use instead. Don't also list
-  it in `writable` (that draws a warning and `refs` wins).
+- A prop in `refs` **loses its argument** on the base mutation — a primitive write to it refuses
+  on every door. On the REST/direct seam the refusal names the link mutation to use; on GraphQL
+  the argument was never built, so the refusal is GraphQL's own `Unknown argument` and the
+  pointer to the link mutation lives in the mutation field's **description** instead. Don't also
+  list the prop in `writable` (that draws a warning and `refs` wins).
 - The surface serves `link<lens>_<prop>(entity: ID!, target: ID!)` and `unlink<lens>_<prop>` —
   for lens `sync:experience`, prop `experiencers`:
   `linksync_experience_experiencers` / `unlinksync_experience_experiencers`.

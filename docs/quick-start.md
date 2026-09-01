@@ -101,20 +101,26 @@ In claude.ai: **Settings → Connectors → Add custom connector.**
   supports it, and it means reconnects reuse one client identity instead of minting orphans.
 
 Press **Add**, sign in as your user when the store's login page appears, and consent. That's the
-connection. If the connector ever shows "no tools", delete the connector entry entirely and add
-it fresh — a cached credential from a previous store answers 401 until it is replaced.
+connection. If a view answers suspiciously empty, ask for `loam_whoami` first — it says who the
+store thinks the caller is, and its anonymous answer says in words that reads are masked: an
+empty view for an unrecognized caller is not an empty store. If the connector shows "no tools"
+outright, delete the connector entry entirely and add it fresh — a cached credential from a
+previous store answers 401 until it is replaced.
 
 ## 7. First conversation
 
 Ask Claude to look around. Useful first moves:
 
+- `loam_whoami` — who the door thinks the caller is, and what standing the ground grants. Call
+  it first whenever a view answers empty; it tells "nothing here" apart from "not signed in."
 - `loam_query` with `{ person(entity: "person:me") { name } }` — reading resolves through the
   store's schemas.
 - Writing a person, then linking: `person(entity:, name:)` writes a field;
   `linkperson_follows(entity:, target:)` asserts a typed edge — references are edges, never
   strings.
-- `loam_docs(topic: "register-grammar")` — the store hands the agent its own manual when it wants
-  to define new schemas; `loam_docs()` lists everything it can teach.
+- `loam_docs(topic: "first-steps")` — what makes this store different and six ways to use it
+  today; `loam_docs(topic: "register-grammar")` is the full schema-definition manual, and
+  `loam_docs()` lists everything the store can teach.
 
 ## When something refuses
 

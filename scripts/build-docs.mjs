@@ -25,6 +25,9 @@ const OUT = join(root, "src", "server", "docs-content.ts");
 
 // One line per SERVED topic, shown by `loam_docs` with no arguments and by `resources/list`.
 const SUMMARIES = {
+  "first-steps":
+    "You connected — now what? What makes this store different, six ways to use it today " +
+    "with paste-able first prompts, and the two things worth knowing early.",
   "quick-start":
     "From nothing to a store Claude can reach: install, the guided init, the tailscale funnel, " +
     "and the MCP connection — every loam command transcribed from the shipped code.",
