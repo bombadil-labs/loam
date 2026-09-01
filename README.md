@@ -169,7 +169,9 @@ exist and are easy to miss.
 A served store answers these doors per mount, behind a `Bearer` token:
 
 - **`POST /:mount/graphql`** — `{ query, variables? }` → `{ data, errors }`. Both queries and
-  mutations; the mutation acts as the token's identity.
+  mutations; the mutation acts as the token's identity. Every query field takes `asOf` (a
+  millisecond timestamp) and every view carries `_asOf` and `_forgotten` — the past as it stood,
+  confessing its lawful redactions (SPEC §26).
 - **`GET /:mount/subscribe?query=…`** — a `text/event-stream` (SSE). The query must be a
   `subscription` operation (`subscription { plant(entity: "…") { height _hex _fromHex _changed } }`):
   an initial snapshot, then one `data:` frame per change (`_fromHex → _hex`, `_changed`, and the

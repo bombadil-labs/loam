@@ -1120,7 +1120,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       name: "loam_query",
       description:
         "Run a GraphQL query against this Loam store; returns { data, errors }. " +
-        "Reads only: a mutation or subscription document is refused.",
+        "Reads only: a mutation or subscription document is refused. Every entity field takes " +
+        "asOf (a millisecond timestamp) to answer as the store stood then, and every view " +
+        "carries _asOf and _forgotten — the pin, and the erasures inside that window, never " +
+        "their content.",
       inputSchema: {
         type: "object",
         properties: { query: { type: "string" }, variables: { type: "object" } },
