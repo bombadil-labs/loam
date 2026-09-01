@@ -26,8 +26,8 @@ Two words this section keeps apart, because the admin page already uses one of t
 - **posture** — a container's storage: `separate` (its own store) or `shared` (a reading over
   the primary ground). §27.1's immutable knob. Unchanged here.
 - **leeway** — what a bound connection may do inside its subtree: *receive*, *offer*,
-  *publish*, *delegate*, and the *envelope*. New here; set at provisioning; a declaration on the
-  container.
+  *publish*, the *envelope*, and *delegate* — the terms under which the subtree may differ.
+  New here; set at provisioning; one JSON value on the container's declaration.
 
 ## User stories
 
@@ -50,9 +50,9 @@ issued and no prefix typed: the container's path plus its colon is the fence, so
 shape anything under `ada:journal:` and nothing beside it — not `ada:other:log`, not `log`, and
 not `ada:journalx:log`. *Surface:* `loam_register` as today. *Rail:* the derived-standing suite.
 
-**3. Ada provisions a daily driver.** On the consent page she creates `ada:agent1` with the
-every leeway switch on and a large envelope — she read each switch's line before flipping
-it. In conversation, agent1 declares `ada:agent1:scratch`, opens a
+**3. Ada provisions a daily driver.** On the consent page she creates `ada:agent1` with every
+switch on, a large envelope, and delegation terms that mirror them — she read each line
+before flipping it. In conversation, agent1 declares `ada:agent1:scratch`, opens a
 channel from a colleague's offered container into `ada:agent1:inbox`, offers
 `ada:agent1:outbox`, and binds a helper key to `ada:agent1:helper` — each through a
 `loam_container` tool, each inside `ada:agent1:…`, none able to reach `ada` or the store. The
@@ -128,7 +128,9 @@ none of the pre-binding ids at the bytes.
    *offer* is minting an offer token for a descendant of `C`; *read* resolves over a
    materialization scoped to `C`'s subtree — the shape `reads.ts` already uses for a channel's
    lens — so a query for rows that live in `ada:other` or in `loam.grants` answers as if they
-   were not there; *delegate* is binding a further key to a descendant of `C`. `loam grant
+   were not there; *delegate* is what may exist below `C` — a further key bound to a
+   descendant, or a descendant whose leeway differs from `C`'s — within `C`'s delegation
+   terms. `loam grant
    --verb=…` retires for connections once the tools that replace it have landed. *Folded:* three
    of those clauses were citations to mechanisms that do not exist yet for inbox pools (the
    fold, the read scope, the colon); they are requirements now, in slices S1 and S2.
@@ -144,10 +146,22 @@ none of the pre-binding ids at the bytes.
    envelope, so the blast radius of a blessed renderer is the envelope's. It cannot exceed its envelope
    (§23's bills, set on the container). It cannot erase (§11 is home access).
 
-4. **Leeway is five switches, off by default, each explained on the page.** DECIDED. Creating
-   a binding target sets five things: *receive* (may it follow other containers), *offer* (may
-   descendants be offered to other stores), *publish* (may lenses be declared public, §12),
-   *delegate* (may an agent bound here bind further keys), and the *envelope*. There are no
+4. **Leeway is four switches, an envelope, and delegation terms — off by default, each
+   explained on the page.** DECIDED. Creating a binding target sets: *receive* (may it follow
+   other containers), *offer* (may descendants be offered to other stores), *publish* (may
+   lenses be declared public, §12), the *envelope*, and *delegate* — which is not a switch but
+   the TERMS under which this container's subtree may differ from it:
+
+   ```
+   leeway = { receive, offer, publish, envelope, delegate: off | terms }
+   terms  = { receive, offer, publish, envelope, delegate: off | "same" | terms }
+   ```
+
+   `off` means the subtree is a pure namespace: no new keys may be bound below, and every
+   child inherits this container's leeway exactly, so there is nothing to configure and
+   nothing to attenuate. `terms` says what may exist below; `"same"` means helpers may
+   delegate further under these very terms, all the way down, without anyone writing the
+   recursion out. There are no
    presets: a preset is a name for one row of a matrix whose every row stays reachable, and a
    name a friend has to learn is one more thing between them and the switch. Every switch
    starts off — the private journal is the default — and every switch carries, on the page and
@@ -167,10 +181,14 @@ none of the pre-binding ids at the bytes.
      token: a web address. *The risk:* a public lens is readable by strangers and search
      engines until you unmark it. Nothing anonymous can ever write. Mark nothing public you
      would not print.
-   - **Delegate** — *Let an agent bound here hand out keys of its own.* Each helper lives in a
-     sub-container and can do no more than this container allows. *The risk:* this creates new
-     actors that write under their own names. They can never reach outside this container,
-     and revoking the agent revokes them all — but until then, what they write is real.
+   - **Delegate** — *Let what exists under this container differ from it, on the terms you set
+     here.* Turn it on and its terms unfold beneath: the same switches, an envelope ceiling, and
+     *may delegate further*. An agent here may then declare sub-containers with their own
+     leeway inside those terms, and hand out keys to helpers that live in them. *The risk:*
+     anything you allow below, the agent here can reach through its subtree — an annex that
+     receives is a room it can read. Helpers write under their own names, can never reach
+     outside this container, and are revoked when the agent is — but until then, what they
+     write is real.
    - **Envelope** — *How much compute an agent here may spend running things behind glass:*
      small, medium, or large. *The risk:* a larger envelope lets a misbehaving app run longer
      and use more memory before the store stops it. It never grants reach.
@@ -179,13 +197,19 @@ none of the pre-binding ids at the bytes.
    visible without hovering, never signaled by color alone, so a screen reader and a phone read
    them the same. A leeway is a declaration on the container, so changing it later — on the
    container's admin page, with the same five lines — is a delta the next request obeys.
-   **Attenuation, folded:** a child a connection declares, and a helper it binds, take a leeway
-   that is a subset of the parent's effective leeway — no knob on that the parent has off — and
-   an envelope carved out of the parent's, never beyond it; a request for a wider child is
-   refused with the sentence naming the parent's ceiling. **Cascade, folded:** a delegated
-   binding is rooted in the delegator's; revoking or dropping the delegator revokes every
-   binding it delegated, on the next request. §28 called this effectiveness attenuating upward;
-   it is the rule that keeps "total freedom inside" from becoming "escalate by nesting."
+   **The one rule (folded twice — a premortem found escalation by nesting; Myk found that
+   attenuating over a container's OWN switches made a sealed room with an open annex
+   inexpressible):** a child's leeway — its switches, its envelope, and its own `delegate` —
+   must fit inside its parent's `delegate` terms. The parent's own switches never enter the
+   comparison. So `ada:agent1` with `receive: off` and `delegate: { receive: on, … }` cannot
+   follow anything into its own room, but may declare `ada:agent1:annex` with `receive: on`
+   and follow a store into that, dropping the annex later with the room untouched; and
+   `publish: on, delegate: { publish: off, … }` publishes itself while its helpers cannot. A
+   request for a child outside the terms is refused with the sentence naming the ceiling. The
+   terms govern the whole subtree, keys or no keys — an annex needs no helper key to exist.
+   **Cascade:** a delegated binding is rooted in the delegator's; revoking or dropping the
+   delegator revokes every binding it delegated, on the next request. §28 called this
+   effectiveness attenuating upward; no subtree can exceed what the person set at its top.
 
 5. **Names are paths, paths are the namespace, and the tree agrees with the names.** DECIDED;
    two folds. Containers nest by name with the colon (`ada:agent1:inbox`); a bound connection's
@@ -289,12 +313,15 @@ replacement lands.
    refuses, while a renderer it blesses serves behind glass under its envelope; a request to
    bind, offer, or declare above its root is refused with the sentence naming the rule; its
    envelope binds — verified by `test/server/subtree-walls.test.ts`.
-5. LEEWAY ATTENUATES AND CASCADES. A container created with every switch off refuses
-   receive, offer, publish, and delegate; with every switch on it admits all four; a child asked for a
-   knob its parent lacks is refused and a narrower child binds; a helper's envelope is bounded by
-   its parent's; revoking the delegator refuses the helper's next request while an unrelated
-   binding is untouched; changing a leeway is a delta the next request obeys — verified by
-   `test/server/leeway.test.ts`.
+5. LEEWAY FITS ITS PARENT'S TERMS, AND CASCADES. A container created with every switch off
+   and `delegate: off` refuses receive, offer, and publish, and refuses any child leeway or
+   helper key; with `receive: off` and `delegate: { receive: on }` the container's own channel
+   request refuses while a child declared with `receive: on` binds and receives; with
+   `delegate: { receive: off }` that child is refused; with `publish: on` and `delegate:
+   { publish: off }` the container publishes while its child's publish refuses; a child asked
+   for an envelope above the terms' ceiling is refused; revoking the delegator refuses the
+   helper's next request while an unrelated binding is untouched; changing a leeway is a delta
+   the next request obeys — verified by `test/server/leeway.test.ts`.
 6. SIBLINGS SHARE BY THE PERSON'S ACT. Ada's share-into from `ada:journal` to
    `ada:agent1:journal` reads the journal through agent1's pool and nothing else; agent1's own
    request to open that channel refuses while the journal is unoffered; dropping the pool ends
