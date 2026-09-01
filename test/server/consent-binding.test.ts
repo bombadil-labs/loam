@@ -262,15 +262,31 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     // Beside the journal: a pool receiving into it, never offered. Its name is ONE level below
     // the home on purpose — a machine-minted pool (`inbox:…`, `channel:…`) carries at least two
     // colons and no leaf can spell it, so the create path's pool arm guards hand-declared law
-    // only, and this is that law, declared by hand. And a bystander that shares the pool's
-    // posture but not its edge — `separate`, no `inboxOf` — so what is refused is the pool, for
-    // being a pool, and not every separate container.
+    // only, and this is that law, declared by hand. A second pool carries BOTH edges — a parent
+    // and an inboxOf — so what makes a pool is the inboxOf edge alone, not the absence of a
+    // parent. And a bystander that shares the pools' posture but not their edge — `separate`,
+    // no `inboxOf` — so what is refused is the pool, for being a pool, and not every separate
+    // container.
     await op(
       containerClaims(
         {
           container: "ada:inbox-1",
           trust: "curated",
           posture: "separate",
+          membership: authoredBy(OPERATOR),
+          inboxOf: "ada:journal",
+        },
+        OPERATOR,
+        ts++,
+      ),
+    );
+    await op(
+      containerClaims(
+        {
+          container: "ada:inbox-2",
+          trust: "curated",
+          posture: "separate",
+          parent: "ada",
           membership: authoredBy(OPERATOR),
           inboxOf: "ada:journal",
         },
@@ -294,6 +310,7 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     const standing = [
       "ada",
       "ada:inbox-1",
+      "ada:inbox-2",
       "ada:journal",
       "ada:journal:2025",
       "ada:notes ",
@@ -310,6 +327,7 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     expect(second).toContain('value="ada:vault"');
     expect(second).not.toContain('value="ada"');
     expect(second).not.toContain("inbox-1");
+    expect(second).not.toContain("inbox-2");
     const res = await approve(base, ada, second, { bind: "ada:journal" });
     expect(res.status).toBe(302);
     const codes = readOAuthFile(connectorsHome).codes ?? [];
@@ -340,10 +358,13 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     // the pool is chosen or "created" into; and none of it mints or declares.
     const home = await approve(base, ada, second, { bind: "ada" });
     expect(home.status).toBe(400);
-    expect(await home.text()).toContain("never bound");
+    expect(await home.text()).toContain("Your home container is never bound");
     const pool = await approve(base, ada, second, { bind: "ada:inbox-1" });
     expect(pool.status).toBe(400);
     expect(await pool.text()).toContain("a pool is never bound");
+    const parented = await approve(base, ada, second, { bind: "ada:inbox-2" });
+    expect(parented.status).toBe(400);
+    expect(await parented.text()).toContain("a pool is never bound");
     const intoPool = await approve(base, ada, second, { bind_new: "inbox-1" });
     expect(intoPool.status).toBe(400);
     expect(await intoPool.text()).toContain("a pool is never bound");

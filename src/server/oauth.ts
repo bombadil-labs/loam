@@ -876,9 +876,8 @@ ${bindingFields(user, bindable)}
   // person's home — and a name outside the person's reach draws the same answer whether it is
   // another person's or nobody's. A pool INSIDE the reach — a connection's or a channel's — is
   // refused by its own reason: it hides nothing from its owner, so the uniform answer would only
-  // mislead. A
-  // leaf under the home may be created here; an existing container under the home may be
-  // chosen. The refusal sentences are the page's own words.
+  // mislead. A leaf under the home may be created here; an existing container under the home may
+  // be chosen. The refusal sentences are the page's own words.
   type Binding =
     | { readonly kind: "existing"; readonly container: string }
     | { readonly kind: "create"; readonly leaf: string; readonly container: string }
