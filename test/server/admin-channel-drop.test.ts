@@ -249,14 +249,26 @@ describe("T257 (a)+(b) — a channel severs through the page, two-sided at the b
     expect(confirm.status).toBe(200);
     const confirmBody = await confirm.text();
     expect(confirmBody).toContain(alice.name);
-    expect(confirmBody).toMatch(/\d+ deltas?/);
+    // The count is the pool's own members, said as a whole tag so a broken markup mutant fails.
+    const held = gateway.channelPools.get(alice.name)!.members().length;
+    expect(confirmBody).toContain(`<p>It holds ${held} deltas.</p>`);
     // The page names the act truthfully: a channel sever, its law retired with it — never "one
-    // connection's inbox", which is a different act on a different kind of pool.
-    expect(confirmBody).toContain("federation channel");
+    // connection's inbox", which is a different act on a different kind of pool. Asserted with
+    // the tags around the words, so the sentence must arrive as well-formed HTML.
+    expect(confirmBody).toContain("<p>This is the pool of a federation channel receiving into");
+    expect(confirmBody).toContain(`<code>${INTO}</code>. Dropping it severs that channel whole`);
     expect(confirmBody).toContain("law the channel blessed");
+    expect(confirmBody).toContain("that is reversible, and this is not.</p>");
     expect(confirmBody).toContain("cannot be undone");
     const confirmToken = confirmTokenOf(confirmBody);
     expect(confirmToken).toBeDefined();
+
+    // The SHARED receiving container's own confirm page still counts — a plan that is neither an
+    // inbox nor a channel has no handle, and the count must not fall over into "could not be
+    // counted" because of the way the two handle-bearing acts are told apart.
+    const sharedConfirm = await post(base, "/admin/drop", ada, { form_token: token, name: INTO });
+    expect(sharedConfirm.status).toBe(200);
+    expect(await sharedConfirm.text()).toMatch(/<p>It holds \d+ deltas?\.<\/p>/);
 
     // (a) Step 2: the confirmed POST severs. Byte level: the spy saw alice's write purged.
     // Reading level: her channel is no longer listed and the child no longer gathers her word.
@@ -311,6 +323,35 @@ describe("T257 (c) — the link the agent hands back leads to this page", () => 
     // which containers the page reaches, so the link is never a promise the page cannot keep.
     expect(staged.cliAt).toBe(`loam federate drop --channel ${alice.name} --yes`);
     expect(staged.note).toContain("under the signed-in person's own name");
+    // The reversible alternative is named with the right value — an agent reads this literally.
+    expect(staged.note).toContain("`loam_federate_set` with receiving false");
+  });
+});
+
+describe("T257 (d2) — a sever the store cannot complete answers 503 honestly, claiming neither direction", () => {
+  it("when the purge itself refuses, the page says the sever did not complete and the channel still stands", async () => {
+    const { base, gateway, alice, carol } = await channelServer();
+    // The pool's own backend refuses to purge: drop() refuses over doubt, and the page must relay
+    // that as "did not complete" — not "nothing was forgotten" (which a post-purge throw could
+    // make false) and not success.
+    alice.backend.purge = (): Promise<number> => Promise.reject(new Error("the disk said no"));
+    const ada = await signIn(base);
+    const token = tokenOf(await (await getPage(base, ada)).text());
+    const confirm = await post(base, "/admin/drop", ada, { form_token: token, name: alice.name });
+    expect(confirm.status).toBe(200);
+    const done = await post(base, "/admin/drop-confirm", ada, {
+      form_token: token,
+      name: alice.name,
+      confirm_token: confirmTokenOf(await confirm.text())!,
+    });
+    expect(done.status).toBe(503);
+    const body = await done.text();
+    expect(body).toContain("The sever did not complete.");
+    expect(body).not.toContain("nothing was forgotten");
+    // Two-sided: the channel is still listed, its bytes are still held, and the bystander is whole.
+    expect(gateway.channelStatus(alice.name)).toHaveLength(1);
+    expect(await carol.backend.holds(carol.note.id)).toBe(true);
+    expect(gateway.channelStatus(carol.name)).toHaveLength(1);
   });
 });
 
