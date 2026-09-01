@@ -91,19 +91,19 @@ member of `ada:journal` through a View and absent from the root read.
 **7. agent1 severs.** It tires of the colleague's channel and severs it with `loam_container
 sever`. The pool was inside its own subtree; the sever completes in conversation, two-sided —
 its pool purged and verified, every other channel whole — and Ada's page shows it gone.
-(Recommended; open question 1.) *Surface:* the tool. *Rail:* the MCP client drives it against
+(DECIDED.) *Surface:* the tool. *Rail:* the MCP client drives it against
 two channels; the bystander is asserted at the bytes.
 
-**8. Ada's old connector catches up.** She connected Claude last month, before this section,
-and Claude wrote into the store's primary ground under a root write grant. On her admin
-Connections panel that connector now shows *unbound*, with a **bind** action; every tool reply
-and `loam_whoami` name the pending binding and the link. She binds it to `ada:claude`. Its past
-writes are already members of `ada:claude` — a container is a reading, and this one's
-membership is "what that key authored before the binding" — while its inbox pool starts empty
-and takes only what comes next. Nothing moved; a declaration adopted a month of work, and a
-later drop of that connection forgets only what it wrote after binding. *Surface:* the
-Connections panel. *Rail:* a browser drives the bind; the suite asserts adoption, the empty
-pool at the bytes, and the sibling connector's deltas untouched.
+**8. Ada's old connector consents again.** She connected Claude last month, before this
+section, and Claude wrote into the store's primary ground under a root write grant. Loam is
+greenfield here — there are no installs to carry — so that connector simply consents again and
+binds like any new one, to `ada:claude`. Its earlier writes stay where they are, because the
+ground forgets nothing; its inbox pool starts empty and takes only what comes next, so a later
+drop of that connection forgets exactly its post-binding writes. If Ada wants the earlier
+writes gathered somewhere, she declares a container whose membership is what that key authored
+— a container is a reading — and that is her admin page's ordinary declare form. *Surface:*
+the consent page, then the admin page. *Rail:* story 1's; plus the suite asserts the pool holds
+none of the pre-binding ids at the bytes.
 
 ## Positions
 
@@ -115,7 +115,7 @@ pool at the bytes, and the sibling connector's deltas untouched.
    person's reach and the place they provision from, and it is not bound either. Every binding
    target is at depth two or deeper under the provisioning user. *Folded:* a non-operator user's
    own mirror or departure is a real need this arc does not answer — the home container offered
-   to its owner's own §36 key — and it is open question 6 rather than a silent gap.
+   to its owner's own §36 key — and it is a follow-on ticket (DECIDED), not a silent gap.
 
 2. **The binding is the grant.** DECIDED. Standing is derived from the binding, never granted
    verb by verb. Bound to container `C`: *write* lands in the connection's own pool inside `C`,
@@ -136,9 +136,11 @@ pool at the bytes, and the sibling connector's deltas untouched.
    connection declares children, shapes, receives, offers, and delegates, deciding in
    conversation. It cannot cross the edge upward — nothing it writes lands in `ada` or the
    store, and moving its work up is promotion (position 6), the person's act. It cannot touch
-   the constitution. It cannot make the store run code: renderers and resolvers arriving by
-   federation stay inert until a person blesses them, and resolvers — which run in the gateway
-   process — are never a connection's to bless at any depth. It cannot exceed its envelope
+   the constitution. It cannot make the store run code in the gateway process: resolvers
+   arriving by federation stay inert until a person blesses them, and they are never a
+   connection's to bless at any depth. A RENDERER arriving into its subtree it may bless itself
+   (DECIDED): renderers run behind glass in a billed worker (§23.9), under this container's
+   envelope, so the blast radius of a blessed renderer is the envelope's. It cannot exceed its envelope
    (§23's bills, set on the container). It cannot erase (§11 is home access).
 
 4. **Leeway is set at provisioning and attenuates downward.** DECIDED as the model; the knob
@@ -189,10 +191,10 @@ pool at the bytes, and the sibling connector's deltas untouched.
    forgets exactly what it wrote after binding, and the section says so. **One key per (client,
    user), folded:** a connector's actor seed is minted per consent, so one client consented by
    two people holds two keys and neither person's container adopts the other's work.
-   **Upgrade day, folded:** an already-granted connector keeps its root write standing until
-   its owner binds it; every tool reply and `loam_whoami` name the pending binding and the link
-   to the Connections panel where the bind action lives. (Recommended over striking at upgrade;
-   open question 5.)
+   **Greenfield (DECIDED):** there are no installs to carry. A connector consented before this
+   section consents again and binds like any new one; a root write grant confers nothing once
+   the door derives standing from bindings; nothing is deleted — the ground forgets nothing —
+   and a person who wants a key's earlier writes gathered declares a container over them.
 
 8. **The offer door serves containers, and the offer token is a designed thing.** DECIDED as
    the rule; the token is the fold. §46 deferred where a runtime federation credential lives;
@@ -217,8 +219,8 @@ replacement lands.
 
 - **S1 — bind at consent.** The consent page's binding field, provisioning the home and the
   target in one act; `bindConnection` wired at consent with a per-(client, user) key and a
-  forward-only inbox; migration by declaration; the Connections panel's bind action and the
-  pending-binding sentence in tool replies and `loam_whoami`; reads scoped to the binding.
+  forward-only inbox; reads scoped to the binding; root write grants no longer confer standing
+  for connections.
 - **S2 — the container tools and derived standing.** `loam_container` on the MCP roster
   (declare, leeway, receive, offer, promote-stage, sever) landing together with register-under-
   the-path (inbox-pool publish and fold, boot re-attach), receive-within-the-subtree,
@@ -234,7 +236,7 @@ replacement lands.
   is under a person, so every channel is in someone's reach.)
 - **S6 — authorship on the read surface.** A view can name its authors under the declared rule,
   and a binding attributes a connection's writes to its owner; masked readers learn nothing
-  new. (T259's second half; may be its own ticket — open question 4.)
+  new. (T259's second half; its own ticket after S2 — DECIDED.)
 
 ## Acceptance criteria
 
@@ -254,9 +256,10 @@ replacement lands.
    answers as if they were absent, and of `loam.grants` likewise, while rows in `ada:journal`
    answer through the same call — verified by `test/server/read-scope.test.ts`.
 4. THE WALLS. Nothing a bound connection writes lands in `ada` or the primary ground; a
-   resolver arriving on its channel stays inert; a request to bind, offer, or declare above its
-   root is refused with the sentence naming the rule; its envelope binds — verified by
-   `test/server/subtree-walls.test.ts`.
+   resolver arriving on its channel stays inert and the connection's attempt to bless it
+   refuses, while a renderer it blesses serves behind glass under its envelope; a request to
+   bind, offer, or declare above its root is refused with the sentence naming the rule; its
+   envelope binds — verified by `test/server/subtree-walls.test.ts`.
 5. LEEWAY ATTENUATES AND CASCADES. A container created with the *journal* preset refuses
    receive, offer, publish, and delegate; *daily driver* admits all four; a child asked for a
    knob its parent lacks is refused and a narrower child binds; a helper's envelope is bounded by
@@ -272,12 +275,12 @@ replacement lands.
    `ada:agent1:scratch` into `ada:journal` is a member of `ada:journal` through a View, is signed
    by Ada's user key, and is absent from the root read; promotion into a container outside her
    subtree refuses — verified by `test/server/promote-into.test.ts`.
-8. MIGRATION BY DECLARATION, ONE HOME. A connector's deltas written into the primary ground
-   before binding are members of `ada:claude` the moment it is bound, without a byte moving; the
-   inbox pool holds none of their ids at the bytes; its next write lands in the pool; a sibling
-   connector's deltas are not adopted; one client consented by two users holds two keys and
-   neither container adopts the other's work; an unbound legacy connector's tool reply names the
-   pending binding — verified by `test/server/consent-migration.test.ts`.
+8. ONE HOME, ONE KEY PER PERSON. A connection's inbox pool holds only what it wrote after
+   binding — a delta its key authored elsewhere before binding is absent from the pool at the
+   bytes — so a drop of that connection forgets exactly its post-binding writes; one client
+   consented by two users holds two keys, and neither person's container gathers the other's
+   work; a connector's pre-§58 root write grant confers no standing at any door — verified by
+   `test/server/consent-binding.test.ts`.
 9. NAMES ARE PATHS AND THE TREE AGREES. A declaration whose path-parent is not its declared
    parent is refused; a username whose mangled form lands on an existing path is refused at
    creation; a container whose mangled prefix lands on another user's is refused with a message
@@ -292,8 +295,8 @@ replacement lands.
     offer — verified by `test/server/offer-token.test.ts`.
 12. THE STORY RAILS. A real browser walks the consent page from a user with no containers and no
     seed, through password and binding, to a connected store that files a note into the chosen
-    container; a browser drives share-into, promotion with a destination, the Connections
-    panel's bind, and the offer-token mint; an MCP client drives each `loam_container` tool
+    container; a browser drives share-into, promotion with a destination, and the offer-token
+    mint; an MCP client drives each `loam_container` tool
     two-sided; the CLI follow story runs against two served stores with a token obtained through
     the page — verified by `test/browser/consent-binding.test.ts`,
     `test/browser/container-acts.test.ts`, `test/server/container-tools.test.ts`, and
@@ -301,24 +304,23 @@ replacement lands.
 
 ## Open questions (Myk)
 
-1. **May a connection sever its own channels without a person?** Recommendation: yes, inside
-   its subtree, two-sided like every sever. The alternative keeps every purge a person's second
-   step and costs the daily driver a click per sever.
-2. **May a connection bless a peer's RENDERER into its own subtree?** Recommendation: yes,
-   behind glass, under its envelope (§23.9's worker); resolvers never, at any depth.
-3. **The preset names and their five values.** Recommendation as in position 4; the names are
-   the part a friend reads.
-4. **Does S6 stay inside this arc or become its own ticket?** Recommendation: its own ticket
-   after S2 — it is a read-surface promise with its own masking rules, and the arc is already
-   five landings.
-5. **Upgrade day for already-consented connectors:** keep their root write standing until bound,
-   with the pending-binding sentence everywhere (recommended), or strike at upgrade with the
-   link in the refusal. Keeping is what lets the medialog demo's connector go on working the
-   morning this lands.
-6. **A non-operator user's own mirror.** Position 1 offers the whole ground only to the operator
-   token, so a user who is not the operator cannot yet carry their own world out. Recommendation:
-   a follow-on ticket — the home container offered to its owner's own §36 key — rather than
-   widening this arc.
+Answered 2026-09-01, the same day, and folded above:
+
+1. **May a connection sever its own channels without a person?** DECIDED: yes, inside its
+   subtree, two-sided like every sever.
+2. **May a connection bless a peer's RENDERER into its own subtree?** DECIDED: yes, behind
+   glass, under its envelope; resolvers never, at any depth.
+4. **Does S6 stay inside this arc?** DECIDED: its own ticket after S2.
+5. **Upgrade day for already-consented connectors.** DECIDED: greenfield — there are no
+   installs to carry; a connector consented before this section consents again.
+6. **A non-operator user's own mirror.** DECIDED: a follow-on ticket — the home container
+   offered to its owner's own §36 key — not this arc's.
+
+Still open, in discussion:
+
+3. **The preset names and their five values.** The names are the part a friend reads on the
+   consent page. Position 4's set is the current proposal; the settled set lands here before
+   this spec merges.
 
 **Provenance.** Drafted 2026-09-01 from the conversation in which Myk named the abstraction and
 settled its shape; §27, §28, §39, §46, and §47 are the precedents it finishes. T258, T259, and
