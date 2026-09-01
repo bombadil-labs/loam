@@ -220,10 +220,12 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
 
   it("lists the containers already under the person's home and binds an existing one", async () => {
     const { base, connectorsHome, gateway, op } = await bareUserServer();
-    // A grandchild is declared FIRST, before its parent and the home stand, so the table meets it
-    // ahead of both in arrival order: only a walk that runs to a fixpoint reaches it, through the
-    // child the same walk adds. The reach is the whole subtree, at any depth below the home — and
-    // nothing at all while the home does not stand.
+    // Two containers are declared BEFORE the home stands. A grandchild, whose parent does not
+    // stand either: the table meets it ahead of both in arrival order, so only a walk that runs
+    // to a fixpoint reaches it, through the child the same walk adds. And a child of the home
+    // itself, whose name ends in a space — the store's own name, offered and compared as-is. The
+    // reach is the whole subtree, at any depth below the home — and nothing at all while the home
+    // does not stand, even for a child that names it.
     let ts = 9300;
     await op(
       containerClaims(
@@ -233,25 +235,6 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
           posture: "shared",
           parent: "ada:journal",
           membership: authoredBy(OPERATOR),
-        },
-        OPERATOR,
-        ts++,
-      ),
-    );
-    const ada = await signIn(base, "ada", PASSWORD);
-    const first = await consentPage(base, ada);
-    expect(first).not.toContain("ada:journal:2025");
-    expect((await approve(base, ada, first, { bind_new: "journal" })).status).toBe(302);
-    // Beside the journal: a pool receiving into it (a connection's own, never offered) and a
-    // sibling whose name ends in a space — the store's own name, offered and compared as-is.
-    await op(
-      containerClaims(
-        {
-          container: "ada:journal:inbox-1",
-          trust: "curated",
-          posture: "separate",
-          membership: authoredBy(OPERATOR),
-          inboxOf: "ada:journal",
         },
         OPERATOR,
         ts++,
@@ -270,13 +253,29 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
         ts++,
       ),
     );
-    const standing = [
-      "ada",
-      "ada:journal",
-      "ada:journal:2025",
-      "ada:journal:inbox-1",
-      "ada:notes ",
-    ];
+    const ada = await signIn(base, "ada", PASSWORD);
+    const first = await consentPage(base, ada);
+    expect(first).not.toContain("ada:journal:2025");
+    expect(first).not.toContain('value="ada:notes "');
+    expect((await approve(base, ada, first, { bind_new: "journal" })).status).toBe(302);
+    // Beside the journal: a pool receiving into it, never offered. Its name is ONE level below
+    // the home on purpose — a machine-minted pool (`inbox:…`, `channel:…`) carries two colons and
+    // no leaf can spell it, so the create path's pool arm guards hand-declared law only, and this
+    // is that law, declared by hand.
+    await op(
+      containerClaims(
+        {
+          container: "ada:inbox-1",
+          trust: "curated",
+          posture: "separate",
+          membership: authoredBy(OPERATOR),
+          inboxOf: "ada:journal",
+        },
+        OPERATOR,
+        ts++,
+      ),
+    );
+    const standing = ["ada", "ada:inbox-1", "ada:journal", "ada:journal:2025", "ada:notes "];
     expect(adaNames(gateway)).toEqual(standing);
 
     const second = await consentPage(base, ada);
@@ -310,14 +309,17 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
       container: "ada:journal:2025",
     });
     // With the home standing, the home and the pool are still refused, each by its own reason —
-    // a pool inside the reach hides nothing from its owner, so it is not "not yours" — and
-    // neither mints nor declares.
+    // a pool inside the reach hides nothing from its owner, so it is not "not yours" — whether
+    // the pool is chosen or "created" into; and none of it mints or declares.
     const home = await approve(base, ada, second, { bind: "ada" });
     expect(home.status).toBe(400);
     expect(await home.text()).toContain("never bound");
-    const pool = await approve(base, ada, second, { bind: "ada:journal:inbox-1" });
+    const pool = await approve(base, ada, second, { bind: "ada:inbox-1" });
     expect(pool.status).toBe(400);
     expect(await pool.text()).toContain("a pool is never bound");
+    const intoPool = await approve(base, ada, second, { bind_new: "inbox-1" });
+    expect(intoPool.status).toBe(400);
+    expect(await intoPool.text()).toContain("a pool is never bound");
     expect(readOAuthFile(connectorsHome).codes ?? []).toHaveLength(5);
     expect(adaNames(gateway)).toEqual(standing);
     expect(await deltas()).toBe(before);

@@ -39,9 +39,9 @@ export const isBindableName = (name: string): boolean => name.length > 0 && !CON
 
 /**
  * The containers a binding may name (SPEC §58 position 1): the person's reach minus the home
- * itself and minus every pool — the two levels that are never bound, and the inboxes that are
- * connections' own — and minus any name the record could not carry. Sorted, so a page lists
- * them stably.
+ * itself and minus every pool — the two levels that are never bound, and the pools (an inbox's
+ * or a channel's) that receive into the reach — and minus any name the record could not carry.
+ * Sorted, so a page lists them stably.
  */
 export function bindableOf(table: ContainerTable, root: string): string[] {
   return [...subtreeOf(table, root)]
