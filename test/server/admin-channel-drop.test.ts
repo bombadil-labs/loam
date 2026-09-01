@@ -211,7 +211,7 @@ const confirmTokenOf = (html: string): string | undefined =>
 const mcpDrop = async (
   base: string,
   channel: string,
-): Promise<{ confirmAt: string; purgedNothing: boolean }> => {
+): Promise<{ confirmAt: string; cliAt: string; purgedNothing: boolean; note: string }> => {
   const res = await fetch(`${base}/default/mcp`, {
     method: "POST",
     headers: { authorization: "Bearer op-token", "content-type": "application/json" },
@@ -223,7 +223,12 @@ const mcpDrop = async (
     }),
   });
   const body = (await res.json()) as { result: { content: { text: string }[] } };
-  return JSON.parse(body.result.content[0]!.text) as { confirmAt: string; purgedNothing: boolean };
+  return JSON.parse(body.result.content[0]!.text) as {
+    confirmAt: string;
+    cliAt: string;
+    purgedNothing: boolean;
+    note: string;
+  };
 };
 
 describe("T257 (a)+(b) — a channel severs through the page, two-sided at the bytes and the reading", () => {
@@ -285,18 +290,27 @@ describe("T257 (c) — the link the agent hands back leads to this page", () => 
     const page = await getPage(base, ada, staged.confirmAt);
     expect(page.status).toBe(200);
     const html = await page.text();
-    expect(html).toContain(alice.name);
+    // The page is ALICE'S POOL's — its drop form carries her pool's name, not merely a link to
+    // it from some other container's page.
+    expect(html).toContain(`<input type="hidden" name="name" value="${alice.name}">`);
     expect(html).toContain('action="/admin/drop"');
 
     // And the form on that page leads somewhere: the drop it offers reaches the confirm step
-    // rather than refusing — the link is a path a person can actually walk to the end.
+    // rather than refusing — the link is a path a person can actually walk to the end. The name
+    // posted is the one the page carried.
+    const posted = /<input type="hidden" name="name" value="([^"]+)">/.exec(html)![1]!;
     const confirm = await post(base, "/admin/drop", ada, {
       form_token: tokenOf(html),
-      name: alice.name,
+      name: posted,
     });
     expect(confirm.status).toBe(200);
     expect(confirmTokenOf(await confirm.text())).toBeDefined();
     expect(gateway.channelStatus(alice.name)).toHaveLength(1); // still nothing removed
+
+    // The reply also names the path that ALWAYS works — the command line — and says plainly
+    // which containers the page reaches, so the link is never a promise the page cannot keep.
+    expect(staged.cliAt).toBe(`loam federate drop --channel ${alice.name} --yes`);
+    expect(staged.note).toContain("under the signed-in person's own name");
   });
 });
 
@@ -311,7 +325,11 @@ describe("T257 (d) — a sever the store cannot prove refuses on the page, and r
     expect(res.status).toBe(409);
     const body = await res.text();
     expect(confirmTokenOf(body)).toBeUndefined();
+    // Nothing removed, on both halves: no purge reached the bytes (detach closed the pool's
+    // store, and the spy records ids before delegating, so even an attempt would be witnessed),
+    // and the channel's record still stands.
     expect(alice.purged).toEqual([]);
+    expect(gateway.channelStatus(alice.name)).toHaveLength(1);
     expect(gateway.containers().detached.has(alice.name)).toBe(true);
   });
 });

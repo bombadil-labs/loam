@@ -965,11 +965,16 @@ this lens does not gather; the lens may read ground this container does not hold
           `the admin page's sever of "${name}" refused: ` +
             `${err instanceof Error ? err.message : String(err)}`,
         );
+        // The sever throws from more than one place, and some of them fire AFTER the pool was
+        // purged and verified — so this sentence claims neither that the bytes remain nor that
+        // they are gone. What was verified gone is gone; what could not be struck still stands;
+        // the server log names which (the detail can name paths, so it never reaches the page).
         refuse(
           res,
           503,
-          "The sever could not be proven at the bytes, so the channel remains and nothing was " +
-            "reported forgotten.",
+          "The sever did not complete. Whatever was verified gone is gone; whatever could not " +
+            "be struck still stands, and the server log says which. Retry from the command line " +
+            "with `loam federate drop`.",
         );
         return;
       }

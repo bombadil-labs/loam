@@ -1645,12 +1645,19 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
                     channel: target.name,
                     purgedNothing: true,
                     confirmAt: `${options.publicUrl ?? ""}${ADMIN_CONTAINER_PATH}?name=${encodeURIComponent(target.name)}`,
+                    cliAt: `loam federate drop --channel ${target.name} --yes`,
                     wouldPurge: preview.purges,
                     wouldSurvive: preview.survives,
+                    // The page reaches the containers under a signed-in person's own name and
+                    // nothing outside them; a channel opened into a container with no parent sits
+                    // outside every such reach, and only the command line severs it. Both paths
+                    // are named so the link is never a promise the page cannot keep.
                     note:
-                      "Nothing has been removed. A person must complete this in the browser; this " +
-                      "tool cannot. `loam_federate_set` with receiving false stops the channel " +
-                      "without destroying anything, and is reversible.",
+                      "Nothing has been removed. A person must complete this; this tool cannot. " +
+                      "The browser page reaches containers under the signed-in person's own name " +
+                      `— if "${target.into}" is not one of those, sever from the command line ` +
+                      "with cliAt instead. `loam_federate_set` with receiving false stops the " +
+                      "channel without destroying anything, and is reversible.",
                   },
                   null,
                   1,
