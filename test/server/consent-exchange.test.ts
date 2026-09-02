@@ -235,6 +235,10 @@ async function connect(base: string, user: string, leaf: string): Promise<string
   return ((await res.json()) as { access_token: string }).access_token;
 }
 
+// A page with its hex keys masked. Every disclosure assertion in this file asks about PROSE — a
+// person's name, a connector's name — and a key rendered on the page is neither, however it reads.
+const withoutKeys = (html: string): string => html.replace(/[0-9a-f]{16,}/g, "<key>");
+
 const noteClaims = (author: string, id: string, text: string, timestamp: number): Claims => ({
   author,
   timestamp,
@@ -923,9 +927,14 @@ describe("§58 S1b — the exchange honors the binding", () => {
     const { dashboard, confirmHtml, done } = await revokeViaPanel(base, session, foreign);
     expect(done.status).toBe(200);
     const doneHtml = await done.text();
+    // THE PAGE LEGITIMATELY RENDERS THE INBOX NAME, which carries the other person's KEY in hex —
+    // and hex spells words. A 64-character key contains "ada" about 1.6% of the time (measured),
+    // so asking this of the raw HTML made the rail fail roughly one CI run in sixty, forever. The
+    // question the rail asks is whether the PERSON is disclosed, so it asks it of the prose with
+    // the keys masked; masking a key can never hide a name the page actually printed.
     for (const html of [confirmHtml, doneHtml]) {
       expect(html).toContain("another person's");
-      expect(html).not.toContain("ada");
+      expect(withoutKeys(html)).not.toContain("ada");
     }
     // The panel row above the pages withholds the same: no client name, generation or token
     // count of another person's pair — only that the key's connector binding is someone else's.
@@ -933,9 +942,9 @@ describe("§58 S1b — the exchange honors the binding", () => {
     const row = panel.split("<li>").find((part) => part.includes(foreign.slice(0, 40))) ?? "";
     expect(row, dashboard).not.toBe("");
     expect(row).toContain("another person's");
-    expect(row).not.toContain("Example Connector");
+    expect(withoutKeys(row)).not.toContain("Example Connector");
     expect(row).not.toContain("live token");
-    expect(row).not.toContain("ada");
+    expect(withoutKeys(row)).not.toContain("ada");
     // Bea's pool is struck; ada's pair, token and own pool all stand — and no store-wide grant
     // ever stood for her key.
     const foreignPool = gateway.connectionInboxes.get(foreign)!.gateway!;
