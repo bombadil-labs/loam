@@ -505,6 +505,7 @@ ${flowNote}`;
     // is registered" is never a licence to revoke only the half this page can see.
     let client:
       { clientId: string; clientName?: string; generation?: number; user?: string } | undefined;
+    let othersPair = false;
     if (ctx.connectors !== undefined) {
       let file: OAuthFile;
       try {
@@ -521,8 +522,14 @@ ${flowNote}`;
             "This store's connector records cannot be read right now, so nothing was revoked.",
         };
       }
+      // The connector half is fenced the way the pool half is: only THIS person's pair (or the
+      // pre-§58 key that names no person) is retired from this page. A key bound into this
+      // person's reach through the library door may be another person's connector pair; that
+      // pair stands, and the page says so without naming them.
       const grant = file.grants.find((g) => g.actor === key);
-      if (grant !== undefined) {
+      if (grant !== undefined && grant.user !== undefined && grant.user !== user) {
+        othersPair = true;
+      } else if (grant !== undefined) {
         const c = clientFor(file, grant.clientId);
         // Whose binding this inbox is (§58): the revoke below is that person's alone, never the
         // connector's every key.
@@ -551,6 +558,7 @@ ${flowNote}`;
           sibling.endsWith(`:${key}`) &&
           reach.has(sibling) &&
           handle.gateway !== undefined &&
+          gw.attachedContainers.get(sibling) === handle.gateway && // not mid-drop
           holdsGrant(handle.gateway.reactor, STORE_ENTITY, key, "write", gw.operatorAuthor),
       )
       .map(([sibling]) => sibling)
@@ -622,6 +630,7 @@ ${flowNote}`;
       ...(inboxLeg ?? {}),
       ...(ownerSeed === undefined ? {} : { ownerSeed }),
       ...(client === undefined ? {} : { client }),
+      ...(othersPair ? { othersPair: true as const } : {}),
     };
   };
 
@@ -766,7 +775,11 @@ ${flowNote}`;
       for (const sibling of plan.siblings) {
         const handle = gw.connectionInboxes.get(sibling);
         const pool = handle?.gateway;
-        if (handle === undefined || pool === undefined) {
+        if (
+          handle === undefined ||
+          pool === undefined ||
+          gw.attachedContainers.get(sibling) !== pool
+        ) {
           failedSiblings.push(sibling);
           continue;
         }
@@ -812,6 +825,10 @@ next request. Other people's bindings of this connector stand.`;
         : ` This key also wrote into ${struckSiblings
             .map((s) => `<code>${escapeHtml(s)}</code>`)
             .join(", ")}; that inbox is struck with this one.`;
+    const othersDone =
+      plan.othersPair === true
+        ? " This key's connector binding is another person's, and it stands."
+        : "";
     htmlOut(
       res,
       200,
@@ -819,7 +836,7 @@ next request. Other people's bindings of this connector stand.`;
         "revoked",
         `<h1>Revoked.</h1>
 <p><code>${escapeHtml(plan.key)}</code> no longer writes into
-<code>${escapeHtml(plan.bound)}</code>: its next write is refused at the door.${clientDone}${siblingsDone}
+<code>${escapeHtml(plan.bound)}</code>: its next write is refused at the door.${clientDone}${siblingsDone}${othersDone}
 Everything it already wrote remains, author intact, and every other key's connection is untouched.</p>
 <p><a href="${escapeHtml(pages.detailHref(name))}">Its inbox</a> keeps the record — drop it there to
 forget it whole.</p>

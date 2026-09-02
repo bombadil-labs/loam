@@ -53,6 +53,8 @@ export type RevokePlan =
       readonly ownerSeed?: string;
       /** Every OTHER inbox pool this key holds under the owner (§58): struck with the row's. */
       readonly siblings: readonly string[];
+      /** The key's connector pair names another person: it stands, unnamed (§58). */
+      readonly othersPair?: true;
       readonly client?: {
         readonly clientId: string;
         readonly clientName?: string;
@@ -794,11 +796,16 @@ ${hiddenPair(formToken, name)}
         : `<p>This key also writes into ${plan.siblings
             .map((s) => `<code>${escapeHtml(s)}</code>`)
             .join(", ")}; that inbox is struck with this one, since a revoke is the key's.</p>\n`;
+    const othersLine =
+      plan.othersPair === true
+        ? `<p>This key's connector binding is another person's. Revoking here strikes its grant in ` +
+          `this inbox; that binding stands.</p>\n`
+        : "";
     return page(
       "confirm the revoke",
       `<h1>Revoke <code>${escapeHtml(plan.key)}</code>?</h1>
 <p>It writes into <code>${escapeHtml(plan.bound)}</code>. Revoking refuses its next write.</p>
-${clientLine}${siblingsLine}<p>Everything it already wrote is kept, author intact — a revocation closes the door and does not
+${clientLine}${siblingsLine}${othersLine}<p>Everything it already wrote is kept, author intact — a revocation closes the door and does not
 rewrite history. Every other key's connection is untouched. To forget its inbox whole, drop it from
 <a href="${escapeHtml(detailHref(name))}">its own page</a>.</p>
 <form method="post" action="${ADMIN_REVOKE_CONFIRM_PATH}">

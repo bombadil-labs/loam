@@ -13,8 +13,6 @@
 //   - Reads scoped to the binding — `test/server/read-scope.test.ts` (S1c).
 //   - The exchange's pre-§58 behaviour (burn-first, PKCE, generation, the eviction pin) — the frozen
 //     phase-15 rail (`oauth-token.test.ts`), revised only where its consents now name a container.
-//   - A sibling pool that refuses its owner's strike mid-revoke (the panel answers 503 naming it):
-//     no fixture here can make a pool refuse its own owner, so that path has no rail.
 //
 // Erasure standing rule: every store here is this file's own mkdtemp/memory fixture.
 
@@ -23,7 +21,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { authorForSeed, signClaims, type Claims } from "@bombadil/rhizomatic";
+import { authorForSeed, signClaims, type Claims, type Delta } from "@bombadil/rhizomatic";
 import { initHome, readUserSeed, userSeedPath } from "../../src/cli/config.js";
 import { holdsGrant } from "../../src/gateway/accounts.js";
 import { inboxName } from "../../src/gateway/container.js";
@@ -132,7 +130,7 @@ async function exchangeServer(
       allowRedirectOrigins: [ALLOW_ORIGIN],
       onFault: (m) => faults.push(m),
     },
-    users: { home: usersHome, mount: "default" },
+    users: { home: usersHome, mount: "default", onFault: (m) => faults.push(m) },
   });
   handles.push(handle);
   return { base: handle.url, usersHome, connectorsHome, gateway, faults };
@@ -145,13 +143,22 @@ class StickyBackend extends MemoryBackend {
   }
 }
 
+/** A backend that can be told to refuse its next appends — a pool's store failing mid-act. */
+class RefusingBackend extends MemoryBackend {
+  refuse = false;
+  override append(deltas: Iterable<Delta>): Promise<number> {
+    if (this.refuse) return Promise.reject(new Error("the pool's store refused the append"));
+    return super.append(deltas);
+  }
+}
+
 /** A pool backend factory over a test-owned map: what a durable store hands its pools. */
 const poolFactory =
   (pools: Map<string, MemoryBackend>) =>
   (name: string): MemoryBackend => {
     const held = pools.get(name);
     if (held !== undefined) return held;
-    const fresh = new MemoryBackend();
+    const fresh = new RefusingBackend();
     pools.set(name, fresh);
     return fresh;
   };
@@ -694,9 +701,9 @@ describe("§58 S1b — the exchange honors the binding", () => {
     const grant = readOAuthFile(connectorsHome).grants[0]!;
     const handle = gateway.connectionInboxes.get(grant.inbox!)!;
     await expect(handle.drop()).rejects.toThrow(/drop refused/);
-    // Refused means nothing changed: the bytes are still there, the pool is attached, the handle
-    // held, the standing intact — and a bind resumes it rather than colliding with a pool the
-    // store still holds open.
+    // Refused means nothing changed: the pool is still open over its bytes (a closed pool's
+    // backend refuses this read), attached, its handle held, its standing intact — and a bind
+    // resumes it rather than colliding with a pool the store still holds open.
     expect((await handle.gateway!.backend.deltasSince(new Set())).length).toBeGreaterThan(0);
     expect(gateway.connectionInboxes.get(grant.inbox!)).toBe(handle);
     expect(gateway.attachedContainers.has(grant.inbox!)).toBe(true);
@@ -818,5 +825,116 @@ describe("§58 S1b — the exchange honors the binding", () => {
     const otherPool = gateway.connectionInboxes.get(otherInbox)!.gateway!;
     expect(holdsGrant(otherPool.reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(true);
     expect((await whoami(base, adaToken)).status).toBe(200);
+  });
+
+  it("a row that loses its pool between the confirm page and the act refuses at the act, striking nothing", async () => {
+    const { base, connectorsHome, gateway } = await exchangeServer();
+    const adaToken = await connect(base, "ada", "journal");
+    await connect(base, "ada", "other");
+    const ada = readOAuthFile(connectorsHome).grants.find((g) => g.user === "ada")!;
+    const journalInbox = inboxName("ada:journal", ada.actor);
+    const otherInbox = inboxName("ada:other", ada.actor);
+    const session = await signIn(base, "ada", PASSWORD);
+    const dashboard = await (await getAdmin(base, session)).text();
+    const formToken = formTokenOf(dashboard);
+    const confirm = await postAdmin(base, "/admin/revoke", session, {
+      form_token: formToken,
+      name: journalInbox,
+    });
+    expect(confirm.status).toBe(200);
+    const confirmToken = confirmTokenOf(await confirm.text());
+    // The pool goes away between the two steps; the act re-plans and refuses.
+    gateway.attachedContainers.delete(journalInbox);
+    gateway.connectionInboxes.delete(journalInbox);
+    const done = await postAdmin(base, "/admin/revoke-confirm", session, {
+      form_token: formToken,
+      name: journalInbox,
+      confirm_token: confirmToken,
+    });
+    expect(done.status).toBe(409);
+    expect(await done.text()).toContain("not attached here");
+    // Nothing was struck: the sibling's grant, ada's pair and her token all stand.
+    const otherPool = gateway.connectionInboxes.get(otherInbox)!.gateway!;
+    expect(holdsGrant(otherPool.reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(true);
+    expect(readOAuthFile(connectorsHome).grants.map((g) => g.user)).toEqual(["ada"]);
+    expect((await whoami(base, adaToken)).status).toBe(200);
+  });
+
+  it("a sibling whose store refuses the strike turns the answer into a 503 that names it", async () => {
+    const pools = new Map<string, MemoryBackend>();
+    const { base, connectorsHome, gateway, faults } = await exchangeServer({ pools });
+    const adaToken = await connect(base, "ada", "journal");
+    await connect(base, "ada", "other");
+    const ada = readOAuthFile(connectorsHome).grants.find((g) => g.user === "ada")!;
+    const journalInbox = inboxName("ada:journal", ada.actor);
+    const otherInbox = inboxName("ada:other", ada.actor);
+    (pools.get(otherInbox) as RefusingBackend).refuse = true;
+
+    const session = await signIn(base, "ada", PASSWORD);
+    const { done } = await revokeViaPanel(base, session, journalInbox);
+    expect(done.status).toBe(503);
+    const text = await done.text();
+    expect(text).toContain(otherInbox);
+    expect(text).toContain("incomplete");
+    expect(faults.join("\n")).toContain(otherInbox);
+    // The row's pool is struck and the connector half ran first (the token is dead); the sibling's
+    // grant stands, which is exactly what the page said.
+    const journalPool = gateway.connectionInboxes.get(journalInbox)!.gateway!;
+    const otherPool = gateway.connectionInboxes.get(otherInbox)!.gateway!;
+    expect(holdsGrant(journalPool.reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(false);
+    expect(holdsGrant(otherPool.reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(true);
+    expect((await whoami(base, adaToken)).status).toBe(401);
+  });
+
+  it("a bind that meets a handle whose pool is unregistered refuses rather than resuming a closed pool", async () => {
+    const { base, connectorsHome, gateway, usersHome } = await exchangeServer();
+    await connect(base, "ada", "journal");
+    const grant = readOAuthFile(connectorsHome).grants[0]!;
+    const handle = gateway.connectionInboxes.get(grant.inbox!)!;
+    // The width of a drop's own awaits: unregistered, handle not yet cleared.
+    gateway.attachedContainers.delete(grant.inbox!);
+    const owner = readUserSeed(usersHome, "ada") as { seed: string };
+    await expect(
+      gateway.bindConnection({
+        container: "ada:journal",
+        connectionKey: grant.actor,
+        ownerSeed: owner.seed,
+      }),
+    ).rejects.toThrow(/being dropped/);
+    expect(gateway.connectionInboxes.get(grant.inbox!)).toBe(handle);
+  });
+
+  it("a person revoking a foreign key's inbox in their own reach strikes that pool alone: the other person's pair stands", async () => {
+    // The mirror of the foreign-owner case: ada's connector key bound into bea:notes through the
+    // library door; BEA revokes from that row. The pool half is hers; the connector pair is ada's.
+    const { base, connectorsHome, gateway, usersHome } = await exchangeServer();
+    await connect(base, "bea", "notes");
+    const adaToken = await connect(base, "ada", "journal");
+    const ada = readOAuthFile(connectorsHome).grants.find((g) => g.user === "ada")!;
+    const beaSeed = readUserSeed(usersHome, "bea") as { seed: string };
+    await gateway.bindConnection({
+      container: "bea:notes",
+      connectionKey: ada.actor,
+      ownerSeed: beaSeed.seed,
+    });
+    const foreign = inboxName("bea:notes", ada.actor);
+
+    const session = await signIn(base, "bea", PASSWORD);
+    const { confirmHtml, done } = await revokeViaPanel(base, session, foreign);
+    expect(done.status).toBe(200);
+    const doneHtml = await done.text();
+    for (const html of [confirmHtml, doneHtml]) {
+      expect(html).toContain("another person's");
+      expect(html).not.toContain("ada");
+    }
+    // Bea's pool is struck; ada's pair, token, own pool and store-wide grant all stand.
+    const foreignPool = gateway.connectionInboxes.get(foreign)!.gateway!;
+    expect(holdsGrant(foreignPool.reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(false);
+    const file = readOAuthFile(connectorsHome);
+    expect(file.grants.map((g) => g.user).sort()).toEqual(["ada", "bea"]);
+    expect((await whoami(base, adaToken)).status).toBe(200);
+    const adaPool = gateway.connectionInboxes.get(ada.inbox!)!.gateway!;
+    expect(holdsGrant(adaPool.reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(true);
+    expect(holdsGrant(gateway.reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(true);
   });
 });
