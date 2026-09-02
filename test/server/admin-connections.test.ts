@@ -493,19 +493,23 @@ describe("§40 criterion 12 — the connections panel joins oauth.json (phases 1
     expect(file.tokens).toHaveLength(0);
 
     // §39.3c holds at the inbox too: the actor's next inbox write refuses; the past inbox delta and
-    // the bearer's landed primary write both keep the actor as author.
+    // the bearer's landed write — in the pool its binding named, never the primary (SPEC §58) —
+    // both keep the actor as author.
     await expect(
       pool.append([noteBy(actorSeed, gateway.nextTimestamp(), "after the revoke")]),
     ).rejects.toThrow();
     expect(pool.reactor.get(past.id)!.claims.author).toBe(actor);
-    const authors = [...gateway.reactor.snapshot()]
-      .filter((d) =>
-        d.claims.pointers.some(
-          (p) => p.target.kind === "entity" && p.target.entity.context === "height",
-        ),
-      )
-      .map((d) => d.claims.author);
-    expect(authors).toContain(actor);
+    const heightAuthorsIn = (gw: Gateway): string[] =>
+      [...gw.reactor.snapshot()]
+        .filter((d) =>
+          d.claims.pointers.some(
+            (p) => p.target.kind === "entity" && p.target.entity.context === "height",
+          ),
+        )
+        .map((d) => d.claims.author);
+    const bound = gateway.connectionInboxes.get(`inbox:myk:journal:${actor}`)!.gateway!;
+    expect(heightAuthorsIn(bound)).toContain(actor);
+    expect(heightAuthorsIn(gateway)).not.toContain(actor);
 
     // The panel now shows the revoked state ON THE ROW, and the row stays listed — history does
     // not rewrite.

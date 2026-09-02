@@ -32,7 +32,7 @@ import {
   parseBodyFields as parseAppBody,
   readBodyStrict as readBody,
 } from "./body.js";
-import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
+import { authorForSeed, type Delta } from "@bombadil/rhizomatic";
 import { Kind, OperationTypeNode, parse, type DocumentNode } from "graphql";
 import { fromWire, toWire, type WireDelta } from "../federation/wire.js";
 import { buildOpenApi, handleRest } from "../surface/rest.js";
@@ -69,7 +69,6 @@ import { parseOffer } from "../federation/offer.js";
 import {
   federateContainersOf,
   fenceAdmits,
-  grantClaims,
   holdsGrant,
   registerPrefixesOf,
 } from "../gateway/accounts.js";
@@ -871,8 +870,29 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
   // parent session still inside its idle window.
   const stillAuthorized = (req: IncomingMessage): boolean => identify(req) !== undefined;
 
+  // A bound connection's request carries its binding (SPEC §58): the library routes its writes
+  // into its inbox pool and scopes its reads to the container its consent named. Every other
+  // identity — the operator, an actor token, a §57 client — acts on this store as before.
   const contextFor = (identity: TokenIdentity): RequestContext | undefined =>
-    identity.actor === undefined ? undefined : { actor: identity.actor };
+    identity.actor === undefined
+      ? undefined
+      : identity.binding === undefined
+        ? { actor: identity.actor }
+        : {
+            actor: identity.actor,
+            binding: { container: identity.binding.container, inbox: identity.binding.inbox },
+          };
+  // The sentence a door that resolves the store's OWN ground answers a bound connection with
+  // (SPEC §58): the connection reads its container, and this door cannot scope to it yet.
+  const boundDoorRefusal = (
+    binding: NonNullable<TokenIdentity["binding"]>,
+    door: string,
+  ): { contentType: string; body: string } => ({
+    contentType: "text/plain; charset=utf-8",
+    body:
+      `this connection is bound to ${binding.container} and reads only that container; the ` +
+      `${door} resolves this store's own ground and cannot scope to it — use the query door`,
+  });
 
   // WHOAMI (SPEC §56, T255): who does this door think the caller is, and what standing does
   // the GROUND currently grant them? Read per request like every standing check, so a
@@ -938,14 +958,29 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       };
     }
     const isConnector = connector !== undefined && connector.actor === author;
+    // A BOUND connection's write standing is its pool's (SPEC §58): the owner-authored grant in
+    // the inbox, never a store-wide grant. A pool that is not attached answers false — there is
+    // nowhere for the connection to write, and the door would refuse it.
+    const binding = identity.binding;
+    const writeStanding = (): boolean => {
+      if (gateway === undefined) return false;
+      if (binding === undefined) {
+        return holdsGrant(gateway.reactor, STORE_ENTITY, author, "write", gateway.operatorAuthor);
+      }
+      try {
+        const pool = gateway.poolForBinding(binding);
+        return holdsGrant(pool.reactor, STORE_ENTITY, author, "write", gateway.operatorAuthor);
+      } catch {
+        return false;
+      }
+    };
     return {
       kind: isConnector ? "connector" : "actor",
       author,
       ...(isConnector ? { clientId: connector.clientId } : {}),
+      ...(binding === undefined ? {} : { binding }),
       operator: false,
-      write:
-        gateway !== undefined &&
-        holdsGrant(gateway.reactor, STORE_ENTITY, author, "write", gateway.operatorAuthor),
+      write: writeStanding(),
       registerPrefixes:
         gateway === undefined
           ? []
@@ -955,9 +990,13 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           ? []
           : federateContainersOf(gateway.reactor, author, gateway.operatorAuthor),
       masked: false,
-      note: isConnector
-        ? "A connector's minted identity: it writes as its own author, inside its grants."
-        : "An actor token: it acts as this key, inside this key's surviving grants.",
+      note:
+        binding !== undefined
+          ? `A connection bound by ${binding.user}'s consent: it writes into its inbox ` +
+            `${binding.inbox} and reads the scope of ${binding.container}.`
+          : isConnector
+            ? "A connector's minted identity: it writes as its own author, inside its grants."
+            : "An actor token: it acts as this key, inside this key's surviving grants.",
     };
   };
 
@@ -1050,7 +1089,9 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         refused(res);
         return;
       }
-      json(res, 400, { errors: [err instanceof Error ? err.message : "not a subscription"] });
+      const message = err instanceof Error ? err.message : "not a subscription";
+      // A bound connection's refusal (SPEC §58) is standing, not shape: 403, in the library's words.
+      json(res, /cannot subscribe/.test(message) ? 403 : 400, { errors: [message] });
       return;
     }
     // Opening the subscription was an await, and a teardown sweep only finds REGISTERED streams — so
@@ -2116,7 +2157,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           return;
         case "subscribe":
           await handleSubscribe(
-            (s) => gateway.subscribe(s),
+            (s) => gateway.subscribe(s, undefined, contextFor(identity)),
             "token",
             guard,
             req,
@@ -2232,6 +2273,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             body,
             contextFor(identity)?.actor,
             url.searchParams.get("asOf") ?? undefined,
+            contextFor(identity)?.binding,
           );
           json(res, result.status, result.body);
           return;
@@ -2239,6 +2281,17 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         // A rendered route (SPEC §23), on the full door: GET a route's HTML, rendered from the store's
         // live view under the token's read discipline.
         case "app": {
+          // A BOUND connection reads only the container its consent named (SPEC §58), and a
+          // rendered route resolves the store's own view — and a write-enabled route signs as the
+          // pen into the primary. Neither is the connection's, so both refuse in words rather than
+          // answer beyond the binding. The public and operator doors are untouched.
+          if (identity.binding !== undefined) {
+            sendRendered(res, {
+              status: 403,
+              ...boundDoorRefusal(identity.binding, "rendered route"),
+            });
+            return;
+          }
           const parsed = appRouteOf(url.pathname);
           if (parsed === undefined) {
             refused(res);
@@ -2304,6 +2357,14 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             refused(res);
             return;
           }
+          // The byte door proves a read through a lens over the store's own ground (SPEC §23.7);
+          // a bound connection's reads are its container's (§58), so it refuses here in words.
+          if (identity.binding !== undefined) {
+            const refusal = boundDoorRefusal(identity.binding, "byte door");
+            res.writeHead(403, { "content-type": refusal.contentType });
+            res.end(refusal.body);
+            return;
+          }
           const parsed = byteDoorOf(url.pathname, url.searchParams);
           if (parsed === undefined) {
             refused(res);
@@ -2352,15 +2413,42 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
               return;
             }
           }
+          // A BOUND connection's batch lands in ITS inbox pool (SPEC §58), and only what its own
+          // key signed may enter: the pool is the key's trust domain, and a delta another author
+          // signed would ride the connection's token into a place that author was never bound to.
+          // Every other bearer — the operator, a §57 client, an actor token — appends to this
+          // store exactly as before; the fence is the binding's, not the door's.
+          const bound = identity.binding;
+          if (bound !== undefined) {
+            let key: string | undefined;
+            try {
+              key = identity.actor === undefined ? undefined : authorForSeed(identity.actor);
+            } catch {
+              key = undefined;
+            }
+            const foreign =
+              key === undefined ? batch[0] : batch.find((d) => d.claims.author !== key);
+            if (foreign !== undefined) {
+              json(res, 403, {
+                errors: [
+                  `a bound connection appends only what its own key signed: ${foreign.id} is ` +
+                    `authored by ${foreign.claims.author}, not ${key ?? "a key this token names"} ` +
+                    `— refused`,
+                ],
+              });
+              return;
+            }
+          }
           try {
-            const receipt = await gateway.append(batch);
+            const sink = bound === undefined ? gateway : gateway.poolForBinding(bound);
+            const receipt = await sink.append(batch);
             json(res, 200, receipt);
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             // A degraded gateway is the server's trouble, not the client's batch.
             const status = /can no longer persist/.test(message)
               ? 503
-              : /not permitted/.test(message)
+              : /not permitted|was erased|refused/.test(message)
                 ? 403
                 : 400;
             json(res, status, { errors: [message] });
@@ -2518,10 +2606,11 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           ? {}
           : { cimdAllowPrivateOrigins: options.connectors.cimdAllowPrivateOrigins }),
       });
-      // The token exchange signs the operator-signed write grant with the home's own operator seed —
-      // the same key `loam serve` opened the gateway with (cmdServe reads it from here). Read once, at
-      // boot: a home whose seed is unreadable can register and consent but never mint a token, so the
-      // door FAILS CLOSED (it is not opened) rather than throwing on the first redemption.
+      // The token exchange opens only where the home's operator seed is readable — the same key
+      // `loam serve` opened the gateway with. Since §58 the exchange lands NO store-wide grant (a
+      // connection's standing is its pool's, authored by the person's key at bind), but a store
+      // whose seed cannot be read is not one that should mint connections: read once, at boot, and
+      // FAIL CLOSED (the door is not opened) rather than discover it on the first redemption.
       const connectorHome = options.connectors.home;
       const connectorFault =
         options.connectors.onFault ?? ((message: string): void => void message);
@@ -2531,33 +2620,15 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       } catch (err) {
         connectorFault(
           `the token exchange is not open: this store's operator seed is unreadable, so it cannot ` +
-            `sign a connector's write grant (${err instanceof Error ? err.message : String(err)})`,
+            `mint a connection (${err instanceof Error ? err.message : String(err)})`,
         );
       }
       if (operatorSeed !== undefined) {
-        const seed = operatorSeed;
-        const operator = authorForSeed(seed);
         tokenExchange = makeTokenDoor({
           home: connectorHome,
           redeeming,
           ...(forUsers.monotonicNow === undefined ? {} : { now: forUsers.monotonicNow }),
           onFault: connectorFault,
-          // Land the operator-signed write grant in the connector's mount ground. The gateway is
-          // re-asked per call (erase re-seats a reactor, a mount can vanish), never captured.
-          grantStanding: async (actor: string): Promise<string> => {
-            const gateway = mounts.resolve(forUsers.mount)?.gateway;
-            if (gateway === undefined) {
-              throw new Error(
-                "the connector's mount is not resolvable, so no write grant was landed",
-              );
-            }
-            const delta = signClaims(
-              grantClaims(STORE_ENTITY, actor, "write", operator, Date.now()),
-              seed,
-            );
-            await gateway.append([delta]);
-            return delta.id;
-          },
           // Bind the connection where consent said (§58): the person's own key — provisioned by
           // the consent page — authors the connection's write grant in the inbox pool's ground.
           bind: async ({ user, container, actor }): Promise<string> => {

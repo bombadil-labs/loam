@@ -7,9 +7,9 @@
 // bytes. A token or grant minted before §58 names no user and fails closed.
 //
 // What this file deliberately does NOT assert, and where each gap closes:
-//   - Where a bound connection's WRITES land (the pool, never the primary) and the retirement of the
-//     store-wide write grant — the next slice's rail. In this slice the store-wide grant still
-//     lands beside the binding, so every path a connection walks today keeps working.
+//   - Where a bound connection's WRITES land (the pool, never the primary), through every door —
+//     `test/server/connection-writes.test.ts` (S1b-ii). No store-wide write grant lands for a §58
+//     key; the pool's own chain is its standing, and this file asserts that at the ground.
 //   - Reads scoped to the binding — `test/server/read-scope.test.ts` (S1c).
 //   - The exchange's pre-§58 behaviour (burn-first, PKCE, generation, the eviction pin) — the frozen
 //     phase-15 rail (`oauth-token.test.ts`), revised only where its consents now name a container.
@@ -417,13 +417,14 @@ describe("§58 S1b — the exchange honors the binding", () => {
     const { base, connectorsHome, gateway } = await exchangeServer();
     await connect(base, "ada", "journal");
     const grant = readOAuthFile(connectorsHome).grants[0]!;
-    // The key writes into the PRIMARY under the store-wide grant this slice still lands — the
-    // pre-§58 shape a pre-binding delta takes.
+    // The key holds NO store-wide grant (§58), so a delta of its reaches the primary only by
+    // federation — the shape a pre-§58 store's history takes. Appended, it is refused.
     const early = signClaims(
       noteClaims(grant.actor, "note:early", "before the second binding", gateway.nextTimestamp()),
       grant.actorSeed,
     );
-    await gateway.append([early]);
+    await expect(gateway.append([early])).rejects.toThrow(/not permitted/);
+    await gateway.federate([early], { admit: () => true });
     expect(gateway.reactor.get(early.id)).toBeDefined();
 
     // ada binds the SAME connector into a second container: a second pool, same key.
@@ -438,23 +439,20 @@ describe("§58 S1b — the exchange honors the binding", () => {
     // The second pool seeded from the primary AFTER `early` stood there, and its membership — the
     // key AND a timestamp after its own binding — leaves `early` out, at the bytes, and keeps it
     // out under a fresh pulse. That clause is what this asserts: without it the pool would carry
-    // the delta. (The FIRST pool's scope does admit a later primary write by its key on its next
-    // pulse: in this slice the key still writes to the primary under the store-wide grant — the
-    // window the next slice closes by routing writes into the pool — so it is not asserted here.)
+    // the delta.
     const second = gateway.connectionInboxes.get(otherInbox)!;
     await second.reseed();
     const ids = (await second.gateway!.backend.deltasSince(new Set())).map((d) => d.id);
     expect(ids).not.toContain(early.id);
     expect(second.gateway!.reactor.get(early.id)).toBeUndefined();
-    // And the scope's POSITIVE side, so a scope that admits nothing cannot pass: a primary write
-    // by the key AFTER the second binding is inside the second pool's scope on the next pulse. This
-    // is the same window — the next slice, routing writes into the pool, retires this assertion
-    // deliberately rather than losing it.
+    // And the scope's POSITIVE side, so a scope that admits nothing cannot pass: a delta of the
+    // key's that reaches the primary AFTER the second binding (federated, as above) is inside the
+    // second pool's scope on the next pulse.
     const later = signClaims(
       noteClaims(grant.actor, "note:later", "after the second binding", gateway.nextTimestamp()),
       grant.actorSeed,
     );
-    await gateway.append([later]);
+    await gateway.federate([later], { admit: () => true });
     await second.reseed();
     const afterPulse = (await second.gateway!.backend.deltasSince(new Set())).map((d) => d.id);
     expect(afterPulse).toContain(later.id);
@@ -512,10 +510,11 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(faults.join("\n")).toContain(userSeedPath(usersHome, "zed"));
     const file = readOAuthFile(connectorsHome);
     expect(file.tokens).toHaveLength(0);
-    // The seed was written first and the store-wide grant landed (this slice's window); the pool
-    // never stood, so the grant carries no inbox and the resolver would confer nothing on it.
+    // The seed was written first; the pool never stood, so the grant carries no inbox, is not
+    // standing, and the resolver would confer nothing on it.
     expect(file.grants).toHaveLength(1);
     expect(file.grants[0]!.inbox).toBeUndefined();
+    expect(file.grants[0]!.standing).toBe(false);
   });
 
   it("a grant whose pool never stood confers nothing, even on a token that names its person", async () => {
@@ -679,9 +678,10 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(holdsGrant(poolOf(bea.inbox!).reactor, STORE_ENTITY, bea.actor, "write", OPERATOR)).toBe(
       true,
     );
-    // And at the GROUND: ada's store-wide grant (this slice's window) is struck; bea's stands.
+    // And at the GROUND: neither key ever held a store-wide grant (§58) — the pools are the whole
+    // of their standing.
     expect(holdsGrant(gateway.reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(false);
-    expect(holdsGrant(gateway.reactor, STORE_ENTITY, bea.actor, "write", OPERATOR)).toBe(true);
+    expect(holdsGrant(gateway.reactor, STORE_ENTITY, bea.actor, "write", OPERATOR)).toBe(false);
     // Both of the key's pools are struck; bea's binding and token stand.
     expect(
       holdsGrant(poolOf(journalInbox).reactor, STORE_ENTITY, ada.actor, "write", OPERATOR),
@@ -936,7 +936,8 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(row).not.toContain("Example Connector");
     expect(row).not.toContain("live token");
     expect(row).not.toContain("ada");
-    // Bea's pool is struck; ada's pair, token, own pool and store-wide grant all stand.
+    // Bea's pool is struck; ada's pair, token and own pool all stand — and no store-wide grant
+    // ever stood for her key.
     const foreignPool = gateway.connectionInboxes.get(foreign)!.gateway!;
     expect(holdsGrant(foreignPool.reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(false);
     const file = readOAuthFile(connectorsHome);
@@ -944,6 +945,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect((await whoami(base, adaToken)).status).toBe(200);
     const adaPool = gateway.connectionInboxes.get(ada.inbox!)!.gateway!;
     expect(holdsGrant(adaPool.reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(true);
-    expect(holdsGrant(gateway.reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(true);
+    expect(holdsGrant(gateway.reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(false);
   });
 });

@@ -3379,7 +3379,7 @@ function homeIdentities(home: string): HomeIdentity[] {
 
 // The connector half of the same question. A client with no grant has registered and never
 // completed a token exchange, so it has no acting identity for a grant to name yet; `standing:
-// false` means its seed exists and the ground append has not landed.
+// false` means its seed exists and its inbox pool has not yet stood.
 function connectorIdentities(file: OAuthFile): HomeIdentity[] {
   const out: HomeIdentity[] = [];
   for (const client of file.clients) {
