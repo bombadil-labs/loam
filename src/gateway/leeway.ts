@@ -75,11 +75,11 @@ export function leewayFits(child: Leeway, parent: Leeway): LeewayRefusal | undef
 /**
  * The comparison, shared by a container's own leeway and by every nested terms below it.
  *
- * TERMINATION. The only way down is a child `delegate` that is a terms OBJECT, and each step
- * takes the child one level into its own finite structure. `"same"` never expands: on the
- * ALLOWED side it resolves to the terms already in hand, and on the CHILD side it is answered
- * against the level just checked rather than descended into. So the recursion is bounded by the
- * depth of the child's own written terms.
+ * TERMINATION. Each step consumes one written level of one side. A child `delegate` that is a
+ * terms OBJECT walks the child's own finite structure; a child `delegate` of `"same"` holds the
+ * child still and walks the ALLOWED chain instead, stopping at that chain's `"same"` (admit) or
+ * `"off"` (refuse). `"same"` never expands on either side, so the depth is bounded by
+ * max(depth(child's written terms), depth(allowed's written terms)).
  */
 function fitsWithin(
   child: Allowances & { readonly delegate: "off" | "same" | Terms },
@@ -114,10 +114,15 @@ function fitsWithin(
   // ceiling for the next level down. This is the clause that keeps the comparison finite.
   const ceiling: Terms = permitted === "same" ? allowed : permitted;
 
-  // `"same"` on the CHILD side means its subtree delegates under the child's own terms. Those are
-  // the very allowances just checked against `allowed`, so nothing is left to compare — descending
-  // would re-ask a question already answered.
-  if (wanted === "same") return fitsWithin({ ...child, delegate: "off" }, ceiling);
+  // `"same"` on the CHILD side asserts these allowances at EVERY depth below, so they must fit
+  // EVERY ceiling the parent wrote — not merely the next one. Walk the allowed side down until it
+  // reaches its own fixpoint (`"same"`: every deeper ceiling is the one already fitted, so admit)
+  // or ends (`"off"`, refused above, because a pure namespace is exactly what `"same"` asks to
+  // configure). Stopping one level early lets a child escape a chain that narrows deeper down,
+  // which made the shorthand WIDER than writing the same recursion out.
+  if (wanted === "same") {
+    return permitted === "same" ? undefined : fitsWithin(child, ceiling);
+  }
 
   return fitsWithin(wanted, ceiling);
 }
