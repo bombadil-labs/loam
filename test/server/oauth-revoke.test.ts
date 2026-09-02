@@ -244,9 +244,12 @@ describe("§37 phase 15 — revocation", () => {
   it("(9) revocation binds on the very next request of the SAME live process — no restart", async () => {
     const { base, home, gateway } = await connectorServer();
     const token = await tokenFor(base);
+    const pool = gateway.connectionInboxes.get(readOAuthFile(home).grants[0]!.inbox!)!.gateway!;
 
-    // Positive control: the token works BEFORE the revoke.
+    // Positive control: the token works BEFORE the revoke — into its inbox pool (SPEC §58).
     expect((await mutate(base, token, 90)).status).toBe(200);
+    expect(heightDeltas(pool, 90)).toHaveLength(1);
+    expect(heightDeltas(gateway, 90)).toEqual([]);
 
     // Revoke against the same home the live server reads. No serve() restart happens.
     const outcome = await revokeConnector(home, CLIENT_ID, strikeVia(gateway));
@@ -255,7 +258,8 @@ describe("§37 phase 15 — revocation", () => {
     // The very next request with the same token is refused — the door is the same live instance.
     const after = await mutate(base, token, 91);
     expect(after.status).toBe(401);
-    expect(heightDeltas(gateway, 91)).toEqual([]); // and nothing landed
+    expect(heightDeltas(gateway, 91)).toEqual([]); // and nothing landed, anywhere
+    expect(heightDeltas(pool, 91)).toEqual([]);
 
     // AND it stays refused across a re-grant: a fresh token (new generation) works, but the OLD
     // token never resurrects — the generation gate, not just the grant record, is what binds. Grant
@@ -269,28 +273,37 @@ describe("§37 phase 15 — revocation", () => {
   it("(10) revocation is two-sided: access is gone AND past deltas still name their author", async () => {
     const { base, home, gateway } = await connectorServer();
     const token = await tokenFor(base);
-    const actor = readOAuthFile(home).grants[0]!.actor;
+    const { actor, inbox } = readOAuthFile(home).grants[0]!;
+    const pool = gateway.connectionInboxes.get(inbox!)!.gateway!;
 
-    // The connector writes BEFORE revoke — this is the bystander that must survive.
+    // The connector writes BEFORE revoke — into its inbox pool (SPEC §58). This is the bystander
+    // that must survive.
     expect((await mutate(base, token, 92)).status).toBe(200);
-    expect(heightDeltas(gateway, 92).map((d) => d.claims.author)).toEqual([actor]);
+    expect(heightDeltas(pool, 92).map((d) => d.claims.author)).toEqual([actor]);
 
     await revokeConnector(home, CLIENT_ID, strikeVia(gateway));
 
     // Access is GONE: a new write with the token is refused, and nothing lands.
     expect((await mutate(base, token, 93)).status).toBe(401);
     expect(heightDeltas(gateway, 93)).toEqual([]);
+    expect(heightDeltas(pool, 93)).toEqual([]);
 
     // The BYSTANDER survives: the pre-revoke delta still names the connector's actor AND still
-    // resolves through a reading — revocation removed access, not the connector's history.
-    expect(heightDeltas(gateway, 92).map((d) => d.claims.author)).toEqual([actor]);
+    // resolves through the bound container's reading — revocation removed access, not the
+    // connector's history. The operator's own read is the primary's, which the pool never
+    // composes into (the other half of §58): it answers the garden's latest height.
+    expect(heightDeltas(pool, 92).map((d) => d.claims.author)).toEqual([actor]);
+    const bound = { container: "myk:journal", inbox: inbox! };
+    expect(gateway.resolvedNode("Plant", FERN, undefined, undefined, bound).view["height"]).toBe(
+      92,
+    );
     const read = await fetch(`${base}/default/graphql`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: "Bearer op-token" },
       body: JSON.stringify({ query: `query { plant(entity: "${FERN}") { height } }` }),
     });
     const view = (await read.json()) as { data?: { plant?: { height?: number } } };
-    expect(view.data?.plant?.height).toBe(92);
+    expect(view.data?.plant?.height).toBe(34);
   });
 
   it("(13) a locked revoke refuses without leaking the home path; an unknown client is named", async () => {

@@ -360,10 +360,13 @@ describe("T242 (a) — the CIMD round-trip", () => {
     // OBJECT LEVEL: the minted token writes through the door…
     const written = await mutate(base, token, 731);
     expect(written.status).toBe(200);
-    // …and DELTA LEVEL: the ground names the connector's own actor, never the operator.
-    const authors = authorsOfHeight(gateway, 731);
+    // …and DELTA LEVEL: the connection's inbox pool names the connector's own actor, never the
+    // operator; the primary holds nothing of it (SPEC §58).
+    const pool = gateway.connectionInboxes.get(file.grants[0]!.inbox!)!.gateway!;
+    const authors = authorsOfHeight(pool, 731);
     expect(authors).toEqual([file.grants[0]!.actor]);
     expect(authors).not.toContain(OPERATOR);
+    expect(authorsOfHeight(gateway, 731)).toEqual([]);
 
     // A SECOND full round-trip re-uses the one URL-keyed row and the one grant: the identity is
     // idempotent, which is the 13-dead-clients failure this ticket exists to end.

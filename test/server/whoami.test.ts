@@ -17,7 +17,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, makeNegationClaims } from "@bombadil/rhizomatic";
-import { grantClaims } from "../../src/gateway/accounts.js";
+import { grantClaims, holdsGrant } from "../../src/gateway/accounts.js";
+import { inboxName } from "../../src/gateway/container.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { initHome } from "../../src/cli/config.js";
@@ -34,6 +35,9 @@ const RAE_SEED = "3b".repeat(32);
 const RAE = authorForSeed(RAE_SEED);
 const CONNECTOR_SEED = "3c".repeat(32);
 const CONNECTOR = authorForSeed(CONNECTOR_SEED);
+const MYK_SEED = "3d".repeat(32); // the person whose consent bound the connector
+const JOURNAL = "myk:journal";
+const INBOX = inboxName(JOURNAL, CONNECTOR);
 const CLIENT_ID = "https://claude.ai/oauth/mcp-oauth-client-metadata";
 const BEARER = "connector-bearer-secret-for-the-rail";
 
@@ -56,7 +60,8 @@ const client = (): OAuthClient => ({
  * A store with every kind at the door: the operator token, two actor tokens (ada granted, rae
  * her sibling), and a connector whose oauth grant and live token are written FILE-FIRST — the
  * exact rows the PKCE dance persists, without the dance (oauth-token.test.ts proves the dance;
- * this file proves the answer).
+ * this file proves the answer). The connector's standing is its INBOX POOL's (SPEC §58): the pool
+ * is bound here as the exchange would bind it, and the primary grants the key nothing.
  */
 async function fourDoorStore(): Promise<{ base: string; gateway: Gateway }> {
   const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
@@ -65,8 +70,12 @@ async function fourDoorStore(): Promise<{ base: string; gateway: Gateway }> {
     signClaims(grantClaims(STORE_ENTITY, ADA, "write", OPERATOR, ts++), OPERATOR_SEED),
     signClaims(grantClaims(STORE_ENTITY, ADA, "register", OPERATOR, ts++, "sync:"), OPERATOR_SEED),
     signClaims(grantClaims(STORE_ENTITY, RAE, "write", OPERATOR, ts++), OPERATOR_SEED),
-    signClaims(grantClaims(STORE_ENTITY, CONNECTOR, "write", OPERATOR, ts++), OPERATOR_SEED),
   ]);
+  await gateway.bindConnection({
+    container: JOURNAL,
+    connectionKey: CONNECTOR,
+    ownerSeed: MYK_SEED,
+  });
   const home = mkdtempSync(join(tmpdir(), "loam-t255-"));
   homes.push(home);
   initHome(home, OPERATOR_SEED);
@@ -82,8 +91,8 @@ async function fourDoorStore(): Promise<{ base: string; gateway: Gateway }> {
         grantedAt: 2000,
         standing: true,
         user: "myk", // §58: the key is the (client, user) pair's, pooled in the person's container
-        container: "myk:journal",
-        inbox: "inbox:myk:journal:direct",
+        container: JOURNAL,
+        inbox: INBOX,
       },
     ],
     tokens: [
@@ -123,6 +132,7 @@ interface Answer {
   federateContainers: string[];
   masked: boolean;
   note: string;
+  binding?: { user: string; container: string; inbox: string };
 }
 
 const restWhoami = async (base: string, bearer?: string): Promise<Answer> =>
@@ -173,14 +183,18 @@ describe("T255 (a) — four kinds, four distinct truthful answers", () => {
     expect(a.masked).toBe(false);
   });
 
-  it("a connector's minted token answers as CONNECTOR, naming its client", async () => {
-    const { base } = await fourDoorStore();
+  it("a connector's minted token answers as CONNECTOR, naming its client and its binding", async () => {
+    const { base, gateway } = await fourDoorStore();
     const a = await mcpWhoami(base, BEARER);
     expect(a.kind).toBe("connector");
     expect(a.clientId).toBe(CLIENT_ID);
     expect(a.author).toBe(CONNECTOR);
     expect(a.write).toBe(true);
     expect(a.operator).toBe(false);
+    expect(a.binding).toEqual({ user: "myk", container: JOURNAL, inbox: INBOX });
+    expect(a.note).toContain(INBOX);
+    // The write standing it reports is the POOL's (§58): the primary grants the key nothing.
+    expect(holdsGrant(gateway.reactor, STORE_ENTITY, CONNECTOR, "write", OPERATOR)).toBe(false);
   });
 
   it("ANONYMOUS says so, in words: masked reads, views folding empty for this caller", async () => {
@@ -223,6 +237,20 @@ describe("T255 (b) — the answer reads the ground: a revocation binds on the ve
     expect(ada.registerPrefixes).toEqual(["sync:"]); // the untouched grant still speaks
     const rae = await restWhoami(base, "rae-token");
     expect(rae.write).toBe(true);
+  });
+
+  it("striking the connection's pool grant flips the connector's answer, no restart; ada's survives", async () => {
+    const { base, gateway } = await fourDoorStore();
+    expect((await restWhoami(base, BEARER)).write).toBe(true);
+    await gateway.revokeConnection({
+      inbox: gateway.connectionInboxes.get(INBOX)!,
+      connectionKey: CONNECTOR,
+      ownerSeed: MYK_SEED,
+    });
+    const after = await restWhoami(base, BEARER);
+    expect(after.kind).toBe("connector"); // the token still names it — standing is the pool's
+    expect(after.write).toBe(false);
+    expect((await restWhoami(base, "ada-token")).write).toBe(true);
   });
 });
 

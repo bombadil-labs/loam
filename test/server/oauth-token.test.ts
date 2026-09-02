@@ -7,7 +7,7 @@
 // enforcing code answers rather than a stand-in. The two CONCURRENCY criteria (3, 4) cannot be posed
 // through fetch — the in-flight window is a few synchronous statements wide — so they drive the token
 // door and the register door directly, sharing the one `redeeming` map serve() wires between them,
-// with a grantStanding barrier the test releases by hand.
+// with a bind barrier the test releases by hand.
 //
 // EVERY AUTHORSHIP ASSERTION READS THE STORE'S OWN DELTAS (session-authorship.test.ts's lesson): a
 // view resolves values and says nothing about who signed them, so criterion 6 asserts at BOTH levels.
@@ -333,9 +333,12 @@ describe("§37 phase 15 — the token exchange", () => {
     const wrote = await mutate(base, token, 81);
     expect(wrote.status).toBe(200);
 
-    // The DELTA level: the height delta carries the connector's actor, not the operator's.
-    expect(authorsOfHeight(gateway, 81)).toEqual([grant.actor]);
-    expect(authorsOfHeight(gateway, 81)).not.toContain(OPERATOR);
+    // The DELTA level: the height delta carries the connector's actor, not the operator's — and
+    // it lives in the connection's INBOX POOL (SPEC §58), never in the primary.
+    const pool = gateway.connectionInboxes.get(grant.inbox!)!.gateway!;
+    expect(authorsOfHeight(pool, 81)).toEqual([grant.actor]);
+    expect(authorsOfHeight(pool, 81)).not.toContain(OPERATOR);
+    expect(authorsOfHeight(gateway, 81)).toEqual([]);
 
     // AND a reading: the resolved plant view holds the value the connector wrote.
     const read = await fetch(`${base}/default/graphql`, {
@@ -408,7 +411,6 @@ describe("§37 phase 15 — the token exchange", () => {
     const door = makeTokenDoor({
       home,
       redeeming: new Map(),
-      grantStanding: () => Promise.resolve("unused"),
       bind: bindNowhere,
       readFile,
     });
@@ -482,7 +484,7 @@ describe("§37 phase 15 — the token exchange", () => {
 // --- criteria 3 & 4: the in-flight eviction pin and the redemption count -------------------------
 //
 // Driven at the door layer, sharing the one `redeeming` map serve() wires between the register door
-// (which reads it for its eviction pin) and the token door (which counts into it). A grantStanding
+// (which reads it for its eviction pin) and the token door (which counts into it). A bind
 // barrier holds redemptions in the in-flight window — code burnt, grant not yet standing — on demand.
 
 /** A fake node req that emits a form body, and a res that captures status + body. */
@@ -608,15 +610,15 @@ describe("§37 phase 15 — the eviction pin and the redemption count", () => {
     });
 
     const redeeming = new Map<string, number>();
-    // A grantStanding barrier: it blocks until the test releases it, and counts its calls.
+    // A bind barrier: it blocks until the test releases it, and counts its calls.
     let calls = 0;
     const gates: Array<() => void> = [];
-    const grantStanding = (): Promise<string> =>
+    const bind = (): Promise<string> =>
       new Promise<string>((resolve) => {
         calls += 1;
-        gates.push(() => resolve("grant-delta-id"));
+        gates.push(() => resolve("inbox:myk:journal:direct"));
       });
-    const door = makeTokenDoor({ home, redeeming, grantStanding, bind: bindNowhere });
+    const door = makeTokenDoor({ home, redeeming, bind });
 
     const start = (codeSecret: string, verifier: string): FakeRes => {
       const { res, captured } = fakeRes();
@@ -636,7 +638,7 @@ describe("§37 phase 15 — the eviction pin and the redemption count", () => {
       return captured;
     };
 
-    // Both redemptions reach the in-flight window and block in grantStanding. The pin counts TWO.
+    // Both redemptions reach the in-flight window and block in bind. The pin counts TWO.
     const r1 = start("code-one", c1.verifier);
     const r2 = start("code-two", c2.verifier);
     await vi.waitFor(() => expect(calls).toBe(2));
@@ -656,8 +658,7 @@ describe("§37 phase 15 — the eviction pin and the redemption count", () => {
     expect(redeeming.get(CLIENT_ID)).toBeUndefined();
 
     // A THROW in the mint must not leak the count (released in `finally`). A fresh client with NO
-    // grant (so grantStanding is actually reached) and a grantStanding that rejects: the redemption
-    // fails, and the pin is clean afterwards.
+    // grant and a bind that rejects: the redemption fails, and the pin is clean afterwards.
     const c3 = pkce();
     const d3 = createHash("sha256").update("code-three").digest("hex");
     writeOAuthFile(home, {
@@ -668,8 +669,7 @@ describe("§37 phase 15 — the eviction pin and the redemption count", () => {
     const throwingDoor = makeTokenDoor({
       home,
       redeeming,
-      grantStanding: () => Promise.reject(new Error("ground append failed")),
-      bind: bindNowhere,
+      bind: () => Promise.reject(new Error("bind failed")),
     });
     const { res, captured } = fakeRes();
     void throwingDoor.handle(
@@ -690,7 +690,7 @@ describe("§37 phase 15 — the eviction pin and the redemption count", () => {
     expect(redeeming.get("throwing-client")).toBeUndefined(); // and the count did not leak
   });
 
-  it("(5b) the seed is written BEFORE the ground append: a failed append leaves it for the retry to reuse", async () => {
+  it("(5b) the seed is written BEFORE the bind: a failed bind leaves it for the retry to reuse", async () => {
     const home = mkdtempSync(join(tmpdir(), "loam-oauth-seed-"));
     homes.push(home);
     const c1 = pkce();
@@ -726,13 +726,12 @@ describe("§37 phase 15 — the eviction pin and the redemption count", () => {
       return captured;
     };
 
-    // First attempt: the ground append FAILS. Because the seed is written first, a grant record is
-    // left behind (standing false) rather than nothing — this is the ordering criterion 5 names.
+    // First attempt: the bind FAILS. Because the seed is written first, a grant record is left
+    // behind (standing false) rather than nothing — this is the ordering criterion 5 names.
     const failing = makeTokenDoor({
       home,
       redeeming,
-      grantStanding: () => Promise.reject(new Error("ground append failed")),
-      bind: bindNowhere,
+      bind: () => Promise.reject(new Error("bind failed")),
     });
     const first = run(failing, "seed-code-one", c1.verifier);
     await first.done;
@@ -747,7 +746,6 @@ describe("§37 phase 15 — the eviction pin and the redemption count", () => {
     const ok = makeTokenDoor({
       home,
       redeeming,
-      grantStanding: () => Promise.resolve("grant-delta-id"),
       bind: bindNowhere,
     });
     const second = run(ok, "seed-code-two", c2.verifier);

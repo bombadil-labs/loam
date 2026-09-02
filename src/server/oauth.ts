@@ -1381,16 +1381,12 @@ export interface TokenDoorOptions {
    */
   readonly redeeming: Map<string, number>;
   /**
-   * Land the operator-signed write grant for `actor` in the ground, returning the delta's id. This is
-   * the seam that needs the operator's signing authority and the live gateway; the door itself holds
-   * neither. Called AFTER the seed is durably written (criterion 5), so a retry reuses the seed.
-   */
-  readonly grantStanding: (actor: string) => Promise<string>;
-  /**
    * Bind the connection where consent said (SPEC §58): spawn — or resume — the inbox pool for
    * `actor` inside `container`, owned by `user`, and return the pool's name. The seam that needs
-   * the person's signing key and the live gateway; the door holds neither. A throw refuses the
-   * redemption with nothing minted beyond the seed (which a retry reuses).
+   * the person's signing key and the live gateway; the door holds neither. Called AFTER the seed is
+   * durably written, so a throw refuses the redemption with nothing minted beyond the seed (which a
+   * retry reuses). The pool's own grant chain is the connection's whole standing: no store-wide
+   * grant is ever landed for a §58 key.
    */
   readonly bind: (binding: {
     readonly user: string;
@@ -1639,8 +1635,8 @@ export function makeTokenDoor(options: TokenDoorOptions): TokenDoor {
       const samePair = (g: OAuthGrant): boolean => g.clientId === code.clientId && g.user === user;
 
       // The seed: ONE KEY PER (client, user). Reuse the pair's existing grant seed, or mint a fresh
-      // one and WRITE IT FIRST (standing false) so a retry after a failed ground append reuses it
-      // rather than minting a second and stranding the first (criterion 5). Never the operator's.
+      // one and WRITE IT FIRST (standing false) so a retry after a failed bind reuses it rather
+      // than minting a second and stranding the first (criterion 5). Never the operator's.
       const existing = grantFor(file, code.clientId, user);
       let grant: OAuthGrant;
       if (existing !== undefined) {
@@ -1665,37 +1661,28 @@ export function makeTokenDoor(options: TokenDoorOptions): TokenDoor {
         }));
       }
 
-      // Land the operator-signed write grant in the ground (unless it already stands), then record
-      // its standing. The ground is the authority on whether the connector may write; `oauth.json`
-      // caches that so the resolver need not re-derive it per request.
-      if (!grant.standing) {
-        const grantDeltaId = await options.grantStanding(grant.actor);
-        withOAuthFile<void>(home, (f) => ({
-          next: {
-            ...f,
-            grants: f.grants.map((g) => (samePair(g) ? { ...g, standing: true, grantDeltaId } : g)),
-          },
-          result: undefined,
-        }));
-        grant = { ...grant, standing: true, grantDeltaId };
-      }
-
       // The inbox (§58): bound on EVERY redemption, not only when the record lacks a pool. The
       // pool may have been dropped since — its declaration struck, its bytes gone — while the record
       // still named it, and a record is never the authority on what stands. `bindConnection` is
       // idempotent: it resumes a live pool and re-declares a struck one, so the record follows what
       // actually stands. A consent into another container spawns a second pool there; the first
       // stands, and the grant follows the person's latest word.
+      //
+      // NO STORE-WIDE GRANT LANDS. The connection's standing is the pool's own chain — the person's
+      // key authors the write grant inside the inbox at bind — so the primary never grants the key
+      // anything, and `standing` records only that the pool has stood at least once.
       const inbox = await options.bind({ user, container, actor: grant.actor });
-      if (grant.inbox !== inbox || grant.container !== container) {
+      if (!grant.standing || grant.inbox !== inbox || grant.container !== container) {
         withOAuthFile<void>(home, (f) => ({
           next: {
             ...f,
-            grants: f.grants.map((g) => (samePair(g) ? { ...g, container, inbox } : g)),
+            grants: f.grants.map((g) =>
+              samePair(g) ? { ...g, standing: true, container, inbox } : g,
+            ),
           },
           result: undefined,
         }));
-        grant = { ...grant, container, inbox };
+        grant = { ...grant, standing: true, container, inbox };
       }
 
       // Mint the bearer token: a secret to the client, its DIGEST plus the mint generation to the

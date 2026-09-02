@@ -75,15 +75,16 @@ export interface OAuthGrant {
   readonly actor: string;
   readonly grantedAt: number;
   /**
-   * Has the operator-signed write grant actually landed in the ground? The token exchange (phase 15)
-   * sets this true only after the ground append succeeds — the seed is written first (standing false)
-   * so a retry reuses it rather than minting a second (SPEC §37 phase 15, criterion 5).
+   * Has the connection's inbox pool stood — the bind succeeded — at least once? The token exchange
+   * sets this true only after `bind` returns; the seed is written first (standing false) so a retry
+   * reuses it rather than minting a second (SPEC §37 phase 15, criterion 5). A §58 pair's standing
+   * IS its pool's grant chain; nothing store-wide is landed for it.
    */
   readonly standing: boolean;
   /**
-   * The id of the operator-signed write-grant delta this grant's standing rests on (phase 15).
-   * OPTIONAL: a store written before phase 15, or a grant whose ground append has not yet landed,
-   * carries none — so `revoke` re-derives the surviving grant deltas rather than trusting this alone.
+   * PRE-§58 ONLY: the id of the operator-signed store-wide write-grant delta a connector minted
+   * before §58 rested on. A §58 pair carries none — its standing lives in its pool — and `revoke`
+   * re-derives the surviving store-wide grant deltas rather than trusting this alone.
    */
   readonly grantDeltaId?: string;
   /**
