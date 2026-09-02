@@ -275,13 +275,15 @@ replacement lands.
   forward-only inbox; reads scoped to the binding; root write grants no longer confer standing
   for connections.
 - **S2 — the container tools and derived standing.** `loam_container` on the MCP roster
-  (declare, leeway, receive, offer, promote-stage, sever) landing together with register-under-
+  (declare, leeway, receive, promote-stage, sever) landing together with register-under-
   the-path (inbox-pool publish and fold, boot re-attach), receive-within-the-subtree,
   delegation with attenuation and cascade — and only then the retirement of `loam grant
-  --verb=…` for connections.
+  --verb=…` for connections. S2 builds the *offer* SWITCH, which the leeway-fit rule weighs
+  like any other; the offer ACT is S3's, beside the token it hands out.
 - **S3 — the offer token and the container door.** Minting, showing, rotating, and striking on
-  the admin container page; `/:mount/<container>/federate`; the bare-name rule; the
-  no-pools-travel rule; the mount refusing a container credential.
+  the admin container page; `loam_container offer`, so one secret's whole life is written in
+  one slice; `/:mount/<container>/federate`; the bare-name rule; the no-pools-travel rule; the
+  mount refusing a container credential.
 - **S4 — the person's acts on the page.** Share-into for sibling channels; promotion with a
   destination and the owner's signature; leeway edits.
 - **S5 — names and the tree.** Path-parent agreement at declaration; store-wide injectivity
