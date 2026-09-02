@@ -2,11 +2,12 @@
 // GitHub Pages. The page imports `@bombadil/loam/browser` and this build aliases that name to
 // the SAME-COMMIT source entry, so the tutorial can never skew from the library it teaches.
 
-import { cpSync, mkdirSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { stubRenderWorker } from "./esbuild-stub-render-worker.mjs";
+import { renderMarkdown } from "./render-md.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // The output directory is a PARAMETER, defaulting to the deployed one. This build begins by
@@ -62,11 +63,45 @@ await build({
   logLevel: "silent",
 });
 
-// The ROOT is a landing page (Myk, 2026-07-26), and the tutorial is one of its three doors. The
-// landing is deliberately claim-free — the thesis and the doors, nothing that can rot — because the
-// last front door aged badly by carrying content the code outgrew. Anything checkable lives in the
-// book, which goes red when stale.
-cpSync(join(root, "demos", "site", "index.html"), join(out, "index.html"));
+// The ROOT is a landing page (Myk, 2026-07-26) that gets a newcomer running (Myk, 2026-09-02): the
+// thesis, then the two guides — quick start and first steps — rendered here from docs/ at build
+// time, so the site never carries a second copy of them (the rule the capabilities book follows;
+// the last front door aged badly by carrying content the code outgrew). The tutorial, the deck and
+// the book stay emitted and linked from the foot, for when a reader wants them.
+const landing = readFileSync(join(root, "demos", "site", "index.html"), "utf8");
+const guide = (file, id) => {
+  const { html, headings } = renderMarkdown(readFileSync(join(root, "docs", file), "utf8"), {
+    headingShift: 1,
+    // A guide's link to its sibling guide becomes the in-page anchor; everything else stands.
+    linkOf: (href) =>
+      href === "quick-start.md"
+        ? "#quick-start"
+        : href === "first-steps.md"
+          ? "#first-steps"
+          : href,
+  });
+  const [title, ...rest] = headings;
+  const toc = rest
+    .filter((h) => h.level === 3)
+    .map((h) => `<li><a href="#${h.id}">${h.text}</a></li>`)
+    .join("");
+  // The document's own title becomes the section's; the table of contents follows it.
+  return html
+    .replace(`<h2 id="${title.id}">`, `<h2 id="${id}-title">`)
+    .replace(`</h2>`, `</h2>\n<ul class="toc">${toc}</ul>`);
+};
+for (const [marker, file, id] of [
+  ["<!-- QUICK-START -->", "quick-start.md", "quick-start"],
+  ["<!-- FIRST-STEPS -->", "first-steps.md", "first-steps"],
+]) {
+  if (!landing.includes(marker)) throw new Error(`the landing template lacks ${marker}`);
+}
+writeFileSync(
+  join(out, "index.html"),
+  landing
+    .replace("<!-- QUICK-START -->", guide("quick-start.md", "quick-start"))
+    .replace("<!-- FIRST-STEPS -->", guide("first-steps.md", "first-steps")),
+);
 cpSync(join(root, "demos", "tutorial", "index.html"), join(out, "tutorial.html"));
 cpSync(join(root, "demos", "tutorial", "style.css"), join(out, "style.css"));
 cpSync(join(root, "demos", "tutorial", "packets"), join(out, "packets"), { recursive: true });
@@ -74,4 +109,4 @@ cpSync(join(root, "demos", "tutorial", "packets"), join(out, "packets"), { recur
 cpSync(join(root, "demos", "tutorial", "intro.html"), join(out, "intro.html"));
 cpSync(join(root, "demos", "capabilities", "index.html"), join(out, "capabilities.html"));
 
-console.log(`loam: built ${out} (the landing, the tutorial, the deck, the book)`);
+console.log(`loam: built ${out} (the landing with both guides, the tutorial, the deck, the book)`);

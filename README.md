@@ -223,7 +223,10 @@ loam serve --http --home ./my-store --token "$TOKEN" \
 dials — the store publishes it in its discovery documents, so a mismatch stops the handshake before
 authentication. `--oauth-allow-redirect` names the origins a connector may return to after consent.
 Together they open discovery, dynamic client registration, consent, and token exchange; without
-them the store serves MCP to bearer tokens only.
+them the store serves MCP to bearer tokens only. At consent the person chooses where the
+connection lives — one container under their name — and the exchange binds it there (SPEC §58):
+the connection's writes land in an inbox pool inside that container, its reads resolve over that
+container, and no store-wide grant is ever landed for it. Consenting again moves it.
 
 The store must be reachable over **HTTPS**, terminated in front of Loam — a tunnel, a reverse
 proxy, or a funnel. Serve behind the terminator and name the public address with `--public-url`.
