@@ -1,0 +1,13 @@
+{
+  "body": "Raised by the §58 S1 audit (loam-suppression); the mechanism is confirmed and the DECISION is open, which is why this is a spec ticket rather than a bug.\n\nThe `/append` door fences a bound connection's batch to deltas its own key SIGNED. A negation it signs targeting the OWNER's delta passes that fence, lands in its inbox pool, and composes into the bound container's scope — so a reader whose lens takes the default `drop` mask sees the owner's claim suppressed by the connection's strike.\n\nTHIS IS NOT A REGRESSION, and the ticket must not be built as if it were. Before §58 the same connector held store-wide write and could land that negation in the PRIMARY, where every lens saw it; the slice moved the blast radius inside one container. The door's own comment already states the true thing: raw deltas carry the library's full power, and whether any of it BINDS a reader is the reader's lens.\n\n§28 already frames the question: whose retractions bind inside a container is the container's TRUST, declared, not the door's. So:\n\nDESIGN QUESTIONS (Myk). (1) Should an inbox pool compose into its parent under a GOVERNED mask by default, so a connection's strike cannot blank its owner's claim? (2) If so, what declares it — the container's trust, a new field on the declaration, or the parent's membership term? (3) Does the same default apply to a channel pool, which has the identical shape today?\n\nRecommendation: yes to (1), declared by the container's existing trust knob in (2), and yes to (3) — a `curated` container should mean the owner's word wins over a guest's strike, which is what a person means by curating. Land the decision in the spec first; the implementation is small once the default is chosen.\n\nAcceptance: a connection's negation of its owner's claim does not suppress it for a reader of the bound container, while the connection's retraction of its OWN claim still binds; a named bystander (the owner's other claims, and another connection's pool) is untouched. Verify: test/gateway/binding-route.test.ts.",
+  "category": "spec",
+  "duration": 2,
+  "id": "T271",
+  "scope": [
+    "spec/**",
+    ".adlc/specs/**",
+    "src/gateway/container.ts",
+    "test/gateway/**"
+  ],
+  "title": "Decide whose retractions bind inside a container, and default it"
+}

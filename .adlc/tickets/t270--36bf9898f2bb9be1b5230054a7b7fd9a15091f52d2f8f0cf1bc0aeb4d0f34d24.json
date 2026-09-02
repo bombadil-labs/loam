@@ -1,0 +1,13 @@
+{
+  "body": "Confirmed by the §58 S1 audit (loam-scan-scale, verified, three sites): a bound connection's read resolves through `connectionScope`, which walks this store's whole ground to decide membership and composes EVERY sibling inbox pool in full. There is no warm path — the materialization is maintained over the primary and cannot answer a container's question, so `gatherImpl` takes the cold branch for every bound request. A bound listing pays that walk once per page AND again per listed entity; a REST clear pays it once per named field. The cost is stated honestly in `listing.ts` today; this ticket is the fix.\n\nThis is the shape T163 built the maintained candidate set to escape, and a container has none. Build the same instrument for a container scope, with the same two-sided rail T163 earned:\n\n- FAST = SLOW: every page the maintained set serves is the page a cold `connectionScope` projection serves, on this gateway AND on a fresh gateway opened over the same backend.\n- EVERY PATH THAT CHANGES MEMBERSHIP REACHES THE INDEX (H8's stale-index trap): a plain append, an inbox-pool write, a strike, a revived strike, a strike arriving before its target, an exclusion and its re-inclusion, a pool attached or dropped, an erasure that reseats the reactor.\n- The cost assertion is deterministic and spied, never timed.\n\nVerify: test/gateway/binding-scale.test.ts (new), and the existing test/gateway/listing-warm.test.ts shape as the model. Belongs with S2's container tools, where containers gain their own lifecycle.",
+  "category": "feature",
+  "duration": 3,
+  "id": "T270",
+  "scope": [
+    "src/gateway/listing.ts",
+    "src/gateway/container.ts",
+    "src/gateway/reads.ts",
+    "test/gateway/**"
+  ],
+  "title": "A maintained candidate set for a bound container's reads"
+}
