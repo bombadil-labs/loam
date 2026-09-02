@@ -29,7 +29,7 @@ import { Channel } from "./channel.js";
 import { prefixOfChannelName } from "../federation/channel.js";
 import { forgottenSince } from "./erase.js";
 import { readClosedIds, readGround, requireMoment } from "./slate.js";
-import type { Gateway } from "./gateway.js";
+import type { ConnectionBinding, Gateway } from "./gateway.js";
 import type { PatchNode, ResolvedNode } from "./gql.js";
 import type { Registered } from "./gql.js";
 import { lensOf, type ResolverSpecs } from "./registration.js";
@@ -112,8 +112,34 @@ export function gatherImpl(
   entity: string,
   now: number,
   asOf?: number,
+  binding?: ConnectionBinding,
 ): HView {
   requireMoment(now, `gather ${name}`);
+
+  // A BOUND CONNECTION READS ITS OWN SCOPE (SPEC §58): the container its consent named, with the
+  // inbox pools composed into it — never the primary's materialization, which is maintained over
+  // the whole ground and would answer with everything the store holds. It runs before every other
+  // branch for the reason the channel branch does: a materialization keyed by program name is not
+  // the connection's to read. A channel's lens is refused outright — its pool is not in the scope,
+  // and resolving the peer's reading over the connection's ground would answer a question nobody
+  // asked.
+  if (binding !== undefined) {
+    if (channelLens(gw, name)) {
+      throw new Error(
+        `${name} arrived through a federation channel, and a bound connection reads only the ` +
+          `container its consent named — that channel's pool is outside its scope`,
+      );
+    }
+    const result = evalTerm(
+      gw.def(name).hyperschema.body,
+      boundGroundFor(gw, binding, now, asOf),
+      entity,
+      gw.registry,
+    );
+    if (result.sort !== "hview") throw new Error(`schema ${name} does not evaluate to a hyperview`);
+    return result.hview;
+  }
+
   const closed = readClosedIds(gw, now);
 
   // A lens that arrived through a federation channel resolves over THAT CHANNEL'S POOL, not over
@@ -244,6 +270,33 @@ function channelGroundFor(
   return DeltaSet.from(deltas);
 }
 
+/**
+ * The ground a BOUND CONNECTION resolves over (SPEC §58): `connectionScope` at the bound container —
+ * its own members, its subtree's, and every inbox pool composed into it — narrowed by read closure
+ * and by this store's own surviving strikes, exactly as the channel path narrows a pool (H1: a
+ * strike living in the primary must bind on a claim that lives in a pool). A time pin rides the
+ * read here too. `connectionScope` refuses an undeclared container or an unattached pool: a scope
+ * must never resolve as if a container were empty (H9).
+ */
+export function boundGroundFor(
+  gw: Gateway,
+  binding: ConnectionBinding,
+  now: number,
+  asOf?: number,
+): DeltaSet {
+  const closed = readClosedIds(gw, now);
+  return DeltaSet.from(
+    gw
+      .connectionScope({ bound: binding.container })
+      .filter(
+        (d) =>
+          (asOf === undefined || d.claims.timestamp <= asOf) &&
+          !closed.has(d.id) &&
+          !gw.reactor.negationsOf(d.id).some((n) => gw.reactor.negationsOf(n).length === 0),
+      ),
+  );
+}
+
 const asOfGroundImpl = (gw: Gateway, asOf: number, closed: ReadonlySet<string>): DeltaSet =>
   closed.size === 0
     ? groundAsOfImpl(gw, asOf)
@@ -263,9 +316,24 @@ const asOfGroundImpl = (gw: Gateway, asOf: number, closed: ReadonlySet<string>):
  * It discloses nothing: the negations only ever target the caller's OWN claims, which the caller wrote,
  * and the node returned afterwards goes back through the ordinary narrowed read.
  */
-export function gatherForRetractionImpl(gw: Gateway, name: string, entity: string): HView {
+export function gatherForRetractionImpl(
+  gw: Gateway,
+  name: string,
+  entity: string,
+  binding?: ConnectionBinding,
+): HView {
   const def = gw.def(name);
-  const result = gw.reactor.eval(def.hyperschema.body, entity, gw.registry);
+  // A bound connection's own claims live in its pool, so its retraction gathers ITS scope — the
+  // whole of it, unnarrowed by read closure, for the same reason as the primary path.
+  const result =
+    binding === undefined
+      ? gw.reactor.eval(def.hyperschema.body, entity, gw.registry)
+      : evalTerm(
+          def.hyperschema.body,
+          DeltaSet.from(gw.connectionScope({ bound: binding.container })),
+          entity,
+          gw.registry,
+        );
   if (result.sort !== "hview") throw new Error(`schema ${name} does not evaluate to a hyperview`);
   return result.hview;
 }
@@ -280,9 +348,10 @@ export function resolvedNodeImpl(
   entity: string,
   now: number,
   asOf?: number,
+  binding?: ConnectionBinding,
 ): ResolvedNode {
   const def = gw.def(name);
-  const hview = gatherImpl(gw, name, entity, now, asOf);
+  const hview = gatherImpl(gw, name, entity, now, asOf, binding);
   const view = applyResolvers(
     def.resolvers,
     decorateChildren(
@@ -358,6 +427,7 @@ export function resolvePinnedImpl(
   entity: string,
   now: number,
   asOf?: number,
+  binding?: ConnectionBinding,
 ): ResolvedNode {
   requireMoment(now, `resolvePinned ${reg.hyperschema.name}`);
   if (channelLens(gw, lensOf(reg))) {
@@ -371,12 +441,16 @@ export function resolvePinnedImpl(
   // same `readGround` substitution the cold gather takes, and the as-of branch narrows after the
   // reconstruction. A pinned version freezes the lens, never the store's obligations.
   const closed = readClosedIds(gw, now);
+  // A bound connection's pinned read takes the same scoped ground its live read takes (§58): an
+  // old lens over the connection's scope, never over the store's own ground.
   const result =
-    asOf === undefined
-      ? closed.size === 0
-        ? gw.reactor.eval(reg.hyperschema.body, entity, gw.registry)
-        : evalTerm(reg.hyperschema.body, readGround(gw, now), entity, gw.registry)
-      : evalTerm(reg.hyperschema.body, asOfGroundImpl(gw, asOf, closed), entity, gw.registry);
+    binding !== undefined
+      ? evalTerm(reg.hyperschema.body, boundGroundFor(gw, binding, now, asOf), entity, gw.registry)
+      : asOf === undefined
+        ? closed.size === 0
+          ? gw.reactor.eval(reg.hyperschema.body, entity, gw.registry)
+          : evalTerm(reg.hyperschema.body, readGround(gw, now), entity, gw.registry)
+        : evalTerm(reg.hyperschema.body, asOfGroundImpl(gw, asOf, closed), entity, gw.registry);
   if (result.sort !== "hview") {
     throw new Error(`schema ${reg.hyperschema.name} does not evaluate to a hyperview`);
   }

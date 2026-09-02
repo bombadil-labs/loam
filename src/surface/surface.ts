@@ -13,6 +13,7 @@
 // ground, one registration, the same view, _hex for _hex.
 
 import type { HyperSchema, Schema, Primitive, View } from "@bombadil/rhizomatic";
+import type { ConnectionBinding } from "../gateway/gateway.js";
 import type { ClaimTemplates, RefSpecs, ResolverSpecs } from "../gateway/registration.js";
 
 // One registered lens, as a generator receives it: the hyperschema (gather), its resolution
@@ -81,15 +82,24 @@ export interface ClaimPointerSpec {
 // language: resolve answers a view, mutate compiles a write to a signed claim through the
 // door discipline, watch streams re-resolutions, claim lands raw signed pointers. The
 // GATEWAY owns all four; a door only translates its dialect into these calls.
+// Every hook takes a trailing `binding` (SPEC §58): a bound connection's request — its writes land
+// in its inbox pool and its reads resolve over the container its consent named. Absent, the request
+// is the operator's or a store-wide actor's, on this store's own ground.
 export interface SurfaceHooks {
   // Resolve a view at an entity. An optional `asOf` (SPEC §26) reads a MOMENT: the ground as it
   // stood at timestamp T, resolved by the same program — omit it and the read is present-tense.
-  resolve(schemaName: string, entity: string, asOf?: number): ResolvedNode;
+  resolve(
+    schemaName: string,
+    entity: string,
+    asOf?: number,
+    binding?: ConnectionBinding,
+  ): ResolvedNode;
   mutate(
     schemaName: string,
     entity: string,
     props: Record<string, Primitive>,
     actorSeed?: string,
+    binding?: ConnectionBinding,
   ): Promise<ResolvedNode>;
   // Clearing is retraction (SPEC §14): negate the caller's OWN surviving contributions to each
   // named field, so it resolves to what survives — the next pick, the remaining tags, the
@@ -100,6 +110,7 @@ export interface SurfaceHooks {
     entity: string,
     fields: readonly string[],
     actorSeed?: string,
+    binding?: ConnectionBinding,
   ): Promise<ResolvedNode>;
   // Remove ONE value (SPEC §14 amendment): retract only the caller's own contribution(s) to `field`
   // whose claimed value is one of `values` — the rest of the field, theirs and everyone's, stands.
@@ -109,6 +120,7 @@ export interface SurfaceHooks {
     field: string,
     values: readonly Primitive[],
     actorSeed?: string,
+    binding?: ConnectionBinding,
   ): Promise<ResolvedNode>;
   // Link an edge (SPEC §14 edge verbs): assert an edge delta — the same per-prop shape as a write,
   // but its value pointer targets an ENTITY, followed by the gather's `expand` into the child's
@@ -120,6 +132,7 @@ export interface SurfaceHooks {
     target: string,
     context: string | undefined,
     actorSeed?: string,
+    binding?: ConnectionBinding,
   ): Promise<ResolvedNode>;
   // Sever an edge (SPEC §14 edge verbs): retract YOUR OWN edge deltas in `field` — all of them, or
   // only those pointing at one of `targets`. Pure sugar over `retract`; the dual of link.
@@ -129,6 +142,7 @@ export interface SurfaceHooks {
     field: string,
     targets: readonly string[] | undefined,
     actorSeed?: string,
+    binding?: ConnectionBinding,
   ): Promise<ResolvedNode>;
   // Lens-derived edge writes (SPEC §51): assert ONE symmetric two-pointer edge delta into a
   // declared reference prop — its exact shape (roles and contexts) derived from the registration's
@@ -140,6 +154,7 @@ export interface SurfaceHooks {
     prop: string,
     target: string,
     actorSeed?: string,
+    binding?: ConnectionBinding,
   ): Promise<ResolvedNode>;
   unlinkRef(
     schemaName: string,
@@ -147,14 +162,23 @@ export interface SurfaceHooks {
     prop: string,
     target: string,
     actorSeed?: string,
+    binding?: ConnectionBinding,
   ): Promise<ResolvedNode>;
   watch(schemaName: string, entity: string): AsyncGenerator<PatchNode>;
-  claim(pointers: readonly ClaimPointerSpec[], actorSeed?: string): Promise<{ delta: string }>;
+  claim(
+    pointers: readonly ClaimPointerSpec[],
+    actorSeed?: string,
+    binding?: ConnectionBinding,
+  ): Promise<{ delta: string }>;
   // The listing door (T110): the distinct entities the lens's backing container holds evidence
   // for, resolved through the lens — one page, ascending by entity id, `after` exclusive. Only
   // a FULL projection may derive a field from this hook: enumeration is authed-only (public
   // enumeration is §12's deferred question), so a read door that offered it would be widening.
-  list(schemaName: string, opts?: { limit?: number; after?: string }): Promise<ResolvedNode[]>;
+  list(
+    schemaName: string,
+    opts?: { limit?: number; after?: string },
+    binding?: ConnectionBinding,
+  ): Promise<ResolvedNode[]>;
 }
 
 // A projection is a door's capability posture (SPEC §17): "full" derives reads and writes;
