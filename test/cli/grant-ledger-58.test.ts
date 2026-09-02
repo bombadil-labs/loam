@@ -99,3 +99,66 @@ describe("§58 — one connector, two people, two keys on the ledger", () => {
     expect(listing).not.toContain(BEA_SEED);
   });
 });
+
+describe("§58 — `loam grant <id> --verb=register` names whose key, when a connector holds more than one", () => {
+  const client = (clientId: string) => ({
+    clientId,
+    clientName: "Claude",
+    redirectUris: ["https://x/cb"],
+    registeredAt: 1,
+    generation: 1,
+  });
+  const grant = (clientId: string, user: string, seed: string) => ({
+    clientId,
+    actorSeed: seed,
+    actor: authorForSeed(seed),
+    grantedAt: 1,
+    standing: true,
+    user,
+    container: `${user}:journal`,
+    inbox: `inbox:${user}:journal:${authorForSeed(seed)}`,
+  });
+  const mint = (...extra: string[]) =>
+    run(["grant", "cli-claude", "--verb=register", "--prefix=cl:", ...extra, "--home", home], io());
+
+  it("two keys: refuses without --user, naming both; mints for the named person; refuses a stranger", async () => {
+    writeOAuthFile(home, {
+      ...EMPTY_OAUTH,
+      clients: [client("cli-claude")],
+      grants: [grant("cli-claude", "ada", ADA_SEED), grant("cli-claude", "bea", BEA_SEED)],
+    });
+    expect(await mint()).toBe(2);
+    expect(printed()).toContain("--user=<name>");
+    expect(printed()).toContain("ada");
+    expect(printed()).toContain("bea");
+    out.length = 0;
+    err.length = 0;
+    expect(await mint("--user=zed"), printed()).toBe(2);
+    expect(printed()).toContain("no key for zed");
+    out.length = 0;
+    err.length = 0;
+    expect(await mint("--user=ada"), printed()).toBe(0);
+    out.length = 0;
+    err.length = 0;
+    // The grant landed on ADA's key and no other: her row holds register, bea's does not.
+    expect(await run(["grant", "list", "--home", home], io()), printed()).toBe(0);
+    const listing = printed();
+    expect(rowFor(listing, ADA.slice(0, 20))).toContain("register");
+    expect(rowFor(listing, BEA.slice(0, 20))).not.toContain("register");
+  });
+
+  it("one key needs no name; no key is no acting identity", async () => {
+    writeOAuthFile(home, {
+      ...EMPTY_OAUTH,
+      clients: [client("cli-claude"), client("cli-empty")],
+      grants: [grant("cli-claude", "ada", ADA_SEED)],
+    });
+    expect(await mint(), printed()).toBe(0);
+    out.length = 0;
+    err.length = 0;
+    expect(
+      await run(["grant", "cli-empty", "--verb=register", "--prefix=em:", "--home", home], io()),
+    ).toBe(2);
+    expect(printed()).toContain("no acting identity");
+  });
+});
