@@ -265,7 +265,7 @@ function channelGroundFor(
       (d) =>
         (asOf === undefined || d.claims.timestamp <= asOf) &&
         !closed.has(d.id) &&
-        !gw.reactor.negationsOf(d.id).some((n) => gw.reactor.negationsOf(n).length === 0),
+        !negatedInGround(gw, d.id, new Set()),
     );
   return DeltaSet.from(deltas);
 }
@@ -292,10 +292,24 @@ export function boundGroundFor(
         (d) =>
           (asOf === undefined || d.claims.timestamp <= asOf) &&
           !closed.has(d.id) &&
-          !gw.reactor.negationsOf(d.id).some((n) => gw.reactor.negationsOf(n).length === 0),
+          !negatedInGround(gw, d.id, new Set()),
       ),
   );
 }
+
+/**
+ * Is `id` negated, by the substrate's own recursive definition? A strike binds unless it is itself
+ * struck — and THAT strike binds unless it is struck, all the way down (rhizomatic's
+ * `computeNegated`; Loam's `struck` agrees). A one-link test is right for two links and wrong for
+ * four: with d struck by n1, n1 by n2 and n2 by n3, n1 binds again and d must stay suppressed, but
+ * one link sees `negationsOf(n1)` non-empty and revives d. `seen` closes the walk over a cycle,
+ * which binds nothing.
+ */
+const negatedInGround = (gw: Gateway, id: string, seen: ReadonlySet<string>): boolean => {
+  if (seen.has(id)) return false;
+  const next = new Set(seen).add(id);
+  return gw.reactor.negationsOf(id).some((n) => !negatedInGround(gw, n, next));
+};
 
 const asOfGroundImpl = (gw: Gateway, asOf: number, closed: ReadonlySet<string>): DeltaSet =>
   closed.size === 0

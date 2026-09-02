@@ -19,7 +19,12 @@
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
-import { containerClaims, inboxName, type Container } from "../../src/gateway/container.js";
+import {
+  containerClaims,
+  CTX_CONTAINER,
+  inboxName,
+  type Container,
+} from "../../src/gateway/container.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway, type ConnectionBinding } from "../../src/gateway/gateway.js";
 import { lensOf } from "../../src/gateway/registration.js";
@@ -47,16 +52,18 @@ const ALICES_OWN = {
   in: "input",
 };
 
-// A negation in the owner's own voice, pointing at one delta.
-const strikeOf = (gw: Gateway, target: string): Delta =>
+// A negation pointing at one delta, in a named voice. The owner's strikes their own data; a
+// container's DECLARATION is constitutional, so only the operator's strike retires one.
+const strikeBy = (gw: Gateway, target: string, author: string, seed: string): Delta =>
   signClaims(
     {
       timestamp: gw.nextTimestamp(),
-      author: OWNER,
+      author,
       pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: target } } }],
     },
-    OWNER_SEED,
+    seed,
   );
+const strikeOf = (gw: Gateway, target: string): Delta => strikeBy(gw, target, OWNER, OWNER_SEED);
 
 const bootStore = (): Promise<Gateway> =>
   Gateway.boot(
@@ -311,6 +318,62 @@ describe("T262 — a bound retraction strikes only the connection's own pool cla
     expect(bound(gw, binding)["height"]).toBe(30);
     // History is not rewritten: the pool keeps the claim it holds.
     expect(inbox.gateway!.reactor.get(claim.id)).toBeDefined();
+    await gw.close();
+  });
+
+  it("a strike chain three links deep still suppresses: a strike binds unless it is itself struck", async () => {
+    const { gw, inbox, binding } = await separateHome();
+    await gw.mutateEntity("Plant", FERN, { height: 7 }, CONN_SEED, binding);
+    const claim = byConn(inbox.gateway!)[0]!;
+
+    // One link: the strike binds, the claim is suppressed, the bystander answers.
+    const n1 = strikeOf(gw, claim.id);
+    await gw.append([n1]);
+    expect(bound(gw, binding)["height"]).toBe(30);
+    // Two links: the strike is itself struck, so it binds nothing and the claim returns.
+    const n2 = strikeOf(gw, n1.id);
+    await gw.append([n2]);
+    expect(bound(gw, binding)["height"]).toBe(7);
+    // THREE links: n2 is struck, so n1 binds again and the claim must stay suppressed. A test that
+    // asks only "does anything negate the strike" answers 7 here, which is the claim revived by a
+    // strike that no longer binds — the substrate's own definition is recursive, and so is ours.
+    await gw.append([strikeOf(gw, n2.id)]);
+    expect(bound(gw, binding)["height"]).toBe(30);
+    await gw.close();
+  });
+
+  it("a write refuses when the container the connection is bound to no longer stands", async () => {
+    const { gw, inbox, binding } = await home();
+    await gw.mutateEntity("Plant", FERN, { height: 7 }, CONN_SEED, binding);
+    const before = byConn(inbox.gateway!).length;
+
+    // The owner drops the container. A shared container's drop strikes its declaration and leaves
+    // the inbox pool declared and attached beneath it.
+    const declaration = [...gw.reactor.snapshot()].find((d) =>
+      d.claims.pointers.some(
+        (p) =>
+          p.role === "container" &&
+          p.target.kind === "entity" &&
+          p.target.entity.id === HOME &&
+          p.target.entity.context === CTX_CONTAINER,
+      ),
+    )!;
+    expect(declaration, "the home's declaration was not found").toBeDefined();
+    await gw.append([strikeBy(gw, declaration.id, OP, OP_SEED)]);
+    expect(gw.containers().containers.has(HOME)).toBe(false); // the drop really took
+
+    // The write refuses BEFORE anything is signed. Without the guard it lands durably in the pool
+    // and the read that follows refuses by name, so the caller is told a landed write failed — and
+    // every retry mints another delta.
+    await expect(gw.mutateEntity("Plant", FERN, { height: 9 }, CONN_SEED, binding)).rejects.toThrow(
+      /no longer stands/,
+    );
+    expect(byConn(inbox.gateway!).length).toBe(before);
+    expect(
+      heightClaimsIn(inbox.gateway!).some((d) =>
+        d.claims.pointers.some((p) => p.target.kind === "primitive" && p.target.value === 9),
+      ),
+    ).toBe(false);
     await gw.close();
   });
 

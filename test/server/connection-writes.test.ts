@@ -325,6 +325,10 @@ describe("S1b-ii — a bound connection's writes land in its inbox pool, never t
     const after = (await (await whoami(base, token)).json()) as Record<string, unknown>;
     expect(after["kind"]).toBe("connector");
     expect(after["write"]).toBe(false);
+    // And the sentence follows the standing: one answer must not deny a write in its field and
+    // promise it in its prose.
+    expect(after["note"]).not.toContain("writes into its inbox");
+    expect(after["note"]).toContain("no write standing");
     // The pool's own door refuses the key now — the GraphQL door reports a resolver refusal as
     // errors on a 200 — and nothing lands in the pool or the primary.
     const refused = (await (await mutateHeight(base, token, 70)).json()) as { errors?: string[] };

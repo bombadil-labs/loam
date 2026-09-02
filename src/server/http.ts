@@ -974,13 +974,14 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         return false;
       }
     };
+    const writes = writeStanding();
     return {
       kind: isConnector ? "connector" : "actor",
       author,
       ...(isConnector ? { clientId: connector.clientId } : {}),
       ...(binding === undefined ? {} : { binding }),
       operator: false,
-      write: writeStanding(),
+      write: writes,
       registerPrefixes:
         gateway === undefined
           ? []
@@ -992,8 +993,15 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       masked: false,
       note:
         binding !== undefined
-          ? `A connection bound by ${binding.user}'s consent: it writes into its inbox ` +
-            `${binding.inbox} and reads the scope of ${binding.container}.`
+          ? // The note follows the STANDING this same answer reports. A revoked pool, or one this
+            // store cannot attach, leaves the binding intact and the writing gone, and a sentence
+            // promising a write beside `write: false` is one answer contradicting itself.
+            writes
+            ? `A connection bound by ${binding.user}'s consent: it writes into its inbox ` +
+              `${binding.inbox} and reads the scope of ${binding.container}.`
+            : `A connection bound by ${binding.user}'s consent: it reads the scope of ` +
+              `${binding.container}, and its inbox ${binding.inbox} grants it no write ` +
+              `standing — revoked, or not attached here.`
           : isConnector
             ? "A connector's minted identity: it writes as its own author, inside its grants."
             : "An actor token: it acts as this key, inside this key's surviving grants.",
