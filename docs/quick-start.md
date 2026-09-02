@@ -100,12 +100,19 @@ In claude.ai: **Settings → Connectors → Add custom connector.**
 - **OAuth client**: *Use Anthropic's hosted client metadata* — the recommended option; your store
   supports it, and it means reconnects reuse one client identity instead of minting orphans.
 
-Press **Add**, sign in as your user when the store's login page appears, and consent. That's the
-connection. If a view answers suspiciously empty, ask for `loam_whoami` first — it says who the
-store thinks the caller is, and its anonymous answer says in words that reads are masked: an
-empty view for an unrecognized caller is not an empty store. If the connector shows "no tools"
-outright, delete the connector entry entirely and add it fresh — a cached credential from a
-previous store answers 401 until it is replaced.
+Press **Add**, sign in as your user when the store's login page appears, and consent. The consent
+screen asks **where the connection lives**: pick a container under your name, or create one (a
+first consent creates your home). That choice is the whole of the connection's reach — everything
+Claude writes lands in that container's inbox, signed as Claude's own key, and everything Claude
+reads is that container. Consent again to move it. That's the connection.
+
+If a view answers suspiciously empty, ask for `loam_whoami` first — it says who the store thinks
+the caller is, where the connection is bound, and its anonymous answer says in words that reads
+are masked: an empty view for an unrecognized caller is not an empty store. If the connector shows
+"no tools" outright, delete the connector entry entirely and add it fresh — a cached credential
+from a previous store answers 401 until it is replaced. A connector that consented before
+version 0.7 holds an older, store-wide grant that no door honors any more: delete it, add it
+fresh, and consent again.
 
 ## 7. First conversation
 

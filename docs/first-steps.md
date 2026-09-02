@@ -12,7 +12,8 @@ You just connected Claude to one of these. This page is the answer to the honest
 
 Out of the box, a connected Claude can read and write the stock shapes — `person`, `org`,
 `event`, `note`, `post` — and nothing else. Defining a *new* shape is constitutional: it needs a
-grant, and the consent screen hands out only `write`. So, once, on the store's machine:
+grant, and consent gives a connection only a place to live — one container under your name, where
+its writes land and its reads resolve. So, once, on the store's machine:
 
 ```bash
 loam grant list
@@ -47,10 +48,12 @@ The answer is the entry as it was; a change you made later does not yet apply. I
 lawfully erased anything in that window, `_forgotten` says so, and when — never what.
 
 **Who said that?** Claude holds its own signing key. When it files a note, the ground records
-that *Claude's connection* said it, not you, and the signature travels with the fact forever.
-Disconnect it and every line stays, still signed as its. Today you read those signatures on the
-admin page and in the store's own ledger (`loam grant list`); teaching the read surface to answer
-"who said this" from chat is queued work.
+that *Claude's connection* said it, not you, and the signature travels with the fact forever. And
+it lands in the connection's own **inbox** inside the container you chose at consent — never in
+your primary ground, and never anywhere you did not name. Disconnect it and every line stays,
+still signed as its. Today you read those signatures on the admin page and in the store's own
+ledger (`loam grant list`); teaching the read surface to answer "who said this" from chat is
+queued work.
 
 ## Two stores, one ground
 
@@ -136,10 +139,15 @@ what standing they hold. "Nothing here" and "not signed in" deserve different re
 
 **The store has a face — for your part of it.** Sign in at `/admin` in a browser and the page
 shows the containers under your own name: what arrived since you last looked and from whom, the
-channels receiving into them, the schemas. The whole store, wherever it is, is the command
-line's (`loam store`, `loam federate list`, `loam grant list`). What Claude files lands in the
-store's primary ground rather than under your name, so the page does not count it yet — that,
-too, is queued.
+channels receiving into them, the connections bound there, the schemas. What Claude files lands
+in its inbox inside the container you chose, so the page counts it under your name — and one row
+revokes that one connection, leaving every word it wrote in place. The whole store, wherever it
+is, is the command line's (`loam store`, `loam federate list`, `loam grant list`).
+
+**A connection reads what it can see.** Claude reads the container it is bound to — your claims
+there, its own, and the pools composed into it — and nothing outside. Ask about something you
+filed elsewhere and the honest answer is empty; consent again into that container, or into a
+wider one, and the same connection sees it. `loam_whoami` names the binding.
 
 ## Going deeper
 

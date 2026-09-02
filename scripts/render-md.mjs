@@ -1,0 +1,120 @@
+// A small, deliberate markdown renderer for the guides the landing page carries (docs/*.md → HTML
+// fragments). It covers exactly what those two documents use — ATX headings, paragraphs, fenced
+// code, blockquotes, unordered lists, and inline code / bold / em / links — and nothing else: a
+// construct it does not know renders as a paragraph rather than silently vanishing. The guides
+// are the source of truth; this exists so the site never carries a hand-maintained second copy of
+// them (the same rule the capabilities book follows).
+
+const escape = (s) =>
+  s
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+
+/** A URL-safe id for a heading: lowercase, words joined by hyphens. */
+export const slug = (text) =>
+  text
+    .toLowerCase()
+    .replace(/[`*_]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+
+// Inline markup, applied to already-escaped text. Code spans are protected first so nothing
+// inside them is re-interpreted.
+function inline(raw, linkOf) {
+  const codes = [];
+  let text = escape(raw).replace(/`([^`]+)`/g, (_, code) => {
+    codes.push(`<code>${code}</code>`);
+    return `\u0000${codes.length - 1}\u0000`;
+  });
+  text = text.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, href) => {
+    const target = linkOf(href);
+    const external = /^https?:/.test(target) ? ' rel="noopener"' : "";
+    return `<a href="${target}"${external}>${label}</a>`;
+  });
+  text = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  text = text.replace(/(^|[^*\w])\*([^*\n]+)\*(?=[^*\w]|$)/g, "$1<em>$2</em>");
+  return text.replace(/\u0000(\d+)\u0000/g, (_, i) => codes[Number(i)]);
+}
+
+/**
+ * Render a markdown document to an HTML fragment.
+ *
+ * `opts.linkOf` rewrites link targets (a `.md` sibling becomes an in-page anchor, say);
+ * `opts.headingShift` demotes every heading by that many levels so a document's `#` becomes the
+ * page's `h2`. Every heading carries an id from its text, so a table of contents can point at it.
+ */
+export function renderMarkdown(source, opts = {}) {
+  const linkOf = opts.linkOf ?? ((href) => href);
+  const shift = opts.headingShift ?? 0;
+  const lines = source.replace(/\r\n/g, "\n").split("\n");
+  const out = [];
+  const headings = [];
+  let i = 0;
+  const paragraph = (buffer) => {
+    if (buffer.length > 0) {
+      out.push(`<p>${inline(buffer.join(" "), linkOf)}</p>`);
+      buffer.length = 0;
+    }
+  };
+  const buffer = [];
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.trim() === "") {
+      paragraph(buffer);
+      i += 1;
+      continue;
+    }
+    const fence = /^```(\w*)\s*$/.exec(line);
+    if (fence !== null) {
+      paragraph(buffer);
+      const body = [];
+      i += 1;
+      while (i < lines.length && !/^```\s*$/.test(lines[i])) {
+        body.push(lines[i]);
+        i += 1;
+      }
+      i += 1; // the closing fence
+      const lang = fence[1] === "" ? "" : ` class="language-${fence[1]}"`;
+      out.push(`<pre><code${lang}>${escape(body.join("\n"))}</code></pre>`);
+      continue;
+    }
+    const heading = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
+    if (heading !== null) {
+      paragraph(buffer);
+      const level = Math.min(6, heading[1].length + shift);
+      const text = heading[2];
+      const id = slug(text);
+      headings.push({ level, text, id });
+      out.push(`<h${level} id="${id}">${inline(text, linkOf)}</h${level}>`);
+      i += 1;
+      continue;
+    }
+    if (/^>\s?/.test(line)) {
+      paragraph(buffer);
+      const quote = [];
+      while (i < lines.length && /^>\s?/.test(lines[i])) {
+        quote.push(lines[i].replace(/^>\s?/, ""));
+        i += 1;
+      }
+      out.push(`<blockquote><p>${inline(quote.join(" "), linkOf)}</p></blockquote>`);
+      continue;
+    }
+    if (/^-\s+/.test(line)) {
+      paragraph(buffer);
+      const items = [];
+      while (i < lines.length && (/^-\s+/.test(lines[i]) || /^\s{2,}\S/.test(lines[i]))) {
+        if (/^-\s+/.test(lines[i])) items.push(lines[i].replace(/^-\s+/, ""));
+        else items[items.length - 1] += " " + lines[i].trim();
+        i += 1;
+      }
+      out.push(`<ul>${items.map((item) => `<li>${inline(item, linkOf)}</li>`).join("")}</ul>`);
+      continue;
+    }
+    buffer.push(line.trim());
+    i += 1;
+  }
+  paragraph(buffer);
+  return { html: out.join("\n"), headings };
+}

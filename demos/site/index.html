@@ -5,21 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Loam — a database you grow. Signed facts, shared ground, apps as lenses."
+      content="Loam — a database you grow. Signed facts, shared ground, apps as lenses. Get a store running and connect Claude to it."
     />
     <title>Loam — a database you grow</title>
     <style>
-      /* The front door. It commits to the concept deck's world — parchment ink on dark ground —
-         because this page and the deck are the same gesture at two lengths. It carries NO claims
-         that can rot: the thesis is the model itself, and every checkable promise lives one door
-         down, in the book that goes red when it goes stale. That is not a style choice; it is why
-         the previous front door aged badly and this one is built not to. */
+      /* The front door, and the way in. Parchment ink on dark ground — the concept deck's world,
+         because this page and the deck are the same gesture at two lengths. The page carries the
+         thesis and then the two guides a newcomer needs, rendered AT BUILD TIME from docs/ so the
+         site never holds a second copy of them (the same rule the capabilities book follows). The
+         guides are the checkable part; the thesis is the model itself. */
       :root {
         --ground: #141009;
         --panel: #1d1710;
+        --panel-2: #18120c;
         --ink: #ece3d1;
         --muted: #9c8f7a;
         --faint: #57503f;
+        --rule: #2a2318;
         --alice: #e2a63c;
         --alice-fill: #382b12;
         --bob: #82aedc;
@@ -33,23 +35,37 @@
       * {
         box-sizing: border-box;
       }
+      html {
+        scroll-behavior: smooth;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+      }
       body {
         margin: 0;
         min-height: 100vh;
         background: var(--ground);
         color: var(--ink);
         font-family: var(--serif);
-        display: grid;
-        place-items: center;
-        padding: 3rem 1.25rem 4rem;
+        line-height: 1.6;
       }
-      main {
-        width: min(64rem, 100%);
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 2.75rem;
-        text-align: center;
+      a {
+        color: var(--alice);
+        text-decoration-color: var(--faint);
+        text-underline-offset: 0.18em;
+      }
+      a:hover {
+        text-decoration-color: var(--alice);
+      }
+      :focus-visible {
+        outline: 2px solid var(--alice);
+        outline-offset: 3px;
+      }
+      code,
+      pre {
+        font-family: var(--mono);
       }
       .kicker {
         font-family: var(--mono);
@@ -57,6 +73,21 @@
         letter-spacing: 0.26em;
         text-transform: uppercase;
         color: var(--muted);
+      }
+
+      /* --- the front door ---------------------------------------------------------------- */
+      .door {
+        display: grid;
+        place-items: center;
+        text-align: center;
+        padding: 4.5rem 1.25rem 3.5rem;
+        gap: 2.2rem;
+      }
+      .door header {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1.1rem;
       }
       h1 {
         font-size: clamp(2.4rem, 6vw, 4rem);
@@ -66,13 +97,12 @@
         max-width: 18ch;
         text-wrap: balance;
       }
-      .fig {
-        margin: 0.5rem 0 0;
-      }
       .fig svg {
         display: block;
-        max-width: 78vw;
+        max-width: 70vw;
         height: auto;
+        animation: breathe 6s ease-in-out infinite;
+        transform-origin: center;
       }
       @keyframes breathe {
         0%,
@@ -83,14 +113,17 @@
           transform: scale(1.03);
         }
       }
-      .fig svg {
-        animation: breathe 6s ease-in-out infinite;
-        transform-origin: center;
-      }
       @media (prefers-reduced-motion: reduce) {
         .fig svg {
           animation: none;
         }
+      }
+      .refrain {
+        font-family: var(--mono);
+        font-size: 0.78rem;
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+        color: var(--alice);
       }
       .thesis {
         font-size: clamp(1.05rem, 2vw, 1.3rem);
@@ -104,28 +137,22 @@
         color: var(--ink);
         font-style: italic;
       }
-      .refrain {
-        font-family: var(--mono);
-        font-size: 0.78rem;
-        letter-spacing: 0.28em;
-        text-transform: uppercase;
-        color: var(--alice);
-      }
-      nav.doors {
+
+      /* --- the two ways in ---------------------------------------------------------------- */
+      nav.ways {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(15.5rem, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
         gap: 1rem;
-        width: 100%;
-        max-width: 56rem;
+        width: min(56rem, 100%);
         text-align: left;
       }
-      nav.doors a {
+      nav.ways a {
         display: flex;
         flex-direction: column;
         gap: 0.55rem;
         padding: 1.5rem 1.4rem 1.35rem;
         background: var(--panel);
-        border: 1px solid #2a2318;
+        border: 1px solid var(--rule);
         border-radius: 10px;
         text-decoration: none;
         color: var(--ink);
@@ -133,74 +160,228 @@
           border-color 0.18s ease,
           transform 0.18s ease;
       }
-      nav.doors a:hover,
-      nav.doors a:focus-visible {
+      nav.ways a:hover,
+      nav.ways a:focus-visible {
         border-color: var(--alice);
         transform: translateY(-2px);
       }
       @media (prefers-reduced-motion: reduce) {
-        nav.doors a {
+        nav.ways a {
           transition: none;
         }
-        nav.doors a:hover {
+        nav.ways a:hover {
           transform: none;
         }
       }
-      nav.doors .door-k {
+      nav.ways .way-k {
         font-family: var(--mono);
         font-size: 0.62rem;
         letter-spacing: 0.24em;
         text-transform: uppercase;
       }
-      nav.doors a:nth-child(1) .door-k {
+      nav.ways a:nth-child(1) .way-k {
         color: var(--entity);
       }
-      nav.doors a:nth-child(2) .door-k {
+      nav.ways a:nth-child(2) .way-k {
         color: var(--bob);
       }
-      nav.doors a:nth-child(3) .door-k {
-        color: var(--alice);
-      }
-      nav.doors .door-t {
+      nav.ways .way-t {
         font-size: 1.22rem;
         line-height: 1.3;
       }
-      nav.doors .door-d {
+      nav.ways .way-d {
         font-size: 0.95rem;
         line-height: 1.5;
         color: var(--muted);
       }
+
+      /* --- what is interesting here: three facts, no claims that can rot ----------------- */
+      .facts {
+        width: min(56rem, 100%);
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+        gap: 1.25rem 2rem;
+        text-align: left;
+        padding: 0 0.25rem;
+      }
+      .facts h3 {
+        margin: 0 0 0.35rem;
+        font-size: 1.05rem;
+        font-weight: 500;
+      }
+      .facts p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.55;
+      }
+      .facts .k {
+        display: block;
+        font-family: var(--mono);
+        font-size: 0.62rem;
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+        margin-bottom: 0.5rem;
+      }
+      .facts > div:nth-child(1) .k {
+        color: var(--alice);
+      }
+      .facts > div:nth-child(2) .k {
+        color: var(--entity);
+      }
+      .facts > div:nth-child(3) .k {
+        color: var(--bob);
+      }
+
+      /* --- the guides ---------------------------------------------------------------------- */
+      .guides {
+        width: min(48rem, 100%);
+        margin: 0 auto;
+        padding: 1rem 1.25rem 5rem;
+      }
+      .guide {
+        border-top: 1px solid var(--rule);
+        padding-top: 2.5rem;
+        margin-top: 3rem;
+      }
+      .guide .kicker {
+        margin-bottom: 0.6rem;
+      }
+      .guide h2 {
+        font-size: clamp(1.9rem, 4vw, 2.6rem);
+        font-weight: 500;
+        line-height: 1.15;
+        margin: 0 0 1.25rem;
+        text-wrap: balance;
+      }
+      .guide h3 {
+        font-size: 1.35rem;
+        font-weight: 500;
+        line-height: 1.3;
+        margin: 2.4rem 0 0.75rem;
+        text-wrap: balance;
+      }
+      .guide h3 a {
+        color: inherit;
+        text-decoration: none;
+      }
+      .guide p,
+      .guide li {
+        font-size: 1.05rem;
+        line-height: 1.65;
+        text-wrap: pretty;
+      }
+      .guide p {
+        margin: 0 0 1rem;
+      }
+      .guide ul {
+        padding-left: 1.3rem;
+        margin: 0 0 1rem;
+      }
+      .guide li {
+        margin-bottom: 0.45rem;
+      }
+      .guide code {
+        font-size: 0.86em;
+        background: var(--panel);
+        border: 1px solid var(--rule);
+        border-radius: 4px;
+        padding: 0.08em 0.36em;
+        color: var(--prim);
+      }
+      .guide pre {
+        background: var(--panel-2);
+        border: 1px solid var(--rule);
+        border-left: 3px solid var(--alice);
+        border-radius: 8px;
+        padding: 1rem 1.1rem;
+        margin: 0 0 1.25rem;
+        overflow-x: auto;
+        font-size: 0.88rem;
+        line-height: 1.55;
+      }
+      .guide pre code {
+        background: none;
+        border: 0;
+        padding: 0;
+        color: var(--ink);
+        font-size: inherit;
+      }
+      .guide blockquote {
+        margin: 0 0 1rem;
+        padding: 0.75rem 1.1rem;
+        border-left: 3px solid var(--entity);
+        background: var(--panel-2);
+        border-radius: 0 8px 8px 0;
+        color: var(--ink);
+        font-style: italic;
+      }
+      .guide blockquote p {
+        margin: 0;
+      }
+      .guide strong {
+        color: var(--ink);
+        font-weight: 600;
+      }
+      .toc {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem 1.1rem;
+        margin: 0 0 1.5rem;
+        padding: 0;
+        list-style: none;
+        font-family: var(--mono);
+        font-size: 0.74rem;
+        letter-spacing: 0.04em;
+      }
+      .toc a {
+        color: var(--muted);
+        text-decoration: none;
+      }
+      .toc a:hover {
+        color: var(--alice);
+      }
+
+      /* --- the foot: the rest of the site, for when you want it ------------------------------ */
       footer {
+        border-top: 1px solid var(--rule);
+        padding: 2.25rem 1.25rem 3rem;
+        text-align: center;
         font-family: var(--mono);
         font-size: 0.72rem;
         letter-spacing: 0.08em;
         color: var(--faint);
+        display: grid;
+        gap: 0.9rem;
       }
       footer a {
         color: var(--muted);
+        text-decoration: none;
       }
       footer a:hover {
         color: var(--ink);
       }
-      :focus-visible {
-        outline: 2px solid var(--alice);
-        outline-offset: 3px;
+      footer .more {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 0.5rem 1.6rem;
       }
     </style>
   </head>
   <body>
-    <main>
-      <header style="display: flex; flex-direction: column; align-items: center; gap: 1.1rem">
+    <section class="door">
+      <header>
         <div class="kicker">bombadil labs</div>
         <h1>Loam is a database you grow.</h1>
       </header>
 
       <!-- One delta — the deck's opening figure, still. A signed claim gripping an object and a
            value at named ports. If you learn one picture, it is this one. -->
-      <div class="fig" aria-hidden="false">
+      <div class="fig">
         <svg
           viewBox="0 0 420 260"
-          width="360"
+          width="320"
           role="img"
           aria-label="One delta: a signed claim pointing at an object and a value"
         >
@@ -232,37 +413,78 @@
         that it forgot and never what.
       </p>
 
-      <nav class="doors" aria-label="three ways in">
-        <a href="tutorial.html">
-          <span class="door-k">grow one</span>
-          <span class="door-t">The interactive tutorial</span>
-          <span class="door-d">
-            Boot a real governed store in this tab. Seventeen lessons of doing, not reading — and
-            you leave with the store on your own laptop, byte for byte.
+      <nav class="ways" aria-label="two ways in">
+        <a href="#quick-start">
+          <span class="way-k">get set up</span>
+          <span class="way-t">Quick start</span>
+          <span class="way-d">
+            From nothing to a store Claude can reach, in four movements: install, init, funnel,
+            connect. Every command transcribed from the shipped code.
           </span>
         </a>
-        <a href="intro.html">
-          <span class="door-k">see it</span>
-          <span class="door-t">The vision, in pictures</span>
-          <span class="door-d">
-            From one delta to federated apps in seventeen slides. The picture language the rest of
-            the site speaks.
-          </span>
-        </a>
-        <a href="capabilities.html">
-          <span class="door-k">hold us to it</span>
-          <span class="door-t">What it can actually do</span>
-          <span class="door-d">
-            The long read, chapter by chapter. Every promise names the test that proves it, gaps
-            confess themselves, and a stale page turns the build red.
+        <a href="#first-steps">
+          <span class="way-k">then</span>
+          <span class="way-t">First steps</span>
+          <span class="way-d">
+            You just connected Claude to one of these. What is actually different here, three things
+            to feel, and six ways to use it today — with the first prompts to paste.
           </span>
         </a>
       </nav>
 
-      <footer>
+      <div class="facts" aria-label="what is interesting here">
+        <div>
+          <span class="k">whose word</span>
+          <h3>Every line is signed.</h3>
+          <p>
+            Claude writes with a key of its own. The ground records that the connection said it —
+            not you — and the signature travels with the fact forever. Disconnect it and every line
+            stays, still signed as its.
+          </p>
+        </div>
+        <div>
+          <span class="k">where it lives</span>
+          <h3>Consent names a container.</h3>
+          <p>
+            When you connect Claude you choose where the connection lives — one container under your
+            name. Its writes land in an inbox there; its reads are that container. Nothing else,
+            unless you say so again.
+          </p>
+        </div>
+        <div>
+          <span class="k">whose law</span>
+          <h3>Readings are yours.</h3>
+          <p>
+            One pile, two readings: the store holds every claim, and a reading decides what they add
+            up to. Two apps — or two friends' stores — can read one ground differently on purpose,
+            with nothing copied.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <main class="guides">
+      <section class="guide" id="quick-start" aria-labelledby="quick-start-title">
+        <div class="kicker">get set up · docs/quick-start.md</div>
+        <!-- QUICK-START -->
+      </section>
+
+      <section class="guide" id="first-steps" aria-labelledby="first-steps-title">
+        <div class="kicker">then · docs/first-steps.md</div>
+        <!-- FIRST-STEPS -->
+      </section>
+    </main>
+
+    <footer>
+      <div class="more">
+        <a href="tutorial.html">the interactive tutorial</a>
+        <a href="intro.html">the vision, in pictures</a>
+        <a href="capabilities.html">what it can actually do</a>
+      </div>
+      <div>
         <a href="https://github.com/bombadil-labs/loam">github.com/bombadil-labs/loam</a>
         &nbsp;·&nbsp; the spec, the journal, and the hazards live in the tree
-      </footer>
-    </main>
+      </div>
+    </footer>
   </body>
 </html>
