@@ -73,8 +73,9 @@ import {
   holdsGrant,
   registerPrefixesOf,
 } from "../gateway/accounts.js";
+import { inboxName } from "../gateway/container.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
-import { readSeed } from "../cli/config.js";
+import { readSeed, readUserSeed, userSeedPath } from "../cli/config.js";
 import { DOC_TOPICS } from "./docs-content.js";
 import { CSP, makeUserDoors, type UserDoorOptions, type UserDoors } from "./session.js";
 import { makeAdminDoor, type AdminDoor } from "./admin.js";
@@ -85,6 +86,16 @@ export { type UserDoorOptions } from "./session.js";
 export interface TokenIdentity {
   readonly actor?: string; // a signing seed: requests act as this identity
   readonly operator?: true; // requests act as the gateway's operator
+  /**
+   * Where a connection lives (SPEC §58): whose consent bound it, the container, and the inbox
+   * pool inside it. Present for a bearer minted through a §58 consent; absent for an operator
+   * token, a session, or a pre-§58 bearer.
+   */
+  readonly binding?: {
+    readonly user: string;
+    readonly container: string;
+    readonly inbox: string;
+  };
 }
 
 export interface ServeOptions {
@@ -2546,6 +2557,28 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             );
             await gateway.append([delta]);
             return delta.id;
+          },
+          // Bind the connection where consent said (§58): the person's own key — provisioned by
+          // the consent page — authors the connection's write grant in the inbox pool's ground.
+          bind: async ({ user, container, actor }): Promise<string> => {
+            const gateway = mounts.resolve(forUsers.mount)?.gateway;
+            if (gateway === undefined) {
+              throw new Error("the connector's mount is not resolvable, so nothing was bound");
+            }
+            const owner = readUserSeed(forUsers.home, user);
+            if (owner.kind !== "present") {
+              connectorFault(
+                `cannot bind ${actor} into ${container}: ${userSeedPath(forUsers.home, user)} ` +
+                  (owner.kind === "absent" ? "does not exist" : owner.detail),
+              );
+              throw new Error(`no signing key for ${user} on this store, so nothing was bound`);
+            }
+            await gateway.bindConnection({
+              container,
+              connectionKey: actor,
+              ownerSeed: owner.seed,
+            });
+            return inboxName(container, actor);
           },
         });
       }

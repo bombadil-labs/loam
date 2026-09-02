@@ -86,6 +86,16 @@ export interface OAuthGrant {
    * carries none — so `revoke` re-derives the surviving grant deltas rather than trusting this alone.
    */
   readonly grantDeltaId?: string;
+  /**
+   * The binding (SPEC §58): whose consent minted this key, the container the connection lives in,
+   * and the inbox pool spawned for it there. One key per (client, user): the same connector
+   * consented by two people holds two grants. OPTIONAL only in the record's shape — a grant that
+   * carries no binding was minted before §58 and confers nothing at any door (greenfield: the
+   * connector consents again).
+   */
+  readonly user?: string;
+  readonly container?: string;
+  readonly inbox?: string;
 }
 
 /**
@@ -123,6 +133,12 @@ export interface OAuthToken {
    * token fails closed.
    */
   readonly generation?: number;
+  /**
+   * Whose grant this token acts under (SPEC §58): the key is per (client, user), so the token must
+   * say which. OPTIONAL only in the record's shape — a token minted before §58 names no user,
+   * finds no grant, and fails closed.
+   */
+  readonly user?: string;
 }
 
 /**
@@ -334,6 +350,9 @@ function checkGrant(raw: unknown, where: string): OAuthGrant {
   ) {
     throw new OAuthFileUnreadable(`${where} has a grantDeltaId that is not a non-empty string`);
   }
+  const user = optPlainName(raw, where, "user");
+  const container = optPlainName(raw, where, "container");
+  const inbox = optPlainName(raw, where, "inbox");
   return {
     clientId: str(raw, where, "clientId"),
     actorSeed,
@@ -341,7 +360,26 @@ function checkGrant(raw: unknown, where: string): OAuthGrant {
     grantedAt: num(raw, where, "grantedAt"),
     standing,
     ...(rawGrantDeltaId === undefined ? {} : { grantDeltaId: rawGrantDeltaId }),
+    ...(user === undefined ? {} : { user }),
+    ...(container === undefined ? {} : { container }),
+    ...(inbox === undefined ? {} : { inbox }),
   };
+}
+
+/**
+ * An OPTIONAL name field (§58's bindings on grants, tokens and codes): absent, or a non-empty string
+ * with no control byte — the same listing-row rule every name in this file obeys.
+ */
+function optPlainName(raw: unknown, where: string, field: string): string | undefined {
+  const value = (raw as Record<string, unknown>)[field];
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.length === 0) {
+    throw new OAuthFileUnreadable(`${where} has a ${field} that is not a non-empty string`);
+  }
+  if (CONTROL(value)) {
+    throw new OAuthFileUnreadable(`${where} has a ${field} carrying a control character`);
+  }
+  return value;
 }
 
 function checkToken(raw: unknown, where: string): OAuthToken {
@@ -351,11 +389,13 @@ function checkToken(raw: unknown, where: string): OAuthToken {
     throw new OAuthFileUnreadable(`${where} has a digest that is not a sha-256 hex digest`);
   }
   const generation = optGeneration(raw, where, "generation");
+  const user = optPlainName(raw, where, "user");
   return {
     digest,
     clientId: str(raw, where, "clientId"),
     issuedAt: num(raw, where, "issuedAt"),
     ...(generation === undefined ? {} : { generation }),
+    ...(user === undefined ? {} : { user }),
   };
 }
 
@@ -524,10 +564,13 @@ function checkFileShape(parsed: unknown, where: string): OAuthFile {
     where,
     "client with clientId",
   );
+  // One grant per (client, user) since §58 — a connector two people consented holds two keys —
+  // and a pre-§58 grant, naming no user, is its own pair. The key is a JSON pair, so no username
+  // can collide with "no user" and no separator can be spelled by a client id.
   checkUnique(
-    grants.map((g) => g.clientId),
+    grants.map((g) => JSON.stringify([g.clientId, g.user ?? null])),
     where,
-    "grant with clientId",
+    "grant for the pair [clientId, user]",
   );
   checkUnique(
     tokens.map((t) => t.digest),
@@ -852,8 +895,21 @@ export function withOAuthFile<T>(home: string, work: (file: OAuthFile) => OAuthW
 export const clientFor = (file: OAuthFile, clientId: string): OAuthClient | undefined =>
   file.clients.find((c) => c.clientId === clientId);
 
-export const grantFor = (file: OAuthFile, clientId: string): OAuthGrant | undefined =>
-  file.grants.find((g) => g.clientId === clientId);
+/**
+ * The grant a (client, user) pair holds (SPEC §58: one key per pair). Without a user, the lookup
+ * finds only a grant that names none — the pre-§58 shape, which confers nothing at any door — and
+ * never one of the pair-bound grants, so no caller can take "the" grant of a client that holds
+ * several.
+ */
+export const grantFor = (
+  file: OAuthFile,
+  clientId: string,
+  user?: string,
+): OAuthGrant | undefined => file.grants.find((g) => g.clientId === clientId && g.user === user);
+
+/** Every grant a client holds — one per person who consented, and any pre-§58 one it still carries. */
+export const grantsFor = (file: OAuthFile, clientId: string): OAuthGrant[] =>
+  file.grants.filter((g) => g.clientId === clientId);
 
 /**
  * Every key this client has had revoked, oldest first. READ-ONLY HISTORY: it names who acted, and it

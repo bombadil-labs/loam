@@ -51,10 +51,16 @@ export type RevokePlan =
       readonly bound: string;
       readonly inbox?: Container;
       readonly ownerSeed?: string;
+      /** Every OTHER inbox pool this key holds under the owner (§58): struck with the row's. */
+      readonly siblings: readonly string[];
+      /** The key's connector pair names another person: it stands, unnamed (§58). */
+      readonly othersPair?: true;
       readonly client?: {
         readonly clientId: string;
         readonly clientName?: string;
         readonly generation?: number;
+        /** Whose binding this inbox is (§58): the revoke is that person's alone. */
+        readonly user?: string;
       };
     }
   | { readonly act: "refuse"; readonly status: number; readonly message: string };
@@ -73,6 +79,7 @@ export interface AdminPagesOpts {
     table: ContainerTable,
     reach: ReadonlySet<string>,
     formToken: string,
+    user: string,
   ) => string;
 }
 
@@ -486,7 +493,7 @@ ${rows.join("\n")}
 <p>You are <code>${escapeHtml(user)}</code>. Below is your subtree: the container that bears your
 name, and everything declared inside it. Each name opens its own page.</p>
 ${treeHtml(table, reach, user)}
-${opts.connectionsPanel(gw, table, reach, formToken)}
+${opts.connectionsPanel(gw, table, reach, formToken, user)}
 ${channelsPanelHtml(gw, (c) => reach.has(c.name), {
   // Scoped, not absolute: this store may be receiving on a dozen channels, and the true statement
   // is only that none of them lands anywhere THIS reader can see.
@@ -772,18 +779,35 @@ ${hiddenPair(formToken, name)}
     formToken: string,
     confirmToken: string,
   ): string => {
+    // §58: the act is the KEY's — this row's person's, or the pre-§58 key that names no person —
+    // never the whole connector's, whose other keys stand.
     const clientLine =
       plan.client === undefined
         ? ""
         : `<p>It is the connector <code>${escapeHtml(plan.client.clientName ?? plan.client.clientId)}</code>` +
           (plan.client.generation === undefined ? "" : ` (generation ${plan.client.generation})`) +
-          `. Revoking retires every token it holds — each is refused on its next request.</p>\n`;
+          (plan.client.user === undefined
+            ? `. Revoking retires the token(s) this key holds — a key from before §58, which already ` +
+              `opens no door — and every other key of this connector stands.</p>\n`
+            : `. Revoking retires the token(s) this key holds for <code>${escapeHtml(plan.client.user)}</code> ` +
+              `— each is refused on its next request. Other people's bindings of this connector stand.</p>\n`);
+    const siblingsLine =
+      plan.siblings.length === 0
+        ? ""
+        : `<p>This key also writes into ${plan.siblings
+            .map((s) => `<code>${escapeHtml(s)}</code>`)
+            .join(", ")}; that inbox is struck with this one, since a revoke is the key's.</p>\n`;
+    const othersLine =
+      plan.othersPair === true
+        ? `<p>This key's connector binding is another person's. Revoking here strikes its grant in ` +
+          `this inbox; that binding stands.</p>\n`
+        : "";
     return page(
       "confirm the revoke",
       `<h1>Revoke <code>${escapeHtml(plan.key)}</code>?</h1>
 <p>It writes into <code>${escapeHtml(plan.bound)}</code>. Revoking refuses its next write.</p>
-${clientLine}<p>Everything it already wrote is kept, author intact — a revocation closes the door and does not
-rewrite history. Every other connection is untouched. To forget its inbox whole, drop it from
+${clientLine}${siblingsLine}${othersLine}<p>Everything it already wrote is kept, author intact — a revocation closes the door and does not
+rewrite history. Every other key's connection is untouched. To forget its inbox whole, drop it from
 <a href="${escapeHtml(detailHref(name))}">its own page</a>.</p>
 <form method="post" action="${ADMIN_REVOKE_CONFIRM_PATH}">
 ${hiddenPair(formToken, name)}

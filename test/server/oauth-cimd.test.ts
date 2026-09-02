@@ -263,6 +263,7 @@ const approve = (base: string, sessionId: string, html: string): Promise<Respons
       code_challenge: fieldOf(html, "code_challenge"),
       code_challenge_method: "S256",
       state: fieldOf(html, "state"),
+      bind_new: "journal", // §58: a connection lives in one container under the person's name
     }).toString(),
     redirect: "manual",
   });

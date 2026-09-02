@@ -1358,6 +1358,12 @@ const atTokenPath = doorAt(TOKEN_PATH);
 /** The connector identity a presented bearer token resolves to. The `actor` is a SIGNING SEED. */
 export interface ConnectorIdentity {
   readonly actor: string; // the grant's actorSeed — never the operator's, never `operator: true`
+  /** Where the connection lives (SPEC §58); absent only for a grant bound before the pool stood. */
+  readonly binding?: {
+    readonly user: string;
+    readonly container: string;
+    readonly inbox: string;
+  };
 }
 
 export interface TokenDoorOptions {
@@ -1380,6 +1386,17 @@ export interface TokenDoorOptions {
    * neither. Called AFTER the seed is durably written (criterion 5), so a retry reuses the seed.
    */
   readonly grantStanding: (actor: string) => Promise<string>;
+  /**
+   * Bind the connection where consent said (SPEC §58): spawn — or resume — the inbox pool for
+   * `actor` inside `container`, owned by `user`, and return the pool's name. The seam that needs
+   * the person's signing key and the live gateway; the door holds neither. A throw refuses the
+   * redemption with nothing minted beyond the seed (which a retry reuses).
+   */
+  readonly bind: (binding: {
+    readonly user: string;
+    readonly container: string;
+    readonly actor: string;
+  }) => Promise<string>;
   /** Where a local fault goes. The CALLER never sees it — it may name the home's path. */
   readonly onFault?: (message: string) => void;
   /**
@@ -1478,9 +1495,24 @@ export function makeTokenDoor(options: TokenDoorOptions): TokenDoor {
     // a fresh grant does not lower the generation, so an old token never resurrects. An absent
     // generation never equals a client's.
     if (client === undefined || token.generation !== client.generation) return undefined;
-    const grant = grantFor(file, token.clientId);
-    if (grant === undefined || !grant.standing) return undefined;
-    return { actor: grant.actorSeed };
+    // The key is the (client, user) pair's (§58): a token that names no user is pre-§58, finds
+    // no grant, and fails closed — the connector consents again.
+    if (token.user === undefined) return undefined;
+    const grant = grantFor(file, token.clientId, token.user);
+    // A grant whose pool never stood (a bind that failed mid-redemption) confers nothing: the
+    // connection is bound nowhere, and nowhere is not a place to act from.
+    if (
+      grant === undefined ||
+      !grant.standing ||
+      grant.container === undefined ||
+      grant.inbox === undefined
+    ) {
+      return undefined;
+    }
+    return {
+      actor: grant.actorSeed,
+      binding: { user: token.user, container: grant.container, inbox: grant.inbox },
+    };
   };
 
   // The same ladder as `resolve`, answering the PUBLIC half: which client, which author. Never
@@ -1496,7 +1528,8 @@ export function makeTokenDoor(options: TokenDoorOptions): TokenDoor {
     if (token === undefined) return undefined;
     const client = clientFor(file, token.clientId);
     if (client === undefined || token.generation !== client.generation) return undefined;
-    const grant = grantFor(file, token.clientId);
+    if (token.user === undefined) return undefined;
+    const grant = grantFor(file, token.clientId, token.user);
     if (grant === undefined || !grant.standing) return undefined;
     return { clientId: token.clientId, actor: grant.actor };
   };
@@ -1588,10 +1621,27 @@ export function makeTokenDoor(options: TokenDoorOptions): TokenDoor {
         return;
       }
 
-      // The seed: reuse the client's existing grant seed, or mint a fresh one and WRITE IT FIRST
-      // (standing false) so a retry after a failed ground append reuses it rather than minting a
-      // second and stranding the first (criterion 5). Never the operator's — a fresh random key.
-      const existing = grantFor(file, code.clientId);
+      // The binding (SPEC §58): consent recorded where this connection lives, and this is where
+      // that word is honored. A code that names no container mints nothing — a connection is
+      // never bound nowhere.
+      if (code.user === undefined || code.container === undefined) {
+        refuse(
+          res,
+          400,
+          "invalid_grant",
+          "this code carries no container, and a connection is never bound nowhere — consent " +
+            "again and choose one",
+        );
+        return;
+      }
+      const user = code.user;
+      const container = code.container;
+      const samePair = (g: OAuthGrant): boolean => g.clientId === code.clientId && g.user === user;
+
+      // The seed: ONE KEY PER (client, user). Reuse the pair's existing grant seed, or mint a fresh
+      // one and WRITE IT FIRST (standing false) so a retry after a failed ground append reuses it
+      // rather than minting a second and stranding the first (criterion 5). Never the operator's.
+      const existing = grantFor(file, code.clientId, user);
       let grant: OAuthGrant;
       if (existing !== undefined) {
         grant = existing;
@@ -1599,6 +1649,8 @@ export function makeTokenDoor(options: TokenDoorOptions): TokenDoor {
         const actorSeed = randomBytes(32).toString("hex");
         grant = {
           clientId: code.clientId,
+          user,
+          container,
           actorSeed,
           actor: authorForSeed(actorSeed),
           grantedAt: Date.now(),
@@ -1606,7 +1658,9 @@ export function makeTokenDoor(options: TokenDoorOptions): TokenDoor {
         };
         withOAuthFile<void>(home, (f) => ({
           next:
-            grantFor(f, code.clientId) === undefined ? { ...f, grants: [...f.grants, grant] } : f,
+            grantFor(f, code.clientId, user) === undefined
+              ? { ...f, grants: [...f.grants, grant] }
+              : f,
           result: undefined,
         }));
       }
@@ -1619,17 +1673,34 @@ export function makeTokenDoor(options: TokenDoorOptions): TokenDoor {
         withOAuthFile<void>(home, (f) => ({
           next: {
             ...f,
-            grants: f.grants.map((g) =>
-              g.clientId === code.clientId ? { ...g, standing: true, grantDeltaId } : g,
-            ),
+            grants: f.grants.map((g) => (samePair(g) ? { ...g, standing: true, grantDeltaId } : g)),
           },
           result: undefined,
         }));
         grant = { ...grant, standing: true, grantDeltaId };
       }
 
+      // The inbox (§58): bound on EVERY redemption, not only when the record lacks a pool. The
+      // pool may have been dropped since — its declaration struck, its bytes gone — while the record
+      // still named it, and a record is never the authority on what stands. `bindConnection` is
+      // idempotent: it resumes a live pool and re-declares a struck one, so the record follows what
+      // actually stands. A consent into another container spawns a second pool there; the first
+      // stands, and the grant follows the person's latest word.
+      const inbox = await options.bind({ user, container, actor: grant.actor });
+      if (grant.inbox !== inbox || grant.container !== container) {
+        withOAuthFile<void>(home, (f) => ({
+          next: {
+            ...f,
+            grants: f.grants.map((g) => (samePair(g) ? { ...g, container, inbox } : g)),
+          },
+          result: undefined,
+        }));
+        grant = { ...grant, container, inbox };
+      }
+
       // Mint the bearer token: a secret to the client, its DIGEST plus the mint generation to the
-      // file. The plaintext never touches disk. Register the digest so the resolver will read for it.
+      // file — and the user, since the key is the pair's. The plaintext never touches disk.
+      // Register the digest so the resolver will read for it.
       const tokenSecret = randomBytes(32).toString("base64url");
       const digest = digestHex(tokenSecret);
       const record: OAuthToken = {
@@ -1637,6 +1708,7 @@ export function makeTokenDoor(options: TokenDoorOptions): TokenDoor {
         clientId: code.clientId,
         issuedAt: Date.now(),
         generation: client.generation,
+        user,
       };
       withOAuthFile<void>(home, (f) => ({
         next: { ...f, tokens: [...f.tokens, record] },
@@ -1709,9 +1781,18 @@ export function makeTokenDoor(options: TokenDoorOptions): TokenDoor {
 
 // --- revocation ---------------------------------------------------------------------------------
 
+/**
+ * What a revoke reaches (SPEC §58). The whole CLIENT — every key it holds, the generation bumped so
+ * every token and code dies at once — is the CLI's explicit act. ONE PAIR — a person's key, or the
+ * pre-§58 key that names no person — is what the admin page revokes from an inbox's row.
+ */
+export type RevokeScope =
+  { readonly kind: "client" } | { readonly kind: "pair"; readonly user: string | undefined };
+
 export type RevokeOutcome =
   | { readonly kind: "revoked"; readonly clientId: string; readonly generation: number }
   | { readonly kind: "no-such-client" }
+  | { readonly kind: "no-such-pair" }
   | { readonly kind: "locked" }
   | { readonly kind: "unreadable" };
 
@@ -1731,39 +1812,59 @@ export async function revokeConnector(
   clientId: string,
   strikeStanding: (grant: OAuthGrant) => Promise<void>,
   onFault: (message: string) => void = () => {},
+  scope: RevokeScope = { kind: "client" },
 ): Promise<RevokeOutcome> {
-  let struckGrant: OAuthGrant | undefined;
+  // Whole client: EVERY key it holds goes — one per person who consented (§58), plus any pre-§58
+  // one — and the generation bump kills every token and code at once. ONE PAIR: that key alone
+  // goes, and since the generation is the client's and cannot scope, the pair's tokens and codes
+  // are deleted by name instead — the resolver refuses a token whose record is gone. Every other
+  // key of the same connector stands untouched. A pair nobody holds is its own answer, and writes
+  // nothing.
+  let struckGrants: OAuthGrant[] = [];
   let outcome: RevokeOutcome;
   try {
     outcome = withOAuthFile<RevokeOutcome>(home, (file) => {
       const client = clientFor(file, clientId);
       if (client === undefined) return { result: { kind: "no-such-client" } };
-      struckGrant = grantFor(file, clientId);
-      const going = struckGrant; // a const the closures below can narrow; `struckGrant` outlives this scope
+      const ofPair = (r: { readonly clientId: string; readonly user?: string }): boolean =>
+        r.clientId === clientId && (scope.kind === "client" || r.user === scope.user);
+      struckGrants = file.grants.filter(ofPair);
+      if (scope.kind === "pair" && struckGrants.length === 0) {
+        return { result: { kind: "no-such-pair" } };
+      }
+      const going = struckGrants; // a const the closures below read; `struckGrants` outlives this scope
+      const goingActors = new Set(going.map((g) => g.actor));
+      const generation = scope.kind === "client" ? client.generation + 1 : client.generation;
       return {
         next: {
           ...file,
-          clients: file.clients.map((c) =>
-            c.clientId === clientId ? { ...c, generation: c.generation + 1 } : c,
-          ),
-          // The grant goes, and with it the SEED — revocation destroys the key. What survives is the
-          // public author, in a list nothing that mints authority reads (`OAuthRevocation`). Without
-          // it the store forgets who acted the moment it stops letting them act, and the ledger then
-          // reports a connector of months' standing as having "no acting identity yet" while the
-          // grant it held sits attributed to nobody.
-          grants: file.grants.filter((g) => g.clientId !== clientId),
+          clients: file.clients.map((c) => (c.clientId === clientId ? { ...c, generation } : c)),
+          // The grants go, and with them the SEEDS — revocation destroys the keys. What survives is
+          // each public author, in a list nothing that mints authority reads (`OAuthRevocation`).
+          // Without it the store forgets who acted the moment it stops letting them act, and the
+          // ledger then reports a connector of months' standing as having "no acting identity yet"
+          // while the grant it held sits attributed to nobody.
+          grants: file.grants.filter((g) => !ofPair(g)),
+          ...(scope.kind === "client"
+            ? {}
+            : {
+                tokens: file.tokens.filter((t) => !ofPair(t)),
+                ...(file.codes === undefined
+                  ? {}
+                  : { codes: file.codes.filter((c) => !ofPair(c)) }),
+              }),
           // Keyed by ACTOR: a re-keyed connector keeps a record for every key it ever signed with,
           // and revoking the same key twice replaces rather than duplicates.
-          ...(going === undefined
+          ...(going.length === 0
             ? {}
             : {
                 revoked: [
-                  ...(file.revoked ?? []).filter((r) => r.actor !== going.actor),
-                  { clientId, actor: going.actor, revokedAt: Date.now() },
+                  ...(file.revoked ?? []).filter((r) => !goingActors.has(r.actor)),
+                  ...going.map((g) => ({ clientId, actor: g.actor, revokedAt: Date.now() })),
                 ],
               }),
         },
-        result: { kind: "revoked", clientId, generation: client.generation + 1 },
+        result: { kind: "revoked", clientId, generation },
       };
     });
   } catch (err) {
@@ -1773,15 +1874,18 @@ export async function revokeConnector(
     return { kind: "unreadable" };
   }
   // The ground strike is cleanup after the authoritative access-kill above. A failure here leaves the
-  // token dead (generation bumped) and only the ground grant lingering, reachable by nothing.
-  if (outcome.kind === "revoked" && struckGrant !== undefined) {
-    try {
-      await strikeStanding(struckGrant);
-    } catch (err) {
-      onFault(
-        `revoked ${clientId} in ${oauthPath(home)} (its tokens are dead) but could not strike its ` +
-          `ground write grant: ${err instanceof Error ? err.message : String(err)}`,
-      );
+  // tokens dead (the generation bumped, or the pair's records gone) and only a ground grant
+  // lingering, reachable by nothing.
+  if (outcome.kind === "revoked") {
+    for (const struck of struckGrants) {
+      try {
+        await strikeStanding(struck);
+      } catch (err) {
+        onFault(
+          `revoked ${clientId} in ${oauthPath(home)} (that key's tokens are dead) but could not ` +
+            `strike the ground write grant of ${struck.actor}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
   }
   return outcome;

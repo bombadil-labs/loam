@@ -81,6 +81,9 @@ async function fourDoorStore(): Promise<{ base: string; gateway: Gateway }> {
         actor: CONNECTOR,
         grantedAt: 2000,
         standing: true,
+        user: "myk", // §58: the key is the (client, user) pair's, pooled in the person's container
+        container: "myk:journal",
+        inbox: "inbox:myk:journal:direct",
       },
     ],
     tokens: [
@@ -89,6 +92,7 @@ async function fourDoorStore(): Promise<{ base: string; gateway: Gateway }> {
         clientId: CLIENT_ID,
         issuedAt: 2000,
         generation: 1,
+        user: "myk",
       },
     ],
   });

@@ -137,6 +137,7 @@ import {
 } from "./quarantine-pool.js";
 import {
   bindConnectionImpl,
+  resumeInboxesImpl,
   connectionScopeImpl,
   containerScopeImpl,
   openContainerImpl,
@@ -528,6 +529,9 @@ export class Gateway {
     // error on a store that merely restarted. Resuming here is what makes a channel outlive the
     // command that opened it.
     await gateway.resumeChannels();
+    // And every connection's inbox pool (§58), for the same reason: a binding made by one process
+    // must be readable by the next, or the bound container answers with a refusal after a restart.
+    await gateway.resumeInboxes();
     return gateway;
   }
 
@@ -1097,6 +1101,11 @@ export class Gateway {
   // owner. Idempotent on (container, connectionKey) — a second bind resumes the same inbox.
   async bindConnection(opts: BindConnectionOptions): Promise<Container> {
     return bindConnectionImpl(this, opts);
+  }
+
+  /** Attach every declared inbox pool whose bytes this store's pool backend holds (§58). */
+  async resumeInboxes(): Promise<void> {
+    return resumeInboxesImpl(this);
   }
 
   // A connection's bounded read (SPEC §39.1.2): gather the bound container (or a named descendant of
