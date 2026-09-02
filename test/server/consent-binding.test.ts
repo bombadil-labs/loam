@@ -485,13 +485,15 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
       expect(res.status, leaf).toBe(400);
     }
     expect(readOAuthFile(connectorsHome).codes ?? []).toHaveLength(0);
-    // The boundaries themselves: 63 is the longest leaf a path carries and 1 the shortest, and
-    // both are created.
+    // The boundaries themselves: 63 is the longest leaf a path carries and 1 the shortest, both
+    // are created, and a leaf may begin with any digit.
     const longest = "x".repeat(63);
     expect((await approve(base, ada, html, { bind_new: longest })).status).toBe(302);
     expect(readOAuthFile(connectorsHome).codes?.[0]).toMatchObject({ container: `ada:${longest}` });
     expect((await approve(base, ada, html, { bind_new: "j" })).status).toBe(302);
     expect(readOAuthFile(connectorsHome).codes?.[1]).toMatchObject({ container: "ada:j" });
+    expect((await approve(base, ada, html, { bind_new: "2025" })).status).toBe(302);
+    expect(readOAuthFile(connectorsHome).codes?.[2]).toMatchObject({ container: "ada:2025" });
   });
 
   it("the record refuses an empty binding name and carries a one-character one", () => {
