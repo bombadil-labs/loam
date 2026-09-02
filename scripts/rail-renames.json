@@ -22,9 +22,9 @@
   "renames": [],
   "revisions": [
     {
-      "file": "test/server/consent-exchange.test.ts",
-      "sha256": "82d357b34df2b6f04dc932f18f8211f746b001b2844987eca533e70f8a36af44",
-      "authorized": "Myk's overnight delegation 2026-09-02 (observed flake, fixed at 20cbb73): three disclosure assertions asked whether a page contains a username as a bare substring, but the page renders a 64-character hex key and hex spells words \u2014 a key contains 'ada' about 1.6% of mints (measured), so the rail failed about one CI run in sixty. The assertions now mask hex keys before asking; a probe that makes the page really print the name still turns the rail red."
+      "file": "test/server/read-scope.test.ts",
+      "sha256": "7b2a2e99b638316e227c24a8b0e0cc0f4dc51b1e024703ba40693968bd3dcf7c",
+      "authorized": "Myk's word 2026-09-02 (fixed at aed5ea3): a bound read now covers the bound container's SUBTREE, which is what \u00a758 position 2 decided and what S1 shipped too narrowly. The rail gains criterion 3's own two edges \u2014 a room beneath the workspace resolves, a room beside it does not \u2014 and the fail-closed refusal when a descendant cannot be attached. Its existing cases are unchanged."
     }
   ]
 }
