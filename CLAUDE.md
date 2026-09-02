@@ -593,6 +593,13 @@ busy.
   Technical names (delta, schema, rail, door, operator) are permitted as domain terms. The SPEC may
   keep its dense register — but every spec idea must be expressible in STE when you communicate it
   to Myk. Craft still applies: STE limits the sentence shape, not the care.
+  **THE PR BODY IS THE HARDEST CASE, AND IT DRIFTED** (Myk, 2026-09-02: "PR descriptions on this
+  project must be written in STE-100 ... that'll help me to stay more on top of what's on offer").
+  A PR body is what Myk reads to decide. Essay prose costs the most there. Write it in this shape:
+  one sentence saying what the PR does; then WHAT CHANGED as a list, one change per line; then WHY,
+  one reason per sentence; then the rails, and what to read. Every sentence obeys the style. Prefer
+  a list to a paragraph. Delete a sentence that only sets a mood. Name a risk in its own sentence.
+  The register is a maintenance manual, not an essay — and the same holds for the board brief.
 - **Comments explain the code; HISTORY goes in the journal** (Myk, 2026-07-21). A comment answers
   *what will bite whoever changes this next* — a non-obvious substrate behavior, an invariant, why
   not the obvious thing. It does **not** narrate how the code got here: what an audit found, what an
