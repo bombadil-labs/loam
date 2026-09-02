@@ -1458,6 +1458,19 @@ export function inboxName(container: string, connectionKey: string): string {
 // a pool mid-drop (unregistered, its handle not yet cleared) both refuse. There is no fallback to
 // this store: a connection's write landing in the primary is exactly the leak the binding closes.
 export function poolForBindingImpl(gw: Gateway, binding: ConnectionBinding): Gateway {
+  // THE CONTAINER FIRST. A pool outlives the container it was bound under: dropping a shared
+  // container strikes its declaration and leaves the inbox declared and attached. Without this
+  // the write lands durably in the pool and the read that follows it refuses by name, so the door
+  // answers 200 with an error over a delta that is really there — and every retry mints another.
+  // Refuse before anything is signed; the connection is bound nowhere until it consents again.
+  const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+  if (!table.containers.has(binding.container)) {
+    throw new Error(
+      `the container ${binding.container} this connection is bound to no longer stands, so this ` +
+        `write is refused — it would land where nothing can read it. Consent again and choose a ` +
+        `container that stands.`,
+    );
+  }
   const held = gw.connectionInboxes.get(binding.inbox);
   if (held?.gateway === undefined) {
     throw new Error(
