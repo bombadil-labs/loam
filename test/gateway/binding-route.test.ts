@@ -286,6 +286,17 @@ describe("T262 — a bound read resolves over the container's scope, never the w
         { _entity: MOSS, tag: ["pooled"] },
       ],
     });
+    // The page arguments bind on the bound listing too: a limit of one, then the cursor after it.
+    const first = await gw.query(`{ plants(limit: 1) { _entity } }`, undefined, {
+      actor: CONN_SEED,
+      binding,
+    });
+    expect(first.data).toEqual({ plants: [{ _entity: FERN }] });
+    const rest = await gw.query(`{ plants(after: "${FERN}") { _entity } }`, undefined, {
+      actor: CONN_SEED,
+      binding,
+    });
+    expect(rest.data).toEqual({ plants: [{ _entity: MOSS }] });
     expect((await gw.list("Plant")).map((n) => n.entity)).toEqual([FERN, OAK]);
     await gw.close();
   });
