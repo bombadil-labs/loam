@@ -222,6 +222,49 @@ const noteClaims = (author: string, id: string, text: string, timestamp: number)
   ],
 });
 
+const getAdmin = (base: string, sessionId: string): Promise<Response> =>
+  fetch(`${base}/admin`, {
+    headers: { cookie: `${SESSION_COOKIE}=${sessionId}` },
+    redirect: "manual",
+  });
+const postAdmin = (
+  base: string,
+  path: string,
+  sessionId: string,
+  fields: Record<string, string>,
+): Promise<Response> =>
+  fetch(`${base}${path}`, {
+    method: "POST",
+    redirect: "manual",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      cookie: `${SESSION_COOKIE}=${sessionId}`,
+      ...SAME_ORIGIN,
+    },
+    body: new URLSearchParams(fields).toString(),
+  });
+const formTokenOf = (html: string): string =>
+  /name="form_token" value="([^"]+)"/.exec(html)?.[1] ?? "";
+const confirmTokenOf = (html: string): string =>
+  /name="confirm_token" value="([^"]+)"/.exec(html)?.[1] ?? "";
+/** The admin page's two-step revoke of one inbox, as a person does it. */
+async function revokeViaPanel(base: string, sessionId: string, name: string): Promise<Response> {
+  const dashboard = await (await getAdmin(base, sessionId)).text();
+  const formToken = formTokenOf(dashboard);
+  const confirm = await postAdmin(base, "/admin/revoke", sessionId, {
+    form_token: formToken,
+    name,
+  });
+  expect(confirm.status).toBe(200);
+  const confirmToken = confirmTokenOf(await confirm.text());
+  expect(confirmToken).not.toBe("");
+  return postAdmin(base, "/admin/revoke-confirm", sessionId, {
+    form_token: formToken,
+    name,
+    confirm_token: confirmToken,
+  });
+}
+
 const whoami = (base: string, token: string): Promise<Response> =>
   fetch(`${base}/default/whoami`, { headers: { authorization: `Bearer ${token}` } });
 
@@ -375,6 +418,19 @@ describe("§58 S1b — the exchange honors the binding", () => {
     const ids = (await second.gateway!.backend.deltasSince(new Set())).map((d) => d.id);
     expect(ids).not.toContain(early.id);
     expect(second.gateway!.reactor.get(early.id)).toBeUndefined();
+    // And the scope's POSITIVE side, so a scope that admits nothing cannot pass: a primary write
+    // by the key AFTER the second binding is inside the second pool's scope on the next pulse. This
+    // is the same window — the next slice, routing writes into the pool, retires this assertion
+    // deliberately rather than losing it.
+    const later = signClaims(
+      noteClaims(grant.actor, "note:later", "after the second binding", gateway.nextTimestamp()),
+      grant.actorSeed,
+    );
+    await gateway.append([later]);
+    await second.reseed();
+    const afterPulse = (await second.gateway!.backend.deltasSince(new Set())).map((d) => d.id);
+    expect(afterPulse).toContain(later.id);
+    expect(afterPulse).not.toContain(early.id);
   });
 
   it("a token or a grant minted before §58 names no user and fails closed", async () => {
@@ -470,6 +526,12 @@ describe("§58 S1b — the exchange honors the binding", () => {
     const { base, connectorsHome, faults } = await exchangeServer();
     const adaToken = await connect(base, "ada", "journal");
     const beaToken = await connect(base, "bea", "notes");
+    // A code ada consented but never redeemed: the revoke burns it too, or it would re-key and
+    // re-bind her without a new consent — the window the whole-client path closes by generation.
+    const pending = pkce();
+    const { code: pendingCode } = await consent(base, "ada", pending.challenge, {
+      bind_new: "journal",
+    });
     const struck: string[] = [];
     const outcome = await revokeConnector(
       connectorsHome,
@@ -489,8 +551,11 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(file.tokens.map((t) => t.user)).toEqual(["bea"]);
     expect(file.revoked?.map((r) => r.clientId)).toEqual([CLIENT_ID]);
     expect(struck).toHaveLength(1);
+    expect((file.codes ?? []).some((c) => c.user === "ada")).toBe(false);
+    expect((await redeem(base, pendingCode, pending.verifier)).status).toBe(400);
     expect((await whoami(base, adaToken)).status).toBe(401);
     expect((await whoami(base, beaToken)).status).toBe(200);
+    expect(readOAuthFile(connectorsHome).grants.map((g) => g.user)).toEqual(["bea"]);
   });
 
   it("a binding outlives the process that made it: the pool re-attaches at the next boot", async () => {
@@ -520,5 +585,66 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(scope).toContain(note.id);
     const reattached = reopened.connectionInboxes.get(grant.inbox!)!.gateway!;
     expect(holdsGrant(reattached.reactor, STORE_ENTITY, grant.actor, "write", OPERATOR)).toBe(true);
+    // A re-attached handle is the inbox kind, not a bare container: it refuses detach, and a drop
+    // through it clears the durable entry so a later bind spawns fresh rather than resuming a
+    // purged pool.
+    const handle = reopened.connectionInboxes.get(grant.inbox!)!;
+    await expect(handle.detach()).rejects.toThrow(/durable/);
+    await handle.drop();
+    expect(reopened.connectionInboxes.has(grant.inbox!)).toBe(false);
+  });
+
+  it("a re-consent after the inbox was dropped binds a fresh pool, never the struck one", async () => {
+    const { base, connectorsHome, gateway } = await exchangeServer();
+    await connect(base, "ada", "journal");
+    const first = readOAuthFile(connectorsHome).grants[0]!;
+    await gateway.connectionInboxes.get(first.inbox!)!.drop();
+    expect(gateway.containers().containers.has(first.inbox!)).toBe(false);
+    // The record still names the dropped pool; the next redemption binds again and a pool stands
+    // — declared, attached, and holding the connection's standing — under the same key.
+    const token = await connect(base, "ada", "journal");
+    const again = readOAuthFile(connectorsHome).grants[0]!;
+    expect(again.actor).toBe(first.actor);
+    expect(again.inbox).toBe(first.inbox);
+    expect(gateway.containers().containers.get(first.inbox!)?.inboxOf).toBe("ada:journal");
+    const pool = gateway.connectionInboxes.get(first.inbox!)?.gateway;
+    expect(pool).toBeDefined();
+    expect(holdsGrant(pool!.reactor, STORE_ENTITY, first.actor, "write", OPERATOR)).toBe(true);
+    expect((await whoami(base, token)).status).toBe(200);
+  });
+
+  it("revoking one inbox from the admin page strikes every pool the same key holds, and only that person's", async () => {
+    const { base, connectorsHome, gateway } = await exchangeServer();
+    const beaToken = await connect(base, "bea", "notes");
+    await connect(base, "ada", "journal");
+    await connect(base, "ada", "other");
+    const ada = readOAuthFile(connectorsHome).grants.find((g) => g.user === "ada")!;
+    const journalInbox = inboxName("ada:journal", ada.actor);
+    const otherInbox = inboxName("ada:other", ada.actor);
+    const poolOf = (name: string) => gateway.connectionInboxes.get(name)!.gateway!;
+    expect(
+      holdsGrant(poolOf(journalInbox).reactor, STORE_ENTITY, ada.actor, "write", OPERATOR),
+    ).toBe(true);
+    expect(holdsGrant(poolOf(otherInbox).reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(
+      true,
+    );
+
+    const session = await signIn(base, "ada", PASSWORD);
+    const done = await revokeViaPanel(base, session, journalInbox);
+    expect(done.status).toBe(200);
+    const doneHtml = await done.text();
+    expect(doneHtml).toContain("for <code>ada</code>");
+    expect(doneHtml).toContain("Other people's bindings of this connector stand");
+    // Both of the key's pools are struck; bea's binding and token stand.
+    expect(
+      holdsGrant(poolOf(journalInbox).reactor, STORE_ENTITY, ada.actor, "write", OPERATOR),
+    ).toBe(false);
+    expect(holdsGrant(poolOf(otherInbox).reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(
+      false,
+    );
+    const file = readOAuthFile(connectorsHome);
+    expect(file.grants.map((g) => g.user)).toEqual(["bea"]);
+    expect(file.clients[0]!.generation).toBe(1);
+    expect((await whoami(base, beaToken)).status).toBe(200);
   });
 });

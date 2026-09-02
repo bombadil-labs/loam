@@ -201,7 +201,10 @@ export const adminFederation = (ctx: AdminFederationCtx) => {
       client === undefined
         ? 0
         : records.file.tokens.filter(
-            (t) => t.clientId === grant.clientId && t.generation === client.generation,
+            (t) =>
+              t.clientId === grant.clientId &&
+              t.generation === client.generation &&
+              t.user === grant.user, // the pair's tokens, not the connector's (§58)
           ).length;
     return {
       clientId: grant.clientId,
@@ -650,7 +653,9 @@ ${flowNote}`;
         clientId,
         strike,
         onFault,
-        plan.client.user === undefined ? undefined : { user: plan.client.user },
+        // Always the pair's — including the pre-§58 pair that names no user; the whole-client
+        // revoke is the CLI's explicit act, never this page's.
+        { user: plan.client.user },
       );
       if (outcome.kind === "no-such-client") {
         refuse(
@@ -705,11 +710,39 @@ ${flowNote}`;
         return;
       }
     }
+    // §58: a key may hold a sibling pool — a re-consent into another container spawns a second
+    // inbox and the first stands — and a revoke is the KEY's, so every pool of this key is struck,
+    // not only the row the page was opened on. A sibling that could not be struck is a fault the
+    // operator hears; the page still says what it did.
+    if (plan.ownerSeed !== undefined) {
+      for (const [sibling, handle] of gw.connectionInboxes) {
+        if (sibling === name || !sibling.endsWith(`:${plan.key}`)) continue;
+        const pool = handle.gateway;
+        if (pool === undefined) continue;
+        if (!holdsGrant(pool.reactor, STORE_ENTITY, plan.key, "write", gw.operatorAuthor)) continue;
+        try {
+          await gw.revokeConnection({
+            inbox: handle,
+            connectionKey: plan.key,
+            ownerSeed: plan.ownerSeed,
+          });
+        } catch (err) {
+          onFault(
+            `the admin revoke struck "${name}" but could not strike the same key's sibling inbox ` +
+              `"${sibling}": ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+    }
     const clientDone =
       plan.client === undefined
         ? ""
-        : ` The connector <code>${escapeHtml(plan.client.clientName ?? plan.client.clientId)}</code>
-holds no working token now — each is refused on its next request.`;
+        : plan.client.user === undefined
+          ? ` The connector <code>${escapeHtml(plan.client.clientName ?? plan.client.clientId)}</code>
+holds no working token now — each is refused on its next request.`
+          : ` The connector <code>${escapeHtml(plan.client.clientName ?? plan.client.clientId)}</code>
+holds no working token for <code>${escapeHtml(plan.client.user)}</code> now — each is refused on its
+next request. Other people's bindings of this connector stand.`;
     htmlOut(
       res,
       200,

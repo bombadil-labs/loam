@@ -779,7 +779,10 @@ ${hiddenPair(formToken, name)}
         ? ""
         : `<p>It is the connector <code>${escapeHtml(plan.client.clientName ?? plan.client.clientId)}</code>` +
           (plan.client.generation === undefined ? "" : ` (generation ${plan.client.generation})`) +
-          `. Revoking retires every token it holds — each is refused on its next request.</p>\n`;
+          (plan.client.user === undefined
+            ? `. Revoking retires every token it holds — each is refused on its next request.</p>\n`
+            : `. Revoking retires the token(s) it holds for <code>${escapeHtml(plan.client.user)}</code> — each is ` +
+              `refused on its next request. Other people's bindings of this connector stand.</p>\n`);
     return page(
       "confirm the revoke",
       `<h1>Revoke <code>${escapeHtml(plan.key)}</code>?</h1>

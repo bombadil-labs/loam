@@ -1680,11 +1680,14 @@ export function makeTokenDoor(options: TokenDoorOptions): TokenDoor {
         grant = { ...grant, standing: true, grantDeltaId };
       }
 
-      // The inbox (§58): spawned once per (container, key), so a re-consent into the same container
-      // resumes it, and a consent into another container spawns a second pool there — the grant
-      // follows the person's latest word. Recorded only once the pool stands.
-      if (grant.inbox === undefined || grant.container !== container) {
-        const inbox = await options.bind({ user, container, actor: grant.actor });
+      // The inbox (§58): bound on EVERY redemption, not only when the record lacks a pool. The
+      // pool may have been dropped since — its declaration struck, its bytes gone — while the record
+      // still named it, and a record is never the authority on what stands. `bindConnection` is
+      // idempotent: it resumes a live pool and re-declares a struck one, so the record follows what
+      // actually stands. A consent into another container spawns a second pool there; the first
+      // stands, and the grant follows the person's latest word.
+      const inbox = await options.bind({ user, container, actor: grant.actor });
+      if (grant.inbox !== inbox || grant.container !== container) {
         withOAuthFile<void>(home, (f) => ({
           next: {
             ...f,
@@ -1800,7 +1803,7 @@ export async function revokeConnector(
   clientId: string,
   strikeStanding: (grant: OAuthGrant) => Promise<void>,
   onFault: (message: string) => void = () => {},
-  only?: { readonly user: string },
+  only?: { readonly user: string | undefined },
 ): Promise<RevokeOutcome> {
   // Whole client: EVERY key it holds goes — one per person who consented (§58), plus any pre-§58
   // one — and the generation bump kills every token and code at once. ONE PERSON (`only`): that
@@ -1865,8 +1868,8 @@ export async function revokeConnector(
         await strikeStanding(struck);
       } catch (err) {
         onFault(
-          `revoked ${clientId} in ${oauthPath(home)} (its tokens are dead) but could not strike ` +
-            `the ground write grant of ${struck.actor}: ${err instanceof Error ? err.message : String(err)}`,
+          `revoked ${clientId} in ${oauthPath(home)} (that key's tokens are dead) but could not ` +
+            `strike the ground write grant of ${struck.actor}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }

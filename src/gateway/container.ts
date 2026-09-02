@@ -1506,11 +1506,16 @@ export async function bindConnectionImpl(
   const owner = authorForSeed(opts.ownerSeed);
   const name = inboxName(opts.container, opts.connectionKey);
 
-  const existing = gw.connectionInboxes.get(name);
-  if (existing !== undefined) return existing; // durable: resume the same inbox (decision 3)
-
+  // Durable (decision 3): a live handle for a STANDING declaration resumes — its grant chain is
+  // re-verified below, idempotently, so a pool re-attached at boot is provisioned exactly like one
+  // this process spawned. A handle whose declaration is gone (the pool was dropped) is stale, and
+  // is cleared rather than resumed: a bind must never answer with a purged pool.
   const table = readContainerTable(gw.reactor, gw.operatorAuthor);
-  if (!table.containers.has(name)) {
+  const declared = table.containers.has(name);
+  const held = gw.connectionInboxes.get(name);
+  if (held !== undefined && !declared) gw.connectionInboxes.delete(name);
+  const live = declared ? held : undefined;
+  if (!declared) {
     // The inbox seeds only THIS connection's deltas, and only those written AFTER the binding
     // (SPEC §58 criterion 8): a delta the key authored elsewhere before it was bound here — under
     // a pre-§58 store-wide grant, say — is not this pool's, at the bytes. The clock is wall time
@@ -1550,10 +1555,12 @@ export async function bindConnectionImpl(
   // with a pool backend factory keeps the inbox on disk, so a binding outlives the process that
   // made it and `resumeInboxes` re-attaches it at the next boot.
   const backend = opts.backend ?? gw.options.channelBackend?.(name);
-  const inbox = await openContainerImpl(gw, {
-    name,
-    ...(backend !== undefined ? { backend } : {}),
-  });
+  const inbox =
+    live ??
+    (await openContainerImpl(gw, {
+      name,
+      ...(backend !== undefined ? { backend } : {}),
+    }));
   const pool = inbox.gateway!;
 
   // The grant chain, in the pool's OWN ground (decision 2): the operator authors the owner's ADMIN
@@ -1578,19 +1585,27 @@ export async function bindConnectionImpl(
     ]);
   }
 
-  // An inbox is DURABLE (§39 decision 3): the connection lifecycle is bind / revoke / drop, never
-  // detach. Detach is the KEEP path — it marks the pool inactive WITHOUT striking its declaration or
-  // purging its bytes, so a strike a connection wrote into its inbox would silently stop being
-  // gathered and a primary-ground claim it retracted would resolve LIVE again. That asymmetric
-  // un-suppression has no place in the lifecycle, so the inbox handle refuses detach and names the
-  // two operations that DO belong: drop() for a total forget, revokeConnection to refuse further
-  // writes while keeping the record.
-  //
-  // Drop ends the live binding — clear the durable handle so a later bind spawns fresh rather than
-  // resuming a purged pool. The delete runs in a `finally`: even if the declaration-strike append
-  // fails after the bytes are gone, the stale handle must not survive to be resumed.
+  if (live !== undefined) return live;
+  const handle = inboxHandle(gw, name, inbox);
+  gw.connectionInboxes.set(name, handle);
+  return handle;
+}
+
+// The ONE kind of handle an inbox pool is held by, whether this process spawned it or re-attached
+// it at boot. An inbox is DURABLE (§39 decision 3): the connection lifecycle is bind / revoke /
+// drop, never detach. Detach is the KEEP path — it marks the pool inactive WITHOUT striking its
+// declaration or purging its bytes, so a strike a connection wrote into its inbox would silently
+// stop being gathered and a primary-ground claim it retracted would resolve LIVE again. That
+// asymmetric un-suppression has no place in the lifecycle, so the handle refuses detach and names
+// the two operations that DO belong: drop() for a total forget, revokeConnection to refuse further
+// writes while keeping the record.
+//
+// Drop ends the live binding — clear the durable handle so a later bind spawns fresh rather than
+// resuming a purged pool. The delete runs in a `finally`: even if the declaration-strike append
+// fails after the bytes are gone, the stale handle must not survive to be resumed.
+function inboxHandle(gw: Gateway, name: string, inbox: Container): Container {
   const baseDrop = inbox.drop.bind(inbox);
-  const handle: Container = {
+  return {
     ...inbox,
     drop: async () => {
       try {
@@ -1607,8 +1622,6 @@ export async function bindConnectionImpl(
         ),
       ),
   };
-  gw.connectionInboxes.set(name, handle);
-  return handle;
 }
 
 // Attach every declared inbox pool at boot (SPEC §58): a binding made by one process is readable by
@@ -1621,14 +1634,14 @@ export async function resumeInboxesImpl(gw: Gateway): Promise<void> {
   const table = readContainerTable(gw.reactor, gw.operatorAuthor);
   for (const [name, rec] of table.containers) {
     if (rec.inboxOf === undefined || !name.startsWith("inbox:")) continue;
-    if (gw.connectionInboxes.has(name)) continue;
+    if (gw.connectionInboxes.has(name) || table.detached.has(name)) continue;
+    // No factory, no bytes: an EMPTY in-memory pool would answer as if the connection wrote
+    // nothing (H9), so the pool is left unattached and a read of it refuses by name instead.
     const backend = gw.options.channelBackend?.(name);
+    if (backend === undefined) continue;
     try {
-      const handle = await openContainerImpl(gw, {
-        name,
-        ...(backend !== undefined ? { backend } : {}),
-      });
-      gw.connectionInboxes.set(name, handle);
+      const handle = await openContainerImpl(gw, { name, backend });
+      gw.connectionInboxes.set(name, inboxHandle(gw, name, handle));
     } catch {
       continue; // left unattached, deliberately; see above
     }

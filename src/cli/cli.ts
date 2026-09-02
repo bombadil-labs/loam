@@ -3384,9 +3384,15 @@ function connectorIdentities(file: OAuthFile): HomeIdentity[] {
   const out: HomeIdentity[] = [];
   for (const client of file.clients) {
     const name = `${client.clientId} (${client.clientName})`;
-    const tokens = file.tokens.filter((t) => t.clientId === client.clientId).length;
-    const facts = `generation ${client.generation} · ${tokens} live token${tokens === 1 ? "" : "s"}`;
     const grants = grantsFor(file, client.clientId);
+    // Live tokens are counted per KEY (§58: one per person), never per connector.
+    const factsFor = (user: string | undefined): string => {
+      const tokens = file.tokens.filter(
+        (t) => t.clientId === client.clientId && t.user === user,
+      ).length;
+      return `generation ${client.generation} · ${tokens} live token${tokens === 1 ? "" : "s"}`;
+    };
+    const facts = factsFor(undefined);
     // EVERY key this connector ever signed with, not merely its current one. Revocation destroys the
     // key and keeps the name, so a re-keyed connector is several authors under one client id, and
     // each holds standing until its own grant is struck. Naming only the latest would strand the
@@ -3406,7 +3412,7 @@ function connectorIdentities(file: OAuthFile): HomeIdentity[] {
       const where =
         grant.user === undefined || grant.container === undefined
           ? facts
-          : `${grant.user} · ${grant.container} · ${facts}`;
+          : `${grant.user} · ${grant.container} · ${factsFor(grant.user)}`;
       out.push({
         kind: "connector",
         name,
