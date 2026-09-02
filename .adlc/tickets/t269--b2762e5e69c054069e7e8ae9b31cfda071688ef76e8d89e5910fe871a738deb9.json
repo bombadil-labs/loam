@@ -1,0 +1,14 @@
+{
+  "body": "Confirmed by the §58 S1 audit (loam-scan-scale, verified): `resumeInboxesImpl` re-attaches and REPLAYS every declared inbox at every boot, and nothing ever removes one. Revoking a pair strikes the pool's write grant but leaves the pool declared, attached and replayed; dropping it is a separate manual act nobody performs. A store that has consented a connector N times carries N pools forever and pays their replay on every boot. The pre-§58 shape had no analogue — a connector held one store-wide grant and no pool — so this arrived with the slice.\n\nTHE TWO HALVES SPLIT, and only one of them is a repair.\n\n(a) THE BOOT COST IS A REPAIR and self-merges on the ordinary bar. A pool whose connection holds no surviving write grant does not need attaching to serve reads, and `containerScope` already refuses an unattached pool BY NAME rather than resolving it empty (H9's rule), so skipping it is honest. Acceptance: a store with one revoked pair and one live pair attaches exactly one pool at boot; the revoked pool's bytes are untouched and a read that names it refuses by name rather than answering empty; the live pair is unaffected. Verify: test/server/consent-exchange.test.ts (a second boot after a pair revoke).\n\n(b) RETIRING THE BYTES IS MYK'S MERGE. Dropping a pool purges it, so this WIDENS what gets deleted, and the PR must state in one line what can now be deleted that could not before. Every rail is two-sided: the target's bytes are gone AND a named live bystander (another person's pool bound under the same connector) survives at the bytes. Verify: test/gateway/pool-drop-detach.test.ts.\n\nDESIGN QUESTION (Myk): should a revoked pair's pool be dropped automatically, dropped on a later explicit act, or kept forever as history? Recommendation: keep it, and give the admin page a per-row 'forget this connection's writes' act — revocation ends access, and forgetting is a separate decision a person makes with the consequences in front of them.",
+  "category": "feature",
+  "duration": 2,
+  "id": "T269",
+  "scope": [
+    "src/gateway/container.ts",
+    "src/server/admin-federation.ts",
+    "src/cli/cli.ts",
+    "test/gateway/**",
+    "test/server/**"
+  ],
+  "title": "Retire a revoked connection's inbox pool instead of replaying it forever"
+}
