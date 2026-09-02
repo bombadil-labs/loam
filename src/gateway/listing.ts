@@ -501,7 +501,14 @@ export async function listingPageImpl(
   }
   // A BOUND CONNECTION lists over ITS scope (SPEC §58) — the bound container's subtree and the inbox
   // pools composed into it — never through the maintained candidate set, which folds the whole
-  // ground. The scope read owns exclusion and inbox composition; it is O(scope), and correct.
+  // ground and would serve entities from outside the binding.
+  //
+  // THE COST, STATED HONESTLY: `connectionScope` walks this store's whole ground to decide
+  // membership, so this page is O(ground) and not O(scope) — the same shape the plain cold branch
+  // below pays, and paid on EVERY bound page because no maintained index stands over a container.
+  // `listImpl` then resolves each listed entity through the same scope, so one page of N entities
+  // costs N+1 walks. Bounded (the page is bounded) but real; a maintained per-container candidate
+  // set is the fix and it belongs with S2's container work, not here.
   if (binding !== undefined) {
     const inContexts = new Set(listingContexts(gw, program));
     const after = opts.after;

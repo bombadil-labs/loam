@@ -1,9 +1,18 @@
-// §58 S1b-ii and S1d (T262, criteria a, b, e and the door half of 8): every door a bound connection
-// walks lands its writes in the connection's INBOX POOL and never in the primary — the typed
-// GraphQL and REST doors, the raw /append door (fenced to what the key itself signed), and the MCP
-// mutate tool — and a store-wide write grant, even one the operator lands by hand for the key,
-// changes nothing about where a bound write goes (S1d: the pre-§58 root grant is inert). A bound
-// bearer cannot subscribe; whoami speaks the binding and reads write standing from the pool.
+// §58 S1b-ii and S1d (T262, criteria a, b, e and the door half of 8): the DATA doors a bound
+// connection walks land its writes in the connection's INBOX POOL and never in the primary — the
+// typed GraphQL and REST doors, the raw /append door (fenced to what the key itself signed), and
+// the MCP mutate tool — and a store-wide write grant, even one the operator lands by hand for the
+// key, changes nothing about where a bound write goes (S1d: the pre-§58 root grant is inert for
+// `write`). A bound bearer cannot subscribe; whoami speaks the binding and reads write standing
+// from the pool.
+//
+// REGISTER IS THE NAMED EXCEPTION, and it is not a leak: registration is constitutional (§17), its
+// standing is an operator's explicit `loam grant --verb=register` and never the binding's, and its
+// deltas land in the primary under the store's own signature exactly as they did before §58. The
+// binding does not route it and does not refuse it. §58 position 2 gives a connection law under its
+// own container path instead, and S2 is the slice that builds it (inbox-pool publish, the §47 fold,
+// re-attach at boot). Until then a bound connection that holds a register grant shapes the store,
+// which is the pre-§58 behaviour the docs still describe.
 //
 // Railed at both levels: which reactor holds the bytes, and what a reader resolves through the
 // Plant lens — the bound bearer over its scope, the operator over the primary. Two-sided: every
@@ -196,10 +205,12 @@ describe("S1b-ii — a bound connection's writes land in its inbox pool, never t
   it("the rendered-route and byte doors refuse a bound bearer in words; the operator's answers stand", async () => {
     const { base } = await connectionServer();
     const token = await connect(base, "ada", "journal");
-    for (const path of [
-      "/default/app/some-route/plant:fern",
-      "/default/bytes/abc?lens=Plant&entity=plant:fern",
-    ]) {
+    // Each door's OWN answer to the operator, which is not 403 and differs between them: the app
+    // door 404s an unknown route, the byte door gives its uniform refusal for a malformed ref.
+    for (const [path, operatorSees] of [
+      ["/default/app/some-route/plant:fern", 404],
+      ["/default/bytes/abc?lens=Plant&entity=plant:fern", 401],
+    ] as const) {
       const bound = await fetch(`${base}${path}`, {
         headers: { authorization: `Bearer ${token}` },
       });
@@ -207,9 +218,12 @@ describe("S1b-ii — a bound connection's writes land in its inbox pool, never t
       // A refusal a person reads, served as text — never a rendered page or a byte stream.
       expect(bound.headers.get("content-type"), path).toBe("text/plain; charset=utf-8");
       expect(await bound.text()).toContain("reads only that container");
-      // The operator meets the door itself — no route, no bytes — never the binding's sentence.
+      // The operator meets THE DOOR ITSELF and gets its own answer — 404, because neither the
+      // route nor the byte ref exists here. Asserting the exact status rather than "not 403" is
+      // what separates a binding refusal that fires from a door that refuses everyone: the two
+      // callers get different answers on the same path.
       const op = await fetch(`${base}${path}`, { headers: { authorization: "Bearer op-token" } });
-      expect(op.status, path).not.toBe(403);
+      expect(op.status, path).toBe(operatorSees);
       expect(await op.text()).not.toContain("reads only that container");
     }
   });
@@ -345,5 +359,13 @@ describe("S1b-ii — a bound connection's writes land in its inbox pool, never t
     ).length;
     expect(negationsAfter).toBe(negationsBefore);
     expect(readOAuthFile(connectorsHome).grants).toEqual([]);
+
+    // AND THE HALF THIS SEAM DOES NOT DO, asserted so the case cannot be read as "revoked whole".
+    // The grant that carries the connection's standing lives in its pool, and striking the ground
+    // never touches it. Access is gone regardless — the record and its seed are deleted — but a
+    // caller that strikes only here leaves a live grant behind, which is what the CLI's own rail
+    // (test/cli/grant-ledger-58.test.ts) proves it now strikes too.
+    const pool = poolOf(gateway, grant.inbox!);
+    expect(holdsGrant(pool.reactor, STORE_ENTITY, grant.actor, "write", OPERATOR)).toBe(true);
   });
 });
