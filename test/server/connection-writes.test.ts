@@ -22,7 +22,7 @@ import { grantClaims, holdsGrant } from "../../src/gateway/accounts.js";
 import { inboxName } from "../../src/gateway/container.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { toWire } from "../../src/federation/wire.js";
-import { readOAuthFile } from "../../src/server/oauth-file.js";
+import { readOAuthFile, writeOAuthFile } from "../../src/server/oauth-file.js";
 import { revokeConnector } from "../../src/server/oauth.js";
 import { FERN } from "../spike/garden.js";
 import {
@@ -258,6 +258,32 @@ describe("S1b-ii — a bound connection's writes land in its inbox pool, never t
     expect(heightDeltas(other, 60)).toEqual([]);
     // And the read follows the record: the bearer now reads ada:other, where 62 is the latest.
     expect(await heightVia(base, first)).toBe(62);
+  });
+
+  it("a record naming a stale inbox is corrected on the next redemption — a record is never the authority", async () => {
+    const { base, connectorsHome, gateway } = await connectionServer();
+    await connect(base, "ada", "journal");
+    const grant = grantOf(connectorsHome, "ada");
+    const real = grant.inbox!;
+
+    // Corrupt the record the way only a hand-edit or a half-finished write could: the SAME
+    // container, an inbox that never stood. The pool itself is untouched.
+    const file = readOAuthFile(connectorsHome);
+    writeOAuthFile(connectorsHome, {
+      ...file,
+      grants: file.grants.map((g) => ({ ...g, inbox: "inbox:ada:journal:never-stood" })),
+    });
+    expect(grantOf(connectorsHome, "ada").inbox).toBe("inbox:ada:journal:never-stood");
+
+    // Consent again into the same container: the bind resumes the pool that actually stands, and
+    // the record follows it rather than the other way round.
+    await connect(base, "ada", "journal");
+    expect(grantOf(connectorsHome, "ada").inbox).toBe(real);
+    expect(grantOf(connectorsHome, "ada").container).toBe("ada:journal");
+    // And the pool it names is the live one: a write through the door lands there.
+    const token = await connect(base, "ada", "journal");
+    expect((await mutateHeight(base, token, 80)).status).toBe(200);
+    expect(heightDeltas(poolOf(gateway, real), 80)).toHaveLength(1);
   });
 
   it("whoami speaks the binding and reads write standing from the pool; a struck pool flips it without a restart", async () => {
