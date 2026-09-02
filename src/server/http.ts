@@ -882,6 +882,17 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             actor: identity.actor,
             binding: { container: identity.binding.container, inbox: identity.binding.inbox },
           };
+  // The sentence a door that resolves the store's OWN ground answers a bound connection with
+  // (SPEC §58): the connection reads its container, and this door cannot scope to it yet.
+  const boundDoorRefusal = (
+    binding: NonNullable<TokenIdentity["binding"]>,
+    door: string,
+  ): { contentType: string; body: string } => ({
+    contentType: "text/plain; charset=utf-8",
+    body:
+      `this connection is bound to ${binding.container} and reads only that container; the ` +
+      `${door} resolves this store's own ground and cannot scope to it — use the query door`,
+  });
 
   // WHOAMI (SPEC §56, T255): who does this door think the caller is, and what standing does
   // the GROUND currently grant them? Read per request like every standing check, so a
@@ -2270,6 +2281,17 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         // A rendered route (SPEC §23), on the full door: GET a route's HTML, rendered from the store's
         // live view under the token's read discipline.
         case "app": {
+          // A BOUND connection reads only the container its consent named (SPEC §58), and a
+          // rendered route resolves the store's own view — and a write-enabled route signs as the
+          // pen into the primary. Neither is the connection's, so both refuse in words rather than
+          // answer beyond the binding. The public and operator doors are untouched.
+          if (identity.binding !== undefined) {
+            sendRendered(res, {
+              status: 403,
+              ...boundDoorRefusal(identity.binding, "rendered route"),
+            });
+            return;
+          }
           const parsed = appRouteOf(url.pathname);
           if (parsed === undefined) {
             refused(res);
@@ -2333,6 +2355,14 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         case "bytes": {
           if (req.method !== "GET") {
             refused(res);
+            return;
+          }
+          // The byte door proves a read through a lens over the store's own ground (SPEC §23.7);
+          // a bound connection's reads are its container's (§58), so it refuses here in words.
+          if (identity.binding !== undefined) {
+            const refusal = boundDoorRefusal(identity.binding, "byte door");
+            res.writeHead(403, { "content-type": refusal.contentType });
+            res.end(refusal.body);
             return;
           }
           const parsed = byteDoorOf(url.pathname, url.searchParams);

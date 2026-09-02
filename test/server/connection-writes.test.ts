@@ -189,6 +189,25 @@ describe("S1b-ii — a bound connection's writes land in its inbox pool, never t
     ]);
   });
 
+  it("the rendered-route and byte doors refuse a bound bearer in words; the operator's answers stand", async () => {
+    const { base } = await connectionServer();
+    const token = await connect(base, "ada", "journal");
+    for (const path of [
+      "/default/app/some-route/plant:fern",
+      "/default/bytes/abc?lens=Plant&entity=plant:fern",
+    ]) {
+      const bound = await fetch(`${base}${path}`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(bound.status, path).toBe(403);
+      expect(await bound.text()).toContain("reads only that container");
+      // The operator meets the door itself — no route, no bytes — never the binding's sentence.
+      const op = await fetch(`${base}${path}`, { headers: { authorization: "Bearer op-token" } });
+      expect(op.status, path).not.toBe(403);
+      expect(await op.text()).not.toContain("reads only that container");
+    }
+  });
+
   it("a bound bearer cannot subscribe (403, in words); the operator still can", async () => {
     const { base } = await connectionServer();
     const token = await connect(base, "ada", "journal");

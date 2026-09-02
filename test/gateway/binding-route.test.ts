@@ -6,8 +6,15 @@
 //
 // Deliberately NOT here: the doors. `contextFor`, the raw `/append` door, whoami and the exchange
 // pass or withhold the binding in their own rails (`test/server/connection-writes.test.ts`,
-// `test/server/read-scope.test.ts`). A channel lens under a binding is refused in `gatherImpl`; it
-// needs a live federation channel to reach and is exercised beside the channel rails, not here.
+// `test/server/read-scope.test.ts`).
+//
+// TWO FIXTURES, and the difference is load-bearing. A SHARED bound container makes this store's
+// own ground one of the scope's contributors, so `containerScope` already closes the primary's
+// strikes over what it admits. A SEPARATE one does not: its bytes are its own store, the scope
+// gathers that store and the inbox pools, and a strike living in the primary is outside the
+// closure entirely. `boundGroundFor`'s strike filter is the only thing that carries it there —
+// so the separate case below is the one that can go red if the filter is deleted, and the shared
+// case beside it would stay green (the finding this file was corrected for).
 
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
@@ -28,6 +35,8 @@ const OWNER = GARDENER;
 const CONN_SEED = "c3".repeat(32);
 const CONN = authorForSeed(CONN_SEED);
 const HOME = "home:alice";
+const SEPARATE = "home:alice-vault";
+const PEER_SEED = "b7".repeat(32);
 const MOSS = "plant:moss";
 const OAK = "plant:oak";
 
@@ -38,8 +47,19 @@ const ALICES_OWN = {
   in: "input",
 };
 
-async function home(): Promise<{ gw: Gateway; inbox: Container; binding: ConnectionBinding }> {
-  const gw = await Gateway.boot(
+// A negation in the owner's own voice, pointing at one delta.
+const strikeOf = (gw: Gateway, target: string): Delta =>
+  signClaims(
+    {
+      timestamp: gw.nextTimestamp(),
+      author: OWNER,
+      pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: target } } }],
+    },
+    OWNER_SEED,
+  );
+
+const bootStore = (): Promise<Gateway> =>
+  Gateway.boot(
     new MemoryBackend(),
     assembleGenesis({
       operatorSeed: OP_SEED,
@@ -48,6 +68,9 @@ async function home(): Promise<{ gw: Gateway; inbox: Container; binding: Connect
       ],
     }),
   );
+
+async function home(): Promise<{ gw: Gateway; inbox: Container; binding: ConnectionBinding }> {
+  const gw = await bootStore();
   await gw.append([signClaims(grantClaims(STORE_ENTITY, OWNER, "write", OP, 500), OP_SEED)]);
   await gw.append([
     signClaims(
@@ -68,6 +91,36 @@ async function home(): Promise<{ gw: Gateway; inbox: Container; binding: Connect
   });
   // The connection holds NO grant on the primary: the pool's own chain is its only standing.
   return { gw, inbox, binding: { container: HOME, inbox: inbox.entity! } };
+}
+
+// The same home, declared SEPARATE: its bytes are its own store, seeded once from the primary when
+// it is attached. The scope then gathers that store and the inbox pool — never this store's ground.
+async function separateHome(): Promise<{
+  gw: Gateway;
+  inbox: Container;
+  binding: ConnectionBinding;
+}> {
+  const gw = await bootStore();
+  await gw.append([signClaims(grantClaims(STORE_ENTITY, OWNER, "write", OP, 500), OP_SEED)]);
+  await gw.append([
+    signClaims(
+      containerClaims(
+        { container: SEPARATE, trust: "curated", posture: "separate", membership: ALICES_OWN },
+        OP,
+        600,
+      ),
+      OP_SEED,
+    ),
+    // Seeded into the container's own store at attach: the bystander of every case below.
+    observed(FERN, "height", 30, 1000, OWNER_SEED),
+  ]);
+  await gw.openContainer({ name: SEPARATE });
+  const inbox = await gw.bindConnection({
+    container: SEPARATE,
+    connectionKey: CONN,
+    ownerSeed: OWNER_SEED,
+  });
+  return { gw, inbox, binding: { container: SEPARATE, inbox: inbox.entity! } };
 }
 
 const byConn = (gw: Gateway): Delta[] =>
@@ -230,18 +283,62 @@ describe("T262 — a bound retraction strikes only the connection's own pool cla
   it("a strike the owner lands in the PRIMARY binds on a pool claim (H1) — the bound read does not revive it", async () => {
     const { gw, inbox, binding } = await home();
     await gw.mutateEntity("Plant", FERN, { height: 7 }, CONN_SEED, binding);
+    // The positive control: without it, 30 below is equally the answer of a bound read that never
+    // composed the pool at all.
+    expect(bound(gw, binding)["height"]).toBe(7);
     const claim = byConn(inbox.gateway!)[0]!;
-    await gw.append([
-      signClaims(
-        {
-          timestamp: gw.nextTimestamp(),
-          author: OWNER,
-          pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: claim.id } } }],
-        },
-        OWNER_SEED,
-      ),
-    ]);
+    await gw.append([strikeOf(gw, claim.id)]);
+    // On a SHARED container this holds through the scope's own closure — the primary contributes,
+    // so its strike rides in with what it admits. The separate case below is what pins the filter.
     expect(bound(gw, binding)["height"]).toBe(30);
+    await gw.close();
+  });
+
+  it("a SEPARATE bound container: the scope admits the struck claim, and the read still refuses it", async () => {
+    const { gw, inbox, binding } = await separateHome();
+    await gw.mutateEntity("Plant", FERN, { height: 7 }, CONN_SEED, binding);
+    expect(bound(gw, binding)["height"]).toBe(7); // the positive control, again
+    const claim = byConn(inbox.gateway!)[0]!;
+    await gw.append([strikeOf(gw, claim.id)]);
+
+    // THE FIXTURE'S WHOLE POINT, asserted rather than assumed: the scope's contributing grounds are
+    // the separate container's own store and the inbox pool, so the strike — which lives in the
+    // primary — is outside its closure and the struck claim is still ADMITTED at the delta level.
+    expect(gw.connectionScope({ bound: SEPARATE }).map((d) => d.id)).toContain(claim.id);
+    // And the reader still does not serve it: `boundGroundFor` carries the primary's own strikes
+    // (H1, the store lying upward). The bystander is the owner's claim, seeded into this
+    // container's own store when it was attached.
+    expect(bound(gw, binding)["height"]).toBe(30);
+    // History is not rewritten: the pool keeps the claim it holds.
+    expect(inbox.gateway!.reactor.get(claim.id)).toBeDefined();
+    await gw.close();
+  });
+
+  it("a channel's lens under a binding is refused — that pool is outside the connection's scope", async () => {
+    const { gw, binding } = await home();
+    const peer = await Gateway.boot(
+      new MemoryBackend(),
+      assembleGenesis({ operatorSeed: PEER_SEED, registrations: [] }),
+    );
+    await peer.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+    await peer.append([observed(FERN, "height", 11, 1200, PEER_SEED)]);
+    const channel = await gw.openChannel({
+      into: "friends",
+      prefix: "peer",
+      source: { pull: () => Promise.resolve(peer.reactor.arrivalLog()) },
+    });
+    expect((await channel.sync()).bound).toContain("peer:Plant");
+
+    // The ordinary door serves the peer's lens over the CHANNEL's pool — the positive control.
+    expect(gw.resolvedNode("peer:Plant", FERN).view["height"]).toBe(11);
+    // Under a binding it refuses: the channel's pool is not in the bound container's scope, and
+    // resolving the peer's reading over the connection's ground would answer nobody's question.
+    expect(() => gw.resolvedNode("peer:Plant", FERN, undefined, undefined, binding)).toThrow(
+      /arrived through a federation channel/,
+    );
+    // The connection's own lens is untouched beside it.
+    expect(bound(gw, binding)["height"]).toBe(30);
+    await peer.close();
     await gw.close();
   });
 });
