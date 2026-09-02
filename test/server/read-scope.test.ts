@@ -84,23 +84,29 @@ describe("S1c — a bound read resolves over the bound container's scope", () =>
     expect(await list("op-token")).toEqual([FERN, OAK]);
   });
 
-  it("REST with a time pin: the pinned read is the scope's as it stood", async () => {
+  it("REST with a time pin: the pinned read is the SCOPE as it stood, not the store as it stood", async () => {
     const { base, gateway, usersHome } = await connectionServer();
     const token = await connect(base, "ada", "journal");
     await gateway.append([
       observed(FERN, "height", 30, gateway.nextTimestamp(), seedOf(usersHome, "ada")),
     ]);
     expect((await mutateHeight(base, token, 31)).status).toBe(200);
+    // An OUT-OF-SCOPE claim, later than the connection's own: without the scoping the pinned read
+    // below would answer 99, so this is what makes the pin a scope assertion rather than a clock one.
+    await gateway.append([observed(FERN, "height", 99, gateway.nextTimestamp(), OPERATOR_SEED)]);
     const at = Date.now();
     await new Promise((r) => setTimeout(r, 5));
     expect((await mutateHeight(base, token, 32)).status).toBe(200);
-    const rest = async (asOf?: number): Promise<unknown> => {
+    const rest = async (bearer: string, asOf?: number): Promise<unknown> => {
       const url = `${base}/default/rest/v1/Plant/${encodeURIComponent(FERN)}${asOf === undefined ? "" : `?asOf=${asOf}`}`;
-      const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+      const res = await fetch(url, { headers: { authorization: `Bearer ${bearer}` } });
       return ((await res.json()) as { view: { height?: unknown } }).view.height ?? null;
     };
-    expect(await rest()).toBe(32);
-    expect(await rest(at)).toBe(31);
+    expect(await rest(token)).toBe(32);
+    expect(await rest(token, at)).toBe(31);
+    // The control: at that same moment the STORE really did hold 99, and the operator reads it —
+    // so 31 above is the scope narrowing the pin, never the pin missing a delta.
+    expect(await rest("op-token", at)).toBe(99);
   });
 
   it("the MCP query tool reads the scope", async () => {
@@ -129,19 +135,26 @@ describe("S1c — a bound read resolves over the bound container's scope", () =>
     });
   });
 
-  it("after a re-consent the read follows the new container", async () => {
+  it("after a re-consent the read follows the new container, and the old pool falls out of scope", async () => {
     const { base, connectorsHome, gateway, usersHome } = await connectionServer();
     const token = await connect(base, "ada", "journal");
-    expect((await mutateHeight(base, token, 40)).status).toBe(200);
-    expect(await heightVia(base, token)).toBe(40);
-    await connect(base, "ada", "other");
-    expect(grantOf(connectorsHome, "ada").container).toBe("ada:other");
-    // The old pool composes into ada:journal, not ada:other: the journal's 40 is out of scope now,
-    // and ada's own primary claim (a member of every container under her home) is what resolves.
+    // ada's own claim FIRST, so it is the older one: what the read falls back to is then a fact
+    // about scope, not about the clock.
     await gateway.append([
       observed(FERN, "height", 30, gateway.nextTimestamp(), seedOf(usersHome, "ada")),
     ]);
+    expect((await mutateHeight(base, token, 40)).status).toBe(200);
+    expect(await heightVia(base, token)).toBe(40); // in scope, and the latest
+
+    await connect(base, "ada", "other");
+    expect(grantOf(connectorsHome, "ada").container).toBe("ada:other");
+    // The journal's pool composes into ada:journal, never into ada:other — so 40 is OUT of scope
+    // now, though it is still the latest claim anywhere and the store still holds it. ada's own
+    // claim (a member of every container under her home) is what the same token now resolves.
     expect(await heightVia(base, token)).toBe(30);
+    // The control: the operator sees ada's 30 and never the connection's later 40 — the journal's
+    // pool never touched the primary, so 30 above is the scope narrowing and not a missing delta.
+    expect(await heightVia(base, "op-token")).toBe(30);
     expect((await mutateHeight(base, token, 41)).status).toBe(200);
     expect(await heightVia(base, token)).toBe(41);
   });

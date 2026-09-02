@@ -10,6 +10,10 @@
 // refusal keeps a named bystander (the operator's own append, a §57-shaped actor token, another
 // person's pair) working exactly as before.
 //
+// NAMED GAP: `whoamiFor`'s `gateway === undefined` arm (its write-standing fail-closed) has no
+// rail, because no caller can reach it — every door resolves its mount before it answers. It is a
+// defensive branch, and mutation testing reports it as a survivor for exactly that reason.
+//
 // Erasure standing rule: every store here is the fixture's own mkdtemp/memory store.
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -200,6 +204,8 @@ describe("S1b-ii — a bound connection's writes land in its inbox pool, never t
         headers: { authorization: `Bearer ${token}` },
       });
       expect(bound.status, path).toBe(403);
+      // A refusal a person reads, served as text — never a rendered page or a byte stream.
+      expect(bound.headers.get("content-type"), path).toBe("text/plain; charset=utf-8");
       expect(await bound.text()).toContain("reads only that container");
       // The operator meets the door itself — no route, no bytes — never the binding's sentence.
       const op = await fetch(`${base}${path}`, { headers: { authorization: "Bearer op-token" } });
