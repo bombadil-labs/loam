@@ -55,6 +55,8 @@ export type RevokePlan =
         readonly clientId: string;
         readonly clientName?: string;
         readonly generation?: number;
+        /** Whose binding this inbox is (§58): the revoke is that person's alone. */
+        readonly user?: string;
       };
     }
   | { readonly act: "refuse"; readonly status: number; readonly message: string };

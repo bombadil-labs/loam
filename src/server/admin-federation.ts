@@ -499,7 +499,8 @@ ${flowNote}`;
     }
     // The connector half. An unreadable records file refuses the WHOLE act: "cannot determine what
     // is registered" is never a licence to revoke only the half this page can see.
-    let client: { clientId: string; clientName?: string; generation?: number } | undefined;
+    let client:
+      { clientId: string; clientName?: string; generation?: number; user?: string } | undefined;
     if (ctx.connectors !== undefined) {
       let file: OAuthFile;
       try {
@@ -519,9 +520,12 @@ ${flowNote}`;
       const grant = file.grants.find((g) => g.actor === key);
       if (grant !== undefined) {
         const c = clientFor(file, grant.clientId);
+        // Whose binding this inbox is (§58): the revoke below is that person's alone, never the
+        // connector's every key.
         client = {
           clientId: grant.clientId,
           ...(c === undefined ? {} : { clientName: c.clientName, generation: c.generation }),
+          ...(grant.user === undefined ? {} : { user: grant.user }),
         };
       }
     }
@@ -641,7 +645,13 @@ ${flowNote}`;
           ),
         );
       };
-      const outcome = await revokeConnector(ctx.connectors!.home, clientId, strike, onFault);
+      const outcome = await revokeConnector(
+        ctx.connectors!.home,
+        clientId,
+        strike,
+        onFault,
+        plan.client.user === undefined ? undefined : { user: plan.client.user },
+      );
       if (outcome.kind === "no-such-client") {
         refuse(
           res,

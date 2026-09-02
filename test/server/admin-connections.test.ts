@@ -482,12 +482,15 @@ describe("§40 criterion 12 — the connections panel joins oauth.json (phases 1
     expect(await done.text()).toContain(CLIENT_NAME);
 
     // Phase 15's rail, driven through the browser door: the very next bearer request refuses, and
-    // nothing landed. The generation bumped and the grant is gone from the file.
+    // nothing landed. The grant is gone from the file. Since §58 the panel revokes ONE person's
+    // binding, and the generation is the connector's — bumping it would refuse every other
+    // person's token too — so it stays, and the pair's token record goes by name instead.
     const after = await mutate(base, token, 91);
     expect(after.status).toBe(401);
     const file = readOAuthFile(home);
-    expect(file.clients[0]!.generation).toBe(2);
+    expect(file.clients[0]!.generation).toBe(1);
     expect(file.grants).toHaveLength(0);
+    expect(file.tokens).toHaveLength(0);
 
     // §39.3c holds at the inbox too: the actor's next inbox write refuses; the past inbox delta and
     // the bearer's landed primary write both keep the actor as author.

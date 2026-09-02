@@ -24,7 +24,6 @@ import {
   clientNameDefect,
   codeFor,
   grantFor,
-  grantsFor,
   oauthPath,
   readOAuthFile,
   tokenFor,
@@ -1801,29 +1800,43 @@ export async function revokeConnector(
   clientId: string,
   strikeStanding: (grant: OAuthGrant) => Promise<void>,
   onFault: (message: string) => void = () => {},
+  only?: { readonly user: string },
 ): Promise<RevokeOutcome> {
-  // EVERY key the client holds goes — one per person who consented (§58), plus any pre-§58 one.
+  // Whole client: EVERY key it holds goes — one per person who consented (§58), plus any pre-§58
+  // one — and the generation bump kills every token and code at once. ONE PERSON (`only`): that
+  // pair's key alone goes, and since the generation is the client's and cannot scope, the pair's
+  // tokens and codes are deleted by name instead — the resolver refuses a token whose record is
+  // gone. Every other person's binding of the same connector stands untouched.
   let struckGrants: OAuthGrant[] = [];
   let outcome: RevokeOutcome;
   try {
     outcome = withOAuthFile<RevokeOutcome>(home, (file) => {
       const client = clientFor(file, clientId);
       if (client === undefined) return { result: { kind: "no-such-client" } };
-      struckGrants = grantsFor(file, clientId);
+      const ofPair = (r: { readonly clientId: string; readonly user?: string }): boolean =>
+        r.clientId === clientId && (only === undefined || r.user === only.user);
+      struckGrants = file.grants.filter(ofPair);
       const going = struckGrants; // a const the closures below read; `struckGrants` outlives this scope
       const goingActors = new Set(going.map((g) => g.actor));
+      const generation = only === undefined ? client.generation + 1 : client.generation;
       return {
         next: {
           ...file,
-          clients: file.clients.map((c) =>
-            c.clientId === clientId ? { ...c, generation: c.generation + 1 } : c,
-          ),
+          clients: file.clients.map((c) => (c.clientId === clientId ? { ...c, generation } : c)),
           // The grants go, and with them the SEEDS — revocation destroys the keys. What survives is
           // each public author, in a list nothing that mints authority reads (`OAuthRevocation`).
           // Without it the store forgets who acted the moment it stops letting them act, and the
           // ledger then reports a connector of months' standing as having "no acting identity yet"
           // while the grant it held sits attributed to nobody.
-          grants: file.grants.filter((g) => g.clientId !== clientId),
+          grants: file.grants.filter((g) => !ofPair(g)),
+          ...(only === undefined
+            ? {}
+            : {
+                tokens: file.tokens.filter((t) => !ofPair(t)),
+                ...(file.codes === undefined
+                  ? {}
+                  : { codes: file.codes.filter((c) => !ofPair(c)) }),
+              }),
           // Keyed by ACTOR: a re-keyed connector keeps a record for every key it ever signed with,
           // and revoking the same key twice replaces rather than duplicates.
           ...(going.length === 0
@@ -1835,7 +1848,7 @@ export async function revokeConnector(
                 ],
               }),
         },
-        result: { kind: "revoked", clientId, generation: client.generation + 1 },
+        result: { kind: "revoked", clientId, generation },
       };
     });
   } catch (err) {

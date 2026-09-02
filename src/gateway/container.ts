@@ -1546,9 +1546,13 @@ export async function bindConnectionImpl(
     ]);
   }
 
+  // Durability is the store's choice, not the connection's (the channel pools' rule, §46): a store
+  // with a pool backend factory keeps the inbox on disk, so a binding outlives the process that
+  // made it and `resumeInboxes` re-attaches it at the next boot.
+  const backend = opts.backend ?? gw.options.channelBackend?.(name);
   const inbox = await openContainerImpl(gw, {
     name,
-    ...(opts.backend !== undefined ? { backend: opts.backend } : {}),
+    ...(backend !== undefined ? { backend } : {}),
   });
   const pool = inbox.gateway!;
 
@@ -1605,6 +1609,30 @@ export async function bindConnectionImpl(
   };
   gw.connectionInboxes.set(name, handle);
   return handle;
+}
+
+// Attach every declared inbox pool at boot (SPEC §58): a binding made by one process is readable by
+// the next. The pool's grant chain lives in its own ground, so re-attaching needs no seed — only
+// the store's pool backend factory, which is where the bytes went. Idempotent, and failure-tolerant
+// per pool, exactly like `resumeChannels`: a pool whose bytes are missing must not stop the store
+// from booting, and a read of it meets containerScope's refusal by name, which is the honest answer.
+export async function resumeInboxesImpl(gw: Gateway): Promise<void> {
+  if (gw.operatorAuthor === undefined) return;
+  const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+  for (const [name, rec] of table.containers) {
+    if (rec.inboxOf === undefined || !name.startsWith("inbox:")) continue;
+    if (gw.connectionInboxes.has(name)) continue;
+    const backend = gw.options.channelBackend?.(name);
+    try {
+      const handle = await openContainerImpl(gw, {
+        name,
+        ...(backend !== undefined ? { backend } : {}),
+      });
+      gw.connectionInboxes.set(name, handle);
+    } catch {
+      continue; // left unattached, deliberately; see above
+    }
+  }
 }
 
 // Revoke a connection: strike its WRITE grant in the inbox pool, owner-authored (§39.3c). The door

@@ -430,8 +430,9 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
   },
   grant: {
     summary: "read the ledger of every author with standing; grant and revoke (SPEC §37)",
-    usage: "loam grant list|revoke <client_id> | <client_id> --verb=<verb> [options]",
-    flags: new Set(["home", "store", "verb", "prefix"]),
+    usage:
+      "loam grant list|revoke <client_id> | <client_id> --verb=<verb> [--user=<name>] [options]",
+    flags: new Set(["home", "store", "verb", "prefix", "user"]),
     notes: [
       "subcommands:",
       "  list                  every author with standing — users, pens, connectors, and any key",

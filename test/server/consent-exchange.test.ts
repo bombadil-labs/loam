@@ -38,7 +38,7 @@ import {
   writeOAuthFile,
   type OAuthFile,
 } from "../../src/server/oauth-file.js";
-import { AUTHORIZE_PATH } from "../../src/server/oauth.js";
+import { AUTHORIZE_PATH, revokeConnector } from "../../src/server/oauth.js";
 import { SAME_ORIGIN, signIn } from "../helpers/session-fixture.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
@@ -69,14 +69,23 @@ afterEach(async () => {
  * registered connector, and the token exchange OPEN (the connectors' home holds the operator seed).
  * The connectors' home and the users' home are distinct on purpose, as in the consent rail.
  */
-async function exchangeServer(preWritten: Partial<OAuthFile> = {}): Promise<{
+async function exchangeServer(
+  opts: {
+    preWritten?: Partial<OAuthFile>;
+    primary?: MemoryBackend;
+    pools?: Map<string, MemoryBackend>;
+  } = {},
+): Promise<{
   base: string;
   usersHome: string;
   connectorsHome: string;
   gateway: Gateway;
   faults: string[];
 }> {
-  const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
+  const gateway = await Gateway.open(opts.primary ?? new MemoryBackend(), {
+    seed: OPERATOR_SEED,
+    ...(opts.pools === undefined ? {} : { channelBackend: poolFactory(opts.pools) }),
+  });
   let ts = 9001;
   const op = (claims: Claims): Promise<unknown> =>
     gateway.append([signClaims(claims, OPERATOR_SEED)]);
@@ -101,7 +110,7 @@ async function exchangeServer(preWritten: Partial<OAuthFile> = {}): Promise<{
         generation: 1,
       },
     ],
-    ...preWritten,
+    ...(opts.preWritten ?? {}),
   });
   const faults: string[] = [];
   const handle = await serve({
@@ -120,6 +129,17 @@ async function exchangeServer(preWritten: Partial<OAuthFile> = {}): Promise<{
   handles.push(handle);
   return { base: handle.url, usersHome, connectorsHome, gateway, faults };
 }
+
+/** A pool backend factory over a test-owned map: what a durable store hands its pools. */
+const poolFactory =
+  (pools: Map<string, MemoryBackend>) =>
+  (name: string): MemoryBackend => {
+    const held = pools.get(name);
+    if (held !== undefined) return held;
+    const fresh = new MemoryBackend();
+    pools.set(name, fresh);
+    return fresh;
+  };
 
 const fieldOf = (html: string, name: string): string =>
   new RegExp(`name="${name}" value="([^"]*)"`).exec(html)?.[1] ?? "";
@@ -298,6 +318,13 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(beaPool.reactor.get(adaNote.id)).toBeUndefined();
     expect(gateway.reactor.get(adaNote.id)).toBeUndefined();
     expect(gateway.reactor.get(beaNote.id)).toBeUndefined();
+    // And at the CONTAINERS: each person's gather holds its own connection's note, not the other's.
+    const adaScope = gateway.containerScope({ containers: ["ada:journal"] }).map((d) => d.id);
+    const beaScope = gateway.containerScope({ containers: ["bea:notes"] }).map((d) => d.id);
+    expect(adaScope).toContain(adaNote.id);
+    expect(adaScope).not.toContain(beaNote.id);
+    expect(beaScope).toContain(beaNote.id);
+    expect(beaScope).not.toContain(adaNote.id);
   });
 
   it("re-consenting into the same container resumes the same key and the same pool", async () => {
@@ -337,44 +364,52 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(after.inbox).toBe(otherInbox);
     expect(gateway.connectionInboxes.size).toBe(2); // the first pool stands; nothing is dropped
 
-    // The early delta is in neither pool's ground, and neither pool gathers it.
-    for (const name of [grant.inbox!, otherInbox]) {
-      const pool = gateway.connectionInboxes.get(name)!.gateway!;
-      const ids = (await pool.backend.deltasSince(new Set())).map((d) => d.id);
-      expect(ids, name).not.toContain(early.id);
-      expect(pool.reactor.get(early.id), name).toBeUndefined();
-    }
+    // The second pool seeded from the primary AFTER `early` stood there, and its membership — the
+    // key AND a timestamp after its own binding — leaves `early` out, at the bytes, and keeps it
+    // out under a fresh pulse. That clause is what this asserts: without it the pool would carry
+    // the delta. (The FIRST pool's scope does admit a later primary write by its key on its next
+    // pulse: in this slice the key still writes to the primary under the store-wide grant — the
+    // window the next slice closes by routing writes into the pool — so it is not asserted here.)
+    const second = gateway.connectionInboxes.get(otherInbox)!;
+    await second.reseed();
+    const ids = (await second.gateway!.backend.deltasSince(new Set())).map((d) => d.id);
+    expect(ids).not.toContain(early.id);
+    expect(second.gateway!.reactor.get(early.id)).toBeUndefined();
   });
 
   it("a token or a grant minted before §58 names no user and fails closed", async () => {
     // Written BEFORE boot, so the door's token index holds the digest and the refusal is the
-    // grant's absence, not an unknown token.
+    // token naming no user — never the unknown-token miss, which would pin nothing.
     const seed = "ab".repeat(32);
-    const bearer = "pre-58-bearer-secret";
+    const preSection58 = "pre-58-bearer";
     const { base } = await exchangeServer({
-      grants: [
-        {
-          clientId: CLIENT_ID,
-          actorSeed: seed,
-          actor: authorForSeed(seed),
-          grantedAt: 1,
-          standing: true,
-        },
-      ],
-      tokens: [{ digest: digestHex(bearer), clientId: CLIENT_ID, issuedAt: 1, generation: 1 }],
+      preWritten: {
+        grants: [
+          {
+            clientId: CLIENT_ID,
+            actorSeed: seed,
+            actor: authorForSeed(seed),
+            grantedAt: 1,
+            standing: true,
+          },
+        ],
+        tokens: [
+          { digest: digestHex(preSection58), clientId: CLIENT_ID, issuedAt: 1, generation: 1 },
+        ],
+      },
     });
-    expect((await whoami(base, bearer)).status).toBe(401);
+    expect((await whoami(base, preSection58)).status).toBe(401);
   });
 
   it("a binding whose person holds no key on this store refuses, names the path only to the operator, and mints no token", async () => {
     const { base, connectorsHome, usersHome, faults } = await exchangeServer();
     const p = pkce();
-    const secret = "hand-written-code";
+    const handWritten = "hand-written-code";
     writeOAuthFile(connectorsHome, {
       ...readOAuthFile(connectorsHome),
       codes: [
         {
-          digest: digestHex(secret),
+          digest: digestHex(handWritten),
           clientId: CLIENT_ID,
           redirectUri: REDIRECT,
           expiresAt: Number.MAX_SAFE_INTEGER,
@@ -387,7 +422,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
       ],
     });
     expect(existsSync(userSeedPath(usersHome, "zed"))).toBe(false);
-    const res = await redeem(base, secret, p.verifier);
+    const res = await redeem(base, handWritten, p.verifier);
     expect(res.status).toBe(503);
     expect(await res.text()).not.toContain(usersHome);
     expect(faults.join("\n")).toContain(userSeedPath(usersHome, "zed"));
@@ -397,5 +432,93 @@ describe("§58 S1b — the exchange honors the binding", () => {
     // never stood, so the grant carries no inbox and the resolver would confer nothing on it.
     expect(file.grants).toHaveLength(1);
     expect(file.grants[0]!.inbox).toBeUndefined();
+  });
+
+  it("a grant whose pool never stood confers nothing, even on a token that names its person", async () => {
+    // Boot-written, so the digest is in the door's index: the 401 is the resolver refusing a
+    // grant without an inbox, not an unknown-token miss.
+    const seed = "cd".repeat(32);
+    const tokenNeverStood = "pool-never-stood";
+    const { base } = await exchangeServer({
+      preWritten: {
+        grants: [
+          {
+            clientId: CLIENT_ID,
+            actorSeed: seed,
+            actor: authorForSeed(seed),
+            grantedAt: 1,
+            standing: true,
+            user: "ada",
+            container: "ada:journal",
+          },
+        ],
+        tokens: [
+          {
+            digest: digestHex(tokenNeverStood),
+            clientId: CLIENT_ID,
+            issuedAt: 1,
+            generation: 1,
+            user: "ada",
+          },
+        ],
+      },
+    });
+    expect((await whoami(base, tokenNeverStood)).status).toBe(401);
+  });
+
+  it("revoking one person's binding leaves every other person's binding of the connector standing", async () => {
+    const { base, connectorsHome, faults } = await exchangeServer();
+    const adaToken = await connect(base, "ada", "journal");
+    const beaToken = await connect(base, "bea", "notes");
+    const struck: string[] = [];
+    const outcome = await revokeConnector(
+      connectorsHome,
+      CLIENT_ID,
+      (g) => {
+        struck.push(g.actor);
+        return Promise.resolve();
+      },
+      (m) => faults.push(m),
+      { user: "ada" },
+    );
+    // No generation bump — that is the client's, and would kill bea too. ada's grant, token and
+    // key go by name; bea's stand; the door agrees on the very next request.
+    expect(outcome).toMatchObject({ kind: "revoked", clientId: CLIENT_ID, generation: 1 });
+    const file = readOAuthFile(connectorsHome);
+    expect(file.grants.map((g) => g.user)).toEqual(["bea"]);
+    expect(file.tokens.map((t) => t.user)).toEqual(["bea"]);
+    expect(file.revoked?.map((r) => r.clientId)).toEqual([CLIENT_ID]);
+    expect(struck).toHaveLength(1);
+    expect((await whoami(base, adaToken)).status).toBe(401);
+    expect((await whoami(base, beaToken)).status).toBe(200);
+  });
+
+  it("a binding outlives the process that made it: the pool re-attaches at the next boot", async () => {
+    // The same ground and the same pool bytes, opened by a second gateway — the next process.
+    const primary = new MemoryBackend();
+    const pools = new Map<string, MemoryBackend>();
+    const { base, connectorsHome, gateway } = await exchangeServer({ primary, pools });
+    await connect(base, "ada", "journal");
+    const grant = readOAuthFile(connectorsHome).grants[0]!;
+    const pool = gateway.connectionInboxes.get(grant.inbox!)!.gateway!;
+    const note = signClaims(
+      noteClaims(grant.actor, "note:durable", "written before the restart", pool.nextTimestamp()),
+      grant.actorSeed,
+    );
+    await pool.append([note]);
+
+    // `boot` is a served store's path (the CLI's): it is where standing pools re-attach.
+    const reopened = await Gateway.boot(
+      primary,
+      { operatorSeed: OPERATOR_SEED, deltas: [] },
+      { channelBackend: poolFactory(pools) },
+    );
+    expect(reopened.connectionInboxes.has(grant.inbox!)).toBe(true);
+    // The bound container answers — no unattached-pool refusal — and gathers what the connection
+    // wrote before the restart; the pool's own ground still holds the connection's standing.
+    const scope = reopened.containerScope({ containers: ["ada:journal"] }).map((d) => d.id);
+    expect(scope).toContain(note.id);
+    const reattached = reopened.connectionInboxes.get(grant.inbox!)!.gateway!;
+    expect(holdsGrant(reattached.reactor, STORE_ENTITY, grant.actor, "write", OPERATOR)).toBe(true);
   });
 });

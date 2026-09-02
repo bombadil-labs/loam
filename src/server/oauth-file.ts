@@ -565,11 +565,12 @@ function checkFileShape(parsed: unknown, where: string): OAuthFile {
     "client with clientId",
   );
   // One grant per (client, user) since §58 — a connector two people consented holds two keys —
-  // and a pre-§58 grant, naming no user, counts as the pair (client, nobody).
+  // and a pre-§58 grant, naming no user, is its own pair. The key is a JSON pair, so no username
+  // can collide with "no user" and no separator can be spelled by a client id.
   checkUnique(
-    grants.map((g) => `${g.clientId} for ${g.user ?? "nobody"}`),
+    grants.map((g) => JSON.stringify([g.clientId, g.user ?? null])),
     where,
-    "grant with clientId",
+    "grant for the pair [clientId, user]",
   );
   checkUnique(
     tokens.map((t) => t.digest),
