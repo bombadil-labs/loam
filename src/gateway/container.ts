@@ -1513,7 +1513,15 @@ export async function bindConnectionImpl(
   // table is still consulted, defensively, so a struck name can never be resumed from a handle.
   const table = readContainerTable(gw.reactor, gw.operatorAuthor);
   const declared = table.containers.has(name);
-  const live = declared ? gw.connectionInboxes.get(name) : undefined;
+  const held = declared ? gw.connectionInboxes.get(name) : undefined;
+  // A drop unregisters the pool before its declaration is struck and its handle cleared; in that
+  // window the handle stands over a closed pool. Binding must not answer with it.
+  if (held !== undefined && gw.attachedContainers.get(name) !== held.gateway) {
+    throw new Error(
+      `bindConnection: the inbox ${name} is being dropped — bind again once the drop has settled`,
+    );
+  }
+  const live = held;
   if (!declared) {
     // The inbox seeds only THIS connection's deltas, and only those written AFTER the binding
     // (SPEC §58 criterion 8): a delta the key authored elsewhere before it was bound here — under

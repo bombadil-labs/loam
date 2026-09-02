@@ -30,6 +30,7 @@ import {
 import { Gateway, type FederationReport } from "../gateway/gateway.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
 import { clientFor, readOAuthFile, type OAuthFile } from "./oauth-file.js";
+import { subtreeOf } from "./subtree.js";
 import { revokeConnector } from "./oauth.js";
 import { escapeHtml, page } from "./session.js";
 import { ADMIN_PATH, ADMIN_REVOKE_PATH, adminPages, type RevokePlan } from "./admin-pages.js";
@@ -540,16 +541,33 @@ ${flowNote}`;
     // §58: a key may hold a sibling pool — a re-consent into another container spawns a second
     // inbox and the first stands — and a revoke is the KEY's, so every pool of this key that still
     // holds the grant is struck with the row's. Named on the confirm page before anything happens.
+    // Fenced to the person's own reach, like every row this page shows: a pool of the same key
+    // under someone else (reachable only through the library door) is neither named nor touched.
+    const reach = subtreeOf(gw.containers(), user);
     const siblings = [...gw.connectionInboxes]
       .filter(
         ([sibling, handle]) =>
           sibling !== name &&
           sibling.endsWith(`:${key}`) &&
+          reach.has(sibling) &&
           handle.gateway !== undefined &&
           holdsGrant(handle.gateway.reactor, STORE_ENTITY, key, "write", gw.operatorAuthor),
       )
       .map(([sibling]) => sibling)
       .sort();
+    // A row whose own pool is not attached here cannot have its grant struck from this row, and a
+    // page that struck the siblings while saying this one "no longer writes" would be lying about
+    // the one pool a person came here for. Refuse, and name where the act can be done instead.
+    if (pool === undefined && siblings.length > 0) {
+      return {
+        act: "refuse",
+        status: 409,
+        message:
+          "This connection's inbox pool is not attached here, so its grant cannot be struck from " +
+          `this row. The same key also writes into ${siblings.join(", ")}; revoke from one of ` +
+          "those rows, or re-attach this inbox and revoke again. Nothing was revoked.",
+      };
+    }
     let inboxLeg: { inbox: Container; ownerSeed: string } | undefined;
     let ownerSeed: string | undefined;
     if (standing || siblings.length > 0) {
@@ -739,13 +757,19 @@ ${flowNote}`;
       }
     }
     // The key's sibling pools, named on the confirm page, are struck here in the owner's voice.
-    // A sibling that could not be struck is a fault the operator hears; the page says what it did.
+    // A sibling that could not be struck is a fault the operator hears AND a refusal the person
+    // sees: the row's own inbox is struck by now, and a page headed "Revoked." over a pool the key
+    // still writes into would be the H7 shape. So the answer names what stands and says incomplete.
     const struckSiblings: string[] = [];
+    const failedSiblings: string[] = [];
     if (plan.ownerSeed !== undefined) {
       for (const sibling of plan.siblings) {
         const handle = gw.connectionInboxes.get(sibling);
         const pool = handle?.gateway;
-        if (handle === undefined || pool === undefined) continue;
+        if (handle === undefined || pool === undefined) {
+          failedSiblings.push(sibling);
+          continue;
+        }
         if (!holdsGrant(pool.reactor, STORE_ENTITY, plan.key, "write", gw.operatorAuthor)) continue;
         try {
           await gw.revokeConnection({
@@ -755,12 +779,22 @@ ${flowNote}`;
           });
           struckSiblings.push(sibling);
         } catch (err) {
+          failedSiblings.push(sibling);
           onFault(
             `the admin revoke struck "${name}" but could not strike the same key's sibling inbox ` +
               `"${sibling}": ${err instanceof Error ? err.message : String(err)}`,
           );
         }
       }
+    }
+    if (failedSiblings.length > 0) {
+      refuse(
+        res,
+        503,
+        `This inbox is struck, but the same key's ${failedSiblings.join(", ")} could not be — the ` +
+          "key still writes there. This revoke is incomplete; retry it from that row.",
+      );
+      return;
     }
     // §58: the act is the key's, never the whole connector's — whose other keys stand.
     const clientDone =
