@@ -537,7 +537,34 @@ ${flowNote}`;
     const pool = gw.attachedContainers.get(name);
     const standing =
       pool !== undefined && holdsGrant(pool.reactor, STORE_ENTITY, key, "write", gw.operatorAuthor);
+    // §58: a key may hold a sibling pool — a re-consent into another container spawns a second
+    // inbox and the first stands — and a revoke is the KEY's, so every pool of this key that still
+    // holds the grant is struck with the row's. Named on the confirm page before anything happens.
+    const siblings = [...gw.connectionInboxes]
+      .filter(
+        ([sibling, handle]) =>
+          sibling !== name &&
+          sibling.endsWith(`:${key}`) &&
+          handle.gateway !== undefined &&
+          holdsGrant(handle.gateway.reactor, STORE_ENTITY, key, "write", gw.operatorAuthor),
+      )
+      .map(([sibling]) => sibling)
+      .sort();
     let inboxLeg: { inbox: Container; ownerSeed: string } | undefined;
+    let ownerSeed: string | undefined;
+    if (standing || siblings.length > 0) {
+      const seed = readUserSeed(ctx.home, user);
+      if (seed.kind !== "present" || !/^[0-9a-f]{64}$/.test(seed.seed)) {
+        return {
+          act: "refuse",
+          status: 409,
+          message:
+            "You have no signing key on this store, so a revocation cannot be authored in your " +
+            "name. Ask the store's operator to provision your key. Nothing was revoked.",
+        };
+      }
+      ownerSeed = seed.seed;
+    }
     if (standing) {
       const handle = gw.connectionInboxes.get(name);
       if (handle === undefined) {
@@ -550,19 +577,9 @@ ${flowNote}`;
             "Nothing was revoked.",
         };
       }
-      const seed = readUserSeed(ctx.home, user);
-      if (seed.kind !== "present" || !/^[0-9a-f]{64}$/.test(seed.seed)) {
-        return {
-          act: "refuse",
-          status: 409,
-          message:
-            "You have no signing key on this store, so a revocation cannot be authored in your " +
-            "name. Ask the store's operator to provision your key. Nothing was revoked.",
-        };
-      }
-      inboxLeg = { inbox: handle, ownerSeed: seed.seed };
+      inboxLeg = { inbox: handle, ownerSeed: ownerSeed! };
     }
-    if (inboxLeg === undefined && client === undefined) {
+    if (inboxLeg === undefined && siblings.length === 0 && client === undefined) {
       return pool !== undefined
         ? {
             act: "refuse",
@@ -583,7 +600,9 @@ ${flowNote}`;
       act: "revoke",
       key,
       bound,
+      siblings,
       ...(inboxLeg ?? {}),
+      ...(ownerSeed === undefined ? {} : { ownerSeed }),
       ...(client === undefined ? {} : { client }),
     };
   };
@@ -655,7 +674,7 @@ ${flowNote}`;
         onFault,
         // Always the pair's — including the pre-§58 pair that names no user; the whole-client
         // revoke is the CLI's explicit act, never this page's.
-        { user: plan.client.user },
+        { kind: "pair", user: plan.client.user },
       );
       if (outcome.kind === "no-such-client") {
         refuse(
@@ -663,6 +682,15 @@ ${flowNote}`;
           409,
           "This connector left the records between the confirm page and now, so nothing was " +
             "revoked. Its row will say what still stands.",
+        );
+        return;
+      }
+      if (outcome.kind === "no-such-pair") {
+        refuse(
+          res,
+          409,
+          "This connector holds no key for this inbox's person any more, so nothing was revoked. " +
+            "Its row will say what still stands.",
         );
         return;
       }
@@ -710,15 +738,14 @@ ${flowNote}`;
         return;
       }
     }
-    // §58: a key may hold a sibling pool — a re-consent into another container spawns a second
-    // inbox and the first stands — and a revoke is the KEY's, so every pool of this key is struck,
-    // not only the row the page was opened on. A sibling that could not be struck is a fault the
-    // operator hears; the page still says what it did.
+    // The key's sibling pools, named on the confirm page, are struck here in the owner's voice.
+    // A sibling that could not be struck is a fault the operator hears; the page says what it did.
+    const struckSiblings: string[] = [];
     if (plan.ownerSeed !== undefined) {
-      for (const [sibling, handle] of gw.connectionInboxes) {
-        if (sibling === name || !sibling.endsWith(`:${plan.key}`)) continue;
-        const pool = handle.gateway;
-        if (pool === undefined) continue;
+      for (const sibling of plan.siblings) {
+        const handle = gw.connectionInboxes.get(sibling);
+        const pool = handle?.gateway;
+        if (handle === undefined || pool === undefined) continue;
         if (!holdsGrant(pool.reactor, STORE_ENTITY, plan.key, "write", gw.operatorAuthor)) continue;
         try {
           await gw.revokeConnection({
@@ -726,6 +753,7 @@ ${flowNote}`;
             connectionKey: plan.key,
             ownerSeed: plan.ownerSeed,
           });
+          struckSiblings.push(sibling);
         } catch (err) {
           onFault(
             `the admin revoke struck "${name}" but could not strike the same key's sibling inbox ` +
@@ -734,15 +762,22 @@ ${flowNote}`;
         }
       }
     }
+    // §58: the act is the key's, never the whole connector's — whose other keys stand.
     const clientDone =
       plan.client === undefined
         ? ""
         : plan.client.user === undefined
           ? ` The connector <code>${escapeHtml(plan.client.clientName ?? plan.client.clientId)}</code>
-holds no working token now — each is refused on its next request.`
+holds no working token for this key now — a key from before §58 — and every other key of it stands.`
           : ` The connector <code>${escapeHtml(plan.client.clientName ?? plan.client.clientId)}</code>
 holds no working token for <code>${escapeHtml(plan.client.user)}</code> now — each is refused on its
 next request. Other people's bindings of this connector stand.`;
+    const siblingsDone =
+      struckSiblings.length === 0
+        ? ""
+        : ` This key also wrote into ${struckSiblings
+            .map((s) => `<code>${escapeHtml(s)}</code>`)
+            .join(", ")}; that inbox is struck with this one.`;
     htmlOut(
       res,
       200,
@@ -750,8 +785,8 @@ next request. Other people's bindings of this connector stand.`;
         "revoked",
         `<h1>Revoked.</h1>
 <p><code>${escapeHtml(plan.key)}</code> no longer writes into
-<code>${escapeHtml(plan.bound)}</code>: its next write is refused at the door.${clientDone}
-Everything it already wrote remains, author intact, and every other connection is untouched.</p>
+<code>${escapeHtml(plan.bound)}</code>: its next write is refused at the door.${clientDone}${siblingsDone}
+Everything it already wrote remains, author intact, and every other key's connection is untouched.</p>
 <p><a href="${escapeHtml(pages.detailHref(name))}">Its inbox</a> keeps the record — drop it there to
 forget it whole.</p>
 <p><a href="${ADMIN_PATH}">Back to your containers.</a></p>`,

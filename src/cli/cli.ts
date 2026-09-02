@@ -3712,6 +3712,11 @@ async function cmdGrantRevoke(
       case "no-such-client":
         io.err(`grant revoke: this store holds no connector ${clientId} — \`loam grant list\``);
         return 2;
+      case "no-such-pair":
+        // The CLI revokes the WHOLE client; a pair scope is the admin page's, so this answer is
+        // not one this command can be given — named here so the type stays exhaustive.
+        io.err(`grant revoke: ${clientId} holds no key for that person — \`loam grant list\``);
+        return 2;
       case "locked":
         io.err(
           `grant revoke: this store's connector records are locked by another process, so ` +

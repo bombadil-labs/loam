@@ -1508,13 +1508,12 @@ export async function bindConnectionImpl(
 
   // Durable (decision 3): a live handle for a STANDING declaration resumes — its grant chain is
   // re-verified below, idempotently, so a pool re-attached at boot is provisioned exactly like one
-  // this process spawned. A handle whose declaration is gone (the pool was dropped) is stale, and
-  // is cleared rather than resumed: a bind must never answer with a purged pool.
+  // this process spawned. The handle's own drop is the one place a handle is cleared, and it clears
+  // only once the pool is unregistered, so a held handle is always a standing declaration; the
+  // table is still consulted, defensively, so a struck name can never be resumed from a handle.
   const table = readContainerTable(gw.reactor, gw.operatorAuthor);
   const declared = table.containers.has(name);
-  const held = gw.connectionInboxes.get(name);
-  if (held !== undefined && !declared) gw.connectionInboxes.delete(name);
-  const live = declared ? held : undefined;
+  const live = declared ? gw.connectionInboxes.get(name) : undefined;
   if (!declared) {
     // The inbox seeds only THIS connection's deltas, and only those written AFTER the binding
     // (SPEC §58 criterion 8): a delta the key authored elsewhere before it was bound here — under
@@ -1601,8 +1600,12 @@ export async function bindConnectionImpl(
 // writes while keeping the record.
 //
 // Drop ends the live binding — clear the durable handle so a later bind spawns fresh rather than
-// resuming a purged pool. The delete runs in a `finally`: even if the declaration-strike append
-// fails after the bytes are gone, the stale handle must not survive to be resumed.
+// resuming a purged pool. The delete runs in a `finally`, but ONLY once the pool is unregistered:
+// a drop the store REFUSES (bytes that survive the purge) throws before unregistering, and the pool
+// then stands exactly as before — attached, declared, its grant live — so its handle must stand
+// too, or the binding is stranded on every door (no revoke, no re-bind, no second drop) until a
+// restart. After a real purge, even if the declaration-strike append fails, the stale handle must
+// not survive to be resumed.
 function inboxHandle(gw: Gateway, name: string, inbox: Container): Container {
   const baseDrop = inbox.drop.bind(inbox);
   return {
@@ -1611,7 +1614,7 @@ function inboxHandle(gw: Gateway, name: string, inbox: Container): Container {
       try {
         await baseDrop();
       } finally {
-        gw.connectionInboxes.delete(name);
+        if (!gw.attachedContainers.has(name)) gw.connectionInboxes.delete(name);
       }
     },
     detach: () =>

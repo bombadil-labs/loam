@@ -51,6 +51,8 @@ export type RevokePlan =
       readonly bound: string;
       readonly inbox?: Container;
       readonly ownerSeed?: string;
+      /** Every OTHER inbox pool this key holds under the owner (§58): struck with the row's. */
+      readonly siblings: readonly string[];
       readonly client?: {
         readonly clientId: string;
         readonly clientName?: string;
@@ -774,21 +776,30 @@ ${hiddenPair(formToken, name)}
     formToken: string,
     confirmToken: string,
   ): string => {
+    // §58: the act is the KEY's — this row's person's, or the pre-§58 key that names no person —
+    // never the whole connector's, whose other keys stand.
     const clientLine =
       plan.client === undefined
         ? ""
         : `<p>It is the connector <code>${escapeHtml(plan.client.clientName ?? plan.client.clientId)}</code>` +
           (plan.client.generation === undefined ? "" : ` (generation ${plan.client.generation})`) +
           (plan.client.user === undefined
-            ? `. Revoking retires every token it holds — each is refused on its next request.</p>\n`
-            : `. Revoking retires the token(s) it holds for <code>${escapeHtml(plan.client.user)}</code> — each is ` +
-              `refused on its next request. Other people's bindings of this connector stand.</p>\n`);
+            ? `. Revoking retires the token(s) this key holds — a key from before §58, which already ` +
+              `opens no door — and every other key of this connector stands.</p>\n`
+            : `. Revoking retires the token(s) this key holds for <code>${escapeHtml(plan.client.user)}</code> ` +
+              `— each is refused on its next request. Other people's bindings of this connector stand.</p>\n`);
+    const siblingsLine =
+      plan.siblings.length === 0
+        ? ""
+        : `<p>This key also writes into ${plan.siblings
+            .map((s) => `<code>${escapeHtml(s)}</code>`)
+            .join(", ")}; that inbox is struck with this one, since a revoke is the key's.</p>\n`;
     return page(
       "confirm the revoke",
       `<h1>Revoke <code>${escapeHtml(plan.key)}</code>?</h1>
 <p>It writes into <code>${escapeHtml(plan.bound)}</code>. Revoking refuses its next write.</p>
-${clientLine}<p>Everything it already wrote is kept, author intact — a revocation closes the door and does not
-rewrite history. Every other connection is untouched. To forget its inbox whole, drop it from
+${clientLine}${siblingsLine}<p>Everything it already wrote is kept, author intact — a revocation closes the door and does not
+rewrite history. Every other key's connection is untouched. To forget its inbox whole, drop it from
 <a href="${escapeHtml(detailHref(name))}">its own page</a>.</p>
 <form method="post" action="${ADMIN_REVOKE_CONFIRM_PATH}">
 ${hiddenPair(formToken, name)}

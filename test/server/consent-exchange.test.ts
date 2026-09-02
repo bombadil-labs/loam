@@ -22,7 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Claims } from "@bombadil/rhizomatic";
-import { initHome, userSeedPath } from "../../src/cli/config.js";
+import { initHome, readUserSeed, userSeedPath } from "../../src/cli/config.js";
 import { holdsGrant } from "../../src/gateway/accounts.js";
 import { inboxName } from "../../src/gateway/container.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -74,6 +74,8 @@ async function exchangeServer(
     preWritten?: Partial<OAuthFile>;
     primary?: MemoryBackend;
     pools?: Map<string, MemoryBackend>;
+    /** Pools whose bytes survive every purge, so a drop is refused. */
+    sticky?: boolean;
   } = {},
 ): Promise<{
   base: string;
@@ -84,7 +86,11 @@ async function exchangeServer(
 }> {
   const gateway = await Gateway.open(opts.primary ?? new MemoryBackend(), {
     seed: OPERATOR_SEED,
-    ...(opts.pools === undefined ? {} : { channelBackend: poolFactory(opts.pools) }),
+    ...(opts.sticky === true
+      ? { channelBackend: (): MemoryBackend => new StickyBackend() }
+      : opts.pools === undefined
+        ? {}
+        : { channelBackend: poolFactory(opts.pools) }),
   });
   let ts = 9001;
   const op = (claims: Claims): Promise<unknown> =>
@@ -128,6 +134,13 @@ async function exchangeServer(
   });
   handles.push(handle);
   return { base: handle.url, usersHome, connectorsHome, gateway, faults };
+}
+
+/** A backend whose bytes never leave: every purge is followed by "still here", so a drop refuses. */
+class StickyBackend extends MemoryBackend {
+  override holds(): Promise<boolean> {
+    return Promise.resolve(true);
+  }
 }
 
 /** A pool backend factory over a test-owned map: what a durable store hands its pools. */
@@ -247,8 +260,12 @@ const formTokenOf = (html: string): string =>
   /name="form_token" value="([^"]+)"/.exec(html)?.[1] ?? "";
 const confirmTokenOf = (html: string): string =>
   /name="confirm_token" value="([^"]+)"/.exec(html)?.[1] ?? "";
-/** The admin page's two-step revoke of one inbox, as a person does it. */
-async function revokeViaPanel(base: string, sessionId: string, name: string): Promise<Response> {
+/** The admin page's two-step revoke of one inbox, as a person does it: both pages come back. */
+async function revokeViaPanel(
+  base: string,
+  sessionId: string,
+  name: string,
+): Promise<{ dashboard: string; confirmHtml: string; done: Response }> {
   const dashboard = await (await getAdmin(base, sessionId)).text();
   const formToken = formTokenOf(dashboard);
   const confirm = await postAdmin(base, "/admin/revoke", sessionId, {
@@ -256,13 +273,15 @@ async function revokeViaPanel(base: string, sessionId: string, name: string): Pr
     name,
   });
   expect(confirm.status).toBe(200);
-  const confirmToken = confirmTokenOf(await confirm.text());
+  const confirmHtml = await confirm.text();
+  const confirmToken = confirmTokenOf(confirmHtml);
   expect(confirmToken).not.toBe("");
-  return postAdmin(base, "/admin/revoke-confirm", sessionId, {
+  const done = await postAdmin(base, "/admin/revoke-confirm", sessionId, {
     form_token: formToken,
     name,
     confirm_token: confirmToken,
   });
+  return { dashboard, confirmHtml, done };
 }
 
 const whoami = (base: string, token: string): Promise<Response> =>
@@ -541,7 +560,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
         return Promise.resolve();
       },
       (m) => faults.push(m),
-      { user: "ada" },
+      { kind: "pair", user: "ada" },
     );
     // No generation bump — that is the client's, and would kill bea too. ada's grant, token and
     // key go by name; bea's stand; the door agrees on the very next request.
@@ -630,11 +649,20 @@ describe("§58 S1b — the exchange honors the binding", () => {
     );
 
     const session = await signIn(base, "ada", PASSWORD);
-    const done = await revokeViaPanel(base, session, journalInbox);
+    const { dashboard, confirmHtml, done } = await revokeViaPanel(base, session, journalInbox);
+    // Before the act: ada's rows count HER pair's tokens (two), never the connector's (three).
+    expect(dashboard).toContain("2 live tokens");
+    expect(dashboard).not.toContain("3 live tokens");
+    // The confirm page names the person and the sibling pool before anything happens.
+    expect(confirmHtml).toContain("for <code>ada</code>");
+    expect(confirmHtml).toContain(`<code>${otherInbox}</code>`);
+    expect(confirmHtml).toContain("struck with this one");
     expect(done.status).toBe(200);
     const doneHtml = await done.text();
     expect(doneHtml).toContain("for <code>ada</code>");
     expect(doneHtml).toContain("Other people's bindings of this connector stand");
+    expect(doneHtml).toContain(`<code>${otherInbox}</code>`);
+    expect(doneHtml).not.toContain("every other connection is untouched");
     // Both of the key's pools are struck; bea's binding and token stand.
     expect(
       holdsGrant(poolOf(journalInbox).reactor, STORE_ENTITY, ada.actor, "write", OPERATOR),
@@ -646,5 +674,60 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(file.grants.map((g) => g.user)).toEqual(["bea"]);
     expect(file.clients[0]!.generation).toBe(1);
     expect((await whoami(base, beaToken)).status).toBe(200);
+  });
+
+  it("a drop the store refuses keeps the binding's handle: the connection stays revocable and re-bindable", async () => {
+    const { base, connectorsHome, gateway } = await exchangeServer({ sticky: true });
+    await connect(base, "ada", "journal");
+    const grant = readOAuthFile(connectorsHome).grants[0]!;
+    const handle = gateway.connectionInboxes.get(grant.inbox!)!;
+    await expect(handle.drop()).rejects.toThrow(/drop refused/);
+    // Refused means nothing changed: the pool is attached, the handle held, the standing intact —
+    // and a bind resumes it rather than colliding with a pool the store still holds open.
+    expect(gateway.connectionInboxes.get(grant.inbox!)).toBe(handle);
+    expect(gateway.attachedContainers.has(grant.inbox!)).toBe(true);
+    expect(holdsGrant(handle.gateway!.reactor, STORE_ENTITY, grant.actor, "write", OPERATOR)).toBe(
+      true,
+    );
+    const again = await connect(base, "ada", "journal");
+    expect((await whoami(base, again)).status).toBe(200);
+    expect(gateway.connectionInboxes.get(grant.inbox!)).toBe(handle);
+  });
+
+  it("revoking a pre-§58 key's inbox from the admin page is that key's alone: the person's own binding stands", async () => {
+    const oldSeed = "ef".repeat(32);
+    const oldKey = authorForSeed(oldSeed);
+    const oldToken = "pre-58-token-two";
+    const { base, connectorsHome, gateway, usersHome } = await exchangeServer({
+      preWritten: {
+        grants: [
+          { clientId: CLIENT_ID, actorSeed: oldSeed, actor: oldKey, grantedAt: 1, standing: true },
+        ],
+        tokens: [{ digest: digestHex(oldToken), clientId: CLIENT_ID, issuedAt: 1, generation: 1 }],
+      },
+    });
+    const adaToken = await connect(base, "ada", "journal"); // provisions ada's key and home
+    const owner = readUserSeed(usersHome, "ada");
+    expect(owner.kind).toBe("present");
+    // The old key's inbox, bound through the §39 library door into ada's home, as a pre-§58 store
+    // would hold it.
+    await gateway.bindConnection({
+      container: "ada",
+      connectionKey: oldKey,
+      ownerSeed: (owner as { seed: string }).seed,
+    });
+    const oldInbox = inboxName("ada", oldKey);
+    const session = await signIn(base, "ada", PASSWORD);
+    const { confirmHtml, done } = await revokeViaPanel(base, session, oldInbox);
+    expect(confirmHtml).toContain("before §58");
+    expect(done.status).toBe(200);
+    // The pair that names nobody went; ada's own pair — and the connector's generation — stand.
+    const file = readOAuthFile(connectorsHome);
+    expect(file.clients[0]!.generation).toBe(1);
+    expect(file.grants.map((g) => g.user)).toEqual(["ada"]);
+    expect(file.tokens.every((t) => t.user === "ada")).toBe(true);
+    expect((await whoami(base, adaToken)).status).toBe(200);
+    const oldPool = gateway.connectionInboxes.get(oldInbox)!.gateway!;
+    expect(holdsGrant(oldPool.reactor, STORE_ENTITY, oldKey, "write", OPERATOR)).toBe(false);
   });
 });

@@ -1781,9 +1781,18 @@ export function makeTokenDoor(options: TokenDoorOptions): TokenDoor {
 
 // --- revocation ---------------------------------------------------------------------------------
 
+/**
+ * What a revoke reaches (SPEC §58). The whole CLIENT — every key it holds, the generation bumped so
+ * every token and code dies at once — is the CLI's explicit act. ONE PAIR — a person's key, or the
+ * pre-§58 key that names no person — is what the admin page revokes from an inbox's row.
+ */
+export type RevokeScope =
+  { readonly kind: "client" } | { readonly kind: "pair"; readonly user: string | undefined };
+
 export type RevokeOutcome =
   | { readonly kind: "revoked"; readonly clientId: string; readonly generation: number }
   | { readonly kind: "no-such-client" }
+  | { readonly kind: "no-such-pair" }
   | { readonly kind: "locked" }
   | { readonly kind: "unreadable" };
 
@@ -1803,13 +1812,14 @@ export async function revokeConnector(
   clientId: string,
   strikeStanding: (grant: OAuthGrant) => Promise<void>,
   onFault: (message: string) => void = () => {},
-  only?: { readonly user: string | undefined },
+  scope: RevokeScope = { kind: "client" },
 ): Promise<RevokeOutcome> {
   // Whole client: EVERY key it holds goes — one per person who consented (§58), plus any pre-§58
-  // one — and the generation bump kills every token and code at once. ONE PERSON (`only`): that
-  // pair's key alone goes, and since the generation is the client's and cannot scope, the pair's
-  // tokens and codes are deleted by name instead — the resolver refuses a token whose record is
-  // gone. Every other person's binding of the same connector stands untouched.
+  // one — and the generation bump kills every token and code at once. ONE PAIR: that key alone
+  // goes, and since the generation is the client's and cannot scope, the pair's tokens and codes
+  // are deleted by name instead — the resolver refuses a token whose record is gone. Every other
+  // key of the same connector stands untouched. A pair nobody holds is its own answer, and writes
+  // nothing.
   let struckGrants: OAuthGrant[] = [];
   let outcome: RevokeOutcome;
   try {
@@ -1817,11 +1827,14 @@ export async function revokeConnector(
       const client = clientFor(file, clientId);
       if (client === undefined) return { result: { kind: "no-such-client" } };
       const ofPair = (r: { readonly clientId: string; readonly user?: string }): boolean =>
-        r.clientId === clientId && (only === undefined || r.user === only.user);
+        r.clientId === clientId && (scope.kind === "client" || r.user === scope.user);
       struckGrants = file.grants.filter(ofPair);
+      if (scope.kind === "pair" && struckGrants.length === 0) {
+        return { result: { kind: "no-such-pair" } };
+      }
       const going = struckGrants; // a const the closures below read; `struckGrants` outlives this scope
       const goingActors = new Set(going.map((g) => g.actor));
-      const generation = only === undefined ? client.generation + 1 : client.generation;
+      const generation = scope.kind === "client" ? client.generation + 1 : client.generation;
       return {
         next: {
           ...file,
@@ -1832,7 +1845,7 @@ export async function revokeConnector(
           // ledger then reports a connector of months' standing as having "no acting identity yet"
           // while the grant it held sits attributed to nobody.
           grants: file.grants.filter((g) => !ofPair(g)),
-          ...(only === undefined
+          ...(scope.kind === "client"
             ? {}
             : {
                 tokens: file.tokens.filter((t) => !ofPair(t)),
@@ -1861,7 +1874,8 @@ export async function revokeConnector(
     return { kind: "unreadable" };
   }
   // The ground strike is cleanup after the authoritative access-kill above. A failure here leaves the
-  // tokens dead (generation bumped) and only a ground grant lingering, reachable by nothing.
+  // tokens dead (the generation bumped, or the pair's records gone) and only a ground grant
+  // lingering, reachable by nothing.
   if (outcome.kind === "revoked") {
     for (const struck of struckGrants) {
       try {
