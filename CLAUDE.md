@@ -316,6 +316,19 @@ Where a working spec exists, **its acceptance criteria ARE the rail list** — e
 names its verification path, so P3 is transcription, not invention. If a criterion has no test yet,
 P1 under-specified. **No reward-hacking: a test that can pass without the desired behavior is a bug.**
 
+**`rails-red` IS A MEASUREMENT, NOT A SENTENCE** (T262, 2026-09-02). Copy every new rail onto the
+BASE tree and run it there; the record is what that run printed. Landing §58 S1 did this for the
+first time and two of fifteen rails PASSED on the base — both in the file whose whole subject was
+scoping, both asserting a clock instead. Five fresh-context lenses had read them, including the one
+whose only job is *could this pass with the fix reverted?*, and neither found them: a model reading
+a test asks whether the assertions look right; it does not run them where the feature is absent.
+The run costs under a minute (a worktree at the base, the rail files copied in, one `vitest`), and
+it is the only instrument that answers the question the record claims to answer. It has a second
+use: a case that legitimately passes on the base is a CONTROL, not a gate, and should say so in its
+own text rather than pad the count. `journal/2026-09-02-rails-red-is-a-measurement.md` has the two
+repairs. The sibling instrument is the REVERT PROBE — delete the guard, watch the named case go red
+— which caught a clause no fixture could reach and no mutant could kill.
+
 **Declare `rails` when the tests EXIST, never in advance.** A rail glob matching no file does not
 fail and does not warn — `rails-guard` prints `all checks passed` and exits 0. Pre-declaring paths
 on a `todo` ticket therefore protects nothing while manufacturing a green. There is no bulk
