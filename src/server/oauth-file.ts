@@ -153,6 +153,15 @@ export interface OAuthCode {
    * after it (criterion 8). OPTIONAL for the pre-phase-15 shape: an absent generation fails closed.
    */
   readonly generation?: number;
+  /**
+   * The binding (SPEC §58): whose consent this was, and the container the connection will live
+   * in. Recorded at consent for the exchange to honor. The exchange does not read them yet: a
+   * code that carries no container still redeems as it always did, and refusing it is the
+   * exchange's own slice of §58. OPTIONAL because a POST that carries no binding fields mints a
+   * code without them.
+   */
+  readonly user?: string;
+  readonly container?: string;
 }
 
 export interface OAuthFile {
@@ -238,7 +247,7 @@ export const MAX_CLIENT_NAME = 200;
  * Written as a CODE-POINT test rather than a regex character class: a literal control character
  * inside a regex is unreadable in a source file.
  */
-const CONTROL = (text: string): boolean =>
+export const CONTROL = (text: string): boolean =>
   [...text].some((ch) => {
     const code = ch.codePointAt(0)!;
     return code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029;
@@ -372,6 +381,20 @@ function checkCode(raw: unknown, where: string): OAuthCode {
     throw new OAuthFileUnreadable(`${where} has a codeChallenge carrying a control character`);
   }
   const generation = optGeneration(raw, where, "generation");
+  // OPTIONAL, §58: the binding. Plain names, no control bytes — the same listing-row rule.
+  const optName = (field: "user" | "container"): string | undefined => {
+    const value = (raw as Record<string, unknown>)[field];
+    if (value === undefined) return undefined;
+    if (typeof value !== "string" || value.length === 0) {
+      throw new OAuthFileUnreadable(`${where} has a ${field} that is not a non-empty string`);
+    }
+    if (CONTROL(value)) {
+      throw new OAuthFileUnreadable(`${where} has a ${field} carrying a control character`);
+    }
+    return value;
+  };
+  const user = optName("user");
+  const container = optName("container");
   return {
     digest,
     clientId: str(raw, where, "clientId"),
@@ -380,6 +403,8 @@ function checkCode(raw: unknown, where: string): OAuthCode {
     issuedAt: num(raw, where, "issuedAt"),
     ...(rawChallenge === undefined ? {} : { codeChallenge: rawChallenge }),
     ...(generation === undefined ? {} : { generation }),
+    ...(user === undefined ? {} : { user }),
+    ...(container === undefined ? {} : { container }),
   };
 }
 

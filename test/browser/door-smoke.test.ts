@@ -176,11 +176,15 @@ describe("T143 — the doors, driven by a real browser", () => {
     const authorize = `${base}/oauth/authorize?${query.toString()}`;
     await tab.navigate(authorize);
     expect(await bodyText(tab)).toContain("Approve a connector?");
+    // §58: a connection lives in one container under alice's name, chosen here — she names it.
+    await tab.eval('document.getElementById("bind_new").value = "journal"');
     await submit(tab, "/oauth/authorize");
     const where = (await tab.eval("location.href")) as string;
     expect(where.startsWith(`${landingOrigin}/cb`)).toBe(true);
     expect(where).toContain("code=");
     expect(where).toContain("state=st-42");
+    // ...and the store holds what she named: the container stands under her home.
+    expect(gateway.containers().containers.get("alice:journal")?.parent).toBe("alice");
     // Criterion 5's second half: what ARRIVES at the connector carries no authorize URL. A
     // STORE-origin Referer is at most the bare origin — never a path, never the query that holds
     // client_id, state and code_challenge. The landing page's own subresource fetches (Chrome
