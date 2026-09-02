@@ -77,7 +77,17 @@ connection reads, and the refusals name it.
 
 `whoami` speaks the binding (the person, the container, the inbox) and reads write standing from
 the pool, so a strike on the pool's grant flips the answer on the very next call while the token
-still names the connection.
+still names the connection. The operator's ledger reads the same place: `loam grant list` reports a
+bound connection's standing from its pool, and `loam grant revoke` strikes that grant rather than
+only the store-wide one that no longer exists — a report naming a strike nobody performed is the
+shape §11's discipline refuses.
+
+**REGISTRATION IS THE NAMED EXCEPTION.** The binding does not route it and does not refuse it.
+Registration is constitutional (§17), its standing is an operator's explicit `register` grant and
+never the binding's, and its deltas land in the primary under the store's own signature exactly as
+they did before this section. Position 2 gives a connection law under its own container path
+instead; the slice that builds it is S2, with the inbox pool's own publish, the §47 fold, and a
+re-attach at boot. Until then a bound connection that holds a register grant shapes the store.
 
 ## 58.4 Reads are the container's
 
