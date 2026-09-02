@@ -83,6 +83,15 @@ describe("§58 position 4 — a child's leeway fits its parent's DELEGATION TERM
       expect(leewayFits(leeway({ envelope: "medium" }), parent)).toBeUndefined();
       expect(leewayFits(leeway({ envelope: "small" }), parent)).toBeUndefined();
     });
+
+    it("refuses a MEDIUM child under a SMALL ceiling — the tightest rung, and the default", () => {
+      // The case above cannot see a rank table that collapses small into medium, because every
+      // child it tries is admitted either way. This one separates the bottom two rungs, which is
+      // where the default sits and therefore where a collapse would cost the most.
+      const parent = leeway({ delegate: terms({ envelope: "small" }) });
+      expect(refusal(leeway({ envelope: "medium" }), parent)).toMatch(/envelope/i);
+      expect(leewayFits(leeway({ envelope: "small" }), parent)).toBeUndefined();
+    });
   });
 
   describe("a child's OWN delegate is compared too", () => {
