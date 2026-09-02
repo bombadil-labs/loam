@@ -156,7 +156,7 @@ export interface RunOptions {
   readonly scrypt?: ScryptParams;
 }
 
-const VERSION = "0.6.0";
+const VERSION = "0.7.0";
 
 type CommandName =
   | "init"
