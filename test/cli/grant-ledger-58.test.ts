@@ -9,8 +9,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { authorForSeed } from "@bombadil/rhizomatic";
-import { run } from "../../src/cli/cli.js";
+import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
+import { channelBackendFor, run } from "../../src/cli/cli.js";
+import { readSeed, writeUserSeed } from "../../src/cli/config.js";
+import { holdsGrant } from "../../src/gateway/accounts.js";
+import { containerClaims } from "../../src/gateway/container.js";
+import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
+import { Gateway } from "../../src/gateway/gateway.js";
+import { SqliteBackend } from "../../src/store/sqlite.js";
 import { EMPTY_OAUTH, writeOAuthFile } from "../../src/server/oauth-file.js";
 
 vi.setConfig({ testTimeout: 60_000 });
@@ -160,5 +166,149 @@ describe("§58 — `loam grant <id> --verb=register` names whose key, when a con
       await run(["grant", "cli-empty", "--verb=register", "--prefix=em:", "--home", home], io()),
     ).toBe(2);
     expect(printed()).toContain("no acting identity");
+  });
+});
+
+// --- a REAL bound connection in a real home ------------------------------------------------------
+// The cases above write grant records by hand, which is enough to test the ledger's arithmetic. The
+// two below need the thing itself: a container, an inbox pool on disk, and the owner-authored write
+// grant inside it — because that grant IS a §58 connection's standing, and both surfaces under test
+// were reading the primary and reporting on something else.
+
+const CONN_SEED = "c3".repeat(32);
+const CONN = authorForSeed(CONN_SEED);
+const OWNER_SEED = "0a".repeat(32);
+const CLIENT = "cli-claude";
+
+/** Bind a connection in `home`, exactly as the consent flow would, and return its inbox name. */
+async function bindInHome(user: string, container: string): Promise<string> {
+  const seed = readSeed(home);
+  const operator = authorForSeed(seed);
+  writeUserSeed(home, user, OWNER_SEED);
+  const gw = await Gateway.boot(
+    new SqliteBackend(join(home, "store.sqlite")),
+    assembleGenesis({ operatorSeed: seed }),
+    { channelBackend: channelBackendFor(home, io()) },
+  );
+  await gw.append([
+    signClaims(
+      containerClaims(
+        {
+          container,
+          trust: "curated",
+          posture: "shared",
+          membership: {
+            op: "select",
+            pred: { match: { field: "author", cmp: "eq", const: authorForSeed(OWNER_SEED) } },
+            in: "input",
+          },
+        },
+        operator,
+        600,
+      ),
+      seed,
+    ),
+  ]);
+  const inbox = await gw.bindConnection({
+    container,
+    connectionKey: CONN,
+    ownerSeed: OWNER_SEED,
+  });
+  const name = inbox.entity!;
+  await gw.close();
+  return name;
+}
+
+/** Does the pool still grant the connection write standing? Asked of the pool's own ground. */
+async function poolGrantsWrite(inbox: string): Promise<boolean> {
+  const seed = readSeed(home);
+  const gw = await Gateway.boot(
+    new SqliteBackend(join(home, "store.sqlite")),
+    assembleGenesis({ operatorSeed: seed }),
+    { channelBackend: channelBackendFor(home, io()) },
+  );
+  const pool = gw.connectionInboxes.get(inbox)?.gateway;
+  const held =
+    pool !== undefined &&
+    holdsGrant(pool.reactor, STORE_ENTITY, CONN, "write", authorForSeed(seed));
+  await gw.close();
+  return held;
+}
+
+const connectorRecord = (inbox: string) => ({
+  ...EMPTY_OAUTH,
+  clients: [
+    {
+      clientId: CLIENT,
+      clientName: "Claude",
+      redirectUris: ["https://claude.ai/cb"],
+      registeredAt: 1,
+      generation: 1,
+    },
+  ],
+  grants: [
+    {
+      clientId: CLIENT,
+      actorSeed: CONN_SEED,
+      actor: CONN,
+      grantedAt: 1,
+      standing: true,
+      user: "ada",
+      container: "ada:journal",
+      inbox,
+    },
+  ],
+  tokens: [{ digest: "d".repeat(64), clientId: CLIENT, issuedAt: 1, generation: 1, user: "ada" }],
+});
+
+describe("§58 — the ledger reads the pool, because that is where the standing is", () => {
+  it("a live bound connection reads as holding write standing in its inbox, not as holding none", async () => {
+    const inbox = await bindInHome("ada", "ada:journal");
+    expect(await poolGrantsWrite(inbox)).toBe(true); // the fixture really is live
+    writeOAuthFile(home, connectorRecord(inbox));
+
+    expect(await run(["grant", "list", "--home", home], io())).toBe(0);
+    const row = rowFor(printed(), CONN.slice(0, 20));
+    expect(row).toContain(`write in ${inbox}`);
+    expect(row).not.toContain("no grant in the ground");
+    // The verdict column and the live count follow the same answer the door gives.
+    expect(row).toContain("write");
+  });
+
+  it("a record naming a pool this home cannot attach says so, rather than reporting no standing", async () => {
+    writeOAuthFile(home, connectorRecord("inbox:ada:journal:never-stood"));
+    expect(await run(["grant", "list", "--home", home], io())).toBe(0);
+    const row = rowFor(printed(), CONN.slice(0, 20));
+    expect(row).toContain("is not attached here");
+    expect(row).not.toContain("no grant in the ground");
+  });
+});
+
+describe("§58 — revoke strikes the grant that IS the standing, and reports what it struck", () => {
+  it("the pool's write grant is struck, and the sentence names the inbox rather than the store", async () => {
+    const inbox = await bindInHome("ada", "ada:journal");
+    writeOAuthFile(home, connectorRecord(inbox));
+    expect(await poolGrantsWrite(inbox)).toBe(true);
+
+    expect(await run(["grant", "revoke", CLIENT, "--home", home], io())).toBe(0);
+
+    // DELTA LEVEL: the grant that carries the connection's standing no longer stands.
+    expect(await poolGrantsWrite(inbox)).toBe(false);
+    // OBJECT LEVEL: the report names the inbox it struck, and claims no store-wide strike — this
+    // store never landed one, and a sentence that said otherwise would be the H7 shape.
+    const said = printed();
+    expect(said).toContain(`the connection's own grant struck in ${inbox}`);
+    expect(said).not.toContain("store-wide write grant");
+    expect(said).toContain("authenticates nowhere");
+  });
+
+  it("a connector with no reachable pool is told its grant still stands, and where to strike it", async () => {
+    writeOAuthFile(home, connectorRecord("inbox:ada:journal:never-stood"));
+    expect(await run(["grant", "revoke", CLIENT, "--home", home], io())).toBe(0);
+    const said = printed();
+    expect(said).toContain("could not reach inbox:ada:journal:never-stood");
+    expect(said).toContain("still stands");
+    // And it does not claim a strike it did not make.
+    expect(said).not.toContain("the connection's own grant struck");
   });
 });
