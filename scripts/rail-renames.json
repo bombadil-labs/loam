@@ -20,5 +20,21 @@
     "(the substitution no longer produces the base) but tidiness keeps this file reviewable."
   ],
   "renames": [],
-  "revisions": []
+  "revisions": [
+    {
+      "file": "test/server/whoami.test.ts",
+      "sha256": "812a9efd1f81f1cdd3889b747f901eec3d309a38420adf06c2ff980d5f456b40",
+      "authorized": "Myk's overnight delegation 2026-09-02 (T262 audit round two, at bb17c34): the fixture bound to a container it never declared, so it asserted write standing the door now refuses; it declares it, as consent does"
+    },
+    {
+      "file": "test/gateway/binding-route.test.ts",
+      "sha256": "ef364d7ffe9b70515cf0eac4332db313ec405d56b1be3a56958d5496a19afad1",
+      "authorized": "Myk's overnight delegation 2026-09-02 (T262 audit round two, at bb17c34): two cases added: a strike chain three links deep, and a write refused when the bound container no longer stands"
+    },
+    {
+      "file": "test/server/connection-writes.test.ts",
+      "sha256": "d51007b9d503fd7a695b9e27846757fdf4b1b0698ec20220b5d1ee2449ed9765",
+      "authorized": "Myk's overnight delegation 2026-09-02 (T262 audit round two, at bb17c34): whoami's note must follow its own write field after a revoked pool"
+    }
+  ]
 }
