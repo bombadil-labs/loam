@@ -154,6 +154,8 @@ export interface RunOptions {
   readonly readInput?: (prompt: string) => Promise<string>;
   /** `user create` and guided `init`: the scrypt cost, for a caller that must not pay the interactive default (tests). */
   readonly scrypt?: ScryptParams;
+  /** `serve`: the federation poll interval. Only a test has any business shortening a minute. */
+  readonly syncEveryMs?: number;
 }
 
 const VERSION = "0.7.0";
@@ -1325,14 +1327,24 @@ async function cmdServe(
   // and the home's credentials; this is what makes them pull. Without it a restarted store keeps its
   // data, resumes nothing, and goes on reporting `receiving` — the report outliving the behaviour.
   //
-  // Started only when there is something to poll, so a store with no channels arms no timer, and
-  // named in the boot line so "is my federation live" is answered here rather than by a stale
-  // `lastSyncedAt` an hour later.
-  const standing =
-    gateway.federationChannels.size > 0 ? gateway.keepSyncing({ everyMs: 60_000 }) : undefined;
-  if (standing !== undefined) {
-    io.out(`  syncing ${gateway.federationChannels.size} channel(s) every 60s`);
-  }
+  // ALWAYS ARMED, and the old conditional is the bug this replaces. A channel can be opened while
+  // the store is SERVING — `loam_federate_connect` on the MCP roster does exactly that — and the
+  // tick re-reads `federationChannels` on every pass, so an interval armed over an empty map polls
+  // a channel opened later. Arming only when a channel existed AT BOOT produced precisely the shape
+  // the note above warns against: a channel `federate list` reports as `receiving` that nothing has
+  // ever polled, for the life of the process.
+  //
+  // An idle store pays nothing for it. A tick with no channels iterates an empty map and writes
+  // NOTHING, which is §49.1's rule for anything periodic, and the timer is unref'd so it never
+  // holds the process open.
+  const everyMs = options.syncEveryMs ?? 60_000;
+  const seconds = Math.max(1, Math.round(everyMs / 1000));
+  const standing = gateway.keepSyncing({ everyMs });
+  io.out(
+    gateway.federationChannels.size > 0
+      ? `  syncing ${gateway.federationChannels.size} channel(s) every ${seconds}s`
+      : `  no channels yet — polling every ${seconds}s, so one opened while serving is followed too`,
+  );
   const unresumed = gateway.channelStatus().filter((c) => !gateway.federationChannels.has(c.name));
   for (const c of unresumed) {
     // An honest report of a channel that CANNOT sync, rather than a list that says `receiving`
@@ -1353,7 +1365,7 @@ async function cmdServe(
   const handle: ServerHandle = {
     ...server,
     async close(): Promise<void> {
-      await standing?.stop();
+      await standing.stop();
       await server.close();
       await gateway.close();
       rmSync(servingFile(home), { force: true });
