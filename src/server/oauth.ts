@@ -1682,7 +1682,6 @@ export function makeTokenDoor(options: TokenDoorOptions): TokenDoor {
           },
           result: undefined,
         }));
-        grant = { ...grant, standing: true, container, inbox };
       }
 
       // Mint the bearer token: a secret to the client, its DIGEST plus the mint generation to the
