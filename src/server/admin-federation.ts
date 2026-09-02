@@ -187,16 +187,27 @@ export const adminFederation = (ctx: AdminFederationCtx) => {
   // The oauth half of a row: the client whose granted actor IS this connection key. Live tokens
   // are counted the way the door counts them — a token whose generation no longer matches its
   // client's is dead already, so it is not a "live" anything.
-  interface ConnectorJoin {
-    readonly clientId: string;
-    readonly clientName?: string;
-    readonly generation?: number;
-    readonly liveTokens: number;
-  }
-  const joinFor = (records: ConnectorRecords, key: string): ConnectorJoin | undefined => {
+  // A pair that is ANOTHER person's (§58: a key bound into this reach through the library door)
+  // joins as nothing but the fact — no client, no generation, no count — the same withholding
+  // the revoke pages keep.
+  type ConnectorJoin =
+    | {
+        readonly kind: "own";
+        readonly clientId: string;
+        readonly clientName?: string;
+        readonly generation?: number;
+        readonly liveTokens: number;
+      }
+    | { readonly kind: "others" };
+  const joinFor = (
+    records: ConnectorRecords,
+    key: string,
+    user: string,
+  ): ConnectorJoin | undefined => {
     if (records.kind !== "read") return undefined;
     const grant = records.file.grants.find((g) => g.actor === key);
     if (grant === undefined) return undefined;
+    if (grant.user !== undefined && grant.user !== user) return { kind: "others" };
     const client = clientFor(records.file, grant.clientId);
     const liveTokens =
       client === undefined
@@ -208,6 +219,7 @@ export const adminFederation = (ctx: AdminFederationCtx) => {
               t.user === grant.user, // the pair's tokens, not the connector's (§58)
           ).length;
     return {
+      kind: "own",
       clientId: grant.clientId,
       ...(client === undefined
         ? {}
@@ -226,6 +238,7 @@ export const adminFederation = (ctx: AdminFederationCtx) => {
     name: string,
     rec: ResolvedContainer,
     formToken: string,
+    user: string,
   ): string => {
     const bound = rec.inboxOf!;
     const inboxLink = `<a href="${escapeHtml(pages.detailHref(name))}">its inbox</a> — drop lives there`;
@@ -248,13 +261,15 @@ export const adminFederation = (ctx: AdminFederationCtx) => {
           : state === "revoked"
             ? "revoked — its next write refuses; everything it wrote is kept, author intact"
             : "holds no write grant — its next write refuses";
-    const join = joinFor(records, key);
+    const join = joinFor(records, key, user);
     const via =
       join === undefined
         ? ""
-        : ` · via <code>${escapeHtml(join.clientName ?? join.clientId)}</code>` +
-          (join.generation === undefined ? "" : `, generation ${join.generation}`) +
-          `, ${join.liveTokens} live token${join.liveTokens === 1 ? "" : "s"}`;
+        : join.kind === "others"
+          ? " · bound as another person's connector"
+          : ` · via <code>${escapeHtml(join.clientName ?? join.clientId)}</code>` +
+            (join.generation === undefined ? "" : `, generation ${join.generation}`) +
+            `, ${join.liveTokens} live token${join.liveTokens === 1 ? "" : "s"}`;
     // The form is an OFFER (revoke re-derives everything): shown where something stands to revoke —
     // a standing inbox grant, or a connector grant the records still hold.
     const revocable = state === "active" || join !== undefined;
@@ -273,6 +288,7 @@ export const adminFederation = (ctx: AdminFederationCtx) => {
     table: ContainerTable,
     reach: ReadonlySet<string>,
     formToken: string,
+    user: string,
   ): string => {
     const records = connectorRecords();
     const names = [...reach].filter((n) => table.containers.get(n)!.inboxOf !== undefined).sort();
@@ -280,7 +296,9 @@ export const adminFederation = (ctx: AdminFederationCtx) => {
       names.length === 0
         ? "<p>No connection is bound in your subtree.</p>"
         : `<ul>\n${names
-            .map((n) => connectionRowHtml(gw, records, n, table.containers.get(n)!, formToken))
+            .map((n) =>
+              connectionRowHtml(gw, records, n, table.containers.get(n)!, formToken, user),
+            )
             .join("\n")}\n</ul>`;
     const flowNote =
       records.kind === "none"

@@ -206,8 +206,8 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
   const pages = adminPages({
     home: options.home,
     onFault,
-    connectionsPanel: (gw, table, reach, formToken) =>
-      fed.connectionsPanelHtml(gw, table, reach, formToken),
+    connectionsPanel: (gw, table, reach, formToken, user) =>
+      fed.connectionsPanelHtml(gw, table, reach, formToken, user),
   });
   const getDashboard = (req: IncomingMessage, res: ServerResponse): void => {
     const session = loginOrUndefined(req, res);

@@ -920,13 +920,22 @@ describe("§58 S1b — the exchange honors the binding", () => {
     const foreign = inboxName("bea:notes", ada.actor);
 
     const session = await signIn(base, "bea", PASSWORD);
-    const { confirmHtml, done } = await revokeViaPanel(base, session, foreign);
+    const { dashboard, confirmHtml, done } = await revokeViaPanel(base, session, foreign);
     expect(done.status).toBe(200);
     const doneHtml = await done.text();
     for (const html of [confirmHtml, doneHtml]) {
       expect(html).toContain("another person's");
       expect(html).not.toContain("ada");
     }
+    // The panel row above the pages withholds the same: no client name, generation or token
+    // count of another person's pair — only that the key's connector binding is someone else's.
+    const panel = dashboard.split("<h2>Connections.</h2>")[1]?.split("<h2>")[0] ?? "";
+    const row = panel.split("<li>").find((part) => part.includes(foreign.slice(0, 40))) ?? "";
+    expect(row, dashboard).not.toBe("");
+    expect(row).toContain("another person's");
+    expect(row).not.toContain("Example Connector");
+    expect(row).not.toContain("live token");
+    expect(row).not.toContain("ada");
     // Bea's pool is struck; ada's pair, token, own pool and store-wide grant all stand.
     const foreignPool = gateway.connectionInboxes.get(foreign)!.gateway!;
     expect(holdsGrant(foreignPool.reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(false);

@@ -79,6 +79,7 @@ export interface AdminPagesOpts {
     table: ContainerTable,
     reach: ReadonlySet<string>,
     formToken: string,
+    user: string,
   ) => string;
 }
 
@@ -492,7 +493,7 @@ ${rows.join("\n")}
 <p>You are <code>${escapeHtml(user)}</code>. Below is your subtree: the container that bears your
 name, and everything declared inside it. Each name opens its own page.</p>
 ${treeHtml(table, reach, user)}
-${opts.connectionsPanel(gw, table, reach, formToken)}
+${opts.connectionsPanel(gw, table, reach, formToken, user)}
 ${channelsPanelHtml(gw, (c) => reach.has(c.name), {
   // Scoped, not absolute: this store may be receiving on a dozen channels, and the true statement
   // is only that none of them lands anywhere THIS reader can see.
