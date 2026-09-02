@@ -32,6 +32,7 @@ import {
 } from "graphql";
 import type { Primitive, Policy } from "@bombadil/rhizomatic";
 import { isWithheldResolver } from "./adopt-law.js";
+import type { ConnectionBinding } from "./gateway.js";
 import { bytesEnvelope } from "./bytes.js";
 import {
   lensOf,
@@ -61,6 +62,11 @@ export type {
   ResolvedNode,
   SurfaceHooks as GqlHooks,
 } from "../surface/surface.js";
+
+// The request context a door supplies (`RequestContext`): the acting seed and, for a §58
+// connection, its binding. Read leniently — a door that passes nothing acts as the operator.
+const contextOf = (ctx: unknown): { actor?: string; binding?: ConnectionBinding } =>
+  (ctx as { actor?: string; binding?: ConnectionBinding } | undefined) ?? {};
 
 // The pass-through output scalar: a resolved View value — primitive, list, or nested object —
 // exactly as the policy adjudicated it. One transformation only (SPEC §23.7): a BytesView anywhere in
@@ -397,8 +403,8 @@ export function buildGqlSchema(
             "Omit to read the present. Erasure still wins: purged content never reappears (§11).",
         },
       },
-      resolve: (_src, args: { entity: string; asOf?: number }) =>
-        hooks.resolve(lensOf(def), args.entity, args.asOf ?? undefined),
+      resolve: (_src, args: { entity: string; asOf?: number }, ctx: unknown) =>
+        hooks.resolve(lensOf(def), args.entity, args.asOf ?? undefined, contextOf(ctx).binding),
     };
 
     subscriptionFields[fieldName] = {
@@ -445,11 +451,15 @@ export function buildGqlSchema(
       },
       // `== null` on purpose: GraphQL hands an omitted argument as undefined and an explicit
       // null as null, and both mean "not asked for" here — one comparison covers the pair.
-      resolve: (_src, args: { limit?: number | null; after?: string | null }) =>
-        hooks.list(lensOf(def), {
-          ...(args.limit == null ? {} : { limit: args.limit }),
-          ...(args.after == null ? {} : { after: args.after }),
-        }),
+      resolve: (_src, args: { limit?: number | null; after?: string | null }, ctx: unknown) =>
+        hooks.list(
+          lensOf(def),
+          {
+            ...(args.limit == null ? {} : { limit: args.limit }),
+            ...(args.after == null ? {} : { after: args.after }),
+          },
+          contextOf(ctx).binding,
+        ),
     };
 
     // Only WRITABLE props are offered as per-prop mutation args (SPEC §14): a read-only field is
@@ -500,14 +510,14 @@ export function buildGqlSchema(
             `link/unlink mutation pair where one is served: ${references.join(", ")}.`),
       args: { ...entityArg, ...propArgs },
       resolve: (_src, args: Record<string, unknown>, ctx: unknown) => {
-        const actor = (ctx as { actor?: string } | undefined)?.actor;
+        const { actor, binding } = contextOf(ctx);
         // A null prototype: no store-named property can ever reach a real Object.prototype key.
         const props: Record<string, Primitive> = Object.create(null) as Record<string, Primitive>;
         for (const [prop] of def.schema.props) {
           const v = args[legal(prop)];
           if (v !== undefined && v !== null) props[prop] = v as Primitive;
         }
-        return hooks.mutate(lensOf(def), args["entity"] as string, props, actor);
+        return hooks.mutate(lensOf(def), args["entity"] as string, props, actor, binding);
       },
     };
 
@@ -530,7 +540,7 @@ export function buildGqlSchema(
         fields: { type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(GraphQLString))) },
       },
       resolve: (_src, args: Record<string, unknown>, ctx: unknown) => {
-        const actor = (ctx as { actor?: string } | undefined)?.actor;
+        const { actor, binding } = contextOf(ctx);
         const fields = args["fields"] as string[];
         // Refuse a typo against THIS lens's fields — a silent no-op would read as a successful
         // clear when nothing was cleared. (REST does the same against its addressed version.)
@@ -539,7 +549,7 @@ export function buildGqlSchema(
             throw new Error(`schema ${lensOf(def)} has no field "${field}" to clear`);
           }
         }
-        return hooks.clear(lensOf(def), args["entity"] as string, fields, actor);
+        return hooks.clear(lensOf(def), args["entity"] as string, fields, actor, binding);
       },
     };
 
@@ -562,7 +572,7 @@ export function buildGqlSchema(
         values: { type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(PrimitiveValue))) },
       },
       resolve: (_src, args: Record<string, unknown>, ctx: unknown) => {
-        const actor = (ctx as { actor?: string } | undefined)?.actor;
+        const { actor, binding } = contextOf(ctx);
         const field = args["field"] as string;
         if (!def.schema.props.has(field)) {
           throw new Error(`schema ${lensOf(def)} has no field "${field}"`);
@@ -573,6 +583,7 @@ export function buildGqlSchema(
           field,
           args["values"] as Primitive[],
           actor,
+          binding,
         );
       },
     };
@@ -603,7 +614,7 @@ export function buildGqlSchema(
           },
         },
         resolve: (_src, args: Record<string, unknown>, ctx: unknown) => {
-          const actor = (ctx as { actor?: string } | undefined)?.actor;
+          const { actor, binding } = contextOf(ctx);
           const field = args["field"] as string;
           if (!def.schema.props.has(field)) {
             throw new Error(`schema ${lensOf(def)} has no field "${field}" to link`);
@@ -615,6 +626,7 @@ export function buildGqlSchema(
             args["target"] as string,
             (args["context"] as string | undefined) ?? undefined,
             actor,
+            binding,
           );
         },
       };
@@ -636,7 +648,7 @@ export function buildGqlSchema(
           targets: { type: new GraphQLList(new GraphQLNonNull(GraphQLID)) },
         },
         resolve: (_src, args: Record<string, unknown>, ctx: unknown) => {
-          const actor = (ctx as { actor?: string } | undefined)?.actor;
+          const { actor, binding } = contextOf(ctx);
           const field = args["field"] as string;
           if (!def.schema.props.has(field)) {
             throw new Error(`schema ${lensOf(def)} has no field "${field}" to sever`);
@@ -647,6 +659,7 @@ export function buildGqlSchema(
             field,
             (args["targets"] as string[] | undefined) ?? undefined,
             actor,
+            binding,
           );
         },
       };
@@ -681,13 +694,14 @@ export function buildGqlSchema(
           `. Returns the re-resolved view.`,
         args: edgeArgs,
         resolve: (_src, args: Record<string, unknown>, ctx: unknown) => {
-          const actor = (ctx as { actor?: string } | undefined)?.actor;
+          const { actor, binding } = contextOf(ctx);
           return hooks.linkRef(
             lensOf(def),
             args["entity"] as string,
             prop,
             args["target"] as string,
             actor,
+            binding,
           );
         },
       };
@@ -704,13 +718,14 @@ export function buildGqlSchema(
           `history survives, another author's edge stands. Returns the re-resolved view.`,
         args: edgeArgs,
         resolve: (_src, args: Record<string, unknown>, ctx: unknown) => {
-          const actor = (ctx as { actor?: string } | undefined)?.actor;
+          const { actor, binding } = contextOf(ctx);
           return hooks.unlinkRef(
             lensOf(def),
             args["entity"] as string,
             prop,
             args["target"] as string,
             actor,
+            binding,
           );
         },
       };
@@ -740,7 +755,7 @@ export function buildGqlSchema(
           `exactly the declared shape.`,
         args: gqlArgs,
         resolve: (_src, args: Record<string, unknown>, ctx: unknown) => {
-          const actor = (ctx as { actor?: string } | undefined)?.actor;
+          const { actor, binding } = contextOf(ctx);
           const pointers: ClaimPointerSpec[] = [];
           for (const p of template.pointers) {
             if (p.at !== undefined) {
@@ -759,7 +774,7 @@ export function buildGqlSchema(
               pointers.push({ role: p.role, value: p.value as Primitive });
             }
           }
-          return hooks.claim(pointers, actor);
+          return hooks.claim(pointers, actor, binding);
         },
       };
     }
@@ -787,8 +802,8 @@ export function buildGqlSchema(
       },
     },
     resolve: (_src, args: { pointers: ClaimPointerSpec[] }, ctx: unknown) => {
-      const actor = (ctx as { actor?: string } | undefined)?.actor;
-      return hooks.claim(args.pointers, actor);
+      const { actor, binding } = contextOf(ctx);
+      return hooks.claim(args.pointers, actor, binding);
     },
   };
 

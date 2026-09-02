@@ -137,6 +137,7 @@ import {
 } from "./quarantine-pool.js";
 import {
   bindConnectionImpl,
+  poolForBindingImpl,
   resumeInboxesImpl,
   connectionScopeImpl,
   containerScopeImpl,
@@ -274,10 +275,26 @@ export interface FederationReport {
   readonly acceptedIds?: readonly string[];
 }
 
+/**
+ * Where a §58 connection's request lands: the container its consent bound it to and the inbox
+ * pool that receives its writes. A request carrying a binding WRITES into `inbox` (the pool's own
+ * door authorizes it, on the pool's own grant chain) and READS over `container`'s scope — never
+ * this store's primary ground. A door derives it from the grant row on every request, so a
+ * revoked pair loses its binding on the very next call.
+ */
+export interface ConnectionBinding {
+  readonly container: string;
+  readonly inbox: string;
+}
+
 export interface RequestContext {
   // The acting identity for this request: mutations are signed as this seed's author and
   // authorized as them. Absent, the operator acts.
   readonly actor?: string;
+  // The connection's binding when the actor is a §58 connection: routes its writes into its inbox
+  // pool and scopes its reads. A binding with no actor is refused at the write seam — the
+  // operator's seed never signs into a connection's pool.
+  readonly binding?: ConnectionBinding;
 }
 
 const toError = (e: unknown): Error => (e instanceof Error ? e : new Error(String(e)));
@@ -542,22 +559,25 @@ export class Gateway {
   /** @internal — T19 seam (lifecycle.ts: every surface (re)build threads the hooks through) */
   gqlHooks(door: "full" | "public" = "full"): GqlHooks {
     return {
-      resolve: (name, entity, asOf) => this.resolvedNode(name, entity, asOf),
-      mutate: (name, entity, props, actorSeed) => this.mutateEntity(name, entity, props, actorSeed),
-      clear: (name, entity, fields, actorSeed) => this.clearEntity(name, entity, fields, actorSeed),
-      remove: (name, entity, field, values, actorSeed) =>
-        this.removeEntity(name, entity, field, values, actorSeed),
-      link: (name, entity, field, target, context, actorSeed) =>
-        this.linkEntity(name, entity, field, target, context, actorSeed),
-      sever: (name, entity, field, targets, actorSeed) =>
-        this.severEntity(name, entity, field, targets, actorSeed),
-      linkRef: (name, entity, prop, target, actorSeed) =>
-        this.linkRefEntity(name, entity, prop, target, actorSeed),
-      unlinkRef: (name, entity, prop, target, actorSeed) =>
-        this.unlinkRefEntity(name, entity, prop, target, actorSeed),
+      resolve: (name, entity, asOf, binding) =>
+        this.resolvedNode(name, entity, asOf, undefined, binding),
+      mutate: (name, entity, props, actorSeed, binding) =>
+        this.mutateEntity(name, entity, props, actorSeed, binding),
+      clear: (name, entity, fields, actorSeed, binding) =>
+        this.clearEntity(name, entity, fields, actorSeed, binding),
+      remove: (name, entity, field, values, actorSeed, binding) =>
+        this.removeEntity(name, entity, field, values, actorSeed, binding),
+      link: (name, entity, field, target, context, actorSeed, binding) =>
+        this.linkEntity(name, entity, field, target, context, actorSeed, binding),
+      sever: (name, entity, field, targets, actorSeed, binding) =>
+        this.severEntity(name, entity, field, targets, actorSeed, binding),
+      linkRef: (name, entity, prop, target, actorSeed, binding) =>
+        this.linkRefEntity(name, entity, prop, target, actorSeed, binding),
+      unlinkRef: (name, entity, prop, target, actorSeed, binding) =>
+        this.unlinkRefEntity(name, entity, prop, target, actorSeed, binding),
       watch: (name, entity) => this.watchEntity(name, entity, door),
-      claim: (pointers, actorSeed) => this.claimEntity(pointers, actorSeed),
-      list: (name, opts) => this.list(name, opts),
+      claim: (pointers, actorSeed, binding) => this.claimEntity(pointers, actorSeed, binding),
+      list: (name, opts, binding) => this.list(name, opts, binding),
     };
   }
 
@@ -611,8 +631,14 @@ export class Gateway {
   // Pinned resolution (SPEC §17 versioning × §26 as-of): the body lives in reads.ts.
   // The optional `now` is the caller's WALL-CLOCK moment for a slate's lapse (SPEC §29.4); absent,
   // the door reads its own clock. The INTERNAL seam below requires it — see `requireMoment`.
-  resolvePinned(reg: Registered, entity: string, asOf?: number, now?: number): ResolvedNode {
-    return resolvePinnedImpl(this, reg, entity, now ?? Date.now(), asOf);
+  resolvePinned(
+    reg: Registered,
+    entity: string,
+    asOf?: number,
+    now?: number,
+    binding?: ConnectionBinding,
+  ): ResolvedNode {
+    return resolvePinnedImpl(this, reg, entity, now ?? Date.now(), asOf, binding);
   }
 
   // Re-derive the store's slice of the surface and follow it. The desired set is the manual
@@ -1092,8 +1118,12 @@ export class Gateway {
   // CONTAINER backing the hyperschema (declared here when absent, refreshed when a sibling lens
   // widens the context union), read through the container scope — governed, negation-closed,
   // erasure-reachable. AUTHED surface only; the public projection never builds a listing field.
-  async list(name: string, opts: ListOptions = {}): Promise<ResolvedNode[]> {
-    return listImpl(this, name, opts);
+  async list(
+    name: string,
+    opts: ListOptions = {},
+    binding?: ConnectionBinding,
+  ): Promise<ResolvedNode[]> {
+    return listImpl(this, name, opts, binding);
   }
 
   // Bind a connection to a container (SPEC §39): spawn a per-connection inbox pool and provision its
@@ -1101,6 +1131,12 @@ export class Gateway {
   // owner. Idempotent on (container, connectionKey) — a second bind resumes the same inbox.
   async bindConnection(opts: BindConnectionOptions): Promise<Container> {
     return bindConnectionImpl(this, opts);
+  }
+
+  // The inbox pool a bound request WRITES into (SPEC §58): the live handle for `binding.inbox`,
+  // or a refusal — never a fallback to this store. The body lives in container.ts.
+  poolForBinding(binding: ConnectionBinding): Gateway {
+    return poolForBindingImpl(this, binding);
   }
 
   /** Attach every declared inbox pool whose bytes this store's pool backend holds (§58). */
@@ -1391,17 +1427,29 @@ export class Gateway {
 
   // Gather the HView for (schema, entity): the body lives in reads.ts.
   /** @internal — T19 seam (mutate.ts: retraction reads the hview to find the caller's own claims) */
-  gather(name: string, entity: string, asOf?: number, now?: number): HView {
-    return gatherImpl(this, name, entity, now ?? Date.now(), asOf);
+  gather(
+    name: string,
+    entity: string,
+    asOf?: number,
+    now?: number,
+    binding?: ConnectionBinding,
+  ): HView {
+    return gatherImpl(this, name, entity, now ?? Date.now(), asOf, binding);
   }
 
-  gatherForRetraction(name: string, entity: string): HView {
-    return gatherForRetractionImpl(this, name, entity);
+  gatherForRetraction(name: string, entity: string, binding?: ConnectionBinding): HView {
+    return gatherForRetractionImpl(this, name, entity, binding);
   }
 
   /** @internal — T19 seam (mutate.ts: every write verb answers with the re-resolved node) */
-  resolvedNode(name: string, entity: string, asOf?: number, now?: number): ResolvedNode {
-    return resolvedNodeImpl(this, name, entity, now ?? Date.now(), asOf);
+  resolvedNode(
+    name: string,
+    entity: string,
+    asOf?: number,
+    now?: number,
+    binding?: ConnectionBinding,
+  ): ResolvedNode {
+    return resolvedNodeImpl(this, name, entity, now ?? Date.now(), asOf, binding);
   }
 
   // --- the write seam --------------------------------------------------------------------------
@@ -1413,8 +1461,9 @@ export class Gateway {
     entity: string,
     props: Record<string, Primitive>,
     actorSeed?: string,
+    binding?: ConnectionBinding,
   ): Promise<ResolvedNode> {
-    return mutateEntityImpl(this, name, entity, props, actorSeed);
+    return mutateEntityImpl(this, name, entity, props, actorSeed, binding);
   }
 
   // Clear whole fields (SPEC §14): the body lives in mutate.ts.
@@ -1423,8 +1472,9 @@ export class Gateway {
     entity: string,
     fields: readonly string[],
     actorSeed?: string,
+    binding?: ConnectionBinding,
   ): Promise<ResolvedNode> {
-    return clearEntityImpl(this, name, entity, fields, actorSeed);
+    return clearEntityImpl(this, name, entity, fields, actorSeed, binding);
   }
 
   // Remove ONE value (SPEC §14 amendment): the body lives in mutate.ts.
@@ -1434,8 +1484,9 @@ export class Gateway {
     field: string,
     values: readonly Primitive[],
     actorSeed?: string,
+    binding?: ConnectionBinding,
   ): Promise<ResolvedNode> {
-    return removeEntityImpl(this, name, entity, field, values, actorSeed);
+    return removeEntityImpl(this, name, entity, field, values, actorSeed, binding);
   }
 
   // Link an edge (SPEC §14 edge verbs): the body lives in mutate.ts.
@@ -1446,8 +1497,9 @@ export class Gateway {
     target: string,
     context: string | undefined,
     actorSeed?: string,
+    binding?: ConnectionBinding,
   ): Promise<ResolvedNode> {
-    return linkEntityImpl(this, name, entity, field, target, context, actorSeed);
+    return linkEntityImpl(this, name, entity, field, target, context, actorSeed, binding);
   }
 
   // Sever an edge (SPEC §14 edge verbs): the body lives in mutate.ts.
@@ -1457,8 +1509,9 @@ export class Gateway {
     field: string,
     targets: readonly string[] | undefined,
     actorSeed?: string,
+    binding?: ConnectionBinding,
   ): Promise<ResolvedNode> {
-    return severEntityImpl(this, name, entity, field, targets, actorSeed);
+    return severEntityImpl(this, name, entity, field, targets, actorSeed, binding);
   }
 
   // Link a declared reference (SPEC §51): the body lives in mutate.ts.
@@ -1468,8 +1521,9 @@ export class Gateway {
     prop: string,
     target: string,
     actorSeed?: string,
+    binding?: ConnectionBinding,
   ): Promise<ResolvedNode> {
-    return linkRefEntityImpl(this, name, entity, prop, target, actorSeed);
+    return linkRefEntityImpl(this, name, entity, prop, target, actorSeed, binding);
   }
 
   // Unlink a declared reference (SPEC §51): the body lives in mutate.ts.
@@ -1479,16 +1533,18 @@ export class Gateway {
     prop: string,
     target: string,
     actorSeed?: string,
+    binding?: ConnectionBinding,
   ): Promise<ResolvedNode> {
-    return unlinkRefEntityImpl(this, name, entity, prop, target, actorSeed);
+    return unlinkRefEntityImpl(this, name, entity, prop, target, actorSeed, binding);
   }
 
   // One signed MULTI-POINTER delta from an explicit pointer list (SPEC §14): the body lives in mutate.ts.
   private async claimEntity(
     pointers: readonly ClaimPointerSpec[],
     actorSeed?: string,
+    binding?: ConnectionBinding,
   ): Promise<{ delta: string }> {
-    return claimEntityImpl(this, pointers, actorSeed);
+    return claimEntityImpl(this, pointers, actorSeed, binding);
   }
 
   // --- the live seam ---------------------------------------------------------------------------
@@ -1650,7 +1706,18 @@ export class Gateway {
   async subscribe(
     source: string,
     variables?: Record<string, unknown>,
+    context?: RequestContext,
   ): Promise<AsyncGenerator<Record<string, unknown>>> {
+    // A live stream resolves off a MATERIALIZATION of this store's primary ground (§29.3), and no
+    // materialization is maintained over a connection's scope — a bound subscriber would be served
+    // the whole store, or nothing, and either is a lie. Refuse until a scoped stream exists.
+    if (context?.binding !== undefined) {
+      throw new Error(
+        `a bound connection cannot subscribe: a live stream resolves over this store's ` +
+          `materialization, which does not see the scope of ${context.binding.container} — ` +
+          `poll the query door instead`,
+      );
+    }
     return this.subscribeVia(this.schemaOrThrow(), source, variables);
   }
 

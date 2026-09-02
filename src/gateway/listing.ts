@@ -33,7 +33,7 @@ import {
   readContainerTable,
   type ContainerTable,
 } from "./container.js";
-import type { Gateway } from "./gateway.js";
+import type { ConnectionBinding, Gateway } from "./gateway.js";
 import { groupPrograms } from "./lifecycle.js";
 import { programOf, type ProgramName } from "./registration.js";
 import type { ResolvedNode } from "../surface/surface.js";
@@ -488,6 +488,7 @@ export async function listingPageImpl(
   gw: Gateway,
   name: string,
   opts: ListOptions = {},
+  binding?: ConnectionBinding,
 ): Promise<string[]> {
   const def = gw.def(name); // refuses an unregistered lens in the door's own voice
   const program = programOf(def);
@@ -497,6 +498,16 @@ export async function listingPageImpl(
       `list ${name}: limit must be an integer between 1 and ${LISTING_MAX_LIMIT} — each listed ` +
         `entity costs a resolution, so the page is bounded; walk the cursor for more`,
     );
+  }
+  // A BOUND CONNECTION lists over ITS scope (SPEC §58) — the bound container's subtree and the inbox
+  // pools composed into it — never through the maintained candidate set, which folds the whole
+  // ground. The scope read owns exclusion and inbox composition; it is O(scope), and correct.
+  if (binding !== undefined) {
+    const inContexts = new Set(listingContexts(gw, program));
+    const after = opts.after;
+    return projectListingEntities(gw.connectionScope({ bound: binding.container }), inContexts)
+      .filter((id) => after === undefined || id > after)
+      .slice(0, limit);
   }
   // The refusal names the LENS the caller asked for (H6: a message reporting the program would
   // describe a request the caller never made); the container it could not declare is the body's.
@@ -539,15 +550,16 @@ export async function listImpl(
   gw: Gateway,
   name: string,
   opts: ListOptions = {},
+  binding?: ConnectionBinding,
 ): Promise<ResolvedNode[]> {
-  const page = await listingPageImpl(gw, name, opts);
+  const page = await listingPageImpl(gw, name, opts, binding);
   // `resolvedNode` is synchronous and O(ground), so a page resolved in one run holds the event
   // loop for its whole duration — one authed request stalling every other mount and the tokenless
   // public door. Yield BETWEEN entities: the caller waits exactly as long, and nobody else does.
   const nodes: ResolvedNode[] = [];
   for (const entity of page) {
     if (nodes.length > 0) await yieldToLoop();
-    nodes.push(gw.resolvedNode(name, entity));
+    nodes.push(gw.resolvedNode(name, entity, undefined, undefined, binding));
   }
   return nodes;
 }

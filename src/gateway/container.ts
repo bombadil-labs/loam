@@ -45,7 +45,7 @@ import {
 import { withNegationClosure, withNegationClosureAcross } from "./ingest.js";
 import { lawfulNegated, lawfulSnapshot } from "./registration.js";
 import { readTrustPolicyAt, type TrustPolicy } from "./trust.js";
-import { Gateway, type FederationReport } from "./gateway.js";
+import { Gateway, type ConnectionBinding, type FederationReport } from "./gateway.js";
 
 export const CTX_CONTAINER = "loam.container";
 export const CTX_CONTAINER_EXCLUDED = "loam.container.excluded";
@@ -1451,6 +1451,28 @@ export interface BindConnectionOptions {
 // resumes the SAME inbox rather than spawning a new one — the inbox is durable (decision 3).
 export function inboxName(container: string, connectionKey: string): string {
   return `inbox:${container}:${connectionKey}`;
+}
+
+// The pool a BOUND request writes into (SPEC §58): the live handle for the binding's inbox. Fail
+// CLOSED on every miss — an unattached pool (no backend factory, bytes missing at boot, dropped) and
+// a pool mid-drop (unregistered, its handle not yet cleared) both refuse. There is no fallback to
+// this store: a connection's write landing in the primary is exactly the leak the binding closes.
+export function poolForBindingImpl(gw: Gateway, binding: ConnectionBinding): Gateway {
+  const held = gw.connectionInboxes.get(binding.inbox);
+  if (held?.gateway === undefined) {
+    throw new Error(
+      `the inbox ${binding.inbox} is not attached here, so this write is refused — the ` +
+        `connection's pool is where its writes land, and nothing stands in for it. Consent ` +
+        `again to bind the connection to a pool this store holds.`,
+    );
+  }
+  if (gw.attachedContainers.get(binding.inbox) !== held.gateway) {
+    throw new Error(
+      `the inbox ${binding.inbox} is being dropped, so this write is refused — write again ` +
+        `once the drop has settled, or consent again to bind afresh`,
+    );
+  }
+  return held.gateway;
 }
 
 // The surviving WRITE grant ids naming `subject` at this pool's store entity — what a revocation

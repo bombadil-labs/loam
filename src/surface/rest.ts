@@ -19,7 +19,7 @@
 
 import type { Primitive } from "@bombadil/rhizomatic";
 import { bytesEnvelope } from "../gateway/bytes.js";
-import type { Gateway } from "../gateway/gateway.js";
+import type { ConnectionBinding, Gateway } from "../gateway/gateway.js";
 import { lensOf } from "../gateway/registration.js";
 import type { RegistrationVersion } from "../gateway/registration.js";
 import type { SurfaceHooks } from "./surface.js";
@@ -284,6 +284,7 @@ export async function handleRest(
   bodyText: string | undefined,
   actorSeed?: string,
   asOfRaw?: string,
+  binding?: ConnectionBinding,
 ): Promise<RestResult> {
   const [vTag, schemaName, entityRaw] = segments;
   if (vTag === undefined || schemaName === undefined || entityRaw === undefined) {
@@ -361,8 +362,8 @@ export async function handleRest(
       // Membership in versionsFor already enforced the declaration: an undeclared @hash never reached here.
       const node =
         isLatest && liveSurface !== undefined
-          ? liveSurface.hooks.resolve(schemaName, entity, asOf)
-          : gateway.resolvePinned(pinned, entity, asOf);
+          ? liveSurface.hooks.resolve(schemaName, entity, asOf, binding)
+          : gateway.resolvePinned(pinned, entity, asOf, undefined, binding);
       return { status: 200, body: nodeBody(node) };
     } catch (err) {
       return refuse(400, err instanceof Error ? err.message : String(err));
@@ -401,8 +402,10 @@ export async function handleRest(
       clean[k] = v;
     }
     try {
-      const node = await hooks.mutate(schemaName, entity, clean, actorSeed);
-      const answered = isLatest ? node : gateway.resolvePinned(pinned, entity);
+      const node = await hooks.mutate(schemaName, entity, clean, actorSeed, binding);
+      const answered = isLatest
+        ? node
+        : gateway.resolvePinned(pinned, entity, undefined, undefined, binding);
       return { status: 200, body: nodeBody(answered) };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -447,8 +450,8 @@ export async function handleRest(
       }
       try {
         let answered = isLatest
-          ? hooks.resolve(schemaName, entity)
-          : gateway.resolvePinned(pinned, entity);
+          ? hooks.resolve(schemaName, entity, undefined, binding)
+          : gateway.resolvePinned(pinned, entity, undefined, undefined, binding);
         for (const [field, values] of Object.entries(spec)) {
           const node = await hooks.remove(
             schemaName,
@@ -456,8 +459,11 @@ export async function handleRest(
             field,
             values as Primitive[],
             actorSeed,
+            binding,
           );
-          answered = isLatest ? node : gateway.resolvePinned(pinned, entity);
+          answered = isLatest
+            ? node
+            : gateway.resolvePinned(pinned, entity, undefined, undefined, binding);
         }
         return { status: 200, body: nodeBody(answered) };
       } catch (err) {
@@ -482,8 +488,10 @@ export async function handleRest(
       fields = parsed as string[];
     }
     try {
-      const node = await hooks.clear(schemaName, entity, fields, actorSeed);
-      const answered = isLatest ? node : gateway.resolvePinned(pinned, entity);
+      const node = await hooks.clear(schemaName, entity, fields, actorSeed, binding);
+      const answered = isLatest
+        ? node
+        : gateway.resolvePinned(pinned, entity, undefined, undefined, binding);
       return { status: 200, body: nodeBody(answered) };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

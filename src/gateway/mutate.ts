@@ -4,7 +4,8 @@
 // to the next survivor, an `all` list loses your value, a field only you spoke for goes absent). The
 // verbs — mutate, clear, remove, link, sever, claim — are all sugar over two motions: sign-and-append
 // a claim, or sign-and-append negations of your own claims. Nothing here bypasses a door: every write
-// runs through `gw.append` (authorize, budgets, validators), and writability is checked at THIS seam
+// runs through a gateway's `append` (authorize, budgets, validators) — this store's, or a bound
+// connection's inbox pool (`sinkFor`, SPEC §58) — and writability is checked at THIS seam
 // (`assertWritable` — §14's immutable-by-default) before a delta is ever minted.
 //
 // These are the implementations behind `Gateway.mutateEntity` and the private clear/remove/link/
@@ -14,9 +15,29 @@
 
 import { authorForSeed, makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
 import type { HVEntry, Primitive } from "@bombadil/rhizomatic";
-import type { Gateway } from "./gateway.js";
+import type { ConnectionBinding, Gateway } from "./gateway.js";
 import { legalNameFor, queryFieldFor, type ClaimPointerSpec, type ResolvedNode } from "./gql.js";
 import { edgeRoles, lensOf, referenceProps, type ReferenceProp } from "./registration.js";
+
+// Where a write LANDS (SPEC §58): a bound connection's deltas go into its inbox pool — the pool's
+// own door authorizes them on the pool's own grant chain, so the primary never has to grant the key
+// anything — and everyone else's into this store. A binding names a connection, so a request that
+// carries one and no actor is malformed and refused BEFORE any seed is resolved: the operator's
+// seed must never sign into a connection's pool.
+function sinkFor(
+  gw: Gateway,
+  actorSeed: string | undefined,
+  binding: ConnectionBinding | undefined,
+): Gateway {
+  if (binding === undefined) return gw;
+  if (actorSeed === undefined) {
+    throw new Error(
+      `a request bound to ${binding.inbox} names no actor, so it is refused — only the ` +
+        `connection's own key writes into its inbox`,
+    );
+  }
+  return gw.poolForBinding(binding);
+}
 
 // One signed property-claim delta per provided property, signed as the ACTOR (or the
 // operator when no actor is named), appended through the same validated, capability-enforced
@@ -27,7 +48,9 @@ export async function mutateEntityImpl(
   entity: string,
   props: Record<string, Primitive>,
   actorSeed?: string,
+  binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
+  const sink = sinkFor(gw, actorSeed, binding);
   const seed = actorSeed ?? gw.options.seed;
   if (seed === undefined) {
     throw new Error("this gateway holds no signing seed and cannot write");
@@ -59,8 +82,8 @@ export async function mutateEntityImpl(
       seed,
     ),
   );
-  await gw.append(deltas);
-  return gw.resolvedNode(name, entity);
+  await sink.append(deltas);
+  return gw.resolvedNode(name, entity, undefined, undefined, binding);
 }
 
 // Retraction, the DUAL of resolution (SPEC §14): negate the caller's OWN surviving contributions
@@ -83,8 +106,10 @@ async function retract(
   name: string,
   entity: string,
   actorSeed: string | undefined,
+  binding: ConnectionBinding | undefined,
   keep: (field: string, entry: HVEntry) => boolean,
 ): Promise<ResolvedNode> {
+  const sink = sinkFor(gw, actorSeed, binding);
   const seed = actorSeed ?? gw.options.seed;
   if (seed === undefined) {
     throw new Error("this gateway holds no signing seed and cannot write");
@@ -93,7 +118,9 @@ async function retract(
   const author = authorForSeed(seed);
   // UNNARROWED (SPEC §29.3): a read-closing slate must not turn this strike into a silent no-op —
   // the member would be absent from a narrowed hview, so nothing would be targeted and nothing signed.
-  const hview = gw.gatherForRetraction(name, entity);
+  // A bound connection gathers ITS scope: its own claims live in its pool, and a strike it signs
+  // lands beside them there.
+  const hview = gw.gatherForRetraction(name, entity, binding);
   const targets = new Set<string>();
   for (const [field, entries] of hview.props) {
     for (const entry of entries) {
@@ -107,9 +134,9 @@ async function retract(
     const negations = [...targets].map((id) =>
       signClaims(makeNegationClaims(author, timestamp, id), seed),
     );
-    await gw.append(negations);
+    await sink.append(negations);
   }
-  return gw.resolvedNode(name, entity);
+  return gw.resolvedNode(name, entity, undefined, undefined, binding);
 }
 
 // Clear whole fields: retract every one of the caller's contributions to each named field.
@@ -119,11 +146,12 @@ export function clearEntityImpl(
   entity: string,
   fields: readonly string[],
   actorSeed?: string,
+  binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
   if (fields.length === 0) throw new Error(`clear of ${entity} names no fields to retract`);
   assertWritable(gw, name, fields);
   const set = new Set(fields);
-  return retract(gw, name, entity, actorSeed, (field) => set.has(field));
+  return retract(gw, name, entity, actorSeed, binding, (field) => set.has(field));
 }
 
 // Remove ONE value (SPEC §14 amendment): retract only the caller's own contribution(s) to `field`
@@ -136,6 +164,7 @@ export function removeEntityImpl(
   field: string,
   values: readonly Primitive[],
   actorSeed?: string,
+  binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
   if (values.length === 0) {
     throw new Error(`remove from ${field} of ${entity} names no values to retract`);
@@ -147,6 +176,7 @@ export function removeEntityImpl(
     name,
     entity,
     actorSeed,
+    binding,
     (f, entry) =>
       f === field &&
       entry.delta.claims.pointers.some(
@@ -200,7 +230,9 @@ export async function linkEntityImpl(
   target: string,
   context: string | undefined,
   actorSeed?: string,
+  binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
+  const sink = sinkFor(gw, actorSeed, binding);
   const seed = actorSeed ?? gw.options.seed;
   if (seed === undefined) {
     throw new Error("this gateway holds no signing seed and cannot write");
@@ -244,8 +276,8 @@ export async function linkEntityImpl(
     },
     seed,
   );
-  await gw.append([delta]);
-  return gw.resolvedNode(name, entity);
+  await sink.append([delta]);
+  return gw.resolvedNode(name, entity, undefined, undefined, binding);
 }
 
 // Sever an edge (SPEC §14 edge verbs): retract YOUR OWN edge deltas in `field` — the dual of link,
@@ -259,6 +291,7 @@ export function severEntityImpl(
   field: string,
   targets: readonly string[] | undefined,
   actorSeed?: string,
+  binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
   if (!gw.def(name).schema.props.has(field)) {
     throw new Error(`schema ${name} has no field "${field}" to sever`);
@@ -271,6 +304,7 @@ export function severEntityImpl(
     name,
     entity,
     actorSeed,
+    binding,
     (f, entry) =>
       f === field &&
       entry.delta.claims.pointers.some(
@@ -337,7 +371,9 @@ export async function linkRefEntityImpl(
   prop: string,
   target: string,
   actorSeed?: string,
+  binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
+  const sink = sinkFor(gw, actorSeed, binding);
   const seed = actorSeed ?? gw.options.seed;
   if (seed === undefined) {
     throw new Error("this gateway holds no signing seed and cannot write");
@@ -366,8 +402,8 @@ export async function linkRefEntityImpl(
     },
     seed,
   );
-  await gw.append([delta]);
-  return gw.resolvedNode(name, entity);
+  await sink.append([delta]);
+  return gw.resolvedNode(name, entity, undefined, undefined, binding);
 }
 
 // Unlink a declared reference (SPEC §51.2): retract the caller's OWN link claim(s) for the
@@ -388,6 +424,7 @@ export async function unlinkRefEntityImpl(
   prop: string,
   target: string,
   actorSeed?: string,
+  binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
   const ref = referencePropFor(gw, name, prop);
   return retract(
@@ -395,6 +432,7 @@ export async function unlinkRefEntityImpl(
     name,
     entity,
     actorSeed,
+    binding,
     (f, entry) =>
       f === prop &&
       entry.delta.claims.pointers.some(
@@ -429,7 +467,9 @@ export async function claimEntityImpl(
   gw: Gateway,
   pointers: readonly ClaimPointerSpec[],
   actorSeed?: string,
+  binding?: ConnectionBinding,
 ): Promise<{ delta: string }> {
+  const sink = sinkFor(gw, actorSeed, binding);
   const seed = actorSeed ?? gw.options.seed;
   if (seed === undefined) {
     throw new Error("this gateway holds no signing seed and cannot write");
@@ -464,6 +504,6 @@ export async function claimEntityImpl(
     { timestamp: gw.nextTimestamp(), author: authorForSeed(seed), pointers: mapped },
     seed,
   );
-  await gw.append([delta]);
+  await sink.append([delta]);
   return { delta: delta.id };
 }

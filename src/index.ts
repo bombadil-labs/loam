@@ -40,6 +40,7 @@ export {
   type GatewayOptions,
   type QueryResult,
   type RequestContext,
+  type ConnectionBinding,
 } from "./gateway/gateway.js";
 export {
   CTX_PUBLIC,
