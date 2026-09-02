@@ -63,6 +63,7 @@ import {
   CTX_GRANTS,
   grantClaims,
   grantsHeldBy,
+  holdsGrant,
   honoredStrikeOn,
 } from "../gateway/accounts.js";
 import {
@@ -3343,6 +3344,12 @@ interface HomeIdentity {
   readonly author?: string;
   /** Facts that ride the standing column: a connector's generation and tokens, or a fault. */
   readonly note?: string;
+  /**
+   * A §58 connection's inbox pool, when its grant record names one. The pool's own ground carries
+   * the connection's write standing, so a ledger that reads only the primary would report a live
+   * connection as holding none — which is the one thing this listing promises never to do.
+   */
+  readonly inbox?: string;
 }
 
 /**
@@ -3418,6 +3425,7 @@ function connectorIdentities(file: OAuthFile): HomeIdentity[] {
         name,
         author: grant.actor,
         note: grant.standing ? where : `grant pending · ${where}`,
+        ...(grant.inbox === undefined ? {} : { inbox: grant.inbox }),
       });
     }
     if (grants.length === 0 && revocations.length === 0) {
@@ -3583,7 +3591,12 @@ async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<numbe
     return 1;
   }
   const path = storePath(home, parsed.flags.get("store"));
-  const gateway = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }));
+  // WITH the pool backend factory (§58): a bound connection's write grant lives in its inbox
+  // pool's own ground, and a gateway that attaches no pools cannot see it. Without this the
+  // ledger reports every live connection as holding no standing.
+  const gateway = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }), {
+    channelBackend: channelBackendFor(home, io),
+  });
   const operator = authorForSeed(seed);
   const rows: LedgerRow[] = [];
   try {
@@ -3630,17 +3643,33 @@ async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<numbe
     const granted = new Set(grants.map((g) => g.subject));
     for (const i of identities) {
       if (i.author !== undefined && granted.has(i.author)) continue;
+      // A §58 connection's standing is its POOL's (SPEC §58): the owner-authored write grant in
+      // the inbox, never a store-wide one. Ask the pool the same question the door asks, so the
+      // two surfaces of one store cannot answer differently about one key.
+      const pool = i.inbox === undefined ? undefined : gateway.connectionInboxes.get(i.inbox);
+      const bound =
+        pool?.gateway !== undefined &&
+        i.author !== undefined &&
+        holdsGrant(pool.gateway.reactor, STORE_ENTITY, i.author, "write", operator);
+      const noGround =
+        i.inbox === undefined
+          ? "no grant in the ground"
+          : bound
+            ? `write in ${i.inbox}`
+            : pool?.gateway === undefined
+              ? `its inbox ${i.inbox} is not attached here, so its standing cannot be read`
+              : `its inbox pool grants it nothing`;
       rows.push({
         kind: i.kind,
         name: i.name,
         author: i.author === undefined ? LEDGER_NONE : shortAuthor(i.author),
-        verb: LEDGER_NONE,
+        verb: bound ? "write" : LEDGER_NONE,
         granted: LEDGER_NONE,
         standing:
           i.author === undefined
             ? (i.note ?? "this home cannot name its key")
-            : withNote("no grant in the ground", i.note),
-        live: false,
+            : withNote(noGround, i.note),
+        live: bound,
         at: 0,
         tiebreak: i.name,
       });
@@ -3695,17 +3724,46 @@ async function cmdGrantRevoke(
   }
   const operator = authorForSeed(seed);
   const path = storePath(home, parsed.flags.get("store"));
-  const gateway = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }));
+  // WITH the pool backend factory: since §58 a connection's write standing lives in its inbox
+  // pool, and a revoke that cannot attach the pool cannot strike the grant that matters.
+  const gateway = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }), {
+    channelBackend: channelBackendFor(home, io),
+  });
+  const struckGround: string[] = [];
+  const struckPools: string[] = [];
+  const unreachablePools: string[] = [];
   try {
-    // Strike every SURVIVING write grant this store's seed signed for the connector's actor. This is
-    // cleanup after the file's generation bump, which is what actually kills the connector's tokens.
+    // BOTH HALVES, and the report below says which ones happened. The store-wide grant is the
+    // pre-§58 shape (nothing lands one now); the pool grant is what a bound connection actually
+    // writes on. Striking one and announcing both is the H7 shape the admin page's own revoke
+    // guards against, and this path used to have it.
     const strike = async (grant: OAuthGrant): Promise<void> => {
       const ids = survivingGrantClaimIds(gateway.reactor, operator, grant.actor);
-      if (ids.length === 0) return;
-      const at = Date.now();
-      await gateway.append(
-        ids.map((id, i) => signClaims(makeNegationClaims(operator, at + i, id), seed)),
-      );
+      if (ids.length > 0) {
+        const at = Date.now();
+        await gateway.append(
+          ids.map((id, i) => signClaims(makeNegationClaims(operator, at + i, id), seed)),
+        );
+        struckGround.push(...ids);
+      }
+      if (grant.inbox === undefined || grant.user === undefined) return;
+      const handle = gateway.connectionInboxes.get(grant.inbox);
+      const owner = readUserSeed(home, grant.user);
+      if (handle === undefined || owner.kind !== "present") {
+        unreachablePools.push(grant.inbox);
+        return;
+      }
+      try {
+        await gateway.revokeConnection({
+          inbox: handle,
+          connectionKey: grant.actor,
+          ownerSeed: owner.seed,
+        });
+        struckPools.push(grant.inbox);
+      } catch {
+        // No surviving write grant names the key there: already revoked, or never provisioned.
+        // Nothing to strike is not a failure, and the report below claims nothing either way.
+      }
     };
     const outcome = await revokeConnector(home, clientId, strike, (m) => io.err(`loam: ${m}`));
     switch (outcome.kind) {
@@ -3728,13 +3786,32 @@ async function cmdGrantRevoke(
           `grant revoke: this store's connector records are unreadable, so nothing was revoked.`,
         );
         return 1;
-      case "revoked":
+      case "revoked": {
+        // The report names what was actually struck. Access dies with the generation bump and the
+        // deleted record whatever the grants did, so the sentence separates the two.
+        const struck = [
+          ...(struckGround.length === 0
+            ? []
+            : [`${struckGround.length} store-wide write grant(s) struck in ${path}`]),
+          ...(struckPools.length === 0
+            ? []
+            : [`the connection's own grant struck in ${struckPools.join(", ")}`]),
+        ];
         io.out(
           `loam: revoked ${clientId}\n` +
-            `  its tokens and codes no longer match (generation ${outcome.generation}), and its ` +
-            `write grant is struck in ${path}\n` +
+            `  its tokens and codes no longer match (generation ${outcome.generation}), so it ` +
+            `authenticates nowhere\n` +
+            (struck.length === 0
+              ? `  no grant needed striking — this connector held none this store could reach\n`
+              : `  ${struck.join("; ")}\n`) +
             `  its past deltas are untouched — they keep naming their author`,
         );
+        if (unreachablePools.length > 0) {
+          io.err(
+            `loam: could not reach ${unreachablePools.join(", ")} — the connection's own write ` +
+              `grant still stands there. Revoke it from that inbox's row on the admin page.`,
+          );
+        }
         {
           // Same boot-materialization trap as the mint above: the strike is in the file, and a
           // live server keeps honoring the grant it booted with until it restarts.
@@ -3742,6 +3819,7 @@ async function cmdGrantRevoke(
           if (staleness !== undefined) io.err(`loam: ${staleness}`);
         }
         return 0;
+      }
     }
   } finally {
     await gateway.close();

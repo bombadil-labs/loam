@@ -2361,7 +2361,9 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           // a bound connection's reads are its container's (§58), so it refuses here in words.
           if (identity.binding !== undefined) {
             const refusal = boundDoorRefusal(identity.binding, "byte door");
-            res.writeHead(403, { "content-type": refusal.contentType });
+            // CORS like every other answer this door gives: a browser must be able to READ the
+            // refusal, or a bound caller sees an opaque network error instead of the sentence.
+            res.writeHead(403, { "content-type": refusal.contentType, ...CORS });
             res.end(refusal.body);
             return;
           }
@@ -2446,7 +2448,9 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             // A degraded gateway is the server's trouble, not the client's batch.
-            const status = /can no longer persist/.test(message)
+            // A pool mid-drop is TRANSIENT and its own sentence says to write again, so it is
+            // the server's "not now" (503) rather than the client's "never" (403).
+            const status = /can no longer persist|being dropped/.test(message)
               ? 503
               : /not permitted|was erased|refused/.test(message)
                 ? 403
