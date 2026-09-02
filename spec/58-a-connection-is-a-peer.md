@@ -68,8 +68,12 @@ was never bound to. The operator, a §57 client and an actor token append to the
 as before; the fence is the binding's, not the door's.
 
 Refusals fail closed, in words: a binding whose actor is absent, an inbox that is not attached,
-a pool mid-drop. A bound connection cannot subscribe — a live stream resolves over the store's
-materialization, which does not see the connection's scope — and the door says so with a 403.
+a pool mid-drop. Three doors resolve this store's own ground and cannot scope to a container, so
+each refuses a bound connection with a 403 and a sentence: the live subscription (a stream
+resolves over a materialization the connection's scope does not reach), the rendered-route door
+(§23, whose write half signs as the renderer's pen into the primary), and the byte door (§23.7,
+a read proved through a lens over this store's ground). The query door is where a bound
+connection reads, and the refusals name it.
 
 `whoami` speaks the binding (the person, the container, the inbox) and reads write standing from
 the pool, so a strike on the pool's grant flips the answer on the very next call while the token
@@ -78,8 +82,9 @@ still names the connection.
 ## 58.4 Reads are the container's
 
 A bound read resolves over the bound container's scope — its own members, its subtree's, and
-every inbox pool composed into it (`connectionScope`) — never over the store's primary
-materialization, which is maintained over the whole ground and would answer with everything the
+every inbox pool composed into it (`connectionScope`) — narrowed by this store's own surviving
+strikes, so a retraction that lives in the primary binds on a claim that lives in a pool (H1).
+It never resolves over the store's primary materialization, which is maintained over the whole ground and would answer with everything the
 store holds. Read closure narrows it as it narrows every read, and a surviving strike in the
 primary binds on a claim that lives in a pool. The retraction gather, the pinned read, the time
 pin and the listing follow the same binding. A row that lives in another container answers as if
@@ -106,8 +111,9 @@ store-wide grant and a token that names no user; both confer nothing now. It con
 binds like any new one. Its earlier writes stay where they are — the ground forgets nothing — and
 a person who wants them gathered declares a container whose membership is what that key authored.
 
-**Provenance.** PRs #517 (the working spec), #520–#524 (S1a, the consent page's binding field and
-the exchange's per-pair key and pool), #525–#526 (S1b-ii, S1c, S1d: the library seam and the
+**Provenance.** PRs #517 (the working spec), #520–#524 (S1a: the consent page's binding field and
+the exchange's per-pair key and pool), #525 (the library seam), #529 and its spend (the six
+frozen-rail revisions the retired store-wide grant required), #526 (S1b-ii, S1c and S1d: the
 doors), and the landing PR (T262). Implementation: `src/server/oauth.ts` (the consent page's
 binding field and provisioning; the exchange: one key per pair, `bind`, no store-wide grant),
 `src/server/oauth-file.ts` (the grant record's `user`/`container`/`inbox`), `src/server/http.ts`
