@@ -25,6 +25,36 @@
       "file": "test/browser/door-smoke.test.ts",
       "sha256": "e03b0c0331d65fb470a4e5a70b8390f2b8b1b34ac0dc11473f3ad06ddfbcc642",
       "authorized": "Myk, 2026-09-01 — §58 S1a (T262): story 2 of the browser doors now NAMES a container before approving (bind_new = journal) and asserts that it stands under alice's home, because §58 story 1 is 'she types journal' and a blank choice refuses by design (PR #517). Two lines added; every existing assertion stays."
+    },
+    {
+      "file": "test/server/oauth-token.test.ts",
+      "sha256": "154d192639369a1b3e9ea2ae8f41807749c5b85ec081edebde7c122ecd08babb",
+      "authorized": "Myk, 2026-09-02 — §58 S1b (T262): the consent helper sends one binding field; the four direct doors take a bind hook; the hand-written code and grant records carry the binding; the bounded-read case reads the binding back — the exchange refuses a code that names no container and mints one key per (client, user), so this rail speaks §58. Every existing assertion stays except where named."
+    },
+    {
+      "file": "test/server/oauth-revoke.test.ts",
+      "sha256": "d9d41e1a3c88f16bfea0aaa3b27a0f352e5e0d99fa16e78bf74a2cfcadd8fbd9",
+      "authorized": "Myk, 2026-09-02 — §58 S1b (T262): the consent helper sends one binding field — the exchange refuses a code that names no container and mints one key per (client, user), so this rail speaks §58. Every existing assertion stays except where named."
+    },
+    {
+      "file": "test/server/oauth-cimd.test.ts",
+      "sha256": "fd6eb82f28a7b9b295f445a5bb07cff930ced1fe4faa7dda6f1319a7703745bb",
+      "authorized": "Myk, 2026-09-02 — §58 S1b (T262): the approve helper sends one binding field — the exchange refuses a code that names no container and mints one key per (client, user), so this rail speaks §58. Every existing assertion stays except where named."
+    },
+    {
+      "file": "test/server/admin-connections.test.ts",
+      "sha256": "5f3ea9fdd80511506522b687e74325e62dfae2fbd60ff0df645f113daa375a5f",
+      "authorized": "Myk, 2026-09-02 — §58 S1b (T262): the consent POST sends one binding field; the panel's revoke is one person's, so the connector's generation stays 1 and the pair's token record goes (the generation-2 assertion retires) — the exchange refuses a code that names no container and mints one key per (client, user), so this rail speaks §58. Every existing assertion stays except where named."
+    },
+    {
+      "file": "test/server/oauth-authorize-validation.test.ts",
+      "sha256": "97a739313c29e716a0c89b41203091d6b3a0d5ecd2e7ec1f5ccc9515985e0136",
+      "authorized": "Myk, 2026-09-02 — §58 S1b (T262): two consent POSTs send one binding field each — the exchange refuses a code that names no container and mints one key per (client, user), so this rail speaks §58. Every existing assertion stays except where named."
+    },
+    {
+      "file": "test/server/whoami.test.ts",
+      "sha256": "3813ba93df1fad5da56e0a004524ccf9ad2a10fd020adc723256a45fa8d35e7c",
+      "authorized": "Myk, 2026-09-02 — §58 S1b (T262): the hand-written grant and token carry the binding (user, container, inbox), as §58's greenfield requires of a token that acts — the exchange refuses a code that names no container and mints one key per (client, user), so this rail speaks §58. Every existing assertion stays except where named."
     }
   ]
 }
