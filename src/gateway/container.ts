@@ -1511,11 +1511,21 @@ export async function bindConnectionImpl(
 
   const table = readContainerTable(gw.reactor, gw.operatorAuthor);
   if (!table.containers.has(name)) {
-    // The inbox seeds only THIS connection's deltas from the primary — none at spawn. A connection
-    // is provably the owner's, so the pool is the owner's trust domain (curated), separate storage.
+    // The inbox seeds only THIS connection's deltas, and only those written AFTER the binding
+    // (SPEC §58 criterion 8): a delta the key authored elsewhere before it was bound here — under
+    // a pre-§58 store-wide grant, say — is not this pool's, at the bytes. The clock is wall time
+    // with a monotonic bump on both gateways, so a write through the pool always lands later
+    // than its own declaration. A connection is provably the owner's, so the pool is the owner's
+    // trust domain (curated), separate storage.
+    const boundAt = gw.nextTimestamp();
     const membership = {
       op: "select",
-      pred: { match: { field: "author", cmp: "eq", const: opts.connectionKey } },
+      pred: {
+        and: [
+          { match: { field: "author", cmp: "eq", const: opts.connectionKey } },
+          { match: { field: "timestamp", cmp: "gt", const: boundAt } },
+        ],
+      },
       in: "input",
     };
     await gw.append([

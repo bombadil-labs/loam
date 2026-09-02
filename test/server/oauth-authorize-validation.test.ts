@@ -250,6 +250,7 @@ describe("T148 — the authorize door refuses a doomed request at the door", () 
       code_challenge: challenge,
       code_challenge_method: "S256",
       response_type: "code",
+      bind_new: "journal", // §58: a connection lives in one container under the person's name
       // the method rides the code_challenge line since T167 (one declaration, not two)
     });
     expect(res.status).toBe(302);
@@ -284,6 +285,7 @@ describe("T148 — the authorize door refuses a doomed request at the door", () 
       state: fieldOf(html, "state"),
       code_challenge: fieldOf(html, "code_challenge"),
       code_challenge_method: fieldOf(html, "code_challenge_method"),
+      bind_new: "journal", // §58: a connection lives in one container under the person's name
     });
     expect(approve.status).toBe(302);
     const location = new URL(approve.headers.get("location")!);

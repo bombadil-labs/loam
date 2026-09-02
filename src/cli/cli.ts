@@ -87,7 +87,7 @@ import {
   writeClientsFile,
 } from "../server/clients-file.js";
 import {
-  grantFor,
+  grantsFor,
   readOAuthFile,
   revocationsFor,
   type OAuthFile,
@@ -3180,6 +3180,7 @@ function connectorActor(
   clientId: string,
   label: string,
   io: IO,
+  user: string | undefined,
 ): { actor: string } | { code: number } {
   let file;
   try {
@@ -3191,11 +3192,29 @@ function connectorActor(
     );
     return { code: 1 };
   }
-  const grant = grantFor(file, clientId);
-  if (grant === undefined) {
+  // One key per (client, user) since §58: a connector two people consented holds two, and a
+  // grant names one of them — `--user=<name>` says which when there is more than one. A single
+  // grant, bound or pre-§58, needs no name.
+  const grants = grantsFor(file, clientId);
+  if (grants.length === 0) {
     io.err(
       `${label}: this store holds no acting identity for ${clientId} — a connector gets one when ` +
         `it first exchanges a token. \`loam grant list\` shows what this store holds.`,
+    );
+    return { code: 2 };
+  }
+  const grant =
+    user !== undefined
+      ? grants.find((g) => g.user === user)
+      : grants.length === 1
+        ? grants[0]
+        : undefined;
+  if (grant === undefined) {
+    io.err(
+      user !== undefined
+        ? `${label}: ${clientId} holds no key for ${user}. \`loam grant list\` names whose it holds.`
+        : `${label}: ${clientId} holds ${grants.length} keys, one per person who consented — say ` +
+            `which with --user=<name>: ${grants.map((g) => g.user).join(", ")}`,
     );
     return { code: 2 };
   }
@@ -3239,7 +3258,7 @@ async function cmdGrantMint(
     );
     return 2;
   }
-  const found = connectorActor(home, clientId, "grant", io);
+  const found = connectorActor(home, clientId, "grant", io, parsed.flags.get("user"));
   if (!("actor" in found)) return found.code;
 
   let seed: string;
@@ -3366,11 +3385,12 @@ function connectorIdentities(file: OAuthFile): HomeIdentity[] {
     const name = `${client.clientId} (${client.clientName})`;
     const tokens = file.tokens.filter((t) => t.clientId === client.clientId).length;
     const facts = `generation ${client.generation} · ${tokens} live token${tokens === 1 ? "" : "s"}`;
-    const grant = grantFor(file, client.clientId);
+    const grants = grantsFor(file, client.clientId);
     // EVERY key this connector ever signed with, not merely its current one. Revocation destroys the
     // key and keeps the name, so a re-keyed connector is several authors under one client id, and
     // each holds standing until its own grant is struck. Naming only the latest would strand the
-    // others under `unattributed` — the same hole one re-key further along.
+    // others under `unattributed` — the same hole one re-key further along. And since §58 a live
+    // connector holds one key per person who consented, each bound to that person's container.
     const revocations = revocationsFor(file, client.clientId);
     for (const r of revocations) {
       out.push({
@@ -3380,14 +3400,20 @@ function connectorIdentities(file: OAuthFile): HomeIdentity[] {
         note: `revoked ${new Date(r.revokedAt).toISOString()} · ${facts}`,
       });
     }
-    if (grant !== undefined) {
+    for (const grant of grants) {
+      // A bound grant says whose and where; a pre-§58 one reads exactly as it always did.
+      const where =
+        grant.user === undefined || grant.container === undefined
+          ? facts
+          : `${grant.user} · ${grant.container} · ${facts}`;
       out.push({
         kind: "connector",
         name,
         author: grant.actor,
-        note: grant.standing ? facts : `grant pending · ${facts}`,
+        note: grant.standing ? where : `grant pending · ${where}`,
       });
-    } else if (revocations.length === 0) {
+    }
+    if (grants.length === 0 && revocations.length === 0) {
       // Registered and never through a token exchange: there is no key to attribute anything to.
       out.push({ kind: "connector", name, note: `no acting identity yet · ${facts}` });
     }

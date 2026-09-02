@@ -408,6 +408,7 @@ async function connectorServer(): Promise<{
       code_challenge: fieldOf(consentHtml, "code_challenge"),
       code_challenge_method: "S256",
       state: fieldOf(consentHtml, "state"),
+      bind_new: "journal", // §58: a connection lives in one container under the person's name
     }).toString(),
     redirect: "manual",
   });

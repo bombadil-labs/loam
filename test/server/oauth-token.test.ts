@@ -176,6 +176,7 @@ async function mintCode(
       code_challenge: fieldOf(html, "code_challenge"),
       code_challenge_method: "S256",
       state: fieldOf(html, "state"),
+      bind_new: "journal", // §58: a connection lives in one container under the person's name
     }).toString(),
     redirect: "manual",
   });
@@ -392,9 +393,12 @@ describe("§37 phase 15 — the token exchange", () => {
           actor: authorForSeed(seed),
           grantedAt: 1,
           standing: true,
+          user: "myk", // §58: the key is the (client, user) pair's, pooled in the person's container
+          container: "myk:journal",
+          inbox: "inbox:myk:journal:direct",
         },
       ],
-      tokens: [{ digest, clientId: CLIENT_ID, issuedAt: 1, generation: 1 }],
+      tokens: [{ digest, clientId: CLIENT_ID, issuedAt: 1, generation: 1, user: "myk" }],
     });
     let reads = 0;
     const readFile = (h: string): OAuthFile => {
@@ -405,6 +409,7 @@ describe("§37 phase 15 — the token exchange", () => {
       home,
       redeeming: new Map(),
       grantStanding: () => Promise.resolve("unused"),
+      bind: bindNowhere,
       readFile,
     });
     // One read at construction (to seed the index). Reset the counter for the probe.
@@ -415,7 +420,10 @@ describe("§37 phase 15 — the token exchange", () => {
     expect(reads).toBe(0);
 
     // The KNOWN digest DOES read (to re-check the generation) and resolves to the actor seed.
-    expect(door.resolve(digest)).toEqual({ actor: seed });
+    expect(door.resolve(digest)).toEqual({
+      actor: seed,
+      binding: { user: "myk", container: "myk:journal", inbox: "inbox:myk:journal:direct" },
+    });
     expect(reads).toBe(1);
   });
 
@@ -528,7 +536,12 @@ const codeRecord = (clientId: string, digest: string, challenge: string): OAuthC
   issuedAt: 1,
   codeChallenge: challenge,
   generation: 1,
+  user: "myk", // §58: a code carries the binding consent recorded
+  container: "myk:journal",
 });
+// §58: the door binds the connection where the code says; these direct-door rails stand up no
+// ground, so the pool's name is answered as given.
+const bindNowhere = (): Promise<string> => Promise.resolve("inbox:myk:journal:direct");
 
 describe("§37 phase 15 — the eviction pin and the redemption count", () => {
   it("(3) the eviction pin reads three sources: a live code, a redemption in flight, and a grant", () => {
@@ -603,7 +616,7 @@ describe("§37 phase 15 — the eviction pin and the redemption count", () => {
         calls += 1;
         gates.push(() => resolve("grant-delta-id"));
       });
-    const door = makeTokenDoor({ home, redeeming, grantStanding });
+    const door = makeTokenDoor({ home, redeeming, grantStanding, bind: bindNowhere });
 
     const start = (codeSecret: string, verifier: string): FakeRes => {
       const { res, captured } = fakeRes();
@@ -656,6 +669,7 @@ describe("§37 phase 15 — the eviction pin and the redemption count", () => {
       home,
       redeeming,
       grantStanding: () => Promise.reject(new Error("ground append failed")),
+      bind: bindNowhere,
     });
     const { res, captured } = fakeRes();
     void throwingDoor.handle(
@@ -718,6 +732,7 @@ describe("§37 phase 15 — the eviction pin and the redemption count", () => {
       home,
       redeeming,
       grantStanding: () => Promise.reject(new Error("ground append failed")),
+      bind: bindNowhere,
     });
     const first = run(failing, "seed-code-one", c1.verifier);
     await first.done;
@@ -733,6 +748,7 @@ describe("§37 phase 15 — the eviction pin and the redemption count", () => {
       home,
       redeeming,
       grantStanding: () => Promise.resolve("grant-delta-id"),
+      bind: bindNowhere,
     });
     const second = run(ok, "seed-code-two", c2.verifier);
     await second.done;
