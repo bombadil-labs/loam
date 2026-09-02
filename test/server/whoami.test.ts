@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, makeNegationClaims } from "@bombadil/rhizomatic";
 import { grantClaims, holdsGrant } from "../../src/gateway/accounts.js";
-import { inboxName } from "../../src/gateway/container.js";
+import { containerClaims, inboxName } from "../../src/gateway/container.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { initHome } from "../../src/cli/config.js";
@@ -71,6 +71,30 @@ async function fourDoorStore(): Promise<{ base: string; gateway: Gateway }> {
     signClaims(grantClaims(STORE_ENTITY, ADA, "register", OPERATOR, ts++, "sync:"), OPERATOR_SEED),
     signClaims(grantClaims(STORE_ENTITY, RAE, "write", OPERATOR, ts++), OPERATOR_SEED),
   ]);
+  // The container the connection binds to, DECLARED — as consent declares it. A binding whose
+  // container does not stand is one whose writes could land where nothing reads them, and the
+  // door refuses it; a fixture that skipped the declaration would assert standing the door denies.
+  const myk = authorForSeed(MYK_SEED);
+  const owned = (container: string, parent?: string) =>
+    signClaims(
+      containerClaims(
+        {
+          container,
+          trust: "curated",
+          posture: "shared",
+          membership: {
+            op: "select",
+            pred: { match: { field: "author", cmp: "eq", const: myk } },
+            in: "input",
+          },
+          ...(parent === undefined ? {} : { parent }),
+        },
+        OPERATOR,
+        ts++,
+      ),
+      OPERATOR_SEED,
+    );
+  await gateway.append([owned("myk"), owned(JOURNAL, "myk")]);
   await gateway.bindConnection({
     container: JOURNAL,
     connectionKey: CONNECTOR,
