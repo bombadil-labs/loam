@@ -10,9 +10,12 @@
 // Erasure standing rule: every store here is the fixture's own mkdtemp/memory store.
 
 import { afterEach, describe, expect, it } from "vitest";
+import { signClaims } from "@bombadil/rhizomatic";
 import { readUserSeed } from "../../src/cli/config.js";
+import { containerClaims } from "../../src/gateway/container.js";
 import { FERN, observed } from "../spike/garden.js";
 import {
+  OPERATOR,
   OPERATOR_SEED,
   closeAll,
   connect,
@@ -157,5 +160,85 @@ describe("S1c — a bound read resolves over the bound container's scope", () =>
     expect(await heightVia(base, "op-token")).toBe(30);
     expect((await mutateHeight(base, token, 41)).status).toBe(200);
     expect(await heightVia(base, token)).toBe(41);
+  });
+
+  // --- the SUBTREE, which is criterion 3's own sentence ---------------------------------------
+  //
+  // A connection bound to a workspace reads the workspace AND the rooms beneath it: §58 position 2
+  // scopes the read to the bound container's subtree. S1 first shipped it narrower — the container
+  // alone — so a workspace could not read its own nested content. These two cases pin both edges.
+  //
+  // The memberships are deliberately DISJOINT from the workspace's own. Consent declares a
+  // container admitting what the PERSON authored, so a child declared the same way would admit the
+  // same deltas and prove nothing about descent. Here each room admits what the OPERATOR authored,
+  // which the workspace itself never admits — so a delta seen through the workspace can only have
+  // arrived by descending into the room.
+  const room = (gateway: { nextTimestamp(): number }, container: string, parent: string) =>
+    signClaims(
+      containerClaims(
+        {
+          container,
+          parent,
+          trust: "curated",
+          posture: "shared",
+          membership: {
+            op: "select",
+            pred: { match: { field: "author", cmp: "eq", const: OPERATOR } },
+            in: "input",
+          },
+        },
+        OPERATOR,
+        gateway.nextTimestamp(),
+      ),
+      OPERATOR_SEED,
+    );
+
+  it("a room BENEATH the workspace resolves; a room beside it does not", async () => {
+    const { base, gateway } = await connectionServer();
+    const token = await connect(base, "ada", "workspace");
+    await gateway.append([
+      room(gateway, "ada:workspace:notes", "ada:workspace"),
+      room(gateway, "ada:elsewhere", "ada"),
+    ]);
+    // One operator claim per room. Neither is a member of `ada:workspace` itself, whose membership
+    // is what ada authored — so each is visible only by reaching into its own room.
+    await gateway.append([observed(FERN, "height", 7, gateway.nextTimestamp(), OPERATOR_SEED)]);
+    expect(await heightVia(base, token)).toBe(7); // the child's room, reached by descent
+
+    // And the sibling stays out. Its claim is later, so were the fence leaking it would win the
+    // pick and this would read 99 — the assertion cannot pass by accident.
+    await gateway.append([observed(MOSS, "height", 99, gateway.nextTimestamp(), OPERATOR_SEED)]);
+    const res = await graphql(base, token, `{ plant(entity: "${MOSS}") { height } }`);
+    const body = (await res.json()) as { data?: { plant?: { height?: unknown } } };
+    expect(body.data?.plant?.height ?? null).toBe(99);
+    expect(await heightVia(base, "op-token")).toBe(7);
+  });
+
+  it("an unreachable room faults the whole workspace read rather than shrinking it", async () => {
+    const { base, gateway } = await connectionServer();
+    const token = await connect(base, "ada", "workspace");
+    // A SEPARATE room beneath the workspace that is never attached: its bytes are its own store and
+    // this process holds none of it. The read must refuse by name (H9) rather than answer as if the
+    // room were empty, which is the fail-closed price of reading a subtree.
+    await gateway.append([
+      signClaims(
+        containerClaims(
+          {
+            container: "ada:workspace:vault",
+            parent: "ada:workspace",
+            trust: "curated",
+            posture: "separate",
+          },
+          OPERATOR,
+          gateway.nextTimestamp(),
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    const res = await graphql(base, token, `{ plant(entity: "${FERN}") { height } }`);
+    const body = (await res.json()) as { errors?: string[] };
+    expect(body.errors?.join(" ")).toMatch(/not attached|cannot be read/);
+    // The operator's own read of the primary is untouched by a room it never enters.
+    expect(await heightVia(base, "op-token")).toBeNull();
   });
 });

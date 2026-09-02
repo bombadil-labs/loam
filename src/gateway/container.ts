@@ -806,6 +806,30 @@ export function containerScopeImpl(
 // addressing, §39.3a); it cannot reach outside its own subtree. With no explicit names it reads its
 // bound container. Reaching a container outside the subtree refuses — the owner chooses the width by
 // choosing the binding.
+// Every container at or beneath `root` by PARENT edge — the set a bound connection reads over
+// (SPEC §58 position 2: the read is scoped to the bound container's SUBTREE). A fixpoint rather
+// than one pass, because the table's iteration order guarantees nothing about parents preceding
+// children. Pools are NOT walked here: `containerScopeImpl` composes each requested container's
+// own pools already, so descending the parent edges reaches every pool under the subtree exactly
+// once, and the two steps stay separately legible.
+//
+// This is deliberately NARROWER than `subtreeOf` (the admin page's reach), which also follows
+// `inboxOf` edges to answer "what may this person act on". Reach and read are different questions.
+function subtreeUnder(table: ContainerTable, root: string): string[] {
+  const reach = new Set<string>([root]);
+  for (;;) {
+    let grew = false;
+    for (const [name, rec] of table.containers) {
+      if (reach.has(name) || rec.parent === undefined) continue;
+      if (reach.has(rec.parent)) {
+        reach.add(name);
+        grew = true;
+      }
+    }
+    if (!grew) return [...reach];
+  }
+}
+
 export function connectionScopeImpl(
   gw: Gateway,
   opts: { bound: string; containers?: readonly string[] },
@@ -826,7 +850,15 @@ export function connectionScopeImpl(
     }
     return false;
   };
-  const targets = opts.containers ?? [opts.bound];
+  // THE WHOLE SUBTREE by default: a workspace reads its own nested rooms, which is what position 2
+  // decided and what S1 first shipped too narrowly. An explicit `containers` list still narrows it,
+  // and every entry is fenced by `within` — the binding is an upper bound, never a routing rule.
+  //
+  // FAIL-CLOSED IS THE PRICE, and it is the right one (Myk, 2026-09-02): a descendant that is
+  // separate and unattached faults the whole read through `membersOf`, so one unreachable room
+  // stops the workspace rather than quietly shrinking it (H9). Detach a room to take it out of
+  // scope deliberately.
+  const targets = opts.containers ?? subtreeUnder(table, opts.bound);
   for (const t of targets) {
     if (!within(t)) {
       throw new Error(
