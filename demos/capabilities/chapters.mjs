@@ -2091,4 +2091,66 @@ export const CHAPTERS = [
       },
     ],
   },
+  {
+    n: 26,
+    slug: "a-connection-is-a-peer",
+    title: "A connection is a peer",
+    thesis:
+      "Consent names one container under the person's name, and that container is the " +
+      "connection's whole grant: its writes land in an inbox pool there, its reads are that " +
+      "container, and no store-wide grant is ever landed for it.",
+    covers: ["spec/58-a-connection-is-a-peer.md"],
+    body: [
+      {
+        kind: "claims",
+        claims: [
+          {
+            says:
+              "The consent page binds a connection to one container at depth two or deeper " +
+              "under the person, provisioning the home, the leaf and the person's seed in one " +
+              "act when they are absent, and refuses the store root and the home.",
+            spec: "spec/58-a-connection-is-a-peer.md",
+            proof: "test/server/consent-binding.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "The exchange mints one key per (client, user) pair and spawns a forward-only " +
+              "inbox pool where consent said, durable across a restart; an unbound code mints " +
+              "nothing and a pre-section-58 token fails closed; a revoke is one person's.",
+            spec: "spec/58-a-connection-is-a-peer.md",
+            proof: "test/server/consent-exchange.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "Every door - GraphQL, REST, the MCP tools and the raw append door fenced to the " +
+              "key's own signatures - lands a bound connection's writes in its pool and never in " +
+              "the primary; no store-wide grant is landed, and one landed by hand is inert.",
+            spec: "spec/58-a-connection-is-a-peer.md",
+            proof: "test/server/connection-writes.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "A bound connection reads the container it is bound to - the person's claims " +
+              "there and its own pool's - and nothing outside, through GraphQL, the listing, " +
+              "REST with a time pin and the MCP query tool; the operator's read stays the primary's.",
+            spec: "spec/58-a-connection-is-a-peer.md",
+            proof: "test/server/read-scope.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "A real browser walks the consent page from a person with no seed and no " +
+              "container, through password and binding, to a connected store that files a claim " +
+              "into the chosen container's inbox.",
+            spec: "spec/58-a-connection-is-a-peer.md",
+            proof: "test/browser/consent-binding.test.ts",
+            door: null,
+          },
+        ],
+      },
+    ],
+  },
 ];

@@ -10,7 +10,11 @@
   "id": "T262",
   "rails": [
     "test/server/consent-binding.test.ts",
-    "test/server/consent-exchange.test.ts"
+    "test/server/consent-exchange.test.ts",
+    "test/gateway/binding-route.test.ts",
+    "test/server/connection-writes.test.ts",
+    "test/server/read-scope.test.ts",
+    "test/browser/consent-binding.test.ts"
   ],
   "status": "in_progress",
   "title": "§58 S1 — bind at consent: the container is the grant"
