@@ -20,36 +20,5 @@
     "(the substitution no longer produces the base) but tidiness keeps this file reviewable."
   ],
   "renames": [],
-  "revisions": [
-    {
-      "file": "test/server/oauth-token.test.ts",
-      "sha256": "8b9ae507984e63aae0e1eb60096ad7922f97994d8ed3790fa845479b9f5165c4",
-      "authorized": "Myk's overnight delegation 2026-09-02 (T262 S1b-ii/S1c/S1d, PR #526 at c2f0768): the store-wide write grant retires, so each rail asserts the write in the connection's inbox pool and nothing of the key's in the primary"
-    },
-    {
-      "file": "test/server/oauth-revoke.test.ts",
-      "sha256": "88115a2ed252df8f14eb2b6783651d03142db3ee0f2fe2be2534f52798e6cca7",
-      "authorized": "Myk's overnight delegation 2026-09-02 (T262 S1b-ii/S1c/S1d, PR #526 at c2f0768): the store-wide write grant retires, so each rail asserts the write in the connection's inbox pool and nothing of the key's in the primary"
-    },
-    {
-      "file": "test/server/oauth-cimd.test.ts",
-      "sha256": "6538202f19f60ce5344b5ec79b4d347b6cad74063bc6424ac0c6bc739d13e4e0",
-      "authorized": "Myk's overnight delegation 2026-09-02 (T262 S1b-ii/S1c/S1d, PR #526 at c2f0768): the store-wide write grant retires, so each rail asserts the write in the connection's inbox pool and nothing of the key's in the primary"
-    },
-    {
-      "file": "test/server/admin-connections.test.ts",
-      "sha256": "e44a4ab9ac0be210805a8cc871074eccba742d49bc6726eec12a590de70a9198",
-      "authorized": "Myk's overnight delegation 2026-09-02 (T262 S1b-ii/S1c/S1d, PR #526 at c2f0768): the store-wide write grant retires, so each rail asserts the write in the connection's inbox pool and nothing of the key's in the primary"
-    },
-    {
-      "file": "test/server/whoami.test.ts",
-      "sha256": "8ad5444abd02be9580b05c3c2984cfb1d88f7b9763a095ac1356dc0535852465",
-      "authorized": "Myk's overnight delegation 2026-09-02 (T262 S1b-ii/S1c/S1d, PR #526 at c2f0768): the store-wide write grant retires, so each rail asserts the write in the connection's inbox pool and nothing of the key's in the primary"
-    },
-    {
-      "file": "test/server/consent-exchange.test.ts",
-      "sha256": "ef3ec8f88304cd356870dec09283fa636207d89f5ca24ce0c3d75446aa85764b",
-      "authorized": "Myk's overnight delegation 2026-09-02 (T262 S1b-ii/S1c/S1d, PR #526 at c2f0768): the store-wide write grant retires, so each rail asserts the write in the connection's inbox pool and nothing of the key's in the primary"
-    }
-  ]
+  "revisions": []
 }
