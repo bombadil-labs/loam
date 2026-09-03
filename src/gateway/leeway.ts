@@ -182,21 +182,13 @@ export function parseLeeway(raw: string): { leeway: Leeway } | { defect: string 
   } catch {
     return { defect: "the declared leeway is not parseable JSON" };
   }
-  // THE BYTES MUST SAY WHAT THEY MEAN. `JSON.parse` resolves a duplicate key to the LAST one, so
-  // `{"publish":false,"publish":true}` reads as bytes that plainly say false and a value that is
-  // true — law whose stored form misreports itself. Requiring the canonical form refuses that, and
-  // with it every other spelling of one value: whitespace, key order, a second copy of a switch.
-  if (raw !== canonicalLeewayJson(parsed)) {
-    return {
-      defect:
-        "the declared leeway is not in canonical form — a leeway is stored with its keys sorted " +
-        "and no duplicates, so the bytes at rest say exactly one thing",
-    };
-  }
+
   const allowances = readAllowances(parsed);
   if (typeof allowances === "string") return { defect: allowances };
   const delegate = (parsed as Record<string, unknown>).delegate;
-  if (delegate === "off") return { leeway: { ...allowances, delegate: "off" } };
+  if (delegate === "off") {
+    return canonical(raw, parsed) ?? { leeway: { ...allowances, delegate: "off" } };
+  }
   if (delegate === "same") {
     return {
       defect:
@@ -205,9 +197,30 @@ export function parseLeeway(raw: string): { leeway: Leeway } | { defect: string 
     };
   }
   const terms = readTerms(delegate, 1);
-  return typeof terms === "string"
-    ? { defect: terms }
-    : { leeway: { ...allowances, delegate: terms } };
+  if (typeof terms === "string") return { defect: terms };
+  return canonical(raw, parsed) ?? { leeway: { ...allowances, delegate: terms } };
+}
+
+/**
+ * THE BYTES MUST SAY WHAT THEY MEAN. `JSON.parse` resolves a duplicate key to the LAST one, so
+ * `{"publish":false,"publish":true}` reads as bytes that plainly say false and a value that is
+ * true — law whose stored form misreports itself. Requiring the canonical spelling refuses that,
+ * and with it every other spelling of one value: whitespace, key order, a repeated switch.
+ *
+ * RUNS LAST, AFTER THE DEPTH BOUND, and that order is load-bearing. `sortKeys` and `JSON.stringify`
+ * both recurse, so canonicalising an UNVALIDATED value walks whatever depth the author sent — and
+ * a few kilobytes of nesting overflowed the stack, turning this function's promise of a defect
+ * sentence into a thrown RangeError at the door and, for a delta already at rest, an unreadable
+ * container table. By here the value has passed the bounded read, so its depth is known small.
+ */
+function canonical(raw: string, parsed: unknown): { defect: string } | undefined {
+  return raw === canonicalLeewayJson(parsed)
+    ? undefined
+    : {
+        defect:
+          "the declared leeway is not in canonical form — a leeway is stored with its keys sorted " +
+          "and no duplicates, so the bytes at rest say exactly one thing",
+      };
 }
 
 /**
@@ -275,13 +288,21 @@ export function isSealed(leeway: Leeway): boolean {
  * read from bytes by strangers, so the bytes may have exactly one meaning.
  */
 export function canonicalLeewayJson(value: unknown): string {
-  return JSON.stringify(sortKeys(value));
+  return JSON.stringify(sortKeys(value, 0));
 }
 
-function sortKeys(value: unknown): unknown {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+/**
+ * Sorted, recursively, and BOUNDED — a depth past the bound collapses to a marker rather than
+ * recursing. Nothing legitimate reaches it (the structural read refuses past `MAX_TERMS_DEPTH`
+ * first), and the marker makes the comparison fail rather than the stack, so the answer is a
+ * refusal either way. A canonicaliser that can throw is a validator that stops validating.
+ */
+function sortKeys(value: unknown, depth: number): unknown {
+  if (depth > MAX_TERMS_DEPTH + 2) return "[too deep to canonicalise]";
+  if (Array.isArray(value)) return value.map((v) => sortKeys(v, depth + 1));
+  if (typeof value !== "object" || value === null) return value;
   const o = value as Record<string, unknown>;
   const out: Record<string, unknown> = {};
-  for (const key of Object.keys(o).sort()) out[key] = sortKeys(o[key]);
+  for (const key of Object.keys(o).sort()) out[key] = sortKeys(o[key], depth + 1);
   return out;
 }

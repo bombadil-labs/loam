@@ -21,24 +21,24 @@
 // path other than this store's own door — federation is the real one. The door's own refusal is
 // railed separately, in `the door refuses a malformed leeway`.
 //
-// REVERT PROBES AND RAILS-RED, both MEASURED against this file as it stands — 19 cases. Re-measure
+// REVERT PROBES AND RAILS-RED, both MEASURED against this file as it stands — 24 cases. Re-measure
 // when you add one; counts copied forward from an older revision read as measurement and are not,
-// and an earlier revision of this block got that wrong twice.
+// and earlier revisions of this block got that wrong twice.
 //
-// RAILS-RED, run on origin/main with this file copied in: 19 red, 0 green. An earlier revision of
-// this comment claimed the module did not exist on the base tree — it does, PR 1 landed it, and
-// two cases PASSED there. Both were tautologies: `expect(x).toEqual(SEALED_LEEWAY)` is satisfied by
-// undefined-equals-undefined where the constant is missing, and "writes no leeway pointer" is
-// trivially true where nothing writes one. Both are asserted on FIELDS now, and both went red.
+// RAILS-RED, run on origin/main with this file copied in: 24 red, 0 green.
 //
 // REVERT PROBES:
-//   the sealed default is permissive instead                → 14 red,  5 green
-//   the reader takes the first of two leeway pointers       →  3 red, 16 green
-//   the canonical-form check is removed                     →  1 red, 18 green
-//   unknown keys are ignored rather than refused            →  1 red, 18 green
-//   the depth bound is removed                              →  2 red, 17 green
-//   a listing refresh drops the standing leeway             →  1 red, 18 green
-// The four narrow ones isolate one or two cases each, which is what makes them worth keeping.
+//   the sealed default is permissive instead                → 16 red,  8 green
+//   the reader takes the first of two leeway pointers       →  3 red, 21 green
+//   the canonical-form check is removed                     →  2 red, 22 green
+//   the canonical form is not sorted                        →  2 red, 22 green
+//   the canonical walk runs BEFORE the depth bound          →  3 red, 21 green
+//   unknown keys are ignored rather than refused            →  1 red, 23 green
+//   the depth bound is removed                              →  5 red, 19 green
+//   a listing refresh drops the standing leeway             →  1 red, 23 green
+// The narrow ones isolate one to three cases each, which is what makes them worth keeping. The
+// fifth is this file's own history: canonicalising an unvalidated value walked whatever depth an
+// author sent, and a parser promising a defect sentence threw a RangeError instead.
 
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
@@ -52,6 +52,7 @@ import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE, pickLatest } from "./fixtures.js";
 import {
   canonicalLeewayJson,
+  parseLeeway,
   SEALED_LEEWAY,
   type Leeway,
   type Terms,
@@ -319,6 +320,81 @@ describe("§58 — a leeway is a declaration on the container", () => {
       expect(legalLooking).toEqual([]);
     });
 
+    /** A CANONICAL terms chain `levels` deep, built as raw bytes so the fixture is not the thing
+     *  under test. Sorted keys: delegate, envelope, offer, publish, receive. */
+    const deepBytes = (levels: number): string =>
+      '{"delegate":'.repeat(levels) +
+      '"off"' +
+      ',"envelope":"small","offer":false,"publish":false,"receive":false}'.repeat(levels);
+
+    it("answers a defect, never a thrown stack, however deep the payload", () => {
+      // The canonical walk recurses, so running it BEFORE the depth bound walked whatever an
+      // author sent: a few kilobytes of nesting overflowed the stack and turned this parser's
+      // promised defect sentence into a RangeError. 20000 levels is far past where that began.
+      const deep = parseLeeway(deepBytes(20_000));
+      expect("defect" in deep && deep.defect).toMatch(/nests deeper than 32 levels/);
+      // And the cheap shape: ten thousand bytes of brackets, which `JSON.stringify` recursed into
+      // even though `sortKeys` left arrays alone.
+      const brackets = parseLeeway("[".repeat(5000) + "]".repeat(5000));
+      expect("defect" in brackets && brackets.defect).toMatch(/object carrying three switches/);
+    });
+
+    it("the door REFUSES a deep leeway by name, even from an author with no standing", async () => {
+      // `containerDefect` runs before the standing check, so a shape defect is refused for
+      // everyone — which also means anyone could reach the overflow. The refusal must be a
+      // sentence, not a stack.
+      const gw = await open();
+      const stranger = "9c".repeat(32);
+      const bad = signClaims(
+        {
+          timestamp: 1000,
+          author: authorForSeed(stranger),
+          pointers: [
+            ...containerClaims(
+              { container: "ada", trust: "curated", posture: "separate" },
+              authorForSeed(stranger),
+              1000,
+            ).pointers,
+            { role: "leeway", target: { kind: "primitive", value: deepBytes(20_000) } },
+          ],
+        },
+        stranger,
+      );
+      await expect(gw.append([bad])).rejects.toThrow(/leeway is malformed/);
+    });
+
+    it("a deep leeway at rest leaves every OTHER container readable", async () => {
+      // The reader resolves the whole table in one pass, so a parser that throws here does not
+      // narrow one container — it deletes all of them. The named bystander is the whole point.
+      const gw = await withSeeded(() => [
+        malformed("ada", deepBytes(20_000), 1000),
+        declare("bob", WIDE, 1000),
+      ]);
+      expect(leewayOf(gw, "ada")).toEqual(SEALED_LEEWAY);
+      expect(leewayOf(gw, "bob")).toEqual(WIDE);
+      expect(defectsOf(gw).join("\n")).toMatch(/container "ada"/);
+    });
+
+    it("pins the canonical spelling as literal bytes", () => {
+      // Every other canonical assertion compares `canonicalLeewayJson` against itself, so the
+      // at-rest form of every stored leeway could change without a red bar. This is the one case
+      // that would notice.
+      expect(canonicalLeewayJson(NARROW)).toBe(
+        '{"delegate":"off","envelope":"small","offer":false,"publish":false,"receive":true}',
+      );
+    });
+
+    it("refuses a key-REORDERED spelling of a wide leeway", async () => {
+      // The sorting half of the canonical rule. Without it this spelling binds WIDE; with it the
+      // container reads sealed. Delete `.sort()` and this is the case that goes red.
+      const unsorted =
+        '{"receive":true,"offer":true,"publish":true,"envelope":"large","delegate":"off"}';
+      const gw = await withSeeded(() => [malformed("ada", unsorted, 1000)]);
+      expect(leewayOf(gw, "ada")).toEqual(SEALED_LEEWAY);
+      expect(leewayOf(gw, "ada")?.publish).toBe(false);
+      expect(defectsOf(gw).join("\n")).toMatch(/canonical form/);
+    });
+
     it("refuses an unknown key rather than reading it as a switch left off", async () => {
       const typo = canonicalLeewayJson({ ...NARROW, recieve: true });
       const gw = await withSeeded(() => [malformed("ada", typo, 1000)]);
@@ -354,7 +430,7 @@ describe("§58 — a leeway is a declaration on the container", () => {
       expect(defectsOf(past).join("\n")).toMatch(/nests deeper than 32 levels/);
     });
 
-    it("refuses terms nested far past the depth bound instead of walking them", async () => {
+    it("refuses a chain well past the bound, through the reader", async () => {
       const gw = await withSeeded(() => [malformed("ada", nested(200), 1000)]);
       expect(leewayOf(gw, "ada")).toEqual(SEALED_LEEWAY);
       expect(defectsOf(gw).join("\n")).toMatch(/nests deeper than/);
