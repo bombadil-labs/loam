@@ -36,12 +36,15 @@
 //   only the target is declared, not the middles            → 1 red, 9 green
 //   the middles walk re-declares declared ancestors         → 1 red, 9 green
 //   the listing road drops a declared sealed pointer        → 1 red, 9 green
-// Four of these were green until the rails were sharpened: the subtree fence, until the refusal
+//   the listing road carries a pointer onto a silent one    → 1 red, 9 green
+// Five of these were green until the rails were sharpened: the subtree fence, until the refusal
 // cases carried a prefix INSIDE the fence (an outside prefix was refused for the prefix); the
 // opener, until a PERSON-opened channel inside the subtree joined the sever case; edge reach,
 // until that channel's target was declared UNDER the container; and the listing road, until the
-// case moved the listing's membership so the road re-declared at all. The parent-edge and
-// middles probes need the object level: introspection sees a field, only a read sees a row.
+// case moved the listing's membership so the road re-declared at all — and re-declared the
+// SILENT container too, or its half proved only that a first declaration carries no pointer.
+// The parent-edge and middles probes need the object level: introspection sees a field, only a
+// read sees a row.
 
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
@@ -382,6 +385,18 @@ describe("§58 — receive within the subtree", () => {
       [FERN],
     );
     await gateway.list("Plant", { limit: 1 });
+    // Bed is re-declared too, or its half of this case proves only that a FIRST declaration
+    // carries no pointer — a road that carried one onto every re-declaration passed it.
+    await gateway.list("Bed", { limit: 1 });
+    await gateway.publishRegistration(
+      { ...PLANT, name: "Bed" },
+      {
+        ...PLANT_POLICY,
+        name: "Bed",
+        props: new Map([...PLANT_POLICY.props, ["girth", PLANT_POLICY.default]]),
+      },
+      [FERN],
+    );
     await gateway.list("Bed", { limit: 1 });
     const after = readContainerTable(gateway.reactor, gateway.operatorAuthor);
     expect(after.containers.get(listing("Plant"))?.leewayDeclared, "sealed stays sealed").toBe(
