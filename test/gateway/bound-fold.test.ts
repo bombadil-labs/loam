@@ -27,18 +27,20 @@
 // holds a dozen derived names, templates among them). A claimant DEFERRED behind a holder is
 // refused this round too, and holds what it staked exactly as a trial-refused one does; held by
 // nothing, its slot was taken by the next claimant whenever the holder above it happened to be
-// waiting on a reading. A refusal belongs to one pool's candidate (`refusalKey`), so two pools
-// refused under one name are each told their own fault.
+// waiting on a reading. A claimant the ROOT refuses is refused for good and told so before any
+// contest is weighed, since root rows never move inside the fold. A refusal belongs to one pool's
+// candidate (`refusalKey`), so two pools refused under one name are each told their own fault.
 //
-// REVERT PROBES, MEASURED on these 15 cases:
-//   drop the candidate sort                          →  2 red, 13 green
-//   key the sort on `boundAt` (the latest binding)   → 10 red,  5 green
-//   trial in ONE pass instead of to a fixpoint       →  9 red,  6 green (+1 in derived-standing)
-//   drop the hold within a round                     →  9 red,  6 green
-//   ask the pair of `groupPrograms` alone            →  6 red,  9 green (every gql-name case)
-//   ask the pair of `buildGqlSchema` alone           →  1 red, 14 green (the rival-body case)
-//   a DEFERRED claimant holds nothing                →  1 red, 14 green (the deferred case)
-//   share one reason per lens across pools           →  1 red, 14 green (the two-faults case)
+// REVERT PROBES, MEASURED on these 16 cases:
+//   drop the candidate sort                          →  2 red, 14 green
+//   key the sort on `boundAt` (the latest binding)   → 10 red,  6 green
+//   trial in ONE pass instead of to a fixpoint       →  9 red,  7 green (+1 in derived-standing)
+//   drop the hold within a round                     →  9 red,  7 green
+//   ask the pair of `groupPrograms` alone            →  6 red, 10 green (every gql-name case)
+//   ask the pair of `buildGqlSchema` alone           →  1 red, 15 green (the rival-body case)
+//   a DEFERRED claimant holds nothing                →  1 red, 15 green (the deferred case)
+//   skip the ROOT check before the rounds            →  1 red, 15 green (the root-refused case)
+//   share one reason per lens across pools           →  1 red, 15 green (the two-faults case)
 // The no-sort probe reds only two cases because attach order happens to agree with the right
 // answer for one of the two orderings, so exactly one of the attach-order and re-attach cases
 // sees it, and the deferred case's third row happens to sort where the answer needs it.
@@ -527,6 +529,26 @@ describe("§58 — two pools in one container contest a name by who staked it fi
     expect(servedBy(gw, first, Y)).toBeUndefined();
     expect(servedBy(gw, first, Z), "z bound into y's slot while y waited behind x").toBeUndefined();
     expect(refusedZ()).toBe(plain);
+  });
+
+  it("a claimant the ROOT refuses is told so, whatever else it contests", async () => {
+    // The root serves reading c. x@first carries a template named after c's field, so the root
+    // refuses it for good; c@second carries a template named after x's field, so it contests x.
+    // Asked only about its contests, c was pointed at x — a claim it could hope to see cleared —
+    // while its own collision with the operator's law went unnamed.
+    const { gw, first, second } = await twoPools();
+    const C = "home:alice:c";
+    await gw.publishRegistration({ ...PLANT, name: "home:alice:q" }, { ...PLANT_POLICY, name: C }, [
+      FERN,
+    ]);
+    await stakeWith(gw, first, LENS, templateNamed("home_alice_c"));
+    await stakeWith(gw, second, C, templateNamed("home_alice_x"));
+    const refused = gw.boundSurface({ container: HOME, inbox: second }).refused;
+    expect(winner(gw, first)).toBeUndefined();
+    expect(servedBy(gw, second, C)).toBeUndefined(); // the root serves that field
+    expect(refused.get(refusalKey(first, LENS))).toMatch(/home_alice_c.*collides/);
+    expect(refused.get(refusalKey(second, C))).toMatch(/home_alice_c.*collides/);
+    expect(refused.get(refusalKey(second, C))).not.toMatch(/earlier claim/);
   });
 
   it("the rival does not take the name by republishing", async () => {
