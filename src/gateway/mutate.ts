@@ -62,8 +62,8 @@ export async function mutateEntityImpl(
   // Reference first, THEN writability: a refs-declared prop draws the reference refusal even
   // when `writable` never opened it — "read-only: name it in writable" would coach the caller
   // into re-opening the exact fossil path the declaration closed.
-  assertNotReference(gw, name, Object.keys(props));
-  assertWritable(gw, name, Object.keys(props));
+  assertNotReference(gw, name, Object.keys(props), binding);
+  assertWritable(gw, name, Object.keys(props), binding);
   const author = authorForSeed(seed);
   // Strictly monotonic WITHIN THIS INSTANCE: two mutations from one running gateway never tie
   // on timestamp, so pick-byTimestamp between them is an ordering, not a coin flip on
@@ -114,7 +114,7 @@ async function retract(
   if (seed === undefined) {
     throw new Error("this gateway holds no signing seed and cannot write");
   }
-  gw.def(name); // refuses an unknown schema
+  gw.def(name, binding); // refuses an unknown schema
   const author = authorForSeed(seed);
   // UNNARROWED (SPEC §29.3): a read-closing slate must not turn this strike into a silent no-op —
   // the member would be absent from a narrowed hview, so nothing would be targeted and nothing signed.
@@ -149,7 +149,7 @@ export function clearEntityImpl(
   binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
   if (fields.length === 0) throw new Error(`clear of ${entity} names no fields to retract`);
-  assertWritable(gw, name, fields);
+  assertWritable(gw, name, fields, binding);
   const set = new Set(fields);
   return retract(gw, name, entity, actorSeed, binding, (field) => set.has(field));
 }
@@ -169,7 +169,7 @@ export function removeEntityImpl(
   if (values.length === 0) {
     throw new Error(`remove from ${field} of ${entity} names no values to retract`);
   }
-  assertWritable(gw, name, [field]);
+  assertWritable(gw, name, [field], binding);
   const wanted = new Set(values.map((v) => JSON.stringify(v)));
   return retract(
     gw,
@@ -200,8 +200,13 @@ const mintedRole = (roles: readonly string[], field: string): string | undefined
 // write must carry so the body's `expand` follows it into the child's view. Read from the
 // PUBLISHED hyperschema gather, never the resolution Schema. A gather with no `expand` resolves no
 // edges — link/sever are meaningless there and refuse.
-function edgeRoleFor(gw: Gateway, name: string, field: string): string {
-  const roles = edgeRoles(gw.def(name).hyperschema.body);
+function edgeRoleFor(
+  gw: Gateway,
+  name: string,
+  field: string,
+  binding?: ConnectionBinding,
+): string {
+  const roles = edgeRoles(gw.def(name, binding).hyperschema.body);
   if (roles.length === 0) {
     throw new Error(
       `schema ${name} resolves no edges: its gather has no \`expand\`, so "${field}" takes a ` +
@@ -237,7 +242,7 @@ export async function linkEntityImpl(
   if (seed === undefined) {
     throw new Error("this gateway holds no signing seed and cannot write");
   }
-  const def = gw.def(name);
+  const def = gw.def(name, binding);
   if (!def.schema.props.has(field)) {
     throw new Error(`schema ${name} has no field "${field}" to link`);
   }
@@ -258,9 +263,9 @@ export async function linkEntityImpl(
     !ref.links ||
     ref.role !== mintedRole(edgeRoles(def.hyperschema.body), field)
   ) {
-    assertWritable(gw, name, [field]);
+    assertWritable(gw, name, [field], binding);
   }
-  const role = edgeRoleFor(gw, name, field);
+  const role = edgeRoleFor(gw, name, field, binding);
   const author = authorForSeed(seed);
   const delta = signClaims(
     {
@@ -293,11 +298,11 @@ export function severEntityImpl(
   actorSeed?: string,
   binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
-  if (!gw.def(name).schema.props.has(field)) {
+  if (!gw.def(name, binding).schema.props.has(field)) {
     throw new Error(`schema ${name} has no field "${field}" to sever`);
   }
-  assertWritable(gw, name, [field]);
-  const role = edgeRoleFor(gw, name, field);
+  assertWritable(gw, name, [field], binding);
+  const role = edgeRoleFor(gw, name, field, binding);
   const wanted = targets !== undefined && targets.length > 0 ? new Set(targets) : undefined;
   return retract(
     gw,
@@ -321,8 +326,13 @@ export function severEntityImpl(
 // seam is what REST and direct callers reach — an unguarded seam keeps the string-fossil path
 // alive on every door that never saw the surface. The refusal names the typed door that exists
 // instead, in the caller's own dialect (the generated mutation's mangled name).
-function assertNotReference(gw: Gateway, name: string, fields: readonly string[]): void {
-  const def = gw.def(name);
+function assertNotReference(
+  gw: Gateway,
+  name: string,
+  fields: readonly string[],
+  binding?: ConnectionBinding,
+): void {
+  const def = gw.def(name, binding);
   if (def.refs === undefined) return;
   const marked = referenceProps(def.hyperschema.body, def.refs);
   for (const field of fields) {
@@ -343,8 +353,13 @@ function assertNotReference(gw: Gateway, name: string, fields: readonly string[]
 // surface generated the mutation from, so the write can never author a shape the surface did not
 // advertise. `links: false` (a prefix/inSet role family) refuses too: the surface minted no
 // mutation for it, and a door reaching here by hand gets the same answer.
-function referencePropFor(gw: Gateway, name: string, prop: string): ReferenceProp {
-  const def = gw.def(name);
+function referencePropFor(
+  gw: Gateway,
+  name: string,
+  prop: string,
+  binding?: ConnectionBinding,
+): ReferenceProp {
+  const def = gw.def(name, binding);
   const ref = referenceProps(def.hyperschema.body, def.refs).get(prop);
   if (ref === undefined || !ref.links) {
     throw new Error(
@@ -378,7 +393,7 @@ export async function linkRefEntityImpl(
   if (seed === undefined) {
     throw new Error("this gateway holds no signing seed and cannot write");
   }
-  const ref = referencePropFor(gw, name, prop);
+  const ref = referencePropFor(gw, name, prop, binding);
   const delta = signClaims(
     {
       timestamp: gw.nextTimestamp(),
@@ -426,7 +441,7 @@ export async function unlinkRefEntityImpl(
   actorSeed?: string,
   binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
-  const ref = referencePropFor(gw, name, prop);
+  const ref = referencePropFor(gw, name, prop, binding);
   return retract(
     gw,
     name,
@@ -448,8 +463,13 @@ export async function unlinkRefEntityImpl(
 // Loam mints names its writable fields explicitly). It disciplines the SURFACE, never the ground:
 // a hand-signed or federated delta may still assert into a "read-only" context, and a reader who
 // wants the guarantee enforces it with a lens.
-function assertWritable(gw: Gateway, name: string, fields: readonly string[]): void {
-  const allowed = new Set(gw.def(name).writable ?? []);
+function assertWritable(
+  gw: Gateway,
+  name: string,
+  fields: readonly string[],
+  binding?: ConnectionBinding,
+): void {
+  const allowed = new Set(gw.def(name, binding).writable ?? []);
   for (const field of fields) {
     if (!allowed.has(field)) {
       throw new Error(

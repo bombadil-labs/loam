@@ -9,6 +9,10 @@
     {
       "contract": "The binding's attribution: S6 names a connection's writes as its owner's through the binding S1/S2 establish.",
       "to": "T267"
+    },
+    {
+      "contract": "T263 lands container-local derived standing, inbox-local registration, and leeway enforcement; T274 formalizes the explicit-context boundary over that settled behavior. Order settled 2026-09-03: a bound connection's law serves only its container, so R2's authorship rule is a follow-on, not a prerequisite.",
+      "to": "T274"
     }
   ],
   "id": "T263",

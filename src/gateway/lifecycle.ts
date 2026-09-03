@@ -30,7 +30,8 @@ import {
   type Primitive,
   type Schema,
 } from "@bombadil/rhizomatic";
-import { readContainerTable } from "./container.js";
+import { readContainerTable, subtreeUnder } from "./container.js";
+import { fenceAdmits } from "./accounts.js";
 import { NUL, type Bound, type Gateway, type RequestContext } from "./gateway.js";
 import { buildGqlSchema } from "./gql.js";
 import {
@@ -433,26 +434,93 @@ function storeBindings(gw: Gateway): Bound[] {
       rows.push({ ...r, origin: "store" as const, channel: standing.name });
     }
   }
-  // AN INBOX POOL FOLDS THE SAME WAY (SPEC §58 position 2). A bound connection's law lives on its
-  // own pool, and this carries it up — filtered to the BOUND CONTAINER'S PATH AND ITS COLON, which
-  // is the same fence the register door applies. Enforcing it twice is the point: the door alone is
-  // bypassed by anything that reaches a pool another way, and the fold alone cannot tell a caller
-  // why its name was refused.
-  //
-  // MARKED, never anonymous. A row with no marker reads as ROOT law — the operator's own — and
-  // would then outrank nothing and be outranked by nothing in a cross-origin contest. A pool is a
-  // pool here whether a channel or an inbox fills it: nearer ground than the root, and ground a
-  // person can actually withdraw.
+  // AN INBOX POOL'S LAW IS NOT HERE, ON PURPOSE (SPEC §58 position 2, Myk's ruling 2026-09-03: a
+  // bound connection's law serves ONLY its container). The root fold is what every principal's
+  // surface is built from — the operator's, a plain token's, the public door's — so a row here is
+  // served to everyone and evaluated over whatever ground the READER has. A connection's lens over
+  // an entity it cannot itself read would then be served, resolved, to the operator (measured). It
+  // folds instead into the bound surface below, which only a connection bound inside that
+  // container is ever handed.
+  return rows;
+}
+
+/**
+ * The five proofs every binding passes before it serves: the registry groups one hyperschema per
+ * program (a rival body throws), a readingless expand can never resolve, the body materializes,
+ * its templates are visible, and the GraphQL names do not collide. ONE derivation, called by the
+ * root replay and by the bound fold, because two copies of a trial drift into two surfaces that
+ * disagree about what binds. Throws with the proximate cause; returns when the candidate may join.
+ */
+function trialBind(gw: Gateway, accepted: readonly Bound[], candidate: Bound): void {
+  const trial = [...accepted, candidate];
+  const registry = SchemaRegistry.build(programHyperschemas(trial), programReadings(trial));
+  assertReadingsNamed(candidate.hyperschema);
+  assertMaterializable(candidate.hyperschema, registry);
+  assertTemplatesVisible(
+    candidate.hyperschema,
+    candidate.mutations,
+    registry,
+    gw.operatorAuthor ?? "loam:specimen",
+  );
+  buildGqlSchema(trial, gw.gqlHooks());
+}
+
+/** What the bound fold answers: the rows a container's surface serves, and why any candidate was left out. */
+export interface BoundFold {
+  readonly registered: readonly Bound[];
+  readonly registry: SchemaRegistry;
+  /** Lens → the proximate cause, for every pool candidate the trial refused. */
+  readonly refused: ReadonlyMap<string, string>;
+  /** Everything the fold depends on, so a cache can tell whether it moved. */
+  readonly key: string;
+}
+
+/**
+ * THE BOUND FOLD (SPEC §58 position 2). The surface a connection bound to `container` is served:
+ * the root's own bound rows — the operator's law is every reader's — PLUS the law published on
+ * the inbox pools composed into that container's subtree, each row fenced to ITS OWN container's
+ * path and colon on all three names the register door fences (the program, the reading, and the
+ * entity), and each passed through the same trial the root replay runs. Nothing here reaches the
+ * root fold, so nothing here is served to anyone outside the container.
+ *
+ * Fenced TWICE on purpose: the door refuses a name outside the container before anything is
+ * written, and this refuses it again for law that reached a pool by some other road — a restore,
+ * a migration, an operator-signed write out of band.
+ */
+export function boundBindingsImpl(gw: Gateway, container: string): BoundFold {
   const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+  const reach = new Set(subtreeUnder(table, container));
+  const candidates: Bound[] = [];
   for (const [name, inbox] of gw.connectionInboxes) {
-    const bound = table.containers.get(name)?.inboxOf;
-    if (bound === undefined || inbox.gateway === undefined) continue;
+    const owner = table.containers.get(name)?.inboxOf;
+    if (owner === undefined || !reach.has(owner) || inbox.gateway === undefined) continue;
+    const prefix = `${owner}:`;
     for (const r of readRegistrations(inbox.gateway.reactor, inbox.gateway.operatorAuthor)) {
-      if (!lensOf(r).startsWith(`${bound}:`)) continue;
-      rows.push({ ...r, origin: "store" as const, channel: name });
+      if (!fenceAdmits(prefix, r.hyperschema.name)) continue; // the program
+      if (!fenceAdmits(prefix, lensOf(r))) continue; // the reading
+      if (r.entity !== undefined && r.entity !== schemaEntityFor(r.hyperschema)) continue; // the entity
+      candidates.push({ ...r, origin: "store" as const, channel: name });
     }
   }
-  return rows;
+  const key = [
+    ...gw.registered.map((r) => boundKey(r)),
+    NUL,
+    ...candidates.map((r) => `${r.channel ?? ""}${NUL}${boundKey(r)}`),
+  ].join(NUL);
+  const accepted: Bound[] = [...gw.registered];
+  const refused = new Map<string, string>();
+  // Root rows are already trialled and already serve; a pool row that collides with one loses here
+  // exactly as a channel row loses at root — the nearer ground never displaces the operator's law.
+  for (const candidate of candidates) {
+    try {
+      trialBind(gw, accepted, candidate);
+      accepted.push(candidate);
+    } catch (err) {
+      refused.set(lensOf(candidate), err instanceof Error ? err.message : String(err));
+    }
+  }
+  const registry = SchemaRegistry.build(programHyperschemas(accepted), programReadings(accepted));
+  return { registered: accepted, registry, refused, key };
 }
 
 // CROSS-ORIGIN CONTESTS resolve by the declared policy BEFORE the trial fixpoint. Undeclared keeps
@@ -636,17 +704,7 @@ export function replayRegistrationsImpl(gw: Gateway): void {
     for (const reg of pending) {
       const attempt = (candidate: Bound): boolean => {
         try {
-          const trial = [...accepted, candidate];
-          const registry = SchemaRegistry.build(programHyperschemas(trial), programReadings(trial)); // groups: one hyperschema per program; a rival body throws here
-          assertReadingsNamed(candidate.hyperschema); // a readingless expand can never resolve
-          assertMaterializable(candidate.hyperschema, registry); // reactor.register would throw
-          assertTemplatesVisible(
-            candidate.hyperschema,
-            candidate.mutations,
-            registry,
-            gw.operatorAuthor ?? "loam:specimen",
-          );
-          buildGqlSchema(trial, gw.gqlHooks()); // GraphQL name collisions
+          trialBind(gw, accepted, candidate);
           accepted.push(candidate);
           forgetBindFailure(gw, failureKey(candidate.entity ?? "", lensOf(candidate)));
           return true;

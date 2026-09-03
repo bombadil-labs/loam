@@ -451,13 +451,31 @@ function registrationSink(gateway: Gateway, identity: TokenIdentity): Gateway {
 }
 
 /**
- * A publish onto a POOL rebinds that pool, not the store that serves it — so the served surface
- * would keep the law it had until something else refolded. This is the seam that carries a bound
- * connection's new law up through the §47 aggregation, on the same request that published it.
- * No-op for everyone else, whose registration already landed in the reactor being served.
+ * SUCCESS MEANS BOUND IN THE CONTAINER'S SURFACE. A pool publish reports whether the POOL bound
+ * the lens, and the pool's fixpoint is not the one a connection is served — its container's fold
+ * runs the same trial against the root's law too, and can refuse what the pool accepted (a name
+ * the operator already serves, a program that will not materialize beside its siblings). Report
+ * the fold's answer, with its reason, rather than the pool's (H7). Everyone else's outcome is
+ * already the served surface's, because their law landed in the reactor being served.
  */
-function refoldAfterBoundPublish(gateway: Gateway, identity: TokenIdentity): void {
-  if (identity.binding !== undefined) gateway.replayRegistrations();
+function asServedTo(
+  gateway: Gateway,
+  identity: TokenIdentity,
+  outcome: Awaited<ReturnType<typeof performRegistration>>,
+): Awaited<ReturnType<typeof performRegistration>> {
+  if (identity.binding === undefined || !outcome.bound) return outcome;
+  const surface = gateway.boundSurface(identity.binding);
+  const served = surface.registered.some(
+    (r) => (r.lensName ?? r.hyperschema.name) === outcome.lens,
+  );
+  if (served) return outcome;
+  return {
+    ...outcome,
+    bound: false,
+    reason:
+      surface.refused.get(outcome.lens) ??
+      `the container's surface did not bind ${outcome.lens}, so it is written and not served`,
+  };
 }
 
 // Thrown for a fence violation so a caller renders it as the AUTHORITY refusal rather than as the
@@ -1017,10 +1035,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       ...(binding === undefined ? {} : { binding }),
       operator: false,
       write: writes,
-      registerPrefixes:
-        gateway === undefined
-          ? []
-          : registerPrefixesOf(gateway.reactor, author, gateway.operatorAuthor),
+      // THE SAME FUNCTION THE DOOR DECIDES WITH. A report of standing that re-derives it beside
+      // the door is a report that can disagree with the door — and it did, once: the door admitted
+      // a bound connection under its container path while this said `[]` (H7).
+      registerPrefixes: gateway === undefined ? [] : (registerStanding(gateway, identity) ?? []),
       federateContainers:
         gateway === undefined
           ? []
@@ -1561,12 +1579,15 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             return;
           }
           try {
-            const outcome = await performRegistration(
-              registrationSink(gateway, identity),
-              params["arguments"] ?? {},
-              fence,
+            const outcome = asServedTo(
+              gateway,
+              identity,
+              await performRegistration(
+                registrationSink(gateway, identity),
+                params["arguments"] ?? {},
+                fence,
+              ),
             );
-            refoldAfterBoundPublish(gateway, identity);
             reply({ content: [{ type: "text", text: JSON.stringify(outcome) }] });
           } catch (err) {
             reply({
@@ -2536,8 +2557,11 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             return;
           }
           try {
-            const done = await performRegistration(registrationSink(gateway, identity), raw, fence);
-            refoldAfterBoundPublish(gateway, identity);
+            const done = asServedTo(
+              gateway,
+              identity,
+              await performRegistration(registrationSink(gateway, identity), raw, fence),
+            );
             json(res, 200, done);
           } catch (err) {
             if (err instanceof NotPermittedToRegister) {
