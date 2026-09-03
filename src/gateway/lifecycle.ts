@@ -553,14 +553,12 @@ export function boundBindingsImpl(
         still.push(candidate);
       }
     }
-    if (!progressed || still.length === 0) break;
     pending = still;
+    if (!progressed || pending.length === 0) break;
   }
   const refused = new Map<string, string>();
-  for (const left of pending) {
-    if (accepted.includes(left)) continue;
+  for (const left of pending)
     refused.set(lensOf(left), reasons.get(lensOf(left)) ?? "did not bind");
-  }
   const registry = SchemaRegistry.build(programHyperschemas(accepted), programReadings(accepted));
   return { registered: accepted, registry, refused, key };
 }
