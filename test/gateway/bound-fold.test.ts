@@ -17,8 +17,9 @@
 // REVERT PROBES, MEASURED on these 4 cases: drop the candidate sort → 1 red, 3 green (attach order
 // happens to agree with the right answer for one of the two orderings, so exactly one of the
 // attach-order and re-attach cases sees it); key the sort on `boundAt` (the latest binding)
-// instead of the first → 1 red, 3 green (the holder's own republish loses the name; the rival's
-// republish never wins it, under either key).
+// instead of the first → 2 red, 2 green (the holder's own republish loses the name, and the
+// re-attach case's evolution moves the holder's latest binding too; the rival's republish never
+// wins it, under either key).
 //
 // RAILS-RED on origin/main: every case red, because `boundSurface` does not exist there. An
 // honest red and a WEAK one; the probes above are the measurement.
