@@ -427,6 +427,9 @@ function storeBindings(gw: Gateway): Bound[] {
     origin: "store" as const,
   }));
   for (const standing of gw.channelStatus()) {
+    // A channel a BOUND CONNECTION opened is not here either: its law serves only the container
+    // it was opened from, in the bound fold below (SPEC §58 position 2).
+    if (standing.openedBy !== undefined) continue;
     const pool = gw.channelPools.get(standing.name)?.gateway;
     if (pool === undefined) continue;
     for (const r of readRegistrations(pool.reactor, pool.operatorAuthor)) {
@@ -508,6 +511,20 @@ export function boundBindingsImpl(
       if (lensOf(r).includes(NUL)) continue; // a reading name is the gateway's alphabet too
       if (r.entity !== undefined && r.entity !== schemaEntityFor(r.hyperschema)) continue; // the entity
       candidates.push({ ...r, origin: "store" as const, channel: name });
+    }
+  }
+  // A CHANNEL A BOUND CONNECTION OPENED serves its container's surface and nobody else's: its
+  // rows are gathered here when the container it was opened from is within reach, fenced to the
+  // prefix the connection assigned (which the door kept inside the container's own fence), and
+  // left out of the root fold above.
+  for (const standing of gw.channelStatus()) {
+    if (standing.openedBy === undefined || !reach.has(standing.openedBy)) continue;
+    const pool = gw.channelPools.get(standing.name)?.gateway;
+    if (pool === undefined) continue;
+    for (const r of readRegistrations(pool.reactor, pool.operatorAuthor)) {
+      if (!lensOf(r).startsWith(`${standing.prefix}:`)) continue;
+      if (lensOf(r).includes(NUL)) continue;
+      candidates.push({ ...r, origin: "store" as const, channel: standing.name });
     }
   }
   // CONTESTS RESOLVE BY WHO STAKED THE NAME FIRST, never by attach order and never by who touched

@@ -404,6 +404,15 @@ export interface ResolvedContainer {
    * enforces the one rule is the one that may call it "in force".
    */
   readonly leeway: Leeway;
+  /**
+   * Whether this container's LATEST declaration carried a leeway pointer at all, however it
+   * parsed. A container that spoke, even badly, reads sealed and that sealing binds; one whose
+   * latest declaration did not speak is a pure namespace, and a road that walks the tree for the
+   * governing leeway climbs past it (SPEC §58 position 4: an undeclared child inherits). Latest
+   * wins per declaration, so a road that re-declares a standing container must carry the pointer
+   * it found, or it deletes it. `leeway` alone cannot tell the two apart.
+   */
+  readonly leewayDeclared: boolean;
 }
 
 export interface DetachRecord {
@@ -646,6 +655,7 @@ function computeContainerTable(reactor: Reactor, operator: string | undefined): 
       ...(latest.version !== undefined ? { version: latest.version } : {}),
       ...(latest.inboxOf !== undefined ? { inboxOf: latest.inboxOf } : {}),
       leeway,
+      leewayDeclared: declared.length > 0,
     });
     if (latest.parent !== undefined) {
       edges.set(name, { parent: latest.parent, ts: latest.ts, id: latest.id });

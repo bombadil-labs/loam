@@ -52,6 +52,12 @@ export interface OpenChannelOptions {
   readonly from?: string;
   /** Whether law arriving on this channel binds. Reversible; see §46's two toggles. */
   readonly bless?: boolean;
+  /**
+   * The container a BOUND CONNECTION opened this channel from (SPEC §58 position 2). Absent for
+   * a channel the person opened. Recorded on the channel, because it decides whose surface the
+   * arriving law serves: a connection's channel serves only its container, never the root.
+   */
+  readonly openedBy?: string;
 }
 
 export interface SyncReport {
@@ -132,6 +138,8 @@ export interface ChannelStatus {
   readonly consecutiveFailures: number;
   /** The peer's address, or "" for a channel opened before addresses were recorded. */
   readonly from: string;
+  /** The container a bound connection opened this channel from; absent for the person's own. */
+  readonly openedBy?: string;
   /**
    * Arrivals this channel accepted and could not stamp — the custody debt, carried on the record
    * until a later sync names them. Empty is the healthy reading, and every record written before
@@ -199,6 +207,13 @@ export const CTX_CHANNEL = "loam.channel";
  * `status.unreadable` is not written, and must not be: it is the reader's verdict ON a record, and
  * a record that carried its own verdict could carry a false one.
  */
+/**
+ * The opener a record carries forward, or nothing: ONE derivation for every stamp, so no stamp can
+ * drop a bound connection's channel back into the root fold by forgetting the field.
+ */
+const opener = (of: { readonly openedBy?: string }): { openedBy?: string } =>
+  of.openedBy === undefined ? {} : { openedBy: of.openedBy };
+
 export function channelRecordClaims(
   status: ChannelStatus,
   author: string,
@@ -214,6 +229,14 @@ export function channelRecordClaims(
       },
       { role: "into", target: { kind: "primitive", value: status.into } },
       { role: "prefix", target: { kind: "primitive", value: status.prefix } },
+      ...(status.openedBy === undefined
+        ? []
+        : [
+            {
+              role: "openedBy" as const,
+              target: { kind: "primitive" as const, value: status.openedBy },
+            },
+          ]),
       { role: "receiving", target: { kind: "primitive", value: status.receiving } },
       { role: "blessing", target: { kind: "primitive", value: status.blessing } },
       { role: "lastSyncedAt", target: { kind: "primitive", value: status.lastSyncedAt } },
@@ -493,6 +516,7 @@ function readChannels(
         lastSyncedAt: Number(of("lastSyncedAt") ?? 0),
         consecutiveFailures: Number(of("consecutiveFailures") ?? 0),
         from: String(of("from") ?? ""),
+        ...(typeof of("openedBy") === "string" ? { openedBy: String(of("openedBy")) } : {}),
         unattested,
         unreadable,
       },
@@ -1328,7 +1352,14 @@ async function syncChannel(
   gw: Gateway,
   ground: Gateway,
   name: string,
-  opts: { into: string; prefix: string; from?: string; source: ChannelSource; bless?: boolean },
+  opts: {
+    into: string;
+    prefix: string;
+    from?: string;
+    source: ChannelSource;
+    bless?: boolean;
+    openedBy?: string;
+  },
 ): Promise<SyncReport> {
   const before = channelStatusImpl(gw, name)[0];
   // WHAT THE RECORD THIS SYNC BUILDS ON COULD NOT SAY. Every stamp below copies most of its fields
@@ -1386,6 +1417,7 @@ async function syncChannel(
         name,
         into: opts.into,
         prefix: opts.prefix,
+        ...opener(opts),
         receiving: before?.receiving ?? true,
         blessing: before?.blessing ?? opts.bless !== false,
         lastSyncedAt: before?.lastSyncedAt ?? 0,
@@ -1431,6 +1463,7 @@ async function syncChannel(
         name,
         into: opts.into,
         prefix: opts.prefix,
+        ...opener(opts),
         receiving: before?.receiving ?? true,
         blessing: before?.blessing ?? opts.bless !== false,
         lastSyncedAt: before?.lastSyncedAt ?? 0,
@@ -1476,6 +1509,7 @@ async function syncChannel(
         name,
         into: opts.into,
         prefix: opts.prefix,
+        ...opener(opts),
         receiving: before?.receiving ?? true,
         blessing,
         lastSyncedAt: before?.lastSyncedAt ?? 0,
@@ -1524,6 +1558,7 @@ async function syncChannel(
         name,
         into: opts.into,
         prefix: opts.prefix,
+        ...opener(opts),
         receiving: before?.receiving ?? true,
         blessing: before?.blessing ?? opts.bless !== false,
         lastSyncedAt: gw.nextTimestamp(),
@@ -1650,16 +1685,49 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
   // trust domain, a view over their ground, with each peer's pool nested beneath it.
   const table = readContainerTable(gw.reactor, gw.operatorAuthor);
   if (!table.containers.has(opts.into)) {
-    await gw.append([
-      signClaims(
-        containerClaims(
-          { container: opts.into, trust: "curated", posture: "shared", membership: AGGREGATOR },
-          gw.operatorAuthor!,
-          gw.nextTimestamp(),
+    if (opts.openedBy === undefined) {
+      await gw.append([
+        signClaims(
+          containerClaims(
+            { container: opts.into, trust: "curated", posture: "shared", membership: AGGREGATOR },
+            gw.operatorAuthor!,
+            gw.nextTimestamp(),
+          ),
+          gw.options.seed,
         ),
-        gw.options.seed,
-      ),
-    ]);
+      ]);
+    } else {
+      // A container a BOUND CONNECTION names is declared under its path parent, and so is every
+      // undeclared name between it and the nearest declared ancestor (SPEC §58 position 5: the
+      // tree agrees with the names). Reach is walked by declared parent edges only, so a pool
+      // composed into a container whose edge dangles from an undeclared name is served as law
+      // that answers nothing — the T189 shape. The door fenced `into` inside the opener's
+      // container, which consent declared, so the walk always meets a declared ancestor.
+      const seed = gw.options.seed;
+      const missing: string[] = [];
+      for (let at = opts.into; !table.containers.has(at) && at.includes(":");) {
+        missing.push(at);
+        at = at.slice(0, at.lastIndexOf(":"));
+      }
+      await gw.append(
+        missing.reverse().map((container) =>
+          signClaims(
+            containerClaims(
+              {
+                container,
+                trust: "curated",
+                posture: "shared",
+                membership: AGGREGATOR,
+                parent: container.slice(0, container.lastIndexOf(":")),
+              },
+              gw.operatorAuthor!,
+              gw.nextTimestamp(),
+            ),
+            seed,
+          ),
+        ),
+      );
+    }
   }
 
   // The pool is UNTRUSTED and SEPARATE. Untrusted because a peer's law is inert until blessed
@@ -1701,8 +1769,10 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
       name,
       into: opts.into,
       prefix: opts.prefix,
+      ...opener(opts),
       receiving: true,
       blessing: opts.bless !== false,
+      ...opener(opts),
       lastSyncedAt: 0,
       consecutiveFailures: 0,
       from: opts.from ?? "",
@@ -1716,6 +1786,7 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
     name,
     into: opts.into,
     prefix: opts.prefix,
+    ...opener(opts),
     pool,
     // Union, and idempotent by construction: the pool's append de-duplicates by delta id, so a
     // second sync of an unchanged peer accepts nothing and refuses nothing. Polling is therefore
@@ -2305,6 +2376,7 @@ export function resumeChannelImpl(gw: Gateway, standing: ChannelStatus, token: s
   const opts = {
     into: standing.into,
     prefix: standing.prefix,
+    ...opener(standing),
     from: standing.from,
     source: sourceFor(
       standing.from,
@@ -2319,6 +2391,7 @@ export function resumeChannelImpl(gw: Gateway, standing: ChannelStatus, token: s
     name: standing.name,
     into: standing.into,
     prefix: standing.prefix,
+    ...opener(standing),
     get pool(): Container {
       return poolOf();
     },
