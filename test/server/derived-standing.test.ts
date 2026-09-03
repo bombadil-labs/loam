@@ -42,6 +42,7 @@
 //   the listing groups the ROOT's rows for a bound reader         →  1 red, 16 green
 //   NUL admitted in a READING name, at door and fold              →  1 red, 16 green
 //   the fold trials in ONE pass instead of to a fixpoint          →  1 red, 16 green
+//   the door reads the fold's refusal by lens, not by (pool, lens) →  2 red, 15 green
 // Ten of these isolate exactly one case, which is what makes them worth keeping. The root-fold
 // probe is restored WHOLE (loop and refold): the loop alone leaves every case green, which is how
 // an earlier draft of these probes misread a hollow rail as a sound one. The contest between two

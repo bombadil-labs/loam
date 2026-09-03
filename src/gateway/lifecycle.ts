@@ -469,7 +469,10 @@ function trialBind(gw: Gateway, accepted: readonly Bound[], candidate: Bound): v
 export interface BoundFold {
   readonly registered: readonly Bound[];
   readonly registry: SchemaRegistry;
-  /** Lens → the proximate cause, for every pool candidate the trial refused. */
+  /**
+   * `refusalKey(pool channel, lens)` → the proximate cause, for every pool candidate the trial
+   * refused. A refusal belongs to one pool's candidate; a lens-only lookup finds nothing.
+   */
   readonly refused: ReadonlyMap<string, string>;
   /** Everything the fold depends on, so a cache can tell whether it moved. */
   readonly key: string;
