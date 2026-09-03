@@ -34,6 +34,7 @@ import {
   type ContainerTable,
 } from "./container.js";
 import type { ConnectionBinding, Gateway } from "./gateway.js";
+import { isSealed } from "./leeway.js";
 import { groupPrograms } from "./lifecycle.js";
 import { programOf, type ProgramName } from "./registration.js";
 import type { ResolvedNode } from "../surface/surface.js";
@@ -216,6 +217,13 @@ async function ensureListingContainer(
           ...(standing?.parent === undefined ? {} : { parent: standing.parent }),
           ...(standing?.version === undefined ? {} : { version: standing.version }),
           ...(standing?.inboxOf === undefined ? {} : { inboxOf: standing.inboxOf }),
+          // A leeway is never undefined on a resolved container, so carrying it unconditionally
+          // would write an explicit sealed pointer onto every container that declared none and
+          // change the bytes of every listing re-declaration. Carry it only when it says
+          // something — a sealed leeway and an absent one resolve identically, so nothing is lost.
+          ...(standing === undefined || isSealed(standing.leeway)
+            ? {}
+            : { leeway: standing.leeway }),
         },
         law.operator,
         gw.nextTimestamp(),
