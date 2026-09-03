@@ -25,6 +25,11 @@
       "file": "test/server/read-scope.test.ts",
       "sha256": "7b2a2e99b638316e227c24a8b0e0cc0f4dc51b1e024703ba40693968bd3dcf7c",
       "authorized": "Myk's word 2026-09-02 (fixed at aed5ea3): a bound read now covers the bound container's SUBTREE, which is what \u00a758 position 2 decided and what S1 shipped too narrowly. The rail gains criterion 3's own two edges \u2014 a room beneath the workspace resolves, a room beside it does not \u2014 and the fail-closed refusal when a descendant cannot be attached. Its existing cases are unchanged."
+    },
+    {
+      "file": "test/server/oauth-token.test.ts",
+      "sha256": "2619f84935913179857a8a756ee6b39177dd14f3182a34435b6240d3b5000269",
+      "authorized": "Myk's word 2026-09-03: SPEC 58 S2 makes /register no longer an operator-only door - a BOUND connection names law under its own container path and its colon, which the landed spec already says S2 would do (spec/58-a-connection-is-a-peer.md:88). Case (7) asserted 403 for an empty body, which now draws a 400 shape complaint because the caller genuinely HAS scoped standing; returning 403 would report an absence of standing that is no longer true. The case keeps its subject and sharpens it: federate still refuses the connector token, and register still refuses a ROOT name from it. Every other case in the file is unchanged."
     }
   ]
 }
