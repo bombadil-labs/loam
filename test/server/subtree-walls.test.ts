@@ -19,25 +19,27 @@
 // ceiling a pool's REPORT resolves, not a render bounded at it: a render refused at the size's
 // slot count and not the operator's is owed by the slice that mounts a renderer behind glass.
 //
-// RAILS-RED on origin/main, this file copied in: 4 red, 3 green — 7 cases. The three greens are
-// the CONTROLS named above; the reds are the envelope's, which is what this slice decides (the
-// cycle case reds on main because the walk does not exist there).
+// RAILS-RED on origin/main, this file copied in: 5 red, 3 green — 8 cases. The three greens are
+// the CONTROLS named above; the reds are the envelope's and the walk's, which is what this slice
+// decides (the cycle and parented cases red on main because the walk does not exist there).
 //
-// REVERT PROBES, MEASURED against this file as it stands — 7 cases. Re-measure when you add one.
-//   no size clamp at all                                    → 3 red, 4 green
-//   the size composes OVER the operator's ceiling           → 1 red, 6 green
-//   whether a size governs decided ONCE, at open            → 2 red, 5 green
-//   the walk climbs by name only, never by a declared edge  → 2 red, 5 green
-//   the walk keeps no memory                                → the file HANGS (killed at 180s)
-//   the table read from the OPENER's copy, not the root's   → 1 red, 6 green
+// REVERT PROBES, MEASURED against this file as it stands — 8 cases. Re-measure when you add one.
+//   no size clamp at all                                    → 4 red, 4 green
+//   the size composes OVER the operator's ceiling           → 1 red, 7 green
+//   whether a size governs decided ONCE, at open            → 3 red, 5 green
+//   the walk follows a declared parent edge                 → 1 red, 7 green
+//   no hop from a pool to its host                          → 3 red, 5 green
+//   a self-hosted pool reads nothing, not sealed            → 1 red, 7 green
+//   the table read from the OPENER's copy, not the root's   → 1 red, 7 green
 // Every size is asserted by number under a wide ceiling; a mutant that moved medium's slots by
-// one survived until it was. A probe that removes the walk's memory does not red a case, it
-// stops the run: the walk is synchronous, so no test timeout can catch it, and the rail is the
-// external clock. A fifth probe once measured a clause DEAD and it was deleted rather than kept:
-// metering a pool because a size governs it changed nothing any case could see, since a channel
-// pool is untrusted and metered already. The shared walk (`governingLeeway`) also serves the
-// receive door; that file's two walk probes were re-measured here against the shared walk and
-// each reds one case.
+// one survived until it was. An earlier walk followed declared edges and kept a memory of names
+// visited; a probe that removed the memory hung the run, since the walk is synchronous and no
+// test timeout can catch it. The walk climbs by name now and takes a pool's host edge once, so
+// no cycle can trap it and the memory is gone. A fifth probe once measured a clause DEAD and it
+// was deleted rather than kept: metering a pool because a size governs it changed nothing any
+// case could see, since a channel pool is untrusted and metered already. The shared walk
+// (`governingLeeway`) also serves the receive door; that file's two walk probes were re-measured
+// against the shared walk and each reds one case.
 import { describe, expect, it } from "vitest";
 import { signClaims } from "@bombadil/rhizomatic";
 import {
@@ -278,10 +280,10 @@ describe("§58 — the walls", () => {
     await closeAll();
   });
 
-  it("the governing walk ends on a cycle the door admits", async () => {
+  it("the governing walk ends on a cycle the door admits, and reads it as sealed", async () => {
     // The table restores a forest over parent edges only; an `inboxOf` edge can point a
-    // container at itself and the door admits it. Without memory the walk hung the event loop
-    // on one lawful delta; with it, a revisit ends the walk with nothing governing.
+    // container at itself and the door admits it. A walk that followed edges hung the event
+    // loop on one lawful delta; this one climbs by name and takes a pool's host edge once.
     const { gateway } = await connectionServer();
     await gateway.append([
       signClaims(
@@ -295,7 +297,9 @@ describe("§58 — the walls", () => {
     ]);
     const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
     expect(table.containers.get("loop")?.inboxOf).toBe("loop");
-    expect(governingLeeway(table, "loop")).toBeUndefined();
+    // A name that cannot be placed reads SEALED: the floor, never the operator's wider ceiling,
+    // so nothing that cannot be placed can widen anything.
+    expect(governingLeeway(table, "loop")).toEqual({ at: "loop", leeway: SEALED_LEEWAY });
     expect(governingLeeway(table, "loop:child")).toBeUndefined();
     await closeAll();
   });
@@ -325,7 +329,8 @@ describe("§58 — the walls", () => {
     const outer = gateway.channelPools.get("channel:ada:journal:inbox:ada:journal:inbox:peer")!;
     // Declared IN THE POOL: a pool's reactor is a seeded copy the root's later deltas never reach,
     // and the nested pool's declaration lives where it is opened. The root's table never sees it,
-    // so the walk climbs by the name's own colon to the container that declared the size.
+    // so the walk climbs by the name's own colon — one step to `ada:journal:inbox`, one more to
+    // `ada:journal`, which declared the size.
     await outer.gateway!.append([
       signClaims(
         containerClaims(
@@ -356,6 +361,62 @@ describe("§58 — the walls", () => {
       renderTimeoutMs: 1000,
       maxMemoryMb: 256,
     });
+    await closePeers();
+    await closeAll();
+  });
+
+  it("a container named under the binding but PARENTED elsewhere is governed by its name", async () => {
+    // The admin page admits a parent anywhere in the person's reach under any deeper name. A walk
+    // that followed that edge carried `ada:journal:x` out to `ada` (receive on, envelope large)
+    // past its own binding (receive off, small), and carried `ada:journal:y` to another person's
+    // container and named it in the refusal. Names are paths: the name governs, and no refusal
+    // names a container outside the binding.
+    const { base, gateway } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    await connect(base, "bea", "notes");
+    await declare(gateway, "ada:journal", { ...SEALED_LEEWAY, receive: false, envelope: "small" });
+    await declare(gateway, "ada", { ...SEALED_LEEWAY, receive: true, envelope: "large" });
+    await declare(gateway, "bea:notes", { ...SEALED_LEEWAY, receive: false });
+    const parented = (name: string, parent: string): Promise<unknown> =>
+      gateway.append([
+        signClaims(
+          containerClaims(
+            { container: name, trust: "curated", posture: "separate", parent },
+            OPERATOR,
+            gateway.nextTimestamp(),
+          ),
+          OPERATOR_SEED,
+        ),
+      ]);
+    await parented("ada:journal:x", "ada");
+    await parented("ada:journal:y", "bea:notes");
+    const peer = await peerStore();
+    const x = await receive(base, ada, "ada:journal:x", peer);
+    expect(x.isError, "the name's own binding says receive off").toBe(true);
+    expect(x.text).toMatch(/ada:journal does not receive/);
+    expect(x.text).not.toMatch(/\bada does not receive|bea:notes/);
+    const y = await receive(base, ada, "ada:journal:y", peer);
+    expect(y.isError).toBe(true);
+    expect(y.text).toMatch(/ada:journal does not receive/);
+    expect(y.text).not.toMatch(/bea:notes/);
+    // The envelope reads the name too: opened under `ada:journal` (small), a pool named under
+    // `ada:journal:x` is small, whatever `x`'s declared parent says.
+    await declare(gateway, "ada:journal", { ...SEALED_LEEWAY, receive: true, envelope: "small" });
+    await gateway.append([
+      signClaims(
+        envelopeClaims(
+          ENVELOPE_ANY,
+          { maxConcurrentRenders: 32, renderTimeoutMs: 4000, maxMemoryMb: 1024 },
+          OPERATOR,
+          gateway.nextTimestamp(),
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    expect((await receive(base, ada, "ada:journal:x", peer)).isError).toBe(false);
+    expect(envelopeOf(gateway, "channel:ada:journal:x:ada:journal:x:peer")).toEqual(
+      DEFAULT_QUARANTINE_ENVELOPE,
+    );
     await closePeers();
     await closeAll();
   });
