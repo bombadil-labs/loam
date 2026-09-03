@@ -48,6 +48,7 @@
 import type { Claims, Reactor } from "@bombadil/rhizomatic";
 import type { Gateway } from "./gateway.js";
 import { lawfulDeltasAt, lawfulNegated } from "./registration.js";
+import type { EnvelopeSize } from "./leeway.js";
 
 export const ENVELOPE_ENTITY = "loam:envelope";
 export const CTX_ENVELOPE = "loam.envelope";
@@ -249,6 +250,17 @@ export function resolveEnvelope(
 // the report prints 32 — a ceiling an operator lowers to contain a leak, that does not bound what it
 // names (H7). The young generation takes a quarter, capped at §23.9's constant so a roomy pool is not
 // handed an enormous scavenger, and floored at 1 so a 1MB declaration still starts a worker.
+/**
+ * The envelope a container's leeway names by SIZE (SPEC §58 position 4). Small is the floor an
+ * unconfigured pool already renders under; the larger sizes widen it, and none of them ever rises
+ * above the operator's own ceiling: a size is clamped under it, never composed over it (§24.5).
+ */
+export const SIZE_ENVELOPES: Readonly<Record<EnvelopeSize, QuarantineEnvelope>> = {
+  small: DEFAULT_QUARANTINE_ENVELOPE,
+  medium: { maxConcurrentRenders: 8, renderTimeoutMs: 1000, maxMemoryMb: 256 },
+  large: { maxConcurrentRenders: 16, renderTimeoutMs: 2000, maxMemoryMb: 512 },
+};
+
 export const workerLimitsOf = (
   env: QuarantineEnvelope,
 ): { maxOldMb: number; maxYoungMb: number } => {

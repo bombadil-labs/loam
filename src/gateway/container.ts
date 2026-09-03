@@ -42,6 +42,7 @@ import {
   poolsBeneath,
   resolveEnvelope,
   type QuarantineEnvelope,
+  SIZE_ENVELOPES,
 } from "./envelope.js";
 import { withNegationClosure, withNegationClosureAcross } from "./ingest.js";
 import { lawfulNegated, lawfulSnapshot } from "./registration.js";
@@ -885,6 +886,33 @@ export function containerScopeImpl(
 //
 // This is deliberately NARROWER than `subtreeOf` (the admin page's reach), which also follows
 // `inboxOf` edges to answer "what may this person act on". Reach and read are different questions.
+/**
+ * The leeway that GOVERNS `name`: the nearest container at or above it whose latest declaration
+ * carried a leeway (SPEC §58 position 4: a container that declared none is a pure namespace and
+ * inherits), walking no higher than `ceiling` when one is given. Undefined when nothing on the way
+ * up declared one: the name is governed by no leeway at all, which every road reads as it always
+ * has (a receive refuses; an envelope keeps the operator's ceiling alone).
+ */
+export function governingLeeway(
+  table: ContainerTable,
+  name: string,
+  ceiling?: string,
+): { readonly at: string; readonly leeway: Leeway } | undefined {
+  for (let at: string | undefined = name; at !== undefined;) {
+    const declared = table.containers.get(at);
+    if (declared !== undefined && declared.leewayDeclared) return { at, leeway: declared.leeway };
+    if (at === ceiling) return undefined;
+    // Up by the DECLARED edge where there is one (a pool sits under the container it was opened
+    // into, whatever its name says), and by the name's own colon where a name is undeclared: an
+    // undeclared name is a pure namespace inside the container its name spells.
+    at =
+      declared?.parent ??
+      declared?.inboxOf ??
+      (at.includes(":") ? at.slice(0, at.lastIndexOf(":")) : undefined);
+  }
+  return undefined;
+}
+
 export function subtreeUnder(table: ContainerTable, root: string): string[] {
   const reach = new Set<string>([root]);
   for (;;) {
@@ -1288,7 +1316,27 @@ async function openSeparate(
   pool.envelopeGround = ground;
   const ownEnvelope = (): QuarantineEnvelope => ground(spec.entity);
   const outerCeiling = gw.envelopeCeiling;
-  const ceiling = outerCeiling === undefined ? ownEnvelope : clampedTo(ownEnvelope, outerCeiling);
+  const operatorsCeiling =
+    outerCeiling === undefined ? ownEnvelope : clampedTo(ownEnvelope, outerCeiling);
+  // THE ENVELOPE BINDS (SPEC §58 position 3): a container's leeway names an envelope SIZE, and a
+  // pool opened inside it renders under that size, clamped UNDER the operator's ceiling and never
+  // over it, so a large size on a small store is the store's own limit. The governing leeway is
+  // read from the root's live table, as the ceiling is, and read again on every resolve: a size
+  // change is a delta the next render obeys.
+  const governed =
+    spec.entity === undefined
+      ? undefined
+      : governingLeeway(readContainerTable(gw.reactor, gw.operatorAuthor), spec.entity);
+  const ceiling =
+    governed === undefined
+      ? operatorsCeiling
+      : clampedTo(() => {
+          const now = governingLeeway(
+            readContainerTable(gw.reactor, gw.operatorAuthor),
+            spec.entity!,
+          );
+          return SIZE_ENVELOPES[(now ?? governed).leeway.envelope];
+        }, operatorsCeiling);
   pool.envelopeCeiling = ceiling;
   // ENFORCEMENT attaches to an UNTRUSTED container, and to EVERYTHING BELOW ONE. A curated container
   // opened directly on the primary keeps the store's ordinary door budgets — the argument for

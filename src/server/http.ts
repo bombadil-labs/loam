@@ -81,7 +81,7 @@ import { CSP, makeUserDoors, type UserDoorOptions, type UserDoors } from "./sess
 import { makeAdminDoor, type AdminDoor } from "./admin.js";
 import { ADMIN_CONTAINER_PATH } from "./admin-pages.js";
 import { refusalKey } from "../gateway/lifecycle.js";
-import { readContainerTable } from "../gateway/container.js";
+import { governingLeeway, readContainerTable } from "../gateway/container.js";
 import type { ChannelStatus } from "../federation/channel.js";
 import type { ConnectionBinding } from "../gateway/gateway.js";
 
@@ -613,20 +613,20 @@ function receiveRefusal(
       `and its colon — and ${prefix} is outside ${into}:`
     );
   }
-  const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
-  for (let at = into; ; at = at.slice(0, at.lastIndexOf(":"))) {
-    const declared = table.containers.get(at);
-    if (declared !== undefined && declared.leewayDeclared) {
-      return declared.leeway.receive
-        ? undefined
-        : `the container ${at} does not receive: its leeway's receive switch is off`;
-    }
-    if (at === binding.container || !at.includes(":")) break;
-  }
-  return (
-    `the container ${binding.container} does not receive: no leeway is declared for it, and an ` +
-    "absent leeway is every switch off"
+  const governed = governingLeeway(
+    readContainerTable(gateway.reactor, gateway.operatorAuthor),
+    into,
+    binding.container,
   );
+  if (governed === undefined) {
+    return (
+      `the container ${binding.container} does not receive: no leeway is declared for it, and an ` +
+      "absent leeway is every switch off"
+    );
+  }
+  return governed.leeway.receive
+    ? undefined
+    : `the container ${governed.at} does not receive: its leeway's receive switch is off`;
 }
 
 /** May this caller see or act on THIS channel? A bound connection owns the channels its container opened. */
