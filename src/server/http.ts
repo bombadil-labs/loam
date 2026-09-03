@@ -434,6 +434,32 @@ const byteDoorOf = (
 // (§12). Never branch this message on the reason.
 const REGISTRATION_REFUSAL = "registration is constitutional: it requires an operator token";
 
+/**
+ * Which gateway a registration publishes on (SPEC §58 position 2).
+ *
+ * A BOUND connection's law lives on its own inbox pool, never in the primary — the same seam the
+ * write path takes through `sinkFor`. The §47 fold is what carries it up to the served surface,
+ * filtered there to the bound container's path a second time, so law that reached a pool by some
+ * road other than this door still cannot be served.
+ *
+ * Everyone else publishes where they always did. An operator shapes the root; a connection holding
+ * an explicit `register` grant keeps landing in the primary until the slice that retires that
+ * grant, because nothing a connection can do today may stop working before its replacement exists.
+ */
+function registrationSink(gateway: Gateway, identity: TokenIdentity): Gateway {
+  return identity.binding === undefined ? gateway : gateway.poolForBinding(identity.binding);
+}
+
+/**
+ * A publish onto a POOL rebinds that pool, not the store that serves it — so the served surface
+ * would keep the law it had until something else refolded. This is the seam that carries a bound
+ * connection's new law up through the §47 aggregation, on the same request that published it.
+ * No-op for everyone else, whose registration already landed in the reactor being served.
+ */
+function refoldAfterBoundPublish(gateway: Gateway, identity: TokenIdentity): void {
+  if (identity.binding !== undefined) gateway.replayRegistrations();
+}
+
 // Thrown for a fence violation so a caller renders it as the AUTHORITY refusal rather than as the
 // shape complaint every other throw from performRegistration becomes.
 class NotPermittedToRegister extends Error {}
@@ -450,14 +476,23 @@ function registerStanding(
   identity: TokenIdentity,
 ): readonly string[] | undefined {
   if (identity.operator === true) return [];
-  if (identity.actor === undefined) return undefined;
+  // THE BINDING IS THE GRANT (§58 position 2). A bound connection names law under its own
+  // container path AND ITS COLON, so `ada:journalx` — a sibling sharing the letters — is outside
+  // the fence, and so is `ada:journal` itself: the fence is what lives UNDER the container.
+  //
+  // Unioned with any grant the connection also holds rather than replacing it, because nothing a
+  // connection can do today may stop working before its replacement has landed. The slice that
+  // retires `loam grant --verb=register` for connections is the one that removes this union.
+  const bound = identity.binding === undefined ? [] : [`${identity.binding.container}:`];
+  if (identity.actor === undefined) return bound.length === 0 ? undefined : bound;
   let author: string;
   try {
     author = authorForSeed(identity.actor);
   } catch {
-    return undefined; // an actor that names no key holds no standing
+    return bound.length === 0 ? undefined : bound; // an actor that names no key holds no grant
   }
-  const prefixes = registerPrefixesOf(gateway.reactor, author, gateway.operatorAuthor);
+  const granted = registerPrefixesOf(gateway.reactor, author, gateway.operatorAuthor);
+  const prefixes = [...granted, ...bound];
   return prefixes.length === 0 ? undefined : prefixes;
 }
 
@@ -1526,7 +1561,12 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             return;
           }
           try {
-            const outcome = await performRegistration(gateway, params["arguments"] ?? {}, fence);
+            const outcome = await performRegistration(
+              registrationSink(gateway, identity),
+              params["arguments"] ?? {},
+              fence,
+            );
+            refoldAfterBoundPublish(gateway, identity);
             reply({ content: [{ type: "text", text: JSON.stringify(outcome) }] });
           } catch (err) {
             reply({
@@ -2496,7 +2536,9 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             return;
           }
           try {
-            json(res, 200, await performRegistration(gateway, raw, fence));
+            const done = await performRegistration(registrationSink(gateway, identity), raw, fence);
+            refoldAfterBoundPublish(gateway, identity);
+            json(res, 200, done);
           } catch (err) {
             if (err instanceof NotPermittedToRegister) {
               json(res, 403, { errors: [err.message] });

@@ -1784,6 +1784,10 @@ export async function resumeInboxesImpl(gw: Gateway): Promise<void> {
       continue; // left unattached, deliberately; see above
     }
   }
+  // Boot's replay ran before any inbox attached, so the §47 aggregation saw none of their law.
+  // Refold once, after the loop — without this a rebooted store keeps a connection's DATA and
+  // loses the LAW it published, which is the same failure the channel pools refold for above.
+  if (gw.connectionInboxes.size > 0) gw.replayRegistrations();
 }
 
 // Revoke a connection: strike its WRITE grant in the inbox pool, owner-authored (§39.3c). The door

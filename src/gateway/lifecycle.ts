@@ -30,6 +30,7 @@ import {
   type Primitive,
   type Schema,
 } from "@bombadil/rhizomatic";
+import { readContainerTable } from "./container.js";
 import { NUL, type Bound, type Gateway, type RequestContext } from "./gateway.js";
 import { buildGqlSchema } from "./gql.js";
 import {
@@ -430,6 +431,25 @@ function storeBindings(gw: Gateway): Bound[] {
     for (const r of readRegistrations(pool.reactor, pool.operatorAuthor)) {
       if (!lensOf(r).startsWith(`${standing.prefix}:`)) continue;
       rows.push({ ...r, origin: "store" as const, channel: standing.name });
+    }
+  }
+  // AN INBOX POOL FOLDS THE SAME WAY (SPEC §58 position 2). A bound connection's law lives on its
+  // own pool, and this carries it up — filtered to the BOUND CONTAINER'S PATH AND ITS COLON, which
+  // is the same fence the register door applies. Enforcing it twice is the point: the door alone is
+  // bypassed by anything that reaches a pool another way, and the fold alone cannot tell a caller
+  // why its name was refused.
+  //
+  // MARKED, never anonymous. A row with no marker reads as ROOT law — the operator's own — and
+  // would then outrank nothing and be outranked by nothing in a cross-origin contest. A pool is a
+  // pool here whether a channel or an inbox fills it: nearer ground than the root, and ground a
+  // person can actually withdraw.
+  const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+  for (const [name, inbox] of gw.connectionInboxes) {
+    const bound = table.containers.get(name)?.inboxOf;
+    if (bound === undefined || inbox.gateway === undefined) continue;
+    for (const r of readRegistrations(inbox.gateway.reactor, inbox.gateway.operatorAuthor)) {
+      if (!lensOf(r).startsWith(`${bound}:`)) continue;
+      rows.push({ ...r, origin: "store" as const, channel: name });
     }
   }
   return rows;
