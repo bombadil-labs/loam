@@ -230,14 +230,29 @@ describe("§58 — a leeway is a declaration on the container", () => {
       expect(defectsOf(gw).join("\n")).toMatch(/belongs inside delegation terms/);
     });
 
-    it("refuses terms nested past the depth bound instead of walking them", async () => {
+    /** A leeway whose delegate is `levels` nested terms deep. */
+    const nested = (levels: number): string => {
       let deep: Terms | "off" = "off";
-      for (let i = 0; i < 40; i += 1) {
+      for (let i = 0; i < levels; i += 1) {
         deep = { receive: false, offer: false, publish: false, envelope: "small", delegate: deep };
       }
-      const gw = await withSeeded(() => [
-        malformed("ada", JSON.stringify({ ...NARROW, delegate: deep }), 1000),
-      ]);
+      return JSON.stringify({ ...NARROW, delegate: deep });
+    };
+
+    it("admits terms exactly at the depth bound and refuses one level past it", async () => {
+      // The bound is EXACT and pinned here on purpose. A test that only tried something far past
+      // it would pass with the constant quietly widened, which is a bound that stops bounding.
+      const deepest = await withSeeded(() => [malformed("ada", nested(32), 1000)]);
+      expect(leewayOf(deepest, "ada")).not.toEqual(SEALED_LEEWAY);
+      expect(defectsOf(deepest)).toEqual([]);
+
+      const past = await withSeeded(() => [malformed("ada", nested(33), 1000)]);
+      expect(leewayOf(past, "ada")).toEqual(SEALED_LEEWAY);
+      expect(defectsOf(past).join("\n")).toMatch(/nests deeper than 32 levels/);
+    });
+
+    it("refuses terms nested far past the depth bound instead of walking them", async () => {
+      const gw = await withSeeded(() => [malformed("ada", nested(200), 1000)]);
       expect(leewayOf(gw, "ada")).toEqual(SEALED_LEEWAY);
       expect(defectsOf(gw).join("\n")).toMatch(/nests deeper than/);
     });
