@@ -1749,14 +1749,7 @@ function inboxHandle(gw: Gateway, name: string, inbox: Container): Container {
       try {
         await baseDrop();
       } finally {
-        if (!gw.attachedContainers.has(name)) {
-          gw.connectionInboxes.delete(name);
-          // The pool's law left with it: the container's cached surface would otherwise hold it.
-          const owner = readContainerTable(gw.reactor, gw.operatorAuthor).containers.get(
-            name,
-          )?.inboxOf;
-          if (owner !== undefined) gw.forgetBoundSurface(owner);
-        }
+        if (!gw.attachedContainers.has(name)) gw.connectionInboxes.delete(name);
       }
     },
     detach: () =>

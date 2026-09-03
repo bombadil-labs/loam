@@ -388,7 +388,8 @@ export class Gateway {
   /**
    * The surface each BOUND container is served (SPEC §58 position 2), keyed by container and
    * rebuilt when anything it folds moves: root law, the pools composed into the container, or a
-   * pool's registrations. A dropped pool leaves the map, so its law leaves the next build.
+   * pool's registrations. A dropped pool leaves the map, so its law leaves the next build. The
+   * entry itself is never evicted — see the note on the cache below `boundSurface`.
    */
   private readonly boundCache = new Map<
     string,
@@ -1438,16 +1439,12 @@ export class Gateway {
     return { ...fold, schema };
   }
 
-  /**
-   * Forget a container's cached surface. Called where a pool leaves — the drop path — because
-   * that is the one moment a dropped container's surface would otherwise outlive it: nothing
-   * asks for a dropped connection's surface again, so an eviction that waits for the next ask
-   * never runs. Evicting on fold shape instead re-trialled every container with no accepted
-   * pool law on every ask, which is the common case, three asks per bound query.
-   */
-  forgetBoundSurface(container: string): void {
-    this.boundCache.delete(container);
-  }
+  // The cache holds one fold per container ever asked for, for the gateway's lifetime. Correctness
+  // never depends on eviction: the key names every pool row the fold saw, so a dropped pool's rows
+  // leave the key and the next ask rebuilds. What eviction would buy is memory for a container
+  // nobody asks for again — unobservable from outside, and evicting on fold SHAPE instead
+  // re-trialled the common case on every ask. Named as a limit rather than half-solved: the drop
+  // path is where a context-carrying design (T274) can release it.
 
   // The materialization watching (schema, entity) — the schema's own when the entity is a
   // registered root, a lazily-created cached one otherwise. Lazy names live in a NUL-separated

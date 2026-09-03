@@ -118,13 +118,14 @@ describe("§58 — two pools in one container contest a name by who staked it fi
     await publish(gw, first);
     await publish(gw, second);
     expect(winner(gw, first)).toBe(first);
-    // Re-attach in the other order, and FORGET the cached surface so the next ask refolds from
-    // the Map as it now stands — without that, a cached fold would answer and prove nothing.
+    // Re-attach in the other order, then EVOLVE the winner so the fold's key moves and the next
+    // ask refolds from the Map as it now stands — an unchanged key would answer from the cache
+    // and prove nothing. (An evolution moves the latest binding, never the first claim.)
     const handles = new Map(gw.connectionInboxes);
     gw.connectionInboxes.clear();
     for (const name of [...handles.keys()].reverse())
       gw.connectionInboxes.set(name, handles.get(name)!);
-    gw.forgetBoundSurface(HOME);
+    await publish(gw, first, "watered");
     expect(winner(gw, first)).toBe(first);
     expect(winner(gw, second)).toBe(first);
   });
