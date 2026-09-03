@@ -17,29 +17,31 @@
 // the pool's bytes surviving a reboot, which is the backend's promise (§46) — this file pins that
 // the RECORD survives with its opener and the root fold reads it.
 //
-// RAILS-RED on origin/main, this file copied in: 8 red, 1 green — 9 cases. The green is the
+// RAILS-RED on origin/main, this file copied in: 9 red, 1 green — 10 cases. The green is the
 // CONTROL: the plain `federate` grant road, which this slice neither widens nor narrows.
 //
-// REVERT PROBES, MEASURED against this file as it stands — 9 cases. Re-measure when you add one.
-//   the root fold keeps a connection's channel             → 2 red, 7 green
-//   the bound fold drops the channel's rows                 → 3 red, 6 green
-//   no subtree fence on `into`                              → 1 red, 8 green
-//   no fence on the prefix                                  → 2 red, 7 green
-//   the prefix fenced to the binding, not the target        → 1 red, 8 green
-//   no leeway walk (receive always on)                      → 2 red, 7 green
-//   the walk stops at a container that declared no leeway   → 1 red, 8 green
-//   status and sever admit by the fence, not the opener     → 1 red, 8 green
-//   status and sever admit by edge reach, not the opener    → 1 red, 8 green
-//   the stamps carry no opener                              → 4 red, 5 green
-//   the bound fold admits a foreign opener                  → 2 red, 7 green
-//   no parent edge for a name a connection declares         → 2 red, 7 green
-//   only the target is declared, not the middles            → 1 red, 8 green
-//   the middles walk re-declares declared ancestors         → 1 red, 8 green
-// Three of these were green until the rails were sharpened: the subtree fence, until the refusal
+// REVERT PROBES, MEASURED against this file as it stands — 10 cases. Re-measure when you add one.
+//   the root fold keeps a connection's channel             → 2 red, 8 green
+//   the bound fold drops the channel's rows                 → 3 red, 7 green
+//   no subtree fence on `into`                              → 1 red, 9 green
+//   no fence on the prefix                                  → 2 red, 8 green
+//   the prefix fenced to the binding, not the target        → 1 red, 9 green
+//   no leeway walk (receive always on)                      → 2 red, 8 green
+//   the walk stops at a container that declared no leeway   → 1 red, 9 green
+//   status and sever admit by the fence, not the opener     → 1 red, 9 green
+//   status and sever admit by edge reach, not the opener    → 1 red, 9 green
+//   the stamps carry no opener                              → 4 red, 6 green
+//   the bound fold admits a foreign opener                  → 2 red, 8 green
+//   no parent edge for a name a connection declares         → 2 red, 8 green
+//   only the target is declared, not the middles            → 1 red, 9 green
+//   the middles walk re-declares declared ancestors         → 1 red, 9 green
+//   the listing road drops a declared sealed pointer        → 1 red, 9 green
+// Four of these were green until the rails were sharpened: the subtree fence, until the refusal
 // cases carried a prefix INSIDE the fence (an outside prefix was refused for the prefix); the
-// opener, until a PERSON-opened channel inside the subtree joined the sever case; and edge reach,
-// until that channel's target was declared UNDER the container. The parent-edge and middles probes
-// need the object level: introspection sees a field, only a read sees a row.
+// opener, until a PERSON-opened channel inside the subtree joined the sever case; edge reach,
+// until that channel's target was declared UNDER the container; and the listing road, until the
+// case moved the listing's membership so the road re-declared at all. The parent-edge and
+// middles probes need the object level: introspection sees a field, only a read sees a row.
 
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
@@ -353,6 +355,40 @@ describe("§58 — receive within the subtree", () => {
     expect(sealed.isError).toBe(true);
     expect(sealed.text).toMatch(/ada:journal does not receive/);
     await closePeers();
+    await closeAll();
+  });
+
+  it("a road that re-declares a standing container carries the leeway it found: sealed stays sealed, silent stays silent", async () => {
+    // Latest wins per declaration. The listing road re-declares a program's listing container on
+    // every publish; it once omitted a sealed pointer on the premise that sealed and absent read
+    // the same. On a road that walks the tree they do not: a container that sealed itself would
+    // have been reopened, and one that never spoke would have been sealed by a stray pointer.
+    const { gateway } = await connectionServer();
+    const listing = (program: string): string => `container:hyperschema:${program}`;
+    // The listing road declares a program's listing container when its page is first read, and
+    // re-declares it on every later read.
+    await gateway.list("Plant", { limit: 1 });
+    await declare(gateway, listing("Plant"), SEALED_LEEWAY); // sealed explicitly, copying its record
+    const before = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+    expect(before.containers.get(listing("Plant"))?.leewayDeclared).toBe(true);
+    await gateway.publishRegistration({ ...PLANT, name: "Bed" }, { ...PLANT_POLICY, name: "Bed" }, [
+      FERN,
+    ]);
+    // The road re-declares only when the listing's membership moves, and the membership is the
+    // schema's props: evolve Plant with one more.
+    await gateway.publishRegistration(
+      PLANT,
+      { ...PLANT_POLICY, props: new Map([...PLANT_POLICY.props, ["girth", PLANT_POLICY.default]]) },
+      [FERN],
+    );
+    await gateway.list("Plant", { limit: 1 });
+    await gateway.list("Bed", { limit: 1 });
+    const after = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+    expect(after.containers.get(listing("Plant"))?.leewayDeclared, "sealed stays sealed").toBe(
+      true,
+    );
+    expect(after.containers.get(listing("Plant"))?.leeway.receive).toBe(false);
+    expect(after.containers.get(listing("Bed"))?.leewayDeclared, "silent stays silent").toBe(false);
     await closeAll();
   });
 
