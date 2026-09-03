@@ -33,7 +33,7 @@ import {
 import { readContainerTable, subtreeUnder } from "./container.js";
 import { fenceAdmits } from "./accounts.js";
 import { NUL, type Bound, type Gateway, type RequestContext } from "./gateway.js";
-import { buildGqlSchema, queryFieldFor } from "./gql.js";
+import { buildGqlSchema } from "./gql.js";
 import {
   lensOf,
   programOf,
@@ -540,14 +540,16 @@ export function boundBindingsImpl(
   // reading holds what it staked through the round, and a later claimant contesting any of it
   // waits behind it rather than being trialled into an empty slot. Without that hold, a rival
   // staked second took the name in round one and the holder collided with it in round two, with
-  // no republish able to win it back. What is held is every name the TRIAL contests, not the lens
-  // string alone (`stakes`): two spellings mint one query field, a reading's listing field is
-  // another reading's query field, and one program name admits one body — a hold on the lens
-  // string let each of those rivals through. A claimant refused for good keeps holding: the rival
-  // is told whose stake it is and why that claim is refused, and the stake is never served to the
-  // later claimant. Root rows are already trialled and already serve; a pool row that collides
-  // with one loses here exactly as a channel row loses at root — the nearer ground never displaces
-  // the operator's law.
+  // no republish able to win it back. What is held is whatever the TRIAL'S OWN collision checks
+  // say the holder and the rival cannot both have: the fold asks `buildGqlSchema` and
+  // `groupPrograms` about the PAIR (`contests`), so the hold cannot drift from the trial. A list
+  // of names written here did drift, three times — two spellings mint one query field, a listing
+  // field is another reading's query field, one program admits one body, and the mutation
+  // namespace has a dozen derived names — and each list let the next rival through. A claimant
+  // refused for good keeps holding: the rival is told whose claim it contests, what the trial
+  // refuses the pair on, and why that claim is refused. Root rows are already trialled and
+  // already serve; a pool row that collides with one loses here exactly as a channel row loses at
+  // root — the nearer ground never displaces the operator's law.
   //
   // A refusal is the CANDIDATE'S, keyed by pool and lens (`refusalKey`): two pools refused under
   // one name are refused for two reasons, and the door hands each pool its own.
@@ -561,14 +563,14 @@ export function boundBindingsImpl(
   let pending = candidates;
   for (;;) {
     const still: Bound[] = [];
-    const held = new Map<string, Bound>(); // a stake → the earlier claimant refused this round
+    const holders: Bound[] = []; // the earlier claimants refused this round, in claim order
     let progressed = false;
     for (const candidate of pending) {
-      const contest = contestedBy(candidate, held);
+      const contest = contestedBy(gw, candidate, holders);
       if (contest !== undefined) {
         reasons.set(
           candidate,
-          `lens ${lensOf(candidate)}: an earlier claim holds the ${contest.stake} — that claim is refused: ${reasons.get(contest.holder) ?? "did not bind"}`,
+          `lens ${lensOf(candidate)}: an earlier claim, ${lensOf(contest.holder)}, contests it — ${contest.on} — and that claim is refused: ${reasons.get(contest.holder) ?? "did not bind"}`,
         );
         still.push(candidate);
         continue;
@@ -579,7 +581,7 @@ export function boundBindingsImpl(
         progressed = true;
       } catch (err) {
         reasons.set(candidate, err instanceof Error ? err.message : String(err));
-        for (const [key] of stakes(candidate)) if (!held.has(key)) held.set(key, candidate);
+        holders.push(candidate);
         still.push(candidate);
       }
     }
@@ -594,40 +596,35 @@ export function boundBindingsImpl(
 }
 
 /**
- * What a candidate STAKES, on every axis the trial refuses a rival on: its reading; the query
- * field and the listing field that reading mints (two spellings mint one field — `a:b` and `a_b`
- * — and `x`'s listing field is `xs`'s query field); and its program name, under which the trial
- * admits exactly one body. Keyed for `held`, with the stake spelled for a refusal.
+ * What the trial refuses the PAIR on, or undefined when it admits both. Asked of the trial's own
+ * checks — one program name, one body (`groupPrograms`); one name per GraphQL field, type, and
+ * mutation (`buildGqlSchema`) — with no registry, because a holder waiting on a reading cannot
+ * be resolved yet and its NAMES are what the rival contests. A row the trial cannot build alone
+ * contests nothing: its fault is its own, and it is refused for it.
  */
-function stakes(c: Bound): ReadonlyArray<readonly [key: string, stake: string]> {
-  const lens = lensOf(c);
-  const field = queryFieldFor(lens);
-  return [
-    [`reading:${lens}`, `reading ${lens}`],
-    [`field:${field}`, `query field "${field}"`],
-    [`field:${field}s`, `listing field "${field}s"`],
-    [`program:${c.hyperschema.name}`, `program ${c.hyperschema.name}`],
-  ];
+function contests(gw: Gateway, holder: Bound, rival: Bound): string | undefined {
+  const builds = (rows: readonly Bound[]): string | undefined => {
+    try {
+      groupPrograms(rows);
+      buildGqlSchema(rows, gw.gqlHooks());
+      return undefined;
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
+  };
+  if (builds([holder]) !== undefined || builds([rival]) !== undefined) return undefined;
+  return builds([holder, rival]);
 }
 
-/**
- * The earlier claimant this candidate would contest, if one is refused this round. A shared
- * program is a contest only under a RIVAL body: the same body under another reading is a sibling
- * the trial admits, and deferring it would refuse a lens the trial would bind.
- */
+/** The earlier claimant this candidate contests, if one is refused this round. */
 function contestedBy(
+  gw: Gateway,
   c: Bound,
-  held: ReadonlyMap<string, Bound>,
-): { readonly holder: Bound; readonly stake: string } | undefined {
-  for (const [key, stake] of stakes(c)) {
-    const holder = held.get(key);
-    if (holder === undefined) continue;
-    if (
-      key.startsWith("program:") &&
-      termHash(holder.hyperschema.body) === termHash(c.hyperschema.body)
-    )
-      continue;
-    return { holder, stake };
+  holders: readonly Bound[],
+): { readonly holder: Bound; readonly on: string } | undefined {
+  for (const holder of holders) {
+    const on = contests(gw, holder, c);
+    if (on !== undefined) return { holder, on };
   }
   return undefined;
 }

@@ -18,36 +18,39 @@
 // not reopen the contest. A first claim never moves — but a dependency's first claim can be
 // STRUCK, which moves it later than a dependent's, and (in derived-standing) a lens can be evolved
 // to expand into one staked after it. So the fold trials in rounds to a fixpoint. And a holder
-// refused in a round for want of a reading keeps what it STAKED through that round: trialled into
+// refused in a round for want of a reading keeps what it staked through that round: trialled into
 // the gap, a rival staked second took the name and the holder collided with it a round later.
-// What is held is every name the trial contests, not the lens string — two spellings mint one
-// query field, `x`'s listing field is `xs`'s query field, and one program name admits one body —
-// and a shared program is a contest only under a rival body, since the same body under another
-// reading is a sibling the trial admits. A refusal belongs to one pool's candidate
+// What is held is whatever the TRIAL'S OWN checks refuse the pair on — the fold asks
+// `groupPrograms` and `buildGqlSchema` about holder and rival together — because a list of names
+// written beside the trial drifted three times (two spellings mint one query field; `x`'s
+// listing field is `xs`'s query field; one program admits one body; and the mutation namespace
+// holds a dozen derived names, templates among them). A refusal belongs to one pool's candidate
 // (`refusalKey`), so two pools refused under one name are each told their own fault.
 //
-// REVERT PROBES, MEASURED on these 11 cases:
-//   drop the candidate sort                         →  1 red, 10 green
-//   key the sort on `boundAt` (the latest binding)  →  6 red,  5 green
-//   trial in ONE pass instead of to a fixpoint      →  5 red,  6 green (+1 in derived-standing)
-//   drop the hold within a round                    →  5 red,  6 green
-//   hold on the lens string alone                   →  3 red,  8 green (field, listing, program)
-//   drop the same-body program exception            →  1 red, 10 green (the sibling case)
-//   share one reason per lens across pools          →  1 red, 10 green (the two-faults case)
+// REVERT PROBES, MEASURED on these 14 cases:
+//   drop the candidate sort                          →  1 red, 13 green
+//   key the sort on `boundAt` (the latest binding)   →  9 red,  5 green
+//   trial in ONE pass instead of to a fixpoint       →  8 red,  6 green (+1 in derived-standing)
+//   drop the hold within a round                     →  8 red,  6 green
+//   ask the pair of `groupPrograms` alone            →  5 red,  9 green (every gql-name case)
+//   ask the pair of `buildGqlSchema` alone           →  1 red, 13 green (the rival-body case)
+//   share one reason per lens across pools           →  1 red, 13 green (the two-faults case)
 // The no-sort probe reds one case because attach order happens to agree with the right answer
 // for one of the two orderings, so exactly one of the attach-order and re-attach cases sees it.
 //
 // RAILS-RED on origin/main: every case red, because `boundSurface` does not exist there. An
 // honest red and a WEAK one; the probes above are the measurement.
 //
-// NOT HERE, and said so: the root replay binds a stored row whose templates alone fail WITHOUT its
-// templates; this fold refuses such a row whole, and names the template fault. The door cannot
-// plant one — it refuses invisible templates before writing — so only an out-of-band pool write
-// reaches it. A rail would append such a row to a pool directly and assert the refusal's text.
+// NOT HERE, and said so, twice. (1) The root replay binds a stored row whose templates alone fail
+// WITHOUT its templates; this fold refuses such a row whole, and names the template fault. (2) A
+// row the trial cannot build ALONE holds nothing — `contests` asks about each row before the
+// pair — but the door refuses such a row before writing it. Both reach a pool only by an
+// out-of-band write; a rail for either would append the row to a pool directly.
 
 import { describe, expect, it } from "vitest";
 import { authorForSeed, parseTerm, signClaims } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
+import type { ClaimTemplates } from "../../src/gateway/registration.js";
 import { containerClaims } from "../../src/gateway/container.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -175,6 +178,49 @@ const stake = (
     { ...PLANT, name: program, body },
     { ...PLANT_POLICY, name: lens },
     [FERN],
+  );
+/** A template visible over the Plant gather, under a caller-chosen mutation name. */
+const templateNamed = (name: string): ClaimTemplates => ({
+  [name]: {
+    pointers: [
+      { role: "subject", at: { arg: "plant" }, context: "watered" },
+      { role: "value", value: true },
+    ],
+  },
+});
+/** Stake `lens` with mutation templates and, optionally, a body of its own. */
+const stakeWith = (
+  gw: Gateway,
+  inbox: string,
+  lens: string,
+  mutations: ClaimTemplates | undefined,
+  hyperschema: typeof PLANT = { ...PLANT, name: lens },
+): Promise<unknown> =>
+  pool(gw, inbox).publishRegistration(
+    hyperschema,
+    { ...PLANT_POLICY, name: lens },
+    [FERN],
+    undefined,
+    undefined,
+    mutations,
+  );
+/** Stake `lens` with a reference prop, which mints link/unlink mutations named after it. */
+const stakeWithRefs = (
+  gw: Gateway,
+  inbox: string,
+  lens: string,
+  hyperschema: typeof PLANT = { ...PLANT, name: lens },
+): Promise<unknown> =>
+  pool(gw, inbox).publishRegistration(
+    hyperschema,
+    { ...PLANT_POLICY, name: lens },
+    [FERN],
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { height: { role: "grows" } },
   );
 /** The holder stakes `dep` and evolves `lens` to expand into it — the ordinary way a lens grows. */
 const growInto = async (
@@ -394,6 +440,65 @@ describe("§58 — two pools in one container contest a name by who staked it fi
         .boundSurface({ container: HOME, inbox: first })
         .refused.get(refusalKey(first, "home:alice:p1")),
     ).toMatch(/collides/);
+  });
+
+  it("the hold covers the MUTATION namespace: a rival's template named after the holder's field", async () => {
+    // A name list written beside the trial missed this whole namespace. The hold now asks the
+    // trial's own checks about the pair, so what it covers is what the trial refuses.
+    const { gw, first, second } = await twoPools();
+    const Y = "home:alice:y";
+    await stake(gw, first, LENS);
+    await stakeWith(gw, second, Y, templateNamed("home_alice_x")); // the holder's mutation field
+    expect(winner(gw, first)).toBe(first);
+    expect(servedBy(gw, first, Y)).toBeUndefined();
+    await growInto(gw, first, LENS, "home:alice:dep");
+    for (const asker of [first, second]) {
+      expect(winner(gw, asker), `asked from ${asker}`).toBe(first);
+      expect(servedBy(gw, asker, Y)).toBeUndefined();
+      expect(
+        gw.boundSurface({ container: HOME, inbox: asker }).refused.get(refusalKey(second, Y)),
+      ).toMatch(/collides|contests it/);
+    }
+  });
+
+  it("the hold covers the MUTATION namespace: the holder's own template named after the rival's field", async () => {
+    const { gw, first, second } = await twoPools();
+    const Y = "home:alice:y";
+    await stakeWith(gw, first, LENS, templateNamed("home_alice_y"));
+    await stake(gw, second, Y);
+    expect(winner(gw, first)).toBe(first);
+    expect(servedBy(gw, first, Y)).toBeUndefined();
+    await stake(gw, first, "home:alice:dep");
+    await stakeWith(
+      gw,
+      first,
+      LENS,
+      templateNamed("home_alice_y"),
+      expanding(LENS, "home:alice:dep"),
+    );
+    for (const asker of [first, second]) {
+      expect(winner(gw, asker), `asked from ${asker}`).toBe(first);
+      expect(servedBy(gw, asker, Y)).toBeUndefined();
+    }
+  });
+
+  it("the hold covers lens-DERIVED mutation verbs across distinct query fields", async () => {
+    // `y`'s reference prop `height` mints link/unlink `home_alice_y_height`; a lens named
+    // `y_height` with an expand body mints link/sever of the same name. The query fields differ.
+    const { gw, first, second } = await twoPools();
+    const Y = "home:alice:y";
+    const YH = "home:alice:y_height";
+    await stakeWithRefs(gw, first, Y);
+    await stake(gw, second, "home:alice:rdep");
+    await stakeWith(gw, second, YH, undefined, expanding(YH, "home:alice:rdep"));
+    expect(servedBy(gw, first, Y)).toBe(first);
+    expect(servedBy(gw, first, YH)).toBeUndefined();
+    await stake(gw, first, "home:alice:dep");
+    await stakeWithRefs(gw, first, Y, expanding(Y, "home:alice:dep"));
+    for (const asker of [first, second]) {
+      expect(servedBy(gw, asker, Y), `asked from ${asker}`).toBe(first);
+      expect(servedBy(gw, asker, YH)).toBeUndefined();
+    }
   });
 
   it("the rival does not take the name by republishing", async () => {
