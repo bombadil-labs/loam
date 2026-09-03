@@ -35,7 +35,7 @@ import { isRepairable } from "../store/quarantine.js";
 import { CTX_GRANTS, grantClaims, holdsGrant, revocationClaims } from "./accounts.js";
 import { STORE_ENTITY } from "./genesis.js";
 import { isTombstone, readTombstones } from "./erase.js";
-import { parseLeeway, SEALED_LEEWAY, type Leeway } from "./leeway.js";
+import { canonicalLeewayJson, parseLeeway, SEALED_LEEWAY, type Leeway } from "./leeway.js";
 import {
   clampedTo,
   newPoolEnvelope,
@@ -142,7 +142,7 @@ export function containerClaims(spec: ContainerSpec, author: string, timestamp: 
       ...(spec.membershipAt === undefined ? [] : [primPtr("membershipAt", spec.membershipAt)]),
       ...(spec.version === undefined ? [] : [primPtr("version", spec.version)]),
       ...(spec.inboxOf === undefined ? [] : [primPtr("inboxOf", spec.inboxOf)]),
-      ...(spec.leeway === undefined ? [] : [primPtr("leeway", JSON.stringify(spec.leeway))]),
+      ...(spec.leeway === undefined ? [] : [primPtr("leeway", canonicalLeewayJson(spec.leeway))]),
     ],
   };
 }
@@ -427,7 +427,7 @@ interface Decl {
   readonly membershipAt?: string;
   readonly version?: string;
   readonly inboxOf?: string;
-  readonly leewayRaw?: string;
+  readonly leeways?: readonly unknown[];
 }
 
 const byAge = (a: { ts: number; id: string }, b: { ts: number; id: string }): number =>
@@ -552,7 +552,7 @@ function computeContainerTable(reactor: Reactor, operator: string | undefined): 
     const membershipAt = primitives(claims, "membershipAt")[0];
     const version = primitives(claims, "version")[0];
     const inboxOf = primitives(claims, "inboxOf")[0];
-    const leewayRaw = primitives(claims, "leeway")[0];
+    const leeways = primitives(claims, "leeway");
     const list = decls.get(name) ?? [];
     list.push({
       id: delta.id,
@@ -564,7 +564,7 @@ function computeContainerTable(reactor: Reactor, operator: string | undefined): 
       ...(typeof membershipAt === "string" ? { membershipAt } : {}),
       ...(typeof version === "string" ? { version } : {}),
       ...(typeof inboxOf === "string" ? { inboxOf } : {}),
-      ...(typeof leewayRaw === "string" ? { leewayRaw } : {}),
+      ...(leeways.length > 0 ? { leeways } : {}),
     });
     decls.set(name, list);
   }
@@ -609,15 +609,26 @@ function computeContainerTable(reactor: Reactor, operator: string | undefined): 
     // the previous declaration, which would let a malformed later delta pin an older, wider grant
     // in place.
     let leeway: Leeway = SEALED_LEEWAY;
-    if (latest.leewayRaw !== undefined) {
-      const read = parseLeeway(latest.leewayRaw);
-      if ("defect" in read) {
-        defects.push(
-          `container "${name}": the declared leeway is not binding — ${read.defect}; the ` +
-            `container reads as sealed`,
-        );
+    const declared = latest.leeways ?? [];
+    const sealedBecause = (why: string): void => {
+      defects.push(`container "${name}": ${why}; the container reads as sealed`);
+    };
+    // THE READER AGREES WITH THE DOOR, or the door is decoration. Arity is checked HERE too: the
+    // door refuses two leeway pointers as ambiguous, and taking the first at rest would bind a
+    // grant the door called unreadable — wide, silently, and whichever one the author put first.
+    if (declared.length > 1) {
+      sealedBecause(
+        "the declaration carries more than one leeway pointer, so its law is ambiguous and binds " +
+          "nothing",
+      );
+    } else if (declared.length === 1) {
+      const raw = declared[0];
+      if (typeof raw !== "string") {
+        sealedBecause("a container's leeway is one JSON string primitive, and this is not one");
       } else {
-        leeway = read.leeway;
+        const read = parseLeeway(raw);
+        if ("defect" in read) sealedBecause(`the declared leeway is not binding — ${read.defect}`);
+        else leeway = read.leeway;
       }
     }
     containers.set(name, {

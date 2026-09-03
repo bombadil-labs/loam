@@ -182,6 +182,17 @@ export function parseLeeway(raw: string): { leeway: Leeway } | { defect: string 
   } catch {
     return { defect: "the declared leeway is not parseable JSON" };
   }
+  // THE BYTES MUST SAY WHAT THEY MEAN. `JSON.parse` resolves a duplicate key to the LAST one, so
+  // `{"publish":false,"publish":true}` reads as bytes that plainly say false and a value that is
+  // true — law whose stored form misreports itself. Requiring the canonical form refuses that, and
+  // with it every other spelling of one value: whitespace, key order, a second copy of a switch.
+  if (raw !== canonicalLeewayJson(parsed)) {
+    return {
+      defect:
+        "the declared leeway is not in canonical form — a leeway is stored with its keys sorted " +
+        "and no duplicates, so the bytes at rest say exactly one thing",
+    };
+  }
   const allowances = readAllowances(parsed);
   if (typeof allowances === "string") return { defect: allowances };
   const delegate = (parsed as Record<string, unknown>).delegate;
@@ -257,4 +268,20 @@ export function isSealed(leeway: Leeway): boolean {
     leeway.envelope === "small" &&
     leeway.delegate === "off"
   );
+}
+
+/**
+ * The one spelling a leeway is stored in: keys sorted, no whitespace, nothing repeated. Law is
+ * read from bytes by strangers, so the bytes may have exactly one meaning.
+ */
+export function canonicalLeewayJson(value: unknown): string {
+  return JSON.stringify(sortKeys(value));
+}
+
+function sortKeys(value: unknown): unknown {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+  const o = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(o).sort()) out[key] = sortKeys(o[key]);
+  return out;
 }
