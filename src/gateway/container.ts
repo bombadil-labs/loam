@@ -42,6 +42,7 @@ import {
   poolsBeneath,
   resolveEnvelope,
   type QuarantineEnvelope,
+  SIZE_ENVELOPES,
 } from "./envelope.js";
 import { withNegationClosure, withNegationClosureAcross } from "./ingest.js";
 import { lawfulNegated, lawfulSnapshot } from "./registration.js";
@@ -885,6 +886,41 @@ export function containerScopeImpl(
 //
 // This is deliberately NARROWER than `subtreeOf` (the admin page's reach), which also follows
 // `inboxOf` edges to answer "what may this person act on". Reach and read are different questions.
+/**
+ * The leeway that GOVERNS `name`: the nearest container at or above it whose latest declaration
+ * carried a leeway (SPEC §58 position 4: a container that declared none is a pure namespace and
+ * inherits), walking no higher than `ceiling` when one is given. Undefined when nothing on the way
+ * up declared one: the name is governed by no leeway at all, which every road reads as it always
+ * has (a receive refuses; an envelope keeps the operator's ceiling alone).
+ *
+ * THE WALK CLIMBS BY NAME. Names are paths and the tree agrees with the names (position 5); a
+ * declared `parent` edge that disagrees with a name is the pathology, not a road — followed, it
+ * carried a container named under one binding out to another person's leeway, and a pool named
+ * under a small container up to a large ancestor's size. The one edge honoured is a POOL's
+ * `inboxOf`, taken once at the start: a pool's name (`inbox:…`, `channel:…`) does not spell its
+ * place, and its host is the container it was opened into. A pool whose host is itself has no
+ * place at all, and reads SEALED — the floor, never the operator's wider ceiling, so a name that
+ * cannot be placed cannot widen anything.
+ */
+export function governingLeeway(
+  table: ContainerTable,
+  name: string,
+  ceiling?: string,
+): { readonly at: string; readonly leeway: Leeway } | undefined {
+  // A pool is known by its leading token, as the spec names it, not by the presence of an
+  // `inboxOf` record: an operator-signed `inboxOf` on an ordinary container is not a hop.
+  const isPool = name.startsWith("inbox:") || name.startsWith("channel:");
+  const host = isPool ? table.containers.get(name)?.inboxOf : undefined;
+  if (host === name) return { at: name, leeway: SEALED_LEEWAY };
+  for (let at: string | undefined = host ?? name; at !== undefined;) {
+    const declared = table.containers.get(at);
+    if (declared !== undefined && declared.leewayDeclared) return { at, leeway: declared.leeway };
+    if (at === ceiling) return undefined;
+    at = at.includes(":") ? at.slice(0, at.lastIndexOf(":")) : undefined;
+  }
+  return undefined;
+}
+
 export function subtreeUnder(table: ContainerTable, root: string): string[] {
   const reach = new Set<string>([root]);
   for (;;) {
@@ -1288,7 +1324,30 @@ async function openSeparate(
   pool.envelopeGround = ground;
   const ownEnvelope = (): QuarantineEnvelope => ground(spec.entity);
   const outerCeiling = gw.envelopeCeiling;
-  const ceiling = outerCeiling === undefined ? ownEnvelope : clampedTo(ownEnvelope, outerCeiling);
+  const operatorsCeiling =
+    outerCeiling === undefined ? ownEnvelope : clampedTo(ownEnvelope, outerCeiling);
+  // THE ENVELOPE BINDS (SPEC §58 position 3): a container's leeway names an envelope SIZE, and a
+  // pool opened inside it renders under that size, clamped UNDER the operator's ceiling and never
+  // over it, so a large size on a small store is the store's own limit. Whether a size governs is
+  // asked again on EVERY resolve, from the ROOT's live table — a pool's own reactor is a seeded
+  // copy, and a pool nested in a pool would otherwise read a table that never saw the leeway — so
+  // a leeway declared after the pool opened binds it, one withdrawn later releases it to the
+  // operator's ceiling, and a size change is a delta the next render obeys. A pool the root's
+  // table does not hold (one nested inside a pool) is placed by its NAME, which climbs to the
+  // nearest container the root does hold.
+  let root: Gateway = gw;
+  while (root.attachedTo !== undefined) root = root.attachedTo;
+  const rootGateway = root;
+  const ceiling =
+    spec.entity === undefined
+      ? operatorsCeiling
+      : clampedTo(() => {
+          const now = governingLeeway(
+            readContainerTable(rootGateway.reactor, rootGateway.operatorAuthor),
+            spec.entity!,
+          );
+          return now === undefined ? operatorsCeiling() : SIZE_ENVELOPES[now.leeway.envelope];
+        }, operatorsCeiling);
   pool.envelopeCeiling = ceiling;
   // ENFORCEMENT attaches to an UNTRUSTED container, and to EVERYTHING BELOW ONE. A curated container
   // opened directly on the primary keeps the store's ordinary door budgets — the argument for
