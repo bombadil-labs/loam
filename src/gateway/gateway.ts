@@ -1434,12 +1434,19 @@ export class Gateway {
     const fold = boundBindingsImpl(this, binding.container, held);
     if (held !== undefined && fold === held.fold) return { ...held.fold, schema: held.schema };
     const schema = buildGqlSchema(fold.registered, this.gqlHooks());
-    // A container with no pool law folds to the root's own rows; there is nothing to hold, and
-    // holding it would keep a dropped container's surface in memory for the gateway's lifetime.
-    if (fold.registered.length === this.registered.length)
-      this.boundCache.delete(binding.container);
-    else this.boundCache.set(binding.container, { key: fold.key, fold, schema });
+    this.boundCache.set(binding.container, { key: fold.key, fold, schema });
     return { ...fold, schema };
+  }
+
+  /**
+   * Forget a container's cached surface. Called where a pool leaves — the drop path — because
+   * that is the one moment a dropped container's surface would otherwise outlive it: nothing
+   * asks for a dropped connection's surface again, so an eviction that waits for the next ask
+   * never runs. Evicting on fold shape instead re-trialled every container with no accepted
+   * pool law on every ask, which is the common case, three asks per bound query.
+   */
+  forgetBoundSurface(container: string): void {
+    this.boundCache.delete(container);
   }
 
   // The materialization watching (schema, entity) — the schema's own when the entity is a

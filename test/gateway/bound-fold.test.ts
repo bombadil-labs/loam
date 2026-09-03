@@ -1,20 +1,27 @@
 // T263 — THE BOUND FOLD at the library seam (SPEC §58 position 2; Myk's ruling 2026-09-03: a
 // bound connection's law serves only its container). Two inbox pools in ONE container may each
-// publish the same lens name, and the fold must answer the contest the same way whoever asks and
-// however the pools were attached. The rule is REGISTRATION order: the earlier binding keeps the
-// name, the later one is refused with the collision named, and the answer does not change when
-// the pools are re-attached in another order — which is what a reboot does.
+// publish the same lens name, and the fold must answer the contest the same way whoever asks,
+// however the pools were attached, and however often the holder republishes. The rule is WHO
+// STAKED THE NAME FIRST: the earlier surviving claim keeps it, the rival is refused with the
+// collision named, a reboot that re-attaches in another order answers the same, and the holder's
+// own evolutions never move its claim.
 //
 // Why here and not through the doors: consent binds one pool per (user, container), so two pools
 // in one container need two connection keys bound at this seam, the way `binding-route.test.ts`
 // binds its one. The door-level rails for the same fold are in test/server/derived-standing.test.ts.
 //
-// REVERT PROBE, measured: drop the candidate sort in `boundBindingsImpl` and BOTH cases go red —
-// pool A (attached first) wins the name it registered LAST, and the answer flips on re-attach.
+// THE CONFOUND THIS FILE REMOVES: the earlier registrant must NOT also be the lexically-earlier
+// pool name, or a comparator that sorted by name alone would pass. So the pool that registers
+// first is chosen at runtime to be the one with the lexically LATER inbox name.
 //
-// RAILS-RED on origin/main: both cases red, because `boundSurface` does not exist there. That is
-// an honest red and a WEAK one — it cannot tell a right ordering from a wrong one; the probe above
-// is the measurement that can.
+// REVERT PROBES, MEASURED on these 4 cases: drop the candidate sort → 1 red, 3 green (attach order
+// happens to agree with the right answer for one of the two orderings, so exactly one of the
+// attach-order and re-attach cases sees it); key the sort on `boundAt` (the latest binding)
+// instead of the first → 1 red, 3 green (the holder's own republish loses the name; the rival's
+// republish never wins it, under either key).
+//
+// RAILS-RED on origin/main: every case red, because `boundSurface` does not exist there. An
+// honest red and a WEAK one; the probes above are the measurement.
 
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
@@ -31,8 +38,6 @@ const OP_SEED = "0e".repeat(32);
 const OP = authorForSeed(OP_SEED);
 const OWNER_SEED = GARDENER_SEED;
 const OWNER = GARDENER;
-const CONN_A = authorForSeed("a1".repeat(32));
-const CONN_B = authorForSeed("b2".repeat(32));
 const HOME = "home:alice";
 const LENS = "home:alice:x";
 
@@ -42,7 +47,8 @@ const ALICES_OWN = {
   in: "input",
 };
 
-async function twoPools(): Promise<{ gw: Gateway; a: string; b: string }> {
+/** Two pools in one container. `first` registers first and has the lexically LATER inbox name. */
+async function twoPools(): Promise<{ gw: Gateway; first: string; second: string }> {
   const gw = await Gateway.boot(
     new MemoryBackend(),
     assembleGenesis({
@@ -63,54 +69,87 @@ async function twoPools(): Promise<{ gw: Gateway; a: string; b: string }> {
       OP_SEED,
     ),
   ]);
-  // A is attached FIRST, B second — the order a Map iterates them.
-  const a = (
-    await gw.bindConnection({ container: HOME, connectionKey: CONN_A, ownerSeed: OWNER_SEED })
+  const one = (
+    await gw.bindConnection({
+      container: HOME,
+      connectionKey: authorForSeed("a1".repeat(32)),
+      ownerSeed: OWNER_SEED,
+    })
   ).entity!;
-  const b = (
-    await gw.bindConnection({ container: HOME, connectionKey: CONN_B, ownerSeed: OWNER_SEED })
+  const two = (
+    await gw.bindConnection({
+      container: HOME,
+      connectionKey: authorForSeed("b2".repeat(32)),
+      ownerSeed: OWNER_SEED,
+    })
   ).entity!;
-  return { gw, a, b };
+  const [early, late] = [one, two].sort();
+  return { gw, first: late!, second: early! };
 }
 
 const pool = (gw: Gateway, inbox: string): Gateway => gw.connectionInboxes.get(inbox)!.gateway!;
-const named = (name: string) => ({ ...PLANT_POLICY, name });
+const publish = (gw: Gateway, inbox: string, prop = "height"): Promise<unknown> =>
+  pool(gw, inbox).publishRegistration(
+    { ...PLANT, name: LENS },
+    { ...PLANT_POLICY, name: LENS, props: new Map([[prop, PLANT_POLICY.default]]) },
+    [FERN],
+  );
+const winner = (gw: Gateway, asker: string): string | undefined =>
+  gw.boundSurface({ container: HOME, inbox: asker }).registered.find((r) => lensOf(r) === LENS)
+    ?.channel;
 
-describe("§58 — two pools in one container contest a name by REGISTRATION order", () => {
-  it("the earlier registrant keeps the name, whichever pool was attached first", async () => {
-    const { gw, a, b } = await twoPools();
-    // B (attached SECOND) registers the lens FIRST; A registers it later.
-    await pool(gw, b).publishRegistration({ ...PLANT, name: LENS }, named(LENS), [FERN]);
-    await pool(gw, a).publishRegistration({ ...PLANT, name: LENS }, named(LENS), [FERN]);
-
-    for (const asker of [a, b]) {
-      const surface = gw.boundSurface({ container: HOME, inbox: asker });
-      const row = surface.registered.find((r) => lensOf(r) === LENS);
-      expect(row?.channel, `asked from ${asker === a ? "A" : "B"}`).toBe(b);
-      expect(surface.refused.get(LENS)).toMatch(/collides/);
+describe("§58 — two pools in one container contest a name by who staked it first", () => {
+  it("the first registrant keeps the name, whichever pool was attached or sorts first", async () => {
+    const { gw, first, second } = await twoPools();
+    await publish(gw, first);
+    await publish(gw, second);
+    for (const asker of [first, second]) {
+      expect(winner(gw, asker), `asked from ${asker}`).toBe(first);
+      expect(gw.boundSurface({ container: HOME, inbox: asker }).refused.get(LENS)).toMatch(
+        /collides/,
+      );
     }
     // Two-sided: the root's own law is untouched, and the root fold never saw either row.
     expect(gw.registered.map(lensOf)).toEqual(["Plant"]);
   });
 
   it("answers the same after the pools are re-attached in the other order", async () => {
-    const { gw, a, b } = await twoPools();
-    await pool(gw, b).publishRegistration({ ...PLANT, name: LENS }, named(LENS), [FERN]);
-    await pool(gw, a).publishRegistration({ ...PLANT, name: LENS }, named(LENS), [FERN]);
-    const before = gw
-      .boundSurface({ container: HOME, inbox: a })
-      .registered.find((r) => lensOf(r) === LENS)?.channel;
-    // Re-attach in the other order: delete both handles and reinsert B, then A.
-    const handleA = gw.connectionInboxes.get(a)!;
-    const handleB = gw.connectionInboxes.get(b)!;
-    gw.connectionInboxes.delete(a);
-    gw.connectionInboxes.delete(b);
-    gw.connectionInboxes.set(b, handleB);
-    gw.connectionInboxes.set(a, handleA);
-    const after = gw
-      .boundSurface({ container: HOME, inbox: a })
-      .registered.find((r) => lensOf(r) === LENS)?.channel;
-    expect(before).toBe(b);
-    expect(after).toBe(b);
+    const { gw, first, second } = await twoPools();
+    await publish(gw, first);
+    await publish(gw, second);
+    expect(winner(gw, first)).toBe(first);
+    // Re-attach in the other order, and FORGET the cached surface so the next ask refolds from
+    // the Map as it now stands — without that, a cached fold would answer and prove nothing.
+    const handles = new Map(gw.connectionInboxes);
+    gw.connectionInboxes.clear();
+    for (const name of [...handles.keys()].reverse())
+      gw.connectionInboxes.set(name, handles.get(name)!);
+    gw.forgetBoundSurface(HOME);
+    expect(winner(gw, first)).toBe(first);
+    expect(winner(gw, second)).toBe(first);
+  });
+
+  it("the holder keeps the name through an identical republish and through an evolution", async () => {
+    // Keyed on the LATEST binding, a holder lost its name the moment it republished — its claim
+    // moved later than the rival's — and nothing it did could win it back.
+    const { gw, first, second } = await twoPools();
+    await publish(gw, first);
+    await publish(gw, second);
+    await publish(gw, first); // identical
+    expect(winner(gw, first)).toBe(first);
+    await publish(gw, first, "watered"); // an evolution
+    expect(winner(gw, first)).toBe(first);
+    expect(gw.boundSurface({ container: HOME, inbox: second }).refused.get(LENS)).toMatch(
+      /collides/,
+    );
+  });
+
+  it("the rival does not take the name by republishing", async () => {
+    const { gw, first, second } = await twoPools();
+    await publish(gw, first);
+    await publish(gw, second);
+    await publish(gw, second, "watered");
+    await publish(gw, second);
+    expect(winner(gw, second)).toBe(first);
   });
 });

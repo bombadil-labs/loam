@@ -18,33 +18,34 @@
 // so what a boot needs is exactly what S1 proves.
 
 //
-// RAILS-RED on origin/main, this file copied in: 14 red, 1 green — 15 cases. The green one is the
-// door-fence case, and it is a CONTROL: on main every one of those names is refused because a
-// connection may register nothing at all. It pins that the fence did not widen; it proves nothing
-// about the fence, and says so here rather than padding the count.
+// RAILS-RED on origin/main, this file copied in: 14 red, 2 green — 16 cases. Both greens are
+// CONTROLS and say so: the door-fence case (on main a connection may register nothing, so every
+// name outside the fence is refused for a different reason) and the two-grant case (it pins that
+// a plain grant-holder's mixed pair still lands, which main already did). Each pins that this
+// slice did not widen or narrow something; neither proves the slice, and neither pads the count.
 //
-// REVERT PROBES, MEASURED against this file as it stands — 15 cases. Re-measure when you add one.
-//   the binding grants no register fence                          → 13 red,  2 green
-//   the fence drops the COLON                                     →  3 red, 12 green
-//   every bound identity is routed to its pool (granted law dies) →  1 red, 14 green
-//   container law is routed to the PRIMARY                        → 11 red,  4 green
-//   the fence admits each name separately (a mixed pair passes)   →  1 red, 14 green
-//   the FOLD fences none of its three names                       →  1 red, 14 green
-//   the fold drops the PROGRAM fence alone                        →  1 red, 14 green
-//   the fold drops the READING fence alone                        →  1 red, 14 green
-//   the fold drops the ENTITY fence alone                         →  1 red, 14 green
-//   inbox law back in the ROOT fold, with a root refold           →  8 red,  7 green
-//   the query door ignores the binding                            →  8 red,  7 green
-//   the door reports the pool's answer, not the container's       →  2 red, 13 green
-//   the door matches ANY row under the name, not this pool's      →  1 red, 14 green
-//   whoami re-derives standing beside the door                    →  2 red, 13 green
-//   the listing groups the ROOT's rows for a bound reader         →  1 red, 14 green
-//   the bound fold is a single pass, not a fixpoint               →  1 red, 14 green
-//   NUL admitted in a READING name, at door and fold              →  1 red, 14 green
+// REVERT PROBES, MEASURED against this file as it stands — 16 cases. Re-measure when you add one.
+//   the binding grants no register fence                          → 13 red,  3 green
+//   the fence drops the COLON                                     →  3 red, 13 green
+//   every bound identity is routed to its pool (granted law dies) →  1 red, 15 green
+//   container law is routed to the PRIMARY                        → 11 red,  5 green
+//   a half-inside pair takes the primary road                     →  1 red, 15 green
+//   the FOLD fences none of its three names                       →  1 red, 15 green
+//   the fold drops the PROGRAM fence alone                        →  1 red, 15 green
+//   the fold drops the READING fence alone                        →  1 red, 15 green
+//   the fold drops the ENTITY fence alone                         →  1 red, 15 green
+//   inbox law back in the ROOT fold, with a root refold           →  8 red,  8 green
+//   the query door ignores the binding                            →  8 red,  8 green
+//   the door reports the pool's answer, not the container's       →  2 red, 14 green
+//   the door matches ANY row under the name, not this pool's      →  1 red, 15 green
+//   whoami re-derives standing beside the door                    →  2 red, 14 green
+//   the listing groups the ROOT's rows for a bound reader         →  1 red, 15 green
+//   NUL admitted in a READING name, at door and fold              →  1 red, 15 green
 // Ten of these isolate exactly one case, which is what makes them worth keeping. The root-fold
 // probe is restored WHOLE (loop and refold): the loop alone leaves every case green, which is how
 // an earlier draft of these probes misread a hollow rail as a sound one. The contest between two
-// pools in one container is railed at the library seam, in test/gateway/bound-fold.test.ts.
+// pools in one container, and the order the fold trials in, are railed at the library seam in
+// test/gateway/bound-fold.test.ts.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -422,6 +423,39 @@ describe("§58 position 2 — the binding is the register grant, and the law ser
     await closeAll();
   });
 
+  it("a PLAIN holder of two grants may still pair a program under one with a reading under the other", async () => {
+    // Nothing a grant-holder could do stops working: both names reach only what it owns, and
+    // both roads are the primary. Only the CONTAINER's pair must be whole, and only because a
+    // half-inside pair would send container-path law down the primary road.
+    const TWO_SEED = "d4".repeat(32);
+    const { base, gateway } = await connectionServer({
+      tokens: { "two-token": { actor: TWO_SEED } },
+    });
+    const key = authorForSeed(TWO_SEED);
+    await gateway.append([
+      signClaims(
+        grantClaims(STORE_ENTITY, key, "register", OPERATOR, gateway.nextTimestamp(), "zed:"),
+        OPERATOR_SEED,
+      ),
+      signClaims(
+        grantClaims(STORE_ENTITY, key, "register", OPERATOR, gateway.nextTimestamp(), "yon:"),
+        OPERATOR_SEED,
+      ),
+    ]);
+    const mixed = await register(base, "two-token", {
+      ...(envelope("zed:p") as Record<string, unknown>),
+      schema: {
+        name: "yon:r",
+        props: { note: { pick: { order: { byTimestamp: "desc" } } } },
+        default: { pick: { order: { byTimestamp: "desc" } } },
+      },
+    });
+    expect(mixed.status).toBe(200);
+    expect(lensesIn(gateway)).toContain("yon:r");
+    expect(await serves(base, "op-token", "yon_r")).toBe(true);
+    await closeAll();
+  });
+
   it("KNOWN LIMIT — a pool lens that expands into the ROOT's reading is refused at the door, by name", async () => {
     // The pool's own trial cannot see the root's readings, so a body that expands into `Plant`
     // fails to materialize at publish. Honest refusal, not a silent fallback; the fix is the
@@ -482,10 +516,13 @@ describe("§58 position 2 — the binding is the register grant, and the law ser
     await closeAll();
   });
 
-  it("binds a dependent lens whose dependency was EVOLVED later — the fold runs to a fixpoint", async () => {
-    // Timestamp order is not dependency order. Lens B expands into lens A; then A is evolved, so
-    // A's binding is stamped later than B's. A single pass trials B first, finds no A, refuses B,
-    // then binds A — and the connection loses B. Rounds bind B on the second pass.
+  it("binds a dependent lens whose dependency was EVOLVED later — first-claim order is dependency order", async () => {
+    // Lens B expands into lens A; then A is evolved, so A's LATEST binding is stamped later than
+    // B's. Trialled in latest-binding order, B would be tried first, find no A, and be refused.
+    // The fold trials in FIRST-claim order, which an evolution never moves, so A still comes
+    // first and B binds in one pass. (A dependent cannot be staked before its dependency exists —
+    // the pool's own door refuses it — so first-claim order is dependency order by construction,
+    // and no fixpoint round is needed; this case is what holds that argument to the code.)
     const { base } = await connectionServer();
     const ada = await connect(base, "ada", "journal");
     expect((await register(base, ada, envelope("ada:journal:a"))).status).toBe(200);

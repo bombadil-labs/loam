@@ -461,10 +461,16 @@ function registrationRoute(
   if (binding === undefined) return route;
   const own = `${binding.container}:`;
   route.pick = (input) => {
-    const insideContainer =
-      fenceAdmits(own, input.hyperschema.name) &&
-      fenceAdmits(own, lensNameFor(input.hyperschema, input.schema));
-    if (!insideContainer) return gateway;
+    const programInside = fenceAdmits(own, input.hyperschema.name);
+    const readingInside = fenceAdmits(own, lensNameFor(input.hyperschema, input.schema));
+    if (programInside !== readingInside) {
+      // Half inside the container is under NO one prefix: the fence admitted each name on its
+      // own, but this pair would put container-path law in the PRIMARY, operator-signed and
+      // served store-wide. Refused, as the authority refusal — the caller holds no standing for
+      // this shape, whatever it holds for each name.
+      throw new NotPermittedToRegister(REGISTRATION_REFUSAL);
+    }
+    if (!programInside) return gateway;
     route.toPool = true;
     return gateway.poolForBinding(binding);
   };
@@ -613,15 +619,13 @@ function federateAdmits(standing: readonly string[] | undefined, container: stri
 function registerFenceAdmits(fence: readonly string[], input: RegistrationInput): boolean {
   const reading = lensNameFor(input.hyperschema, input.schema);
   if (reading.includes(NUL)) return false; // the program is guarded at publish; the reading was not
-  // ONE prefix must admit BOTH names. A fence that tested each name against any prefix let a
-  // connection holding a grant AND a binding pair a program under its container with a reading
-  // under its grant — and the route, seeing a pair not wholly inside the container, sent
-  // container-path law to the PRIMARY, operator-signed and served store-wide. A registration
-  // lives under one prefix; that prefix decides where it lands.
-  const program = input.hyperschema.name;
-  if (!fence.some((prefix) => fenceAdmits(prefix, program) && fenceAdmits(prefix, reading))) {
-    return false;
-  }
+  // Each name is admitted by ANY prefix the caller holds: a holder of two grants may pair a
+  // program under one with a reading under the other, as it always could — both reach nothing
+  // it does not own. The one pair that must be WHOLE is the container's, and the route refuses
+  // a half-inside pair rather than sending container-path law down the primary road.
+  const inside = (name: string): boolean => fence.some((prefix) => fenceAdmits(prefix, name));
+  if (!inside(input.hyperschema.name)) return false;
+  if (!inside(reading)) return false;
   return input.entity === undefined || input.entity === schemaEntityFor(input.hyperschema);
 }
 

@@ -377,6 +377,13 @@ export interface Registration {
   // when this row meets a channel pool's row for one name (§47 slice 3). Optional: a manual
   // registration has no binding delta.
   readonly boundAt?: number;
+  /**
+   * When this entity FIRST bound this lens name, across every surviving binding of it — the
+   * moment a claim to the name was staked. `boundAt` is the latest binding's time and moves on
+   * every republish; a contest keyed on it would hand a name to a rival the moment its holder
+   * evolved. Contests key on this instead (§58 position 2, the bound fold).
+   */
+  readonly firstBoundAt?: number;
   readonly boundId?: string;
   // Who SIGNED the binding delta. Deliberately NOT the origin a policy ranks by: a channel's
   // blessing is the receiving operator's own act wherever it lands, so the signing key cannot tell
@@ -1132,11 +1139,18 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
   // latest survivor — registering FilmClassic no longer evicts Film. A pre-coexistence store's
   // bindings all carry one lens name per entity, so this reads exactly as the old latest-wins did.
   const latest = new Map<string, Candidate>();
+  const first = new Map<string, number>();
   for (const [key, group] of groups) {
     for (const cand of group) {
-      latest.set([key, lensNameOf(cand)].join(NUL_SEP), cand); // ground order: last write wins
+      const at = [key, lensNameOf(cand)].join(NUL_SEP);
+      latest.set(at, cand); // ground order: last write wins
+      if (!first.has(at)) first.set(at, cand.timestamp); // ...and the first is remembered
     }
   }
+  // The survivor carries the moment its entity FIRST claimed the lens, read back by identity so
+  // the emit below, which iterates survivors and not groups, need not rebuild the key.
+  const firstOf = new Map<Candidate, number>();
+  for (const [at, survivor] of latest) firstOf.set(survivor, first.get(at) ?? survivor.timestamp);
 
   // §47 — A DECLARED POLICY RESOLVES CONTESTED NAMES; an undeclared store keeps today's behavior
   // whole (criterion 12), including its build-time collision when two entities want one lens. The
@@ -1192,6 +1206,7 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
         entity: cand.schemaEntity,
         lensName: lensNameOf(cand),
         boundAt: cand.timestamp,
+        firstBoundAt: firstOf.get(cand) ?? cand.timestamp,
         boundId: cand.id,
         boundBy: cand.author,
         ...(cand.mutations === undefined ? {} : { mutations: cand.mutations }),

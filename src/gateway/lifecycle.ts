@@ -507,14 +507,16 @@ export function boundBindingsImpl(
       candidates.push({ ...r, origin: "store" as const, channel: name });
     }
   }
-  // CONTESTS RESOLVE BY REGISTRATION ORDER, never by attach order. Two pools in one container may
-  // name one lens; iterating `connectionInboxes` would let a LATER registrant on an EARLIER-attached
-  // inbox displace a sibling's already-bound lens — silently for the sibling, and differently after
-  // a reboot re-attaches in another order. The earlier binding keeps the name; ties break on the
-  // pool's name so a replay is deterministic.
+  // CONTESTS RESOLVE BY WHO STAKED THE NAME FIRST, never by attach order and never by who touched
+  // it last. Two pools in one container may name one lens. Iterating `connectionInboxes` let a
+  // later registrant on an earlier-attached inbox displace a sibling, and differently after a
+  // reboot. Keying on the LATEST binding let the holder lose the name by republishing — even an
+  // identical republish moved its claim later than the rival's, and nothing it did could win it
+  // back. The first surviving claim keeps the name; ties break on the pool's name.
   candidates.sort(
     (a, b) =>
-      (a.boundAt ?? 0) - (b.boundAt ?? 0) || (a.channel ?? "").localeCompare(b.channel ?? ""),
+      (a.firstBoundAt ?? a.boundAt ?? 0) - (b.firstBoundAt ?? b.boundAt ?? 0) ||
+      (a.channel ?? "").localeCompare(b.channel ?? ""),
   );
   // THE KEY IS COMPUTED BEFORE ANY TRIAL, or the cache caches nothing: a trial per candidate is
   // the expensive part, and a key that only exists after it is a receipt, not a shortcut.
@@ -525,34 +527,21 @@ export function boundBindingsImpl(
   ].join(NUL);
   if (held !== undefined && held.key === key) return held.fold;
 
-  // FIXPOINT ROUNDS, for the reason the root replay runs them: timestamp order is not dependency
-  // order. An evolution re-stamps a lens later than the lenses that expand into it, so a single
-  // pass would refuse the dependents and then bind the dependency they needed. Root rows are
+  // ONE PASS, in first-claim order — and that order IS dependency order, by construction. The root
+  // replay runs fixpoint rounds because an evolution re-stamps a lens later than its dependents;
+  // here the sort keys on the FIRST claim, which an evolution never moves, and a dependent cannot
+  // have been staked before its dependency existed (the pool's own door refuses it). Root rows are
   // already trialled and already serve; a pool row that collides with one loses here exactly as a
   // channel row loses at root — the nearer ground never displaces the operator's law.
   const accepted: Bound[] = [...gw.registered];
-  const reasons = new Map<string, string>();
-  let pending = candidates;
-  for (;;) {
-    const still: Bound[] = [];
-    let progressed = false;
-    for (const candidate of pending) {
-      try {
-        trialBind(gw, accepted, candidate);
-        accepted.push(candidate);
-        progressed = true;
-      } catch (err) {
-        reasons.set(lensOf(candidate), err instanceof Error ? err.message : String(err));
-        still.push(candidate);
-      }
-    }
-    if (!progressed || still.length === 0) break;
-    pending = still;
-  }
   const refused = new Map<string, string>();
-  for (const left of pending) {
-    if (accepted.includes(left)) continue;
-    refused.set(lensOf(left), reasons.get(lensOf(left)) ?? "did not bind");
+  for (const candidate of candidates) {
+    try {
+      trialBind(gw, accepted, candidate);
+      accepted.push(candidate);
+    } catch (err) {
+      refused.set(lensOf(candidate), err instanceof Error ? err.message : String(err));
+    }
   }
   const registry = SchemaRegistry.build(programHyperschemas(accepted), programReadings(accepted));
   return { registered: accepted, registry, refused, key };
