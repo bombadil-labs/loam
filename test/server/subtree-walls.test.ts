@@ -15,7 +15,10 @@
 // attempt refuses, and a renderer it blesses serves behind glass — those need the `bless-renderer`
 // verb of the roster slice; offering above the root is the offer token's (T264); declaring above the
 // root is the `declare` verb's; a child leeway that does not FIT its parent's terms is the cascade
-// slice. Each of those slices owes this file's successor a case. And the envelope cases assert the
+// slice. Each of those slices owes this file's successor a case. The pool tokens `inbox:` and
+// `channel:` are not reserved from the names a person may declare; no door writes an `inboxOf`
+// today, so no name can borrow the hop, and the roster slice should reserve the tokens at its
+// doors. And the envelope cases assert the
 // ceiling a pool's REPORT resolves, not a render bounded at it: a render refused at the size's
 // slot count and not the operator's is owed by the slice that mounts a renderer behind glass.
 //
