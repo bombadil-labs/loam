@@ -394,9 +394,14 @@ export interface ResolvedContainer {
   /** Set on an INBOX pool (SPEC §39): the parent container whose gather this pool composes into. */
   readonly inboxOf?: string;
   /**
-   * The leeway in force (SPEC §58). NEVER optional and never undefined: a container that declared
-   * none, and one whose declaration did not parse, both read `SEALED_LEEWAY`. A reader therefore
-   * cannot forget to default, and there is no `undefined` here for anyone to read as permission.
+   * The leeway this container DECLARES (SPEC §58). NEVER optional and never undefined: a container
+   * that declared none, and one whose declaration did not parse or was ambiguous, all read
+   * `SEALED_LEEWAY`. A reader cannot forget to default, and there is no `undefined` here for
+   * anyone to read as permission.
+   *
+   * IT IS NOT YET WEIGHED. Nothing calls `leewayFits` against a parent's delegation terms on any
+   * path, so this is what the container ASKED FOR, not what it has been granted. The slice that
+   * enforces the one rule is the one that may call it "in force".
    */
   readonly leeway: Leeway;
 }
