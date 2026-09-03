@@ -190,6 +190,18 @@ describe("§58 position 4 — a child's leeway fits its parent's DELEGATION TERM
       expect(refusal(forever({ envelope: "large" }), parent)).toMatch(/envelope/i);
     });
 
+    it("admits a 'same' every written ceiling permits, down to the chain's own fixpoint", () => {
+      // THE ADMIT HALF OF THE WALK, and the four cases below it are all refusals. Without this
+      // one, a rule that walks the chain and then refuses every admit passes the whole file —
+      // measured — which would make the shorthand unusable instead of too wide. That is the exact
+      // inverse of the escalation, and the rails could not tell the two apart.
+      // Three written levels is the shallowest chain that reaches the recursive branch: at two,
+      // the `permitted === "same"` guard answers first and the case would be hollow.
+      const wide = { receive: true, publish: true };
+      const parent = leeway({ delegate: chain(wide, wide, { ...wide, delegate: "same" }) });
+      expect(leewayFits(forever(wide), parent)).toBeUndefined();
+    });
+
     it("REVERT PROBE — the shorthand is never wider than writing the recursion out", () => {
       // `"same"` is DEFINED as sugar for the written recursion, so any reach the written form is
       // refused must be refused through the shorthand too. This is the asymmetry that exposed the
@@ -224,11 +236,16 @@ describe("§58 position 4 — a child's leeway fits its parent's DELEGATION TERM
     });
   });
 
-  // ── The cases the rule was folded for. Each is a revert probe, and the MEASURED counts are
-  // below rather than a claim of exclusivity: deleting a clause reds a named case, not only it.
-  //   compare against `parent` instead of `parent.delegate` → 8 cases red
-  //   drop the recursive delegate comparison             → 3 cases red, 9 green
-  // The second is the sharp one: it is how the escalation would have shipped looking healthy.
+  // ── The cases the rule was folded for. Each is a revert probe, and the counts below are
+  // MEASURED against this file as it stands — 20 cases — not a claim of exclusivity. Re-measure
+  // them when you add a case; an earlier revision of this comment carried the counts from a
+  // 13-case version and read as measurement, which is the overclaim the header warns about.
+  //   compare against `parent` instead of `parent.delegate`  → 14 red, 6 green
+  //   drop the delegate comparison entirely                  →  8 red, 12 green
+  //   walk the chain, then refuse every admit                →  1 red, 19 green
+  // The third is the sharpest and the narrowest: exactly one case separates a rule that walks
+  // the ceiling chain from one that refuses the shorthand under any written terms. Without that
+  // case the inverse of the escalation ships green.
   describe("the folded cases", () => {
     it("REVERT PROBE — the parent's own switches never enter the comparison", () => {
       // Compare against `parent` instead of `parent.delegate` and this goes red. A sealed parent
