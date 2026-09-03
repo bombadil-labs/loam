@@ -1685,30 +1685,49 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
   // trust domain, a view over their ground, with each peer's pool nested beneath it.
   const table = readContainerTable(gw.reactor, gw.operatorAuthor);
   if (!table.containers.has(opts.into)) {
-    // A container a BOUND CONNECTION names is declared under its path parent (SPEC §58 position
-    // 5: the tree agrees with the names). Reach is walked by parent edges, and a pool composed
-    // into a container no edge reaches is served as law that answers nothing — the T189 shape.
-    // The person's own road keeps its older shape here; that is a separate decision.
-    const parent =
-      opts.openedBy === undefined || !opts.into.includes(":")
-        ? {}
-        : { parent: opts.into.slice(0, opts.into.lastIndexOf(":")) };
-    await gw.append([
-      signClaims(
-        containerClaims(
-          {
-            container: opts.into,
-            trust: "curated",
-            posture: "shared",
-            membership: AGGREGATOR,
-            ...parent,
-          },
-          gw.operatorAuthor!,
-          gw.nextTimestamp(),
+    if (opts.openedBy === undefined) {
+      await gw.append([
+        signClaims(
+          containerClaims(
+            { container: opts.into, trust: "curated", posture: "shared", membership: AGGREGATOR },
+            gw.operatorAuthor!,
+            gw.nextTimestamp(),
+          ),
+          gw.options.seed,
         ),
-        gw.options.seed,
-      ),
-    ]);
+      ]);
+    } else {
+      // A container a BOUND CONNECTION names is declared under its path parent, and so is every
+      // undeclared name between it and the nearest declared ancestor (SPEC §58 position 5: the
+      // tree agrees with the names). Reach is walked by declared parent edges only, so a pool
+      // composed into a container whose edge dangles from an undeclared name is served as law
+      // that answers nothing — the T189 shape. The door fenced `into` inside the opener's
+      // container, which consent declared, so the walk always meets a declared ancestor.
+      const seed = gw.options.seed;
+      const missing: string[] = [];
+      for (let at = opts.into; !table.containers.has(at) && at.includes(":");) {
+        missing.push(at);
+        at = at.slice(0, at.lastIndexOf(":"));
+      }
+      await gw.append(
+        missing.reverse().map((container) =>
+          signClaims(
+            containerClaims(
+              {
+                container,
+                trust: "curated",
+                posture: "shared",
+                membership: AGGREGATOR,
+                parent: container.slice(0, container.lastIndexOf(":")),
+              },
+              gw.operatorAuthor!,
+              gw.nextTimestamp(),
+            ),
+            seed,
+          ),
+        ),
+      );
+    }
   }
 
   // The pool is UNTRUSTED and SEPARATE. Untrusted because a peer's law is inert until blessed

@@ -17,25 +17,27 @@
 // the pool's bytes surviving a reboot, which is the backend's promise (§46) — this file pins that
 // the RECORD survives with its opener and the root fold reads it.
 //
-// RAILS-RED on origin/main, this file copied in: 6 red, 1 green — 7 cases. The green is the
+// RAILS-RED on origin/main, this file copied in: 7 red, 1 green — 8 cases. The green is the
 // CONTROL: the plain `federate` grant road, which this slice neither widens nor narrows.
 //
-// REVERT PROBES, MEASURED against this file as it stands — 7 cases. Re-measure when you add one.
-//   the root fold keeps a connection's channel             → 2 red, 5 green
-//   the bound fold drops the channel's rows                 → 2 red, 5 green
-//   no subtree fence on `into`                              → 1 red, 6 green
-//   no fence on the prefix                                  → 2 red, 5 green
-//   the prefix fenced to the binding, not the target        → 1 red, 6 green
-//   no leeway walk (receive always on)                      → 1 red, 6 green
-//   status and sever admit by the fence, not the opener     → 1 red, 6 green
-//   the stamps carry no opener                              → 4 red, 3 green
-//   the bound fold admits a foreign opener                  → 2 red, 5 green
-//   no parent edge for a descendant a connection names      → 1 red, 6 green
-// The subtree-fence probe was green until the refusal cases carried a prefix INSIDE the fence:
-// an outside prefix was refused for the prefix, and the container fence went unpinned. The
-// opener probe was green until a PERSON-opened channel inside the subtree joined the sever case.
-// The parent-edge probe needs the object level: introspection sees a field, only a read sees
-// a row.
+// REVERT PROBES, MEASURED against this file as it stands — 8 cases. Re-measure when you add one.
+//   the root fold keeps a connection's channel             → 2 red, 6 green
+//   the bound fold drops the channel's rows                 → 3 red, 5 green
+//   no subtree fence on `into`                              → 1 red, 7 green
+//   no fence on the prefix                                  → 2 red, 6 green
+//   the prefix fenced to the binding, not the target        → 1 red, 7 green
+//   no leeway walk (receive always on)                      → 1 red, 7 green
+//   status and sever admit by the fence, not the opener     → 1 red, 7 green
+//   status and sever admit by edge reach, not the opener    → 1 red, 7 green
+//   the stamps carry no opener                              → 4 red, 4 green
+//   the bound fold admits a foreign opener                  → 2 red, 6 green
+//   no parent edge for a name a connection declares         → 2 red, 6 green
+//   only the target is declared, not the middles            → 1 red, 7 green
+// Three of these were green until the rails were sharpened: the subtree fence, until the refusal
+// cases carried a prefix INSIDE the fence (an outside prefix was refused for the prefix); the
+// opener, until a PERSON-opened channel inside the subtree joined the sever case; and edge reach,
+// until that channel's target was declared UNDER the container. The parent-edge and middles probes
+// need the object level: introspection sees a field, only a read sees a row.
 
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
@@ -300,6 +302,32 @@ describe("§58 — receive within the subtree", () => {
     await closeAll();
   });
 
+  it("a target two levels down is reached: the undeclared middle is declared under its parent too", async () => {
+    // One level down the parent edge lands on a declared container. Two levels down it landed
+    // on a name nothing declared, and reach — walked by declared edges — stopped at the top:
+    // the peer's lens was served and answered null, one level lower than before.
+    const { base, gateway } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    await declare(gateway, "ada:journal", RECEIVES);
+    const peer = await peerStore();
+    const r = await receive(base, ada, "ada:journal:a:b", peer);
+    expect(r.isError, r.text).toBe(false);
+    const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+    expect(table.containers.get("ada:journal:a")?.parent).toBe("ada:journal");
+    expect(table.containers.get("ada:journal:a:b")?.parent).toBe("ada:journal:a");
+    const res = await fetch(`${base}/default/graphql`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${ada}` },
+      body: JSON.stringify({
+        query: `{ ada_journal_a_b_peer_Plant(entity: "${FERN}") { height } }`,
+      }),
+    });
+    const body = (await res.json()) as { data?: Record<string, { height?: unknown } | null> };
+    expect(body.data?.ada_journal_a_b_peer_Plant?.height).toBe(11);
+    await closePeers();
+    await closeAll();
+  });
+
   it("a plain `federate` grant holder is unchanged, and cannot receive into a container it was not granted", async () => {
     // CONTROL: the grant road. Red on neither side of this slice; it pins that the slice did not
     // widen or narrow the older door.
@@ -363,7 +391,9 @@ describe("§58 — receive within the subtree", () => {
     expect(mine.isError, mine.text).toBe(false);
     expect(mine.text).toMatch(/ada:journal:inbox/);
     // A channel the PERSON opened into the same subtree is not the connection's to see or sever:
-    // the opener decides, not the fence.
+    // the opener decides, not the fence and not reach — the target is declared UNDER the
+    // container first, so an admission by edge reach would let it through.
+    await declare(gateway, "ada:journal:other", SEALED_LEEWAY, "ada:journal");
     await gateway.openChannel({
       into: "ada:journal:other",
       prefix: "ada:journal:other:theirs",
