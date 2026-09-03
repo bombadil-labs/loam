@@ -52,7 +52,11 @@
 // either reds one case in test/server/subtree-receive.test.ts or test/server/subtree-walls.test.ts.
 import { describe, expect, it } from "vitest";
 import { makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
-import { channelName, channelRecordClaims } from "../../src/federation/channel.js";
+import {
+  channelName,
+  channelRecordClaims,
+  type ChannelStatus,
+} from "../../src/federation/channel.js";
 import {
   DEFAULT_QUARANTINE_ENVELOPE,
   ENVELOPE_ANY,
@@ -408,14 +412,24 @@ describe("§58 — leeway fits its parent's terms, and cascades", () => {
     expect(await servesPeer(base, ada, "ada:journal:inbox:peer")).toBe(true);
     const name = channelName("ada:journal:inbox", "ada:journal:inbox:peer");
     const standing = gateway.channelStatus(name)[0]!;
-    const { openedFrom: _dropped, unreadable: _u, ...withoutBinding } = standing;
+    // The same record, minus the binding it was opened from — the shape a channel stamped before
+    // the binding was recorded still carries.
+    const withoutBinding: ChannelStatus = {
+      name: standing.name,
+      into: standing.into,
+      prefix: standing.prefix,
+      receiving: standing.receiving,
+      blessing: standing.blessing,
+      lastSyncedAt: standing.lastSyncedAt,
+      consecutiveFailures: standing.consecutiveFailures,
+      from: standing.from,
+      unattested: standing.unattested,
+      unreadable: [],
+      ...(standing.openedBy === undefined ? {} : { openedBy: standing.openedBy }),
+    };
     await gateway.append([
       signClaims(
-        channelRecordClaims(
-          { ...withoutBinding, unreadable: [] },
-          OPERATOR,
-          gateway.nextTimestamp(),
-        ),
+        channelRecordClaims(withoutBinding, OPERATOR, gateway.nextTimestamp()),
         OPERATOR_SEED,
       ),
     ]);
