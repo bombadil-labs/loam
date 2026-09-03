@@ -35,6 +35,7 @@ import { isRepairable } from "../store/quarantine.js";
 import { CTX_GRANTS, grantClaims, holdsGrant, revocationClaims } from "./accounts.js";
 import { STORE_ENTITY } from "./genesis.js";
 import { isTombstone, readTombstones } from "./erase.js";
+import { parseLeeway, SEALED_LEEWAY, type Leeway } from "./leeway.js";
 import {
   clampedTo,
   newPoolEnvelope,
@@ -109,6 +110,12 @@ export interface ContainerSpec {
    * declaration simply has no `inboxOf`).
    */
   readonly inboxOf?: string;
+  /**
+   * What this container may do and what it allows beneath it (SPEC §58, position 4), inlined as
+   * canonical JSON under role `leeway`. Absent means SEALED — every switch off — so an older
+   * declaration reads as the private journal and owes no §20 migration, exactly as `inboxOf` does.
+   */
+  readonly leeway?: Leeway;
 }
 
 const entityPtr = (role: string, id: string, context: string): Claims["pointers"][number] => ({
@@ -135,6 +142,7 @@ export function containerClaims(spec: ContainerSpec, author: string, timestamp: 
       ...(spec.membershipAt === undefined ? [] : [primPtr("membershipAt", spec.membershipAt)]),
       ...(spec.version === undefined ? [] : [primPtr("version", spec.version)]),
       ...(spec.inboxOf === undefined ? [] : [primPtr("inboxOf", spec.inboxOf)]),
+      ...(spec.leeway === undefined ? [] : [primPtr("leeway", JSON.stringify(spec.leeway))]),
     ],
   };
 }
@@ -297,6 +305,15 @@ export function containerDefect(
     );
   }
 
+  const leeways = primitives(claims, "leeway");
+  if (leeways.length > 1) return "a container declaration carries at most one leeway pointer";
+  if (leeways.length === 1) {
+    const raw = leeways[0];
+    if (typeof raw !== "string") return "a container's leeway is one JSON string primitive";
+    const read = parseLeeway(raw);
+    if ("defect" in read) return `a container's leeway is malformed: ${read.defect}`;
+  }
+
   const inboxOfs = primitives(claims, "inboxOf");
   if (inboxOfs.length > 1) return "a container declaration carries at most one inboxOf pointer";
   if (inboxOfs.length === 1) {
@@ -376,6 +393,12 @@ export interface ResolvedContainer {
   readonly version?: string;
   /** Set on an INBOX pool (SPEC §39): the parent container whose gather this pool composes into. */
   readonly inboxOf?: string;
+  /**
+   * The leeway in force (SPEC §58). NEVER optional and never undefined: a container that declared
+   * none, and one whose declaration did not parse, both read `SEALED_LEEWAY`. A reader therefore
+   * cannot forget to default, and there is no `undefined` here for anyone to read as permission.
+   */
+  readonly leeway: Leeway;
 }
 
 export interface DetachRecord {
@@ -404,6 +427,7 @@ interface Decl {
   readonly membershipAt?: string;
   readonly version?: string;
   readonly inboxOf?: string;
+  readonly leewayRaw?: string;
 }
 
 const byAge = (a: { ts: number; id: string }, b: { ts: number; id: string }): number =>
@@ -528,6 +552,7 @@ function computeContainerTable(reactor: Reactor, operator: string | undefined): 
     const membershipAt = primitives(claims, "membershipAt")[0];
     const version = primitives(claims, "version")[0];
     const inboxOf = primitives(claims, "inboxOf")[0];
+    const leewayRaw = primitives(claims, "leeway")[0];
     const list = decls.get(name) ?? [];
     list.push({
       id: delta.id,
@@ -539,6 +564,7 @@ function computeContainerTable(reactor: Reactor, operator: string | undefined): 
       ...(typeof membershipAt === "string" ? { membershipAt } : {}),
       ...(typeof version === "string" ? { version } : {}),
       ...(typeof inboxOf === "string" ? { inboxOf } : {}),
+      ...(typeof leewayRaw === "string" ? { leewayRaw } : {}),
     });
     decls.set(name, list);
   }
@@ -577,6 +603,23 @@ function computeContainerTable(reactor: Reactor, operator: string | undefined): 
         );
       }
     }
+    // LEEWAY TAKES THE LATEST, unlike trust and posture above: "a leeway is a declaration on the
+    // container, so changing it later ... is a delta the next request obeys" (§58 position 4). A
+    // leeway that does not parse is NOT BINDING and the container falls back to SEALED — never to
+    // the previous declaration, which would let a malformed later delta pin an older, wider grant
+    // in place.
+    let leeway: Leeway = SEALED_LEEWAY;
+    if (latest.leewayRaw !== undefined) {
+      const read = parseLeeway(latest.leewayRaw);
+      if ("defect" in read) {
+        defects.push(
+          `container "${name}": the declared leeway is not binding — ${read.defect}; the ` +
+            `container reads as sealed`,
+        );
+      } else {
+        leeway = read.leeway;
+      }
+    }
     containers.set(name, {
       entity: name,
       trust: earliest.trust,
@@ -586,6 +629,7 @@ function computeContainerTable(reactor: Reactor, operator: string | undefined): 
       ...(latest.membershipAt !== undefined ? { membershipAt: latest.membershipAt } : {}),
       ...(latest.version !== undefined ? { version: latest.version } : {}),
       ...(latest.inboxOf !== undefined ? { inboxOf: latest.inboxOf } : {}),
+      leeway,
     });
     if (latest.parent !== undefined) {
       edges.set(name, { parent: latest.parent, ts: latest.ts, id: latest.id });

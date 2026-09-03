@@ -139,3 +139,122 @@ function refusedSwitch(name: Switch): string {
     `it gives away.`
   );
 }
+
+// ── Reading a leeway off a container declaration (SPEC §58, position 4: "A leeway is a declaration
+// on the container, so changing it later ... is a delta the next request obeys").
+
+/**
+ * What a container has when it declares no leeway, and what it falls back to when the leeway it
+ * declares does not parse. Every switch off — the private journal.
+ *
+ * BOTH ROADS LEAD HERE ON PURPOSE. An absent leeway and a broken one must read the same, and they
+ * must read as the tightest thing expressible: a defect that widened what a person turned on would
+ * be a report of permission nobody granted (H9).
+ */
+export const SEALED_LEEWAY: Leeway = {
+  receive: false,
+  offer: false,
+  publish: false,
+  envelope: "small",
+  delegate: "off",
+};
+
+/** How deep a written terms chain may nest before the declaration is a defect rather than a stack. */
+const MAX_TERMS_DEPTH = 32;
+
+const ENVELOPE_NAMES: ReadonlySet<string> = new Set<EnvelopeSize>(["small", "medium", "large"]);
+const LEEWAY_KEYS: ReadonlySet<string> = new Set([...SWITCHES, "envelope", "delegate"]);
+
+/**
+ * Read a declared leeway from the JSON a container declaration carries.
+ *
+ * Answers with a DEFECT SENTENCE rather than throwing, and never with a partial value: a leeway
+ * that does not parse is not binding, and its container reads as `SEALED_LEEWAY`.
+ *
+ * UNKNOWN KEYS ARE REFUSED rather than ignored. A misspelled switch that silently reads `false` is
+ * the same bug in a quieter coat, and refusing lands on the closed side either way — including the
+ * day a sixth control is added and an older reader meets it.
+ */
+export function parseLeeway(raw: string): { leeway: Leeway } | { defect: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return { defect: "the declared leeway is not parseable JSON" };
+  }
+  const allowances = readAllowances(parsed);
+  if (typeof allowances === "string") return { defect: allowances };
+  const delegate = (parsed as Record<string, unknown>).delegate;
+  if (delegate === "off") return { leeway: { ...allowances, delegate: "off" } };
+  if (delegate === "same") {
+    return {
+      defect:
+        '"same" means "under these very terms", so it belongs inside delegation terms and never ' +
+        "on a container's own leeway, where there are no enclosing terms for it to repeat",
+    };
+  }
+  const terms = readTerms(delegate, 1);
+  return typeof terms === "string"
+    ? { defect: terms }
+    : { leeway: { ...allowances, delegate: terms } };
+}
+
+/**
+ * The four fields a leeway and a terms share. Rejects an unknown key rather than dropping it, so a
+ * typo cannot pass as a switch left off.
+ */
+function readAllowances(value: unknown): Allowances | string {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return "a leeway is an object carrying three switches, an envelope and delegation terms";
+  }
+  const o = value as Record<string, unknown>;
+  for (const key of Object.keys(o)) {
+    if (!LEEWAY_KEYS.has(key)) return `the declared leeway carries an unknown key "${key}"`;
+  }
+  for (const name of SWITCHES) {
+    if (typeof o[name] !== "boolean") {
+      return `the leeway switch "${name}" is a boolean, and every declaration carries all three`;
+    }
+  }
+  const envelope = o.envelope;
+  if (typeof envelope !== "string" || !ENVELOPE_NAMES.has(envelope)) {
+    return 'the leeway envelope is "small", "medium" or "large"';
+  }
+  return {
+    receive: o.receive as boolean,
+    offer: o.offer as boolean,
+    publish: o.publish as boolean,
+    envelope: envelope as EnvelopeSize,
+  };
+}
+
+/**
+ * One level of delegation terms. Unlike a container's own leeway, a terms may carry `"same"` —
+ * there ARE enclosing terms here for it to repeat.
+ */
+function readTerms(value: unknown, depth: number): Terms | string {
+  if (depth > MAX_TERMS_DEPTH) {
+    return `the declared leeway nests deeper than ${MAX_TERMS_DEPTH} levels of terms`;
+  }
+  const allowances = readAllowances(value);
+  if (typeof allowances === "string") return allowances;
+  const delegate = (value as Record<string, unknown>).delegate;
+  if (delegate === "off" || delegate === "same") return { ...allowances, delegate };
+  const inner = readTerms(delegate, depth + 1);
+  return typeof inner === "string" ? inner : { ...allowances, delegate: inner };
+}
+
+/**
+ * Is this the leeway a container has when it declares none? Used where a re-declaration carries
+ * knobs forward: an absent leeway and a sealed one resolve identically, so the sealed case need
+ * not be written down, and not writing it keeps the delta's bytes as they were.
+ */
+export function isSealed(leeway: Leeway): boolean {
+  return (
+    !leeway.receive &&
+    !leeway.offer &&
+    !leeway.publish &&
+    leeway.envelope === "small" &&
+    leeway.delegate === "off"
+  );
+}

@@ -147,6 +147,15 @@ export {
   type DetachRecord,
   type ResolvedContainer,
 } from "./gateway/container.js";
+export {
+  leewayFits,
+  parseLeeway,
+  SEALED_LEEWAY,
+  type EnvelopeSize,
+  type Leeway,
+  type LeewayRefusal,
+  type Terms,
+} from "./gateway/leeway.js";
 export { freezeMembers, type ModuleVersion } from "./gateway/container-identity.js";
 export {
   LISTING_DEFAULT_LIMIT,
