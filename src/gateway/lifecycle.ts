@@ -620,8 +620,7 @@ export function boundBindingsImpl(
  * be resolved yet and its NAMES are what the rival contests. A row the trial cannot build alone
  * contests nothing: its fault is its own, and it is refused for it.
  */
-function contests(gw: Gateway, holder: Bound | readonly Bound[], rival: Bound): string | undefined {
-  const held = Array.isArray(holder) ? holder : [holder as Bound];
+function contests(gw: Gateway, held: readonly Bound[], rival: Bound): string | undefined {
   const builds = (rows: readonly Bound[]): string | undefined => {
     try {
       groupPrograms(rows);
@@ -642,7 +641,7 @@ function contestedBy(
   holders: readonly Bound[],
 ): { readonly holder: Bound; readonly on: string } | undefined {
   for (const holder of holders) {
-    const on = contests(gw, holder, c);
+    const on = contests(gw, [holder], c);
     if (on !== undefined) return { holder, on };
   }
   return undefined;
