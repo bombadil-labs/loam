@@ -130,11 +130,15 @@ export function gatherImpl(
           `container its consent named — that channel's pool is outside its scope`,
       );
     }
+    // The lens and the registry are the CONTAINER'S (§58 position 2): a lens that lives only in
+    // one of its pools resolves here and nowhere else, and an `expand` inside it finds its
+    // sibling readings in the same fold rather than in the root's.
+    const surface = gw.boundSurface(binding);
     const result = evalTerm(
-      gw.def(name).hyperschema.body,
+      gw.def(name, binding).hyperschema.body,
       boundGroundFor(gw, binding, now, asOf),
       entity,
-      gw.registry,
+      surface.registry,
     );
     if (result.sort !== "hview") throw new Error(`schema ${name} does not evaluate to a hyperview`);
     return result.hview;
@@ -336,9 +340,10 @@ export function gatherForRetractionImpl(
   entity: string,
   binding?: ConnectionBinding,
 ): HView {
-  const def = gw.def(name);
+  const def = gw.def(name, binding);
   // A bound connection's own claims live in its pool, so its retraction gathers ITS scope — the
-  // whole of it, unnarrowed by read closure, for the same reason as the primary path.
+  // whole of it, unnarrowed by read closure, for the same reason as the primary path — through
+  // its container's registry, where a lens that lives only in a pool is known.
   const result =
     binding === undefined
       ? gw.reactor.eval(def.hyperschema.body, entity, gw.registry)
@@ -346,7 +351,7 @@ export function gatherForRetractionImpl(
           def.hyperschema.body,
           DeltaSet.from(gw.connectionScope({ bound: binding.container })),
           entity,
-          gw.registry,
+          gw.boundSurface(binding).registry,
         );
   if (result.sort !== "hview") throw new Error(`schema ${name} does not evaluate to a hyperview`);
   return result.hview;
@@ -364,7 +369,7 @@ export function resolvedNodeImpl(
   asOf?: number,
   binding?: ConnectionBinding,
 ): ResolvedNode {
-  const def = gw.def(name);
+  const def = gw.def(name, binding); // a bound connection's lens may live only in its container's fold
   const hview = gatherImpl(gw, name, entity, now, asOf, binding);
   const view = applyResolvers(
     def.resolvers,

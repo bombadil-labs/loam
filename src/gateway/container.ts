@@ -875,7 +875,7 @@ export function containerScopeImpl(
 //
 // This is deliberately NARROWER than `subtreeOf` (the admin page's reach), which also follows
 // `inboxOf` edges to answer "what may this person act on". Reach and read are different questions.
-function subtreeUnder(table: ContainerTable, root: string): string[] {
+export function subtreeUnder(table: ContainerTable, root: string): string[] {
   const reach = new Set<string>([root]);
   for (;;) {
     let grew = false;

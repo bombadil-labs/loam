@@ -41,6 +41,7 @@ import {
   type Gateway,
   type QueryResult,
   type RequestContext,
+  NUL,
 } from "../gateway/gateway.js";
 import {
   parseRegistrationInput,
@@ -79,6 +80,7 @@ import { DOC_TOPICS } from "./docs-content.js";
 import { CSP, makeUserDoors, type UserDoorOptions, type UserDoors } from "./session.js";
 import { makeAdminDoor, type AdminDoor } from "./admin.js";
 import { ADMIN_CONTAINER_PATH } from "./admin-pages.js";
+import { refusalKey } from "../gateway/lifecycle.js";
 
 export { type UserDoorOptions } from "./session.js";
 
@@ -434,6 +436,81 @@ const byteDoorOf = (
 // (§12). Never branch this message on the reason.
 const REGISTRATION_REFUSAL = "registration is constitutional: it requires an operator token";
 
+/**
+ * Where a registration publishes (SPEC §58 position 2), decided BY THE NAME, not by the caller.
+ *
+ * Law a bound connection names under its own container path lives on its inbox pool, never in the
+ * primary — the same seam the write path takes through `sinkFor` — and the container's fold is what
+ * serves it, to the container alone. Law the same connection names under a prefix an operator
+ * GRANTED it lands where it always did: the primary, served to everyone, until the slice that
+ * retires `loam grant --verb=register` for connections. Routing every bound identity to its pool
+ * regardless of the name sent granted law into a pool whose fold fenced it out — written, and
+ * served to nobody.
+ *
+ * `toPool` records the decision for the outcome: only a pool publish is answered by the container's
+ * fold, so only a pool publish has its `bound` re-read from there.
+ */
+function registrationRoute(
+  gateway: Gateway,
+  identity: TokenIdentity,
+): { pick: (input: RegistrationInput) => Gateway; toPool: boolean } {
+  const route: { pick: (input: RegistrationInput) => Gateway; toPool: boolean } = {
+    toPool: false,
+    pick: () => gateway,
+  };
+  const binding = identity.binding;
+  if (binding === undefined) return route;
+  const own = `${binding.container}:`;
+  route.pick = (input) => {
+    const programInside = fenceAdmits(own, input.hyperschema.name);
+    const readingInside = fenceAdmits(own, lensNameFor(input.hyperschema, input.schema));
+    if (programInside !== readingInside) {
+      // Half inside the container is under NO one prefix: the fence admitted each name on its
+      // own, but this pair would put container-path law in the PRIMARY, operator-signed and
+      // served store-wide. Refused, as the authority refusal — the caller holds no standing for
+      // this shape, whatever it holds for each name.
+      throw new NotPermittedToRegister(REGISTRATION_REFUSAL);
+    }
+    if (!programInside) return gateway;
+    route.toPool = true;
+    return gateway.poolForBinding(binding);
+  };
+  return route;
+}
+
+/**
+ * SUCCESS MEANS BOUND IN THE CONTAINER'S SURFACE. A pool publish reports whether the POOL bound
+ * the lens, and the pool's fixpoint is not the one a connection is served — its container's fold
+ * runs the same trial against the root's law too, and can refuse what the pool accepted (a name
+ * the operator already serves, a program that will not materialize beside its siblings). Report
+ * the fold's answer, with its reason, rather than the pool's (H7). Everyone else's outcome is
+ * already the served surface's, because their law landed in the reactor being served.
+ */
+function asServedTo(
+  gateway: Gateway,
+  identity: TokenIdentity,
+  outcome: Awaited<ReturnType<typeof performRegistration>>,
+  toPool: boolean,
+): Awaited<ReturnType<typeof performRegistration>> {
+  if (!toPool || identity.binding === undefined || !outcome.bound) return outcome;
+  const surface = gateway.boundSurface(identity.binding);
+  // THIS POOL'S ROW, not any row under the name. The root may serve a lens spelled exactly the
+  // same — the operator is unfenced — and a sibling pool may too; a name match would then report
+  // the connection's law bound while the fold had refused it and served someone else's (H7).
+  const inbox = identity.binding.inbox;
+  const served = surface.registered.some(
+    (r) => r.channel === inbox && (r.lensName ?? r.hyperschema.name) === outcome.lens,
+  );
+  if (served) return outcome;
+  return {
+    ...outcome,
+    bound: false,
+    reason:
+      surface.refused.get(refusalKey(inbox, outcome.lens)) ??
+      `the container's surface did not bind ${outcome.lens}, so it is written and not served`,
+  };
+}
+
 // Thrown for a fence violation so a caller renders it as the AUTHORITY refusal rather than as the
 // shape complaint every other throw from performRegistration becomes.
 class NotPermittedToRegister extends Error {}
@@ -450,14 +527,23 @@ function registerStanding(
   identity: TokenIdentity,
 ): readonly string[] | undefined {
   if (identity.operator === true) return [];
-  if (identity.actor === undefined) return undefined;
+  // THE BINDING IS THE GRANT (§58 position 2). A bound connection names law under its own
+  // container path AND ITS COLON, so `ada:journalx` — a sibling sharing the letters — is outside
+  // the fence, and so is `ada:journal` itself: the fence is what lives UNDER the container.
+  //
+  // Unioned with any grant the connection also holds rather than replacing it, because nothing a
+  // connection can do today may stop working before its replacement has landed. The slice that
+  // retires `loam grant --verb=register` for connections is the one that removes this union.
+  const bound = identity.binding === undefined ? [] : [`${identity.binding.container}:`];
+  if (identity.actor === undefined) return bound.length === 0 ? undefined : bound;
   let author: string;
   try {
     author = authorForSeed(identity.actor);
   } catch {
-    return undefined; // an actor that names no key holds no standing
+    return bound.length === 0 ? undefined : bound; // an actor that names no key holds no grant
   }
-  const prefixes = registerPrefixesOf(gateway.reactor, author, gateway.operatorAuthor);
+  const granted = registerPrefixesOf(gateway.reactor, author, gateway.operatorAuthor);
+  const prefixes = [...granted, ...bound];
   return prefixes.length === 0 ? undefined : prefixes;
 }
 
@@ -532,9 +618,15 @@ function federateAdmits(standing: readonly string[] | undefined, container: stri
 // AND THE FENCE IS NOT THE WHOLE GATE. Two fields of a registration are not namespace problems at
 // all, and no prefix could ever have contained them — see `scopedRegistrationDefect` below.
 function registerFenceAdmits(fence: readonly string[], input: RegistrationInput): boolean {
+  const reading = lensNameFor(input.hyperschema, input.schema);
+  if (reading.includes(NUL)) return false; // the program is guarded at publish; the reading was not
+  // Each name is admitted by ANY prefix the caller holds: a holder of two grants may pair a
+  // program under one with a reading under the other, as it always could — both reach nothing
+  // it does not own. The one pair that must be WHOLE is the container's, and the route refuses
+  // a half-inside pair rather than sending container-path law down the primary road.
   const inside = (name: string): boolean => fence.some((prefix) => fenceAdmits(prefix, name));
   if (!inside(input.hyperschema.name)) return false;
-  if (!inside(lensNameFor(input.hyperschema, input.schema))) return false;
+  if (!inside(reading)) return false;
   return input.entity === undefined || input.entity === schemaEntityFor(input.hyperschema);
 }
 
@@ -585,6 +677,7 @@ async function performRegistration(
   gateway: Gateway,
   raw: unknown,
   fence: readonly string[],
+  route: (input: RegistrationInput) => Gateway = () => gateway,
 ): Promise<{
   registered: string;
   lens: string;
@@ -622,7 +715,7 @@ async function performRegistration(
     if (defect !== undefined) throw new Error(defect);
     if (!registerFenceAdmits(fence, input)) throw new NotPermittedToRegister(REGISTRATION_REFUSAL);
   }
-  const outcome = await gateway.publishRegistration(
+  const outcome = await route(input).publishRegistration(
     input.hyperschema,
     input.schema,
     input.roots,
@@ -982,10 +1075,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       ...(binding === undefined ? {} : { binding }),
       operator: false,
       write: writes,
-      registerPrefixes:
-        gateway === undefined
-          ? []
-          : registerPrefixesOf(gateway.reactor, author, gateway.operatorAuthor),
+      // THE SAME FUNCTION THE DOOR DECIDES WITH. A report of standing that re-derives it beside
+      // the door is a report that can disagree with the door — and it did, once: the door admitted
+      // a bound connection under its container path while this said `[]` (H7).
+      registerPrefixes: gateway === undefined ? [] : (registerStanding(gateway, identity) ?? []),
       federateContainers:
         gateway === undefined
           ? []
@@ -1526,7 +1619,13 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             return;
           }
           try {
-            const outcome = await performRegistration(gateway, params["arguments"] ?? {}, fence);
+            const route = registrationRoute(gateway, identity);
+            const outcome = asServedTo(
+              gateway,
+              identity,
+              await performRegistration(gateway, params["arguments"] ?? {}, fence, route.pick),
+              route.toPool,
+            );
             reply({ content: [{ type: "text", text: JSON.stringify(outcome) }] });
           } catch (err) {
             reply({
@@ -2496,7 +2595,14 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             return;
           }
           try {
-            json(res, 200, await performRegistration(gateway, raw, fence));
+            const route = registrationRoute(gateway, identity);
+            const done = asServedTo(
+              gateway,
+              identity,
+              await performRegistration(gateway, raw, fence, route.pick),
+              route.toPool,
+            );
+            json(res, 200, done);
           } catch (err) {
             if (err instanceof NotPermittedToRegister) {
               json(res, 403, { errors: [err.message] });

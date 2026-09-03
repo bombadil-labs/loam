@@ -30,6 +30,8 @@ import {
   type Primitive,
   type Schema,
 } from "@bombadil/rhizomatic";
+import { readContainerTable, subtreeUnder } from "./container.js";
+import { fenceAdmits } from "./accounts.js";
 import { NUL, type Bound, type Gateway, type RequestContext } from "./gateway.js";
 import { buildGqlSchema } from "./gql.js";
 import {
@@ -432,8 +434,226 @@ function storeBindings(gw: Gateway): Bound[] {
       rows.push({ ...r, origin: "store" as const, channel: standing.name });
     }
   }
+  // AN INBOX POOL'S LAW IS NOT HERE, ON PURPOSE (SPEC §58 position 2, Myk's ruling 2026-09-03: a
+  // bound connection's law serves ONLY its container). The root fold is what every principal's
+  // surface is built from — the operator's, a plain token's, the public door's — so a row here is
+  // served to everyone and evaluated over whatever ground the READER has. A connection's lens over
+  // an entity it cannot itself read would then be served, resolved, to the operator (measured). It
+  // folds instead into the bound surface below, which only a connection bound inside that
+  // container is ever handed.
   return rows;
 }
+
+/**
+ * The five proofs every binding passes before it serves: the registry groups one hyperschema per
+ * program (a rival body throws), a readingless expand can never resolve, the body materializes,
+ * its templates are visible, and the GraphQL names do not collide. ONE derivation, called by the
+ * root replay and by the bound fold, because two copies of a trial drift into two surfaces that
+ * disagree about what binds. Throws with the proximate cause; returns when the candidate may join.
+ */
+function trialBind(gw: Gateway, accepted: readonly Bound[], candidate: Bound): void {
+  const trial = [...accepted, candidate];
+  const registry = SchemaRegistry.build(programHyperschemas(trial), programReadings(trial));
+  assertReadingsNamed(candidate.hyperschema);
+  assertMaterializable(candidate.hyperschema, registry);
+  assertTemplatesVisible(
+    candidate.hyperschema,
+    candidate.mutations,
+    registry,
+    gw.operatorAuthor ?? "loam:specimen",
+  );
+  buildGqlSchema(trial, gw.gqlHooks());
+}
+
+/** What the bound fold answers: the rows a container's surface serves, and why any candidate was left out. */
+export interface BoundFold {
+  readonly registered: readonly Bound[];
+  readonly registry: SchemaRegistry;
+  /**
+   * `refusalKey(pool channel, lens)` → the proximate cause, for every pool candidate the trial
+   * refused. A refusal belongs to one pool's candidate; a lens-only lookup finds nothing.
+   */
+  readonly refused: ReadonlyMap<string, string>;
+  /** Everything the fold depends on, so a cache can tell whether it moved. */
+  readonly key: string;
+}
+
+/**
+ * THE BOUND FOLD (SPEC §58 position 2). The surface a connection bound to `container` is served:
+ * the root's own bound rows — the operator's law is every reader's — PLUS the law published on
+ * the inbox pools composed into that container's subtree, each row fenced to ITS OWN container's
+ * path and colon on all three names the register door fences (the program, the reading, and the
+ * entity), and each passed through the same trial the root replay runs. Nothing here reaches the
+ * root fold, so nothing here is served to anyone outside the container.
+ *
+ * Fenced TWICE on purpose: the door refuses a name outside the container before anything is
+ * written, and this refuses it again for law that reached a pool by some other road — a restore,
+ * a migration, an operator-signed write out of band.
+ */
+export function boundBindingsImpl(
+  gw: Gateway,
+  container: string,
+  held?: { readonly key: string; readonly fold: BoundFold },
+): BoundFold {
+  const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+  const reach = new Set(subtreeUnder(table, container));
+  const candidates: Bound[] = [];
+  for (const [name, inbox] of gw.connectionInboxes) {
+    const owner = table.containers.get(name)?.inboxOf;
+    if (owner === undefined || !reach.has(owner) || inbox.gateway === undefined) continue;
+    const prefix = `${owner}:`;
+    for (const r of readRegistrations(inbox.gateway.reactor, inbox.gateway.operatorAuthor)) {
+      if (!fenceAdmits(prefix, r.hyperschema.name)) continue; // the program
+      if (!fenceAdmits(prefix, lensOf(r))) continue; // the reading
+      if (lensOf(r).includes(NUL)) continue; // a reading name is the gateway's alphabet too
+      if (r.entity !== undefined && r.entity !== schemaEntityFor(r.hyperschema)) continue; // the entity
+      candidates.push({ ...r, origin: "store" as const, channel: name });
+    }
+  }
+  // CONTESTS RESOLVE BY WHO STAKED THE NAME FIRST, never by attach order and never by who touched
+  // it last. Two pools in one container may name one lens. Iterating `connectionInboxes` let a
+  // later registrant on an earlier-attached inbox displace a sibling, and differently after a
+  // reboot. Keying on the LATEST binding let the holder lose the name by republishing — even an
+  // identical republish moved its claim later than the rival's, and nothing it did could win it
+  // back. The first surviving claim keeps the name; ties break on the pool's name.
+  candidates.sort(
+    (a, b) =>
+      (a.firstBoundAt ?? a.boundAt ?? 0) - (b.firstBoundAt ?? b.boundAt ?? 0) ||
+      (a.channel ?? "").localeCompare(b.channel ?? ""),
+  );
+  // THE KEY IS COMPUTED BEFORE ANY TRIAL, or the cache caches nothing: a trial per candidate is
+  // the expensive part, and a key that only exists after it is a receipt, not a shortcut.
+  const key = [
+    ...gw.registered.map((r) => boundKey(r)),
+    NUL,
+    ...candidates.map((r) => `${r.channel ?? ""}${NUL}${boundKey(r)}`),
+  ].join(NUL);
+  if (held !== undefined && held.key === key) return held.fold;
+
+  // THE SORT SETTLES CONTESTS; THE ROUNDS SETTLE DEPENDENCY ORDER, and neither can do the other's
+  // job. A first claim never moves, so a republish cannot lose a name — but for the same reason a
+  // first claim says nothing about a lens's BODY: a lens staked plain and later EVOLVED to expand
+  // into a lens staked after it keeps its early claim, sorts first, and is trialled before the
+  // reading it needs exists. A single pass refused it forever, and no republish could recover it.
+  // So the trial runs in rounds until nothing more binds, as the root replay does — and the rounds
+  // must not reopen the contest the sort closed: a first claimant refused THIS round for want of a
+  // reading holds what it staked through the round, and a later claimant contesting any of it
+  // waits behind it rather than being trialled into an empty slot. Without that hold, a rival
+  // staked second took the name in round one and the holder collided with it in round two, with
+  // no republish able to win it back. What is held is whatever the TRIAL'S OWN collision checks
+  // say the holder and the rival cannot both have: the fold asks `buildGqlSchema` and
+  // `groupPrograms` about the PAIR (`contests`), so the hold cannot drift from the trial. A list
+  // of names written here did drift, three times — two spellings mint one query field, a listing
+  // field is another reading's query field, one program admits one body, and the mutation
+  // namespace has a dozen derived names — and each list let the next rival through. A claimant
+  // refused for good keeps holding: the rival is told whose claim it contests, what the trial
+  // refuses the pair on, and why that claim is refused. Root rows are already trialled and
+  // already serve; a pool row that collides with one loses here exactly as a channel row loses at
+  // root — the nearer ground never displaces the operator's law.
+  //
+  // A refusal is the CANDIDATE'S, keyed by pool and lens (`refusalKey`): two pools refused under
+  // one name are refused for two reasons, and the door hands each pool its own.
+  //
+  // The root replay binds a stored row whose templates alone fail WITHOUT its templates; this fold
+  // does not, so such a row is refused whole here while the pool's own replay serves it template-
+  // less. The door cannot plant one (it refuses invisible templates before writing), only an
+  // out-of-band write can, and the refusal names the template fault.
+  const accepted: Bound[] = [...gw.registered];
+  const reasons = new Map<Bound, string>();
+  // A candidate the ROOT refuses is refused for good — root rows never move inside the fold — and
+  // is told so, whatever else it contests. Asked only about its contests, it was pointed at a
+  // sibling's claim it could hope to see cleared while its own collision with the operator's law
+  // went unnamed.
+  const rootFault = new Map<Bound, string>();
+  // The root builds alone — it passed this very trial whole when it was bound — so that half of
+  // the pair test is asked once, not once per candidate.
+  if (buildsAlone(gw, gw.registered) === undefined)
+    for (const candidate of candidates) {
+      if (buildsAlone(gw, [candidate]) !== undefined) continue; // its fault is its own
+      const fault = buildsAlone(gw, [...gw.registered, candidate]);
+      if (fault !== undefined) rootFault.set(candidate, fault);
+    }
+  let pending = candidates;
+  for (;;) {
+    const still: Bound[] = [];
+    const holders: Bound[] = []; // the earlier claimants refused this round, in claim order
+    let progressed = false;
+    for (const candidate of pending) {
+      const fault = rootFault.get(candidate);
+      if (fault !== undefined) {
+        reasons.set(candidate, fault);
+        holders.push(candidate);
+        still.push(candidate);
+        continue;
+      }
+      const contest = contestedBy(gw, candidate, holders);
+      if (contest !== undefined) {
+        reasons.set(
+          candidate,
+          `lens ${lensOf(candidate)}: an earlier claim, ${lensOf(contest.holder)}, contests it — ${contest.on} — and that claim is refused: ${reasons.get(contest.holder) ?? "did not bind"}`,
+        );
+        holders.push(candidate); // deferred is refused this round: what IT staked is held too
+        still.push(candidate);
+        continue;
+      }
+      try {
+        trialBind(gw, accepted, candidate);
+        accepted.push(candidate);
+        progressed = true;
+      } catch (err) {
+        reasons.set(candidate, err instanceof Error ? err.message : String(err));
+        holders.push(candidate);
+        still.push(candidate);
+      }
+    }
+    pending = still;
+    if (!progressed || pending.length === 0) break;
+  }
+  const refused = new Map<string, string>();
+  for (const left of pending)
+    refused.set(refusalKey(left.channel ?? "", lensOf(left)), reasons.get(left) ?? "did not bind");
+  const registry = SchemaRegistry.build(programHyperschemas(accepted), programReadings(accepted));
+  return { registered: accepted, registry, refused, key };
+}
+
+/**
+ * What the trial refuses the PAIR on, or undefined when it admits both. Asked of the trial's own
+ * checks — one program name, one body (`groupPrograms`); one name per GraphQL field, type, and
+ * mutation (`buildGqlSchema`) — with no registry, because a holder waiting on a reading cannot
+ * be resolved yet and its NAMES are what the rival contests. A row the trial cannot build alone
+ * contests nothing: its fault is its own, and it is refused for it.
+ */
+function buildsAlone(gw: Gateway, rows: readonly Bound[]): string | undefined {
+  try {
+    groupPrograms(rows);
+    buildGqlSchema(rows, gw.gqlHooks());
+    return undefined;
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+
+function contests(gw: Gateway, holder: Bound, rival: Bound): string | undefined {
+  if (buildsAlone(gw, [holder]) !== undefined || buildsAlone(gw, [rival]) !== undefined)
+    return undefined;
+  return buildsAlone(gw, [holder, rival]);
+}
+
+/** The earlier claimant this candidate contests, if one is refused this round. */
+function contestedBy(
+  gw: Gateway,
+  c: Bound,
+  holders: readonly Bound[],
+): { readonly holder: Bound; readonly on: string } | undefined {
+  for (const holder of holders) {
+    const on = contests(gw, holder, c);
+    if (on !== undefined) return { holder, on };
+  }
+  return undefined;
+}
+
+/** The key a bound fold's `refused` map uses: a refusal belongs to one pool's candidate. */
+export const refusalKey = (channel: string, lens: string): string => `${channel}${NUL}${lens}`;
 
 // CROSS-ORIGIN CONTESTS resolve by the declared policy BEFORE the trial fixpoint. Undeclared keeps
 // today's shape whole: root rows enter the fixpoint FIRST, so a channel row contesting a root name
@@ -616,17 +836,7 @@ export function replayRegistrationsImpl(gw: Gateway): void {
     for (const reg of pending) {
       const attempt = (candidate: Bound): boolean => {
         try {
-          const trial = [...accepted, candidate];
-          const registry = SchemaRegistry.build(programHyperschemas(trial), programReadings(trial)); // groups: one hyperschema per program; a rival body throws here
-          assertReadingsNamed(candidate.hyperschema); // a readingless expand can never resolve
-          assertMaterializable(candidate.hyperschema, registry); // reactor.register would throw
-          assertTemplatesVisible(
-            candidate.hyperschema,
-            candidate.mutations,
-            registry,
-            gw.operatorAuthor ?? "loam:specimen",
-          );
-          buildGqlSchema(trial, gw.gqlHooks()); // GraphQL name collisions
+          trialBind(gw, accepted, candidate);
           accepted.push(candidate);
           forgetBindFailure(gw, failureKey(candidate.entity ?? "", lensOf(candidate)));
           return true;

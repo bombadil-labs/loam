@@ -360,15 +360,43 @@ describe("§37 phase 15 — the token exchange", () => {
       }
     ).access_token;
 
-    // The operator-only doors REFUSE the connector token — proof it names no operator identity.
-    for (const door of ["register", "federate"]) {
-      const res = await fetch(`${base}/default/${door}`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify({}),
-      });
-      expect(res.status, `${door} refuses the connector token`).toBe(403);
-    }
+    // The operator-only door REFUSES the connector token — proof it names no operator identity.
+    const fed = await fetch(`${base}/default/federate`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({}),
+    });
+    expect(fed.status, "federate refuses the connector token").toBe(403);
+
+    // `register` STOPPED BEING AN OPERATOR-ONLY DOOR at §58 S2: a bound connection names law under
+    // its own container path, so an empty body now draws a shape complaint rather than the
+    // authority refusal. What the connector still cannot do is shape the ROOT, and that — not the
+    // status code an empty body happens to draw — is what this case was always about.
+    const root = await fetch(`${base}/default/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        hyperschema: {
+          name: "Plant",
+          alg: 1,
+          body: {
+            op: "group",
+            key: "byTargetContext",
+            in: {
+              op: "select",
+              pred: { hasPointer: { targetEntity: { var: "root" } } },
+              in: { op: "mask", policy: "drop", in: "input" },
+            },
+          },
+        },
+        schema: {
+          props: { note: { pick: { order: { byTimestamp: "desc" } } } },
+          default: { pick: { order: { byTimestamp: "desc" } } },
+        },
+        roots: ["plant:1"],
+      }),
+    });
+    expect(root.status, "register refuses a ROOT name from the connector token").toBe(403);
 
     // Positive control: the operator token opens federate (so the 403s are about the identity, not a
     // door that refuses everyone).
