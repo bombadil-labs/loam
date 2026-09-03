@@ -527,21 +527,39 @@ export function boundBindingsImpl(
   ].join(NUL);
   if (held !== undefined && held.key === key) return held.fold;
 
-  // ONE PASS, in first-claim order — and that order IS dependency order, by construction. The root
-  // replay runs fixpoint rounds because an evolution re-stamps a lens later than its dependents;
-  // here the sort keys on the FIRST claim, which an evolution never moves, and a dependent cannot
-  // have been staked before its dependency existed (the pool's own door refuses it). Root rows are
-  // already trialled and already serve; a pool row that collides with one loses here exactly as a
-  // channel row loses at root — the nearer ground never displaces the operator's law.
+  // THE SORT SETTLES CONTESTS; THE ROUNDS SETTLE DEPENDENCY ORDER, and neither can do the other's
+  // job. A first claim never moves, so a republish cannot lose a name — but for the same reason a
+  // first claim says nothing about a lens's BODY: a lens staked plain and later EVOLVED to expand
+  // into a lens staked after it keeps its early claim, sorts first, and is trialled before the
+  // reading it needs exists. A single pass refused it forever, and no republish could recover it
+  // (an earlier draft argued first-claim order was dependency order "by construction"; that held
+  // for a name and not for a body). So the trial runs in rounds until nothing more binds, as the
+  // root replay does. Root rows are already trialled and already serve; a pool row that collides
+  // with one loses here exactly as a channel row loses at root — the nearer ground never displaces
+  // the operator's law.
   const accepted: Bound[] = [...gw.registered];
-  const refused = new Map<string, string>();
-  for (const candidate of candidates) {
-    try {
-      trialBind(gw, accepted, candidate);
-      accepted.push(candidate);
-    } catch (err) {
-      refused.set(lensOf(candidate), err instanceof Error ? err.message : String(err));
+  const reasons = new Map<string, string>();
+  let pending = candidates;
+  for (;;) {
+    const still: Bound[] = [];
+    let progressed = false;
+    for (const candidate of pending) {
+      try {
+        trialBind(gw, accepted, candidate);
+        accepted.push(candidate);
+        progressed = true;
+      } catch (err) {
+        reasons.set(lensOf(candidate), err instanceof Error ? err.message : String(err));
+        still.push(candidate);
+      }
     }
+    if (!progressed || still.length === 0) break;
+    pending = still;
+  }
+  const refused = new Map<string, string>();
+  for (const left of pending) {
+    if (accepted.includes(left)) continue;
+    refused.set(lensOf(left), reasons.get(lensOf(left)) ?? "did not bind");
   }
   const registry = SchemaRegistry.build(programHyperschemas(accepted), programReadings(accepted));
   return { registered: accepted, registry, refused, key };

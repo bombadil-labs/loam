@@ -18,29 +18,30 @@
 // so what a boot needs is exactly what S1 proves.
 
 //
-// RAILS-RED on origin/main, this file copied in: 14 red, 2 green — 16 cases. Both greens are
+// RAILS-RED on origin/main, this file copied in: 15 red, 2 green — 17 cases. Both greens are
 // CONTROLS and say so: the door-fence case (on main a connection may register nothing, so every
 // name outside the fence is refused for a different reason) and the two-grant case (it pins that
 // a plain grant-holder's mixed pair still lands, which main already did). Each pins that this
 // slice did not widen or narrow something; neither proves the slice, and neither pads the count.
 //
-// REVERT PROBES, MEASURED against this file as it stands — 16 cases. Re-measure when you add one.
-//   the binding grants no register fence                          → 13 red,  3 green
-//   the fence drops the COLON                                     →  3 red, 13 green
-//   every bound identity is routed to its pool (granted law dies) →  1 red, 15 green
-//   container law is routed to the PRIMARY                        → 11 red,  5 green
-//   a half-inside pair takes the primary road                     →  1 red, 15 green
-//   the FOLD fences none of its three names                       →  1 red, 15 green
-//   the fold drops the PROGRAM fence alone                        →  1 red, 15 green
-//   the fold drops the READING fence alone                        →  1 red, 15 green
-//   the fold drops the ENTITY fence alone                         →  1 red, 15 green
-//   inbox law back in the ROOT fold, with a root refold           →  8 red,  8 green
-//   the query door ignores the binding                            →  8 red,  8 green
-//   the door reports the pool's answer, not the container's       →  2 red, 14 green
-//   the door matches ANY row under the name, not this pool's      →  1 red, 15 green
-//   whoami re-derives standing beside the door                    →  2 red, 14 green
-//   the listing groups the ROOT's rows for a bound reader         →  1 red, 15 green
-//   NUL admitted in a READING name, at door and fold              →  1 red, 15 green
+// REVERT PROBES, MEASURED against this file as it stands — 17 cases. Re-measure when you add one.
+//   the binding grants no register fence                          → 14 red,  3 green
+//   the fence drops the COLON                                     →  3 red, 14 green
+//   every bound identity is routed to its pool (granted law dies) →  1 red, 16 green
+//   container law is routed to the PRIMARY                        → 11 red,  6 green
+//   a half-inside pair takes the primary road                     →  1 red, 16 green
+//   the FOLD fences none of its three names                       →  1 red, 16 green
+//   the fold drops the PROGRAM fence alone                        →  1 red, 16 green
+//   the fold drops the READING fence alone                        →  1 red, 16 green
+//   the fold drops the ENTITY fence alone                         →  1 red, 16 green
+//   inbox law back in the ROOT fold, with a root refold           →  8 red,  9 green
+//   the query door ignores the binding                            →  9 red,  8 green
+//   the door reports the pool's answer, not the container's       →  2 red, 15 green
+//   the door matches ANY row under the name, not this pool's      →  1 red, 16 green
+//   whoami re-derives standing beside the door                    →  2 red, 15 green
+//   the listing groups the ROOT's rows for a bound reader         →  1 red, 16 green
+//   NUL admitted in a READING name, at door and fold              →  1 red, 16 green
+//   the fold trials in ONE pass instead of to a fixpoint          →  1 red, 16 green
 // Ten of these isolate exactly one case, which is what makes them worth keeping. The root-fold
 // probe is restored WHOLE (loop and refold): the loop alone leaves every case green, which is how
 // an earlier draft of these probes misread a hollow rail as a sound one. The contest between two
@@ -557,6 +558,45 @@ describe("§58 position 2 — the binding is the register grant, and the law ser
     expect((await register(base, ada, envelope("ada:journal:a", "note2"))).status).toBe(200);
     expect(await serves(base, ada, "ada_journal_a")).toBe(true);
     expect(await serves(base, ada, "ada_journal_b")).toBe(true);
+    await closeAll();
+  });
+
+  it("binds a lens EVOLVED to depend on one staked after it — the fold runs to a fixpoint", async () => {
+    // A first claim never moves, and that is the point of it for contests. It is also why it says
+    // nothing about a lens's BODY: `b` is staked plain, then `a`, then `b` is evolved to expand
+    // into `a`. Sorted by first claim, `b` is trialled before `a` exists in the trial and is
+    // refused — and a single pass refused it FOREVER, since no republish moves a first claim.
+    // Rounds bind `a`, then `b`. This is the ordinary way a lens grows, and it bound on the base.
+    const { base } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    expect((await register(base, ada, envelope("ada:journal:b"))).status).toBe(200);
+    expect((await register(base, ada, envelope("ada:journal:a"))).status).toBe(200);
+    const evolved = await register(base, ada, {
+      ...(envelope("ada:journal:b") as Record<string, unknown>),
+      hyperschema: {
+        name: "ada:journal:b",
+        alg: 1,
+        body: {
+          op: "expand",
+          role: { exact: "grows" },
+          schema: "ada:journal:a",
+          reading: "ada:journal:a",
+          in: {
+            op: "group",
+            key: "byTargetContext",
+            in: {
+              op: "select",
+              pred: { hasPointer: { targetEntity: { var: "root" } } },
+              in: { op: "mask", policy: "drop", in: "input" },
+            },
+          },
+        },
+      },
+    });
+    expect(evolved.status).toBe(200);
+    expect(((await evolved.json()) as { bound: boolean }).bound).toBe(true);
+    expect(await serves(base, ada, "ada_journal_b")).toBe(true);
+    expect(await serves(base, ada, "ada_journal_a")).toBe(true);
     await closeAll();
   });
 

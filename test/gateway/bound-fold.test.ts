@@ -14,23 +14,29 @@
 // pool name, or a comparator that sorted by name alone would pass. So the pool that registers
 // first is chosen at runtime to be the one with the lexically LATER inbox name.
 //
-// REVERT PROBES, MEASURED on these 4 cases: drop the candidate sort → 1 red, 3 green (attach order
+// The sort settles the contest; it does not settle DEPENDENCY order, and the last case is why. A
+// first claim never moves — but a dependency's first claim can be STRUCK, which moves its claim
+// later than a dependent's, and (in derived-standing) a lens can be evolved to expand into one
+// staked after it. The fold trials in rounds to a fixpoint for both.
+//
+// REVERT PROBES, MEASURED on these 5 cases: drop the candidate sort → 1 red, 4 green (attach order
 // happens to agree with the right answer for one of the two orderings, so exactly one of the
 // attach-order and re-attach cases sees it); key the sort on `boundAt` (the latest binding)
-// instead of the first → 2 red, 2 green (the holder's own republish loses the name, and the
+// instead of the first → 2 red, 3 green (the holder's own republish loses the name, and the
 // re-attach case's evolution moves the holder's latest binding too; the rival's republish never
-// wins it, under either key).
+// wins it, under either key); trial in ONE pass instead of to a fixpoint → 1 red, 4 green (the
+// struck-dependency case, and the evolved-dependent case in derived-standing).
 //
 // RAILS-RED on origin/main: every case red, because `boundSurface` does not exist there. An
 // honest red and a WEAK one; the probes above are the measurement.
 
 import { describe, expect, it } from "vitest";
-import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
+import { authorForSeed, parseTerm, signClaims } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { containerClaims } from "../../src/gateway/container.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
-import { lensOf } from "../../src/gateway/registration.js";
+import { lensOf, readRegistrationVersions } from "../../src/gateway/registration.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
@@ -144,6 +150,60 @@ describe("§58 — two pools in one container contest a name by who staked it fi
     expect(gw.boundSurface({ container: HOME, inbox: second }).refused.get(LENS)).toMatch(
       /collides/,
     );
+  });
+
+  it("a dependency whose FIRST binding is struck still sorts where its dependent needs it", async () => {
+    // `firstBoundAt` is the first SURVIVING claim. Strike a dependency's earliest binding out of
+    // band (an operator-signed negation in the pool — the road the fold's header says it fences)
+    // and its first claim moves later than its dependent's. Rounds bind the dependent anyway.
+    const { gw, first } = await twoPools();
+    const p = pool(gw, first);
+    const A = "home:alice:a";
+    const B = "home:alice:b";
+    const expandsIntoA = {
+      ...PLANT,
+      name: B,
+      body: parseTerm({
+        op: "expand",
+        role: { exact: "grows" },
+        schema: A,
+        reading: A,
+        in: {
+          op: "group",
+          key: "byTargetContext",
+          in: {
+            op: "select",
+            pred: { hasPointer: { targetEntity: { var: "root" } } },
+            in: { op: "mask", policy: "drop", in: "input" },
+          },
+        },
+      }),
+    };
+    await p.publishRegistration({ ...PLANT, name: A }, { ...PLANT_POLICY, name: A }, [FERN]);
+    await p.publishRegistration(expandsIntoA, { ...PLANT_POLICY, name: B }, [FERN]);
+    await p.publishRegistration(
+      { ...PLANT, name: A },
+      { ...PLANT_POLICY, name: A, props: new Map([["watered", PLANT_POLICY.default]]) },
+      [FERN],
+    ); // evolve A: a later binding
+    const firstA = readRegistrationVersions(p.reactor, p.operatorAuthor)
+      .filter((v) => v.lensName === A)
+      .sort((x, y) => x.timestamp - y.timestamp)[0]!;
+    await p.append([
+      signClaims(
+        {
+          timestamp: p.nextTimestamp(),
+          author: OP,
+          pointers: [
+            { role: "negates", target: { kind: "delta", deltaRef: { delta: firstA.deltaId } } },
+          ],
+        },
+        OP_SEED,
+      ),
+    ]);
+    const surface = gw.boundSurface({ container: HOME, inbox: first });
+    expect(surface.registered.map(lensOf)).toEqual(expect.arrayContaining([A, B]));
+    expect(surface.refused.has(B)).toBe(false);
   });
 
   it("the rival does not take the name by republishing", async () => {
