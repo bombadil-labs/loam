@@ -18,7 +18,8 @@
   "id": "T263",
   "rails": [
     "test/gateway/leeway-declaration.test.ts",
-    "test/gateway/leeway-fit.test.ts"
+    "test/gateway/leeway-fit.test.ts",
+    "test/server/derived-standing.test.ts"
   ],
   "status": "todo",
   "title": "§58 S2 — the container tools and derived standing"
