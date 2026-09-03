@@ -18,21 +18,24 @@
 // not reopen the contest. A first claim never moves — but a dependency's first claim can be
 // STRUCK, which moves it later than a dependent's, and (in derived-standing) a lens can be evolved
 // to expand into one staked after it. So the fold trials in rounds to a fixpoint. And a holder
-// refused in a round for want of a reading keeps its name through that round: trialled into the
-// gap, a rival staked second took the name and the holder collided with it a round later. A
-// refusal belongs to one pool's candidate (`refusalKey`), so two pools refused under one name are
-// each told their own fault.
+// refused in a round for want of a reading keeps what it STAKED through that round: trialled into
+// the gap, a rival staked second took the name and the holder collided with it a round later.
+// What is held is every name the trial contests, not the lens string — two spellings mint one
+// query field, `x`'s listing field is `xs`'s query field, and one program name admits one body —
+// and a shared program is a contest only under a rival body, since the same body under another
+// reading is a sibling the trial admits. A refusal belongs to one pool's candidate
+// (`refusalKey`), so two pools refused under one name are each told their own fault.
 //
-// REVERT PROBES, MEASURED on these 7 cases: drop the candidate sort → 1 red, 6 green (attach order
-// happens to agree with the right answer for one of the two orderings, so exactly one of the
-// attach-order and re-attach cases sees it); key the sort on `boundAt` (the latest binding)
-// instead of the first → 3 red, 4 green (the holder's own republish loses the name, the re-attach
-// case's evolution moves the holder's latest binding, and the holder-through-rounds case loses to
-// the rival; the rival's republish never wins it, under either key); trial in ONE pass instead of
-// to a fixpoint → 2 red, 5 green (the struck-dependency case and the holder-through-rounds case,
-// plus the evolved-dependent case in derived-standing); drop the hold within a round → 2 red,
-// 5 green (the rival takes the name in round one; the two-faults case then has no second fault to
-// report); share one reason per lens across pools → 1 red, 6 green (the two-faults case).
+// REVERT PROBES, MEASURED on these 11 cases:
+//   drop the candidate sort                         →  1 red, 10 green
+//   key the sort on `boundAt` (the latest binding)  →  6 red,  5 green
+//   trial in ONE pass instead of to a fixpoint      →  5 red,  6 green (+1 in derived-standing)
+//   drop the hold within a round                    →  5 red,  6 green
+//   hold on the lens string alone                   →  3 red,  8 green (field, listing, program)
+//   drop the same-body program exception            →  1 red, 10 green (the sibling case)
+//   share one reason per lens across pools          →  1 red, 10 green (the two-faults case)
+// The no-sort probe reds one case because attach order happens to agree with the right answer
+// for one of the two orderings, so exactly one of the attach-order and re-attach cases sees it.
 //
 // RAILS-RED on origin/main: every case red, because `boundSurface` does not exist there. An
 // honest red and a WEAK one; the probes above are the measurement.
@@ -150,9 +153,44 @@ const strike = (p: Gateway, deltaId: string): Promise<unknown> =>
       OP_SEED,
     ),
   ]);
-const winner = (gw: Gateway, asker: string): string | undefined =>
-  gw.boundSurface({ container: HOME, inbox: asker }).registered.find((r) => lensOf(r) === LENS)
+const servedBy = (gw: Gateway, asker: string, lens: string): string | undefined =>
+  gw.boundSurface({ container: HOME, inbox: asker }).registered.find((r) => lensOf(r) === lens)
     ?.channel;
+const winner = (gw: Gateway, asker: string): string | undefined => servedBy(gw, asker, LENS);
+/** A program body that is not PLANT's: the same group, no select beneath it. */
+const OTHER_BODY = parseTerm({
+  op: "group",
+  key: "byTargetContext",
+  in: { op: "mask", policy: "drop", in: "input" },
+});
+/** Stake `lens` on pool `inbox` under program `program` with body `body`. */
+const stake = (
+  gw: Gateway,
+  inbox: string,
+  lens: string,
+  program = lens,
+  body: typeof PLANT.body = PLANT.body,
+): Promise<unknown> =>
+  pool(gw, inbox).publishRegistration(
+    { ...PLANT, name: program, body },
+    { ...PLANT_POLICY, name: lens },
+    [FERN],
+  );
+/** The holder stakes `dep` and evolves `lens` to expand into it — the ordinary way a lens grows. */
+const growInto = async (
+  gw: Gateway,
+  inbox: string,
+  lens: string,
+  dep: string,
+  program = lens,
+): Promise<void> => {
+  await stake(gw, inbox, dep);
+  await pool(gw, inbox).publishRegistration(
+    expanding(program, dep),
+    { ...PLANT_POLICY, name: lens },
+    [FERN],
+  );
+};
 
 describe("§58 — two pools in one container contest a name by who staked it first", () => {
   it("the first registrant keeps the name, whichever pool was attached or sorts first", async () => {
@@ -279,6 +317,83 @@ describe("§58 — two pools in one container contest a name by who staked it fi
     expect(refused.get(refusalKey(first, LENS))).not.toMatch(/earlier claim/);
     expect(refused.get(refusalKey(second, LENS))).toMatch(/^lens home:alice:x: an earlier claim/);
     expect(winner(gw, second)).toBeUndefined();
+  });
+
+  it("the hold covers the QUERY FIELD: two spellings that mint one field", async () => {
+    // `home:alice:a:b` and `home:alice:a_b` are two readings and one GraphQL field. Held by the
+    // lens string alone, the holder's evolution let the other spelling take the field in round
+    // one, and the holder collided with it in round two.
+    const { gw, first, second } = await twoPools();
+    const AB = "home:alice:a:b";
+    const A_B = "home:alice:a_b";
+    await stake(gw, first, AB);
+    await stake(gw, second, A_B);
+    expect(servedBy(gw, first, AB)).toBe(first); // the sort's answer, before any evolution
+    await growInto(gw, first, AB, "home:alice:dep");
+    for (const asker of [first, second]) {
+      expect(servedBy(gw, asker, AB), `asked from ${asker}`).toBe(first);
+      expect(servedBy(gw, asker, A_B)).toBeUndefined();
+      expect(
+        gw.boundSurface({ container: HOME, inbox: asker }).refused.get(refusalKey(second, A_B)),
+      ).toMatch(/collides|earlier claim/);
+    }
+  });
+
+  it("the hold covers the LISTING FIELD: `x`'s listing field is `xs`'s query field", async () => {
+    const { gw, first, second } = await twoPools();
+    const XS = `${LENS}s`;
+    await stake(gw, first, LENS);
+    await stake(gw, second, XS);
+    expect(winner(gw, first)).toBe(first);
+    await growInto(gw, first, LENS, "home:alice:dep");
+    expect(winner(gw, second)).toBe(first);
+    expect(servedBy(gw, second, XS)).toBeUndefined();
+    expect(
+      gw.boundSurface({ container: HOME, inbox: second }).refused.get(refusalKey(second, XS)),
+    ).toMatch(/collides|earlier claim/);
+  });
+
+  it("the hold covers the PROGRAM: a rival body under the holder's program name", async () => {
+    // One program name admits one body. `second` stakes the same program under another reading
+    // with a rival body; the holder's evolution must not hand the program to it.
+    const { gw, first, second } = await twoPools();
+    const P = "home:alice:p";
+    await stake(gw, first, "home:alice:p1", P);
+    await stake(gw, second, "home:alice:p2", P, OTHER_BODY);
+    expect(servedBy(gw, first, "home:alice:p1")).toBe(first);
+    expect(servedBy(gw, first, "home:alice:p2")).toBeUndefined();
+    await growInto(gw, first, "home:alice:p1", "home:alice:dep", P);
+    for (const asker of [first, second]) {
+      expect(servedBy(gw, asker, "home:alice:p1"), `asked from ${asker}`).toBe(first);
+      expect(servedBy(gw, asker, "home:alice:p2")).toBeUndefined();
+      expect(
+        gw
+          .boundSurface({ container: HOME, inbox: asker })
+          .refused.get(refusalKey(second, "home:alice:p2")),
+      ).toMatch(/DIFFERENT bodies|earlier claim/);
+    }
+  });
+
+  it("a sibling reading of the SAME body is not held behind a claimant the root blocks", async () => {
+    // The program axis is a contest only under a rival body. `first`'s reading collides with a
+    // root lens and never binds; `second` shares the program with the same body under a reading
+    // of its own, and the trial admits it. Held on the program name alone, it never bound.
+    const { gw, first, second } = await twoPools();
+    const P = "home:alice:p";
+    await gw.publishRegistration(
+      { ...PLANT, name: "home:alice:q" },
+      { ...PLANT_POLICY, name: "home:alice:p1" },
+      [FERN],
+    );
+    await stake(gw, first, "home:alice:p1", P);
+    await stake(gw, second, "home:alice:p2", P);
+    expect(servedBy(gw, second, "home:alice:p2")).toBe(second);
+    expect(servedBy(gw, first, "home:alice:p1")).toBeUndefined(); // the root serves that field
+    expect(
+      gw
+        .boundSurface({ container: HOME, inbox: first })
+        .refused.get(refusalKey(first, "home:alice:p1")),
+    ).toMatch(/collides/);
   });
 
   it("the rival does not take the name by republishing", async () => {
