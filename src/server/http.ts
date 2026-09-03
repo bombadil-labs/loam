@@ -78,6 +78,7 @@ import {
   inboxName,
   openerStands,
   readContainerTable,
+  receivesNow,
 } from "../gateway/container.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
 import { readSeed, readUserSeed, userSeedPath } from "../cli/config.js";
@@ -642,7 +643,9 @@ function channelAdmits(
 ): boolean {
   return identity.binding === undefined
     ? federateAdmits(standing, channel.into)
-    : channel.openedFrom === identity.binding.inbox && openerStands(gateway, channel);
+    : channel.openedFrom === identity.binding.inbox &&
+        openerStands(gateway, channel) &&
+        receivesNow(readContainerTable(gateway.reactor, gateway.operatorAuthor), channel.into);
 }
 
 function federateAdmits(standing: readonly string[] | undefined, container: string): boolean {

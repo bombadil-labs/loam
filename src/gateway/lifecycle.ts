@@ -30,7 +30,7 @@ import {
   type Primitive,
   type Schema,
 } from "@bombadil/rhizomatic";
-import { readContainerTable, subtreeUnder, openerStands } from "./container.js";
+import { openerStands, readContainerTable, receivesNow, subtreeUnder } from "./container.js";
 import { fenceAdmits } from "./accounts.js";
 import { NUL, type Bound, type Gateway, type RequestContext } from "./gateway.js";
 import { buildGqlSchema } from "./gql.js";
@@ -520,6 +520,7 @@ export function boundBindingsImpl(
   for (const standing of gw.channelStatus()) {
     if (standing.openedBy === undefined || !reach.has(standing.openedBy)) continue;
     if (!openerStands(gw, standing)) continue; // the cascade: a revoked opener's channel serves nobody
+    if (!receivesNow(table, standing.into)) continue; // and one whose container stopped receiving
     const pool = gw.channelPools.get(standing.name)?.gateway;
     if (pool === undefined) continue;
     for (const r of readRegistrations(pool.reactor, pool.operatorAuthor)) {

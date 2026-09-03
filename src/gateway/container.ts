@@ -430,9 +430,10 @@ export interface ResolvedContainer {
    * `SEALED_LEEWAY`. A reader cannot forget to default, and there is no `undefined` here for
    * anyone to read as permission.
    *
-   * IT IS NOT YET WEIGHED. Nothing calls `leewayFits` against a parent's delegation terms on any
-   * path, so this is what the container ASKED FOR, not what it has been granted. The slice that
-   * enforces the one rule is the one that may call it "in force".
+   * IT IS WHAT THE CONTAINER ASKED FOR, not what it has. The one rule is weighed twice, and
+   * neither reading is here: `containerDefect` refuses a declaration that does not fit the terms
+   * above it, and `governingLeeway` narrows what stands by those terms at every depth. Ask it
+   * for the leeway in force; this field is the ask.
    */
   readonly leeway: Leeway;
   /**
@@ -944,45 +945,109 @@ export function governingLeeway(
   if (host === name) return { at: name, leeway: SEALED_LEEWAY };
   const up = (at: string): string | undefined =>
     at.includes(":") ? at.slice(0, at.lastIndexOf(":")) : undefined;
-  let found: { readonly at: string; readonly leeway: Leeway } | undefined;
-  let at: string | undefined = host ?? name;
-  for (; at !== undefined; at = up(at)) {
-    const declared = table.containers.get(at);
-    if (declared !== undefined && declared.leewayDeclared) {
-      found = { at, leeway: declared.leeway };
-      break;
-    }
-    if (at === ceiling) return undefined;
+  // The levels this name answers to, listed TOP DOWN. A ceiling stops the list lower; the
+  // person's home — a name with no colon — is the top they set rather than a room with terms,
+  // and is skipped below.
+  const levels: string[] = [];
+  for (let at: string | undefined = host ?? name; at !== undefined; at = up(at)) {
+    levels.push(at);
+    if (at === ceiling) break;
   }
-  if (found === undefined) return undefined;
-  // THE ONE RULE, READ: what a container declared is what it ASKED FOR; what it has is that,
-  // narrowed by the terms of every ancestor that declared a leeway above it. A parent tightened
-  // after its child declared narrows the child on the next request. No subtree exceeds what the
-  // person set at its top, and nothing here ever widens what a child asked for. The person's home
-  // (a name with no colon) is that top, not a room with terms: it narrows nothing below it.
-  let effective = found.leeway;
-  for (let above = up(found.at); above !== undefined && above.includes(":"); above = up(above)) {
-    const ancestor = table.containers.get(above);
-    if (ancestor === undefined || !ancestor.leewayDeclared) continue;
-    // Under `delegate: off` the ancestor's OWN switches are the terms: nothing below it may
-    // exceed it, and what a child asked for is never widened, only narrowed.
-    effective = narrowedBy(
-      effective,
-      ancestor.leeway.delegate === "off" ? ancestor.leeway : ancestor.leeway.delegate,
-    );
+  levels.reverse();
+
+  // THE ONE RULE, READ — AND READ AT EVERY DEPTH. What a container declared is what it ASKED FOR;
+  // what it HAS is that, narrowed by the terms IN FORCE at its own level: the terms its parent
+  // delegates, themselves already narrowed by everything above. Each step down DESCENDS those
+  // terms by one level (`"same"` holds them still, `"off"` seals), so a person who wrote terms
+  // about grandchildren governs grandchildren. Narrowing by each ancestor's TOP level at every
+  // depth did not: a parent tightened about its grandchildren left every grandchild untouched,
+  // and a fresh one was weighed at declaration against its parent's stale written terms. The
+  // narrowed `delegate` is what `leewayFits` reads, so the two halves of the rule agree.
+  //
+  // A container that declared no leeway inherits what is in force, exactly. Nothing here ever
+  // widens what a child asked for.
+  let at: string | undefined;
+  let effective: Leeway | undefined;
+  let inForce: Terms | undefined;
+  for (const level of levels) {
+    const declared = table.containers.get(level);
+    const asked = declared?.leewayDeclared === true ? declared.leeway : effective;
+    if (asked === undefined) continue; // nothing above here has spoken yet
+    if (declared?.leewayDeclared === true) at = level;
+    effective = inForce === undefined ? asked : narrowedBy(asked, inForce);
+    // THE HOME IS THE TOP THE PERSON SETS, NOT A ROOM WITH TERMS. What it declares is inherited
+    // by a subtree that declares nothing of its own, but it sets no terms, so a container the
+    // person declared directly beneath it IS what they set at the top and is narrowed by nothing.
+    inForce = !level.includes(":")
+      ? undefined
+      : effective.delegate === "off"
+        ? sealedTerms(effective)
+        : effective.delegate;
   }
-  return { at: found.at, leeway: effective };
+  return effective === undefined || at === undefined ? undefined : { at, leeway: effective };
 }
 
-/** A leeway narrowed by the terms above it: each switch needs the term's leave, the envelope no larger. */
+/** The terms a container that delegates NOTHING sets below it: its own switches, and no further. */
+const sealedTerms = (leeway: Leeway): Terms => ({
+  receive: leeway.receive,
+  offer: leeway.offer,
+  publish: leeway.publish,
+  envelope: leeway.envelope,
+  delegate: "off",
+});
+
+/**
+ * A leeway narrowed by the terms in force at its level: each switch needs the term's leave, the
+ * envelope is no larger, and what it may delegate is its own chain narrowed by the chain those
+ * terms allow one level down.
+ */
 function narrowedBy(leeway: Leeway, terms: Terms): Leeway {
+  const below = terms.delegate === "same" ? terms : terms.delegate;
   return {
     receive: leeway.receive && terms.receive,
     offer: leeway.offer && terms.offer,
     publish: leeway.publish && terms.publish,
     envelope: smallerEnvelope(leeway.envelope, terms.envelope),
-    delegate: leeway.delegate,
+    delegate:
+      leeway.delegate === "off" || below === "off" ? "off" : narrowTerms(leeway.delegate, below),
   };
+}
+
+/**
+ * Two chains of terms, narrowed into one: the switches need both sides' leave, the envelope is the
+ * smaller, and the chains below are narrowed together.
+ *
+ * TERMINATION. `"off"` on either side ends it; `"same"` on BOTH ends it, since terms that carry
+ * themselves down are their own fixed point. Otherwise at least one side descends into a strictly
+ * shorter written chain each step, so the walk is bounded by the deeper of the two as written. The
+ * depth guard below is belt for that brace, and it fails CLOSED.
+ */
+function narrowTerms(own: Terms, allowed: Terms, depth = 0): Terms {
+  const mine = own.delegate === "same" ? own : own.delegate;
+  const theirs = allowed.delegate === "same" ? allowed : allowed.delegate;
+  const below: "off" | "same" | Terms =
+    mine === "off" || theirs === "off" || depth >= 32
+      ? "off"
+      : own.delegate === "same" && allowed.delegate === "same"
+        ? "same"
+        : narrowTerms(mine, theirs, depth + 1);
+  return {
+    receive: own.receive && allowed.receive,
+    offer: own.offer && allowed.offer,
+    publish: own.publish && allowed.publish,
+    envelope: smallerEnvelope(own.envelope, allowed.envelope),
+    delegate: below,
+  };
+}
+
+/**
+ * Does `into` still receive? The switch a container had when a channel opened is not the switch it
+ * has now, and a leeway change is a delta the next request obeys (SPEC §58 position 4) — so the
+ * fold and the doors ask again, exactly as the open request asked. An absent leeway is every
+ * switch off, here as everywhere.
+ */
+export function receivesNow(table: ContainerTable, into: string): boolean {
+  return governingLeeway(table, into)?.leeway.receive === true;
 }
 
 /**
@@ -995,7 +1060,10 @@ export function openerStands(
   gw: Gateway,
   channel: { readonly openedBy?: string; readonly openedFrom?: string },
 ): boolean {
-  if (channel.openedFrom === undefined) return true;
+  // A record that names an OPENER but no binding is a bound channel this cascade cannot weigh —
+  // one stamped before the binding was recorded. It fails CLOSED, matching the door, which admits
+  // only the inbox the record names: served to nobody rather than served to everybody.
+  if (channel.openedFrom === undefined) return channel.openedBy === undefined;
   const inbox = gw.connectionInboxes.get(channel.openedFrom)?.gateway;
   if (inbox === undefined) return false;
   const stem = `inbox:${channel.openedBy ?? ""}:`;

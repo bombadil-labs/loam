@@ -2060,10 +2060,16 @@ export function keepSyncingImpl(gw: Gateway, opts: { everyMs?: number } = {}): S
   let running: Promise<void> = Promise.resolve();
 
   const tick = async (): Promise<void> => {
+    // Read every record ONCE per tick: `channelStatus` walks the whole ground, and asking it per
+    // channel made the tick quadratic in the store (H8).
+    const records = new Map(gw.channelStatus().map((s) => [s.name, s]));
     for (const channel of [...gw.federationChannels.values()]) {
       // THE CASCADE: a channel whose opener no longer stands is not synced — its record stands,
-      // untouched, but nothing it would receive is served and nothing more is pulled.
-      if (!openerStands(gw, gw.channelStatus(channel.name)[0] ?? {})) continue;
+      // untouched, but nothing it would receive is served and nothing more is pulled. A channel
+      // with no record at all does not stand either: it was struck between ticks, and defaulting
+      // it to the person's own would sync what the store no longer knows about.
+      const record = records.get(channel.name);
+      if (record === undefined || !openerStands(gw, record)) continue;
       if (stopped) return;
       try {
         await channel.sync();
