@@ -25,6 +25,8 @@
 //   the size composes OVER the operator's ceiling           → 1 red, 3 green
 //   the size read once at open, not on every resolve        → 1 red, 3 green
 //   the walk climbs by name only, never by a declared edge  → 1 red, 3 green
+// Every size is asserted by number under a wide ceiling; a mutant that moved medium's slots by
+// one survived until it was.
 // A fifth probe measured a clause DEAD and it was deleted rather than kept: metering a pool
 // because a size governs it changed nothing any case could see, since a channel pool is untrusted
 // and metered already. The shared walk (`governingLeeway`) also serves the receive door; that
@@ -171,6 +173,12 @@ describe("§58 — the walls", () => {
       maxConcurrentRenders: 16,
       renderTimeoutMs: 2000,
       maxMemoryMb: 512,
+    });
+    await declare(gateway, "ada:journal", { ...SEALED_LEEWAY, receive: true, envelope: "medium" });
+    expect(envelopeOf(gateway, pool), "medium under a wide ceiling").toEqual({
+      maxConcurrentRenders: 8,
+      renderTimeoutMs: 1000,
+      maxMemoryMb: 256,
     });
     await declare(gateway, "ada:journal", { ...SEALED_LEEWAY, receive: true, envelope: "small" });
     expect(envelopeOf(gateway, pool), "small under a wide ceiling").toEqual(
