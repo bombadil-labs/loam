@@ -80,6 +80,7 @@ import { DOC_TOPICS } from "./docs-content.js";
 import { CSP, makeUserDoors, type UserDoorOptions, type UserDoors } from "./session.js";
 import { makeAdminDoor, type AdminDoor } from "./admin.js";
 import { ADMIN_CONTAINER_PATH } from "./admin-pages.js";
+import { refusalKey } from "../gateway/lifecycle.js";
 
 export { type UserDoorOptions } from "./session.js";
 
@@ -505,7 +506,7 @@ function asServedTo(
     ...outcome,
     bound: false,
     reason:
-      surface.refused.get(outcome.lens) ??
+      surface.refused.get(refusalKey(inbox, outcome.lens)) ??
       `the container's surface did not bind ${outcome.lens}, so it is written and not served`,
   };
 }

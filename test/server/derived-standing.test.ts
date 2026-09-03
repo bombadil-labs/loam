@@ -517,13 +517,12 @@ describe("§58 position 2 — the binding is the register grant, and the law ser
     await closeAll();
   });
 
-  it("binds a dependent lens whose dependency was EVOLVED later — first-claim order is dependency order", async () => {
+  it("binds a dependent lens whose dependency was EVOLVED later — the dependent's first claim does not move", async () => {
     // Lens B expands into lens A; then A is evolved, so A's LATEST binding is stamped later than
     // B's. Trialled in latest-binding order, B would be tried first, find no A, and be refused.
     // The fold trials in FIRST-claim order, which an evolution never moves, so A still comes
-    // first and B binds in one pass. (A dependent cannot be staked before its dependency exists —
-    // the pool's own door refuses it — so first-claim order is dependency order by construction,
-    // and no fixpoint round is needed; this case is what holds that argument to the code.)
+    // first and B binds in the first round. (The converse — B evolved to need a lens staked
+    // after it — is the next case, and it is why the fold runs rounds.)
     const { base } = await connectionServer();
     const ada = await connect(base, "ada", "journal");
     expect((await register(base, ada, envelope("ada:journal:a"))).status).toBe(200);

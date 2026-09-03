@@ -531,25 +531,49 @@ export function boundBindingsImpl(
   // job. A first claim never moves, so a republish cannot lose a name — but for the same reason a
   // first claim says nothing about a lens's BODY: a lens staked plain and later EVOLVED to expand
   // into a lens staked after it keeps its early claim, sorts first, and is trialled before the
-  // reading it needs exists. A single pass refused it forever, and no republish could recover it
-  // (an earlier draft argued first-claim order was dependency order "by construction"; that held
-  // for a name and not for a body). So the trial runs in rounds until nothing more binds, as the
-  // root replay does. Root rows are already trialled and already serve; a pool row that collides
-  // with one loses here exactly as a channel row loses at root — the nearer ground never displaces
-  // the operator's law.
+  // reading it needs exists. A single pass refused it forever, and no republish could recover it.
+  // So the trial runs in rounds until nothing more binds, as the root replay does — and the rounds
+  // must not reopen the contest the sort closed: a first claimant refused THIS round for want of a
+  // reading holds its name through the round, and a later claimant on that name waits behind it
+  // rather than being trialled into an empty slot. Without that hold, a rival staked second took
+  // the name in round one and the holder collided with it in round two, with no republish able to
+  // win it back. A claimant refused for good keeps holding: the rival is told whose name it is and
+  // why that claim is refused, and the name is never served to the later claimant. Root rows are
+  // already trialled and already serve; a pool row that collides with one loses here exactly as a
+  // channel row loses at root — the nearer ground never displaces the operator's law.
+  //
+  // A refusal is the CANDIDATE'S, keyed by pool and lens (`refusalKey`): two pools refused under
+  // one name are refused for two reasons, and the door hands each pool its own.
+  //
+  // The root replay binds a stored row whose templates alone fail WITHOUT its templates; this fold
+  // does not, so such a row is refused whole here while the pool's own replay serves it template-
+  // less. The door cannot plant one (it refuses invisible templates before writing), only an
+  // out-of-band write can, and the refusal names the template fault.
   const accepted: Bound[] = [...gw.registered];
-  const reasons = new Map<string, string>();
+  const reasons = new Map<Bound, string>();
   let pending = candidates;
   for (;;) {
     const still: Bound[] = [];
+    const held = new Map<string, Bound>(); // lens name → the earlier claimant refused this round
     let progressed = false;
     for (const candidate of pending) {
+      const lens = lensOf(candidate);
+      const holder = held.get(lens);
+      if (holder !== undefined) {
+        reasons.set(
+          candidate,
+          `lens ${lens}: an earlier claim on this name holds it — that claim is refused: ${reasons.get(holder) ?? "did not bind"}`,
+        );
+        still.push(candidate);
+        continue;
+      }
       try {
         trialBind(gw, accepted, candidate);
         accepted.push(candidate);
         progressed = true;
       } catch (err) {
-        reasons.set(lensOf(candidate), err instanceof Error ? err.message : String(err));
+        reasons.set(candidate, err instanceof Error ? err.message : String(err));
+        held.set(lens, candidate);
         still.push(candidate);
       }
     }
@@ -558,10 +582,13 @@ export function boundBindingsImpl(
   }
   const refused = new Map<string, string>();
   for (const left of pending)
-    refused.set(lensOf(left), reasons.get(lensOf(left)) ?? "did not bind");
+    refused.set(refusalKey(left.channel ?? "", lensOf(left)), reasons.get(left) ?? "did not bind");
   const registry = SchemaRegistry.build(programHyperschemas(accepted), programReadings(accepted));
   return { registered: accepted, registry, refused, key };
 }
+
+/** The key a bound fold's `refused` map uses: a refusal belongs to one pool's candidate. */
+export const refusalKey = (channel: string, lens: string): string => `${channel}${NUL}${lens}`;
 
 // CROSS-ORIGIN CONTESTS resolve by the declared policy BEFORE the trial fixpoint. Undeclared keeps
 // today's shape whole: root rows enter the fixpoint FIRST, so a channel row contesting a root name
