@@ -28,6 +28,7 @@
 //   unknown keys are ignored rather than refused         → 1 red, 10 green
 //   the depth bound is removed                           → 1 red, 10 green
 //   a listing refresh drops the standing leeway          → 1 red, 10 green
+// (counts predate the two-pointer case; the five probes above are unaffected by it)
 // The last three isolate a single case each, which is what makes them worth keeping. Note that
 // rails-red is weak here for the same reason as PR 1: `leeway` does not exist on the base tree, so
 // nothing compiles there and no case runs.
@@ -142,6 +143,31 @@ describe("§58 — a leeway is a declaration on the container", () => {
     );
     await expect(gw.append([bad])).rejects.toThrow(/leeway is malformed/);
     // Two-sided: nothing landed, so nothing named "ada" stands at all.
+    expect(leewayOf(gw, "ada")).toBeUndefined();
+  });
+
+  it("the door refuses a declaration carrying TWO leeway pointers", async () => {
+    // Two pointers is ambiguous law, not a merge: the reader takes the first and the second is
+    // silently law nobody can see. Refusing is the only answer that cannot mislead.
+    const gw = await open();
+    const base = containerClaims(
+      { container: "ada", trust: "curated", posture: "separate" },
+      OP,
+      1000,
+    );
+    const twice = signClaims(
+      {
+        timestamp: 1000,
+        author: OP,
+        pointers: [
+          ...base.pointers,
+          { role: "leeway", target: { kind: "primitive", value: JSON.stringify(NARROW) } },
+          { role: "leeway", target: { kind: "primitive", value: JSON.stringify(WIDE) } },
+        ],
+      },
+      OP_SEED,
+    );
+    await expect(gw.append([twice])).rejects.toThrow(/at most one leeway pointer/);
     expect(leewayOf(gw, "ada")).toBeUndefined();
   });
 
