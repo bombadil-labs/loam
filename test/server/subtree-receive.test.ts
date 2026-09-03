@@ -17,22 +17,24 @@
 // the pool's bytes surviving a reboot, which is the backend's promise (§46) — this file pins that
 // the RECORD survives with its opener and the root fold reads it.
 //
-// RAILS-RED on origin/main, this file copied in: 7 red, 1 green — 8 cases. The green is the
+// RAILS-RED on origin/main, this file copied in: 8 red, 1 green — 9 cases. The green is the
 // CONTROL: the plain `federate` grant road, which this slice neither widens nor narrows.
 //
-// REVERT PROBES, MEASURED against this file as it stands — 8 cases. Re-measure when you add one.
-//   the root fold keeps a connection's channel             → 2 red, 6 green
-//   the bound fold drops the channel's rows                 → 3 red, 5 green
-//   no subtree fence on `into`                              → 1 red, 7 green
-//   no fence on the prefix                                  → 2 red, 6 green
-//   the prefix fenced to the binding, not the target        → 1 red, 7 green
-//   no leeway walk (receive always on)                      → 1 red, 7 green
-//   status and sever admit by the fence, not the opener     → 1 red, 7 green
-//   status and sever admit by edge reach, not the opener    → 1 red, 7 green
-//   the stamps carry no opener                              → 4 red, 4 green
-//   the bound fold admits a foreign opener                  → 2 red, 6 green
-//   no parent edge for a name a connection declares         → 2 red, 6 green
-//   only the target is declared, not the middles            → 1 red, 7 green
+// REVERT PROBES, MEASURED against this file as it stands — 9 cases. Re-measure when you add one.
+//   the root fold keeps a connection's channel             → 2 red, 7 green
+//   the bound fold drops the channel's rows                 → 3 red, 6 green
+//   no subtree fence on `into`                              → 1 red, 8 green
+//   no fence on the prefix                                  → 2 red, 7 green
+//   the prefix fenced to the binding, not the target        → 1 red, 8 green
+//   no leeway walk (receive always on)                      → 2 red, 7 green
+//   the walk stops at a container that declared no leeway   → 1 red, 8 green
+//   status and sever admit by the fence, not the opener     → 1 red, 8 green
+//   status and sever admit by edge reach, not the opener    → 1 red, 8 green
+//   the stamps carry no opener                              → 4 red, 5 green
+//   the bound fold admits a foreign opener                  → 2 red, 7 green
+//   no parent edge for a name a connection declares         → 2 red, 7 green
+//   only the target is declared, not the middles            → 1 red, 8 green
+//   the middles walk re-declares declared ancestors         → 1 red, 8 green
 // Three of these were green until the rails were sharpened: the subtree fence, until the refusal
 // cases carried a prefix INSIDE the fence (an outside prefix was refused for the prefix); the
 // opener, until a PERSON-opened channel inside the subtree joined the sever case; and edge reach,
@@ -324,6 +326,32 @@ describe("§58 — receive within the subtree", () => {
     });
     const body = (await res.json()) as { data?: Record<string, { height?: unknown } | null> };
     expect(body.data?.ada_journal_a_b_peer_Plant?.height).toBe(11);
+    await closePeers();
+    await closeAll();
+  });
+
+  it("a middle a receive brought into being is a pure namespace: the next receive under it inherits", async () => {
+    // The first receive declared `ada:journal:a` with no leeway. Read as SEALED and stopped at,
+    // it refused the next receive under it — and a second peer into the same target — while a
+    // fresh middle beside it was admitted. A container that declared no leeway inherits; the
+    // ancestor's own declaration is untouched by the receive that passed through.
+    const { base, gateway } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    await declare(gateway, "ada:journal", RECEIVES);
+    const peer = await peerStore();
+    expect((await receive(base, ada, "ada:journal:a:b", peer)).isError).toBe(false);
+    expect(leewayOf(gateway, "ada:journal")?.receive, "the ancestor's declaration stands").toBe(
+      true,
+    );
+    const under = await receive(base, ada, "ada:journal:a:c", peer);
+    expect(under.isError, under.text).toBe(false);
+    const again = await receive(base, ada, "ada:journal:a:b", peer, "ada:journal:a:b:peer2");
+    expect(again.isError, again.text).toBe(false);
+    // A leeway change on the ancestor is a delta the next request obeys, through the middle.
+    await declare(gateway, "ada:journal", SEALED_LEEWAY);
+    const sealed = await receive(base, ada, "ada:journal:a:d", peer);
+    expect(sealed.isError).toBe(true);
+    expect(sealed.text).toMatch(/ada:journal does not receive/);
     await closePeers();
     await closeAll();
   });

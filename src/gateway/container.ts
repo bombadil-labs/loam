@@ -404,6 +404,13 @@ export interface ResolvedContainer {
    * enforces the one rule is the one that may call it "in force".
    */
   readonly leeway: Leeway;
+  /**
+   * Whether this container DECLARED a leeway at all — any pointer, however it parsed. A container
+   * that spoke, even badly, reads sealed and that sealing binds; one that never spoke is a pure
+   * namespace, and a road that walks the tree for the governing leeway climbs past it (SPEC §58
+   * position 4: an undeclared child inherits). `leeway` alone cannot tell the two apart.
+   */
+  readonly leewayDeclared: boolean;
 }
 
 export interface DetachRecord {
@@ -646,6 +653,7 @@ function computeContainerTable(reactor: Reactor, operator: string | undefined): 
       ...(latest.version !== undefined ? { version: latest.version } : {}),
       ...(latest.inboxOf !== undefined ? { inboxOf: latest.inboxOf } : {}),
       leeway,
+      leewayDeclared: declared.length > 0,
     });
     if (latest.parent !== undefined) {
       edges.set(name, { parent: latest.parent, ts: latest.ts, id: latest.id });

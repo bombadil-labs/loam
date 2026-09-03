@@ -586,9 +586,10 @@ function federateStanding(
  * Why a bound connection may not receive into `into` under `prefix`, or undefined when it may
  * (SPEC §58 position 2: receive is a channel into a descendant of C from a source offered to this
  * connection; position 4: only where the container's leeway says receive is on). The leeway that
- * governs `into` is the nearest DECLARED container at or above it, no higher than the binding's
- * own — an undeclared child is a pure namespace and inherits. The refusal names only the
- * connection's own container, never another's: no oracle.
+ * governs `into` is the nearest container at or above it that DECLARED one, no higher than the
+ * binding's own — a child that declared none, whether or not a receive brought it into being, is
+ * a pure namespace and inherits. The refusal names only the connection's own container, never
+ * another's: no oracle.
  */
 function receiveRefusal(
   gateway: Gateway,
@@ -615,7 +616,7 @@ function receiveRefusal(
   const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
   for (let at = into; ; at = at.slice(0, at.lastIndexOf(":"))) {
     const declared = table.containers.get(at);
-    if (declared !== undefined) {
+    if (declared !== undefined && declared.leewayDeclared) {
       return declared.leeway.receive
         ? undefined
         : `the container ${at} does not receive: its leeway's receive switch is off`;
