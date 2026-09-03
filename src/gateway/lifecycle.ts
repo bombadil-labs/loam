@@ -487,7 +487,11 @@ export interface BoundFold {
  * written, and this refuses it again for law that reached a pool by some other road — a restore,
  * a migration, an operator-signed write out of band.
  */
-export function boundBindingsImpl(gw: Gateway, container: string): BoundFold {
+export function boundBindingsImpl(
+  gw: Gateway,
+  container: string,
+  held?: { readonly key: string; readonly fold: BoundFold },
+): BoundFold {
   const table = readContainerTable(gw.reactor, gw.operatorAuthor);
   const reach = new Set(subtreeUnder(table, container));
   const candidates: Bound[] = [];
@@ -498,26 +502,48 @@ export function boundBindingsImpl(gw: Gateway, container: string): BoundFold {
     for (const r of readRegistrations(inbox.gateway.reactor, inbox.gateway.operatorAuthor)) {
       if (!fenceAdmits(prefix, r.hyperschema.name)) continue; // the program
       if (!fenceAdmits(prefix, lensOf(r))) continue; // the reading
+      if (lensOf(r).includes(NUL)) continue; // a reading name is the gateway's alphabet too
       if (r.entity !== undefined && r.entity !== schemaEntityFor(r.hyperschema)) continue; // the entity
       candidates.push({ ...r, origin: "store" as const, channel: name });
     }
   }
+  // THE KEY IS COMPUTED BEFORE ANY TRIAL, or the cache caches nothing: a trial per candidate is
+  // the expensive part, and a key that only exists after it is a receipt, not a shortcut.
   const key = [
     ...gw.registered.map((r) => boundKey(r)),
     NUL,
     ...candidates.map((r) => `${r.channel ?? ""}${NUL}${boundKey(r)}`),
   ].join(NUL);
+  if (held !== undefined && held.key === key) return held.fold;
+
+  // FIXPOINT ROUNDS, for the reason the root replay runs them: timestamp order is not dependency
+  // order. An evolution re-stamps a lens later than the lenses that expand into it, so a single
+  // pass would refuse the dependents and then bind the dependency they needed. Root rows are
+  // already trialled and already serve; a pool row that collides with one loses here exactly as a
+  // channel row loses at root — the nearer ground never displaces the operator's law.
   const accepted: Bound[] = [...gw.registered];
-  const refused = new Map<string, string>();
-  // Root rows are already trialled and already serve; a pool row that collides with one loses here
-  // exactly as a channel row loses at root — the nearer ground never displaces the operator's law.
-  for (const candidate of candidates) {
-    try {
-      trialBind(gw, accepted, candidate);
-      accepted.push(candidate);
-    } catch (err) {
-      refused.set(lensOf(candidate), err instanceof Error ? err.message : String(err));
+  const reasons = new Map<string, string>();
+  let pending = candidates;
+  for (;;) {
+    const still: Bound[] = [];
+    let progressed = false;
+    for (const candidate of pending) {
+      try {
+        trialBind(gw, accepted, candidate);
+        accepted.push(candidate);
+        progressed = true;
+      } catch (err) {
+        reasons.set(lensOf(candidate), err instanceof Error ? err.message : String(err));
+        still.push(candidate);
+      }
     }
+    if (!progressed || still.length === 0) break;
+    pending = still;
+  }
+  const refused = new Map<string, string>();
+  for (const left of pending) {
+    if (accepted.includes(left)) continue;
+    refused.set(lensOf(left), reasons.get(lensOf(left)) ?? "did not bind");
   }
   const registry = SchemaRegistry.build(programHyperschemas(accepted), programReadings(accepted));
   return { registered: accepted, registry, refused, key };

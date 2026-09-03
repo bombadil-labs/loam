@@ -20,36 +20,47 @@
 // the parser or the fence, so a rail for it would have been hollow.
 
 //
-// RAILS-RED on origin/main, this file copied in: 8 red, 1 green — 9 cases. The green one is the
+// RAILS-RED on origin/main, this file copied in: 14 red, 1 green — 15 cases. The green one is the
 // door-fence case, and it is a CONTROL: on main every one of those names is refused because a
 // connection may register nothing at all. It pins that the fence did not widen; it proves nothing
 // about the fence, and says so here rather than padding the count.
 //
-// REVERT PROBES, MEASURED against this file as it stands — 9 cases. Re-measure when you add one.
-//   the binding grants no register fence                        → 8 red, 1 green
-//   the fence drops the COLON                                   → 2 red, 7 green
-//   a bound registration publishes to the primary               → 7 red, 2 green
-//   the FOLD fences none of its three names                     → 1 red, 8 green
-//   inbox law back in the ROOT fold, with a root refold         → 6 red, 3 green
-//   the query door ignores the binding                          → 6 red, 3 green
-//   the door reports the pool's answer, not the container's     → 1 red, 8 green
-//   whoami re-derives standing beside the door                  → 1 red, 8 green
-// The fifth is the one Myk's ruling exists to prevent, restored WHOLE — the loop alone, without
-// the refold that carried it up, leaves every case green, which is how an earlier draft of these
-// probes misread a hollow rail as a sound one.
+// REVERT PROBES, MEASURED against this file as it stands — 15 cases. Re-measure when you add one.
+//   the binding grants no register fence                        → 13 red,  2 green
+//   the fence drops the COLON                                   →  3 red, 12 green
+//   every bound identity is routed to its pool (granted law dies) →  1 red, 14 green
+//   container law is routed to the PRIMARY                      → 10 red,  5 green
+//   the FOLD fences none of its three names                     →  1 red, 14 green
+//   the fold drops the PROGRAM fence alone                      →  1 red, 14 green
+//   the fold drops the ENTITY fence alone                       →  1 red, 14 green
+//   inbox law back in the ROOT fold, with a root refold         →  8 red,  7 green
+//   the query door ignores the binding                          →  8 red,  7 green
+//   the door reports the pool's answer, not the container's     →  2 red, 13 green
+//   the door matches ANY row under the name, not this pool's    →  1 red, 14 green
+//   whoami re-derives standing beside the door                  →  2 red, 13 green
+//   the listing groups the ROOT's rows for a bound reader       →  1 red, 14 green
+//   the bound fold is a single pass, not a fixpoint             →  1 red, 14 green
+//   NUL admitted in a READING name, at door and fold            →  1 red, 14 green
+// Nine of these isolate exactly one case, which is what makes them worth keeping. The root-fold
+// probe is restored WHOLE (loop and refold): the loop alone leaves every case green, which is how
+// an earlier draft of these probes misread a hollow rail as a sound one.
 
 import { describe, expect, it } from "vitest";
 import {
   closeAll,
   connect,
   connectionServer,
+  grantOf,
+  OPERATOR,
   OPERATOR_SEED,
 } from "../helpers/connection-fixture.js";
+import { grantClaims } from "../../src/gateway/accounts.js";
+import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { readRegistrations } from "../../src/gateway/registration.js";
 import type { Gateway } from "../../src/gateway/gateway.js";
 import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
 import { FERN, observed } from "../spike/garden.js";
-import { signClaims } from "@bombadil/rhizomatic";
+import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 
 /** A minimal, valid registration for one lens name — the canonical entity program. */
 const envelope = (name: string, prop = "note", roots = [`${name}:1`]): unknown => ({
@@ -136,7 +147,7 @@ describe("§58 position 2 — the binding is the register grant, and the law ser
     // Register, write, read: the same container position governs each. The generated mutation
     // for a pool lens is served on the connection's surface and lands through `sinkFor`, in the
     // pool, signed by the connection's key — never in the primary, never as the operator.
-    const { base, gateway } = await connectionServer();
+    const { base, gateway, connectorsHome } = await connectionServer();
     const ada = await connect(base, "ada", "journal");
     expect((await register(base, ada, envelope("ada:journal:log"))).status).toBe(200);
     const wrote = await gql(
@@ -156,6 +167,13 @@ describe("§58 position 2 — the binding is the register grant, and the law ser
       [...p.reactor.snapshot()].some((d) => JSON.stringify(d).includes('"first"')),
     );
     expect(inPool).toBe(true);
+    // AND THE AUTHOR: the connection's own key signed it, not the operator. Location alone would
+    // pass if the operator's key had written into the pool on the connection's behalf.
+    const claim = pools(gateway)
+      .flatMap((p) => [...p.reactor.snapshot()])
+      .find((d) => JSON.stringify(d).includes('"first"'))!;
+    expect(claim.claims.author).toBe(authorForSeed(grantOf(connectorsHome, "ada").actorSeed));
+    expect(claim.claims.author).not.toBe(gateway.operatorAuthor);
     expect(await serves(base, "op-token", "ada_journal_log")).toBe(false);
     await closeAll();
   });
@@ -235,6 +253,20 @@ describe("§58 position 2 — the binding is the register grant, and the law ser
       named("ada:other:reading"),
       [FERN],
     );
+    // (d) the program OUTSIDE with the reading INSIDE — the PROGRAM fence alone catches this
+    await pool.publishRegistration(
+      { ...PLANT, name: "ada:other:program2" },
+      named("ada:journal:reading2"),
+      [FERN],
+    );
+    // (e) both names inside but the ENTITY elsewhere — the third name the door fences
+    await pool.publishRegistration(
+      { ...PLANT, name: "ada:journal:ent" },
+      named("ada:journal:ent"),
+      [FERN],
+      undefined,
+      "hyperschema:ada:journal:elsewhere",
+    );
     // (c) both inside: served
     await pool.publishRegistration(
       { ...PLANT, name: "ada:journal:both" },
@@ -249,6 +281,8 @@ describe("§58 position 2 — the binding is the register grant, and the law ser
     expect(await serves(base, ada, "ada_journal_both")).toBe(true);
     expect(await serves(base, ada, "ada_other_program")).toBe(false);
     expect(await serves(base, ada, "ada_other_reading")).toBe(false);
+    expect(await serves(base, ada, "ada_journal_reading2")).toBe(false); // (d)
+    expect(await serves(base, ada, "ada_journal_ent")).toBe(false); // (e)
     // And none of it ever reaches the root.
     for (const f of [
       "ada_journal_kept",
@@ -301,6 +335,193 @@ describe("§58 position 2 — the binding is the register grant, and the law ser
     expect(await serves(base, "op-token", "ada_journal_log")).toBe(true);
     expect(lensesIn(gateway)).toContain("ada_journal_log");
     expect(lensesIn(gateway)).not.toContain("ada:journal:log");
+    await closeAll();
+  });
+
+  it("a root lens spelled EXACTLY the same refuses the pool's, and the door reports THIS pool's row", async () => {
+    // The operator is unfenced and may spell a root lens `ada:journal:log`. The fold refuses the
+    // pool's row under that name. A door that asked "does any served row carry the name?" would
+    // find the operator's and report the connection's law bound — while the connection is served
+    // someone else's fields (H7). The door must ask about THIS pool's row.
+    const { base } = await connectionServer();
+    expect((await register(base, "op-token", envelope("ada:journal:log", "rootprop"))).status).toBe(
+      200,
+    );
+    const ada = await connect(base, "ada", "journal");
+    const res = await register(base, ada, envelope("ada:journal:log", "note"));
+    expect(res.status).toBe(200);
+    const outcome = (await res.json()) as { bound: boolean; reason?: string };
+    expect(outcome.bound).toBe(false);
+    expect(outcome.reason).toMatch(/ada_journal_log/);
+    const mine = await gql(base, ada, `{ ada_journal_log(entity: "ada:journal:log:1") { note } }`);
+    expect((mine.errors ?? []).join(" ")).toMatch(/Cannot query field "note"/);
+    const theirs = await gql(
+      base,
+      "op-token",
+      `{ ada_journal_log(entity: "ada:journal:log:1") { rootprop } }`,
+    );
+    expect(theirs.errors).toBeUndefined();
+    await closeAll();
+  });
+
+  it("law under a GRANTED prefix still lands in the primary and serves everyone — nothing stops working before its replacement", async () => {
+    // A bound key that also holds an explicit `register` grant keeps that grant until the slice
+    // that retires it. Routing every bound identity to its pool sent granted law into a pool whose
+    // fold fenced it out — written, served to nobody. The route is decided by the NAME.
+    const { base, gateway, connectorsHome } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    const key = authorForSeed(grantOf(connectorsHome, "ada").actorSeed);
+    await gateway.append([
+      signClaims(
+        grantClaims(STORE_ENTITY, key, "register", OPERATOR, gateway.nextTimestamp(), "zed:"),
+        OPERATOR_SEED,
+      ),
+    ]);
+    const who = (await (
+      await fetch(`${base}/default/whoami`, { headers: { authorization: `Bearer ${ada}` } })
+    ).json()) as { registerPrefixes: string[] };
+    expect(who.registerPrefixes).toEqual(expect.arrayContaining(["zed:", "ada:journal:"]));
+
+    const granted = await register(base, ada, envelope("zed:thing"));
+    expect(granted.status).toBe(200);
+    expect(((await granted.json()) as { bound: boolean }).bound).toBe(true);
+    expect(lensesIn(gateway)).toContain("zed:thing"); // the PRIMARY, as before this slice
+    expect(pools(gateway).flatMap(lensesIn)).not.toContain("zed:thing");
+    expect(await serves(base, "op-token", "zed_thing")).toBe(true);
+    expect(await serves(base, ada, "zed_thing")).toBe(true);
+    // ...while law under the container path still takes the pool.
+    expect((await register(base, ada, envelope("ada:journal:own"))).status).toBe(200);
+    expect(lensesIn(gateway)).not.toContain("ada:journal:own");
+    expect(await serves(base, "op-token", "ada_journal_own")).toBe(false);
+    await closeAll();
+  });
+
+  it("KNOWN LIMIT — a pool lens that expands into the ROOT's reading is refused at the door, by name", async () => {
+    // The pool's own trial cannot see the root's readings, so a body that `expand`s into `Plant`
+    // draws the parser's shape complaint at publish. Honest refusal, not a silent fallback; the
+    // fix is the context carrying its law source (T274, §59), and until then this case is the
+    // record that it refuses rather than pretending.
+    const { base, gateway } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    const res = await register(base, ada, {
+      ...(envelope("ada:journal:expander") as Record<string, unknown>),
+      hyperschema: {
+        name: "ada:journal:expander",
+        alg: 1,
+        body: {
+          op: "expand",
+          role: { exact: "grows" },
+          schema: "Plant",
+          reading: "Plant",
+          in: {
+            op: "select",
+            pred: { hasPointer: { targetEntity: { var: "root" } } },
+            in: { op: "mask", policy: "drop", in: "input" },
+          },
+        },
+      },
+    });
+    expect(res.status).toBe(400);
+    expect(lensesIn(gateway)).not.toContain("ada:journal:expander");
+    expect(pools(gateway).flatMap(lensesIn)).not.toContain("ada:journal:expander");
+    await closeAll();
+  });
+
+  it("LISTS its own pool lens — the page's contexts come from the surface it is served", async () => {
+    // The singular door resolved a pool lens while the listing answered an empty page, because
+    // the page grouped the ROOT's rows for its contexts and a pool program had none there. An
+    // empty page reads as "no such entities", a bigger claim than the read ever made.
+    const { base } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    expect((await register(base, ada, envelope("ada:journal:log"))).status).toBe(200);
+    const wrote = await gql(
+      base,
+      ada,
+      `mutation { ada_journal_log(entity: "ada:journal:log:1", note: "listed") { note } }`,
+    );
+    expect(wrote.errors).toBeUndefined();
+    const page = await gql(base, ada, `{ ada_journal_logs(limit: 5) { _entity } }`);
+    expect(page.errors).toBeUndefined();
+    expect(
+      (page.data as { ada_journal_logs: { _entity: string }[] }).ada_journal_logs.map(
+        (n) => n._entity,
+      ),
+    ).toEqual(["ada:journal:log:1"]);
+    expect(await serves(base, "op-token", "ada_journal_logs")).toBe(false);
+    await closeAll();
+  });
+
+  it("binds a dependent lens whose dependency was EVOLVED later — the fold runs to a fixpoint", async () => {
+    // Timestamp order is not dependency order. Lens B expands into lens A; then A is evolved, so
+    // A's binding is stamped later than B's. A single pass trials B first, finds no A, refuses B,
+    // then binds A — and the connection loses B. Rounds bind B on the second pass.
+    const { base } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    expect((await register(base, ada, envelope("ada:journal:a"))).status).toBe(200);
+    const b = {
+      ...(envelope("ada:journal:b") as Record<string, unknown>),
+      hyperschema: {
+        name: "ada:journal:b",
+        alg: 1,
+        body: {
+          op: "expand",
+          role: { exact: "grows" },
+          schema: "ada:journal:a",
+          reading: "ada:journal:a",
+          // `expand` wants an HView operand (E9): the canonical entity program, grouped.
+          in: {
+            op: "group",
+            key: "byTargetContext",
+            in: {
+              op: "select",
+              pred: { hasPointer: { targetEntity: { var: "root" } } },
+              in: { op: "mask", policy: "drop", in: "input" },
+            },
+          },
+        },
+      },
+    };
+    const first = await register(base, ada, b);
+    expect(first.status).toBe(200);
+    expect(((await first.json()) as { bound: boolean }).bound).toBe(true);
+    expect(await serves(base, ada, "ada_journal_b")).toBe(true);
+    // Evolve A: a republish at the same name, stamped after B.
+    expect((await register(base, ada, envelope("ada:journal:a", "note2"))).status).toBe(200);
+    expect(await serves(base, ada, "ada_journal_a")).toBe(true);
+    expect(await serves(base, ada, "ada_journal_b")).toBe(true);
+    await closeAll();
+  });
+
+  it("refuses NUL in a READING name at the door and at the fold", async () => {
+    // The publish guards the PROGRAM name against NUL — the gateway's own alphabet — and the
+    // reading was unguarded on both fences. An operator has the same gap; the register door is
+    // now open to connections, so it is closed here on both sides.
+    const { base, gateway } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    const atDoor = await register(base, ada, {
+      ...(envelope("ada:journal:nul") as Record<string, unknown>),
+      schema: {
+        name: "ada:journal:n\u0000l",
+        props: { note: { pick: { order: { byTimestamp: "desc" } } } },
+        default: { pick: { order: { byTimestamp: "desc" } } },
+      },
+    });
+    expect(atDoor.status).toBe(403);
+    const pool = pools(gateway)[0]!;
+    await pool.publishRegistration(
+      { ...PLANT, name: "ada:journal:nulled" },
+      { ...PLANT_POLICY, name: "ada:journal:nu\u0000lled" },
+      [FERN],
+    );
+    expect(lensesIn(pool)).toContain("ada:journal:nu\u0000lled"); // it IS in the pool
+    expect(
+      gateway
+        .boundSurface({
+          container: "ada:journal",
+          inbox: [...gateway.connectionInboxes.keys()][0]!,
+        })
+        .registered.map((r) => r.lensName ?? r.hyperschema.name),
+    ).not.toContain("ada:journal:nu\u0000lled");
     await closeAll();
   });
 

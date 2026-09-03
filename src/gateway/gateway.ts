@@ -1430,11 +1430,9 @@ export class Gateway {
     readonly refused: ReadonlyMap<string, string>;
     readonly schema: GraphQLSchema;
   } {
-    const fold = boundBindingsImpl(this, binding.container);
     const held = this.boundCache.get(binding.container);
-    if (held !== undefined && held.key === fold.key) {
-      return { ...held.fold, schema: held.schema };
-    }
+    const fold = boundBindingsImpl(this, binding.container, held);
+    if (held !== undefined && fold === held.fold) return { ...held.fold, schema: held.schema };
     const schema = buildGqlSchema(fold.registered, this.gqlHooks());
     this.boundCache.set(binding.container, { key: fold.key, fold, schema });
     return { ...fold, schema };

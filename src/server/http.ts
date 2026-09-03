@@ -41,6 +41,7 @@ import {
   type Gateway,
   type QueryResult,
   type RequestContext,
+  NUL,
 } from "../gateway/gateway.js";
 import {
   parseRegistrationInput,
@@ -435,19 +436,39 @@ const byteDoorOf = (
 const REGISTRATION_REFUSAL = "registration is constitutional: it requires an operator token";
 
 /**
- * Which gateway a registration publishes on (SPEC §58 position 2).
+ * Where a registration publishes (SPEC §58 position 2), decided BY THE NAME, not by the caller.
  *
- * A BOUND connection's law lives on its own inbox pool, never in the primary — the same seam the
- * write path takes through `sinkFor`. The §47 fold is what carries it up to the served surface,
- * filtered there to the bound container's path a second time, so law that reached a pool by some
- * road other than this door still cannot be served.
+ * Law a bound connection names under its own container path lives on its inbox pool, never in the
+ * primary — the same seam the write path takes through `sinkFor` — and the container's fold is what
+ * serves it, to the container alone. Law the same connection names under a prefix an operator
+ * GRANTED it lands where it always did: the primary, served to everyone, until the slice that
+ * retires `loam grant --verb=register` for connections. Routing every bound identity to its pool
+ * regardless of the name sent granted law into a pool whose fold fenced it out — written, and
+ * served to nobody.
  *
- * Everyone else publishes where they always did. An operator shapes the root; a connection holding
- * an explicit `register` grant keeps landing in the primary until the slice that retires that
- * grant, because nothing a connection can do today may stop working before its replacement exists.
+ * `toPool` records the decision for the outcome: only a pool publish is answered by the container's
+ * fold, so only a pool publish has its `bound` re-read from there.
  */
-function registrationSink(gateway: Gateway, identity: TokenIdentity): Gateway {
-  return identity.binding === undefined ? gateway : gateway.poolForBinding(identity.binding);
+function registrationRoute(
+  gateway: Gateway,
+  identity: TokenIdentity,
+): { pick: (input: RegistrationInput) => Gateway; toPool: boolean } {
+  const route: { pick: (input: RegistrationInput) => Gateway; toPool: boolean } = {
+    toPool: false,
+    pick: () => gateway,
+  };
+  const binding = identity.binding;
+  if (binding === undefined) return route;
+  const own = `${binding.container}:`;
+  route.pick = (input) => {
+    const insideContainer =
+      fenceAdmits(own, input.hyperschema.name) &&
+      fenceAdmits(own, lensNameFor(input.hyperschema, input.schema));
+    if (!insideContainer) return gateway;
+    route.toPool = true;
+    return gateway.poolForBinding(binding);
+  };
+  return route;
 }
 
 /**
@@ -462,11 +483,16 @@ function asServedTo(
   gateway: Gateway,
   identity: TokenIdentity,
   outcome: Awaited<ReturnType<typeof performRegistration>>,
+  toPool: boolean,
 ): Awaited<ReturnType<typeof performRegistration>> {
-  if (identity.binding === undefined || !outcome.bound) return outcome;
+  if (!toPool || identity.binding === undefined || !outcome.bound) return outcome;
   const surface = gateway.boundSurface(identity.binding);
+  // THIS POOL'S ROW, not any row under the name. The root may serve a lens spelled exactly the
+  // same — the operator is unfenced — and a sibling pool may too; a name match would then report
+  // the connection's law bound while the fold had refused it and served someone else's (H7).
+  const inbox = identity.binding.inbox;
   const served = surface.registered.some(
-    (r) => (r.lensName ?? r.hyperschema.name) === outcome.lens,
+    (r) => r.channel === inbox && (r.lensName ?? r.hyperschema.name) === outcome.lens,
   );
   if (served) return outcome;
   return {
@@ -587,7 +613,9 @@ function federateAdmits(standing: readonly string[] | undefined, container: stri
 function registerFenceAdmits(fence: readonly string[], input: RegistrationInput): boolean {
   const inside = (name: string): boolean => fence.some((prefix) => fenceAdmits(prefix, name));
   if (!inside(input.hyperschema.name)) return false;
-  if (!inside(lensNameFor(input.hyperschema, input.schema))) return false;
+  const reading = lensNameFor(input.hyperschema, input.schema);
+  if (reading.includes(NUL)) return false; // the program is guarded at publish; the reading was not
+  if (!inside(reading)) return false;
   return input.entity === undefined || input.entity === schemaEntityFor(input.hyperschema);
 }
 
@@ -638,6 +666,7 @@ async function performRegistration(
   gateway: Gateway,
   raw: unknown,
   fence: readonly string[],
+  route: (input: RegistrationInput) => Gateway = () => gateway,
 ): Promise<{
   registered: string;
   lens: string;
@@ -675,7 +704,7 @@ async function performRegistration(
     if (defect !== undefined) throw new Error(defect);
     if (!registerFenceAdmits(fence, input)) throw new NotPermittedToRegister(REGISTRATION_REFUSAL);
   }
-  const outcome = await gateway.publishRegistration(
+  const outcome = await route(input).publishRegistration(
     input.hyperschema,
     input.schema,
     input.roots,
@@ -1579,14 +1608,12 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             return;
           }
           try {
+            const route = registrationRoute(gateway, identity);
             const outcome = asServedTo(
               gateway,
               identity,
-              await performRegistration(
-                registrationSink(gateway, identity),
-                params["arguments"] ?? {},
-                fence,
-              ),
+              await performRegistration(gateway, params["arguments"] ?? {}, fence, route.pick),
+              route.toPool,
             );
             reply({ content: [{ type: "text", text: JSON.stringify(outcome) }] });
           } catch (err) {
@@ -2557,10 +2584,12 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             return;
           }
           try {
+            const route = registrationRoute(gateway, identity);
             const done = asServedTo(
               gateway,
               identity,
-              await performRegistration(registrationSink(gateway, identity), raw, fence),
+              await performRegistration(gateway, raw, fence, route.pick),
+              route.toPool,
             );
             json(res, 200, done);
           } catch (err) {

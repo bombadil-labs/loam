@@ -78,8 +78,16 @@ export const listingContainerName = (program: string): string => `container:hype
 // list legitimately holds a superseded binding beside its evolution, and a union drawn from it
 // would keep admitting contexts no SURVIVING lens reads (the H6 family's shape — a membership
 // nobody's current reading declares).
-export function listingContexts(gw: Gateway, program: ProgramName): string[] {
-  const group = groupPrograms(gw.registered).get(program);
+export function listingContexts(
+  gw: Gateway,
+  program: ProgramName,
+  binding?: ConnectionBinding,
+): string[] {
+  // A bound reader's lens may live only in its container's fold (§58 position 2); grouping the
+  // root's rows for it answers "no contexts" and therefore an empty page for a lens the singular
+  // door resolves — an absence claim the read never made.
+  const rows = binding === undefined ? gw.registered : gw.boundSurface(binding).registered;
+  const group = groupPrograms(rows).get(program);
   const contexts = new Set<string>();
   for (const r of group?.lenses.values() ?? []) {
     for (const prop of r.schema.props.keys()) contexts.add(prop);
@@ -518,7 +526,7 @@ export async function listingPageImpl(
   // costs N+1 walks. Bounded (the page is bounded) but real; a maintained per-container candidate
   // set is the fix and it belongs with S2's container work, not here.
   if (binding !== undefined) {
-    const inContexts = new Set(listingContexts(gw, program));
+    const inContexts = new Set(listingContexts(gw, program, binding));
     const after = opts.after;
     return projectListingEntities(gw.connectionScope({ bound: binding.container }), inContexts)
       .filter((id) => after === undefined || id > after)
