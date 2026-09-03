@@ -24,19 +24,24 @@
 // `groupPrograms` and `buildGqlSchema` about holder and rival together — because a list of names
 // written beside the trial drifted three times (two spellings mint one query field; `x`'s
 // listing field is `xs`'s query field; one program admits one body; and the mutation namespace
-// holds a dozen derived names, templates among them). A refusal belongs to one pool's candidate
-// (`refusalKey`), so two pools refused under one name are each told their own fault.
+// holds a dozen derived names, templates among them). A claimant DEFERRED behind a holder is
+// refused this round too, and holds what it staked exactly as a trial-refused one does; held by
+// nothing, its slot was taken by the next claimant whenever the holder above it happened to be
+// waiting on a reading. A refusal belongs to one pool's candidate (`refusalKey`), so two pools
+// refused under one name are each told their own fault.
 //
-// REVERT PROBES, MEASURED on these 14 cases:
-//   drop the candidate sort                          →  1 red, 13 green
-//   key the sort on `boundAt` (the latest binding)   →  9 red,  5 green
-//   trial in ONE pass instead of to a fixpoint       →  8 red,  6 green (+1 in derived-standing)
-//   drop the hold within a round                     →  8 red,  6 green
-//   ask the pair of `groupPrograms` alone            →  5 red,  9 green (every gql-name case)
-//   ask the pair of `buildGqlSchema` alone           →  1 red, 13 green (the rival-body case)
-//   share one reason per lens across pools           →  1 red, 13 green (the two-faults case)
-// The no-sort probe reds one case because attach order happens to agree with the right answer
-// for one of the two orderings, so exactly one of the attach-order and re-attach cases sees it.
+// REVERT PROBES, MEASURED on these 15 cases:
+//   drop the candidate sort                          →  2 red, 13 green
+//   key the sort on `boundAt` (the latest binding)   → 10 red,  5 green
+//   trial in ONE pass instead of to a fixpoint       →  9 red,  6 green (+1 in derived-standing)
+//   drop the hold within a round                     →  9 red,  6 green
+//   ask the pair of `groupPrograms` alone            →  6 red,  9 green (every gql-name case)
+//   ask the pair of `buildGqlSchema` alone           →  1 red, 14 green (the rival-body case)
+//   a DEFERRED claimant holds nothing                →  1 red, 14 green (the deferred case)
+//   share one reason per lens across pools           →  1 red, 14 green (the two-faults case)
+// The no-sort probe reds only two cases because attach order happens to agree with the right
+// answer for one of the two orderings, so exactly one of the attach-order and re-attach cases
+// sees it, and the deferred case's third row happens to sort where the answer needs it.
 //
 // RAILS-RED on origin/main: every case red, because `boundSurface` does not exist there. An
 // honest red and a WEAK one; the probes above are the measurement.
@@ -499,6 +504,29 @@ describe("§58 — two pools in one container contest a name by who staked it fi
       expect(servedBy(gw, asker, Y), `asked from ${asker}`).toBe(first);
       expect(servedBy(gw, asker, YH)).toBeUndefined();
     }
+  });
+
+  it("a claimant DEFERRED behind a holder holds what it staked, exactly as a refused one does", async () => {
+    // x@first; y@second, whose template is dead against x's mutation field forever; z@first,
+    // whose template is named after y's field. While x is plain, y is trial-refused and z waits
+    // behind y. While x waits on a reading, y is deferred behind x — and a deferred claimant that
+    // held nothing let z bind into y's slot, so z's fate flipped with x's body.
+    const { gw, first, second } = await twoPools();
+    const Y = "home:alice:y";
+    const Z = "home:alice:z";
+    await stake(gw, first, LENS);
+    await stakeWith(gw, second, Y, templateNamed("home_alice_x"));
+    await stakeWith(gw, first, Z, templateNamed("home_alice_y"));
+    const refusedZ = (): string | undefined =>
+      gw.boundSurface({ container: HOME, inbox: first }).refused.get(refusalKey(first, Z));
+    expect(servedBy(gw, first, Z)).toBeUndefined();
+    const plain = refusedZ();
+    expect(plain).toMatch(/home:alice:y/);
+    await growInto(gw, first, LENS, "home:alice:dep");
+    expect(winner(gw, first)).toBe(first);
+    expect(servedBy(gw, first, Y)).toBeUndefined();
+    expect(servedBy(gw, first, Z), "z bound into y's slot while y waited behind x").toBeUndefined();
+    expect(refusedZ()).toBe(plain);
   });
 
   it("the rival does not take the name by republishing", async () => {

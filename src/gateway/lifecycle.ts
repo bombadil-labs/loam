@@ -572,6 +572,7 @@ export function boundBindingsImpl(
           candidate,
           `lens ${lensOf(candidate)}: an earlier claim, ${lensOf(contest.holder)}, contests it — ${contest.on} — and that claim is refused: ${reasons.get(contest.holder) ?? "did not bind"}`,
         );
+        holders.push(candidate); // deferred is refused this round: what IT staked is held too
         still.push(candidate);
         continue;
       }
