@@ -19,27 +19,31 @@
 // ceiling a pool's REPORT resolves, not a render bounded at it: a render refused at the size's
 // slot count and not the operator's is owed by the slice that mounts a renderer behind glass.
 //
-// RAILS-RED on origin/main, this file copied in: 5 red, 3 green — 8 cases. The three greens are
-// the CONTROLS named above; the reds are the envelope's and the walk's, which is what this slice
-// decides (the cycle and parented cases red on main because the walk does not exist there).
+// RAILS-RED on origin/main, this file copied in: 5 red, 4 green — 9 cases. Three greens are the
+// CONTROLS named above. The fourth is the case parenting a container under another person's: on
+// main the receive door climbed by the colon and never met the edge, so it is green there too; it
+// pins the no-oracle half against the walk this slice adds, and the parent-edge probe reds it.
 //
-// REVERT PROBES, MEASURED against this file as it stands — 8 cases. Re-measure when you add one.
-//   no size clamp at all                                    → 4 red, 4 green
-//   the size composes OVER the operator's ceiling           → 1 red, 7 green
-//   whether a size governs decided ONCE, at open            → 3 red, 5 green
-//   the walk follows a declared parent edge                 → 1 red, 7 green
-//   no hop from a pool to its host                          → 3 red, 5 green
-//   a self-hosted pool reads nothing, not sealed            → 1 red, 7 green
-//   the table read from the OPENER's copy, not the root's   → 1 red, 7 green
+// REVERT PROBES, MEASURED against this file as it stands — 9 cases. Re-measure when you add one.
+//   no size clamp at all                                    → 4 red, 5 green
+//   the size composes OVER the operator's ceiling           → 1 red, 8 green
+//   whether a size governs decided ONCE, at open            → 3 red, 6 green
+//   the walk follows a declared parent edge                 → 2 red, 7 green
+//   no hop from a pool to its host                          → 3 red, 6 green
+//   a self-hosted pool reads nothing, not sealed            → 1 red, 8 green
+//   any name with an inboxOf hops, not only a pool          → 1 red, 8 green
+//   the table read from the OPENER's copy, not the root's   → 1 red, 8 green
 // Every size is asserted by number under a wide ceiling; a mutant that moved medium's slots by
 // one survived until it was. An earlier walk followed declared edges and kept a memory of names
 // visited; a probe that removed the memory hung the run, since the walk is synchronous and no
 // test timeout can catch it. The walk climbs by name now and takes a pool's host edge once, so
-// no cycle can trap it and the memory is gone. A fifth probe once measured a clause DEAD and it
-// was deleted rather than kept: metering a pool because a size governs it changed nothing any
-// case could see, since a channel pool is untrusted and metered already. The shared walk
-// (`governingLeeway`) also serves the receive door; that file's two walk probes were re-measured
-// against the shared walk and each reds one case.
+// no cycle can trap it and the memory is gone. The non-pool hop probe was green until the
+// ordinary container's `inboxOf` pointed OUTSIDE its own name's subtree; inside it, both roads
+// land on the same ancestor. A fifth probe once measured a clause DEAD and it was deleted rather
+// than kept: metering a pool because a size governs it changed nothing any case could see, since
+// a channel pool is untrusted and metered already. The shared walk (`governingLeeway`) also
+// serves the receive door; that file's two walk probes were re-measured against the shared walk
+// and each reds one case.
 import { describe, expect, it } from "vitest";
 import { signClaims } from "@bombadil/rhizomatic";
 import {
@@ -288,7 +292,12 @@ describe("§58 — the walls", () => {
     await gateway.append([
       signClaims(
         containerClaims(
-          { container: "loop", trust: "curated", posture: "separate", inboxOf: "loop" },
+          {
+            container: "inbox:loop",
+            trust: "curated",
+            posture: "separate",
+            inboxOf: "inbox:loop",
+          },
           OPERATOR,
           gateway.nextTimestamp(),
         ),
@@ -296,11 +305,59 @@ describe("§58 — the walls", () => {
       ),
     ]);
     const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
-    expect(table.containers.get("loop")?.inboxOf).toBe("loop");
+    expect(table.containers.get("inbox:loop")?.inboxOf).toBe("inbox:loop");
     // A name that cannot be placed reads SEALED: the floor, never the operator's wider ceiling,
     // so nothing that cannot be placed can widen anything.
-    expect(governingLeeway(table, "loop")).toEqual({ at: "loop", leeway: SEALED_LEEWAY });
-    expect(governingLeeway(table, "loop:child")).toBeUndefined();
+    expect(governingLeeway(table, "inbox:loop")).toEqual({
+      at: "inbox:loop",
+      leeway: SEALED_LEEWAY,
+    });
+    expect(governingLeeway(table, "inbox:loop:child")).toBeUndefined();
+    // Only a POOL hops to its host. An ordinary container carrying an `inboxOf` — an
+    // operator-signed shape the door admits — is placed by its name like any other: `ada:plain`
+    // points at `bea:elsewhere`, under a `bea` that sealed itself, and is governed by `ada`.
+    await gateway.append([
+      signClaims(
+        containerClaims(
+          { container: "bea", trust: "curated", posture: "separate", leeway: SEALED_LEEWAY },
+          OPERATOR,
+          gateway.nextTimestamp(),
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    await gateway.append([
+      signClaims(
+        containerClaims(
+          {
+            container: "ada",
+            trust: "curated",
+            posture: "separate",
+            leeway: { ...SEALED_LEEWAY, receive: true },
+          },
+          OPERATOR,
+          gateway.nextTimestamp(),
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    await gateway.append([
+      signClaims(
+        containerClaims(
+          {
+            container: "ada:plain",
+            trust: "curated",
+            posture: "separate",
+            inboxOf: "bea:elsewhere",
+          },
+          OPERATOR,
+          gateway.nextTimestamp(),
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    const later = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+    expect(governingLeeway(later, "ada:plain")?.at).toBe("ada");
     await closeAll();
   });
 
@@ -395,10 +452,6 @@ describe("§58 — the walls", () => {
     expect(x.isError, "the name's own binding says receive off").toBe(true);
     expect(x.text).toMatch(/ada:journal does not receive/);
     expect(x.text).not.toMatch(/\bada does not receive|bea:notes/);
-    const y = await receive(base, ada, "ada:journal:y", peer);
-    expect(y.isError).toBe(true);
-    expect(y.text).toMatch(/ada:journal does not receive/);
-    expect(y.text).not.toMatch(/bea:notes/);
     // The envelope reads the name too: opened under `ada:journal` (small), a pool named under
     // `ada:journal:x` is small, whatever `x`'s declared parent says.
     await declare(gateway, "ada:journal", { ...SEALED_LEEWAY, receive: true, envelope: "small" });
@@ -417,6 +470,38 @@ describe("§58 — the walls", () => {
     expect(envelopeOf(gateway, "channel:ada:journal:x:ada:journal:x:peer")).toEqual(
       DEFAULT_QUARANTINE_ENVELOPE,
     );
+    await closePeers();
+    await closeAll();
+  });
+
+  it("a container parented under ANOTHER PERSON'S container is governed by its name, and no refusal names them", async () => {
+    // Measured apart from its sibling case so the oracle half stands on its own: with the edge
+    // followed, the refusal named `bea:notes`, another person's container.
+    const { base, gateway } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    await connect(base, "bea", "notes");
+    await declare(gateway, "ada:journal", { ...SEALED_LEEWAY, receive: false });
+    await declare(gateway, "bea:notes", { ...SEALED_LEEWAY, receive: false });
+    await gateway.append([
+      signClaims(
+        containerClaims(
+          {
+            container: "ada:journal:y",
+            trust: "curated",
+            posture: "separate",
+            parent: "bea:notes",
+          },
+          OPERATOR,
+          gateway.nextTimestamp(),
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    const peer = await peerStore();
+    const y = await receive(base, ada, "ada:journal:y", peer);
+    expect(y.isError).toBe(true);
+    expect(y.text).toMatch(/ada:journal does not receive/);
+    expect(y.text).not.toMatch(/bea:notes/);
     await closePeers();
     await closeAll();
   });

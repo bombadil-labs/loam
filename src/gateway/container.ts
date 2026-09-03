@@ -907,7 +907,10 @@ export function governingLeeway(
   name: string,
   ceiling?: string,
 ): { readonly at: string; readonly leeway: Leeway } | undefined {
-  const host = table.containers.get(name)?.inboxOf;
+  // A pool is known by its leading token, as the spec names it, not by the presence of an
+  // `inboxOf` record: an operator-signed `inboxOf` on an ordinary container is not a hop.
+  const isPool = name.startsWith("inbox:") || name.startsWith("channel:");
+  const host = isPool ? table.containers.get(name)?.inboxOf : undefined;
   if (host === name) return { at: name, leeway: SEALED_LEEWAY };
   for (let at: string | undefined = host ?? name; at !== undefined;) {
     const declared = table.containers.get(at);
