@@ -507,6 +507,15 @@ export function boundBindingsImpl(
       candidates.push({ ...r, origin: "store" as const, channel: name });
     }
   }
+  // CONTESTS RESOLVE BY REGISTRATION ORDER, never by attach order. Two pools in one container may
+  // name one lens; iterating `connectionInboxes` would let a LATER registrant on an EARLIER-attached
+  // inbox displace a sibling's already-bound lens — silently for the sibling, and differently after
+  // a reboot re-attaches in another order. The earlier binding keeps the name; ties break on the
+  // pool's name so a replay is deterministic.
+  candidates.sort(
+    (a, b) =>
+      (a.boundAt ?? 0) - (b.boundAt ?? 0) || (a.channel ?? "").localeCompare(b.channel ?? ""),
+  );
   // THE KEY IS COMPUTED BEFORE ANY TRIAL, or the cache caches nothing: a trial per candidate is
   // the expensive part, and a key that only exists after it is a receipt, not a shortcut.
   const key = [

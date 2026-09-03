@@ -13,11 +13,9 @@
 // primary's) AND what each door serves — asked as "does the surface CARRY the field", matched on
 // GraphQL's own "Cannot query field", so no other error can pass for "not served".
 //
-// NOT HERE, and said so rather than padded: (a) a restart — the pools re-attach through S1's
+// NOT HERE, and said so rather than padded: a restart — the pools re-attach through S1's
 // `resumeInboxesImpl`, which S1 railed, and this fold is a pure function over the attached pools,
-// so what a boot needs is exactly what S1 proves; (b) `bound:false` from the container trial for a
-// candidate the POOL accepted — every deterministic refusal I could construct is refused earlier by
-// the parser or the fence, so a rail for it would have been hollow.
+// so what a boot needs is exactly what S1 proves.
 
 //
 // RAILS-RED on origin/main, this file copied in: 14 red, 1 green — 15 cases. The green one is the
@@ -26,24 +24,27 @@
 // about the fence, and says so here rather than padding the count.
 //
 // REVERT PROBES, MEASURED against this file as it stands — 15 cases. Re-measure when you add one.
-//   the binding grants no register fence                        → 13 red,  2 green
-//   the fence drops the COLON                                   →  3 red, 12 green
+//   the binding grants no register fence                          → 13 red,  2 green
+//   the fence drops the COLON                                     →  3 red, 12 green
 //   every bound identity is routed to its pool (granted law dies) →  1 red, 14 green
-//   container law is routed to the PRIMARY                      → 10 red,  5 green
-//   the FOLD fences none of its three names                     →  1 red, 14 green
-//   the fold drops the PROGRAM fence alone                      →  1 red, 14 green
-//   the fold drops the ENTITY fence alone                       →  1 red, 14 green
-//   inbox law back in the ROOT fold, with a root refold         →  8 red,  7 green
-//   the query door ignores the binding                          →  8 red,  7 green
-//   the door reports the pool's answer, not the container's     →  2 red, 13 green
-//   the door matches ANY row under the name, not this pool's    →  1 red, 14 green
-//   whoami re-derives standing beside the door                  →  2 red, 13 green
-//   the listing groups the ROOT's rows for a bound reader       →  1 red, 14 green
-//   the bound fold is a single pass, not a fixpoint             →  1 red, 14 green
-//   NUL admitted in a READING name, at door and fold            →  1 red, 14 green
-// Nine of these isolate exactly one case, which is what makes them worth keeping. The root-fold
+//   container law is routed to the PRIMARY                        → 11 red,  4 green
+//   the fence admits each name separately (a mixed pair passes)   →  1 red, 14 green
+//   the FOLD fences none of its three names                       →  1 red, 14 green
+//   the fold drops the PROGRAM fence alone                        →  1 red, 14 green
+//   the fold drops the READING fence alone                        →  1 red, 14 green
+//   the fold drops the ENTITY fence alone                         →  1 red, 14 green
+//   inbox law back in the ROOT fold, with a root refold           →  8 red,  7 green
+//   the query door ignores the binding                            →  8 red,  7 green
+//   the door reports the pool's answer, not the container's       →  2 red, 13 green
+//   the door matches ANY row under the name, not this pool's      →  1 red, 14 green
+//   whoami re-derives standing beside the door                    →  2 red, 13 green
+//   the listing groups the ROOT's rows for a bound reader         →  1 red, 14 green
+//   the bound fold is a single pass, not a fixpoint               →  1 red, 14 green
+//   NUL admitted in a READING name, at door and fold              →  1 red, 14 green
+// Ten of these isolate exactly one case, which is what makes them worth keeping. The root-fold
 // probe is restored WHOLE (loop and refold): the loop alone leaves every case green, which is how
-// an earlier draft of these probes misread a hollow rail as a sound one.
+// an earlier draft of these probes misread a hollow rail as a sound one. The contest between two
+// pools in one container is railed at the library seam, in test/gateway/bound-fold.test.ts.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -393,14 +394,39 @@ describe("§58 position 2 — the binding is the register grant, and the law ser
     expect((await register(base, ada, envelope("ada:journal:own"))).status).toBe(200);
     expect(lensesIn(gateway)).not.toContain("ada:journal:own");
     expect(await serves(base, "op-token", "ada_journal_own")).toBe(false);
+
+    // A MIXED PAIR — program under the container, reading under the grant, or the reverse — is
+    // under NO one prefix and is refused. A fence that admitted each name separately let this
+    // pair clear it, and the route sent container-path law to the primary, served to everyone.
+    const bea = await connect(base, "bea", "journal");
+    for (const [program, reading] of [
+      ["ada:journal:p1", "zed:r1"],
+      ["zed:p2", "ada:journal:r2"],
+    ] as const) {
+      const mixed = await register(base, ada, {
+        ...(envelope(program) as Record<string, unknown>),
+        schema: {
+          name: reading,
+          props: { note: { pick: { order: { byTimestamp: "desc" } } } },
+          default: { pick: { order: { byTimestamp: "desc" } } },
+        },
+      });
+      expect(mixed.status, `${program} / ${reading}`).toBe(403);
+    }
+    const everywhere = [...lensesIn(gateway), ...pools(gateway).flatMap(lensesIn)];
+    for (const name of ["ada:journal:p1", "zed:r1", "zed:p2", "ada:journal:r2"]) {
+      expect(everywhere).not.toContain(name);
+    }
+    expect(await serves(base, "op-token", "ada_journal_r2")).toBe(false);
+    expect(await serves(base, bea, "ada_journal_r2")).toBe(false);
     await closeAll();
   });
 
   it("KNOWN LIMIT — a pool lens that expands into the ROOT's reading is refused at the door, by name", async () => {
-    // The pool's own trial cannot see the root's readings, so a body that `expand`s into `Plant`
-    // draws the parser's shape complaint at publish. Honest refusal, not a silent fallback; the
-    // fix is the context carrying its law source (T274, §59), and until then this case is the
-    // record that it refuses rather than pretending.
+    // The pool's own trial cannot see the root's readings, so a body that expands into `Plant`
+    // fails to materialize at publish. Honest refusal, not a silent fallback; the fix is the
+    // context carrying its law source (T274, §59). This case goes RED the day that lands — its
+    // body is a well-formed grouped expand, so the only thing between it and 200 is the limit.
     const { base, gateway } = await connectionServer();
     const ada = await connect(base, "ada", "journal");
     const res = await register(base, ada, {
@@ -414,14 +440,19 @@ describe("§58 position 2 — the binding is the register grant, and the law ser
           schema: "Plant",
           reading: "Plant",
           in: {
-            op: "select",
-            pred: { hasPointer: { targetEntity: { var: "root" } } },
-            in: { op: "mask", policy: "drop", in: "input" },
+            op: "group",
+            key: "byTargetContext",
+            in: {
+              op: "select",
+              pred: { hasPointer: { targetEntity: { var: "root" } } },
+              in: { op: "mask", policy: "drop", in: "input" },
+            },
           },
         },
       },
     });
     expect(res.status).toBe(400);
+    expect(await res.text()).toMatch(/Plant/);
     expect(lensesIn(gateway)).not.toContain("ada:journal:expander");
     expect(pools(gateway).flatMap(lensesIn)).not.toContain("ada:journal:expander");
     await closeAll();

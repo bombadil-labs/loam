@@ -1434,7 +1434,11 @@ export class Gateway {
     const fold = boundBindingsImpl(this, binding.container, held);
     if (held !== undefined && fold === held.fold) return { ...held.fold, schema: held.schema };
     const schema = buildGqlSchema(fold.registered, this.gqlHooks());
-    this.boundCache.set(binding.container, { key: fold.key, fold, schema });
+    // A container with no pool law folds to the root's own rows; there is nothing to hold, and
+    // holding it would keep a dropped container's surface in memory for the gateway's lifetime.
+    if (fold.registered.length === this.registered.length)
+      this.boundCache.delete(binding.container);
+    else this.boundCache.set(binding.container, { key: fold.key, fold, schema });
     return { ...fold, schema };
   }
 

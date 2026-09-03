@@ -611,11 +611,17 @@ function federateAdmits(standing: readonly string[] | undefined, container: stri
 // AND THE FENCE IS NOT THE WHOLE GATE. Two fields of a registration are not namespace problems at
 // all, and no prefix could ever have contained them — see `scopedRegistrationDefect` below.
 function registerFenceAdmits(fence: readonly string[], input: RegistrationInput): boolean {
-  const inside = (name: string): boolean => fence.some((prefix) => fenceAdmits(prefix, name));
-  if (!inside(input.hyperschema.name)) return false;
   const reading = lensNameFor(input.hyperschema, input.schema);
   if (reading.includes(NUL)) return false; // the program is guarded at publish; the reading was not
-  if (!inside(reading)) return false;
+  // ONE prefix must admit BOTH names. A fence that tested each name against any prefix let a
+  // connection holding a grant AND a binding pair a program under its container with a reading
+  // under its grant — and the route, seeing a pair not wholly inside the container, sent
+  // container-path law to the PRIMARY, operator-signed and served store-wide. A registration
+  // lives under one prefix; that prefix decides where it lands.
+  const program = input.hyperschema.name;
+  if (!fence.some((prefix) => fenceAdmits(prefix, program) && fenceAdmits(prefix, reading))) {
+    return false;
+  }
   return input.entity === undefined || input.entity === schemaEntityFor(input.hyperschema);
 }
 
