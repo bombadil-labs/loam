@@ -52,6 +52,12 @@ export interface OpenChannelOptions {
   readonly from?: string;
   /** Whether law arriving on this channel binds. Reversible; see §46's two toggles. */
   readonly bless?: boolean;
+  /**
+   * The container a BOUND CONNECTION opened this channel from (SPEC §58 position 2). Absent for
+   * a channel the person opened. Recorded on the channel, because it decides whose surface the
+   * arriving law serves: a connection's channel serves only its container, never the root.
+   */
+  readonly openedBy?: string;
 }
 
 export interface SyncReport {
@@ -132,6 +138,8 @@ export interface ChannelStatus {
   readonly consecutiveFailures: number;
   /** The peer's address, or "" for a channel opened before addresses were recorded. */
   readonly from: string;
+  /** The container a bound connection opened this channel from; absent for the person's own. */
+  readonly openedBy?: string;
   /**
    * Arrivals this channel accepted and could not stamp — the custody debt, carried on the record
    * until a later sync names them. Empty is the healthy reading, and every record written before
@@ -214,6 +222,14 @@ export function channelRecordClaims(
       },
       { role: "into", target: { kind: "primitive", value: status.into } },
       { role: "prefix", target: { kind: "primitive", value: status.prefix } },
+      ...(status.openedBy === undefined
+        ? []
+        : [
+            {
+              role: "openedBy" as const,
+              target: { kind: "primitive" as const, value: status.openedBy },
+            },
+          ]),
       { role: "receiving", target: { kind: "primitive", value: status.receiving } },
       { role: "blessing", target: { kind: "primitive", value: status.blessing } },
       { role: "lastSyncedAt", target: { kind: "primitive", value: status.lastSyncedAt } },
@@ -493,6 +509,7 @@ function readChannels(
         lastSyncedAt: Number(of("lastSyncedAt") ?? 0),
         consecutiveFailures: Number(of("consecutiveFailures") ?? 0),
         from: String(of("from") ?? ""),
+        ...(typeof of("openedBy") === "string" ? { openedBy: String(of("openedBy")) } : {}),
         unattested,
         unreadable,
       },
@@ -1328,7 +1345,14 @@ async function syncChannel(
   gw: Gateway,
   ground: Gateway,
   name: string,
-  opts: { into: string; prefix: string; from?: string; source: ChannelSource; bless?: boolean },
+  opts: {
+    into: string;
+    prefix: string;
+    from?: string;
+    source: ChannelSource;
+    bless?: boolean;
+    openedBy?: string;
+  },
 ): Promise<SyncReport> {
   const before = channelStatusImpl(gw, name)[0];
   // WHAT THE RECORD THIS SYNC BUILDS ON COULD NOT SAY. Every stamp below copies most of its fields
@@ -1386,6 +1410,7 @@ async function syncChannel(
         name,
         into: opts.into,
         prefix: opts.prefix,
+        ...(opts.openedBy === undefined ? {} : { openedBy: opts.openedBy }),
         receiving: before?.receiving ?? true,
         blessing: before?.blessing ?? opts.bless !== false,
         lastSyncedAt: before?.lastSyncedAt ?? 0,
@@ -1431,6 +1456,7 @@ async function syncChannel(
         name,
         into: opts.into,
         prefix: opts.prefix,
+        ...(opts.openedBy === undefined ? {} : { openedBy: opts.openedBy }),
         receiving: before?.receiving ?? true,
         blessing: before?.blessing ?? opts.bless !== false,
         lastSyncedAt: before?.lastSyncedAt ?? 0,
@@ -1476,6 +1502,7 @@ async function syncChannel(
         name,
         into: opts.into,
         prefix: opts.prefix,
+        ...(opts.openedBy === undefined ? {} : { openedBy: opts.openedBy }),
         receiving: before?.receiving ?? true,
         blessing,
         lastSyncedAt: before?.lastSyncedAt ?? 0,
@@ -1524,6 +1551,7 @@ async function syncChannel(
         name,
         into: opts.into,
         prefix: opts.prefix,
+        ...(opts.openedBy === undefined ? {} : { openedBy: opts.openedBy }),
         receiving: before?.receiving ?? true,
         blessing: before?.blessing ?? opts.bless !== false,
         lastSyncedAt: gw.nextTimestamp(),
@@ -1701,8 +1729,10 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
       name,
       into: opts.into,
       prefix: opts.prefix,
+      ...(opts.openedBy === undefined ? {} : { openedBy: opts.openedBy }),
       receiving: true,
       blessing: opts.bless !== false,
+      ...(opts.openedBy === undefined ? {} : { openedBy: opts.openedBy }),
       lastSyncedAt: 0,
       consecutiveFailures: 0,
       from: opts.from ?? "",
@@ -1716,6 +1746,7 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
     name,
     into: opts.into,
     prefix: opts.prefix,
+    ...(opts.openedBy === undefined ? {} : { openedBy: opts.openedBy }),
     pool,
     // Union, and idempotent by construction: the pool's append de-duplicates by delta id, so a
     // second sync of an unchanged peer accepts nothing and refuses nothing. Polling is therefore
@@ -2305,6 +2336,7 @@ export function resumeChannelImpl(gw: Gateway, standing: ChannelStatus, token: s
   const opts = {
     into: standing.into,
     prefix: standing.prefix,
+    ...(standing.openedBy === undefined ? {} : { openedBy: standing.openedBy }),
     from: standing.from,
     source: sourceFor(
       standing.from,
@@ -2319,6 +2351,7 @@ export function resumeChannelImpl(gw: Gateway, standing: ChannelStatus, token: s
     name: standing.name,
     into: standing.into,
     prefix: standing.prefix,
+    ...(standing.openedBy === undefined ? {} : { openedBy: standing.openedBy }),
     get pool(): Container {
       return poolOf();
     },

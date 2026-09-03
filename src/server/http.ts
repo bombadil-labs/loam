@@ -81,6 +81,9 @@ import { CSP, makeUserDoors, type UserDoorOptions, type UserDoors } from "./sess
 import { makeAdminDoor, type AdminDoor } from "./admin.js";
 import { ADMIN_CONTAINER_PATH } from "./admin-pages.js";
 import { refusalKey } from "../gateway/lifecycle.js";
+import { readContainerTable } from "../gateway/container.js";
+import type { ChannelStatus } from "../federation/channel.js";
+import type { ConnectionBinding } from "../gateway/gateway.js";
 
 export { type UserDoorOptions } from "./session.js";
 
@@ -579,6 +582,60 @@ function federateStanding(
  * exactly one container, and prefix-matching would admit `friends-archive` to a grant saying
  * `friends`.
  */
+/**
+ * Why a bound connection may not receive into `into` under `prefix`, or undefined when it may
+ * (SPEC §58 position 2: receive is a channel into a descendant of C from a source offered to this
+ * connection; position 4: only where the container's leeway says receive is on). The leeway that
+ * governs `into` is the nearest DECLARED container at or above it, no higher than the binding's
+ * own — an undeclared child is a pure namespace and inherits. The refusal names only the
+ * connection's own container, never another's: no oracle.
+ */
+function receiveRefusal(
+  gateway: Gateway,
+  binding: ConnectionBinding,
+  into: string,
+  prefix: string | undefined,
+): string | undefined {
+  const fence = `${binding.container}:`;
+  if (into !== binding.container && !fenceAdmits(fence, into)) {
+    return (
+      "a connection receives only into its own container or a descendant of it — the path and " +
+      `its colon — and ${into} is outside ${fence}`
+    );
+  }
+  if (prefix !== undefined && !fenceAdmits(fence, prefix)) {
+    return (
+      "a connection assigns a peer a prefix inside its own fence — the path and its colon — " +
+      `and ${prefix} is outside ${fence}`
+    );
+  }
+  const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+  for (let at = into; ; at = at.slice(0, at.lastIndexOf(":"))) {
+    const declared = table.containers.get(at);
+    if (declared !== undefined) {
+      return declared.leeway.receive
+        ? undefined
+        : `the container ${at} does not receive: its leeway's receive switch is off`;
+    }
+    if (at === binding.container || !at.includes(":")) break;
+  }
+  return (
+    `the container ${binding.container} does not receive: no leeway is declared for it, and an ` +
+    "absent leeway is every switch off"
+  );
+}
+
+/** May this caller see or act on THIS channel? A bound connection owns the channels its container opened. */
+function channelAdmits(
+  identity: TokenIdentity,
+  standing: readonly string[] | undefined,
+  channel: ChannelStatus,
+): boolean {
+  return identity.binding === undefined
+    ? federateAdmits(standing, channel.into)
+    : channel.openedBy === identity.binding.container;
+}
+
 function federateAdmits(standing: readonly string[] | undefined, container: string): boolean {
   if (standing === undefined) return false;
   return standing.length === 0 || standing.includes(container);
@@ -1707,22 +1764,22 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           const from = typeof args.from === "string" ? args.from : undefined;
           const prefix = typeof args.prefix === "string" ? args.prefix : undefined;
           // The fence is checked BEFORE the arguments are examined further, so a caller without
-          // standing cannot learn which containers exist by comparing refusals (§12/T78).
-          if (into === undefined || !federateAdmits(standing, into)) {
-            reply({
-              content: [
-                {
-                  type: "text",
-                  text:
-                    "federation is not yours to open here: it wants a `federate` grant naming the " +
-                    "container you are receiving into.",
-                },
-              ],
-              isError: true,
-            });
+          // standing cannot learn which containers exist by comparing refusals (§12/T78). A bound
+          // connection's fence is its binding, not a grant (SPEC §58 position 2).
+          const refusal =
+            identity.binding !== undefined
+              ? into === undefined
+                ? "federate_connect wants `from`, `into` and `prefix`."
+                : receiveRefusal(gateway, identity.binding, into, prefix)
+              : into === undefined || !federateAdmits(standing, into)
+                ? "federation is not yours to open here: it wants a `federate` grant naming the " +
+                  "container you are receiving into."
+                : undefined;
+          if (refusal !== undefined) {
+            reply({ content: [{ type: "text", text: refusal }], isError: true });
             return;
           }
-          if (from === undefined || prefix === undefined) {
+          if (into === undefined || from === undefined || prefix === undefined) {
             reply({
               content: [
                 { type: "text", text: "federate_connect wants `from`, `into` and `prefix`." },
@@ -1736,6 +1793,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
               into,
               prefix,
               bless: args.bless !== false,
+              ...(identity.binding === undefined ? {} : { openedBy: identity.binding.container }),
               // The SHIPPED source builder, shared with the CLI — never a second copy.
               source: sourceFor(
                 from,
@@ -1768,7 +1826,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           const standing = federateStanding(gateway, identity);
           const target = gateway
             .channelStatus(args.channel)
-            .find((c) => federateAdmits(standing, c.into));
+            .find((c) => channelAdmits(identity, standing, c));
           if (target === undefined) {
             reply({
               content: [
@@ -1829,7 +1887,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
 
         if (name === "loam_federate_status" || name === "loam_federate_set") {
           const standing = federateStanding(gateway, identity);
-          if (standing === undefined) {
+          if (standing === undefined && identity.binding === undefined) {
             reply({
               content: [
                 {
@@ -1845,7 +1903,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           }
           const rows = gateway
             .channelStatus(args.channel)
-            .filter((c) => federateAdmits(standing, c.into));
+            .filter((c) => channelAdmits(identity, standing, c));
 
           if (name === "loam_federate_status") {
             // Read ONCE for the whole answer: `channelApps` walks the ground to find the channels,
