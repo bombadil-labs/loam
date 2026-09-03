@@ -565,10 +565,14 @@ export function boundBindingsImpl(
   // sibling's claim it could hope to see cleared while its own collision with the operator's law
   // went unnamed.
   const rootFault = new Map<Bound, string>();
-  for (const candidate of candidates) {
-    const fault = contests(gw, gw.registered, candidate);
-    if (fault !== undefined) rootFault.set(candidate, fault);
-  }
+  // The root builds alone — it passed this very trial whole when it was bound — so that half of
+  // the pair test is asked once, not once per candidate.
+  if (buildsAlone(gw, gw.registered) === undefined)
+    for (const candidate of candidates) {
+      if (buildsAlone(gw, [candidate]) !== undefined) continue; // its fault is its own
+      const fault = buildsAlone(gw, [...gw.registered, candidate]);
+      if (fault !== undefined) rootFault.set(candidate, fault);
+    }
   let pending = candidates;
   for (;;) {
     const still: Bound[] = [];
@@ -613,25 +617,26 @@ export function boundBindingsImpl(
 }
 
 /**
- * What the trial refuses the PAIR on — the holder, or the root's rows, against a rival — or
- * undefined when it admits both. Asked of the trial's own
+ * What the trial refuses the PAIR on, or undefined when it admits both. Asked of the trial's own
  * checks — one program name, one body (`groupPrograms`); one name per GraphQL field, type, and
  * mutation (`buildGqlSchema`) — with no registry, because a holder waiting on a reading cannot
  * be resolved yet and its NAMES are what the rival contests. A row the trial cannot build alone
  * contests nothing: its fault is its own, and it is refused for it.
  */
-function contests(gw: Gateway, held: readonly Bound[], rival: Bound): string | undefined {
-  const builds = (rows: readonly Bound[]): string | undefined => {
-    try {
-      groupPrograms(rows);
-      buildGqlSchema(rows, gw.gqlHooks());
-      return undefined;
-    } catch (err) {
-      return err instanceof Error ? err.message : String(err);
-    }
-  };
-  if (builds(held) !== undefined || builds([rival]) !== undefined) return undefined;
-  return builds([...held, rival]);
+function buildsAlone(gw: Gateway, rows: readonly Bound[]): string | undefined {
+  try {
+    groupPrograms(rows);
+    buildGqlSchema(rows, gw.gqlHooks());
+    return undefined;
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+
+function contests(gw: Gateway, holder: Bound, rival: Bound): string | undefined {
+  if (buildsAlone(gw, [holder]) !== undefined || buildsAlone(gw, [rival]) !== undefined)
+    return undefined;
+  return buildsAlone(gw, [holder, rival]);
 }
 
 /** The earlier claimant this candidate contests, if one is refused this round. */
@@ -641,7 +646,7 @@ function contestedBy(
   holders: readonly Bound[],
 ): { readonly holder: Bound; readonly on: string } | undefined {
   for (const holder of holders) {
-    const on = contests(gw, [holder], c);
+    const on = contests(gw, holder, c);
     if (on !== undefined) return { holder, on };
   }
   return undefined;
