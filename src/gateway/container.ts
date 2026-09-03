@@ -898,7 +898,13 @@ export function governingLeeway(
   name: string,
   ceiling?: string,
 ): { readonly at: string; readonly leeway: Leeway } | undefined {
-  for (let at: string | undefined = name; at !== undefined;) {
+  // The table restores a forest over PARENT edges only; an `inboxOf` edge is never checked for a
+  // cycle, and a lawful declaration can point a container at itself. A walk with no memory hangs
+  // the event loop on one such delta, so every name is visited once: a revisit ends the walk with
+  // nothing governing, which every road reads as it reads an undeclared top.
+  const seen = new Set<string>();
+  for (let at: string | undefined = name; at !== undefined && !seen.has(at);) {
+    seen.add(at);
     const declared = table.containers.get(at);
     if (declared !== undefined && declared.leewayDeclared) return { at, leeway: declared.leeway };
     if (at === ceiling) return undefined;
@@ -1320,22 +1326,23 @@ async function openSeparate(
     outerCeiling === undefined ? ownEnvelope : clampedTo(ownEnvelope, outerCeiling);
   // THE ENVELOPE BINDS (SPEC §58 position 3): a container's leeway names an envelope SIZE, and a
   // pool opened inside it renders under that size, clamped UNDER the operator's ceiling and never
-  // over it, so a large size on a small store is the store's own limit. The governing leeway is
-  // read from the root's live table, as the ceiling is, and read again on every resolve: a size
-  // change is a delta the next render obeys.
-  const governed =
-    spec.entity === undefined
-      ? undefined
-      : governingLeeway(readContainerTable(gw.reactor, gw.operatorAuthor), spec.entity);
+  // over it, so a large size on a small store is the store's own limit. Whether a size governs is
+  // asked again on EVERY resolve, from the ROOT's live table — a pool's own reactor is a seeded
+  // copy, and a pool nested in a pool would otherwise read a table that never saw the leeway — so
+  // a leeway declared after the pool opened binds it, one withdrawn later releases it to the
+  // operator's ceiling, and a size change is a delta the next render obeys.
+  let root: Gateway = gw;
+  while (root.attachedTo !== undefined) root = root.attachedTo;
+  const rootGateway = root;
   const ceiling =
-    governed === undefined
+    spec.entity === undefined
       ? operatorsCeiling
       : clampedTo(() => {
           const now = governingLeeway(
-            readContainerTable(gw.reactor, gw.operatorAuthor),
+            readContainerTable(rootGateway.reactor, rootGateway.operatorAuthor),
             spec.entity!,
           );
-          return SIZE_ENVELOPES[(now ?? governed).leeway.envelope];
+          return now === undefined ? operatorsCeiling() : SIZE_ENVELOPES[now.leeway.envelope];
         }, operatorsCeiling);
   pool.envelopeCeiling = ceiling;
   // ENFORCEMENT attaches to an UNTRUSTED container, and to EVERYTHING BELOW ONE. A curated container

@@ -15,26 +15,37 @@
 // attempt refuses, and a renderer it blesses serves behind glass — those need the `bless-renderer`
 // verb of the roster slice; offering above the root is the offer token's (T264); declaring above the
 // root is the `declare` verb's; a child leeway that does not FIT its parent's terms is the cascade
-// slice. Each of those slices owes this file's successor a case.
+// slice. Each of those slices owes this file's successor a case. And the envelope cases assert the
+// ceiling a pool's REPORT resolves, not a render bounded at it: a render refused at the size's
+// slot count and not the operator's is owed by the slice that mounts a renderer behind glass.
 //
-// RAILS-RED on origin/main, this file copied in: 1 red, 3 green — 4 cases. The three greens are
-// the CONTROLS named above; the red is the envelope, which is what this slice decides.
+// RAILS-RED on origin/main, this file copied in: 4 red, 3 green — 7 cases. The three greens are
+// the CONTROLS named above; the reds are the envelope's, which is what this slice decides (the
+// cycle case reds on main because the walk does not exist there).
 //
-// REVERT PROBES, MEASURED against this file as it stands — 4 cases. Re-measure when you add one.
-//   no size clamp at all                                    → 1 red, 3 green
-//   the size composes OVER the operator's ceiling           → 1 red, 3 green
-//   the size read once at open, not on every resolve        → 1 red, 3 green
-//   the walk climbs by name only, never by a declared edge  → 1 red, 3 green
+// REVERT PROBES, MEASURED against this file as it stands — 7 cases. Re-measure when you add one.
+//   no size clamp at all                                    → 3 red, 4 green
+//   the size composes OVER the operator's ceiling           → 1 red, 6 green
+//   whether a size governs decided ONCE, at open            → 2 red, 5 green
+//   the walk climbs by name only, never by a declared edge  → 2 red, 5 green
+//   the walk keeps no memory                                → the file HANGS (killed at 180s)
+//   the table read from the OPENER's copy, not the root's   → 1 red, 6 green
 // Every size is asserted by number under a wide ceiling; a mutant that moved medium's slots by
-// one survived until it was.
-// A fifth probe measured a clause DEAD and it was deleted rather than kept: metering a pool
-// because a size governs it changed nothing any case could see, since a channel pool is untrusted
-// and metered already. The shared walk (`governingLeeway`) also serves the receive door; that
-// file's two walk probes were re-measured here against the shared walk and each reds one case.
-
+// one survived until it was. A probe that removes the walk's memory does not red a case, it
+// stops the run: the walk is synchronous, so no test timeout can catch it, and the rail is the
+// external clock. A fifth probe once measured a clause DEAD and it was deleted rather than kept:
+// metering a pool because a size governs it changed nothing any case could see, since a channel
+// pool is untrusted and metered already. The shared walk (`governingLeeway`) also serves the
+// receive door; that file's two walk probes were re-measured here against the shared walk and
+// each reds one case.
 import { describe, expect, it } from "vitest";
 import { signClaims } from "@bombadil/rhizomatic";
-import { containerClaims, readContainerTable } from "../../src/gateway/container.js";
+import {
+  containerClaims,
+  governingLeeway,
+  inboxName,
+  readContainerTable,
+} from "../../src/gateway/container.js";
 import {
   DEFAULT_QUARANTINE_ENVELOPE,
   ENVELOPE_ANY,
@@ -58,6 +69,7 @@ import {
   OPERATOR_SEED,
   pkce,
   poolOf,
+  grantOf,
 } from "../helpers/connection-fixture.js";
 import { FERN } from "../spike/garden.js";
 
@@ -207,16 +219,163 @@ describe("§58 — the walls", () => {
     await closeAll();
   });
 
+  it("a size declared AFTER the pool opened binds it, and one withdrawn releases it", async () => {
+    // Whether a size governs is asked on every resolve, never fixed at open. A pool opened
+    // before its container declared any leeway renders under the operator's ceiling; declaring
+    // the size binds it; re-declaring the container without a pointer (a pure namespace again)
+    // releases it to the operator's ceiling.
+    const { base, gateway } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    await declare(gateway, "ada:journal", { ...SEALED_LEEWAY, receive: true });
+    await gateway.append([
+      signClaims(
+        envelopeClaims(
+          ENVELOPE_ANY,
+          { maxConcurrentRenders: 32, renderTimeoutMs: 4000, maxMemoryMb: 1024 },
+          OPERATOR,
+          gateway.nextTimestamp(),
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    const peer = await peerStore();
+    expect((await receive(base, ada, "ada:journal:inbox", peer)).isError).toBe(false);
+    const pool = "channel:ada:journal:inbox:ada:journal:inbox:peer";
+    // `ada:journal` declared a leeway with the default size: small binds from the start.
+    expect(envelopeOf(gateway, pool)).toEqual(DEFAULT_QUARANTINE_ENVELOPE);
+    await declare(gateway, "ada:journal", { ...SEALED_LEEWAY, receive: true, envelope: "medium" });
+    expect(envelopeOf(gateway, pool), "declared after").toEqual({
+      maxConcurrentRenders: 8,
+      renderTimeoutMs: 1000,
+      maxMemoryMb: 256,
+    });
+    // Withdrawn: the container re-declared with no pointer inherits, and nothing above it spoke.
+    const standing = readContainerTable(gateway.reactor, gateway.operatorAuthor).containers.get(
+      "ada:journal",
+    )!;
+    await gateway.append([
+      signClaims(
+        containerClaims(
+          {
+            container: "ada:journal",
+            trust: standing.trust,
+            posture: standing.posture,
+            ...(standing.parent === undefined ? {} : { parent: standing.parent }),
+            ...(standing.membership === undefined ? {} : { membership: standing.membership }),
+          },
+          OPERATOR,
+          gateway.nextTimestamp(),
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    expect(envelopeOf(gateway, pool), "withdrawn").toEqual({
+      maxConcurrentRenders: 32,
+      renderTimeoutMs: 4000,
+      maxMemoryMb: 1024,
+    });
+    await closePeers();
+    await closeAll();
+  });
+
+  it("the governing walk ends on a cycle the door admits", async () => {
+    // The table restores a forest over parent edges only; an `inboxOf` edge can point a
+    // container at itself and the door admits it. Without memory the walk hung the event loop
+    // on one lawful delta; with it, a revisit ends the walk with nothing governing.
+    const { gateway } = await connectionServer();
+    await gateway.append([
+      signClaims(
+        containerClaims(
+          { container: "loop", trust: "curated", posture: "separate", inboxOf: "loop" },
+          OPERATOR,
+          gateway.nextTimestamp(),
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+    expect(table.containers.get("loop")?.inboxOf).toBe("loop");
+    expect(governingLeeway(table, "loop")).toBeUndefined();
+    expect(governingLeeway(table, "loop:child")).toBeUndefined();
+    await closeAll();
+  });
+
+  it("a pool nested in a pool renders under the size too: the walk reads the root's table", async () => {
+    // A pool's own reactor is a seeded copy that never saw the leeway; read from it, a nested
+    // pool escaped the size. The table is the root's, on every resolve.
+    const { base, gateway } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    await declare(gateway, "ada:journal", { ...SEALED_LEEWAY, receive: true });
+    await gateway.append([
+      signClaims(
+        envelopeClaims(
+          ENVELOPE_ANY,
+          { maxConcurrentRenders: 32, renderTimeoutMs: 4000, maxMemoryMb: 1024 },
+          OPERATOR,
+          gateway.nextTimestamp(),
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    const peer = await peerStore();
+    expect((await receive(base, ada, "ada:journal:inbox", peer)).isError).toBe(false);
+    // The size is declared AFTER the channel pool opened, so the pool's seeded copy never sees it:
+    // only the root's table can govern what is opened inside the pool from here on.
+    await declare(gateway, "ada:journal", { ...SEALED_LEEWAY, receive: true, envelope: "medium" });
+    const outer = gateway.channelPools.get("channel:ada:journal:inbox:ada:journal:inbox:peer")!;
+    // Declared IN THE POOL: a pool's reactor is a seeded copy the root's later deltas never reach,
+    // and the nested pool's declaration lives where it is opened. The root's table never sees it,
+    // so the walk climbs by the name's own colon to the container that declared the size.
+    await outer.gateway!.append([
+      signClaims(
+        containerClaims(
+          {
+            container: "ada:journal:inbox:nested",
+            trust: "untrusted",
+            posture: "separate",
+            parent: "ada:journal:inbox",
+          },
+          OPERATOR,
+          outer.gateway!.nextTimestamp(),
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    const inner = await outer.gateway!.openContainer({
+      name: "ada:journal:inbox:nested",
+      trust: "untrusted",
+      posture: "separate",
+      backend: new MemoryBackend(),
+    });
+    expect(inner.entity).toBe("ada:journal:inbox:nested");
+    const report = gateway
+      .envelopeReports()
+      .find((r) => r.container === "ada:journal:inbox:nested");
+    expect(report?.envelope, "the nested pool").toEqual({
+      maxConcurrentRenders: 8,
+      renderTimeoutMs: 1000,
+      maxMemoryMb: 256,
+    });
+    await closePeers();
+    await closeAll();
+  });
+
   it("nothing a bound connection writes lands in `ada` or the primary ground — the object level and the sibling", async () => {
     // CONTROL at the delta level (S1 railed the sink); the object level and the sibling are new.
-    const { base, gateway } = await connectionServer();
+    const server = await connectionServer();
+    const { base, gateway } = server;
     const ada = await connect(base, "ada", "journal");
     const bea = await connect(base, "bea", "notes");
     expect((await mutateHeight(base, ada, 41)).status).toBe(200);
     expect(heightDeltas(gateway, 41), "the primary ground").toEqual([]);
-    const [adaInbox, beaInbox] = [...gateway.connectionInboxes.keys()];
-    expect(heightDeltas(poolOf(gateway, adaInbox!), 41)).toHaveLength(1);
-    expect(heightDeltas(poolOf(gateway, beaInbox!), 41), "the sibling's pool").toEqual([]);
+    const { connectorsHome } = server;
+    const inboxOf = (user: string, container: string): string =>
+      inboxName(container, grantOf(connectorsHome, user).actor);
+    expect(heightDeltas(poolOf(gateway, inboxOf("ada", "ada:journal")), 41)).toHaveLength(1);
+    expect(
+      heightDeltas(poolOf(gateway, inboxOf("bea", "bea:notes")), 41),
+      "the sibling's pool",
+    ).toEqual([]);
     expect(await heightVia(base, ada)).toBe(41);
     expect(await heightVia(base, bea)).not.toBe(41);
     await closeAll();
@@ -242,11 +401,14 @@ describe("§58 — the walls", () => {
     const p = pkce();
     const home = await consent(base, "ada", p.challenge, { bind: "ada" });
     expect(home.status).toBe(400);
+    expect(home.text).toContain("Your home container is never bound");
     const store = await consent(base, "ada", p.challenge, { bind: "" });
     expect(store.status).toBe(400);
+    expect(store.text).toContain("never bound to the store or to your home");
     await connect(base, "bea", "notes");
     const theirs = await consent(base, "ada", p.challenge, { bind: "bea:notes" });
     expect(theirs.status).toBe(404);
+    expect(theirs.text).toMatch(/Nothing under your name answers to that|not yours/i);
     await closeAll();
   });
 });

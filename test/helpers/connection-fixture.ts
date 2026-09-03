@@ -122,7 +122,7 @@ export async function consent(
   user: string,
   challenge: string,
   bind: Record<string, string>,
-): Promise<{ code: string; status: number }> {
+): Promise<{ code: string; status: number; text: string }> {
   const session = await signIn(base, user, PASSWORD);
   const query = new URLSearchParams({
     client_id: CLIENT_ID,
@@ -158,7 +158,7 @@ export async function consent(
   });
   const location = res.headers.get("location");
   const code = location === null ? "" : (new URL(location).searchParams.get("code") ?? "");
-  return { code, status: res.status };
+  return { code, status: res.status, text: await res.text() };
 }
 
 export async function redeem(base: string, code: string, verifier: string): Promise<Response> {
