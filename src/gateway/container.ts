@@ -35,7 +35,16 @@ import { isRepairable } from "../store/quarantine.js";
 import { CTX_GRANTS, grantClaims, holdsGrant, revocationClaims } from "./accounts.js";
 import { STORE_ENTITY } from "./genesis.js";
 import { isTombstone, readTombstones } from "./erase.js";
-import { canonicalLeewayJson, parseLeeway, SEALED_LEEWAY, type Leeway } from "./leeway.js";
+import {
+  canonicalLeewayJson,
+  parseLeeway,
+  SEALED_LEEWAY,
+  type Leeway,
+  leewayFits,
+  smallerEnvelope,
+  type Terms,
+  isSealed,
+} from "./leeway.js";
 import {
   clampedTo,
   newPoolEnvelope,
@@ -313,6 +322,27 @@ export function containerDefect(
     if (typeof raw !== "string") return "a container's leeway is one JSON string primitive";
     const read = parseLeeway(raw);
     if ("defect" in read) return `a container's leeway is malformed: ${read.defect}`;
+    // THE ONE RULE, WEIGHED WHERE A LEEWAY IS DECLARED (SPEC §58 position 4): a child's leeway —
+    // its switches, its envelope, its own delegate — must fit inside the terms its parent
+    // delegates, and the parent's own switches never enter the comparison. Weighed here, in the
+    // one validator every append runs through the trust policy, so every road reads one rule and
+    // the refusal names the ceiling. A child with nothing declared above it is free: the person
+    // sets the top, and no subtree exceeds what they set there.
+    // The person's HOME — a name with no colon — is the top the person sets, not a room with
+    // terms: consent never binds it, and what a person declares directly under it IS what they
+    // set at the top. Fit is weighed against a parent below the first colon.
+    const parent = name.includes(":") ? name.slice(0, name.lastIndexOf(":")) : undefined;
+    if (parent !== undefined && parent.includes(":")) {
+      const governing = governingLeeway(readContainerTable(reactor, operator), parent);
+      // A child that declares SEALED asks for nothing anyone could exceed: admitted under any
+      // terms, since the read narrows and never widens, and a room may name its annex closed.
+      if (governing !== undefined && !isSealed(read.leeway)) {
+        const refusal = leewayFits(read.leeway, governing.leeway);
+        if (refusal !== undefined) {
+          return `a container's leeway does not fit the terms ${governing.at} delegates: ${refusal.why}`;
+        }
+      }
+    }
   }
 
   const inboxOfs = primitives(claims, "inboxOf");
@@ -912,13 +942,66 @@ export function governingLeeway(
   const isPool = name.startsWith("inbox:") || name.startsWith("channel:");
   const host = isPool ? table.containers.get(name)?.inboxOf : undefined;
   if (host === name) return { at: name, leeway: SEALED_LEEWAY };
-  for (let at: string | undefined = host ?? name; at !== undefined;) {
+  const up = (at: string): string | undefined =>
+    at.includes(":") ? at.slice(0, at.lastIndexOf(":")) : undefined;
+  let found: { readonly at: string; readonly leeway: Leeway } | undefined;
+  let at: string | undefined = host ?? name;
+  for (; at !== undefined; at = up(at)) {
     const declared = table.containers.get(at);
-    if (declared !== undefined && declared.leewayDeclared) return { at, leeway: declared.leeway };
+    if (declared !== undefined && declared.leewayDeclared) {
+      found = { at, leeway: declared.leeway };
+      break;
+    }
     if (at === ceiling) return undefined;
-    at = at.includes(":") ? at.slice(0, at.lastIndexOf(":")) : undefined;
   }
-  return undefined;
+  if (found === undefined) return undefined;
+  // THE ONE RULE, READ: what a container declared is what it ASKED FOR; what it has is that,
+  // narrowed by the terms of every ancestor that declared a leeway above it. A parent tightened
+  // after its child declared narrows the child on the next request. No subtree exceeds what the
+  // person set at its top, and nothing here ever widens what a child asked for. The person's home
+  // (a name with no colon) is that top, not a room with terms: it narrows nothing below it.
+  let effective = found.leeway;
+  for (let above = up(found.at); above !== undefined && above.includes(":"); above = up(above)) {
+    const ancestor = table.containers.get(above);
+    if (ancestor === undefined || !ancestor.leewayDeclared) continue;
+    // Under `delegate: off` the ancestor's OWN switches are the terms: nothing below it may
+    // exceed it, and what a child asked for is never widened, only narrowed.
+    effective = narrowedBy(
+      effective,
+      ancestor.leeway.delegate === "off" ? ancestor.leeway : ancestor.leeway.delegate,
+    );
+  }
+  return { at: found.at, leeway: effective };
+}
+
+/** A leeway narrowed by the terms above it: each switch needs the term's leave, the envelope no larger. */
+function narrowedBy(leeway: Leeway, terms: Terms): Leeway {
+  return {
+    receive: leeway.receive && terms.receive,
+    offer: leeway.offer && terms.offer,
+    publish: leeway.publish && terms.publish,
+    envelope: smallerEnvelope(leeway.envelope, terms.envelope),
+    delegate: leeway.delegate,
+  };
+}
+
+/**
+ * Does the connection that opened this channel still STAND — its inbox pool attached and its
+ * write grant surviving there? A channel the person opened has no opener and always stands. The
+ * cascade (SPEC §58 position 4): a channel is rooted in the binding that opened it; revoking the
+ * binding revokes the channel on the next request, and a channel nobody revoked is untouched.
+ */
+export function openerStands(
+  gw: Gateway,
+  channel: { readonly openedBy?: string; readonly openedFrom?: string },
+): boolean {
+  if (channel.openedFrom === undefined) return true;
+  const inbox = gw.connectionInboxes.get(channel.openedFrom)?.gateway;
+  if (inbox === undefined) return false;
+  const stem = `inbox:${channel.openedBy ?? ""}:`;
+  if (!channel.openedFrom.startsWith(stem)) return false;
+  const key = channel.openedFrom.slice(stem.length);
+  return holdsGrant(inbox.reactor, STORE_ENTITY, key, "write", gw.operatorAuthor);
 }
 
 export function subtreeUnder(table: ContainerTable, root: string): string[] {
@@ -1656,7 +1739,7 @@ export function poolForBindingImpl(gw: Gateway, binding: ConnectionBinding): Gat
 // would survive an unbind. Nothing mints one for a connection key today — register standing is
 // handed to OAuth connector actors, and `loam grant revoke` strikes every verb — so the gap is not
 // reachable now. It becomes reachable the moment a connection key is granted `register`.
-function survivingWriteGrantIds(reactor: Reactor, subject: string): string[] {
+export function survivingWriteGrantIds(reactor: Reactor, subject: string): string[] {
   const out: string[] = [];
   for (const id of reactor.byTarget(STORE_ENTITY)) {
     const delta = reactor.get(id);
