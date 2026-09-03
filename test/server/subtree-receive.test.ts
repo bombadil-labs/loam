@@ -17,19 +17,25 @@
 // the pool's bytes surviving a reboot, which is the backend's promise (§46) — this file pins that
 // the RECORD survives with its opener and the root fold reads it.
 //
-// RAILS-RED on origin/main, this file copied in: 5 red, 1 green — 6 cases. The green is the
+// RAILS-RED on origin/main, this file copied in: 6 red, 1 green — 7 cases. The green is the
 // CONTROL: the plain `federate` grant road, which this slice neither widens nor narrows.
 //
-// REVERT PROBES, MEASURED against this file as it stands — 6 cases. Re-measure when you add one.
-//   the root fold keeps a connection's channel             → 1 red, 5 green
-//   the bound fold drops the channel's rows                 → 1 red, 5 green
-//   no subtree fence on `into`                              → 1 red, 5 green
-//   no fence on the prefix                                  → 1 red, 5 green
-//   no leeway walk (receive always on)                      → 1 red, 5 green
-//   status and sever admit by grant, not by opener          → 1 red, 5 green
-//   the sync stamps drop the opener                         → 3 red, 3 green
+// REVERT PROBES, MEASURED against this file as it stands — 7 cases. Re-measure when you add one.
+//   the root fold keeps a connection's channel             → 2 red, 5 green
+//   the bound fold drops the channel's rows                 → 2 red, 5 green
+//   no subtree fence on `into`                              → 1 red, 6 green
+//   no fence on the prefix                                  → 2 red, 5 green
+//   the prefix fenced to the binding, not the target        → 1 red, 6 green
+//   no leeway walk (receive always on)                      → 1 red, 6 green
+//   status and sever admit by the fence, not the opener     → 1 red, 6 green
+//   the stamps carry no opener                              → 4 red, 3 green
+//   the bound fold admits a foreign opener                  → 2 red, 5 green
+//   no parent edge for a descendant a connection names      → 1 red, 6 green
 // The subtree-fence probe was green until the refusal cases carried a prefix INSIDE the fence:
-// an outside prefix was refused for the prefix, and the container fence went unpinned.
+// an outside prefix was refused for the prefix, and the container fence went unpinned. The
+// opener probe was green until a PERSON-opened channel inside the subtree joined the sever case.
+// The parent-edge probe needs the object level: introspection sees a field, only a read sees
+// a row.
 
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
@@ -48,7 +54,7 @@ import {
   OPERATOR,
   OPERATOR_SEED,
 } from "../helpers/connection-fixture.js";
-import { FERN } from "../spike/garden.js";
+import { FERN, observed } from "../spike/garden.js";
 
 const PEER_SEED = "7a".repeat(32);
 const PEER_TOKEN = "peer-door-token";
@@ -68,6 +74,7 @@ async function peerStore(): Promise<string> {
       ],
     }),
   );
+  await peer.append([observed(FERN, "height", 11, peer.nextTimestamp(), PEER_SEED)]);
   const handle = await serve({
     mounts: { default: peer },
     tokens: { [PEER_TOKEN]: { operator: true } },
@@ -189,6 +196,11 @@ describe("§58 — receive within the subtree", () => {
     expect(await servesPeer(base, "op-token", "ada:journal:inbox:peer"), "the root surface").toBe(
       false,
     );
+    // Two-sided across containers too: a connection bound elsewhere is served nothing of it.
+    const bea = await connect(base, "bea", "notes");
+    expect(await servesPeer(base, bea, "ada:journal:inbox:peer"), "a sibling's surface").toBe(
+      false,
+    );
     expect(gateway.registered.map((r) => r.lensName ?? r.hyperschema.name)).not.toContainEqual(
       expect.stringMatching(/^ada:journal:inbox:peer/),
     );
@@ -231,6 +243,11 @@ describe("§58 — receive within the subtree", () => {
     expect(own.isError).toBe(true);
     expect(own.text).toMatch(/receive/);
     await declare(gateway, "ada:journal:annex", RECEIVES, "ada:journal");
+    // The prefix is fenced to the TARGET: the annex receives, but not under the parent's names,
+    // whose receive switch is off.
+    const underParent = await receive(base, ada, "ada:journal:annex", peer, "ada:journal:peer");
+    expect(underParent.isError).toBe(true);
+    expect(underParent.text).toMatch(/outside ada:journal:annex:/);
     const annex = await receive(base, ada, "ada:journal:annex", peer);
     expect(annex.isError, annex.text).toBe(false);
     expect(gateway.channelStatus().map((c) => c.into)).toEqual(["ada:journal:annex"]);
@@ -238,6 +255,47 @@ describe("§58 — receive within the subtree", () => {
     await declare(gateway, "ada:journal", RECEIVES);
     const later = await receive(base, ada, "ada:journal:inbox", peer);
     expect(later.isError, later.text).toBe(false);
+    await closePeers();
+    await closeAll();
+  });
+
+  it("what arrives ANSWERS through the connection: the peer's row resolves, and nowhere else", async () => {
+    // Introspection sees a field; only a read sees a row. A descendant the connection names is
+    // declared under its path parent, so the bound read scope reaches the pool — law that is
+    // served and answers nothing is the T189 shape.
+    const { base, gateway } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    await declare(gateway, "ada:journal", RECEIVES);
+    const peer = await peerStore();
+    expect((await receive(base, ada, "ada:journal:inbox", peer)).isError).toBe(false);
+    expect(
+      readContainerTable(gateway.reactor, gateway.operatorAuthor).containers.get(
+        "ada:journal:inbox",
+      )?.parent,
+    ).toBe("ada:journal");
+    const height = async (bearer: string | undefined): Promise<unknown> => {
+      const res = await fetch(`${base}/default/graphql`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(bearer === undefined ? {} : { authorization: `Bearer ${bearer}` }),
+        },
+        body: JSON.stringify({
+          query: `{ ada_journal_inbox_peer_Plant(entity: "${FERN}") { height } }`,
+        }),
+      });
+      const body = (await res.json()) as {
+        data?: Record<string, { height?: unknown } | null>;
+        errors?: unknown[];
+      };
+      return body.errors !== undefined
+        ? "unserved"
+        : (body.data?.ada_journal_inbox_peer_Plant?.height ?? null);
+    };
+    expect(await height(ada)).toBe(11);
+    expect(await height("op-token")).toBe("unserved");
+    const bea = await connect(base, "bea", "notes");
+    expect(await height(bea)).toBe("unserved");
     await closePeers();
     await closeAll();
   });
@@ -304,11 +362,28 @@ describe("§58 — receive within the subtree", () => {
     const mine = await callTool(base, ada, "loam_federate_status", {});
     expect(mine.isError, mine.text).toBe(false);
     expect(mine.text).toMatch(/ada:journal:inbox/);
+    // A channel the PERSON opened into the same subtree is not the connection's to see or sever:
+    // the opener decides, not the fence.
+    await gateway.openChannel({
+      into: "ada:journal:other",
+      prefix: "ada:journal:other:theirs",
+      source: { pull: () => Promise.resolve([]) },
+    });
+    const mineAgain = await callTool(base, ada, "loam_federate_status", {});
+    expect(mineAgain.text).not.toMatch(/ada:journal:other/);
+    const theirs = gateway.channelStatus().find((c) => c.into === "ada:journal:other")!.name;
+    expect((await callTool(base, ada, "loam_federate_drop", { channel: theirs })).isError).toBe(
+      true,
+    );
     const hers = await callTool(base, bea, "loam_federate_status", {});
     expect(hers.isError, hers.text).toBe(false);
     expect(hers.text).not.toMatch(/ada:journal/);
     const sever = await callTool(base, bea, "loam_federate_drop", { channel });
     expect(sever.isError).toBe(true);
+    expect(sever.text).not.toMatch(/federate` grant/);
+    const set = await callTool(base, bea, "loam_federate_set", { channel, receiving: false });
+    expect(set.isError).toBe(true);
+    expect(set.text).not.toMatch(/federate grant/);
     const own = await callTool(base, ada, "loam_federate_drop", { channel });
     expect(own.isError, own.text).toBe(false);
     await closePeers();

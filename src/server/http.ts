@@ -603,10 +603,13 @@ function receiveRefusal(
       `its colon — and ${into} is outside ${fence}`
     );
   }
-  if (prefix !== undefined && !fenceAdmits(fence, prefix)) {
+  // The prefix is fenced to the TARGET, not merely to the binding: arriving law is named under
+  // the container that receives it, so a container whose receive switch is off never carries a
+  // peer's names by way of a child that does.
+  if (prefix !== undefined && !fenceAdmits(`${into}:`, prefix)) {
     return (
-      "a connection assigns a peer a prefix inside its own fence — the path and its colon — " +
-      `and ${prefix} is outside ${fence}`
+      "a connection assigns a peer a prefix inside the container it receives into — the path " +
+      `and its colon — and ${prefix} is outside ${into}:`
     );
   }
   const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
@@ -1833,8 +1836,11 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
                 {
                   type: "text",
                   text:
-                    "federation is not yours to sever here: it wants a `federate` grant naming the " +
-                    "container the channel receives into.",
+                    identity.binding === undefined
+                      ? "federation is not yours to sever here: it wants a `federate` grant naming " +
+                        "the container the channel receives into."
+                      : "federation is not yours to sever here: a connection severs only a channel " +
+                        "its own container opened; loam_federate_status names them.",
                 },
               ],
               isError: true,
@@ -1966,8 +1972,11 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
                 {
                   type: "text",
                   text:
-                    "federate_set wants a `channel` you hold a federate grant for; " +
-                    "loam_federate_status names the ones you may act on.",
+                    identity.binding === undefined
+                      ? "federate_set wants a `channel` you hold a federate grant for; " +
+                        "loam_federate_status names the ones you may act on."
+                      : "federate_set wants a `channel` your own container opened; " +
+                        "loam_federate_status names the ones you may act on.",
                 },
               ],
               isError: true,

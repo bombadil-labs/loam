@@ -207,6 +207,13 @@ export const CTX_CHANNEL = "loam.channel";
  * `status.unreadable` is not written, and must not be: it is the reader's verdict ON a record, and
  * a record that carried its own verdict could carry a false one.
  */
+/**
+ * The opener a record carries forward, or nothing: ONE derivation for every stamp, so no stamp can
+ * drop a bound connection's channel back into the root fold by forgetting the field.
+ */
+const opener = (of: { readonly openedBy?: string }): { openedBy?: string } =>
+  of.openedBy === undefined ? {} : { openedBy: of.openedBy };
+
 export function channelRecordClaims(
   status: ChannelStatus,
   author: string,
@@ -1410,7 +1417,7 @@ async function syncChannel(
         name,
         into: opts.into,
         prefix: opts.prefix,
-        ...(opts.openedBy === undefined ? {} : { openedBy: opts.openedBy }),
+        ...opener(opts),
         receiving: before?.receiving ?? true,
         blessing: before?.blessing ?? opts.bless !== false,
         lastSyncedAt: before?.lastSyncedAt ?? 0,
@@ -1456,7 +1463,7 @@ async function syncChannel(
         name,
         into: opts.into,
         prefix: opts.prefix,
-        ...(opts.openedBy === undefined ? {} : { openedBy: opts.openedBy }),
+        ...opener(opts),
         receiving: before?.receiving ?? true,
         blessing: before?.blessing ?? opts.bless !== false,
         lastSyncedAt: before?.lastSyncedAt ?? 0,
@@ -1502,7 +1509,7 @@ async function syncChannel(
         name,
         into: opts.into,
         prefix: opts.prefix,
-        ...(opts.openedBy === undefined ? {} : { openedBy: opts.openedBy }),
+        ...opener(opts),
         receiving: before?.receiving ?? true,
         blessing,
         lastSyncedAt: before?.lastSyncedAt ?? 0,
@@ -1551,7 +1558,7 @@ async function syncChannel(
         name,
         into: opts.into,
         prefix: opts.prefix,
-        ...(opts.openedBy === undefined ? {} : { openedBy: opts.openedBy }),
+        ...opener(opts),
         receiving: before?.receiving ?? true,
         blessing: before?.blessing ?? opts.bless !== false,
         lastSyncedAt: gw.nextTimestamp(),
@@ -1678,10 +1685,24 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
   // trust domain, a view over their ground, with each peer's pool nested beneath it.
   const table = readContainerTable(gw.reactor, gw.operatorAuthor);
   if (!table.containers.has(opts.into)) {
+    // A container a BOUND CONNECTION names is declared under its path parent (SPEC §58 position
+    // 5: the tree agrees with the names). Reach is walked by parent edges, and a pool composed
+    // into a container no edge reaches is served as law that answers nothing — the T189 shape.
+    // The person's own road keeps its older shape here; that is a separate decision.
+    const parent =
+      opts.openedBy === undefined || !opts.into.includes(":")
+        ? {}
+        : { parent: opts.into.slice(0, opts.into.lastIndexOf(":")) };
     await gw.append([
       signClaims(
         containerClaims(
-          { container: opts.into, trust: "curated", posture: "shared", membership: AGGREGATOR },
+          {
+            container: opts.into,
+            trust: "curated",
+            posture: "shared",
+            membership: AGGREGATOR,
+            ...parent,
+          },
           gw.operatorAuthor!,
           gw.nextTimestamp(),
         ),
@@ -1729,10 +1750,10 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
       name,
       into: opts.into,
       prefix: opts.prefix,
-      ...(opts.openedBy === undefined ? {} : { openedBy: opts.openedBy }),
+      ...opener(opts),
       receiving: true,
       blessing: opts.bless !== false,
-      ...(opts.openedBy === undefined ? {} : { openedBy: opts.openedBy }),
+      ...opener(opts),
       lastSyncedAt: 0,
       consecutiveFailures: 0,
       from: opts.from ?? "",
@@ -1746,7 +1767,7 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
     name,
     into: opts.into,
     prefix: opts.prefix,
-    ...(opts.openedBy === undefined ? {} : { openedBy: opts.openedBy }),
+    ...opener(opts),
     pool,
     // Union, and idempotent by construction: the pool's append de-duplicates by delta id, so a
     // second sync of an unchanged peer accepts nothing and refuses nothing. Polling is therefore
@@ -2336,7 +2357,7 @@ export function resumeChannelImpl(gw: Gateway, standing: ChannelStatus, token: s
   const opts = {
     into: standing.into,
     prefix: standing.prefix,
-    ...(standing.openedBy === undefined ? {} : { openedBy: standing.openedBy }),
+    ...opener(standing),
     from: standing.from,
     source: sourceFor(
       standing.from,
@@ -2351,7 +2372,7 @@ export function resumeChannelImpl(gw: Gateway, standing: ChannelStatus, token: s
     name: standing.name,
     into: standing.into,
     prefix: standing.prefix,
-    ...(standing.openedBy === undefined ? {} : { openedBy: standing.openedBy }),
+    ...opener(standing),
     get pool(): Container {
       return poolOf();
     },
