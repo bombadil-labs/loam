@@ -1732,46 +1732,66 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
             `declaring it again would restore what the drop removed`,
         );
       }
-      // IT HANGS FROM SOMETHING, WHATEVER ITS DEPTH. This branch used to declare `into` with no
-      // parent at any depth, which MAKES the orphan every other rule here refuses: a container
-      // holding a live peer channel that no page of the person's can show or drop, because their
-      // pages walk edges. A name with a colon hangs from its path parent, and every undeclared
-      // level between them is declared with it — the same walk the bound branch makes. A
-      // colon-free name is a root and hangs from nothing, which is what a root is.
+      // IT HANGS FROM SOMETHING, OR FROM NOTHING — NEVER FROM A NAME THAT IS NOT THERE. This
+      // branch used to declare `into` with no parent at any depth, which MAKES the orphan every
+      // other rule here refuses: a container holding a live peer channel that no page of the
+      // person's can show or drop, because their pages walk edges.
+      //
+      // Three rules, and each is pinned by a rail:
+      //   - Every undeclared level between `into` and the nearest standing ancestor is declared
+      //     with it, so no level is skipped and no edge points at a gap.
+      //   - A parent edge is written only where a parent STANDS. The topmost new level may have
+      //     none — `ada:feed` on a store with no `ada` is a name this door has always been able to
+      //     make, and prefix-collision.test.ts pins that it does not mint `ada` to do it. An edge
+      //     onto an undeclared name would be a dangling one, which is the orphan again.
+      //   - And the ancestor the walk STOPS at must not itself dangle, or everything hung beneath
+      //     it inherits the invisibility.
       const missingHere: string[] = [];
       let up = opts.into;
       while (!table.containers.has(up) && up.includes(":")) {
         missingHere.push(up);
         up = up.slice(0, up.lastIndexOf(":"));
       }
+      // A colon-free `into` is the container this call was asked for, and making it is this
+      // door's whole job. A colon-free ANCESTOR is not: it was never named, and minting it would
+      // put operator-signed law at a top-level name nobody asked for.
+      if (missingHere.length === 0 && !table.containers.has(up)) missingHere.push(up);
       const struckHere = missingHere.find((container) =>
         everDeclared(gw.reactor, gw.operatorAuthor, container),
       );
       if (struckHere !== undefined) {
         throw new Error(
-          `${struckHere} was declared and then dropped, so a channel cannot be opened beneath ` +
-            `it — declaring it again would restore what the drop removed`,
+          `${struckHere} was declared and then dropped, so a channel cannot be opened there — ` +
+            `declaring it again would restore what the drop removed`,
         );
       }
+      if (table.containers.has(up) && danglingAncestor(table, up) !== undefined) {
+        throw new Error(
+          `${up} stands, but it hangs from a container that does not, so it is reachable from no ` +
+            `page the person has — a channel cannot be opened beneath it`,
+        );
+      }
+      const standing = new Set(table.containers.keys());
       await gw.append(
-        (missingHere.length === 0 ? [opts.into] : missingHere.reverse()).map((container) =>
-          signClaims(
-            containerClaims(
-              {
-                container,
-                trust: "curated",
-                posture: "shared",
-                membership: AGGREGATOR,
-                ...(container.includes(":")
-                  ? { parent: container.slice(0, container.lastIndexOf(":")) }
-                  : {}),
-              },
-              gw.operatorAuthor!,
-              gw.nextTimestamp(),
-            ),
+        missingHere.reverse().map((container) => {
+          const parent = container.includes(":")
+            ? container.slice(0, container.lastIndexOf(":"))
+            : undefined;
+          const spec = {
+            container,
+            trust: "curated" as const,
+            posture: "shared" as const,
+            membership: AGGREGATOR,
+            // ONLY WHERE ONE STANDS. The topmost new level may hang from nothing; an edge onto a
+            // name the table does not hold is the dangling edge this whole rule refuses.
+            ...(parent !== undefined && standing.has(parent) ? { parent } : {}),
+          };
+          standing.add(container);
+          return signClaims(
+            containerClaims(spec, gw.operatorAuthor!, gw.nextTimestamp()),
             gw.options.seed!,
-          ),
-        ),
+          );
+        }),
       );
     } else {
       // A container a BOUND CONNECTION names is declared under its path parent, and so is every
@@ -1816,7 +1836,7 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
       }
       if (danglingAncestor(table, at) !== undefined) {
         throw new Error(
-          `${at} stands, but it hangs from a container that was dropped, so a channel cannot be ` +
+          `${at} stands, but it hangs from a container that does not, so a channel cannot be ` +
             `opened there`,
         );
       }

@@ -36,64 +36,61 @@
 // AT MINTING ONLY — `userNameDefect` is asked on every read and every login, so folding it there
 // would strand a person already named `inbox` in a store provisioned before the rule.
 //
-// REVERT PROBES, MEASURED against this file as it stands — 29 cases. Re-measure when you add one.
-//   the fence drops its colon                            → 17 red, 12 green
-//   the fence admits an empty level                      →  1 red, 28 green
-//   no bound on the name's length or depth               →  1 red, 28 green
-//   leeway admits the caller's OWN container             →  1 red, 28 green
-//   declare skips the standing-name check                →  1 red, 28 green
-//   declare writes no parent edge                        →  9 red, 20 green
-//   declare declares the target and not the middles      →  3 red, 26 green
-//   declare mints back a level the person dropped        →  1 red, 28 green
-//   receive mints back a level the person dropped        →  1 red, 28 green
-//   the declare door does not ask if the edge dangles    →  1 red, 28 green
-//   the declare door does not ask where the edge leads   →  1 red, 28 green
-//   edgeLeavesFence calls a parentless name outside      →  1 red, 28 green
-//   the write seam asks the name, not the chain          →  1 red, 28 green
-//   the operator road declares no parent edge            →  1 red, 28 green
-//   the operator road declares only the name it was given→  1 red, 28 green
-//   the receive road asks the edge only when it mints    →  1 red, 28 green
-//   the walk may fall off its stop and mint an orphan    →  1 red, 28 green
-//   everDeclared asks the door's test, not the bind test →  1 red, 28 green
-//   everDeclared answers across authors with no operator →  1 red, 28 green
-//   everDeclared forgets a struck name                   →  2 red, 27 green
-//   the refusal names the dropped ancestor (an oracle)   →  1 red, 28 green
-//   declare reports only the name it was asked for       →  1 red, 28 green
-//   leeway drops the record's pool refusal               →  1 red, 28 green
-//   leeway asks the name and not the reach               →  1 red, 28 green
-//   the standing check asks one name, not the chain      →  1 red, 28 green
-//   the standing check is gone entirely                  →  3 red, 26 green
-//   the act's other name asks nothing                    →  1 red, 28 green
-//   the roster block swallows the receive verb           →  1 red, 28 green
-//   federate_set does not ask the connection             →  1 red, 28 green
-//   receive skips the shared name rule                   →  1 red, 28 green
-//   the unbound check is gone                            →  1 red, 28 green
-//   the parser drops an unknown key                      →  2 red, 27 green
-//   the door reports success over a refused append       →  1 red, 28 green
-//   the leeway re-declaration drops the parent           →  3 red, 26 green
-//   the reservation is gone from loam init --user        →  1 red, 28 green
-//   the reservation is gone from user create             →  1 red, 28 green
-//   the reservation is gone from pen create              →  1 red, 28 green
-//   the reservation is folded into userNameDefect        →  1 red, 28 green
-//   the refusal helper slices a non-law error            →  1 red, 28 green
-//   the receive door does not ask if the edge dangles    →  0 red, 29 green
-//   the walk climbs past the connection's own container  →  0 red, 29 green
-//   the receive walk climbs past the opener's container  →  0 red, 29 green
+// REVERT PROBES, MEASURED against this file as it stands — 31 cases. Re-measure when you add one.
+//   the fence drops its colon                            → 19 red, 12 green
+//   the fence admits an empty level                      →  1 red, 30 green
+//   no bound on the name's length or depth               →  1 red, 30 green
+//   leeway admits the caller's OWN container             →  1 red, 30 green
+//   declare skips the standing-name check                →  1 red, 30 green
+//   declare writes no parent edge                        → 11 red, 20 green
+//   declare declares the target and not the middles      → 17 red, 14 green
+//   declare mints back a level the person dropped        →  1 red, 30 green
+//   receive mints back a level the person dropped        →  1 red, 30 green
+//   the declare door does not ask if the edge dangles    →  1 red, 30 green
+//   the declare door does not ask where the edge leads   →  1 red, 30 green
+//   the refusal names the dropped ancestor (an oracle)   →  1 red, 30 green
+//   the write seam asks the name, not the chain          →  1 red, 30 green
+//   the standing check asks one name, not the chain      →  1 red, 30 green
+//   the standing check is gone entirely                  →  3 red, 28 green
+//   the operator road writes an edge onto an absent name →  1 red, 30 green
+//   the operator road skips the dangling-ancestor check  →  1 red, 30 green
+//   the operator road mints a colon-free ancestor        →  1 red, 30 green
+//   the operator road declares no parent edge at all     →  2 red, 29 green
+//   the operator road declares only the name it was given→  3 red, 28 green
+//   the receive road asks the edge only when it mints    →  1 red, 30 green
+//   the walk may fall off its stop and mint an orphan    →  1 red, 30 green
+//   everDeclared asks the door's test, not the bind test →  1 red, 30 green
+//   everDeclared answers across authors with no operator →  1 red, 30 green
+//   everDeclared forgets a struck name                   →  2 red, 29 green
+//   declare reports only the name it was asked for       →  1 red, 30 green
+//   leeway drops the record's pool refusal               →  1 red, 30 green
+//   leeway asks the name and not the reach               →  2 red, 29 green
+//   the act's other name asks nothing                    →  1 red, 30 green
+//   the roster block swallows the receive verb           →  1 red, 30 green
+//   federate_set does not ask the connection             →  1 red, 30 green
+//   receive skips the shared name rule                   →  1 red, 30 green
+//   the unbound check is gone                            →  1 red, 30 green
+//   the parser drops an unknown key                      →  2 red, 29 green
+//   the door reports success over a refused append       →  1 red, 30 green
+//   the leeway re-declaration drops the parent           →  3 red, 28 green
+//   the reservation is gone from loam init --user        →  1 red, 30 green
+//   the reservation is gone from user create             →  1 red, 30 green
+//   the reservation is gone from pen create              →  1 red, 30 green
+//   the reservation is folded into userNameDefect        →  1 red, 30 green
+//   the refusal helper slices a non-law error            →  1 red, 30 green
+//   the receive door does not ask if the edge dangles    →  0 red, 31 green
 //
-// THE LAST THREE PROBES ARE GREEN, AND THAT IS THE HONEST RECORD. Each is a second guard on a road
-// whose first guard refuses earlier in every state a rail can reach: the receive door's edge check
-// duplicates the one `openChannel` now makes for every caller, and each walk's stop at its own
-// container is only reachable once the struck-level rule has already let the walk through. They
-// are written down rather than deleted, because a probe removed for being green reads exactly like
-// a probe never run. A fourth guard — `openChannel`'s dangling check inside its minting branch —
-// is unprobed for the same reason and named here rather than left silent.
+// THE LAST PROBE IS GREEN, AND THAT IS THE HONEST RECORD. It is a second guard on a road whose
+// first guard refuses earlier in every state a rail can reach: `openChannel` asks the same
+// question of every caller before it mints. It is written down rather than deleted, because a
+// probe removed for being green reads exactly like a probe never run. `openChannel`'s dangling
+// check inside its own minting branch is unprobed for the same reason and named here.
 //
 // RAILS-RED IS NOT MEASURED FOR EVERY CASE, and the record should say which. The file does not
 // LOAD on origin/main, because it imports a module this slice adds, so vitest reports one failed
-// suite rather than twenty-nine failed cases: that measures the import graph. The thirteen cases
-// present at the last resolvable revision measured 16 red, 0 green over 16 cases. For the sixteen
-// added since, the probe table above is the instrument, and every one of them has a probe that
-// reds it.
+// suite rather than thirty-one failed cases: that measures the import graph. The sixteen cases
+// present at the last resolvable revision measured 16 red, 0 green. For the fifteen added since,
+// the probe table above is the instrument, and every one of them has a probe that reds it.
 //
 // ONE CASE IS HELPER-LEVEL, and says so here: `a refusal is the store's own sentence, whole` calls
 // `appendRefusal` directly. Every other case in this file goes through a door.
@@ -120,6 +117,7 @@ import { signClaims } from "@bombadil/rhizomatic";
 import {
   containerClaims,
   containerDefect,
+  danglingAncestor,
   everDeclared,
   LEGACY_POSTURES,
   readContainerTable,
@@ -499,8 +497,10 @@ describe("§58 — the container roster", () => {
     expect(under.text, "without naming where it went").not.toContain("sibling");
     expect(recOf(gateway, "ada:journal:away:z"), "nothing was made").toBeUndefined();
 
-    // The other side: a name whose edges lead nowhere in particular is not outside anything, and
-    // plenty stand that way — declared by name alone, before the tree agreed with the names.
+    // A NAME WITH NO PARENT EDGE AT ALL IS OUTSIDE TOO, and both write verbs say so the same way.
+    // Reach is walked by edges: a container that hangs from nothing is on no page the person has,
+    // so law written beneath it is law they cannot see or drop — the same harm as the case above,
+    // reached by a name that was never joined to the tree rather than one whose join was struck.
     await gateway.append([
       signClaims(
         containerClaims(
@@ -516,8 +516,15 @@ describe("§58 — the container roster", () => {
         OPERATOR_SEED,
       ),
     ]);
-    const ok = await declareTool(base, ada, "ada:journal:rootless:z");
-    expect(ok.isError, ok.text).toBe(false);
+    const rootless = await declareTool(base, ada, "ada:journal:rootless:z");
+    expect(rootless.isError, rootless.text).toBe(true);
+    expect(rootless.text, "the same sentence the leeway verb speaks").toMatch(
+      /does not stand inside it/,
+    );
+    // And the two write verbs agree about the very same target.
+    const shaped = await leewayTool(base, ada, { name: "ada:journal:rootless" });
+    expect(shaped.isError, "the leeway verb refuses it too").toBe(true);
+    expect(shaped.text).toMatch(/does not stand inside it/);
     await closeAll();
   });
 
@@ -878,8 +885,8 @@ describe("§58 — the container roster", () => {
     // Neither road may hang anything from it.
     const grown = await declareTool(base, ada, "ada:journal:zeta:z");
     expect(grown.isError, grown.text).toBe(true);
-    expect(grown.text, "and it says the edge hangs from a dropped container").toMatch(
-      /hangs from a container that was dropped/,
+    expect(grown.text, "and it says the edge hangs from a container that is not there").toMatch(
+      /hangs from a container that does not/,
     );
     // AND IT DOES NOT NAME IT, at all. A parent edge need not agree with the name, so the dropped
     // ancestor can be a container in another person's subtree; naming it would teach this caller
@@ -984,6 +991,85 @@ describe("§58 — the container roster", () => {
     });
     expect(root.isError, root.text).toBe(false);
     expect(recOf(gateway, "friends")?.parent, "a root hangs from nothing").toBeUndefined();
+    await closePeers();
+    await closeAll();
+  });
+
+  it("the operator's road writes an edge only where a parent stands", async () => {
+    // THREE RULES, ONE CASE. A level below a standing name gets an edge onto it. A level whose own
+    // parent does not stand gets NO edge, because an edge onto a name the table does not hold is
+    // the dangling one every rule here refuses — and a colon-free ancestor is never minted, since
+    // nobody named it. Getting the middle rule wrong is how this road made an orphan while the
+    // code around it was refusing them.
+    const { base, gateway } = await connectionServer();
+    await connect(base, "ada", "journal");
+    const from = await peerStore();
+
+    // (a) below a standing name: the edge is written, and the person's reach finds it.
+    const under = await callTool(base, "op-token", "loam_federate_connect", {
+      from,
+      into: "ada:journal:fresh",
+      prefix: "ada:journal:fresh:peer",
+      token: PEER_TOKEN,
+    });
+    expect(under.isError, under.text).toBe(false);
+    expect(recOf(gateway, "ada:journal:fresh")?.parent).toBe("ada:journal");
+    expect(subtreeOf(gateway.containers(), "ada").has("ada:journal:fresh")).toBe(true);
+
+    // (b) two levels under a name that does NOT stand: the middle is declared with no edge, the
+    // leaf hangs from the middle, and the top-level name is never minted.
+    const deep = await callTool(base, "op-token", "loam_federate_connect", {
+      from,
+      into: "zed:room:leaf",
+      prefix: "zed:room:leaf:peer",
+      token: PEER_TOKEN,
+    });
+    expect(deep.isError, deep.text).toBe(false);
+    expect(recOf(gateway, "zed"), "a colon-free ancestor is never minted").toBeUndefined();
+    expect(recOf(gateway, "zed:room")?.parent, "the topmost new level hangs from nothing").toBe(
+      undefined,
+    );
+    expect(recOf(gateway, "zed:room:leaf")?.parent, "and the leaf hangs from it").toBe("zed:room");
+    // The point of (b): no edge anywhere points at a name the table does not hold.
+    expect(danglingAncestor(gateway.containers(), "zed:room:leaf")).toBeUndefined();
+    await closePeers();
+    await closeAll();
+  });
+
+  it("the operator's road refuses a target whose standing ancestor dangles", async () => {
+    // The ancestor the walk STOPS at may itself be what a drop left behind. Everything hung
+    // beneath it inherits the invisibility, so the walk asks before it mints.
+    const { base, gateway } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    await declareAs(gateway, "ada", OPEN);
+    await declareAs(gateway, "ada:journal", OPEN);
+    expect((await declareTool(base, ada, "ada:journal:room")).isError, "premise").toBe(false);
+    const ids = survivingDeclarationIds(gateway.reactor, gateway.operatorAuthor!, "ada:journal");
+    await gateway.append(
+      ids.map((id) =>
+        signClaims(
+          {
+            timestamp: gateway.nextTimestamp(),
+            author: OPERATOR,
+            pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
+          },
+          OPERATOR_SEED,
+        ),
+      ),
+    );
+    expect(recOf(gateway, "ada:journal"), "premise: the middle is gone").toBeUndefined();
+    expect(recOf(gateway, "ada:journal:room"), "premise: its child stands").toBeDefined();
+
+    const from = await peerStore();
+    const refused = await callTool(base, "op-token", "loam_federate_connect", {
+      from,
+      into: "ada:journal:room:peers",
+      prefix: "ada:journal:room:peers:p",
+      token: PEER_TOKEN,
+    });
+    expect(refused.isError, refused.text).toBe(true);
+    expect(recOf(gateway, "ada:journal:room:peers"), "and nothing was minted").toBeUndefined();
+    expect(gateway.channelStatus().length, "and no peer bytes landed").toBe(0);
     await closePeers();
     await closeAll();
   });

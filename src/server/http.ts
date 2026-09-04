@@ -83,7 +83,6 @@ import {
   readContainerTable,
   receivesNow,
   danglingAncestor,
-  edgeLeavesFence,
   subtreeUnder,
   type ContainerTable,
 } from "../gateway/container.js";
@@ -645,13 +644,20 @@ function mintableAt(
   // says what is true of the caller's own name and stops.
   // THREE CONDITIONS, THREE SENTENCES. One message for all of them would tell a caller a drop
   // happened when none did, and send them after a person who dropped nothing.
+  // SAYS WHAT IS OBSERVED, NOT WHY. A parent edge naming a container the table does not hold is
+  // what a drop leaves behind, but it is not the only way to get one, and telling a caller to go
+  // ask the person who dropped it is a false errand when nothing was dropped.
   if (danglingAncestor(table, root) !== undefined) {
     return (
-      `${root} stands, but it hangs from a container that was dropped, so it is reachable from ` +
-      `no page the person has. Nothing may be made beneath it.`
+      `${root} stands, but it hangs from a container that does not, so it is reachable from no ` +
+      `page the person has. Nothing may be made beneath it.`
     );
   }
-  if (edgeLeavesFence(table, root, binding.container)) {
+  // THE SAME QUESTION `loam_container_leeway` ASKS, ASKED THE SAME WAY. Two write verbs that
+  // disagree about one target is the shape every round of this review kept finding, and a walk
+  // that admits a parentless container admits one the person's own pages cannot reach: reach is
+  // `subtreeUnder`, and law written beneath a name outside it is law nobody can see or drop.
+  if (!subtreeUnder(table, binding.container).includes(root)) {
     return (
       `${root} bears a name inside your container but does not stand inside it: its parent is ` +
       `elsewhere, so nothing may be made beneath it.`
@@ -731,8 +737,8 @@ function receiveRefusal(
   // it may be a container in another person's subtree.
   if (danglingAncestor(table, root) !== undefined) {
     return (
-      `${root} stands, but it hangs from a container that was dropped, so it is reachable from ` +
-      `no page the person has — a channel cannot be opened there`
+      `${root} stands, but it hangs from a container that does not, so it is reachable from no ` +
+      `page the person has — a channel cannot be opened there`
     );
   }
   // READ WHAT THE FOLD READS. The walk is not capped at the binding: an ancestor's terms narrow

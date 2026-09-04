@@ -1162,19 +1162,6 @@ export function danglingAncestor(table: ContainerTable, name: string): string | 
 }
 
 /**
- * Do this container's PARENT EDGES lead somewhere other than `fence`?
- *
- * NOT `subtreeUnder`, and the difference is a whole class of container. Plenty stand with no parent
- * edge at all — declared by name alone, which every road did before the tree was made to agree with
- * the names — and those are not outside anything; refusing them would break law already at rest.
- * What is outside is a container whose edges DO lead somewhere, and lead elsewhere: the law admits
- * a parent that disagrees with the name (it refuses only cycles and cross-trust moves), so a name
- * under this fence can resolve inside a subtree the caller was never bound to.
- *
- * So: walk the edges. Meeting the fence is inside. Running out of edges is inside, because nothing
- * was ever said about where it hangs. Only a chain that ends somewhere else is outside.
- */
-/**
  * The first name in this container's parent chain that does not stand, or absent when the whole
  * chain stands. `name` itself counts: a container that is gone breaks its own chain.
  *
@@ -1191,20 +1178,6 @@ export function chainBreaksAt(table: ContainerTable, name: string): string | und
     at = rec.parent;
   }
   return undefined;
-}
-
-export function edgeLeavesFence(table: ContainerTable, name: string, fence: string): boolean {
-  const seen = new Set<string>();
-  let hops = 0;
-  for (let at: string | undefined = name; at !== undefined && !seen.has(at);) {
-    if (at === fence) return false;
-    seen.add(at);
-    const rec = table.containers.get(at);
-    if (rec === undefined || rec.parent === undefined) return hops > 0 && at !== fence;
-    at = rec.parent;
-    hops += 1;
-  }
-  return hops > 0;
 }
 
 export function subtreeUnder(table: ContainerTable, root: string): string[] {
