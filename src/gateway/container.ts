@@ -1194,9 +1194,39 @@ export function withinSubtree(table: ContainerTable, name: string, root: string)
   for (let at: string | undefined = name; at !== undefined && !seen.has(at);) {
     if (at === root) return true;
     seen.add(at);
-    at = table.containers.get(at)?.parent;
+    at = climb(table, at);
   }
   return false;
+}
+
+/**
+ * The topmost container `name` stands under — the root of its tree, walked by the same edges.
+ *
+ * NOT `name.split(":")[0]`. That is the mistake this file warns about three times over: a parent
+ * edge NEED NOT AGREE WITH THE NAME, so the name's first token says where a container is named,
+ * never where it stands. A door that derived a person's home from the name would admit exactly the
+ * containers whose edges leave that person's tree, which is the case it was written to refuse.
+ */
+export function treeRootOf(table: ContainerTable, name: string): string {
+  const seen = new Set<string>();
+  let at = name;
+  for (;;) {
+    if (seen.has(at)) return at;
+    seen.add(at);
+    const up = climb(table, at);
+    if (up === undefined) return at;
+    at = up;
+  }
+}
+
+/**
+ * One step up the tree a PERSON sees. Their pages grow through `parent` and through `inboxOf`
+ * (src/server/subtree.ts), so a container hung under a pool is on their page — and a walk that
+ * followed only `parent` would refuse them a container they made themselves.
+ */
+function climb(table: ContainerTable, name: string): string | undefined {
+  const rec = table.containers.get(name);
+  return rec === undefined ? undefined : (rec.parent ?? rec.inboxOf);
 }
 
 export function subtreeUnder(table: ContainerTable, root: string): string[] {

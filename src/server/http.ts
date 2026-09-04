@@ -83,6 +83,7 @@ import {
   readContainerTable,
   receivesNow,
   danglingAncestor,
+  treeRootOf,
   withinSubtree,
   type ContainerTable,
 } from "../gateway/container.js";
@@ -791,9 +792,12 @@ function receiveRefusal(
   // PERSON'S tree is on their pages and on none of this person's, so a peer's pool composed into
   // it would be invisible to the person who let the peer in and visible to one who never did.
   //
-  // ASKED OF THE HOME, NOT THE BINDING, and that is the whole difference from the mint rule: the
-  // walls admit a name that hangs one level above the binding, inside the same person's tree.
-  const home = binding.container.split(":")[0]!;
+  // ASKED OF THE TREE THE BINDING STANDS IN, NOT ITS NAME. That is the whole difference from the
+  // mint rule: the walls admit a name that hangs one level above the binding, inside the same
+  // person's tree. And the root is WALKED, never split off the name — a parent edge need not agree
+  // with a name, so splitting would derive the wrong tree for exactly the containers whose edges
+  // leave it, which is the case this refuses.
+  const home = treeRootOf(table, binding.container);
   if (table.containers.has(into) && !withinSubtree(table, into, home)) {
     return (
       `${into} bears a name inside your container but hangs outside it: a channel opened there ` +

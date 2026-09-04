@@ -36,8 +36,8 @@
 // AT MINTING ONLY — `userNameDefect` is asked on every read and every login, so folding it there
 // would strand a person already named `inbox` in a store provisioned before the rule.
 //
-// REVERT PROBES, MEASURED against this file as it stands — 33 cases. Re-measure when you add one.
-// (Rows carried from the 32-case run are marked; the four added this round were measured at 33.)
+// REVERT PROBES, MEASURED against this file as it stands — 34 cases. Re-measure when you add one.
+// Rows are measured at the case count of the round that added them; the newest are at 34.
 //   the fence drops its colon                            → 19 red, 13 green
 //   the fence admits an empty level                      →  1 red, 31 green
 //   no bound on the name's length or depth               →  1 red, 31 green
@@ -54,6 +54,8 @@
 //   the receive door asks the binding, not the home      →  1 red, 32 green
 //   withinSubtree answers true for a name outside        →  3 red, 30 green
 //   the leeway verb keeps its own wording                →  1 red, 32 green
+//   the home is split off the name instead of walked     →  1 red, 33 green
+//   the reach walk follows parent only, not inboxOf      →  1 red, 33 green
 //   the receive road asks the edge only when it mints    →  1 red, 31 green
 //   the refusal names the dropped ancestor (an oracle)   →  1 red, 31 green
 //   the write seam asks the name, not the chain          →  1 red, 31 green
@@ -100,8 +102,8 @@
 //
 // RAILS-RED IS NOT MEASURED FOR EVERY CASE, and the record should say which. The file does not
 // LOAD on origin/main, because it imports a module this slice adds, so vitest reports one failed
-// suite rather than thirty-three failed cases: that measures the import graph. The sixteen cases
-// present at the last resolvable revision measured 16 red, 0 green. For the seventeen added since,
+// suite rather than thirty-four failed cases: that measures the import graph. The sixteen cases
+// present at the last resolvable revision measured 16 red, 0 green. For the eighteen added since,
 // the probe table above is the instrument, and every one of them has a probe that reds it.
 //
 // ONE CASE IS HELPER-LEVEL, and says so here: `a refusal is the store's own sentence, whole` calls
@@ -152,6 +154,9 @@ import {
   closeAll,
   connect,
   connectionServer,
+  consent,
+  pkce,
+  redeem,
   OPERATOR,
   OPERATOR_SEED,
 } from "../helpers/connection-fixture.js";
@@ -1039,6 +1044,91 @@ describe("§58 — the container roster", () => {
     });
     expect(root.isError, root.text).toBe(false);
     expect(recOf(gateway, "friends")?.parent, "a root hangs from nothing").toBeUndefined();
+    await closePeers();
+    await closeAll();
+  });
+
+  it("the tree a binding stands in is WALKED, never split off its name", async () => {
+    // THE SHARPEST SHAPE IN THIS FILE. A parent edge need not agree with a name, so the name's
+    // first token says where a container is NAMED, never where it STANDS. A door that derived the
+    // person's home by splitting the name would get it exactly backwards for the containers this
+    // rule exists to judge: it would admit the ones whose edges leave the person's tree, and
+    // refuse the ones squarely inside it.
+    const { base, gateway } = await connectionServer();
+    await connect(base, "bea", "notes");
+    await connect(base, "ada", "journal");
+    await declareAs(gateway, "ada", OPEN);
+    await declareAs(gateway, "ada:journal", OPEN);
+    const membership = recOf(gateway, "ada:journal")!.membership;
+    const declare = (container: string, parent: string): Promise<unknown> =>
+      gateway.append([
+        signClaims(
+          containerClaims(
+            { container, trust: "curated", posture: "shared", membership, parent },
+            OPERATOR,
+            gateway.nextTimestamp(),
+          ),
+          OPERATOR_SEED,
+        ),
+      ]);
+    // Named in bea's namespace, standing in ada's tree — so ada reaches it and may bind to it.
+    await declare("bea:shared", "ada:journal");
+    await declare("bea:shared:mine", "ada:journal");
+    await declare("bea:shared:leak", "bea");
+    expect(
+      subtreeOf(gateway.containers(), "ada").has("bea:shared"),
+      "premise: ada reaches it",
+    ).toBe(true);
+    expect(subtreeOf(gateway.containers(), "bea").has("bea:shared:leak"), "premise").toBe(true);
+    await declareAs(gateway, "bea:shared", OPEN);
+
+    // ADA BINDS TO IT. Her consent page offers it because her own reach walk finds it, so the
+    // binding's name begins `bea:` while the tree it stands in is hers.
+    const p = pkce();
+    const { code, status } = await consent(base, "ada", p.challenge, { bind: "bea:shared" });
+    expect(status, "premise: consent offers a container ada reaches").toBe(302);
+    const redeemed = await redeem(base, code, p.verifier);
+    expect(redeemed.status).toBe(200);
+    const ada = ((await redeemed.json()) as { access_token: string }).access_token;
+
+    // Splitting `bea:shared` on its colon gives "bea", which is the WRONG tree: it would admit
+    // the leak, which stands in bea's tree, and refuse `mine`, which stands in ada's. Walking the
+    // edges gives "ada", and the two answers come out the other way round.
+    const from = await peerStore();
+    const leak = await callTool(base, ada, "loam_container_receive", {
+      from,
+      into: "bea:shared:leak",
+      prefix: "bea:shared:leak:peer",
+      token: PEER_TOKEN,
+    });
+    expect(leak.isError, `the leak is refused: ${leak.text}`).toBe(true);
+    expect(gateway.channelStatus().length, "and no peer bytes landed").toBe(0);
+
+    const mine = await callTool(base, ada, "loam_container_receive", {
+      from,
+      into: "bea:shared:mine",
+      prefix: "bea:shared:mine:peer",
+      token: PEER_TOKEN,
+    });
+    expect(mine.isError, `and the one inside her own tree is admitted: ${mine.text}`).toBe(false);
+
+    // AND THE WALK FOLLOWS THE EDGES A PERSON'S PAGES FOLLOW. Their reach grows through `inboxOf`
+    // as well as `parent`, and their own declare page offers any container in that reach as a
+    // parent — so a container hung under a pool is on their page. A walk that followed only
+    // `parent` would stop at the pool and refuse them a container they made themselves.
+    const pool = [...gateway.containers().containers.entries()].find(
+      ([, r]) => r.inboxOf === "bea:shared",
+    )?.[0];
+    expect(pool, "premise: the connection's pool stands under the binding").toBeDefined();
+    await declare("bea:shared:pooled", pool!);
+    expect(subtreeOf(gateway.containers(), "ada").has("bea:shared:pooled"), "premise").toBe(true);
+    const pooled = await callTool(base, ada, "loam_container_receive", {
+      from,
+      into: "bea:shared:pooled",
+      prefix: "bea:shared:pooled:peer",
+      token: PEER_TOKEN,
+    });
+    expect(pooled.isError, `a container under a pool is hers too: ${pooled.text}`).toBe(false);
     await closePeers();
     await closeAll();
   });

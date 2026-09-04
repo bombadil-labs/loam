@@ -1765,8 +1765,8 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
       );
       if (struckHere !== undefined) {
         throw new Error(
-          `${struckHere} was declared and then dropped, so a channel cannot be opened beneath ` +
-            `it — what stands there is what the drop removed, and this store does not put it back`,
+          `${struckHere} was declared and then dropped, so a channel cannot be opened there — ` +
+            `declaring it again would restore what the drop removed`,
         );
       }
       if (table.containers.has(up) && danglingAncestor(table, up) !== undefined) {
