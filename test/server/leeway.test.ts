@@ -18,7 +18,10 @@
 // bound connection is the roster's too); offering is T264's. A revoked opener's channel is also
 // skipped by the standing sync, which no rail here observes: the fold and the doors are what a
 // reader can see, and they are pinned. The standing sync obeys the same switch as the fold and the
-// doors, so a closed container follows nothing more; no rail here watches a tick.
+// doors, so a closed container follows nothing more; no rail here watches a tick. That tick reads
+// the container table once whether or not a bound channel is due, and snapshots both the records
+// and the table before the syncs it awaits — so a long tick can sync against a switch that moved
+// under it, the same staleness the opener check already carried, and the next tick obeys.
 //
 // THE CASCADE IS A SUSPENSION, KEYED ON STANDING, and that is a decision rather than a fallback.
 // Nothing is struck: a channel serves exactly while the binding that opened it stands, so if the
@@ -47,7 +50,8 @@
 // The two door probes are named apart because they pull in opposite directions: capping the walk
 // at the binding let a tightening ABOVE it pass, and removing the cap outright let a connection
 // inherit a room it was never bound to. What the cap was doing is kept as its own rule — a leeway
-// must be declared at or inside the binding's own container — and each half reds its own case.
+// must be declared at or inside the binding's own container. Both probes red the SAME case, the
+// one that carries both halves; the halves are two rules, not two cases.
 // The two descent probes are named apart for the same reason: the terms a parent delegates
 // descend one level per container level, and the chains those terms carry descend inside one
 // another. The second was green until the depth-three case existed.
