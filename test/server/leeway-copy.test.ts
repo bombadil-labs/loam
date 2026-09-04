@@ -142,7 +142,7 @@ describe("§58 — the five controls, in words", () => {
       500,
     );
     const bullets = block
-      .split(/\n   - /)
+      .split(/\n {3}- /)
       .map((b) => flat(b.replace(/\*/g, "")).replace(/^- /, ""))
       .filter((b) => b.length > 0);
     expect(bullets, "five bullets, no more and no fewer").toHaveLength(5);
