@@ -58,6 +58,7 @@
 //   the reach walk follows parent only, not inboxOf      →  1 red, 33 green
 //   the climb follows one edge kind, not both            →  1 red, 33 green
 //   the gate asks the binding but not the target        →  1 red, 33 green
+//   the gate weighs only a target that already stands    →  1 red, 33 green
 //   the gate does not fail closed on two trees           →  1 red, 33 green
 //   the gate does not require the root to stand          →  0 red, 34 green
 //   the receive road asks the edge only when it mints    →  1 red, 31 green
@@ -1157,6 +1158,20 @@ describe("§58 — the container roster", () => {
     });
     expect(double.isError, double.text).toBe(true);
     expect(gateway.channelStatus().length, "and still no peer bytes landed").toBe(0);
+
+    // AND THE SAME HARM IS ONE MINT AWAY. A name that does not stand yet is judged by the nearest
+    // standing name it will hang from, because that is what its pool will be seen through. A gate
+    // that only weighed a container already standing left this open: mint a fresh child of the
+    // two-tree container and the bytes land in both people's pages again.
+    const fresh = await callTool(base, ada, "loam_container_receive", {
+      from,
+      into: "bea:shared:double:fresh",
+      prefix: "bea:shared:double:fresh:peer",
+      token: PEER_TOKEN,
+    });
+    expect(fresh.isError, fresh.text).toBe(true);
+    expect(recOf(gateway, "bea:shared:double:fresh"), "and nothing was minted").toBeUndefined();
+    expect(gateway.channelStatus().length, "and no peer bytes landed").toBe(0);
 
     const mine = await callTool(base, ada, "loam_container_receive", {
       from,
