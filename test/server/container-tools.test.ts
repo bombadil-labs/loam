@@ -57,7 +57,9 @@
 //   the home is split off the name instead of walked     →  1 red, 33 green
 //   the reach walk follows parent only, not inboxOf      →  1 red, 33 green
 //   the climb follows one edge kind, not both            →  1 red, 33 green
-//   the door does not fail closed on two trees           →  0 red, 34 green
+//   the gate asks the binding but not the target        →  1 red, 33 green
+//   the gate does not fail closed on two trees           →  1 red, 33 green
+//   the gate does not require the root to stand          →  0 red, 34 green
 //   the receive road asks the edge only when it mints    →  1 red, 31 green
 //   the refusal names the dropped ancestor (an oracle)   →  1 red, 31 green
 //   the write seam asks the name, not the chain          →  1 red, 31 green
@@ -93,11 +95,17 @@
 //
 // TWO PROBES ARE GREEN, AND THAT IS THE HONEST RECORD. The receive door's edge check is a second
 // guard on a road whose first guard refuses earlier in every state a rail can reach: `openChannel`
-// asks the same question of every caller before it mints. And the two-tree gate cannot be driven
-// from a door at all — a container carrying an `inboxOf` makes the leeway walk hop to its host,
-// and a host outside the binding is never "declared here", so the leeway refuses first. It stays
-// as the guard that would answer if that ever changed, and the rail asserts the predicate it
-// reads instead of pretending a door reaches it. It is written down rather than deleted, because a
+// asks the same question of every caller before it mints. And the tree gate's "the root must
+// stand" half needs a binding whose only upward edge is a dangling `inboxOf`; no door writes one,
+// and the standing check walks `parent`, so no case reaches it.
+//
+// A THIRD PROBE WAS GREEN FOR A BAD REASON, AND THE RECORD SAID SO WRONGLY. The two-tree gate was
+// recorded as undrivable from any door, blamed on the leeway walk hopping a pool. That mechanism
+// hops on the pool NAME token, not on an `inboxOf` record. The real cause was this file's own
+// fixture: it re-declared the container without its leeway, and latest-wins per declaration means
+// an omitted leeway is a DELETED one, so the door refused for an unrelated reason. The fixture
+// carries the leeway now and the probe is red. A rail that records a guard as untestable when it
+// is testable is worse than one that omits it. It is written down rather than deleted, because a
 // probe removed for being green reads exactly like a probe never run. `openChannel`'s dangling
 // check inside its own minting branch is unprobed for the same reason and named here.
 //
@@ -1111,6 +1119,45 @@ describe("§58 — the container roster", () => {
     expect(leak.isError, `the leak is refused: ${leak.text}`).toBe(true);
     expect(gateway.channelStatus().length, "and no peer bytes landed").toBe(0);
 
+    // ASKED OF THE TARGET TOO. A binding standing in ONE tree can still name a target standing in
+    // TWO, and then a second person sees a peer nobody let them in to. The question is the same
+    // question; asking it of the binding alone left this open.
+    await declare("bea:shared:double", "bea:notes");
+    await gateway.append([
+      signClaims(
+        containerClaims(
+          {
+            container: "bea:shared:double",
+            trust: "curated",
+            posture: "shared",
+            membership,
+            parent: "bea:notes",
+            inboxOf: "bea:shared",
+            leeway: OPEN,
+          },
+          OPERATOR,
+          gateway.nextTimestamp(),
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    expect(
+      treeRootsOf(gateway.containers(), "bea:shared:double").sort(),
+      "premise: the target stands in two trees",
+    ).toEqual(["ada", "bea"]);
+    expect(
+      subtreeOf(gateway.containers(), "bea").has("bea:shared:double"),
+      "premise: and bea's pages hold it",
+    ).toBe(true);
+    const double = await callTool(base, ada, "loam_container_receive", {
+      from,
+      into: "bea:shared:double",
+      prefix: "bea:shared:double:peer",
+      token: PEER_TOKEN,
+    });
+    expect(double.isError, double.text).toBe(true);
+    expect(gateway.channelStatus().length, "and still no peer bytes landed").toBe(0);
+
     const mine = await callTool(base, ada, "loam_container_receive", {
       from,
       into: "bea:shared:mine",
@@ -1151,6 +1198,11 @@ describe("§58 — the container roster", () => {
             membership,
             parent: "ada:journal",
             inboxOf: "bea",
+            // CARRIED, because latest-wins is per declaration: omitting it here DELETES the
+            // leeway, and the door then refuses for a reason that has nothing to do with the
+            // ambiguity under test. An earlier draft of this case omitted it and recorded the
+            // guard as unreachable from any door, which was false.
+            leeway: OPEN,
           },
           OPERATOR,
           gateway.nextTimestamp(),
@@ -1162,18 +1214,14 @@ describe("§58 — the container roster", () => {
       treeRootsOf(gateway.containers(), "bea:shared").sort(),
       "premise: it stands in two trees",
     ).toEqual(["ada", "bea"]);
-    // THE DOOR CANNOT REACH THIS ONE, AND THAT IS WORTH WRITING DOWN. An `inboxOf` makes the
-    // leeway walk treat the container as a pool and hop to its host, and a host outside the
-    // binding is never "declared here" — so the leeway refuses before the ambiguity is weighed.
-    // The gate stays as the guard that would answer if that ever changed, and this asserts the
-    // predicate it reads rather than pretending a door drives it.
     const ambiguous = await callTool(base, ada, "loam_container_receive", {
       from,
       into: "bea:shared:mine",
       prefix: "bea:shared:mine:second",
       token: PEER_TOKEN,
     });
-    expect(ambiguous.isError, "refused, by the leeway walk").toBe(true);
+    expect(ambiguous.isError, ambiguous.text).toBe(true);
+    expect(ambiguous.text, "and it says the tree is not decided").toMatch(/not decided/);
     await closePeers();
     await closeAll();
   });

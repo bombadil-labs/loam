@@ -806,14 +806,23 @@ function receiveRefusal(
   // at once, and then there is no such thing as "the person whose tree this is" — honouring
   // either one would be choosing whose page sees a peer's bytes. It fails closed instead.
   if (table.containers.has(into)) {
+    // ASKED OF BOTH NAMES, AND THAT SYMMETRY IS THE RULE. The binding says whose authority this
+    // is; `into` says where the bytes land. A container standing in ONE tree can still receive
+    // into a name standing in TWO, and then a second person sees a peer nobody let in — so the
+    // question is asked of the target as well, and both answers must be the same single tree.
+    //
+    // The root must STAND, too. A dangling edge reports the name it points at as a root, and a
+    // tree rooted at a name the table does not hold is on nobody's pages: the guard would pass
+    // while meaning nothing.
     const homes = treeRootsOf(table, binding.container);
-    if (homes.length !== 1) {
+    const lands = treeRootsOf(table, into);
+    if (homes.length !== 1 || !table.containers.has(homes[0]!)) {
       return (
-        `the container this connection is bound to stands in more than one tree, so where a ` +
-        `channel would be seen is not decided. It is refused until that is settled.`
+        `the container this connection is bound to does not stand in exactly one tree, so where ` +
+        `a channel would be seen is not decided. It is refused until that is settled.`
       );
     }
-    if (!withinSubtree(table, into, homes[0]!)) {
+    if (lands.length !== 1 || lands[0] !== homes[0]) {
       return (
         `${into} bears a name inside your container but hangs outside it: a channel opened there ` +
         `would serve a subtree that is not yours, so it is refused`
