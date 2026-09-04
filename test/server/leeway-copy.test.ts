@@ -30,6 +30,10 @@
 //   the risk sentence is not bound to its input             → 1 red, 6 green
 //   saving keeps the old leeway                             → 2 red, 5 green
 //   a refused save is reported as saved                     → 1 red, 6 green
+//   saving drops the container's parent                     → 1 red, 7 green
+// The markup this file reads is a string; the markup a person USES is driven by Chrome in
+// test/browser/leeway-controls.test.ts, which is where a broken tag or a folded-away control is
+// caught. Both files belong in the same mutation run for that reason.
 //
 // NOT HERE, and said so: a POOL's page. An inbox or a channel pool is reachable from no person's
 // container page — the door fences that page to the person's own subtree, which parent edges walk
@@ -410,6 +414,78 @@ describe("§58 — the five controls, in words", () => {
       envelope: "large",
       delegate: "off",
     });
+    await closeAll();
+  });
+
+  it("saving a leeway carries the container's record whole", async () => {
+    // A leeway is saved by re-declaring the container, so everything the record already held has
+    // to ride along. Dropping the parent would orphan a child from the tree its name says it is
+    // in, and reach is walked by parent edges.
+    const { base, gateway } = await connectionServer();
+    const session = await signIn(base, "ada", PASSWORD);
+    const p = pkce();
+    const query = new URLSearchParams({
+      client_id: CLIENT_ID,
+      redirect_uri: "https://app.example/cb",
+      state: "st-1",
+      response_type: "code",
+      code_challenge: p.challenge,
+      code_challenge_method: "S256",
+    });
+    const page = await fetch(`${base}${AUTHORIZE_PATH}?${query}`, {
+      headers: { cookie: `${SESSION_COOKIE}=${session}` },
+      redirect: "manual",
+    });
+    await fetch(`${base}${AUTHORIZE_PATH}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `${SESSION_COOKIE}=${session}`,
+        ...SAME_ORIGIN,
+      },
+      body: new URLSearchParams({
+        form_token: formTokenOf(await page.text()),
+        client_id: CLIENT_ID,
+        redirect_uri: "https://app.example/cb",
+        state: "st-1",
+        response_type: "code",
+        code_challenge: p.challenge,
+        code_challenge_method: "S256",
+        bind_new: "journal",
+        leeway_envelope: "small",
+      }).toString(),
+      redirect: "manual",
+    });
+    const before = readContainerTable(gateway.reactor, gateway.operatorAuthor).containers.get(
+      "ada:journal",
+    )!;
+    expect(before.parent, "premise: it is a child of the home").toBe("ada");
+    expect(before.membership, "premise: it is a shared container with a membership").toBeDefined();
+    const shown = await containerPage(base, "ada", "ada:journal");
+    const saved = await fetch(`${base}${ADMIN_LEEWAY_PATH}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `${SESSION_COOKIE}=${shown.session}`,
+        ...SAME_ORIGIN,
+      },
+      body: new URLSearchParams({
+        form_token: formTokenOf(shown.html),
+        name: "ada:journal",
+        leeway_receive: "on",
+        leeway_envelope: "small",
+      }).toString(),
+      redirect: "manual",
+    });
+    expect(saved.status).toBe(303);
+    const after = readContainerTable(gateway.reactor, gateway.operatorAuthor).containers.get(
+      "ada:journal",
+    )!;
+    expect(after.leeway.receive, "the leeway is what changed").toBe(true);
+    expect(after.parent, "and the parent rode along").toBe("ada");
+    expect(after.membership, "and so did the membership").toEqual(before.membership);
+    expect(after.trust).toBe(before.trust);
+    expect(after.posture).toBe(before.posture);
     await closeAll();
   });
 
