@@ -19,6 +19,8 @@ import { contentAddress, makeNegationClaims, signClaims } from "@bombadil/rhizom
 import type { Container } from "../gateway/container.js";
 import {
   containerClaims,
+  danglingAncestor,
+  everDeclared,
   openerStands,
   readContainerTable,
   receivesNow,
@@ -1708,18 +1710,93 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
   // naming it brings it into being if it is new. It is `curated` and `shared`: the receiver's own
   // trust domain, a view over their ground, with each peer's pool nested beneath it.
   const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+  // ASKED OF EVERY CALLER, WHETHER OR NOT THE NAME STANDS. The guards below sat inside the
+  // declaring branch, so a container that ALREADY stands skipped them — and a container that
+  // outlived the drop of its parent is exactly that: standing, and reachable from no page the
+  // person has. A grant-holding caller reaches here without passing the bound road's door.
+  if (danglingAncestor(table, opts.into) !== undefined) {
+    throw new Error(
+      `${opts.into} stands, but it hangs from a container that does not, so it is reachable ` +
+        `from no page the person has — a channel cannot be opened there`,
+    );
+  }
   if (!table.containers.has(opts.into)) {
     if (opts.openedBy === undefined) {
-      await gw.append([
-        signClaims(
-          containerClaims(
-            { container: opts.into, trust: "curated", posture: "shared", membership: AGGREGATOR },
-            gw.operatorAuthor!,
-            gw.nextTimestamp(),
-          ),
-          gw.options.seed,
-        ),
-      ]);
+      // THE STRUCK-NAME RULE IS NOT THE BOUND CALLER'S ALONE. A grant-holding caller reaches this
+      // branch, and re-declaring a name a person dropped reattaches every surviving descendant to
+      // it — worse here, because this declaration carries no parent, so the restored name is not
+      // in the person's reach either. They cannot see it and cannot drop it again.
+      if (everDeclared(gw.reactor, gw.operatorAuthor, opts.into)) {
+        throw new Error(
+          `${opts.into} was declared and then dropped, so a channel cannot be opened into it — ` +
+            `declaring it again would restore what the drop removed`,
+        );
+      }
+      // IT HANGS FROM SOMETHING, OR FROM NOTHING — NEVER FROM A NAME THAT IS NOT THERE. This
+      // branch used to declare `into` with no parent at any depth, which MAKES the orphan every
+      // other rule here refuses: a container holding a live peer channel that no page of the
+      // person's can show or drop, because their pages walk edges.
+      //
+      // Three rules, and each is pinned by a rail:
+      //   - Every undeclared level between `into` and the nearest standing ancestor is declared
+      //     with it, so no level is skipped and no edge points at a gap.
+      //   - A parent edge is written only where a parent STANDS. The topmost new level may have
+      //     none — `ada:feed` on a store with no `ada` is a name this door has always been able to
+      //     make, and prefix-collision.test.ts pins that it does not mint `ada` to do it. An edge
+      //     onto an undeclared name would be a dangling one, which is the orphan again.
+      //   - And the ancestor the walk STOPS at must not itself dangle, or everything hung beneath
+      //     it inherits the invisibility.
+      const missingHere: string[] = [];
+      let up = opts.into;
+      while (!table.containers.has(up) && up.includes(":")) {
+        missingHere.push(up);
+        up = up.slice(0, up.lastIndexOf(":"));
+      }
+      // A colon-free `into` is the container this call was asked for, and making it is this
+      // door's whole job. A colon-free ANCESTOR is not: it was never named, and minting it would
+      // put operator-signed law at a top-level name nobody asked for.
+      if (missingHere.length === 0 && !table.containers.has(up)) missingHere.push(up);
+      // THE STRUCK RULE COVERS THE LEVEL THIS BRANCH DECLINES TO MINT. Asking it only of the
+      // levels being made left a hole at exactly the name a person is most likely to have
+      // dropped — their own top-level one — because that name is never in the mint list when the
+      // target is two or more levels below it.
+      const struckHere = [...missingHere, ...(table.containers.has(up) ? [] : [up])].find(
+        (container) => everDeclared(gw.reactor, gw.operatorAuthor, container),
+      );
+      if (struckHere !== undefined) {
+        throw new Error(
+          `${struckHere} was declared and then dropped, so a channel cannot be opened there — ` +
+            `declaring it again would restore what the drop removed`,
+        );
+      }
+      if (table.containers.has(up) && danglingAncestor(table, up) !== undefined) {
+        throw new Error(
+          `${up} stands, but it hangs from a container that does not, so it is reachable from no ` +
+            `page the person has — a channel cannot be opened beneath it`,
+        );
+      }
+      const standing = new Set(table.containers.keys());
+      await gw.append(
+        missingHere.reverse().map((container) => {
+          const parent = container.includes(":")
+            ? container.slice(0, container.lastIndexOf(":"))
+            : undefined;
+          const spec = {
+            container,
+            trust: "curated" as const,
+            posture: "shared" as const,
+            membership: AGGREGATOR,
+            // ONLY WHERE ONE STANDS. The topmost new level may hang from nothing; an edge onto a
+            // name the table does not hold is the dangling edge this whole rule refuses.
+            ...(parent !== undefined && standing.has(parent) ? { parent } : {}),
+          };
+          standing.add(container);
+          return signClaims(
+            containerClaims(spec, gw.operatorAuthor!, gw.nextTimestamp()),
+            gw.options.seed!,
+          );
+        }),
+      );
     } else {
       // A container a BOUND CONNECTION names is declared under its path parent, and so is every
       // undeclared name between it and the nearest declared ancestor (SPEC §58 position 5: the
@@ -1727,11 +1804,45 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
       // composed into a container whose edge dangles from an undeclared name is served as law
       // that answers nothing — the T189 shape. The door fenced `into` inside the opener's
       // container, which consent declared, so the walk always meets a declared ancestor.
+      // IT STOPS AT THE OPENER'S OWN CONTAINER, AND AT A NAME THAT WAS DROPPED. A person drops a
+      // shared container by striking its declarations, which leaves its descendants standing but
+      // out of every parent-edge walk — and to this loop that is indistinguishable from a name
+      // nobody declared. Re-minting it would hand the dropped subtree back to its reader, at the
+      // request of the party the drop was aimed at.
       const seed = gw.options.seed;
+      const stop = opts.openedBy;
       const missing: string[] = [];
-      for (let at = opts.into; !table.containers.has(at) && at.includes(":");) {
+      let at = opts.into;
+      while (at !== stop && !table.containers.has(at) && at.includes(":")) {
         missing.push(at);
         at = at.slice(0, at.lastIndexOf(":"));
+      }
+      const struck = missing.find((container) =>
+        everDeclared(gw.reactor, gw.operatorAuthor, container),
+      );
+      if (struck !== undefined) {
+        throw new Error(
+          `${struck} was declared and then dropped, so a channel cannot be opened there — ` +
+            `declaring it again would restore what the drop removed`,
+        );
+      }
+      // AND THE NAME THE WALK STOPPED AT MAY ITSELF BE AN ORPHAN. It stands, so the walk is
+      // satisfied — but its own parent is not there, so it hangs off nothing the person can reach
+      // and a pool composed beneath it is invisible to every door they have.
+      // THE WALK MUST LAND ON SOMETHING. `openChannel` is a gateway API and `openedBy` is the
+      // caller's; a target that is not under it strips down to a name nothing holds, and minting
+      // beneath THAT manufactures the orphan every rule here exists to refuse.
+      if (!table.containers.has(at)) {
+        throw new Error(
+          `${at} does not stand, so there is nothing for ${opts.into} to hang from — a channel ` +
+            `cannot be opened there`,
+        );
+      }
+      if (danglingAncestor(table, at) !== undefined) {
+        throw new Error(
+          `${at} stands, but it hangs from a container that does not, so a channel cannot be ` +
+            `opened there`,
+        );
       }
       await gw.append(
         missing.reverse().map((container) =>

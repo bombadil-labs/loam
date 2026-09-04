@@ -54,7 +54,7 @@ import {
   SIZE_ENVELOPES,
 } from "./envelope.js";
 import { withNegationClosure, withNegationClosureAcross } from "./ingest.js";
-import { lawfulNegated, lawfulSnapshot } from "./registration.js";
+import { lawfulDeltasAt, lawfulNegated, lawfulSnapshot } from "./registration.js";
 import { readTrustPolicyAt, type TrustPolicy } from "./trust.js";
 import { Gateway, type ConnectionBinding, type FederationReport } from "./gateway.js";
 
@@ -572,22 +572,9 @@ function computeContainerTable(reactor: Reactor, operator: string | undefined): 
       detached.set(detachedName, records);
       continue;
     }
-    const name = containerRef(claims, CTX_CONTAINER);
-    if (name === undefined) continue;
-    const trust = primitives(claims, "trust")[0];
-    // A RETIRED posture word still binds HERE, unlike at the door: a store is migrated when someone
-    // runs `loam migrate`, and until then dropping its containers would empty every scope and blind
-    // the erasure guard without saying a word (H9). The word is normalized, never widened — the
-    // legacy pair maps onto the same two postures, so nothing new becomes lawful.
-    const posture = asPosture(primitives(claims, "posture")[0]);
-    if (
-      typeof trust !== "string" ||
-      !TRUSTS.has(trust) ||
-      posture === undefined ||
-      (trust === "untrusted" && posture === "shared")
-    ) {
-      continue; // malformed law binds nothing, at the reader as at the door
-    }
+    const bound = boundContainer(claims);
+    if (bound === undefined) continue; // malformed law binds nothing
+    const { name, trust, posture } = bound;
     const parentPtr = claims.pointers.find(
       (p) =>
         p.role === "parent" &&
@@ -752,19 +739,98 @@ export function containerAdmission(
   return readTrustPolicyAt(reactor, container, operator);
 }
 
+/**
+ * What this delta declares, if it BINDS as a container — the name, and the two words the reader
+ * normalizes. Absent when it declares nothing, or when it declares something malformed.
+ *
+ * THIS IS THE BIND TEST, AND IT IS NOT THE DOOR'S TEST. `containerDefect` weighs whether a NEW
+ * declaration may be ADMITTED, against the state standing right now: it reads the leeway tree, so
+ * a parent tightening its terms later can turn a declaration that was law when it was signed into
+ * one the door would refuse today. It also refuses a retired posture word the reader still honours
+ * on an unmigrated store. Neither belongs in the question "did this ever bind" — and using the
+ * door's test for it was a licence to mint, because a name that answers "never declared" is a name
+ * a walk will make again.
+ *
+ * So the table and `everDeclared` ask THIS, together. Two readers of one predicate cannot drift.
+ */
+function boundContainer(
+  claims: Claims,
+): { name: string; trust: string; posture: "shared" | "separate" } | undefined {
+  // The two record kinds that are not declarations at all. The table `continue`s on each before it
+  // looks for a declaration, so a delta carrying both is a detach or an exclusion and nothing else.
+  if (containerRef(claims, CTX_CONTAINER_EXCLUDED) !== undefined) return undefined;
+  if (containerRef(claims, CTX_CONTAINER_DETACHED) !== undefined) return undefined;
+  const name = containerRef(claims, CTX_CONTAINER);
+  if (name === undefined) return undefined;
+  const trust = primitives(claims, "trust")[0];
+  // A RETIRED posture word still binds HERE, unlike at the door: a store is migrated when someone
+  // runs `loam migrate`, and until then dropping its containers would empty every scope and blind
+  // the erasure guard without saying a word (H9). The word is normalized, never widened — the
+  // legacy pair maps onto the same two postures, so nothing new becomes lawful.
+  const posture = asPosture(primitives(claims, "posture")[0]);
+  if (
+    typeof trust !== "string" ||
+    !TRUSTS.has(trust) ||
+    posture === undefined ||
+    (trust === "untrusted" && posture === "shared")
+  ) {
+    return undefined;
+  }
+  return { name, trust, posture };
+}
+
 // The surviving lawful declaration ids for one entity — what a strike-the-declaration act negates.
 export function survivingDeclarationIds(
   reactor: Reactor,
   operator: string,
   entity: string,
 ): string[] {
+  // Filed AT the container's entity, so the target index answers it — the same H8 rule as
+  // `everDeclared` below, on the road that drops a container. `lawfulDeltasAt` carries no negation
+  // closure of its own, so the strike filter stays here.
   const negated = lawfulNegated(reactor, operator);
-  const out: string[] = [];
-  for (const delta of lawfulSnapshot(reactor, operator)) {
-    if (negated(delta.id)) continue;
-    if (containerRef(delta.claims, CTX_CONTAINER) === entity) out.push(delta.id);
-  }
-  return out;
+  return lawfulDeltasAt(reactor, { entity, context: CTX_CONTAINER }, operator)
+    .filter((delta) => !negated(delta.id))
+    .filter((delta) => containerRef(delta.claims, CTX_CONTAINER) === entity)
+    .map((delta) => delta.id);
+}
+
+/**
+ * Was this name EVER declared — struck or standing?
+ *
+ * The container table answers "does it stand". A road that mints a missing level needs the other
+ * question, because the two states look identical to it and mean opposite things: a name nobody
+ * declared is one to create, and a name a person STRUCK is one they removed. Re-minting the second
+ * restores every surviving descendant to the reader, which is the person's act undone by the party
+ * it was aimed at.
+ */
+export function everDeclared(
+  reactor: Reactor,
+  operator: string | undefined,
+  entity: string,
+): boolean {
+  // FAILS CLOSED, AND CLOSED HERE MEANS TRUE. A false ABSENCE is a licence to mint — it is what
+  // lets a walk declare this name — so a store with no operator to weigh law by cannot be allowed
+  // to answer "never declared". `readContainerTable` fails closed the other way, returning an
+  // empty table, and the two directions agree: neither hands out a name it could not judge.
+  if (operator === undefined) return true;
+  // THE TARGETED LOOKUP, NOT A SCAN (H8). A declaration is filed AT the container's entity, so the
+  // substrate's own target index answers this in the size of that one container's history rather
+  // than the size of the store. The scanning form cost a full materialization of every delta, and
+  // the walk that calls this calls it once per missing level — sixteen store-sized passes on one
+  // request.
+  //
+  // NOT A DERIVED MEMO, and that distinction is the whole of H8's index trap here. A false ABSENCE
+  // is a licence to mint: it is what lets the walk re-declare a name, so a stale index would hand
+  // a dropped subtree back to its reader. `byTarget` is written by ingest beside the set it
+  // indexes and replayed whole by an erase, so it cannot answer absent for a delta the store
+  // holds; a Set maintained on this side could.
+  // WELL-FORMED ONLY. Malformed law binds nothing — `computeContainerTable` skips a declaration
+  // whose trust or posture the law refuses — so a name that only ever carried one never stood, and
+  // reporting it as dropped would refuse a road forever over a container nobody ever had.
+  return lawfulDeltasAt(reactor, { entity, context: CTX_CONTAINER }, operator).some(
+    (delta) => boundContainer(delta.claims)?.name === entity,
+  );
 }
 
 const retractionOf = (targetId: string, author: string, timestamp: number): Claims => ({
@@ -1070,6 +1136,97 @@ export function openerStands(
   if (!channel.openedFrom.startsWith(stem)) return false;
   const key = channel.openedFrom.slice(stem.length);
   return holdsGrant(inbox.reactor, STORE_ENTITY, key, "write", gw.operatorAuthor);
+}
+
+/**
+ * The nearest ancestor edge of `name` that points at a container the table does not hold, or
+ * absent if every edge lands somewhere.
+ *
+ * A DANGLING EDGE IS WHAT A DROP LEAVES BEHIND. Dropping a shared container strikes that one
+ * container's declarations; its children keep standing and keep their `parent`, which now names
+ * nothing. Such a child passes every test made of its NAME while being unreachable from the
+ * person's own pages, which walk edges — so it must not be somewhere new law can be hung.
+ *
+ * A container with NO parent edge is not dangling. Plenty stand that way by design, declared by
+ * name alone; this asks only that the edges a record actually carries land on something.
+ */
+export function danglingAncestor(table: ContainerTable, name: string): string | undefined {
+  const seen = new Set<string>();
+  for (let at: string | undefined = name; at !== undefined && !seen.has(at);) {
+    seen.add(at);
+    const rec = table.containers.get(at);
+    if (rec === undefined) return at === name ? undefined : at;
+    at = rec.parent;
+  }
+  return undefined;
+}
+
+/**
+ * The first name in this container's parent chain that does not stand, or absent when the whole
+ * chain stands. `name` itself counts: a container that is gone breaks its own chain.
+ *
+ * ONE QUESTION, ASKED BY EVERY ROAD THAT ACTS ON A BINDING'S AUTHORITY. A shared drop strikes one
+ * container and leaves its descendants standing, so "does my container stand" and "does my
+ * container hang from anything" are different questions with the same stakes.
+ */
+export function chainBreaksAt(table: ContainerTable, name: string): string | undefined {
+  const seen = new Set<string>();
+  for (let at: string | undefined = name; at !== undefined && !seen.has(at);) {
+    seen.add(at);
+    const rec = table.containers.get(at);
+    if (rec === undefined) return at;
+    at = rec.parent;
+  }
+  return undefined;
+}
+
+/**
+ * Does `name` sit inside `root`, by the edges a PERSON'S OWN PAGES walk?
+ *
+ * Their reach (src/server/subtree.ts) grows through `parent` AND through `inboxOf`, so this walks
+ * up through both. That is a UNION, not a precedence: a record carrying both edges belongs to both
+ * trees, and following only one of them answers about a tree the person may not be standing in.
+ *
+ * Walked from the name UP rather than from the root down. The table is not a forest under these
+ * edges — `computeContainerTable` restores acyclicity over `parent` only, and nothing breaks a
+ * cycle closed by an `inboxOf` — so the `seen` set is what makes this total, not an invariant.
+ */
+export function withinSubtree(table: ContainerTable, name: string, root: string): boolean {
+  return climbFrom(table, name).has(root);
+}
+
+/**
+ * The roots of the trees `name` stands in — every name above it with nowhere further to go.
+ *
+ * PLURAL, AND THAT IS THE POINT. A container carrying both a `parent` and an `inboxOf` stands in
+ * two trees at once, so a caller asking "whose tree is this in" has no single answer, and a door
+ * that took one would be choosing which person's page to honour. Callers that need a single tree
+ * must refuse when this returns more than one; see `receiveRefusal`.
+ */
+export function treeRootsOf(table: ContainerTable, name: string): string[] {
+  const up = climbFrom(table, name);
+  return [...up].filter((at) => stepsUp(table, at).length === 0);
+}
+
+/** Every name at or above `name`, following both edge kinds. Total: `seen` bounds the walk. */
+function climbFrom(table: ContainerTable, name: string): Set<string> {
+  const seen = new Set<string>([name]);
+  const queue = [name];
+  while (queue.length > 0) {
+    for (const next of stepsUp(table, queue.pop()!)) {
+      if (seen.has(next)) continue;
+      seen.add(next);
+      queue.push(next);
+    }
+  }
+  return seen;
+}
+
+/** One step up, both edges. A record the table does not hold has none. */
+function stepsUp(table: ContainerTable, name: string): string[] {
+  const rec = table.containers.get(name);
+  if (rec === undefined) return [];
+  return [rec.parent, rec.inboxOf].filter((e): e is string => e !== undefined);
 }
 
 export function subtreeUnder(table: ContainerTable, root: string): string[] {
@@ -1775,8 +1932,14 @@ export function poolForBindingImpl(gw: Gateway, binding: ConnectionBinding): Gat
   // the write lands durably in the pool and the read that follows it refuses by name, so the door
   // answers 200 with an error over a delta that is really there — and every retry mints another.
   // Refuse before anything is signed; the connection is bound nowhere until it consents again.
+  //
+  // THE WHOLE CHAIN, NOT THE NAME. A shared drop strikes only the container it names, so dropping
+  // a container leaves its descendants standing — including one a connection is bound to. Asking
+  // the name alone let that connection keep appending law into a subtree the person had removed
+  // from every page they have: unseeable, and un-droppable, because their pages walk edges. This
+  // is the same question the MCP roster asks; both write on the binding's authority, so both ask it.
   const table = readContainerTable(gw.reactor, gw.operatorAuthor);
-  if (!table.containers.has(binding.container)) {
+  if (chainBreaksAt(table, binding.container) !== undefined) {
     throw new Error(
       `the container ${binding.container} this connection is bound to no longer stands, so this ` +
         `write is refused — it would land where nothing can read it. Consent again and choose a ` +

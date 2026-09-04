@@ -32,7 +32,7 @@ import {
   parseBodyFields as parseAppBody,
   readBodyStrict as readBody,
 } from "./body.js";
-import { authorForSeed, type Delta } from "@bombadil/rhizomatic";
+import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { Kind, OperationTypeNode, parse, type DocumentNode } from "graphql";
 import { fromWire, toWire, type WireDelta } from "../federation/wire.js";
 import { buildOpenApi, handleRest } from "../surface/rest.js";
@@ -74,11 +74,18 @@ import {
   registerPrefixesOf,
 } from "../gateway/accounts.js";
 import {
+  chainBreaksAt,
+  containerClaims,
+  everDeclared,
   governingLeeway,
   inboxName,
   openerStands,
   readContainerTable,
   receivesNow,
+  danglingAncestor,
+  treeRootsOf,
+  withinSubtree,
+  type ContainerTable,
 } from "../gateway/container.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
 import { readSeed, readUserSeed, userSeedPath } from "../cli/config.js";
@@ -86,9 +93,11 @@ import { DOC_TOPICS } from "./docs-content.js";
 import { CSP, makeUserDoors, type UserDoorOptions, type UserDoors } from "./session.js";
 import { makeAdminDoor, type AdminDoor } from "./admin.js";
 import { ADMIN_CONTAINER_PATH } from "./admin-pages.js";
+import { appendRefusal, mintableNameDefect } from "./refusal.js";
 import { refusalKey } from "../gateway/lifecycle.js";
 import type { ChannelStatus } from "../federation/channel.js";
 import type { ConnectionBinding } from "../gateway/gateway.js";
+import { canonicalLeewayJson, parseLeeway, type Leeway } from "../gateway/leeway.js";
 
 export { type UserDoorOptions } from "./session.js";
 
@@ -596,6 +605,98 @@ function federateStanding(
  * a pure namespace and inherits. The refusal names only the connection's own container, never
  * another's: no oracle.
  */
+/**
+ * May a connection mint `missing` beneath `root` — the standing name its walk stopped at? The
+ * sentence refusing it, or absent.
+ *
+ * TWO QUESTIONS, AND THE NAME ANSWERS NEITHER. A person drops a shared container by striking that
+ * ONE container's declarations, which leaves its children standing with a parent edge pointing at
+ * a name the table no longer holds.
+ *
+ *   - A struck level in `missing` is not an undeclared one. Re-minting it restores the dropped
+ *     subtree to its reader, so a level that was ever declared stops the walk.
+ *   - And the name the walk STOPPED at may itself be one of those orphans. It stands, so the walk
+ *     is satisfied — but it hangs off nothing the person can reach, and everything minted beneath
+ *     it inherits that invisibility. Reach is walked by PARENT EDGES, so that is the question to
+ *     ask: does the stopping name sit inside the connection's own container by edges, not by name.
+ *
+ * Together they are the whole of it. A name is mintable only where the person can still see what
+ * it will hang from.
+ */
+function mintableAt(
+  gateway: Gateway,
+  binding: ConnectionBinding,
+  table: ContainerTable,
+  root: string,
+  missing: readonly string[],
+): string | undefined {
+  const struck = missing.find((container) =>
+    everDeclared(gateway.reactor, gateway.operatorAuthor, container),
+  );
+  if (struck !== undefined) {
+    return (
+      `${struck} was declared and then dropped. Making a name there would restore what the drop ` +
+      `removed, so it is refused. Ask the person who dropped it.`
+    );
+  }
+  // NO ORACLE, and the edge is where it would leak. A parent edge need not agree with the name —
+  // the leeway verb exists to catch exactly that — so the dropped ancestor may be a container in
+  // someone else's subtree, and naming it would teach this caller that it existed. The refusal
+  // says what is true of the caller's own name and stops.
+  // THREE CONDITIONS, THREE SENTENCES. One message for all of them would tell a caller a drop
+  // happened when none did, and send them after a person who dropped nothing.
+  // SAYS WHAT IS OBSERVED, NOT WHY. A parent edge naming a container the table does not hold is
+  // what a drop leaves behind, but it is not the only way to get one, and telling a caller to go
+  // ask the person who dropped it is a false errand when nothing was dropped.
+  if (danglingAncestor(table, root) !== undefined) {
+    return (
+      `${root} stands, but it hangs from a container that does not, so it is reachable from no ` +
+      `page the person has. Nothing may be made beneath it.`
+    );
+  }
+  // THE SAME QUESTION `loam_container_leeway` ASKS, ASKED THE SAME WAY. Two write verbs that
+  // disagree about one target is the shape every round of this review kept finding, and a walk
+  // that admits a parentless container admits one the person's own pages cannot reach: law
+  // written beneath a name outside their reach is law nobody can see or drop.
+  //
+  // `withinSubtree` walks BOTH edge kinds, like a person's page. `subtreeUnder` walks `parent`
+  // only, and so does `connectionScopeImpl`. They are not interchangeable; swapping one for the
+  // other here would change what these doors admit.
+  if (!withinSubtree(table, root, binding.container)) {
+    return (
+      `${root} bears a name inside your container but does not stand inside it: its edges do not ` +
+      `lead back to ${binding.container}, so nothing may be made beneath it.`
+    );
+  }
+  return undefined;
+}
+
+const STANDING_ENDED =
+  "this connection no longer stands in its container, so it shapes nothing here. Ask the person " +
+  "who connected you to connect you again.";
+
+/**
+ * Does this connection still stand? TWO QUESTIONS, NOT ONE, and every road that writes on a
+ * binding's authority asks both.
+ *
+ * `openerStands` proves the inbox pool is attached and that the write grant in it survives. It
+ * says nothing about the CONTAINER, and a pool outlives the container it was bound under: dropping
+ * a shared container strikes that container's declarations and leaves the pool declared and
+ * attached. A connection whose container was dropped must not act — least of all through a walk
+ * that declares missing levels, which would re-declare the container the person just dropped, with
+ * the store's own key, at the request of the party the drop was aimed at.
+ */
+function connectionStands(gateway: Gateway, binding: ConnectionBinding): boolean {
+  const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+  // THE WHOLE CHAIN, NOT THE NAME. A shared drop strikes only the container it names, so a
+  // descendant keeps its own declaration and stands alone: absent from every parent-edge walk the
+  // person's pages make, and reachable only by the connection bound to it. Asking the chain means
+  // dropping a container ends the connections bound beneath it too, which is what a person
+  // dropping a room expects.
+  if (chainBreaksAt(table, binding.container) !== undefined) return false;
+  return openerStands(gateway, { openedBy: binding.container, openedFrom: binding.inbox });
+}
+
 function receiveRefusal(
   gateway: Gateway,
   binding: ConnectionBinding,
@@ -603,11 +704,20 @@ function receiveRefusal(
   prefix: string | undefined,
 ): string | undefined {
   const fence = `${binding.container}:`;
+  // THE SAME NAME RULE THE ROSTER'S `declare` ASKS. This door hands `into` to a walk that declares
+  // every missing level of it, so a name with an empty level or a thousand of them mints exactly
+  // the law the roster refuses — a rule one minting road asks is a rule the other does not.
   if (into !== binding.container && !fenceAdmits(fence, into)) {
     return (
       "a connection receives only into its own container or a descendant of it — the path and " +
       `its colon — and ${into} is outside ${fence}`
     );
+  }
+  if (into !== binding.container) {
+    const defect = mintableNameDefect(fence, into);
+    if (defect !== undefined) {
+      return `a connection receives only into a container it could name: ${defect}`;
+    }
   }
   // The prefix is fenced to the TARGET, not merely to the binding: arriving law is named under
   // the container that receives it, so a container whose receive switch is off never carries a
@@ -618,16 +728,31 @@ function receiveRefusal(
       `and its colon — and ${prefix} is outside ${into}:`
     );
   }
+  // AND THE NAME MUST HANG INSIDE THE CONTAINER, not merely begin with it. A person's drop strikes
+  // one container and leaves its children standing with a parent edge pointing at a name the table
+  // no longer holds; those children keep passing every test made of the NAME. Reach is walked by
+  // parent edges, so a peer's bytes must not be able to land under one of them — invisible to
+  // every door the person has, and un-droppable because their pages cannot see it.
+  const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+  let root = into;
+  while (root !== binding.container && !table.containers.has(root) && root.includes(":")) {
+    root = root.slice(0, root.lastIndexOf(":"));
+  }
+  // NO ORACLE: the dropped ancestor is not named. A parent edge need not agree with the name, so
+  // it may be a container in another person's subtree.
+  if (danglingAncestor(table, root) !== undefined) {
+    return (
+      `${root} stands, but it hangs from a container that does not, so it is reachable from no ` +
+      `page the person has — a channel cannot be opened there`
+    );
+  }
   // READ WHAT THE FOLD READS. The walk is not capped at the binding: an ancestor's terms narrow
   // what stands below them, and a door that stopped climbing at the binding admitted a follow the
   // fold then refused to serve — peer bytes landing in a subtree the person had closed. What the
   // cap was doing is kept, and said plainly: a leeway must be declared AT OR INSIDE the binding's
   // own container, so a connection never inherits a room it was not bound to. No refusal names a
   // container outside the binding.
-  const governed = governingLeeway(
-    readContainerTable(gateway.reactor, gateway.operatorAuthor),
-    into,
-  );
+  const governed = governingLeeway(table, into);
   const declaredHere =
     governed !== undefined &&
     (governed.at === binding.container || fenceAdmits(fence, governed.at));
@@ -637,10 +762,139 @@ function receiveRefusal(
       "absent leeway is every switch off"
     );
   }
-  return governed.leeway.receive
-    ? undefined
-    : `the container ${governed.at} does not receive: the leeway in force there has its receive ` +
-        "switch off";
+  if (!governed.leeway.receive) {
+    return (
+      `the container ${governed.at} does not receive: the leeway in force there has its receive ` +
+      "switch off"
+    );
+  }
+  // THE EDGE IS NOT ASKED OF A CONTAINER THAT ALREADY STANDS, and the asymmetry is the point.
+  // §58's walls settled it: NAMES ARE PATHS, and the name governs. A container named under this
+  // binding but declared with a parent elsewhere still resolves its leeway by name, so the switch
+  // the person set on THIS container is the one in force — an edge check there would refuse a
+  // receive the person's own leeway already permits, and subtree-walls.test.ts pins it both ways.
+  //
+  // IT IS ASKED WHEN THIS DOOR WOULD MINT. Receiving into a name that does not stand declares it,
+  // and a declaration hung beneath a container whose edges lead elsewhere is new law administered
+  // from outside the caller's subtree — the act the write verbs gate, arriving by another door.
+  // Resolution governs by name; MAKING a container is not resolution.
+  if (!table.containers.has(into)) {
+    let root = into;
+    while (root !== binding.container && !table.containers.has(root) && root.includes(":")) {
+      root = root.slice(0, root.lastIndexOf(":"));
+    }
+    if (table.containers.has(root) && !withinSubtree(table, root, binding.container)) {
+      return (
+        `${root} bears a name inside your container but does not stand inside it: its edges do ` +
+        `not lead back to ${binding.container}, so nothing may be made beneath it`
+      );
+    }
+  }
+  // AND THE BYTES MUST LAND SOMEWHERE THE PERSON CAN SEE. Resolution governs by NAME — a container
+  // named here but parented one level up is still governed by the leeway set here, which is what
+  // the walls settled and what the case above preserves. But a container parented into ANOTHER
+  // PERSON'S tree is on their pages and on none of this person's, so a peer's pool composed into
+  // it would be invisible to the person who let the peer in and visible to one who never did.
+  //
+  // ASKED OF THE TREE THE BINDING STANDS IN, NOT ITS NAME. That is the whole difference from the
+  // mint rule: the walls admit a name that hangs one level above the binding, inside the same
+  // person's tree. And the root is WALKED, never split off the name — a parent edge need not agree
+  // with a name, so splitting would derive the wrong tree for exactly the containers whose edges
+  // leave it, which is the case this refuses.
+  //
+  // ONE TREE, OR NONE. A container carrying both a `parent` and an `inboxOf` stands in two trees
+  // at once, and then there is no such thing as "the person whose tree this is" — honouring
+  // either one would be choosing whose page sees a peer's bytes. It fails closed instead.
+  // ASKED OF BOTH NAMES, AND THAT SYMMETRY IS THE RULE. The binding says whose authority this is;
+  // the target says where the bytes land. A container standing in ONE tree can still name a target
+  // standing in TWO, and then a second person sees a peer nobody let in — so the question is asked
+  // of the target as well, and both answers must be the same single tree.
+  //
+  // AND OF THE ANCHOR WHEN THE TARGET IS NEW. A name that does not stand yet is judged by the
+  // nearest standing name it will hang from, because that is what its pool will be seen through.
+  // Gating only the standing case left the same harm one mint away.
+  //
+  // The root must STAND, too. A dangling edge reports the name it points at as a root, and a tree
+  // rooted at a name the table does not hold is on nobody's pages: the guard would pass while
+  // meaning nothing.
+  let anchor = into;
+  while (anchor !== binding.container && !table.containers.has(anchor) && anchor.includes(":")) {
+    anchor = anchor.slice(0, anchor.lastIndexOf(":"));
+  }
+  const homes = treeRootsOf(table, binding.container);
+  if (homes.length !== 1 || !table.containers.has(homes[0]!)) {
+    return (
+      `the container this connection is bound to does not stand in exactly one tree, so where a ` +
+      `channel would be seen is not decided. It is refused until that is settled.`
+    );
+  }
+  if (table.containers.has(anchor)) {
+    const lands = treeRootsOf(table, anchor);
+    if (lands.length !== 1 || lands[0] !== homes[0]) {
+      return (
+        `${into} bears a name inside your container but hangs outside it: a channel opened there ` +
+        `would serve a subtree that is not yours, so it is refused`
+      );
+    }
+  }
+  return undefined;
+}
+
+// A container a connection declares serves through what is nested inside it, exactly like the
+// receiving container `openChannel` declares. Its own membership matches no author, so nothing
+// lands in its ground directly. Same Term, same reason (federation/channel.ts).
+const CONNECTION_AGGREGATOR = {
+  op: "select",
+  pred: { match: { field: "author", cmp: "eq", const: "\u0000none" } },
+  in: "input",
+} as const;
+
+/**
+ * The leeway a container tool was asked for, or the sentence refusing it.
+ *
+ * ERGONOMICS HERE, THE LAW'S STRICTNESS UNDERNEATH. A caller names the switches it wants and every
+ * switch it does not name is off — the same default the consent page renders, arrived at from the
+ * other side. That filling is all this function does. The filled value then goes through
+ * `parseLeeway`, so an unknown key, a bad envelope name, a terms that is not an object and a
+ * nesting deeper than the law admits are all refused in the LAW'S OWN WORDS rather than in a
+ * second set this door would have to keep in step. A misspelled switch that silently read `false`
+ * would be a permission nobody chose, which is the one thing this door must never write.
+ */
+function leewayFromTool(args: Record<string, unknown>): Leeway | string {
+  const asked: Record<string, unknown> = { ...args };
+  delete asked["name"];
+  const parsed = parseLeeway(canonicalLeewayJson(fillLeeway(asked, 0)));
+  return "leeway" in parsed ? parsed.leeway : parsed.defect;
+}
+
+/**
+ * Every switch the caller did not name, off; `delegate` absent or `false` as "off" and `true` as
+ * "same", which is how a caller spells them. Keys it does not know are copied through UNCHANGED so
+ * `parseLeeway` sees them and refuses them — filling must never make an unknown key disappear.
+ * Bounded because it recurses over caller input: past the bound the value passes through whole and
+ * the law's own depth rule answers it.
+ */
+function fillLeeway(value: unknown, depth: number): unknown {
+  if (depth > 32 || typeof value !== "object" || value === null || Array.isArray(value)) {
+    return value;
+  }
+  const given = value as Record<string, unknown>;
+  const delegate = given["delegate"];
+  return {
+    receive: false,
+    offer: false,
+    publish: false,
+    envelope: "small",
+    ...given,
+    delegate:
+      delegate === undefined || delegate === false
+        ? "off"
+        : delegate === true
+          ? "same"
+          : typeof delegate === "object" && delegate !== null
+            ? fillLeeway(delegate, depth + 1)
+            : delegate,
+  };
 }
 
 /** May this caller see or act on THIS channel? A bound connection owns the channels its container opened. */
@@ -652,7 +906,13 @@ function channelAdmits(
 ): boolean {
   return identity.binding === undefined
     ? federateAdmits(standing, channel.into)
-    : channel.openedFrom === identity.binding.inbox &&
+    : // THE CONNECTION FIRST, THE CHANNEL SECOND. `openerStands` weighs the CHANNEL's opener
+      // against its pool; it says nothing about whether the container this connection is bound to
+      // still stands. A channel's own `into` survives its container's drop, so without this a
+      // dropped connection could still flip a channel back on and keep pulling a peer's data into
+      // the subtree the person removed.
+      connectionStands(gateway, identity.binding) &&
+        channel.openedFrom === identity.binding.inbox &&
         openerStands(gateway, channel) &&
         receivesNow(readContainerTable(gateway.reactor, gateway.operatorAuthor), channel.into);
 }
@@ -1516,6 +1776,74 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       },
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
+    {
+      name: "loam_container_declare",
+      description:
+        "Declare a container INSIDE your own — the path and its colon. A connection shapes its own " +
+        "subtree and nothing beside it: a name one level up, a sibling, or a name that merely " +
+        "shares your letters is refused with the sentence naming the rule. The new container " +
+        "declares no leeway of its own, so it inherits what yours allows until you set one with " +
+        "loam_container_leeway.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "the container to declare, under your own path" },
+        },
+        required: ["name"],
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    {
+      name: "loam_container_leeway",
+      description:
+        "Set what a container in your subtree may do: receive, offer, publish, an envelope size, " +
+        "and the terms below it. THIS REPLACES THE WHOLE LEEWAY: every switch you do not name is " +
+        "off, so setting one switch turns the others off. The reply echoes what now stands. A " +
+        "leeway that does not fit the terms above it is refused with the sentence naming the " +
+        "ceiling, and a change is a delta the next request obeys. Your own container's leeway is " +
+        "the person's to set, not yours.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "a container BELOW your own" },
+          receive: { type: "boolean", description: "may it follow other stores (default false)" },
+          offer: { type: "boolean", description: "may its descendants be offered (default false)" },
+          publish: { type: "boolean", description: "may lenses be public here (default false)" },
+          envelope: {
+            type: "string",
+            description: "how much compute may run behind glass: small, medium or large",
+          },
+          delegate: {
+            type: "object",
+            description:
+              "the terms a child may differ within: the same switches, an envelope ceiling, and " +
+              "`same` to carry these terms further down. Absent means it delegates nothing.",
+          },
+        },
+        required: ["name"],
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    {
+      name: "loam_container_receive",
+      description:
+        "Follow another store INTO your own subtree: a channel into your container or one below " +
+        "it, under a prefix inside it, where that container's leeway says receive is on. What " +
+        "arrives is kept in a pool of its own and serves your container alone. This is the same " +
+        "act as loam_federate_connect, named for the roster; an unbound caller uses that one.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          from: { type: "string", description: "the peer's mount address" },
+          into: { type: "string", description: "your container, or one below it" },
+          prefix: { type: "string", description: "the namespace YOU assign this peer" },
+          token: { type: "string", description: "the peer's door token, if it wants one" },
+          bless: { type: "boolean", description: "bind law that arrives (default true)" },
+        },
+        required: ["from", "into", "prefix"],
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
   ];
 
   // `gateway.query` runs whatever document it is handed — graphql executes a `mutation` operation as
@@ -1779,7 +2107,255 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         // §46 over MCP (T188). Authority is the CONTAINER-SCOPED federate grant, never the operator
         // role — see federateStanding. A caller with no standing meets the same refusal whichever
         // channel it named, so the tool cannot be used to learn which channels exist (§12/T78).
-        if (name === "loam_federate_connect") {
+        // THE CONTAINER ROSTER (SPEC §58 position 3). A connection shapes its own subtree in
+        // conversation and reaches nothing beside it. Every verb here answers the same two
+        // questions in the same order: is this caller bound, and is the name it gave inside the
+        // fence its binding draws — the path AND ITS COLON, so a sibling sharing the letters is
+        // outside. A refusal names only the caller's own container.
+        // `loam_container_receive` is NOT handled here. It is `loam_federate_connect` under
+        // another name, and a caller holding a federate grant but no binding may drive it — so it
+        // goes to the one road below, which answers both names identically. Intercepting it here
+        // would give the two names different refusals for the same caller.
+        if (
+          typeof name === "string" &&
+          name.startsWith("loam_container_") &&
+          name !== "loam_container_receive"
+        ) {
+          const asked = args as Record<string, unknown>;
+          const binding = identity.binding;
+          if (binding === undefined) {
+            reply({
+              content: [
+                {
+                  type: "text",
+                  text:
+                    "the container tools are a bound connection's: they shape the container this " +
+                    "connection lives in. This token is not bound to one.",
+                },
+              ],
+              isError: true,
+            });
+            return;
+          }
+          // THE FENCE IS THE PATH AND ITS COLON, AND EVERY SEGMENT AFTER IT IS A REAL NAME. A
+          // bare `startsWith` admits the fence itself — `ada:journal:`, an empty final segment —
+          // which stands as a container whose listed name reads as its parent's prefix and whose
+          // own children's fence doubles the colon. The bound is not decoration either: each
+          // declaration is permanent operator-signed law, and the reach walks are fixpoints over
+          // the table, so an unbounded name is an unbounded cost on every later read.
+          // THE BINDING IS ASKED AGAIN, NOT ASSUMED. A connection's standing lives in its inbox
+          // pool, and a person can end it there — dropping the pool — without touching the token,
+          // which resolves from the connector file and keeps saying it is bound. Every federation
+          // road re-asks on each request; these write with the store's own key, so they ask too.
+          if (!connectionStands(gateway, binding)) {
+            reply({ content: [{ type: "text", text: STANDING_ENDED }], isError: true });
+            return;
+          }
+          const fence = `${binding.container}:`;
+          const nameDefect = (given: unknown): string | undefined =>
+            typeof given === "string"
+              ? mintableNameDefect(fence, given)
+              : "this verb wants a container name.";
+
+          if (name === "loam_container_declare") {
+            const target = asked["name"];
+            const defect = nameDefect(target);
+            if (typeof target !== "string" || defect !== undefined) {
+              reply({ content: [{ type: "text", text: defect! }], isError: true });
+              return;
+            }
+            const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+            if (table.containers.has(target)) {
+              reply({
+                content: [{ type: "text", text: `${target} already stands.` }],
+                isError: true,
+              });
+              return;
+            }
+            // EVERY UNDECLARED NAME BETWEEN THE TARGET AND ITS NEAREST DECLARED ANCESTOR IS
+            // DECLARED WITH IT — the T189 shape, the same walk `openChannel` makes for a container
+            // a bound connection names (federation/channel.ts). Reach is walked by DECLARED PARENT
+            // EDGES while this fence is read from the NAME, so a container hung off an undeclared
+            // middle is governed by the leeway walk and invisible to every door the person has: it
+            // is absent from their container page, from the leeway page, from the drop page, and
+            // from what they may bind. The walk always meets a declared ancestor, because the
+            // fence is the connection's own container and consent declared that.
+            //
+            // Shared with the aggregator membership, which is the shape the sibling road writes. A
+            // `separate` container with no backend attached is worse than useless: the scope walk
+            // fails closed on it, so one successful declaration would brick every later read this
+            // connection makes.
+            // IT STOPS AT THE CONNECTION'S OWN CONTAINER, WHICH THE CHECK ABOVE PROVED STANDS.
+            // A walk that climbed past it to the nearest declared ancestor would RE-DECLARE the
+            // container itself — undoing a person's drop, with the store's own key, at the request
+            // of the party the drop was aimed at.
+            const missing: string[] = [];
+            let root = target;
+            while (
+              root !== binding.container &&
+              !table.containers.has(root) &&
+              root.includes(":")
+            ) {
+              missing.push(root);
+              root = root.slice(0, root.lastIndexOf(":"));
+            }
+            const unmintable = mintableAt(gateway, binding, table, root, missing);
+            if (unmintable !== undefined) {
+              reply({ content: [{ type: "text", text: unmintable }], isError: true });
+              return;
+            }
+            try {
+              await gateway.append(
+                missing.reverse().map((container) =>
+                  signClaims(
+                    containerClaims(
+                      {
+                        container,
+                        trust: "curated",
+                        posture: "shared",
+                        membership: CONNECTION_AGGREGATOR,
+                        parent: container.slice(0, container.lastIndexOf(":")),
+                      },
+                      gateway.operatorAuthor!,
+                      gateway.nextTimestamp(),
+                    ),
+                    gateway.options.seed!,
+                  ),
+                ),
+              );
+            } catch (err) {
+              reply({
+                content: [{ type: "text", text: appendRefusal(err) }],
+                isError: true,
+              });
+              return;
+            }
+            // REPORTS WHAT IT SIGNED, not what it was asked for. Naming a level below an
+            // undeclared one declares them all, and a reply naming only the target would hide
+            // permanent law the caller never asked for.
+            reply({
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(
+                    { declared: missing, leeway: "inherited — set one with loam_container_leeway" },
+                    null,
+                    1,
+                  ),
+                },
+              ],
+            });
+            return;
+          }
+
+          if (name === "loam_container_leeway") {
+            // A CONNECTION SHAPES BELOW ITSELF, NEVER ITSELF. Its own container's leeway is what
+            // the person granted it; a connection that could widen that would be granting itself.
+            const target = asked["name"];
+            const defect = nameDefect(target);
+            if (typeof target !== "string" || defect !== undefined) {
+              reply({
+                content: [
+                  {
+                    type: "text",
+                    text: `${defect!} Your own container's leeway is the person's to set, on its page.`,
+                  },
+                ],
+                isError: true,
+              });
+              return;
+            }
+            const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+            const rec = table.containers.get(target);
+            if (rec === undefined) {
+              reply({
+                content: [{ type: "text", text: `${target} is not declared. Declare it first.` }],
+                isError: true,
+              });
+              return;
+            }
+            // A POOL IS NOT SHAPED HERE, ASKED OF THE RECORD RATHER THAN THE NAME. A pool takes
+            // its leeway from the container it was opened into, and this re-declaration would
+            // carry the pointer forward — but the person's own page refuses the act outright, and
+            // two doors doing the same re-declaration should ask the same question. The name
+            // argument (a pool leads with a token no person may take) is the weaker guard: it
+            // stops holding the moment a name is minted some other way.
+            if (rec.inboxOf !== undefined) {
+              reply({
+                content: [
+                  {
+                    type: "text",
+                    text:
+                      `${target} takes its leeway from ${rec.inboxOf}, the container it was ` +
+                      `opened into. Change it there. Nothing was changed here.`,
+                  },
+                ],
+                isError: true,
+              });
+              return;
+            }
+            // THE FENCE READS THE NAME; REACH IS WALKED BY THE PARENT EDGE. A container's edge may
+            // disagree with its name — the law refuses only cycles and cross-trust moves — so a
+            // name under this connection's path can resolve inside a subtree the connection was
+            // never bound to. Both questions, or the weaker one decides.
+            if (!withinSubtree(table, target, binding.container)) {
+              reply({
+                content: [
+                  {
+                    type: "text",
+                    text:
+                      `${target} bears a name inside your container but does not stand inside ` +
+                      `it: its edges do not lead back to ${binding.container}, so its leeway is ` +
+                      `not yours to set.`,
+                  },
+                ],
+                isError: true,
+              });
+              return;
+            }
+            const want = leewayFromTool(asked);
+            if (typeof want === "string") {
+              reply({ content: [{ type: "text", text: want }], isError: true });
+              return;
+            }
+            try {
+              await gateway.append([
+                signClaims(
+                  containerClaims(
+                    {
+                      container: target,
+                      trust: rec.trust,
+                      posture: rec.posture,
+                      ...(rec.parent === undefined ? {} : { parent: rec.parent }),
+                      ...(rec.membership === undefined ? {} : { membership: rec.membership }),
+                      ...(rec.membershipAt === undefined ? {} : { membershipAt: rec.membershipAt }),
+                      ...(rec.version === undefined ? {} : { version: rec.version }),
+                      leeway: want,
+                    },
+                    gateway.operatorAuthor!,
+                    gateway.nextTimestamp(),
+                  ),
+                  gateway.options.seed!,
+                ),
+              ]);
+            } catch (err) {
+              reply({ content: [{ type: "text", text: appendRefusal(err) }], isError: true });
+              return;
+            }
+            reply({
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({ container: target, leeway: want }, null, 1),
+                },
+              ],
+            });
+            return;
+          }
+        }
+
+        // The roster's receive is this act, named for its caller: one road, two names.
+        if (name === "loam_federate_connect" || name === "loam_container_receive") {
           const standing = federateStanding(gateway, identity);
           const into = typeof args.into === "string" ? args.into : undefined;
           const from = typeof args.from === "string" ? args.from : undefined;
@@ -1787,11 +2363,17 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           // The fence is checked BEFORE the arguments are examined further, so a caller without
           // standing cannot learn which containers exist by comparing refusals (§12/T78). A bound
           // connection's fence is its binding, not a grant (SPEC §58 position 2).
+          // THE SAME ACT UNDER TWO NAMES IS THE SAME ACT. The roster block asks whether the
+          // connection still stands before it writes; this road writes too, and only one of its
+          // two names begins `loam_container_`. A check one name asks is a check the other does
+          // not, and `tools/list` hands every caller both names.
           const refusal =
             identity.binding !== undefined
-              ? into === undefined
-                ? "federate_connect wants `from`, `into` and `prefix`."
-                : receiveRefusal(gateway, identity.binding, into, prefix)
+              ? !connectionStands(gateway, identity.binding)
+                ? STANDING_ENDED
+                : into === undefined
+                  ? "federate_connect wants `from`, `into` and `prefix`."
+                  : receiveRefusal(gateway, identity.binding, into, prefix)
               : into === undefined || !federateAdmits(standing, into)
                 ? "federation is not yours to open here: it wants a `federate` grant naming the " +
                   "container you are receiving into."

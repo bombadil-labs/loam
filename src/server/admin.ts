@@ -86,6 +86,7 @@ import { MemoryBackend } from "../store/memory.js";
 import { adminFederation } from "./admin-federation.js";
 import { declareOwned, ensureUserKey } from "./provision.js";
 import { leewayFromFields } from "./leeway-form.js";
+import { appendRefusal } from "./refusal.js";
 import { subtreeOf } from "./subtree.js";
 import { CSP, escapeHtml, page, sameSecret, type SessionGate } from "./session.js";
 import {
@@ -353,9 +354,7 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
         signClaims(containerClaims(spec, gw.operatorAuthor!, gw.nextTimestamp()), gw.options.seed!),
       ]);
     } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      const why = detail.slice(detail.indexOf("malformed law:") + "malformed law:".length).trim();
-      refuse(res, 409, `${escapeHtml(why === "" ? detail : why)} Nothing was changed.`);
+      refuse(res, 409, `${escapeHtml(appendRefusal(err))} Nothing was changed.`);
       return;
     }
     seeOther(res);

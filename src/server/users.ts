@@ -57,6 +57,31 @@ export function userNameDefect(name: string): string | undefined {
   return undefined;
 }
 
+// THE POOL TOKENS ARE RESERVED, AT MINTING ONLY.
+//
+// A person's name is the root of their container path, so a person named `inbox` owns
+// `inbox:notes`, `inbox:journal`, and every other name below their home. Those names lead with
+// `inbox:`, which is exactly what the reading side calls a POOL: `governingLeeway` treats such a
+// name as a pool and resolves its leeway through the container it was opened into, and
+// `openerStands` reconstructs a bound channel's opener from the same `inbox:<container>:` stem.
+// Neither would find what it expects, because nothing wrote a pointer onto a person's own child.
+// The home itself is safe — `inbox` has no colon and is not pool-shaped — so it is the SUBTREE
+// that collides, not the name.
+//
+// THIS IS NOT `userNameDefect`, deliberately. That one is asked on every READ and every login,
+// so folding this in would lock out a person already named `inbox` in a store provisioned before
+// the rule — no login, no roles resolved, no road back, and if they held the operator role, no
+// admin surface at all. A name at rest keeps working; only a NEW one is refused.
+const RESERVED = new Set(["inbox", "channel"]);
+
+/** Why this name may not be MINTED. Absent means it may. Asked by the doors that create a person. */
+export function reservedNameDefect(name: string): string | undefined {
+  return RESERVED.has(name)
+    ? `"${name}" is reserved: a container whose name begins with it is a pool, which takes its ` +
+        `leeway from the container it was opened into. Pick another name.`
+    : undefined;
+}
+
 /**
  * Is `role` one this store ships? A future write path (phase 3's CLI, `assign-role`) consults this
  * BEFORE it ever signs a claim, so an unknown role name is refused rather than admitted into the

@@ -113,6 +113,7 @@ import {
   userHyperSchema,
   userRoleDefect,
   type UserRole,
+  reservedNameDefect,
 } from "../server/users.js";
 import { promptLine, promptSecret } from "./prompt.js";
 import type { StoreBackend } from "../store/backend.js";
@@ -1057,7 +1058,7 @@ async function cmdInitGuided(parsed: Parsed, io: IO, options: RunOptions): Promi
       );
       return 2;
     }
-    const defect = userNameDefect(name);
+    const defect = userNameDefect(name) ?? reservedNameDefect(name);
     if (defect !== undefined) {
       io.err(`init: ${defect}`);
       return 2;
@@ -2520,6 +2521,15 @@ async function cmdUser(args: readonly string[], io: IO, options: RunOptions): Pr
     io.err(`user ${sub}: ${nameDefect}`);
     return 2;
   }
+  // MINTING ONLY. `assign-role` and `remove-role` act on a person who already exists, and a store
+  // may hold one named before the reservation; refusing here would strand them.
+  if (sub === "create") {
+    const reserved = reservedNameDefect(name);
+    if (reserved !== undefined) {
+      io.err(`user create: ${reserved}`);
+      return 2;
+    }
+  }
   const home = parsed.flags.get("home") ?? defaultHome();
   if (sub === "create") return cmdUserCreate(name, parsed, home, io, options);
   return cmdUserRole(name, parsed, home, io, sub === "assign-role" ? "assign" : "remove");
@@ -3000,7 +3010,16 @@ async function cmdPen(args: readonly string[], io: IO): Promise<number> {
   }
   // Checked before ANY path is built from `name` — a pen name is a single path component (the seed
   // file's own name), never a traversal. The user-name grammar is exactly that discipline.
-  const nameDefect = userNameDefect(name);
+  // A pen meets the same reservation, said in the pen's own terms. A pen mints a seed file and a
+  // grant rather than a container, so the reason is not the pen's own path: it is that the name is
+  // reserved store-wide, and a pen and a person must not be able to collide on one.
+  const reservedPen = reservedNameDefect(name);
+  const nameDefect =
+    userNameDefect(name) ??
+    (reservedPen === undefined
+      ? undefined
+      : `"${name}" is reserved store-wide, so a pen cannot take it either: a person of that ` +
+        `name would own containers a reader resolves as pools. Pick another name.`);
   if (nameDefect !== undefined) {
     io.err(`pen create: ${nameDefect.replace("is not a user name", "is not a pen name")}`);
     return 2;
