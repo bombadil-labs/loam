@@ -15,6 +15,7 @@ import { grantClaims } from "../gateway/accounts.js";
 import { containerClaims } from "../gateway/container.js";
 import type { Gateway } from "../gateway/gateway.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
+import type { Leeway } from "../gateway/leeway.js";
 
 export interface ProvisionRefusal {
   readonly status: number;
@@ -125,6 +126,8 @@ export async function declareOwned(
   userSeed: string,
   parent: string | undefined,
   onFault: (message: string) => void,
+  /** What the person set on the five controls, when this declaration is theirs to shape. */
+  leeway?: Leeway,
 ): Promise<ProvisionRefusal | undefined> {
   if (gw.options.seed === undefined || gw.operatorAuthor === undefined) {
     return {
@@ -138,6 +141,10 @@ export async function declareOwned(
     posture: "shared" as const,
     membership: authoredBy(authorForSeed(userSeed)),
     ...(parent === undefined ? {} : { parent }),
+    // WRITTEN ONLY WHEN THE PERSON SET IT. A container declared with no leeway pointer is a pure
+    // namespace that inherits; writing a sealed pointer onto every provisioned home would seal
+    // what should inherit, which is a different promise (SPEC §58 position 4).
+    ...(leeway === undefined ? {} : { leeway }),
   };
   try {
     await gw.append([
