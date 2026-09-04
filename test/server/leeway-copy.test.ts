@@ -13,6 +13,9 @@
 // spec/58-*.md, this case must be re-pointed there — a copy rail that reads nothing is a copy rail
 // that passes.
 //
+// The container's own page shows what this container ASKED FOR, which is what a person edits.
+// What it HAS is that, narrowed by the terms above it, and the page does not say so today.
+//
 // RAILS-RED on origin/main: the file does not COLLECT there — it imports a copy module and a form
 // module that do not exist yet — which is an honest red and a useless one. Measured properly, with
 // those two modules copied in beside it: 5 red, 2 green of 7. The two greens are CONTROLS and say
@@ -31,6 +34,13 @@
 //   saving keeps the old leeway                             → 2 red, 5 green
 //   a refused save is reported as saved                     → 1 red, 6 green
 //   saving drops the container's parent                     → 1 red, 7 green
+//   a risk sentence loses its closing clause                → 1 red, 7 green
+//   a risk sentence is emptied outright                     → 1 red, 7 green
+// The last two are why the spec case compares for EQUALITY. It once compared by containment, and
+// a truncated warning is still a substring of the warning while an empty one is a substring of
+// everything: the one rail whose job is to hold the promise where the spec put it would have
+// passed over a risk sentence deleted whole. The page cases cannot catch that either — the page
+// renders the module, so they move together — which is what makes the spec case load-bearing.
 // The markup this file reads is a string; the markup a person USES is driven by Chrome in
 // test/browser/leeway-controls.test.ts, which is where a broken tag or a folded-away control is
 // caught. Both files belong in the same mutation run for that reason.
@@ -119,22 +129,29 @@ const wiringOf = (html: string): { labels: string[]; described: string[]; ids: s
 });
 
 describe("§58 — the five controls, in words", () => {
-  it("the copy module carries the spec's own sentences", () => {
-    // The spec italicises its capability lines and one phrase inside Delegate's risk; the copy
-    // module carries the words, not the emphasis.
-    const spec = flat(
-      readFileSync(".adlc/specs/58-a-connection-is-a-peer.md", "utf8").replace(/\*/g, ""),
+  it("the copy module IS the spec's five bullets, word for word", () => {
+    // EQUALITY, not containment. Containment let a risk sentence be truncated to a prefix, or
+    // emptied to nothing at all, and still pass — in the one rail whose whole job is to hold the
+    // promise where the spec put it. The five bullets are lifted out and compared entire.
+    const spec = readFileSync(".adlc/specs/58-a-connection-is-a-peer.md", "utf8");
+    const block = spec.slice(
+      spec.indexOf("   - **Receive**"),
+      spec.indexOf("The five are native controls"),
     );
-    expect(spec, "the working spec is where this copy comes from").toContain(
-      "Every switch starts off",
+    expect(block.length, "the spec's own five are where this rail looks for them").toBeGreaterThan(
+      500,
     );
-    for (const c of LEEWAY_CONTROLS) {
-      expect(spec, `${c.label}: capability`).toContain(flat(c.capability));
-      // The spec italicises "The risk:" and the module writes it plain; compare the halves.
-      for (const half of flat(c.risk).split(/The risk:/)) {
-        if (half.trim().length > 0) expect(spec, `${c.label}: risk`).toContain(half.trim());
-      }
-    }
+    const bullets = block
+      .split(/\n   - /)
+      .map((b) => flat(b.replace(/\*/g, "")).replace(/^- /, ""))
+      .filter((b) => b.length > 0);
+    expect(bullets, "five bullets, no more and no fewer").toHaveLength(5);
+    expect(LEEWAY_CONTROLS, "and five controls to match them").toHaveLength(5);
+    LEEWAY_CONTROLS.forEach((c, i) => {
+      expect(flat(`${c.label} — ${c.capability} ${c.risk}`), `${c.label}, word for word`).toBe(
+        bullets[i],
+      );
+    });
   });
 
   it("the consent page renders all five, unchecked, with every label and description bound", async () => {
