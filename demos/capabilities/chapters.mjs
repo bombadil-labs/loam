@@ -2171,8 +2171,8 @@ export const CHAPTERS = [
           {
             says:
               "A bound connection needs no grant: it registers law under its container's path " +
-              "AND ITS COLON, that law is folded into its own container's surface and nobody " +
-              "else's, and it survives a restart.",
+              "AND ITS COLON, and that law is folded into its own container's surface and " +
+              "nobody else's - not the store's.",
             spec: "spec/58-a-connection-is-a-peer.md",
             proof: "test/server/derived-standing.test.ts",
             door: null,
@@ -2180,10 +2180,18 @@ export const CHAPTERS = [
           {
             says:
               "A connection follows another store only into its own subtree and only where the " +
-              "leeway in force says receive; what arrives serves that container alone, and the " +
-              "channel ends when the connection's standing does.",
+              "leeway in force says receive, and what arrives serves that container alone.",
             spec: "spec/58-a-connection-is-a-peer.md",
             proof: "test/server/subtree-receive.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "The cascade is keyed on STANDING, not on a severance: revoking a connection " +
+              "suspends the channels it opened on the very next request, and an unrelated " +
+              "binding is untouched.",
+            spec: "spec/58-a-connection-is-a-peer.md",
+            proof: "test/server/leeway.test.ts",
             door: null,
           },
           {

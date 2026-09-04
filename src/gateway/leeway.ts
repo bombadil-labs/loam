@@ -1,6 +1,6 @@
 // LEEWAY — what a container may do, and what it allows beneath it (SPEC §58, position 4).
 //
-// A leeway is four switches, an envelope, and delegation terms. Every switch starts off: the
+// A leeway is three switches, an envelope, and delegation terms. Every switch starts off: the
 // private journal is the default, and nothing here can widen what a person did not turn on.
 //
 // THE ONE RULE, and it is the whole of this file: a child's leeway — its switches, its envelope,

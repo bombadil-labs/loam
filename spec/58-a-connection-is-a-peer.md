@@ -155,11 +155,15 @@ registration is not the store's.
 
 ## 58.9 The walls
 
-Nothing a connection writes lands in the person's own container or in the primary ground. A
-**resolver** arriving on its channel stays inert. Declaring, offering or binding above its own root
-refuses with the sentence naming the rule, and no refusal names a container outside the caller's
-own fence. The envelope binds: a pool's report is clamped under the operator's ceiling on every
-resolve.
+Nothing a connection **authors** lands in the person's own container or in the primary ground: its
+deltas go to its inbox pool, and a write seam that cannot reach one refuses rather than falling
+back. Declaring a container is the exception that proves the shape — the STORE signs that law, in
+the primary, at the connection's request, and it is refused unless the name is inside the fence.
+
+A **resolver** arriving on its channel stays inert; that is federation's own rule (§46) and this
+section does not restate its proof. Declaring or binding above the connection's own root refuses
+with the sentence naming the rule, and no refusal names a container outside the caller's own fence.
+The envelope binds: a pool's report is clamped under the operator's ceiling on every resolve.
 
 **Names are paths, and the name governs.** A container named under the binding but declared with a
 parent elsewhere still resolves its leeway by name, so the switch a person set on the container is
@@ -177,21 +181,37 @@ not on a severance, and an unrelated binding is untouched.
 **A container a person dropped stays dropped.** A shared drop strikes that container's declarations
 and leaves its children standing, so "dropped" and "never declared" look alike to a walk that mints
 missing levels — and re-minting one would hand the person's dropped subtree back to its reader. No
-road mints a name that was ever declared, and none hangs new law beneath a container whose own
-edges lead nowhere the person can see.
+road mints a name that was ever declared, and no road a connection drives hangs new law beneath a
+container whose own edges lead nowhere the person can see.
+
+The operator's own federation road can still make a container with no parent edge at all, which no
+page then reaches; T277 carries that, and the three repairs each break a rail some earlier decision
+froze.
 
 ## 58.11 The five controls, in words
 
-The consent page and the container's own page render the leeway as five controls — the three
-switches, the envelope, and delegation — unchecked by default, as native controls with their label
-and description associated in the markup, each carrying its capability and its risk in a sentence.
-Delegate's terms unfold beneath it when it is on. A person reads what they are turning on, in
-words, before they turn it on.
+The consent page and the container's own page render the leeway as five controls, unchecked by
+default, as native controls with their label and description associated in the markup. Delegate's
+terms unfold beneath it when it is on. A person reads what they are turning on, in words, before
+they turn it on — and these are the words:
+
+- **Receive** — *Let this container follow other stores.* What arrives is kept in a pool of its own, signed by whoever sent it, under a name you assign; you can freeze or drop it later. *The risk:* a store you follow can fill this pool with anything it publishes, and its schemas can bind here under your prefix — nothing arriving can reach outside this container, and nothing binds that you did not allow.
+- **Offer** — *Let other Loam stores follow this container.* You mint a token per follower; they receive a signed copy of what is here, under a name they choose. *The risk:* whoever holds an offer token can copy this container's own contents and keep that copy after you stop offering. An offer never includes what you follow from others.
+- **Publish** — *Let anyone on the internet read what you mark public here.* No login, no token: a web address. *The risk:* a public lens is readable by strangers and search engines until you unmark it. Nothing anonymous can ever write. Mark nothing public you would not print.
+- **Delegate** — *Let what exists under this container differ from it, on the terms you set here.* Turn it on and its terms unfold beneath: the same switches, an envelope ceiling, and *may delegate further*. An agent here may then declare sub-containers with their own leeway inside those terms, and hand out keys to helpers that live in them. *The risk:* anything you allow below, the agent here can reach through its subtree — an annex that receives is a room it can read. Helpers write under their own names, can never reach outside this container, and are revoked when the agent is — but until then, what they write is real.
+- **Envelope** — *How much compute an agent here may spend running things behind glass:* small, medium, or large. *The risk:* a larger envelope lets a misbehaving app run longer and use more memory before the store stops it. It never grants reach.
+
+Those five sentences are the promise, and `src/gateway/leeway-copy.ts` carries them verbatim; the
+rail compares the module to this section, so a control whose words drift from what is recorded here
+is a red bar.
 
 ## 58.12 The roster: what a connection does in conversation
 
-Five verbs, and each asks the same question first — is the name inside the fence this binding
-draws:
+Five verbs. Every one of them asks first whether the connection still **stands** — its container
+declared, its chain of parents whole, its pool's write grant surviving — because all five act on
+the store's own key. What they ask second differs, and the difference is the act: the three that
+name a container ask whether the name is inside the fence this binding draws; the two that name a
+channel or a delta ask who opened it, and what the container gathers.
 
 - `loam_container_declare` writes a new container inside the caller's own subtree, declaring every
   missing level with it so the tree agrees with the names, and reporting every container it signed.
@@ -204,8 +224,9 @@ draws:
 
 The two staged verbs move no bytes. A sever purges a peer's pool and a promotion re-signs a claim
 under the store's own name in canonical history, where erasure is the only way back out — so both
-hand back a preview and a link, and a person completes them behind a session gate a connector token
-cannot obtain. An agent nominates; a person decides.
+hand back a preview and a link, and a person completes them: on the container's own page, behind a
+session gate a connector token cannot obtain, or from the command line, which is the road when the
+container is not one the signed-in person's page reaches. An agent nominates; a person decides.
 
 **A sixth verb is not here.** §58's working spec decided a peer's *renderer* is blessable by a
 connection and its *resolvers* never; §46.5 decided that no tool mounts a stranger's code at all,
@@ -232,7 +253,7 @@ register door's widening required), and the slice's own stack: derived standing,
 within the subtree, the cascade on revocation, the five controls in words, and #554–#555 (the
 roster's five verbs). T277 carries a container the operator's federation road can still make
 unreachable; T278 carries the sixth roster verb, which two landed positions disagree about.
-Implementation: `src/gateway/leeway.ts` (the four switches, the envelope order and `leewayFits` —
+Implementation: `src/gateway/leeway.ts` (the three switches, the envelope order and `leewayFits` —
 the one rule, folded twice), `src/gateway/container.ts` (`governingLeeway`'s top-down walk and its
 terms, `everDeclared` and `boundContainer` — the bind test the reader and the mint question share,
 `danglingAncestor`, `withinSubtree` and `treeRootsOf`, `chainBreaksAt`, `openerStands`,
@@ -247,5 +268,6 @@ Rails: `test/gateway/leeway-fit.test.ts`, `test/gateway/leeway-declaration.test.
 `test/gateway/bound-fold.test.ts`, `test/server/derived-standing.test.ts`,
 `test/server/subtree-walls.test.ts`, `test/server/subtree-receive.test.ts`,
 `test/server/leeway.test.ts`, `test/server/leeway-copy.test.ts`,
+`test/server/leeway-copy-landed.test.ts`,
 `test/server/container-tools.test.ts`, `test/server/roster-staged.test.ts`,
 `test/browser/leeway-controls.test.ts`.
