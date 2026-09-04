@@ -1180,6 +1180,25 @@ export function chainBreaksAt(table: ContainerTable, name: string): string | und
   return undefined;
 }
 
+/**
+ * Does `name` sit inside `root` by PARENT EDGES? The same question `subtreeUnder(...).includes(...)`
+ * answers, walked from the name UP instead of from the root down.
+ *
+ * The table is a restored forest — `computeContainerTable` breaks every cycle before it returns —
+ * so one walk up the chain decides it in the depth of the name, where the fixpoint costs a pass
+ * over every container in the store for each level of the subtree (H8). Three doors ask this on
+ * every request; none of them wants the whole set, only the answer.
+ */
+export function withinSubtree(table: ContainerTable, name: string, root: string): boolean {
+  const seen = new Set<string>();
+  for (let at: string | undefined = name; at !== undefined && !seen.has(at);) {
+    if (at === root) return true;
+    seen.add(at);
+    at = table.containers.get(at)?.parent;
+  }
+  return false;
+}
+
 export function subtreeUnder(table: ContainerTable, root: string): string[] {
   const reach = new Set<string>([root]);
   for (;;) {

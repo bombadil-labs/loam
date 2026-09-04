@@ -83,7 +83,7 @@ import {
   readContainerTable,
   receivesNow,
   danglingAncestor,
-  subtreeUnder,
+  withinSubtree,
   type ContainerTable,
 } from "../gateway/container.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
@@ -657,7 +657,7 @@ function mintableAt(
   // disagree about one target is the shape every round of this review kept finding, and a walk
   // that admits a parentless container admits one the person's own pages cannot reach: reach is
   // `subtreeUnder`, and law written beneath a name outside it is law nobody can see or drop.
-  if (!subtreeUnder(table, binding.container).includes(root)) {
+  if (!withinSubtree(table, root, binding.container)) {
     return (
       `${root} bears a name inside your container but does not stand inside it: its edges do not ` +
       `lead back to ${binding.container}, so nothing may be made beneath it.`
@@ -778,12 +778,27 @@ function receiveRefusal(
     while (root !== binding.container && !table.containers.has(root) && root.includes(":")) {
       root = root.slice(0, root.lastIndexOf(":"));
     }
-    if (table.containers.has(root) && !subtreeUnder(table, binding.container).includes(root)) {
+    if (table.containers.has(root) && !withinSubtree(table, root, binding.container)) {
       return (
         `${root} bears a name inside your container but does not stand inside it: its edges do ` +
         `not lead back to ${binding.container}, so nothing may be made beneath it`
       );
     }
+  }
+  // AND THE BYTES MUST LAND SOMEWHERE THE PERSON CAN SEE. Resolution governs by NAME — a container
+  // named here but parented one level up is still governed by the leeway set here, which is what
+  // the walls settled and what the case above preserves. But a container parented into ANOTHER
+  // PERSON'S tree is on their pages and on none of this person's, so a peer's pool composed into
+  // it would be invisible to the person who let the peer in and visible to one who never did.
+  //
+  // ASKED OF THE HOME, NOT THE BINDING, and that is the whole difference from the mint rule: the
+  // walls admit a name that hangs one level above the binding, inside the same person's tree.
+  const home = binding.container.split(":")[0]!;
+  if (table.containers.has(into) && !withinSubtree(table, into, home)) {
+    return (
+      `${into} bears a name inside your container but hangs outside it: a channel opened there ` +
+      `would serve a subtree that is not yours, so it is refused`
+    );
   }
   return undefined;
 }
@@ -2246,14 +2261,15 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             // disagree with its name — the law refuses only cycles and cross-trust moves — so a
             // name under this connection's path can resolve inside a subtree the connection was
             // never bound to. Both questions, or the weaker one decides.
-            if (!subtreeUnder(table, binding.container).includes(target)) {
+            if (!withinSubtree(table, target, binding.container)) {
               reply({
                 content: [
                   {
                     type: "text",
                     text:
-                      `${target} bears a name inside your container but does not stand inside it: ` +
-                      `its parent is elsewhere, so its leeway is not yours to set.`,
+                      `${target} bears a name inside your container but does not stand inside ` +
+                      `it: its edges do not lead back to ${binding.container}, so its leeway is ` +
+                      `not yours to set.`,
                   },
                 ],
                 isError: true,

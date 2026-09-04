@@ -36,7 +36,8 @@
 // AT MINTING ONLY — `userNameDefect` is asked on every read and every login, so folding it there
 // would strand a person already named `inbox` in a store provisioned before the rule.
 //
-// REVERT PROBES, MEASURED against this file as it stands — 32 cases. Re-measure when you add one.
+// REVERT PROBES, MEASURED against this file as it stands — 33 cases. Re-measure when you add one.
+// (Rows carried from the 32-case run are marked; the four added this round were measured at 33.)
 //   the fence drops its colon                            → 19 red, 13 green
 //   the fence admits an empty level                      →  1 red, 31 green
 //   no bound on the name's length or depth               →  1 red, 31 green
@@ -49,6 +50,10 @@
 //   the declare door does not ask if the edge dangles    →  1 red, 31 green
 //   the declare door does not ask where the edge leads   →  1 red, 31 green
 //   the receive door does not gate its own mint          →  1 red, 31 green
+//   the receive door admits a name in another's tree     →  1 red, 32 green
+//   the receive door asks the binding, not the home      →  1 red, 32 green
+//   withinSubtree answers true for a name outside        →  3 red, 30 green
+//   the leeway verb keeps its own wording                →  1 red, 32 green
 //   the receive road asks the edge only when it mints    →  1 red, 31 green
 //   the refusal names the dropped ancestor (an oracle)   →  1 red, 31 green
 //   the write seam asks the name, not the chain          →  1 red, 31 green
@@ -95,8 +100,8 @@
 //
 // RAILS-RED IS NOT MEASURED FOR EVERY CASE, and the record should say which. The file does not
 // LOAD on origin/main, because it imports a module this slice adds, so vitest reports one failed
-// suite rather than thirty-two failed cases: that measures the import graph. The sixteen cases
-// present at the last resolvable revision measured 16 red, 0 green. For the sixteen added since,
+// suite rather than thirty-three failed cases: that measures the import graph. The sixteen cases
+// present at the last resolvable revision measured 16 red, 0 green. For the seventeen added since,
 // the probe table above is the instrument, and every one of them has a probe that reds it.
 //
 // ONE CASE IS HELPER-LEVEL, and says so here: `a refusal is the store's own sentence, whole` calls
@@ -559,6 +564,15 @@ describe("§58 — the container roster", () => {
     const shaped = await leewayTool(base, ada, { name: "ada:journal:rootless" });
     expect(shaped.isError, "the leeway verb refuses it too").toBe(true);
     expect(shaped.text).toMatch(/does not stand inside it/);
+    // WORD FOR WORD, and this fixture is the one that catches a divergence: `rootless` has no
+    // parent at all, so a sentence saying "its parent is elsewhere" is false about it. Both verbs
+    // say what is true instead, and say it the same way.
+    expect(shaped.text, "and says what is true of a container with no parent").toMatch(
+      /edges do not lead back to ada:journal/,
+    );
+    expect(rootless.text, "the same words at the other verb").toMatch(
+      /edges do not lead back to ada:journal/,
+    );
     await closeAll();
   });
 
@@ -1029,6 +1043,78 @@ describe("§58 — the container roster", () => {
     await closeAll();
   });
 
+  it("a channel is refused into a name that hangs in ANOTHER person's tree", async () => {
+    // RESOLUTION GOVERNS BY NAME, AND THAT STANDS: a container named here but parented one level
+    // up is still governed by the leeway set here, which the walls settled. This is the other
+    // case. A container parented into another PERSON'S tree sits on their pages and on none of
+    // this person's, so a peer's pool composed into it would be invisible to the person who let
+    // the peer in and visible to one who never did.
+    const { base, gateway } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    await connect(base, "bea", "notes");
+    await declareAs(gateway, "ada", OPEN);
+    await declareAs(gateway, "ada:journal", OPEN);
+    await gateway.append([
+      signClaims(
+        containerClaims(
+          {
+            container: "ada:journal:y",
+            trust: "curated",
+            posture: "shared",
+            membership: recOf(gateway, "ada:journal")!.membership,
+            parent: "bea:notes",
+          },
+          OPERATOR,
+          gateway.nextTimestamp(),
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    // The premise, at both ends: it stands, it is on bea's pages, and on none of ada's.
+    expect(subtreeOf(gateway.containers(), "bea").has("ada:journal:y"), "premise").toBe(true);
+    expect(subtreeOf(gateway.containers(), "ada").has("ada:journal:y"), "premise").toBe(false);
+
+    const from = await peerStore();
+    const refused = await callTool(base, ada, "loam_container_receive", {
+      from,
+      into: "ada:journal:y",
+      prefix: "ada:journal:y:peer",
+      token: PEER_TOKEN,
+    });
+    expect(refused.isError, refused.text).toBe(true);
+    expect(refused.text, "and it says the name hangs outside").toMatch(/hangs outside it/);
+    expect(refused.text, "without naming whose tree it is in").not.toContain("bea:notes");
+    expect(gateway.channelStatus().length, "and no peer bytes landed").toBe(0);
+
+    // The other side, one level up inside the SAME person's tree: still admitted, because the
+    // name governs and the leeway in force is the one this person set.
+    await gateway.append([
+      signClaims(
+        containerClaims(
+          {
+            container: "ada:journal:x",
+            trust: "curated",
+            posture: "shared",
+            membership: recOf(gateway, "ada:journal")!.membership,
+            parent: "ada",
+          },
+          OPERATOR,
+          gateway.nextTimestamp(),
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    const admitted = await callTool(base, ada, "loam_container_receive", {
+      from,
+      into: "ada:journal:x",
+      prefix: "ada:journal:x:peer",
+      token: PEER_TOKEN,
+    });
+    expect(admitted.isError, admitted.text).toBe(false);
+    await closePeers();
+    await closeAll();
+  });
+
   it("the operator's road writes an edge only where a parent stands", async () => {
     // THREE RULES, ONE CASE. A level below a standing name gets an edge onto it. A level whose own
     // parent does not stand gets NO edge, because an edge onto a name the table does not hold is
@@ -1068,10 +1154,12 @@ describe("§58 — the container roster", () => {
     expect(danglingAncestor(gateway.containers(), "zed:room:leaf")).toBeUndefined();
     // AND A GAP THIS SLICE DOES NOT CLOSE, ASSERTED SO IT CANNOT BE MISTAKEN FOR CLOSED. Nothing
     // dangles, but `zed:room` hangs from nothing either, so once a person owns `zed` their pages
-    // — which walk edges from their home — still cannot see it. Both repairs break a frozen rail:
-    // refusing the target breaks the channel-open rail that opens into a name with no owner, and
-    // minting the colon-free ancestor breaks the prefix-collision rail that pins this road does
-    // not mint one. The shape is a landed decision, and T277 carries it.
+    // — which walk edges from their home — still cannot see it. Three repairs, three frozen rails:
+    // refusing the target breaks the rail that opens into a name with no owner; minting the
+    // colon-free ancestor breaks the rail that pins this road does not mint one; and refusing only
+    // the DEEP case — the repair a reader reaches for first — breaks prefix-collision.test.ts:164,
+    // which opens into `one:deep:nest` on a store with no `one` and depends on exactly this shape.
+    // The shape is a landed decision, and T277 carries it.
     expect(subtreeOf(gateway.containers(), "zed").has("zed:room"), "T277: still unreachable").toBe(
       false,
     );
