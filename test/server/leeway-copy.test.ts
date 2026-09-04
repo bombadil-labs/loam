@@ -42,12 +42,7 @@
 
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import {
-  DELEGATE_CONTROL,
-  ENVELOPE_CONTROL,
-  LEEWAY_CONTROLS,
-  SWITCH_CONTROLS,
-} from "../../src/gateway/leeway-copy.js";
+import { LEEWAY_CONTROLS, SWITCH_CONTROLS } from "../../src/gateway/leeway-copy.js";
 import { containerClaims, readContainerTable } from "../../src/gateway/container.js";
 import { SEALED_LEEWAY } from "../../src/gateway/leeway.js";
 import { signClaims } from "@bombadil/rhizomatic";
