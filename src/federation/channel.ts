@@ -17,7 +17,12 @@ import type { Delta } from "@bombadil/rhizomatic";
 import type { Claims } from "@bombadil/rhizomatic";
 import { contentAddress, makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
 import type { Container } from "../gateway/container.js";
-import { containerClaims, readContainerTable } from "../gateway/container.js";
+import {
+  containerClaims,
+  openerStands,
+  readContainerTable,
+  receivesNow,
+} from "../gateway/container.js";
 import type { FederationReport, Gateway } from "../gateway/gateway.js";
 import { legalNameFor } from "../gateway/gql.js";
 import { parseOffer } from "./offer.js";
@@ -58,6 +63,8 @@ export interface OpenChannelOptions {
    * arriving law serves: a connection's channel serves only its container, never the root.
    */
   readonly openedBy?: string;
+  /** The opener's own inbox pool — the binding this channel is rooted in, for the cascade. */
+  readonly openedFrom?: string;
 }
 
 export interface SyncReport {
@@ -140,6 +147,8 @@ export interface ChannelStatus {
   readonly from: string;
   /** The container a bound connection opened this channel from; absent for the person's own. */
   readonly openedBy?: string;
+  /** The opener's inbox pool, the binding this channel is rooted in; absent for the person's own. */
+  readonly openedFrom?: string;
   /**
    * Arrivals this channel accepted and could not stamp — the custody debt, carried on the record
    * until a later sync names them. Empty is the healthy reading, and every record written before
@@ -211,8 +220,13 @@ export const CTX_CHANNEL = "loam.channel";
  * The opener a record carries forward, or nothing: ONE derivation for every stamp, so no stamp can
  * drop a bound connection's channel back into the root fold by forgetting the field.
  */
-const opener = (of: { readonly openedBy?: string }): { openedBy?: string } =>
-  of.openedBy === undefined ? {} : { openedBy: of.openedBy };
+const opener = (of: {
+  readonly openedBy?: string;
+  readonly openedFrom?: string;
+}): { openedBy?: string; openedFrom?: string } => ({
+  ...(of.openedBy === undefined ? {} : { openedBy: of.openedBy }),
+  ...(of.openedFrom === undefined ? {} : { openedFrom: of.openedFrom }),
+});
 
 export function channelRecordClaims(
   status: ChannelStatus,
@@ -235,6 +249,14 @@ export function channelRecordClaims(
             {
               role: "openedBy" as const,
               target: { kind: "primitive" as const, value: status.openedBy },
+            },
+          ]),
+      ...(status.openedFrom === undefined
+        ? []
+        : [
+            {
+              role: "openedFrom" as const,
+              target: { kind: "primitive" as const, value: status.openedFrom },
             },
           ]),
       { role: "receiving", target: { kind: "primitive", value: status.receiving } },
@@ -517,6 +539,7 @@ function readChannels(
         consecutiveFailures: Number(of("consecutiveFailures") ?? 0),
         from: String(of("from") ?? ""),
         ...(typeof of("openedBy") === "string" ? { openedBy: String(of("openedBy")) } : {}),
+        ...(typeof of("openedFrom") === "string" ? { openedFrom: String(of("openedFrom")) } : {}),
         unattested,
         unreadable,
       },
@@ -1359,6 +1382,7 @@ async function syncChannel(
     source: ChannelSource;
     bless?: boolean;
     openedBy?: string;
+    openedFrom?: string;
   },
 ): Promise<SyncReport> {
   const before = channelStatusImpl(gw, name)[0];
@@ -2041,7 +2065,20 @@ export function keepSyncingImpl(gw: Gateway, opts: { everyMs?: number } = {}): S
   let running: Promise<void> = Promise.resolve();
 
   const tick = async (): Promise<void> => {
+    // Read every record ONCE per tick: `channelStatus` walks the whole ground, and asking it per
+    // channel made the tick quadratic in the store (H8).
+    const records = new Map(gw.channelStatus().map((s) => [s.name, s]));
+    const table = readContainerTable(gw.reactor, gw.operatorAuthor);
     for (const channel of [...gw.federationChannels.values()]) {
+      // THE CASCADE: a channel whose opener no longer stands is not synced — its record stands,
+      // untouched, but nothing it would receive is served and nothing more is pulled. A channel
+      // with no record at all does not stand either: it was struck between ticks, and defaulting
+      // it to the person's own would sync what the store no longer knows about.
+      const record = records.get(channel.name);
+      if (record === undefined || !openerStands(gw, record)) continue;
+      // And a bound channel obeys its container's switch here too: the fold refusing to SERVE what
+      // a closed container followed would still leave the peer's bytes landing in it.
+      if (record.openedBy !== undefined && !receivesNow(table, record.into)) continue;
       if (stopped) return;
       try {
         await channel.sync();

@@ -35,7 +35,16 @@ import { isRepairable } from "../store/quarantine.js";
 import { CTX_GRANTS, grantClaims, holdsGrant, revocationClaims } from "./accounts.js";
 import { STORE_ENTITY } from "./genesis.js";
 import { isTombstone, readTombstones } from "./erase.js";
-import { canonicalLeewayJson, parseLeeway, SEALED_LEEWAY, type Leeway } from "./leeway.js";
+import {
+  canonicalLeewayJson,
+  parseLeeway,
+  SEALED_LEEWAY,
+  type Leeway,
+  leewayFits,
+  smallerEnvelope,
+  type Terms,
+  isSealed,
+} from "./leeway.js";
 import {
   clampedTo,
   newPoolEnvelope,
@@ -313,6 +322,27 @@ export function containerDefect(
     if (typeof raw !== "string") return "a container's leeway is one JSON string primitive";
     const read = parseLeeway(raw);
     if ("defect" in read) return `a container's leeway is malformed: ${read.defect}`;
+    // THE ONE RULE, WEIGHED WHERE A LEEWAY IS DECLARED (SPEC §58 position 4): a child's leeway —
+    // its switches, its envelope, its own delegate — must fit inside the terms its parent
+    // delegates, and the parent's own switches never enter the comparison. Weighed here, in the
+    // one validator every append runs through the trust policy, so every road reads one rule and
+    // the refusal names the ceiling. A child with nothing declared above it is free: the person
+    // sets the top, and no subtree exceeds what they set there.
+    // The person's HOME — a name with no colon — is the top the person sets, not a room with
+    // terms: consent never binds it, and what a person declares directly under it IS what they
+    // set at the top. Fit is weighed against a parent below the first colon.
+    const parent = name.includes(":") ? name.slice(0, name.lastIndexOf(":")) : undefined;
+    if (parent !== undefined && parent.includes(":")) {
+      const governing = governingLeeway(readContainerTable(reactor, operator), parent);
+      // A child that declares SEALED asks for nothing anyone could exceed: admitted under any
+      // terms, since the read narrows and never widens, and a room may name its annex closed.
+      if (governing !== undefined && !isSealed(read.leeway)) {
+        const refusal = leewayFits(read.leeway, governing.leeway);
+        if (refusal !== undefined) {
+          return `a container's leeway does not fit the terms ${governing.at} delegates: ${refusal.why}`;
+        }
+      }
+    }
   }
 
   const inboxOfs = primitives(claims, "inboxOf");
@@ -400,9 +430,10 @@ export interface ResolvedContainer {
    * `SEALED_LEEWAY`. A reader cannot forget to default, and there is no `undefined` here for
    * anyone to read as permission.
    *
-   * IT IS NOT YET WEIGHED. Nothing calls `leewayFits` against a parent's delegation terms on any
-   * path, so this is what the container ASKED FOR, not what it has been granted. The slice that
-   * enforces the one rule is the one that may call it "in force".
+   * IT IS WHAT THE CONTAINER ASKED FOR, not what it has. The one rule is weighed twice, and
+   * neither reading is here: `containerDefect` refuses a declaration that does not fit the terms
+   * above it, and `governingLeeway` narrows what stands by those terms at every depth. Ask it
+   * for the leeway in force; this field is the ask.
    */
   readonly leeway: Leeway;
   /**
@@ -912,13 +943,133 @@ export function governingLeeway(
   const isPool = name.startsWith("inbox:") || name.startsWith("channel:");
   const host = isPool ? table.containers.get(name)?.inboxOf : undefined;
   if (host === name) return { at: name, leeway: SEALED_LEEWAY };
-  for (let at: string | undefined = host ?? name; at !== undefined;) {
-    const declared = table.containers.get(at);
-    if (declared !== undefined && declared.leewayDeclared) return { at, leeway: declared.leeway };
-    if (at === ceiling) return undefined;
-    at = at.includes(":") ? at.slice(0, at.lastIndexOf(":")) : undefined;
+  const up = (at: string): string | undefined =>
+    at.includes(":") ? at.slice(0, at.lastIndexOf(":")) : undefined;
+  // The levels this name answers to, listed TOP DOWN. A ceiling stops the list lower; the
+  // person's home — a name with no colon — is the top they set rather than a room with terms,
+  // and is skipped below.
+  const levels: string[] = [];
+  for (let at: string | undefined = host ?? name; at !== undefined; at = up(at)) {
+    levels.push(at);
+    if (at === ceiling) break;
   }
-  return undefined;
+  levels.reverse();
+
+  // THE ONE RULE, READ — AND READ AT EVERY DEPTH. What a container declared is what it ASKED FOR;
+  // what it HAS is that, narrowed by the terms IN FORCE at its own level: the terms its parent
+  // delegates, themselves already narrowed by everything above. Each step down DESCENDS those
+  // terms by one level (`"same"` holds them still, `"off"` seals), so a person who wrote terms
+  // about grandchildren governs grandchildren. Narrowing by each ancestor's TOP level at every
+  // depth did not: a parent tightened about its grandchildren left every grandchild untouched,
+  // and a fresh one was weighed at declaration against its parent's stale written terms. The
+  // narrowed `delegate` is what `leewayFits` reads, so the two halves of the rule agree.
+  //
+  // A container that declared no leeway inherits what is in force, exactly. Nothing here ever
+  // widens what a child asked for.
+  let at: string | undefined;
+  let effective: Leeway | undefined;
+  let inForce: Terms | undefined;
+  for (const level of levels) {
+    const declared = table.containers.get(level);
+    const asked = declared?.leewayDeclared === true ? declared.leeway : effective;
+    if (asked === undefined) continue; // nothing above here has spoken yet
+    if (declared?.leewayDeclared === true) at = level;
+    effective = inForce === undefined ? asked : narrowedBy(asked, inForce);
+    // THE HOME IS THE TOP THE PERSON SETS, NOT A ROOM WITH TERMS. What it declares is inherited
+    // by a subtree that declares nothing of its own, but it sets no terms, so a container the
+    // person declared directly beneath it IS what they set at the top and is narrowed by nothing.
+    inForce = !level.includes(":")
+      ? undefined
+      : effective.delegate === "off"
+        ? sealedTerms(effective)
+        : effective.delegate;
+  }
+  return effective === undefined || at === undefined ? undefined : { at, leeway: effective };
+}
+
+/** The terms a container that delegates NOTHING sets below it: its own switches, and no further. */
+const sealedTerms = (leeway: Leeway): Terms => ({
+  receive: leeway.receive,
+  offer: leeway.offer,
+  publish: leeway.publish,
+  envelope: leeway.envelope,
+  delegate: "off",
+});
+
+/**
+ * A leeway narrowed by the terms in force at its level: each switch needs the term's leave, the
+ * envelope is no larger, and what it may delegate is its own chain narrowed by the chain those
+ * terms allow one level down.
+ */
+function narrowedBy(leeway: Leeway, terms: Terms): Leeway {
+  const below = terms.delegate === "same" ? terms : terms.delegate;
+  return {
+    receive: leeway.receive && terms.receive,
+    offer: leeway.offer && terms.offer,
+    publish: leeway.publish && terms.publish,
+    envelope: smallerEnvelope(leeway.envelope, terms.envelope),
+    delegate:
+      leeway.delegate === "off" || below === "off" ? "off" : narrowTerms(leeway.delegate, below),
+  };
+}
+
+/**
+ * Two chains of terms, narrowed into one: the switches need both sides' leave, the envelope is the
+ * smaller, and the chains below are narrowed together.
+ *
+ * TERMINATION. `"off"` on either side ends it; `"same"` on BOTH ends it, since terms that carry
+ * themselves down are their own fixed point. Otherwise at least one side descends into a strictly
+ * shorter written chain each step, so the walk is bounded by the deeper of the two as written. The
+ * depth guard below is belt for that brace, and it fails CLOSED.
+ */
+function narrowTerms(own: Terms, allowed: Terms, depth = 0): Terms {
+  const mine = own.delegate === "same" ? own : own.delegate;
+  const theirs = allowed.delegate === "same" ? allowed : allowed.delegate;
+  const below: "off" | "same" | Terms =
+    mine === "off" || theirs === "off" || depth >= 32
+      ? "off"
+      : own.delegate === "same" && allowed.delegate === "same"
+        ? "same"
+        : narrowTerms(mine, theirs, depth + 1);
+  return {
+    receive: own.receive && allowed.receive,
+    offer: own.offer && allowed.offer,
+    publish: own.publish && allowed.publish,
+    envelope: smallerEnvelope(own.envelope, allowed.envelope),
+    delegate: below,
+  };
+}
+
+/**
+ * Does `into` still receive? The switch a container had when a channel opened is not the switch it
+ * has now, and a leeway change is a delta the next request obeys (SPEC §58 position 4) — so the
+ * fold and the doors ask again, exactly as the open request asked. An absent leeway is every
+ * switch off, here as everywhere.
+ */
+export function receivesNow(table: ContainerTable, into: string): boolean {
+  return governingLeeway(table, into)?.leeway.receive === true;
+}
+
+/**
+ * Does the connection that opened this channel still STAND — its inbox pool attached and its
+ * write grant surviving there? A channel the person opened has no opener and always stands. The
+ * cascade (SPEC §58 position 4): a channel is rooted in the binding that opened it; revoking the
+ * binding revokes the channel on the next request, and a channel nobody revoked is untouched.
+ */
+export function openerStands(
+  gw: Gateway,
+  channel: { readonly openedBy?: string; readonly openedFrom?: string },
+): boolean {
+  // A record that names an OPENER but no binding is a bound channel this cascade cannot weigh —
+  // one stamped before the binding was recorded. It fails CLOSED, matching the door, which admits
+  // only the inbox the record names: served to nobody rather than served to everybody.
+  if (channel.openedFrom === undefined) return channel.openedBy === undefined;
+  const inbox = gw.connectionInboxes.get(channel.openedFrom)?.gateway;
+  if (inbox === undefined) return false;
+  const stem = `inbox:${channel.openedBy ?? ""}:`;
+  if (!channel.openedFrom.startsWith(stem)) return false;
+  const key = channel.openedFrom.slice(stem.length);
+  return holdsGrant(inbox.reactor, STORE_ENTITY, key, "write", gw.operatorAuthor);
 }
 
 export function subtreeUnder(table: ContainerTable, root: string): string[] {
@@ -1656,7 +1807,7 @@ export function poolForBindingImpl(gw: Gateway, binding: ConnectionBinding): Gat
 // would survive an unbind. Nothing mints one for a connection key today — register standing is
 // handed to OAuth connector actors, and `loam grant revoke` strikes every verb — so the gap is not
 // reachable now. It becomes reachable the moment a connection key is granted `register`.
-function survivingWriteGrantIds(reactor: Reactor, subject: string): string[] {
+export function survivingWriteGrantIds(reactor: Reactor, subject: string): string[] {
   const out: string[] = [];
   for (const id of reactor.byTarget(STORE_ENTITY)) {
     const delta = reactor.get(id);

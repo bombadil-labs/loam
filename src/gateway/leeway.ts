@@ -27,6 +27,10 @@ export type EnvelopeSize = "small" | "medium" | "large";
 
 const ENVELOPE_RANK: Readonly<Record<EnvelopeSize, number>> = { small: 1, medium: 2, large: 3 };
 
+/** The smaller of two envelope sizes — a ceiling composes downward, never up. */
+export const smallerEnvelope = (a: EnvelopeSize, b: EnvelopeSize): EnvelopeSize =>
+  ENVELOPE_RANK[a] <= ENVELOPE_RANK[b] ? a : b;
+
 /** The three switches that are plain permissions. The envelope is a ceiling and is compared apart. */
 const SWITCHES = ["receive", "offer", "publish"] as const;
 type Switch = (typeof SWITCHES)[number];

@@ -73,7 +73,13 @@ import {
   holdsGrant,
   registerPrefixesOf,
 } from "../gateway/accounts.js";
-import { inboxName } from "../gateway/container.js";
+import {
+  governingLeeway,
+  inboxName,
+  openerStands,
+  readContainerTable,
+  receivesNow,
+} from "../gateway/container.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
 import { readSeed, readUserSeed, userSeedPath } from "../cli/config.js";
 import { DOC_TOPICS } from "./docs-content.js";
@@ -81,7 +87,6 @@ import { CSP, makeUserDoors, type UserDoorOptions, type UserDoors } from "./sess
 import { makeAdminDoor, type AdminDoor } from "./admin.js";
 import { ADMIN_CONTAINER_PATH } from "./admin-pages.js";
 import { refusalKey } from "../gateway/lifecycle.js";
-import { governingLeeway, readContainerTable } from "../gateway/container.js";
 import type { ChannelStatus } from "../federation/channel.js";
 import type { ConnectionBinding } from "../gateway/gateway.js";
 
@@ -613,12 +618,20 @@ function receiveRefusal(
       `and its colon — and ${prefix} is outside ${into}:`
     );
   }
+  // READ WHAT THE FOLD READS. The walk is not capped at the binding: an ancestor's terms narrow
+  // what stands below them, and a door that stopped climbing at the binding admitted a follow the
+  // fold then refused to serve — peer bytes landing in a subtree the person had closed. What the
+  // cap was doing is kept, and said plainly: a leeway must be declared AT OR INSIDE the binding's
+  // own container, so a connection never inherits a room it was not bound to. No refusal names a
+  // container outside the binding.
   const governed = governingLeeway(
     readContainerTable(gateway.reactor, gateway.operatorAuthor),
     into,
-    binding.container,
   );
-  if (governed === undefined) {
+  const declaredHere =
+    governed !== undefined &&
+    (governed.at === binding.container || fenceAdmits(fence, governed.at));
+  if (!declaredHere) {
     return (
       `the container ${binding.container} does not receive: no leeway is declared for it, and an ` +
       "absent leeway is every switch off"
@@ -626,18 +639,22 @@ function receiveRefusal(
   }
   return governed.leeway.receive
     ? undefined
-    : `the container ${governed.at} does not receive: its leeway's receive switch is off`;
+    : `the container ${governed.at} does not receive: the leeway in force there has its receive ` +
+        "switch off";
 }
 
 /** May this caller see or act on THIS channel? A bound connection owns the channels its container opened. */
 function channelAdmits(
+  gateway: Gateway,
   identity: TokenIdentity,
   standing: readonly string[] | undefined,
   channel: ChannelStatus,
 ): boolean {
   return identity.binding === undefined
     ? federateAdmits(standing, channel.into)
-    : channel.openedBy === identity.binding.container;
+    : channel.openedFrom === identity.binding.inbox &&
+        openerStands(gateway, channel) &&
+        receivesNow(readContainerTable(gateway.reactor, gateway.operatorAuthor), channel.into);
 }
 
 function federateAdmits(standing: readonly string[] | undefined, container: string): boolean {
@@ -1797,7 +1814,9 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
               into,
               prefix,
               bless: args.bless !== false,
-              ...(identity.binding === undefined ? {} : { openedBy: identity.binding.container }),
+              ...(identity.binding === undefined
+                ? {}
+                : { openedBy: identity.binding.container, openedFrom: identity.binding.inbox }),
               // The SHIPPED source builder, shared with the CLI — never a second copy.
               source: sourceFor(
                 from,
@@ -1830,7 +1849,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           const standing = federateStanding(gateway, identity);
           const target = gateway
             .channelStatus(args.channel)
-            .find((c) => channelAdmits(identity, standing, c));
+            .find((c) => channelAdmits(gateway, identity, standing, c));
           if (target === undefined) {
             reply({
               content: [
@@ -1910,7 +1929,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           }
           const rows = gateway
             .channelStatus(args.channel)
-            .filter((c) => channelAdmits(identity, standing, c));
+            .filter((c) => channelAdmits(gateway, identity, standing, c));
 
           if (name === "loam_federate_status") {
             // Read ONCE for the whole answer: `channelApps` walks the ground to find the channels,
