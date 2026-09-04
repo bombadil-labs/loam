@@ -56,6 +56,8 @@
 //   the leeway verb keeps its own wording                →  1 red, 32 green
 //   the home is split off the name instead of walked     →  1 red, 33 green
 //   the reach walk follows parent only, not inboxOf      →  1 red, 33 green
+//   the climb follows one edge kind, not both            →  1 red, 33 green
+//   the door does not fail closed on two trees           →  0 red, 34 green
 //   the receive road asks the edge only when it mints    →  1 red, 31 green
 //   the refusal names the dropped ancestor (an oracle)   →  1 red, 31 green
 //   the write seam asks the name, not the chain          →  1 red, 31 green
@@ -89,9 +91,13 @@
 //   the refusal helper slices a non-law error            →  1 red, 31 green
 //   the receive door does not ask if the edge dangles    →  0 red, 32 green
 //
-// THE LAST PROBE IS GREEN, AND THAT IS THE HONEST RECORD. It is a second guard on a road whose
-// first guard refuses earlier in every state a rail can reach: `openChannel` asks the same
-// question of every caller before it mints. It is written down rather than deleted, because a
+// TWO PROBES ARE GREEN, AND THAT IS THE HONEST RECORD. The receive door's edge check is a second
+// guard on a road whose first guard refuses earlier in every state a rail can reach: `openChannel`
+// asks the same question of every caller before it mints. And the two-tree gate cannot be driven
+// from a door at all — a container carrying an `inboxOf` makes the leeway walk hop to its host,
+// and a host outside the binding is never "declared here", so the leeway refuses first. It stays
+// as the guard that would answer if that ever changed, and the rail asserts the predicate it
+// reads instead of pretending a door reaches it. It is written down rather than deleted, because a
 // probe removed for being green reads exactly like a probe never run. `openChannel`'s dangling
 // check inside its own minting branch is unprobed for the same reason and named here.
 //
@@ -132,6 +138,7 @@ import {
   containerClaims,
   containerDefect,
   danglingAncestor,
+  treeRootsOf,
   everDeclared,
   LEGACY_POSTURES,
   readContainerTable,
@@ -1129,6 +1136,44 @@ describe("§58 — the container roster", () => {
       token: PEER_TOKEN,
     });
     expect(pooled.isError, `a container under a pool is hers too: ${pooled.text}`).toBe(false);
+
+    // AND A BINDING THAT STANDS IN TWO TREES AT ONCE IS REFUSED, NOT CHOSEN BETWEEN. Re-declare
+    // the bound container carrying BOTH edges: it now belongs to ada's tree and to bea's, and
+    // following one and not the other would pick whose page sees a peer's bytes. There is no
+    // right pick, so the door fails closed.
+    await gateway.append([
+      signClaims(
+        containerClaims(
+          {
+            container: "bea:shared",
+            trust: "curated",
+            posture: "shared",
+            membership,
+            parent: "ada:journal",
+            inboxOf: "bea",
+          },
+          OPERATOR,
+          gateway.nextTimestamp(),
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    expect(
+      treeRootsOf(gateway.containers(), "bea:shared").sort(),
+      "premise: it stands in two trees",
+    ).toEqual(["ada", "bea"]);
+    // THE DOOR CANNOT REACH THIS ONE, AND THAT IS WORTH WRITING DOWN. An `inboxOf` makes the
+    // leeway walk treat the container as a pool and hop to its host, and a host outside the
+    // binding is never "declared here" — so the leeway refuses before the ambiguity is weighed.
+    // The gate stays as the guard that would answer if that ever changed, and this asserts the
+    // predicate it reads rather than pretending a door drives it.
+    const ambiguous = await callTool(base, ada, "loam_container_receive", {
+      from,
+      into: "bea:shared:mine",
+      prefix: "bea:shared:mine:second",
+      token: PEER_TOKEN,
+    });
+    expect(ambiguous.isError, "refused, by the leeway walk").toBe(true);
     await closePeers();
     await closeAll();
   });

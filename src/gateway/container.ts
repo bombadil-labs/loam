@@ -1181,52 +1181,52 @@ export function chainBreaksAt(table: ContainerTable, name: string): string | und
 }
 
 /**
- * Does `name` sit inside `root` by PARENT EDGES? The same question `subtreeUnder(...).includes(...)`
- * answers, walked from the name UP instead of from the root down.
+ * Does `name` sit inside `root`, by the edges a PERSON'S OWN PAGES walk?
  *
- * The table is a restored forest — `computeContainerTable` breaks every cycle before it returns —
- * so one walk up the chain decides it in the depth of the name, where the fixpoint costs a pass
- * over every container in the store for each level of the subtree (H8). Three doors ask this on
- * every request; none of them wants the whole set, only the answer.
+ * Their reach (src/server/subtree.ts) grows through `parent` AND through `inboxOf`, so this walks
+ * up through both. That is a UNION, not a precedence: a record carrying both edges belongs to both
+ * trees, and following only one of them answers about a tree the person may not be standing in.
+ *
+ * Walked from the name UP rather than from the root down. The table is not a forest under these
+ * edges — `computeContainerTable` restores acyclicity over `parent` only, and nothing breaks a
+ * cycle closed by an `inboxOf` — so the `seen` set is what makes this total, not an invariant.
  */
 export function withinSubtree(table: ContainerTable, name: string, root: string): boolean {
-  const seen = new Set<string>();
-  for (let at: string | undefined = name; at !== undefined && !seen.has(at);) {
-    if (at === root) return true;
-    seen.add(at);
-    at = climb(table, at);
-  }
-  return false;
+  return climbFrom(table, name).has(root);
 }
 
 /**
- * The topmost container `name` stands under — the root of its tree, walked by the same edges.
+ * The roots of the trees `name` stands in — every name above it with nowhere further to go.
  *
- * NOT `name.split(":")[0]`. That is the mistake this file warns about three times over: a parent
- * edge NEED NOT AGREE WITH THE NAME, so the name's first token says where a container is named,
- * never where it stands. A door that derived a person's home from the name would admit exactly the
- * containers whose edges leave that person's tree, which is the case it was written to refuse.
+ * PLURAL, AND THAT IS THE POINT. A container carrying both a `parent` and an `inboxOf` stands in
+ * two trees at once, so a caller asking "whose tree is this in" has no single answer, and a door
+ * that took one would be choosing which person's page to honour. Callers that need a single tree
+ * must refuse when this returns more than one; see `receiveRefusal`.
  */
-export function treeRootOf(table: ContainerTable, name: string): string {
-  const seen = new Set<string>();
-  let at = name;
-  for (;;) {
-    if (seen.has(at)) return at;
-    seen.add(at);
-    const up = climb(table, at);
-    if (up === undefined) return at;
-    at = up;
-  }
+export function treeRootsOf(table: ContainerTable, name: string): string[] {
+  const up = climbFrom(table, name);
+  return [...up].filter((at) => stepsUp(table, at).length === 0);
 }
 
-/**
- * One step up the tree a PERSON sees. Their pages grow through `parent` and through `inboxOf`
- * (src/server/subtree.ts), so a container hung under a pool is on their page — and a walk that
- * followed only `parent` would refuse them a container they made themselves.
- */
-function climb(table: ContainerTable, name: string): string | undefined {
+/** Every name at or above `name`, following both edge kinds. Total: `seen` bounds the walk. */
+function climbFrom(table: ContainerTable, name: string): Set<string> {
+  const seen = new Set<string>([name]);
+  const queue = [name];
+  while (queue.length > 0) {
+    for (const next of stepsUp(table, queue.pop()!)) {
+      if (seen.has(next)) continue;
+      seen.add(next);
+      queue.push(next);
+    }
+  }
+  return seen;
+}
+
+/** One step up, both edges. A record the table does not hold has none. */
+function stepsUp(table: ContainerTable, name: string): string[] {
   const rec = table.containers.get(name);
-  return rec === undefined ? undefined : (rec.parent ?? rec.inboxOf);
+  if (rec === undefined) return [];
+  return [rec.parent, rec.inboxOf].filter((e): e is string => e !== undefined);
 }
 
 export function subtreeUnder(table: ContainerTable, root: string): string[] {

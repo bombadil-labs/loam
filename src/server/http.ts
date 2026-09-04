@@ -83,7 +83,7 @@ import {
   readContainerTable,
   receivesNow,
   danglingAncestor,
-  treeRootOf,
+  treeRootsOf,
   withinSubtree,
   type ContainerTable,
 } from "../gateway/container.js";
@@ -656,8 +656,12 @@ function mintableAt(
   }
   // THE SAME QUESTION `loam_container_leeway` ASKS, ASKED THE SAME WAY. Two write verbs that
   // disagree about one target is the shape every round of this review kept finding, and a walk
-  // that admits a parentless container admits one the person's own pages cannot reach: reach is
-  // `subtreeUnder`, and law written beneath a name outside it is law nobody can see or drop.
+  // that admits a parentless container admits one the person's own pages cannot reach: law
+  // written beneath a name outside their reach is law nobody can see or drop.
+  //
+  // `withinSubtree` walks BOTH edge kinds, like a person's page. `subtreeUnder` walks `parent`
+  // only, and so does `connectionScopeImpl`. They are not interchangeable; swapping one for the
+  // other here would change what these doors admit.
   if (!withinSubtree(table, root, binding.container)) {
     return (
       `${root} bears a name inside your container but does not stand inside it: its edges do not ` +
@@ -797,12 +801,24 @@ function receiveRefusal(
   // person's tree. And the root is WALKED, never split off the name — a parent edge need not agree
   // with a name, so splitting would derive the wrong tree for exactly the containers whose edges
   // leave it, which is the case this refuses.
-  const home = treeRootOf(table, binding.container);
-  if (table.containers.has(into) && !withinSubtree(table, into, home)) {
-    return (
-      `${into} bears a name inside your container but hangs outside it: a channel opened there ` +
-      `would serve a subtree that is not yours, so it is refused`
-    );
+  //
+  // ONE TREE, OR NONE. A container carrying both a `parent` and an `inboxOf` stands in two trees
+  // at once, and then there is no such thing as "the person whose tree this is" — honouring
+  // either one would be choosing whose page sees a peer's bytes. It fails closed instead.
+  if (table.containers.has(into)) {
+    const homes = treeRootsOf(table, binding.container);
+    if (homes.length !== 1) {
+      return (
+        `the container this connection is bound to stands in more than one tree, so where a ` +
+        `channel would be seen is not decided. It is refused until that is settled.`
+      );
+    }
+    if (!withinSubtree(table, into, homes[0]!)) {
+      return (
+        `${into} bears a name inside your container but hangs outside it: a channel opened there ` +
+        `would serve a subtree that is not yours, so it is refused`
+      );
+    }
   }
   return undefined;
 }
@@ -2297,10 +2313,6 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
                       ...(rec.membership === undefined ? {} : { membership: rec.membership }),
                       ...(rec.membershipAt === undefined ? {} : { membershipAt: rec.membershipAt }),
                       ...(rec.version === undefined ? {} : { version: rec.version }),
-                      // Latest-wins is per DECLARATION: a pointer that stands and is omitted here
-                      // is a pointer deleted. Carried even though the refusal above means this
-                      // road never meets one, because the belt is one line and the loss is total.
-                      ...(rec.inboxOf === undefined ? {} : { inboxOf: rec.inboxOf }),
                       leeway: want,
                     },
                     gateway.operatorAuthor!,
