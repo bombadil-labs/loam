@@ -19,6 +19,7 @@ import { contentAddress, makeNegationClaims, signClaims } from "@bombadil/rhizom
 import type { Container } from "../gateway/container.js";
 import {
   containerClaims,
+  everDeclared,
   openerStands,
   readContainerTable,
   receivesNow,
@@ -1727,11 +1728,26 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
       // composed into a container whose edge dangles from an undeclared name is served as law
       // that answers nothing — the T189 shape. The door fenced `into` inside the opener's
       // container, which consent declared, so the walk always meets a declared ancestor.
+      // IT STOPS AT THE OPENER'S OWN CONTAINER, AND AT A NAME THAT WAS DROPPED. A person drops a
+      // shared container by striking its declarations, which leaves its descendants standing but
+      // out of every parent-edge walk — and to this loop that is indistinguishable from a name
+      // nobody declared. Re-minting it would hand the dropped subtree back to its reader, at the
+      // request of the party the drop was aimed at.
       const seed = gw.options.seed;
+      const stop = opts.openedBy;
       const missing: string[] = [];
-      for (let at = opts.into; !table.containers.has(at) && at.includes(":");) {
+      for (let at = opts.into; at !== stop && !table.containers.has(at) && at.includes(":");) {
         missing.push(at);
         at = at.slice(0, at.lastIndexOf(":"));
+      }
+      const struck = missing.find((container) =>
+        everDeclared(gw.reactor, gw.operatorAuthor!, container),
+      );
+      if (struck !== undefined) {
+        throw new Error(
+          `${struck} was declared and then dropped, so a channel cannot be opened beneath it — ` +
+            `declaring it again would restore what the drop removed`,
+        );
       }
       await gw.append(
         missing.reverse().map((container) =>

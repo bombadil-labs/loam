@@ -81,8 +81,12 @@ describe("T275 — the two docs rails cannot run at the same time", () => {
         { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
       ),
     ) as { file: string; projectName?: string }[];
+    // Compared on POSIX separators. Windows reports `test\\server\\…`, and a comparison against
+    // `join(root, file)` passes on one platform and fails on the other — which is a rail that
+    // reports the platform rather than the scheduling.
+    const slashed = (path: string): string => path.replace(/\\/g, "/");
     for (const file of [WRITER, READER]) {
-      const rows = listed.filter((r) => r.file === join(root, file));
+      const rows = listed.filter((r) => slashed(r.file).endsWith(`/${file}`));
       expect(rows.length, `${file} is collected by exactly one project`).toBe(1);
       expect(rows[0]!.projectName, `${file} is collected by the docs project`).toBe("docs");
     }

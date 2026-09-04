@@ -767,6 +767,22 @@ export function survivingDeclarationIds(
   return out;
 }
 
+/**
+ * Was this name EVER declared — struck or standing?
+ *
+ * The container table answers "does it stand". A road that mints a missing level needs the other
+ * question, because the two states look identical to it and mean opposite things: a name nobody
+ * declared is one to create, and a name a person STRUCK is one they removed. Re-minting the second
+ * restores every surviving descendant to the reader, which is the person's act undone by the party
+ * it was aimed at.
+ */
+export function everDeclared(reactor: Reactor, operator: string, entity: string): boolean {
+  for (const delta of lawfulSnapshot(reactor, operator)) {
+    if (containerRef(delta.claims, CTX_CONTAINER) === entity) return true;
+  }
+  return false;
+}
+
 const retractionOf = (targetId: string, author: string, timestamp: number): Claims => ({
   timestamp,
   author,

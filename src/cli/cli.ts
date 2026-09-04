@@ -3010,15 +3010,16 @@ async function cmdPen(args: readonly string[], io: IO): Promise<number> {
   }
   // Checked before ANY path is built from `name` — a pen name is a single path component (the seed
   // file's own name), never a traversal. The user-name grammar is exactly that discipline.
-  // A pen's name roots a path the same way a person's does, so it meets the same reservation —
-  // said in the pen's own terms, because a pen mints a seed and a grant rather than a container.
+  // A pen meets the same reservation, said in the pen's own terms. A pen mints a seed file and a
+  // grant rather than a container, so the reason is not the pen's own path: it is that the name is
+  // reserved store-wide, and a pen and a person must not be able to collide on one.
   const reservedPen = reservedNameDefect(name);
   const nameDefect =
     userNameDefect(name) ??
     (reservedPen === undefined
       ? undefined
-      : `"${name}" is reserved: a container path beginning with it reads as a pool, and a pen ` +
-        `names a path. Pick another name.`);
+      : `"${name}" is reserved store-wide, so a pen cannot take it either: a person of that ` +
+        `name would own containers a reader resolves as pools. Pick another name.`);
   if (nameDefect !== undefined) {
     io.err(`pen create: ${nameDefect.replace("is not a user name", "is not a pen name")}`);
     return 2;

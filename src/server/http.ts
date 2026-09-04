@@ -75,6 +75,7 @@ import {
 } from "../gateway/accounts.js";
 import {
   containerClaims,
+  everDeclared,
   governingLeeway,
   inboxName,
   openerStands,
@@ -617,10 +618,17 @@ const STANDING_ENDED =
  */
 function connectionStands(gateway: Gateway, binding: ConnectionBinding): boolean {
   const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
-  return (
-    table.containers.has(binding.container) &&
-    openerStands(gateway, { openedBy: binding.container, openedFrom: binding.inbox })
-  );
+  // THE WHOLE CHAIN, NOT THE NAME. A shared drop strikes only the container it names, so a
+  // descendant keeps its own declaration and stands alone: absent from every parent-edge walk the
+  // person's pages make, and reachable only by the connection bound to it. Asking the chain means
+  // dropping a container ends the connections bound beneath it too, which is what a person
+  // dropping a room expects.
+  for (let at: string | undefined = binding.container; at !== undefined;) {
+    const rec = table.containers.get(at);
+    if (rec === undefined) return false;
+    at = rec.parent;
+  }
+  return openerStands(gateway, { openedBy: binding.container, openedFrom: binding.inbox });
 }
 
 function receiveRefusal(
@@ -745,7 +753,13 @@ function channelAdmits(
 ): boolean {
   return identity.binding === undefined
     ? federateAdmits(standing, channel.into)
-    : channel.openedFrom === identity.binding.inbox &&
+    : // THE CONNECTION FIRST, THE CHANNEL SECOND. `openerStands` weighs the CHANNEL's opener
+      // against its pool; it says nothing about whether the container this connection is bound to
+      // still stands. A channel's own `into` survives its container's drop, so without this a
+      // dropped connection could still flip a channel back on and keep pulling a peer's data into
+      // the subtree the person removed.
+      connectionStands(gateway, identity.binding) &&
+        channel.openedFrom === identity.binding.inbox &&
         openerStands(gateway, channel) &&
         receivesNow(readContainerTable(gateway.reactor, gateway.operatorAuthor), channel.into);
 }
@@ -1945,7 +1959,15 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         // questions in the same order: is this caller bound, and is the name it gave inside the
         // fence its binding draws — the path AND ITS COLON, so a sibling sharing the letters is
         // outside. A refusal names only the caller's own container.
-        if (typeof name === "string" && name.startsWith("loam_container_")) {
+        // `loam_container_receive` is NOT handled here. It is `loam_federate_connect` under
+        // another name, and a caller holding a federate grant but no binding may drive it — so it
+        // goes to the one road below, which answers both names identically. Intercepting it here
+        // would give the two names different refusals for the same caller.
+        if (
+          typeof name === "string" &&
+          name.startsWith("loam_container_") &&
+          name !== "loam_container_receive"
+        ) {
           const asked = args as Record<string, unknown>;
           const binding = identity.binding;
           if (binding === undefined) {
@@ -2021,6 +2043,30 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             ) {
               missing.push(at);
               at = at.slice(0, at.lastIndexOf(":"));
+            }
+            // A MISSING LEVEL IS NOT ALWAYS AN UNDECLARED ONE. A person drops a shared container by
+            // striking its declarations, which leaves its descendants standing but out of reach —
+            // their parent edge points at a name the table no longer holds. To this walk that is
+            // indistinguishable from a name nobody ever declared, and re-minting it hands the
+            // person's dropped subtree straight back to its reader. So the walk asks the other
+            // question, and a struck level stops it.
+            const struck = missing.find((container) =>
+              everDeclared(gateway.reactor, gateway.operatorAuthor!, container),
+            );
+            if (struck !== undefined) {
+              reply({
+                content: [
+                  {
+                    type: "text",
+                    text:
+                      `${struck} was declared and then dropped, so this name cannot be made ` +
+                      `beneath it. Declaring it again would restore what the drop removed. Ask ` +
+                      `the person who dropped it.`,
+                  },
+                ],
+                isError: true,
+              });
+              return;
             }
             try {
               await gateway.append(
