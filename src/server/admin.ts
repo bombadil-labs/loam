@@ -85,6 +85,7 @@ import {
 import { MemoryBackend } from "../store/memory.js";
 import { adminFederation } from "./admin-federation.js";
 import { declareOwned, ensureUserKey } from "./provision.js";
+import { leewayFromFields } from "./leeway-form.js";
 import { subtreeOf } from "./subtree.js";
 import { CSP, escapeHtml, page, sameSecret, type SessionGate } from "./session.js";
 import {
@@ -92,6 +93,7 @@ import {
   ADMIN_CREATE_ROOT_PATH,
   ADMIN_CONTAINER_PATH,
   ADMIN_DECLARE_PATH,
+  ADMIN_LEEWAY_PATH,
   ADMIN_DETACH_PATH,
   ADMIN_REATTACH_PATH,
   ADMIN_DROP_PATH,
@@ -302,6 +304,60 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
         gw.options.seed!,
       ),
     ]);
+    seeOther(res);
+  };
+
+  // THE FIVE CONTROLS, SAVED. A leeway is a declaration on the container, so saving one is a
+  // re-declaration: the record it stands on, carried forward whole, with the new leeway written
+  // over the old. The one rule is weighed by the append itself, so a leeway that does not fit the
+  // terms above it is refused there and the person reads the refusal that names the ceiling —
+  // this page never decides what fits.
+  const postLeeway = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const gated = await postGate(req, res);
+    if (gated === undefined) return;
+    const gw = signerGround(res);
+    if (gw === undefined) return;
+    const target = targetOf(gw, gated.user, gated.fields, res);
+    if (target === undefined) return;
+    const rec = target.rec;
+    // A POOL'S LEEWAY IS NOT THE PERSON'S TO SET HERE. An inbox or a channel pool takes what the
+    // container it was opened into allows, and a person's reach DOES join those edges — so this
+    // door is reachable for a pool and must say no. It said yes, and re-declared the pool without
+    // the pointer to its host, which severed it from that container for good: its members stopped
+    // composing there, and the severed name left the person's reach, so no door could reach it
+    // again to put it back.
+    if (rec.inboxOf !== undefined) {
+      refuse(
+        res,
+        409,
+        `This pool takes its leeway from ${escapeHtml(rec.inboxOf)}, the container it was opened ` +
+          "into. Change it there. Nothing was changed here.",
+      );
+      return;
+    }
+    const spec = {
+      container: target.name,
+      trust: rec.trust,
+      posture: rec.posture,
+      ...(rec.parent === undefined ? {} : { parent: rec.parent }),
+      // No `inboxOf` here, and that is not an omission: the refusal above is the safeguard, and a
+      // carry beside it would be a line no case can reach — read as a second guard, killed by no
+      // mutation, and left standing as the only one if the refusal is ever relaxed.
+      ...(rec.membership === undefined ? {} : { membership: rec.membership }),
+      ...(rec.membershipAt === undefined ? {} : { membershipAt: rec.membershipAt }),
+      ...(rec.version === undefined ? {} : { version: rec.version }),
+      leeway: leewayFromFields(gated.fields),
+    };
+    try {
+      await gw.append([
+        signClaims(containerClaims(spec, gw.operatorAuthor!, gw.nextTimestamp()), gw.options.seed!),
+      ]);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      const why = detail.slice(detail.indexOf("malformed law:") + "malformed law:".length).trim();
+      refuse(res, 409, `${escapeHtml(why === "" ? detail : why)} Nothing was changed.`);
+      return;
+    }
     seeOther(res);
   };
 
@@ -1215,6 +1271,7 @@ forever; the value now survives even if its container is dropped.</p>
     ADMIN_CREATE_ROOT_PATH,
     ADMIN_CONTAINER_PATH,
     ADMIN_DECLARE_PATH,
+    ADMIN_LEEWAY_PATH,
     ADMIN_DETACH_PATH,
     ADMIN_REATTACH_PATH,
     ADMIN_DROP_PATH,
@@ -1232,6 +1289,7 @@ forever; the value now survives even if its container is dropped.</p>
   const POSTS = new Map([
     [ADMIN_CREATE_ROOT_PATH, postCreateRoot],
     [ADMIN_DECLARE_PATH, postDeclare],
+    [ADMIN_LEEWAY_PATH, postLeeway],
     [ADMIN_DETACH_PATH, postDetach],
     [ADMIN_REATTACH_PATH, postReattach],
     [ADMIN_DROP_PATH, postDrop],

@@ -11,6 +11,7 @@
 // in this module imports admin.ts, so there is no cycle: the door imports the pages.
 
 import { escapeHtml, page } from "./session.js";
+import { leewayFields } from "./leeway-form.js";
 import { readUserSeed } from "../cli/config.js";
 import { authorForSeed, type Delta } from "@bombadil/rhizomatic";
 import { lensOf, readRegistrations } from "../gateway/registration.js";
@@ -31,6 +32,7 @@ export const ADMIN_PATH = "/admin";
 export const ADMIN_CREATE_ROOT_PATH = "/admin/create-root";
 export const ADMIN_CONTAINER_PATH = "/admin/container";
 export const ADMIN_DECLARE_PATH = "/admin/declare";
+export const ADMIN_LEEWAY_PATH = "/admin/leeway";
 export const ADMIN_DETACH_PATH = "/admin/detach";
 export const ADMIN_REATTACH_PATH = "/admin/reattach";
 export const ADMIN_DROP_PATH = "/admin/drop";
@@ -585,6 +587,27 @@ ${hiddenPair(formToken, name)}
 
   // The lifecycle a container's page offers, by its state. Where an act cannot be truthful from
   // a browser, the page says so instead of rendering a form that would lie.
+  // THE FIVE CONTROLS, WHERE THEY CHANGE (SPEC §58 position 4). The same five lines the consent
+  // page shows when a container is created, rendered from what this container declared — and a
+  // container that declared none shows every switch off, which is what it has.
+  //
+  // A POOL DOES REACH THIS PAGE — a person's reach joins inboxOf edges as well as parent ones —
+  // and it is not shaped here: an inbox or a channel pool takes what the container it was opened
+  // into allows, so this page names that container instead of offering a switch that governs
+  // nothing.
+  const leewayForm = (name: string, rec: ResolvedContainer, formToken: string): string =>
+    rec.inboxOf !== undefined
+      ? `<p>This pool takes its leeway from <code>${escapeHtml(rec.inboxOf)}</code>, the container
+it was opened into. Change it there.</p>`
+      : `<form method="post" action="${ADMIN_LEEWAY_PATH}">
+${hiddenPair(formToken, name)}
+${leewayFields(
+  rec.leewayDeclared ? rec.leeway : undefined,
+  "These apply to this container and, through its terms, to everything below it.",
+)}
+<button type="submit">save what this container may do</button>
+</form>`;
+
   const lifecycleForms = (
     table: ContainerTable,
     name: string,
@@ -702,7 +725,8 @@ ${members.map((m) => memberHtml(gw, name, m, formToken)).join("\n")}
 </ul>`;
     return page(
       name,
-      `${head}\n${censusHtml}\n${listing}\n${federateFormHtml(name, rec, formToken)}\n${forms}\n${back}\n${signOutFormHtml(formToken)}`,
+      `${head}\n${censusHtml}\n${listing}\n${federateFormHtml(name, rec, formToken)}\n` +
+        `${leewayForm(name, rec, formToken)}\n${forms}\n${back}\n${signOutFormHtml(formToken)}`,
     );
   };
 

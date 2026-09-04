@@ -41,6 +41,9 @@ import { cimdRedirectDefect, isCimdClientId, makeCimdFetcher, type CimdDocument 
 import type { Gateway } from "../gateway/gateway.js";
 import { declareOwned, ensureUserKey, LEAF_RE } from "./provision.js";
 import { bindableOf, isBindableName, subtreeOf } from "./subtree.js";
+import { leewayFields, leewayFromFields } from "./leeway-form.js";
+import { canonicalLeewayJson, SEALED_LEEWAY, type Leeway } from "../gateway/leeway.js";
+import { governingLeeway } from "../gateway/container.js";
 
 /** The one scope §37 ships. A scope LIST replaces it when a second one exists. */
 export const CONNECTOR_SCOPE = "loam.connector";
@@ -824,7 +827,11 @@ export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
   // The binding field (SPEC §58 position 1): a connection lives in ONE container under the
   // person's name, chosen here or created here, and never in the home itself. The home is not an
   // option; the empty option is the refusal, not a default.
-  const bindingFields = (user: string, bindable: readonly string[]): string =>
+  const bindingFields = (
+    user: string,
+    bindable: readonly string[],
+    inherited: Leeway | undefined,
+  ): string =>
     `<fieldset>
 <legend>Bind this connection to</legend>
 <p>A connection lives in one container under your name, and never above it. That container is
@@ -836,7 +843,13 @@ ${bindable.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option
 </select>
 <label for="bind_new">or create one under <code>${escapeHtml(user)}:</code></label>
 <input id="bind_new" name="bind_new" placeholder="journal" maxlength="63">
-</fieldset>`;
+</fieldset>
+${leewayFields(
+  inherited,
+  "These apply to a container you create here, and start from what the container above it " +
+    "allows. A container that already stands keeps the leeway it has — change it on that " +
+    "container's own page.",
+)}`;
 
   const consentPage = (
     client: Pick<OAuthClient, "clientId" | "clientName">,
@@ -847,6 +860,7 @@ ${bindable.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option
     formToken: string,
     user: string,
     bindable: readonly string[],
+    inherited: Leeway | undefined,
   ): string =>
     page(
       "approve a connector",
@@ -867,7 +881,7 @@ ${
 <input type="hidden" name="state" value="${escapeHtml(state)}">
 <input type="hidden" name="code_challenge" value="${escapeHtml(codeChallenge)}">
 <input type="hidden" name="code_challenge_method" value="${escapeHtml(codeChallengeMethod)}">
-${bindingFields(user, bindable)}
+${bindingFields(user, bindable, inherited)}
 <button type="submit">approve</button>
 </form>`,
     );
@@ -1074,6 +1088,7 @@ ${bindingFields(user, bindable)}
         session.formToken,
         session.user,
         bindableOf(gw.containers(), session.user),
+        governingLeeway(gw.containers(), session.user)?.leeway,
       ),
       undefined,
       consentCsp,
@@ -1190,8 +1205,27 @@ ${bindingFields(user, bindable)}
           }
         }
         if (binding.kind === "create") {
-          const declined = await declareOwned(gw, binding.container, key.userSeed, user, (m) =>
-            fault(`the consent page ${m}`),
+          // A CONTAINER DECLARES A LEEWAY ONLY WHERE IT DIFFERS FROM WHAT IT WOULD INHERIT.
+          // The page shows the person what this container will have — which, before they touch
+          // anything, is what the container above it allows — so leaving the five alone declares
+          // nothing and inherits, and changing any of them writes the choice down. Writing a
+          // pointer either way would seal every container a person ever creates; writing none
+          // either way would show a switch off and hand them a room that receives.
+          const chosen = leewayFromFields(fields);
+          const inherited = governingLeeway(gw.containers(), user)?.leeway ?? SEALED_LEEWAY;
+          // A form that carried no controls made no choice — every switch reads off from absence
+          // alone, and absence is not an answer. The envelope is a select, so a rendered form
+          // always carries it; a client that posts without one leaves the container to inherit
+          // rather than sealing it by silence.
+          const answered = fields.get("leeway_envelope") !== undefined;
+          const differs = canonicalLeewayJson(chosen) !== canonicalLeewayJson(inherited);
+          const declined = await declareOwned(
+            gw,
+            binding.container,
+            key.userSeed,
+            user,
+            (m) => fault(`the consent page ${m}`),
+            answered && differs ? chosen : undefined,
           );
           if (declined !== undefined) {
             refuse(res, declined.status, declined.message);
