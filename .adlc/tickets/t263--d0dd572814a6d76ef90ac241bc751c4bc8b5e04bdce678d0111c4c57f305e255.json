@@ -27,7 +27,8 @@
     "test/server/leeway-copy.test.ts",
     "test/server/container-tools.test.ts",
     "test/server/roster-staged.test.ts",
-    "test/browser/leeway-controls.test.ts"
+    "test/browser/leeway-controls.test.ts",
+    "test/server/grant-retired.test.ts"
   ],
   "status": "todo",
   "title": "§58 S2 — the container tools and derived standing"

@@ -548,20 +548,24 @@ function registerStanding(
   // container path AND ITS COLON, so `ada:journalx` — a sibling sharing the letters — is outside
   // the fence, and so is `ada:journal` itself: the fence is what lives UNDER the container.
   //
-  // Unioned with any grant the connection also holds rather than replacing it, because nothing a
-  // connection can do today may stop working before its replacement has landed. The slice that
-  // retires `loam grant --verb=register` for connections is the one that removes this union.
-  const bound = identity.binding === undefined ? [] : [`${identity.binding.container}:`];
-  if (identity.actor === undefined) return bound.length === 0 ? undefined : bound;
+  // AND ONLY THAT. The union with a granted prefix is gone: it existed so that nothing a
+  // connection could do would stop working before its replacement had landed, and derived
+  // standing is that replacement. A grant could name a prefix in no container at all, which is
+  // exactly the store-wide authority this section ends.
+  //
+  // The bytes are untouched. A standing `register` grant stays readable and stays lawful for a
+  // key that is NOT a bound connection; it simply adds nothing to a binding's fence. That is the
+  // same shape §58.6 records for the store-wide grants that predate the section.
+  if (identity.binding !== undefined) return [`${identity.binding.container}:`];
+  if (identity.actor === undefined) return undefined;
   let author: string;
   try {
     author = authorForSeed(identity.actor);
   } catch {
-    return bound.length === 0 ? undefined : bound; // an actor that names no key holds no grant
+    return undefined; // an actor that names no key holds no grant
   }
   const granted = registerPrefixesOf(gateway.reactor, author, gateway.operatorAuthor);
-  const prefixes = [...granted, ...bound];
-  return prefixes.length === 0 ? undefined : prefixes;
+  return granted.length === 0 ? undefined : granted;
 }
 
 /**
