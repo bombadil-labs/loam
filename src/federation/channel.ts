@@ -1716,7 +1716,7 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
   // person has. A grant-holding caller reaches here without passing the bound road's door.
   if (danglingAncestor(table, opts.into) !== undefined) {
     throw new Error(
-      `${opts.into} stands, but it hangs from a container that was dropped, so it is reachable ` +
+      `${opts.into} stands, but it hangs from a container that does not, so it is reachable ` +
         `from no page the person has — a channel cannot be opened there`,
     );
   }
@@ -1756,8 +1756,12 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
       // door's whole job. A colon-free ANCESTOR is not: it was never named, and minting it would
       // put operator-signed law at a top-level name nobody asked for.
       if (missingHere.length === 0 && !table.containers.has(up)) missingHere.push(up);
-      const struckHere = missingHere.find((container) =>
-        everDeclared(gw.reactor, gw.operatorAuthor, container),
+      // THE STRUCK RULE COVERS THE LEVEL THIS BRANCH DECLINES TO MINT. Asking it only of the
+      // levels being made left a hole at exactly the name a person is most likely to have
+      // dropped — their own top-level one — because that name is never in the mint list when the
+      // target is two or more levels below it.
+      const struckHere = [...missingHere, ...(table.containers.has(up) ? [] : [up])].find(
+        (container) => everDeclared(gw.reactor, gw.operatorAuthor, container),
       );
       if (struckHere !== undefined) {
         throw new Error(
@@ -1823,7 +1827,7 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
         );
       }
       // AND THE NAME THE WALK STOPPED AT MAY ITSELF BE AN ORPHAN. It stands, so the walk is
-      // satisfied — but its own parent was dropped, so it hangs off nothing the person can reach
+      // satisfied — but its own parent is not there, so it hangs off nothing the person can reach
       // and a pool composed beneath it is invisible to every door they have.
       // THE WALK MUST LAND ON SOMETHING. `openChannel` is a gateway API and `openedBy` is the
       // caller's; a target that is not under it strips down to a name nothing holds, and minting

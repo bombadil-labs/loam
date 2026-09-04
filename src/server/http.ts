@@ -659,8 +659,8 @@ function mintableAt(
   // `subtreeUnder`, and law written beneath a name outside it is law nobody can see or drop.
   if (!subtreeUnder(table, binding.container).includes(root)) {
     return (
-      `${root} bears a name inside your container but does not stand inside it: its parent is ` +
-      `elsewhere, so nothing may be made beneath it.`
+      `${root} bears a name inside your container but does not stand inside it: its edges do not ` +
+      `lead back to ${binding.container}, so nothing may be made beneath it.`
     );
   }
   return undefined;
@@ -763,15 +763,28 @@ function receiveRefusal(
       "switch off"
     );
   }
-  // THE EDGE IS DELIBERATELY NOT ASKED HERE, and the asymmetry with the write verbs is the point.
+  // THE EDGE IS NOT ASKED OF A CONTAINER THAT ALREADY STANDS, and the asymmetry is the point.
   // §58's walls settled it: NAMES ARE PATHS, and the name governs. A container named under this
   // binding but declared with a parent elsewhere still resolves its leeway by name, so the switch
-  // the person set on THIS container is the one in force — an edge check would refuse a receive
-  // the person's own leeway already permits, and subtree-walls.test.ts pins that both ways.
+  // the person set on THIS container is the one in force — an edge check there would refuse a
+  // receive the person's own leeway already permits, and subtree-walls.test.ts pins it both ways.
   //
-  // The write verbs ask it, because they are not the same act. `declare` and `leeway` write law
-  // that governs everything below a name, and where that law is administered from is exactly what
-  // the edge says. Receiving lands bytes under a name whose governing leeway is already resolved.
+  // IT IS ASKED WHEN THIS DOOR WOULD MINT. Receiving into a name that does not stand declares it,
+  // and a declaration hung beneath a container whose edges lead elsewhere is new law administered
+  // from outside the caller's subtree — the act the write verbs gate, arriving by another door.
+  // Resolution governs by name; MAKING a container is not resolution.
+  if (!table.containers.has(into)) {
+    let root = into;
+    while (root !== binding.container && !table.containers.has(root) && root.includes(":")) {
+      root = root.slice(0, root.lastIndexOf(":"));
+    }
+    if (table.containers.has(root) && !subtreeUnder(table, binding.container).includes(root)) {
+      return (
+        `${root} bears a name inside your container but does not stand inside it: its edges do ` +
+        `not lead back to ${binding.container}, so nothing may be made beneath it`
+      );
+    }
+  }
   return undefined;
 }
 
