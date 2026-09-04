@@ -1710,6 +1710,16 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
   // naming it brings it into being if it is new. It is `curated` and `shared`: the receiver's own
   // trust domain, a view over their ground, with each peer's pool nested beneath it.
   const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+  // ASKED OF EVERY CALLER, WHETHER OR NOT THE NAME STANDS. The guards below sat inside the
+  // declaring branch, so a container that ALREADY stands skipped them — and a container that
+  // outlived the drop of its parent is exactly that: standing, and reachable from no page the
+  // person has. A grant-holding caller reaches here without passing the bound road's door.
+  if (danglingAncestor(table, opts.into) !== undefined) {
+    throw new Error(
+      `${opts.into} stands, but it hangs from a container that was dropped, so it is reachable ` +
+        `from no page the person has — a channel cannot be opened there`,
+    );
+  }
   if (!table.containers.has(opts.into)) {
     if (opts.openedBy === undefined) {
       // THE STRUCK-NAME RULE IS NOT THE BOUND CALLER'S ALONE. A grant-holding caller reaches this
@@ -1764,10 +1774,19 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
       // AND THE NAME THE WALK STOPPED AT MAY ITSELF BE AN ORPHAN. It stands, so the walk is
       // satisfied — but its own parent was dropped, so it hangs off nothing the person can reach
       // and a pool composed beneath it is invisible to every door they have.
-      const dangling = danglingAncestor(table, at);
-      if (dangling !== undefined) {
+      // THE WALK MUST LAND ON SOMETHING. `openChannel` is a gateway API and `openedBy` is the
+      // caller's; a target that is not under it strips down to a name nothing holds, and minting
+      // beneath THAT manufactures the orphan every rule here exists to refuse.
+      if (!table.containers.has(at)) {
         throw new Error(
-          `${at} hangs from ${dangling}, which was dropped, so a channel cannot be opened there`,
+          `${at} does not stand, so there is nothing for ${opts.into} to hang from — a channel ` +
+            `cannot be opened there`,
+        );
+      }
+      if (danglingAncestor(table, at) !== undefined) {
+        throw new Error(
+          `${at} stands, but it hangs from a container that was dropped, so a channel cannot be ` +
+            `opened there`,
         );
       }
       await gw.append(

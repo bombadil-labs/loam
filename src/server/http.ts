@@ -637,11 +637,17 @@ function mintableAt(
       `removed, so it is refused. Ask the person who dropped it.`
     );
   }
-  const dangling = danglingAncestor(table, root);
-  if (dangling !== undefined) {
+  // NO ORACLE, and the edge is where it would leak. A parent edge need not agree with the name —
+  // the leeway verb exists to catch exactly that — so the dropped ancestor may be a container in
+  // someone else's subtree, and naming it would teach this caller that it existed. The refusal
+  // says what is true of the caller's own name and stops.
+  if (
+    danglingAncestor(table, root) !== undefined ||
+    !subtreeUnder(table, binding.container).includes(root)
+  ) {
     return (
-      `${root} hangs from ${dangling}, which was dropped, so it is reachable from no page the ` +
-      `person has. Nothing may be made beneath it.`
+      `${root} stands, but it hangs from a container that was dropped, so it is reachable from ` +
+      `no page the person has. Nothing may be made beneath it.`
     );
   }
   return undefined;
@@ -718,11 +724,12 @@ function receiveRefusal(
   while (root !== binding.container && !table.containers.has(root) && root.includes(":")) {
     root = root.slice(0, root.lastIndexOf(":"));
   }
-  const dangling = danglingAncestor(table, root);
-  if (dangling !== undefined) {
+  // NO ORACLE: the dropped ancestor is not named. A parent edge need not agree with the name, so
+  // it may be a container in another person's subtree.
+  if (danglingAncestor(table, root) !== undefined) {
     return (
-      `${root} hangs from ${dangling}, which was dropped, so it is reachable from no page the ` +
-      `person has — a channel cannot be opened there`
+      `${root} stands, but it hangs from a container that was dropped, so it is reachable from ` +
+      `no page the person has — a channel cannot be opened there`
     );
   }
   // READ WHAT THE FOLD READS. The walk is not capped at the binding: an ancestor's terms narrow

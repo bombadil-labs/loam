@@ -572,22 +572,9 @@ function computeContainerTable(reactor: Reactor, operator: string | undefined): 
       detached.set(detachedName, records);
       continue;
     }
-    const name = containerRef(claims, CTX_CONTAINER);
-    if (name === undefined) continue;
-    const trust = primitives(claims, "trust")[0];
-    // A RETIRED posture word still binds HERE, unlike at the door: a store is migrated when someone
-    // runs `loam migrate`, and until then dropping its containers would empty every scope and blind
-    // the erasure guard without saying a word (H9). The word is normalized, never widened — the
-    // legacy pair maps onto the same two postures, so nothing new becomes lawful.
-    const posture = asPosture(primitives(claims, "posture")[0]);
-    if (
-      typeof trust !== "string" ||
-      !TRUSTS.has(trust) ||
-      posture === undefined ||
-      (trust === "untrusted" && posture === "shared")
-    ) {
-      continue; // malformed law binds nothing, at the reader as at the door
-    }
+    const bound = boundContainer(claims);
+    if (bound === undefined) continue; // malformed law binds nothing
+    const { name, trust, posture } = bound;
     const parentPtr = claims.pointers.find(
       (p) =>
         p.role === "parent" &&
@@ -752,6 +739,46 @@ export function containerAdmission(
   return readTrustPolicyAt(reactor, container, operator);
 }
 
+/**
+ * What this delta declares, if it BINDS as a container — the name, and the two words the reader
+ * normalizes. Absent when it declares nothing, or when it declares something malformed.
+ *
+ * THIS IS THE BIND TEST, AND IT IS NOT THE DOOR'S TEST. `containerDefect` weighs whether a NEW
+ * declaration may be ADMITTED, against the state standing right now: it reads the leeway tree, so
+ * a parent tightening its terms later can turn a declaration that was law when it was signed into
+ * one the door would refuse today. It also refuses a retired posture word the reader still honours
+ * on an unmigrated store. Neither belongs in the question "did this ever bind" — and using the
+ * door's test for it was a licence to mint, because a name that answers "never declared" is a name
+ * a walk will make again.
+ *
+ * So the table and `everDeclared` ask THIS, together. Two readers of one predicate cannot drift.
+ */
+function boundContainer(
+  claims: Claims,
+): { name: string; trust: string; posture: "shared" | "separate" } | undefined {
+  // The two record kinds that are not declarations at all. The table `continue`s on each before it
+  // looks for a declaration, so a delta carrying both is a detach or an exclusion and nothing else.
+  if (containerRef(claims, CTX_CONTAINER_EXCLUDED) !== undefined) return undefined;
+  if (containerRef(claims, CTX_CONTAINER_DETACHED) !== undefined) return undefined;
+  const name = containerRef(claims, CTX_CONTAINER);
+  if (name === undefined) return undefined;
+  const trust = primitives(claims, "trust")[0];
+  // A RETIRED posture word still binds HERE, unlike at the door: a store is migrated when someone
+  // runs `loam migrate`, and until then dropping its containers would empty every scope and blind
+  // the erasure guard without saying a word (H9). The word is normalized, never widened — the
+  // legacy pair maps onto the same two postures, so nothing new becomes lawful.
+  const posture = asPosture(primitives(claims, "posture")[0]);
+  if (
+    typeof trust !== "string" ||
+    !TRUSTS.has(trust) ||
+    posture === undefined ||
+    (trust === "untrusted" && posture === "shared")
+  ) {
+    return undefined;
+  }
+  return { name, trust, posture };
+}
+
 // The surviving lawful declaration ids for one entity — what a strike-the-declaration act negates.
 export function survivingDeclarationIds(
   reactor: Reactor,
@@ -802,9 +829,7 @@ export function everDeclared(
   // whose trust or posture the law refuses — so a name that only ever carried one never stood, and
   // reporting it as dropped would refuse a road forever over a container nobody ever had.
   return lawfulDeltasAt(reactor, { entity, context: CTX_CONTAINER }, operator).some(
-    (delta) =>
-      containerRef(delta.claims, CTX_CONTAINER) === entity &&
-      containerDefect(delta, reactor, operator) === undefined,
+    (delta) => boundContainer(delta.claims)?.name === entity,
   );
 }
 
