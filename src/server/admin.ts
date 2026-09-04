@@ -86,7 +86,7 @@ import { MemoryBackend } from "../store/memory.js";
 import { adminFederation } from "./admin-federation.js";
 import { declareOwned, ensureUserKey } from "./provision.js";
 import { leewayFromFields } from "./leeway-form.js";
-import { appendRefusal } from "./http.js";
+import { appendRefusal } from "./refusal.js";
 import { subtreeOf } from "./subtree.js";
 import { CSP, escapeHtml, page, sameSecret, type SessionGate } from "./session.js";
 import {

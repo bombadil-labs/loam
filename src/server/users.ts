@@ -57,10 +57,16 @@ export function userNameDefect(name: string): string | undefined {
   return undefined;
 }
 
-// THE POOL TOKENS ARE RESERVED, AT MINTING ONLY. The leeway walk reads a container whose LEADING
-// token is `inbox` or `channel` as a pool and hops it to the container it was opened into. A
-// person named `inbox` would own a home that walk hops away from, and no door writes an `inboxOf`
-// onto a home, so the hop would find nothing.
+// THE POOL TOKENS ARE RESERVED, AT MINTING ONLY.
+//
+// A person's name is the root of their container path, so a person named `inbox` owns
+// `inbox:notes`, `inbox:journal`, and every other name below their home. Those names lead with
+// `inbox:`, which is exactly what the reading side calls a POOL: `governingLeeway` treats such a
+// name as a pool and resolves its leeway through the container it was opened into, and
+// `openerStands` reconstructs a bound channel's opener from the same `inbox:<container>:` stem.
+// Neither would find what it expects, because nothing wrote a pointer onto a person's own child.
+// The home itself is safe — `inbox` has no colon and is not pool-shaped — so it is the SUBTREE
+// that collides, not the name.
 //
 // THIS IS NOT `userNameDefect`, deliberately. That one is asked on every READ and every login,
 // so folding this in would lock out a person already named `inbox` in a store provisioned before

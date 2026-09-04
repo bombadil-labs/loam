@@ -36,46 +36,72 @@
 // AT MINTING ONLY — `userNameDefect` is asked on every read and every login, so folding it there
 // would strand a person already named `inbox` in a store provisioned before the rule.
 //
-// RAILS-RED on origin/main, this file copied in: 16 red, 0 green — 16 cases. No control: every
-// case names a verb or a rule this slice adds, and none of them exists on the base.
+// RAILS-RED on origin/main, this file copied in: the suite does not LOAD there — it imports
+// src/server/refusal.js, a module this slice adds — so every case is red and vitest reports one
+// failed suite rather than sixteen failed cases. Measured at the last revision whose imports the
+// base could resolve: 16 red, 0 green over 16 cases, no control.
 //
-// REVERT PROBES, MEASURED against this file as it stands — 16 cases. Re-measure when you add one.
-//   the fence drops its colon                        → 11 red, 4 green
-//   the fence admits an empty segment                →  1 red, 15 green
-//   no bound on the name's length or depth           →  1 red, 15 green
-//   leeway admits the caller's OWN container         →  1 red, 15 green
-//   declare skips the standing-name check            →  1 red, 15 green
-//   declare writes no parent edge                    →  8 red, 7 green
-//   declare declares the target and not the middles  →  1 red, 15 green
-//   leeway drops the record's pool refusal           →  1 red, 15 green
-//   leeway asks the name and not the reach           →  1 red, 15 green
-//   the standing check is gone                       →  1 red, 15 green
-//   the unbound check is gone                        →  1 red, 15 green
-//   the parser drops an unknown key                  →  1 red, 15 green
-//   the leeway re-declaration drops the parent       →  3 red, 12 green
-//   the reservation is gone from the minting door    →  1 red, 15 green
-//   the reservation is folded into userNameDefect    →  1 red, 15 green
-//   the refusal helper slices a non-law error        →  1 red, 15 green
+// REVERT PROBES, MEASURED against this file as it stands — 18 cases. Re-measure when you add one.
+//   the fence drops its colon                            → 12 red,  6 green
+//   the fence admits an empty level                      →  1 red, 17 green
+//   no bound on the name's length or depth               →  1 red, 17 green
+//   leeway admits the caller's OWN container             →  1 red, 17 green
+//   declare skips the standing-name check                →  1 red, 17 green
+//   declare writes no parent edge                        →  8 red, 10 green
+//   declare declares the target and not the middles      →  1 red, 17 green
+//   declare reports only the name it was asked for       →  1 red, 17 green
+//   leeway drops the record's pool refusal               →  1 red, 17 green
+//   leeway asks the name and not the reach               →  1 red, 17 green
+//   the standing check asks only the grant               →  1 red, 17 green
+//   the standing check is gone entirely                  →  2 red, 16 green
+//   the act's other name asks nothing                    →  1 red, 17 green
+//   receive skips the shared name rule                   →  1 red, 17 green
+//   the unbound check is gone                            →  1 red, 17 green
+//   the parser drops an unknown key                      →  2 red, 16 green
+//   the door reports success over a refused append       →  1 red, 17 green
+//   the leeway re-declaration drops the parent           →  3 red, 15 green
+//   the reservation is gone from loam init --user        →  1 red, 17 green
+//   the reservation is gone from user create             →  1 red, 17 green
+//   the reservation is gone from pen create              →  1 red, 17 green
+//   the reservation is folded into userNameDefect        →  1 red, 17 green
+//   the refusal helper slices a non-law error            →  1 red, 17 green
+//   the walk climbs past the connection's own container  →  0 red, 18 green
 //
-// SIX OF THESE PROBES WERE GREEN BEFORE AN INDEPENDENT REVIEW, and each green was a rail that
-// looked right: the pool case asked for a leeway the one rule refused anyway, so it could not tell
-// a pool rule from no rule; the parser was exercised with one switch, so two thirds of it could
-// have been deleted; the reservation was asserted against the rule rather than a door; a
-// re-declared parent was unasserted; and two refusals were read as booleans, so a different rule's
-// sentence satisfied them.
+// THE LAST PROBE IS GREEN, AND THAT IS THE HONEST RECORD. The walk that declares missing levels is
+// guarded twice: it stops at the connection's own container, and the standing check above refuses
+// when that container does not stand. The second guard refuses first in every state a rail can
+// reach, so the first is defence in depth and no case can red it alone. Written down rather than
+// dropped, because a probe removed for being green reads exactly like a probe never run.
+//
+// ONE MORE CASE IS HELPER-LEVEL, and says so here: `a refusal is the store's own sentence, whole`
+// calls `appendRefusal` directly. Every other case in this file goes through a door.
+//
+// EIGHT PROBES WERE GREEN BEFORE INDEPENDENT REVIEW, over two rounds, and every green was a rail
+// that read correctly. Round one: the pool case asked for a leeway the one rule refused anyway; the
+// parser was exercised with one switch; the reservation was asserted against the rule and not a
+// door; a re-declared parent was unasserted; two refusals were read as booleans. Round two found
+// three defects the FIXES introduced — the middles walk could resurrect a container a person had
+// just dropped, the act's other name skipped every new check, and the receive door minted from a
+// name rule only its sibling asked — and none of them was visible to any rail until it was named.
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { signClaims } from "@bombadil/rhizomatic";
-import { containerClaims, readContainerTable } from "../../src/gateway/container.js";
+import {
+  containerClaims,
+  readContainerTable,
+  survivingDeclarationIds,
+} from "../../src/gateway/container.js";
 import { subtreeOf } from "../../src/server/subtree.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { SEALED_LEEWAY, type Leeway, type Terms } from "../../src/gateway/leeway.js";
-import { appendRefusal, serve, type ServerHandle } from "../../src/server/http.js";
+import { serve, type ServerHandle } from "../../src/server/http.js";
+import { appendRefusal } from "../../src/server/refusal.js";
 import { run } from "../../src/cli/cli.js";
+import { readPenSeed } from "../../src/cli/config.js";
 import { readCredentials, type ScryptParams } from "../../src/server/credentials.js";
 import { reservedNameDefect, userNameDefect } from "../../src/server/users.js";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -206,6 +232,9 @@ describe("§58 — the container roster", () => {
 
     const made = await declareTool(base, ada, "ada:journal:notes");
     expect(made.isError, made.text).toBe(false);
+    expect(JSON.parse(made.text), "and the reply names what it signed").toMatchObject({
+      declared: ["ada:journal:notes"],
+    });
     // The delta level: the record stands, with the path parent as its edge.
     const rec = recOf(gateway, "ada:journal:notes");
     expect(rec, "the container stands").toBeDefined();
@@ -350,6 +379,11 @@ describe("§58 — the container roster", () => {
     const ada = await connect(base, "ada", "journal");
     const deep = await declareTool(base, ada, "ada:journal:notes:drafts:old");
     expect(deep.isError, deep.text).toBe(false);
+    // REPORTS WHAT IT SIGNED. Naming one level below an undeclared one declares them all, and a
+    // reply naming only the target would hide permanent law the caller never asked for (H7).
+    expect(JSON.parse(deep.text)).toMatchObject({
+      declared: ["ada:journal:notes", "ada:journal:notes:drafts", "ada:journal:notes:drafts:old"],
+    });
     for (const level of [
       "ada:journal:notes",
       "ada:journal:notes:drafts",
@@ -390,7 +424,9 @@ describe("§58 — the container roster", () => {
     ]) {
       const r = await declareTool(base, ada, bad);
       expect(r.isError, `${bad.slice(0, 40)} is refused`).toBe(true);
-      expect(r.text).toMatch(FENCE);
+      expect(r.text, "and the refusal names the rule it broke").toMatch(
+        /empty level|at most \d+ (characters|levels)|the path and its colon/,
+      );
     }
     expect(gateway.containers().containers.size, "and none of them stands").toBe(before);
     await closeAll();
@@ -593,6 +629,90 @@ describe("§58 — the container roster", () => {
     await closeAll();
   });
 
+  it("a dropped container is not resurrected by the connection it held", async () => {
+    // THE POOL OUTLIVES THE CONTAINER. Dropping a shared container strikes that container's
+    // declarations and leaves the connection's inbox pool declared and attached, so the grant
+    // check alone still says the connection stands. A walk that climbed to the nearest declared
+    // ancestor would then re-declare the dropped container itself — undoing the person's act,
+    // signed with the store's own key, at the request of the party it was aimed at.
+    const { base, gateway } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    expect((await declareTool(base, ada, "ada:journal:before")).isError, "premise").toBe(false);
+
+    // Strike the container's declarations and leave the pool alone. This is the SHIPPED shape:
+    // `survivingDeclarationIds` is what the admin page's drop-confirm road gathers for a shared
+    // container, and negating them is what it appends.
+    const ids = survivingDeclarationIds(gateway.reactor, gateway.operatorAuthor!, "ada:journal");
+    expect(ids.length, "premise: ada:journal was declared").toBeGreaterThan(0);
+    await gateway.append(
+      ids.map((id) =>
+        signClaims(
+          {
+            timestamp: gateway.nextTimestamp(),
+            author: OPERATOR,
+            pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
+          },
+          OPERATOR_SEED,
+        ),
+      ),
+    );
+    expect(recOf(gateway, "ada:journal"), "premise: the container is gone").toBeUndefined();
+    // And the pool it was bound under is still there: that is exactly why the grant check alone
+    // would still say this connection stands.
+    expect(gateway.connectionInboxes.size, "premise: the pool outlives it").toBeGreaterThan(0);
+
+    const after = await declareTool(base, ada, "ada:journal:after");
+    expect(after.isError, after.text).toBe(true);
+    expect(after.text, "and it says the standing ended").toMatch(/no longer stands/);
+    expect(recOf(gateway, "ada:journal"), "the dropped container stays dropped").toBeUndefined();
+    expect(recOf(gateway, "ada:journal:after"), "and nothing new stands").toBeUndefined();
+    await closeAll();
+  });
+
+  it("the act's other name asks the same questions", async () => {
+    // `loam_container_receive` and `loam_federate_connect` are one road. A check only the roster
+    // name asks is a check a caller skips by typing the other name, and tools/list hands every
+    // caller both.
+    const { base, gateway, connectorsHome } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    await declareAs(gateway, "ada:journal", OPEN);
+    const from = await peerStore();
+
+    // The name rule: an empty level is refused under BOTH names, and mints nothing.
+    const before = gateway.containers().containers.size;
+    for (const verb of ["loam_container_receive", "loam_federate_connect"] as const) {
+      const r = await callTool(base, ada, verb, {
+        from,
+        into: "ada:journal:",
+        prefix: "ada:journal::peer",
+        token: PEER_TOKEN,
+      });
+      expect(r.isError, `${verb} refuses an empty level`).toBe(true);
+    }
+    expect(gateway.containers().containers.size, "and neither minted anything").toBe(before);
+
+    // The standing rule: once the connection's grant is struck, both names refuse.
+    const grant = readOAuthFile(connectorsHome).grants[0]!;
+    await gateway.revokeConnection({
+      inbox: gateway.connectionInboxes.get(grant.inbox!)!,
+      connectionKey: grant.actor,
+      ownerSeed: OPERATOR_SEED,
+    });
+    for (const verb of ["loam_container_receive", "loam_federate_connect"] as const) {
+      const r = await callTool(base, ada, verb, {
+        from,
+        into: "ada:journal:inbox",
+        prefix: "ada:journal:inbox:peer",
+        token: PEER_TOKEN,
+      });
+      expect(r.isError, `${verb} refuses a connection that no longer stands`).toBe(true);
+      expect(r.text, `${verb} says why`).toMatch(/no longer stands/);
+    }
+    expect(gateway.channelStatus().length, "and no channel stands").toBe(0);
+    await closePeers();
+    await closeAll();
+  });
+
   it("an unbound caller is refused every roster verb, and is offered them anyway", async () => {
     const { base, gateway } = await connectionServer();
     // `op-token` is the operator's own door token: full authority, and bound to no container.
@@ -641,19 +761,39 @@ describe("§58 — the container roster", () => {
       expect(reservedNameDefect(ok), `${ok} may be minted`).toBeUndefined();
     }
 
-    // THE DOOR. `loam user create` is where a person's name is minted; nothing is written when it
-    // refuses, and an ordinary name still mints.
+    // EVERY DOOR THAT MINTS ONE, and there are THREE. A rule one door asks is a rule the other
+    // two do not: `loam init --user`, `loam user create` and `loam pen create` each name a person
+    // or a pen, and each writes a home or a seed file under that name.
     const home = mkdtempSync(join(tmpdir(), "loam-roster-user-"));
     try {
       const err: string[] = [];
       const io = { out: () => {}, err: (m: string) => err.push(m) };
       const pw = { readSecret: () => Promise.resolve("pw"), scrypt: CHEAP_SCRYPT };
+
+      // `loam init --user inbox` — refused before the store is even made.
+      expect(await run(["init", "--home", home, "--user", "inbox"], io, pw)).toBe(2);
+      expect(err.join("\n"), "init says why").toMatch(/reserved/);
+      err.length = 0;
+
       expect(await run(["init", "--home", home, "--no-user"], io)).toBe(0);
+
+      // `loam user create inbox` — refused, and nothing is minted.
       expect(await run(["user", "create", "inbox", "--home", home], io, pw)).toBe(2);
-      expect(err.join("\n"), "the door says why").toMatch(/reserved/);
+      expect(err.join("\n"), "user create says why").toMatch(/reserved/);
       expect(readCredentials(home).users["inbox"], "and mints nothing").toBeUndefined();
+      err.length = 0;
+
+      // `loam pen create channel` — refused, and no seed file is written.
+      expect(await run(["pen", "create", "channel", "--home", home], io, pw)).toBe(2);
+      expect(err.join("\n"), "pen create says why").toMatch(/reserved/);
+      expect(readPenSeed(home, "channel").kind, "and writes no seed").toBe("absent");
+      err.length = 0;
+
+      // The other side, at the same doors: an ordinary name still mints.
       expect(await run(["user", "create", "inboxer", "--home", home], io, pw)).toBe(0);
       expect(readCredentials(home).users["inboxer"], "the ordinary name mints").toBeDefined();
+      expect(await run(["pen", "create", "channels", "--home", home], io, pw)).toBe(0);
+      expect(readPenSeed(home, "channels").kind, "and the ordinary pen").toBe("present");
     } finally {
       rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
