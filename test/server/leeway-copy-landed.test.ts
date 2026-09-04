@@ -19,6 +19,7 @@
 //
 // REVERT PROBES, MEASURED against this file as it stands — 2 cases.
 //   a bullet in the section drifts from the module's words   → 1 red, 1 green
+//   the section grows a sentence no control renders          → 1 red, 1 green
 //   the order the record sets is scrambled                   → 1 red, 1 green
 
 import { describe, expect, it } from "vitest";
@@ -54,9 +55,6 @@ describe("§58.11 — the module is the LANDED section's five, word for word", (
     expect(LEEWAY_CONTROLS, "and the module carries five").toHaveLength(5);
     for (const [i, control] of LEEWAY_CONTROLS.entries()) {
       const bullet = bullets[i]!;
-      // EQUALITY OF THE PARTS, not containment of the whole. Containment lets a risk sentence be
-      // truncated to a prefix — or emptied entirely — in the one rail whose whole job is holding
-      // the promise where the record put it.
       expect(bullet, `${control.label}: the section's bullet names it`).toContain(
         `**${control.label}**`,
       );
@@ -67,6 +65,14 @@ describe("§58.11 — the module is the LANDED section's five, word for word", (
       expect(flat(control.risk).length, `${control.label}'s risk is a sentence`).toBeGreaterThan(
         40,
       );
+      // BOTH DIRECTIONS. Containment alone catches a module whose words shrink, and misses a
+      // SECTION that grows a sentence the module never renders — a promise in the record that no
+      // control makes, which is the same defect wearing the other coat.
+      const parts = flat(`${control.label} ${control.capability} ${control.risk}`).length;
+      expect(
+        flat(bullet).length,
+        `${control.label}: the section says no more than the control does`,
+      ).toBeLessThanOrEqual(parts + 12);
     }
   });
 

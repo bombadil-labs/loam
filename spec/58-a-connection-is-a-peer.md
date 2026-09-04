@@ -160,8 +160,8 @@ deltas go to its inbox pool, and a write seam that cannot reach one refuses rath
 back. Declaring a container is the exception that proves the shape — the STORE signs that law, in
 the primary, at the connection's request, and it is refused unless the name is inside the fence.
 
-A **resolver** arriving on its channel stays inert; that is federation's own rule (§46) and this
-section does not restate its proof. Declaring or binding above the connection's own root refuses
+A **resolver** arriving on its channel stays inert; that is §24's rule — foreign law is inert by
+default — and this section does not restate its proof. Declaring or binding above the connection's own root refuses
 with the sentence naming the rule, and no refusal names a container outside the caller's own fence.
 The envelope binds: a pool's report is clamped under the operator's ceiling on every resolve.
 
@@ -190,8 +190,9 @@ froze.
 
 ## 58.11 The five controls, in words
 
-The consent page and the container's own page render the leeway as five controls, unchecked by
-default, as native controls with their label and description associated in the markup. Delegate's
+The consent page and the container's own page render the leeway as five controls — four switches
+off by default and the envelope at its smallest — as native controls with their label and
+description associated in the markup. Delegate's
 terms unfold beneath it when it is on. A person reads what they are turning on, in words, before
 they turn it on — and these are the words:
 
@@ -201,15 +202,15 @@ they turn it on — and these are the words:
 - **Delegate** — *Let what exists under this container differ from it, on the terms you set here.* Turn it on and its terms unfold beneath: the same switches, an envelope ceiling, and *may delegate further*. An agent here may then declare sub-containers with their own leeway inside those terms, and hand out keys to helpers that live in them. *The risk:* anything you allow below, the agent here can reach through its subtree — an annex that receives is a room it can read. Helpers write under their own names, can never reach outside this container, and are revoked when the agent is — but until then, what they write is real.
 - **Envelope** — *How much compute an agent here may spend running things behind glass:* small, medium, or large. *The risk:* a larger envelope lets a misbehaving app run longer and use more memory before the store stops it. It never grants reach.
 
-Those five sentences are the promise, and `src/gateway/leeway-copy.ts` carries them verbatim; the
-rail compares the module to this section, so a control whose words drift from what is recorded here
-is a red bar.
+Those five sentences are the promise, and `src/gateway/leeway-copy.ts` carries them word for word
+apart from this record's emphasis; the rail compares the module to this section, so a control whose
+words drift from what is recorded here is a red bar.
 
 ## 58.12 The roster: what a connection does in conversation
 
 Five verbs. Every one of them asks first whether the connection still **stands** — its container
 declared, its chain of parents whole, its pool's write grant surviving — because all five act on
-the store's own key. What they ask second differs, and the difference is the act: the three that
+the authority of the binding, whether they write or only stage. What they ask second differs, and the difference is the act: the three that
 name a container ask whether the name is inside the fence this binding draws; the two that name a
 channel or a delta ask who opened it, and what the container gathers.
 
@@ -224,13 +225,15 @@ channel or a delta ask who opened it, and what the container gathers.
 
 The two staged verbs move no bytes. A sever purges a peer's pool and a promotion re-signs a claim
 under the store's own name in canonical history, where erasure is the only way back out — so both
-hand back a preview and a link, and a person completes them: on the container's own page, behind a
-session gate a connector token cannot obtain, or from the command line, which is the road when the
-container is not one the signed-in person's page reaches. An agent nominates; a person decides.
+hand back a preview and a link, and a person completes them on the container's own page, behind a
+session gate a connector token cannot obtain. A sever also carries a command line, which is the
+road when the container is not one the signed-in person's page reaches; a promotion has no such
+road and is the page's alone. An agent nominates; a person decides.
 
 **A sixth verb is not here.** §58's working spec decided a peer's *renderer* is blessable by a
-connection and its *resolvers* never; §46.5 decided that no tool mounts a stranger's code at all,
-because tools are the unit of consent and that is not a consent a connector token may give. Both
+connection and its *resolvers* never; and §46's own rail decided that no tool mounts a stranger's
+code at all — tools are the unit of consent, and that was held not to be a consent a connector
+token may give. Both
 are landed and they disagree. The verb is not built until that is settled.
 
 **Provenance.** PRs #517 (the working spec), #520–#524 (S1a: the consent page's binding field and
