@@ -26,11 +26,21 @@
 // tools answers "unknown tool", which is an error like any other — so a case asserting only that a
 // refusal HAPPENED passed where the feature did not exist. It now matches the verb's own sentence.
 //
-// REVERT PROBES, MEASURED against this file as it stands — 6 cases.
-//   sever is not routed to the staged road          → 2 red, 4 green
-//   promote-stage does not ask the gather           → 1 red, 5 green
-//   promote-stage admits an unbound caller          → 1 red, 5 green
-//   the roster block swallows the staged verbs      → 1 red, 5 green (and 1 red in container-tools)
+// REVERT PROBES, MEASURED against this file as it stands — 8 cases.
+//   sever is not routed to the staged road          → 2 red, 6 green
+//   sever stages an unnamed channel                 → 1 red, 7 green
+//   promote-stage does not ask the gather           → 1 red, 7 green
+//   promote-stage skips the primary-ground gate     → 1 red, 7 green
+//   promote-stage admits an unbound caller          → 1 red, 7 green
+//   the preview names only the other channels       → 1 red, 7 green
+//   the roster block swallows the staged verbs      → 1 red, 7 green (and 1 red in container-tools)
+//   the promote fault is echoed to the caller       → 0 red, 8 green
+//
+// THE LAST PROBE IS GREEN, AND THAT IS THE HONEST RECORD. `containerScope` throws only when a
+// SEPARATE container in the gather is not attached, and this fixture has no detached pool to
+// build one with. The guard maps that throw onto a fixed sentence and logs the detail, because
+// the raw refusal names the container it could not attach — which can be a sibling pool the
+// caller never opened. It is written down rather than deleted.
 
 import { describe, expect, it } from "vitest";
 import { signClaims } from "@bombadil/rhizomatic";
@@ -154,6 +164,23 @@ async function withChannel(): Promise<{
 }
 
 describe("§58 — the roster stages, and a person decides", () => {
+  it("sever wants the channel by name, and stages nothing without one", async () => {
+    // `channelStatus(undefined)` returns EVERY channel, so an omitted argument used to stage the
+    // FIRST one the caller could reach — handing back a ready confirm link and a `--yes` command
+    // line for a channel nobody chose. It purges nothing by itself, and it is still the one
+    // artifact of this road that leads to a real deletion.
+    const { base, gateway, ada, channel } = await withChannel();
+    for (const args of [{}, { channel: 7 }, { channel: ["x"] }, { channel: null }]) {
+      const r = await callTool(base, ada, "loam_container_sever", args);
+      expect(r.isError, `${JSON.stringify(args)} is refused`).toBe(true);
+      expect(r.text, "and it asks for the name").toMatch(/wants the `channel`/);
+      expect(r.text, "without naming one it picked").not.toContain(channel);
+    }
+    expect(gateway.channelStatus().length, "and the channel stands").toBe(1);
+    await closePeers();
+    await closeAll();
+  });
+
   it("sever hands back a preview and a link, and purges nothing", async () => {
     const { base, gateway, ada, channel, poolSize } = await withChannel();
     const staged = await callTool(base, ada, "loam_container_sever", { channel });
@@ -169,6 +196,10 @@ describe("§58 — the roster stages, and a person decides", () => {
     expect(said.purgedNothing, "it says so plainly").toBe(true);
     expect(said.confirmAt, "and hands a person the page").toContain("/admin/container");
     expect(said.wouldPurge.join(" "), "naming what would go").toContain(channel);
+    // TWO-SIDED, LIKE EVERY OTHER PREVIEW OF A REMOVAL. `wouldSurvive` listing only the OTHER
+    // channels is an empty array on a store with one, under a field name that reads as a claim
+    // that nothing survives. The container the channel receives into does.
+    expect(said.wouldSurvive.join(" "), "and naming what stays").toContain("ada:journal");
 
     // AT THE BYTES, which is the only assertion that can see a staged act that acted.
     expect(
@@ -223,25 +254,48 @@ describe("§58 — the roster stages, and a person decides", () => {
   });
 
   it("promote-stage asks the gather, and names nothing outside it", async () => {
-    const { base, gateway, ada, channel } = await withChannel();
+    const { base, gateway, ada } = await withChannel();
+    // A delta that EXISTS and is NOT in this container's gather: bea's own container holds it.
+    // The refusal must not confirm that it exists anywhere — the same no-oracle rule the admin
+    // page's promote gate keeps. An invented id would be answered the same way, which is the
+    // point: the two must be indistinguishable.
+    await connect(base, "bea", "notes");
     const before = [...gateway.reactor.snapshot()].length;
-    // A delta that EXISTS, in the peer's pool, but is not in this container's gather. The refusal
-    // must not confirm that it exists anywhere: the same no-oracle rule the admin page keeps.
-    const inPool = [...gateway.channelPools.get(channel)!.gateway!.reactor.snapshot()][0]!;
-    const outside = await callTool(base, ada, "loam_container_promote_stage", { delta: inPool.id });
-    if (!outside.isError) {
-      // If the pool composes into the gather, this delta IS the container's to nominate, and the
-      // case has nothing to prove; a made-up id is the honest probe then.
-      const invented = await callTool(base, ada, "loam_container_promote_stage", {
-        delta: "0".repeat(64),
-      });
-      expect(invented.isError, invented.text).toBe(true);
-      expect(invented.text).toMatch(/nothing in ada:journal's gather/);
-    } else {
-      expect(outside.text).toMatch(/nothing in ada:journal's gather/);
-      expect(outside.text, "and says nothing about where it does live").not.toContain(channel);
+    const beaHeld = gateway.containerScope({ containers: ["bea:notes"] })[0];
+    const elsewhere =
+      beaHeld === undefined
+        ? undefined
+        : await callTool(base, ada, "loam_container_promote_stage", { delta: beaHeld.id });
+    const invented = await callTool(base, ada, "loam_container_promote_stage", {
+      delta: "0".repeat(64),
+    });
+    expect(invented.isError, invented.text).toBe(true);
+    expect(invented.text).toMatch(/nothing in ada:journal's gather/);
+    if (elsewhere !== undefined) {
+      expect(elsewhere.isError, elsewhere.text).toBe(true);
+      expect(elsewhere.text, "word for word what a name nobody holds gets").toBe(invented.text);
+      expect(elsewhere.text, "and it names no other container").not.toContain("bea:notes");
     }
     expect([...gateway.reactor.snapshot()].length, "and nothing was adopted").toBe(before);
+    await closePeers();
+    await closeAll();
+  });
+
+  it("promote-stage refuses a delta the primary ground already holds", async () => {
+    // THE SECOND GATE THE PAGE ASKS. A delta already in the primary has nothing left to move, and
+    // the page renders no control for it — so staging one hands a person a link to a button that
+    // is not there, over a preview naming something that can never be adopted. A preview must be
+    // true of what a completion would do.
+    const { base, gateway, ada } = await withChannel();
+    const primary = gateway
+      .containerScope({ containers: ["ada:journal"] })
+      .find((d) => gateway.reactor.get(d.id) !== undefined);
+    expect(primary, "premise: the gather holds something the primary already has").toBeDefined();
+    const staged = await callTool(base, ada, "loam_container_promote_stage", {
+      delta: primary!.id,
+    });
+    expect(staged.isError, staged.text).toBe(true);
+    expect(staged.text).toMatch(/already lives in the primary ground/);
     await closePeers();
     await closeAll();
   });

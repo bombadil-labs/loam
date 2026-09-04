@@ -1598,7 +1598,13 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         target === undefined
           ? []
           : [`${target.name} (everything received from "${target.prefix}")`],
-      survives: rows.filter((c) => c.name !== channel).map((c) => c.name),
+      // THE RECEIVING CONTAINER SURVIVES, and saying only "the other channels" reads as a claim
+      // that nothing else does — which on a store with one channel is an empty list under a field
+      // called `wouldSurvive`. A drop preview is two-sided or it is not a preview.
+      survives: [
+        ...(target === undefined ? [] : [`${target.into} (the container it receives into)`]),
+        ...rows.filter((c) => c.name !== channel).map((c) => c.name),
+      ],
     };
   };
 
@@ -2412,8 +2418,23 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
               .containerScope({ containers: [binding.container] })
               .find((d) => d.id === wanted);
           } catch (err) {
+            // THE FAULT IS THE SERVER'S, NOT THE CALLER'S SENTENCE. The raw refusal names the
+            // container it could not attach, which can be a sibling pool this caller never opened.
+            // The admin page maps the same throw onto a fixed sentence and logs the detail; this
+            // is one act on two roads, and they answer the same way.
+            options.connectors?.onFault?.(
+              `the roster's promote-stage could not read the gather of "${binding.container}": ` +
+                appendRefusal(err),
+            );
             reply({
-              content: [{ type: "text", text: appendRefusal(err) }],
+              content: [
+                {
+                  type: "text",
+                  text:
+                    `${binding.container}'s gather cannot be read right now, so nothing was ` +
+                    `staged.`,
+                },
+              ],
               isError: true,
             });
             return;
@@ -2426,6 +2447,24 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
                   text:
                     `nothing in ${binding.container}'s gather has that id, so there is nothing ` +
                     `here to nominate.`,
+                },
+              ],
+              isError: true,
+            });
+            return;
+          }
+          // THE SECOND GATE THE PAGE ASKS. A delta already in the primary ground has nothing left
+          // to move, and the page renders no control for it — so staging one would hand a person a
+          // link to a button that is not there, over a preview naming something that can never be
+          // adopted. The preview must be true of what a completion would do.
+          if (gateway.reactor.get(held.id) !== undefined) {
+            reply({
+              content: [
+                {
+                  type: "text",
+                  text:
+                    "that delta already lives in the primary ground — promotion moves a " +
+                    "container's own output into the primary, and there is nothing left to move.",
                 },
               ],
               isError: true,
@@ -2535,6 +2574,22 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         // The roster's `sever` is this act, named for its caller: one road, two names, so the
         // two cannot answer a caller differently. It stages, and stages only.
         if (name === "loam_federate_drop" || name === "loam_container_sever") {
+          // NAMED, OR NOTHING. `channelStatus(undefined)` returns EVERY channel, so an omitted
+          // argument used to stage the first one the caller could reach — handing back a ready
+          // confirm link and a `--yes` command line for a channel nobody chose. It purges nothing
+          // by itself, but it is the one artifact of this road that leads to a real deletion.
+          if (typeof args.channel !== "string") {
+            reply({
+              content: [
+                {
+                  type: "text",
+                  text: "this wants the `channel` to sever, by name. loam_federate_status lists them.",
+                },
+              ],
+              isError: true,
+            });
+            return;
+          }
           const standing = federateStanding(gateway, identity);
           const target = gateway
             .channelStatus(args.channel)
