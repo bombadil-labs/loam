@@ -26,6 +26,7 @@
     "test/server/leeway.test.ts",
     "test/server/leeway-copy.test.ts",
     "test/server/container-tools.test.ts",
+    "test/server/roster-staged.test.ts",
     "test/browser/leeway-controls.test.ts"
   ],
   "status": "todo",
