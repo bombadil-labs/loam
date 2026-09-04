@@ -47,20 +47,7 @@ export const userEntity = (name: string): string => `user:${name}`;
 // that are safe in all three, and short enough to read in a provenance trail.
 const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
-// THE POOL TOKENS ARE RESERVED. The leeway walk reads a container whose LEADING token is `inbox`
-// or `channel` as a pool and hops it to the container it was opened into. A person named `inbox`
-// would own a home that walk hops away from, and every name below it with it. No door writes an
-// `inboxOf` onto a person's home, so the hop would find nothing and the subtree would govern by
-// the wrong record. Refusing the name is cheaper than teaching the walk to tell them apart.
-const RESERVED = new Set(["inbox", "channel"]);
-
 export function userNameDefect(name: string): string | undefined {
-  if (RESERVED.has(name)) {
-    return (
-      `"${name}" is reserved: a container whose name begins with it is a pool, which takes its ` +
-      `leeway from the container it was opened into. Pick another name.`
-    );
-  }
   if (!NAME.test(name)) {
     return (
       `"${name}" is not a user name: use 1–64 characters of a–z, 0–9, dot, dash or underscore, ` +
@@ -68,6 +55,25 @@ export function userNameDefect(name: string): string | undefined {
     );
   }
   return undefined;
+}
+
+// THE POOL TOKENS ARE RESERVED, AT MINTING ONLY. The leeway walk reads a container whose LEADING
+// token is `inbox` or `channel` as a pool and hops it to the container it was opened into. A
+// person named `inbox` would own a home that walk hops away from, and no door writes an `inboxOf`
+// onto a home, so the hop would find nothing.
+//
+// THIS IS NOT `userNameDefect`, deliberately. That one is asked on every READ and every login,
+// so folding this in would lock out a person already named `inbox` in a store provisioned before
+// the rule — no login, no roles resolved, no road back, and if they held the operator role, no
+// admin surface at all. A name at rest keeps working; only a NEW one is refused.
+const RESERVED = new Set(["inbox", "channel"]);
+
+/** Why this name may not be MINTED. Absent means it may. Asked by the doors that create a person. */
+export function reservedNameDefect(name: string): string | undefined {
+  return RESERVED.has(name)
+    ? `"${name}" is reserved: a container whose name begins with it is a pool, which takes its ` +
+        `leeway from the container it was opened into. Pick another name.`
+    : undefined;
 }
 
 /**

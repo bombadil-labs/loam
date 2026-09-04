@@ -3,6 +3,9 @@
   "category": "test",
   "duration": 1,
   "id": "T275",
+  "rails": [
+    "test/server/docs-schedule.test.ts"
+  ],
   "state": "todo",
   "title": "Stop two docs rails racing on the real docs/ directory"
 }

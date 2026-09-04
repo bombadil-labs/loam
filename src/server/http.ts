@@ -80,6 +80,7 @@ import {
   openerStands,
   readContainerTable,
   receivesNow,
+  subtreeUnder,
 } from "../gateway/container.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
 import { readSeed, readUserSeed, userSeedPath } from "../cli/config.js";
@@ -90,7 +91,7 @@ import { ADMIN_CONTAINER_PATH } from "./admin-pages.js";
 import { refusalKey } from "../gateway/lifecycle.js";
 import type { ChannelStatus } from "../federation/channel.js";
 import type { ConnectionBinding } from "../gateway/gateway.js";
-import type { EnvelopeSize, Leeway, Terms } from "../gateway/leeway.js";
+import { canonicalLeewayJson, parseLeeway, type Leeway } from "../gateway/leeway.js";
 
 export { type UserDoorOptions } from "./session.js";
 
@@ -645,58 +646,81 @@ function receiveRefusal(
         "switch off";
 }
 
+// A container name a connection may mint. Both bounds are generous for any real subtree and finite
+// for a caller that is not building one: a declaration is permanent operator-signed law, and the
+// reach walks are fixpoints over the whole table.
+const MAX_CONTAINER_NAME = 512;
+const MAX_CONTAINER_DEPTH = 16;
+
+// A container a connection declares serves through what is nested inside it, exactly like the
+// receiving container `openChannel` declares. Its own membership matches no author, so nothing
+// lands in its ground directly. Same Term, same reason (federation/channel.ts).
+const CONNECTION_AGGREGATOR = {
+  op: "select",
+  pred: { match: { field: "author", cmp: "eq", const: "\u0000none" } },
+  in: "input",
+} as const;
+
 /**
- * The leeway a container tool was asked for, or the sentence refusing it. Every switch starts off,
- * so an absent field is off — the same default the page renders, arrived at from the other side —
- * and a size or a terms object that is not one of the shapes the law admits is refused here rather
- * than coerced into something the caller did not ask for.
+ * The leeway a container tool was asked for, or the sentence refusing it.
+ *
+ * ERGONOMICS HERE, THE LAW'S STRICTNESS UNDERNEATH. A caller names the switches it wants and every
+ * switch it does not name is off — the same default the consent page renders, arrived at from the
+ * other side. That filling is all this function does. The filled value then goes through
+ * `parseLeeway`, so an unknown key, a bad envelope name, a terms that is not an object and a
+ * nesting deeper than the law admits are all refused in the LAW'S OWN WORDS rather than in a
+ * second set this door would have to keep in step. A misspelled switch that silently read `false`
+ * would be a permission nobody chose, which is the one thing this door must never write.
  */
 function leewayFromTool(args: Record<string, unknown>): Leeway | string {
-  const size = (given: unknown): EnvelopeSize | undefined =>
-    given === undefined
-      ? "small"
-      : given === "small" || given === "medium" || given === "large"
-        ? given
-        : undefined;
-  const badSize = (where: string): string =>
-    `the ${where}envelope is small, medium or large, and what you gave is none of them.`;
-  const terms = (given: unknown, depth: number): Terms | string => {
-    if (typeof given !== "object" || given === null) return "the terms are an object.";
-    const t = given as Record<string, unknown>;
-    const envelope = size(t["envelope"]);
-    if (envelope === undefined) return badSize("terms' ");
-    if (depth >= 8) return "these terms nest deeper than any subtree they could govern.";
-    let delegate: "off" | "same" | Terms;
-    if (t["delegate"] === undefined || t["delegate"] === false) delegate = "off";
-    else if (t["delegate"] === "same" || t["delegate"] === true) delegate = "same";
-    else {
-      const inner = terms(t["delegate"], depth + 1);
-      if (typeof inner === "string") return inner;
-      delegate = inner;
-    }
-    return {
-      receive: t["receive"] === true,
-      offer: t["offer"] === true,
-      publish: t["publish"] === true,
-      envelope,
-      delegate,
-    };
-  };
-  const envelope = size(args["envelope"]);
-  if (envelope === undefined) return badSize("");
-  let delegate: "off" | Terms = "off";
-  if (args["delegate"] !== undefined) {
-    const asked = terms(args["delegate"], 0);
-    if (typeof asked === "string") return asked;
-    delegate = asked;
+  const asked: Record<string, unknown> = { ...args };
+  delete asked["name"];
+  const parsed = parseLeeway(canonicalLeewayJson(fillLeeway(asked, 0)));
+  return "leeway" in parsed ? parsed.leeway : parsed.defect;
+}
+
+/**
+ * Every switch the caller did not name, off; `delegate` absent or `false` as "off" and `true` as
+ * "same", which is how a caller spells them. Keys it does not know are copied through UNCHANGED so
+ * `parseLeeway` sees them and refuses them — filling must never make an unknown key disappear.
+ * Bounded because it recurses over caller input: past the bound the value passes through whole and
+ * the law's own depth rule answers it.
+ */
+function fillLeeway(value: unknown, depth: number): unknown {
+  if (depth > 32 || typeof value !== "object" || value === null || Array.isArray(value)) {
+    return value;
   }
+  const given = value as Record<string, unknown>;
+  const delegate = given["delegate"];
   return {
-    receive: args["receive"] === true,
-    offer: args["offer"] === true,
-    publish: args["publish"] === true,
-    envelope,
-    delegate,
+    receive: false,
+    offer: false,
+    publish: false,
+    envelope: "small",
+    ...given,
+    delegate:
+      delegate === undefined || delegate === false
+        ? "off"
+        : delegate === true
+          ? "same"
+          : typeof delegate === "object" && delegate !== null
+            ? fillLeeway(delegate, depth + 1)
+            : delegate,
   };
+}
+
+/**
+ * What an append refused, in its own words. A container defect arrives wrapped as "malformed law:
+ * <why>", and the wrapper carries nothing a caller can act on. Slicing on `indexOf` alone silently
+ * cuts thirteen characters off every OTHER failure — the store cannot write, the id is tombstoned —
+ * which reports the refusal that matters most in a mangled sentence.
+ */
+export function appendRefusal(err: unknown): string {
+  const detail = err instanceof Error ? err.message : String(err);
+  const marker = "malformed law:";
+  const at = detail.indexOf(marker);
+  const why = at === -1 ? detail : detail.slice(at + marker.length);
+  return why.trim() === "" ? detail : why.trim();
 }
 
 /** May this caller see or act on THIS channel? A bound connection owns the channels its container opened. */
@@ -1593,9 +1617,11 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       name: "loam_container_leeway",
       description:
         "Set what a container in your subtree may do: receive, offer, publish, an envelope size, " +
-        "and the terms below it. Every switch starts off. A leeway that does not fit the terms " +
-        "above it is refused with the sentence naming the ceiling, and a change is a delta the " +
-        "next request obeys. Your own container's leeway is the person's to set, not yours.",
+        "and the terms below it. THIS REPLACES THE WHOLE LEEWAY: every switch you do not name is " +
+        "off, so setting one switch turns the others off. The reply echoes what now stands. A " +
+        "leeway that does not fit the terms above it is refused with the sentence naming the " +
+        "ceiling, and a change is a delta the next request obeys. Your own container's leeway is " +
+        "the person's to set, not yours.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1923,16 +1949,43 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             });
             return;
           }
-          // A POOL IS OUTSIDE THIS FENCE BY ITS NAME. A pool leads with `inbox:` or `channel:`,
-          // and a bound container's name never does — a person may not take those names — so no
-          // name a connection can reach is a pool, and these verbs need no rule of their own for
-          // one. The person's own page carries that rule, because a person's reach does join the
-          // pool edge.
+          // THE FENCE IS THE PATH AND ITS COLON, AND EVERY SEGMENT AFTER IT IS A REAL NAME. A
+          // bare `startsWith` admits the fence itself — `ada:journal:`, an empty final segment —
+          // which stands as a container whose listed name reads as its parent's prefix and whose
+          // own children's fence doubles the colon. The bound is not decoration either: each
+          // declaration is permanent operator-signed law, and the reach walks are fixpoints over
+          // the table, so an unbounded name is an unbounded cost on every later read.
+          // THE BINDING IS ASKED AGAIN, NOT ASSUMED. A connection's standing lives in its inbox
+          // pool, and a person can end it there — dropping the pool — without touching the token,
+          // which resolves from the connector file and keeps saying it is bound. Every federation
+          // road re-asks on each request; these write with the store's own key, so they ask too.
+          if (
+            !openerStands(gateway, {
+              openedBy: binding.container,
+              openedFrom: binding.inbox,
+            })
+          ) {
+            reply({
+              content: [
+                {
+                  type: "text",
+                  text:
+                    "this connection no longer stands in its container, so it shapes nothing " +
+                    "here. Ask the person who connected you to connect you again.",
+                },
+              ],
+              isError: true,
+            });
+            return;
+          }
           const fence = `${binding.container}:`;
-          const below = (given: unknown): string | undefined =>
-            typeof given === "string" && fenceAdmits(fence, given) && !given.includes(NUL)
-              ? given
-              : undefined;
+          const below = (given: unknown): string | undefined => {
+            if (typeof given !== "string" || !fenceAdmits(fence, given)) return undefined;
+            if (given.includes(NUL) || given.length > MAX_CONTAINER_NAME) return undefined;
+            const under = given.slice(fence.length).split(":");
+            if (under.length > MAX_CONTAINER_DEPTH) return undefined;
+            return under.every((segment) => segment.length > 0) ? given : undefined;
+          };
 
           if (name === "loam_container_declare") {
             const target = below(asked["name"]);
@@ -1958,28 +2011,46 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
               });
               return;
             }
+            // EVERY UNDECLARED NAME BETWEEN THE TARGET AND ITS NEAREST DECLARED ANCESTOR IS
+            // DECLARED WITH IT — the T189 shape, the same walk `openChannel` makes for a container
+            // a bound connection names (federation/channel.ts). Reach is walked by DECLARED PARENT
+            // EDGES while this fence is read from the NAME, so a container hung off an undeclared
+            // middle is governed by the leeway walk and invisible to every door the person has: it
+            // is absent from their container page, from the leeway page, from the drop page, and
+            // from what they may bind. The walk always meets a declared ancestor, because the
+            // fence is the connection's own container and consent declared that.
+            //
+            // Shared with the aggregator membership, which is the shape the sibling road writes. A
+            // `separate` container with no backend attached is worse than useless: the scope walk
+            // fails closed on it, so one successful declaration would brick every later read this
+            // connection makes.
+            const missing: string[] = [];
+            for (let at = target; !table.containers.has(at) && at.includes(":");) {
+              missing.push(at);
+              at = at.slice(0, at.lastIndexOf(":"));
+            }
             try {
-              // Declared under its PATH parent, which the fence guarantees is at or inside the
-              // binding's own container: names are paths and the tree agrees with the names, so
-              // reach — walked by parent edges — finds it where its name says it is.
-              await gateway.append([
-                signClaims(
-                  containerClaims(
-                    {
-                      container: target,
-                      trust: "curated",
-                      posture: "separate",
-                      parent: target.slice(0, target.lastIndexOf(":")),
-                    },
-                    gateway.operatorAuthor!,
-                    gateway.nextTimestamp(),
+              await gateway.append(
+                missing.reverse().map((container) =>
+                  signClaims(
+                    containerClaims(
+                      {
+                        container,
+                        trust: "curated",
+                        posture: "shared",
+                        membership: CONNECTION_AGGREGATOR,
+                        parent: container.slice(0, container.lastIndexOf(":")),
+                      },
+                      gateway.operatorAuthor!,
+                      gateway.nextTimestamp(),
+                    ),
+                    gateway.options.seed!,
                   ),
-                  gateway.options.seed!,
                 ),
-              ]);
+              );
             } catch (err) {
               reply({
-                content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+                content: [{ type: "text", text: appendRefusal(err) }],
                 isError: true,
               });
               return;
@@ -2027,6 +2098,44 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
               });
               return;
             }
+            // A POOL IS NOT SHAPED HERE, ASKED OF THE RECORD RATHER THAN THE NAME. A pool takes
+            // its leeway from the container it was opened into, and this re-declaration would
+            // carry the pointer forward — but the person's own page refuses the act outright, and
+            // two doors doing the same re-declaration should ask the same question. The name
+            // argument (a pool leads with a token no person may take) is the weaker guard: it
+            // stops holding the moment a name is minted some other way.
+            if (rec.inboxOf !== undefined) {
+              reply({
+                content: [
+                  {
+                    type: "text",
+                    text:
+                      `${target} takes its leeway from ${rec.inboxOf}, the container it was ` +
+                      `opened into. Change it there. Nothing was changed here.`,
+                  },
+                ],
+                isError: true,
+              });
+              return;
+            }
+            // THE FENCE READS THE NAME; REACH IS WALKED BY THE PARENT EDGE. A container's edge may
+            // disagree with its name — the law refuses only cycles and cross-trust moves — so a
+            // name under this connection's path can resolve inside a subtree the connection was
+            // never bound to. Both questions, or the weaker one decides.
+            if (!subtreeUnder(table, binding.container).includes(target)) {
+              reply({
+                content: [
+                  {
+                    type: "text",
+                    text:
+                      `${target} bears a name inside your container but does not stand inside it: ` +
+                      `its parent is elsewhere, so its leeway is not yours to set.`,
+                  },
+                ],
+                isError: true,
+              });
+              return;
+            }
             const want = leewayFromTool(asked);
             if (typeof want === "string") {
               reply({ content: [{ type: "text", text: want }], isError: true });
@@ -2044,6 +2153,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
                       ...(rec.membership === undefined ? {} : { membership: rec.membership }),
                       ...(rec.membershipAt === undefined ? {} : { membershipAt: rec.membershipAt }),
                       ...(rec.version === undefined ? {} : { version: rec.version }),
+                      // Latest-wins is per DECLARATION: a pointer that stands and is omitted here
+                      // is a pointer deleted. Carried even though the refusal above means this
+                      // road never meets one, because the belt is one line and the loss is total.
+                      ...(rec.inboxOf === undefined ? {} : { inboxOf: rec.inboxOf }),
                       leeway: want,
                     },
                     gateway.operatorAuthor!,
@@ -2053,12 +2166,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
                 ),
               ]);
             } catch (err) {
-              const detail = err instanceof Error ? err.message : String(err);
-              const why = detail.slice(detail.indexOf("malformed law:") + "malformed law:".length);
-              reply({
-                content: [{ type: "text", text: why.trim() === "" ? detail : why.trim() }],
-                isError: true,
-              });
+              reply({ content: [{ type: "text", text: appendRefusal(err) }], isError: true });
               return;
             }
             reply({

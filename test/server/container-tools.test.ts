@@ -16,43 +16,71 @@
 // Railed at BOTH LEVELS: what the container table HOLDS after each act, and what the next request
 // is SERVED — a leeway turned on is only a leeway if the door that reads it then admits.
 //
-// NOT HERE, and said so: `sever`, `promote-stage` and `bless-renderer` are the roster's other
-// three. `sever` purges a pool's bytes, and widening who may purge is a decision rather than a
-// repair, so it ships in its own change with the sentence naming what can now be deleted.
-// `bless-renderer` decides a new capability. Neither is weakened by being absent here: the
-// tools do not exist, so no door serves them.
+// NOT HERE, and said so. `sever`, `promote-stage` and `bless-renderer` are the roster's other
+// three; they ship in their own change, and nothing here is weakened by their absence because the
+// tools do not exist and no door serves them.
+//
+// TWO GAPS THIS FILE DOES NOT CLOSE, both inherited rather than introduced:
+//   - `receive` calls `sync()` after the channel record has landed, so a bad peer token answers
+//     isError over a channel that STANDS and will pull on the next poll. That is the shape
+//     `loam_federate_connect` has always had; this slice only gives it a second name. The rail
+//     that closes it belongs with the road, not with the roster.
+//   - a delta that lands in the backend and then throws inside ingest is durable while the caller
+//     is told the act failed (gateway/ingest.ts). Every door-level refusal here — the standing
+//     check, the fence, the standing name, the pool pointer, the reach walk, the one rule —
+//     precedes the append, so a refusal this file asserts genuinely wrote nothing.
 //
 // The pool tokens: `inbox` and `channel` lead a pool's name, and the leeway walk hops a pool to
 // its host. A person named `inbox` would own a home the walk reads as a pool. The walls rail
-// (subtree-walls.test.ts) named that reservation as owed by this slice; the last case pays it, at
-// the one door that mints a person's name.
+// (subtree-walls.test.ts) named that reservation as owed by this slice, and the last cases pay it
+// AT MINTING ONLY — `userNameDefect` is asked on every read and every login, so folding it there
+// would strand a person already named `inbox` in a store provisioned before the rule.
 //
-// RAILS-RED on origin/main, this file copied in: 9 red, 0 green — 9 cases. No control: every case
-// names a verb or a rule this slice adds, and none of them exists on the base.
+// RAILS-RED on origin/main, this file copied in: 16 red, 0 green — 16 cases. No control: every
+// case names a verb or a rule this slice adds, and none of them exists on the base.
 //
-// REVERT PROBES, MEASURED against this file as it stands — 9 cases. Re-measure when you add one.
-//   the fence drops its colon                       → 2 red, 7 green
-//   leeway admits the caller's OWN container        → 1 red, 8 green
-//   declare skips the standing-name check           → 1 red, 8 green
-//   declare writes no parent edge                   → 1 red, 8 green
-//   the unbound check is gone                       → 1 red, 8 green
-//   the pool tokens are not reserved                → 1 red, 8 green
-//   the leeway re-declaration drops the parent      → 1 red, 8 green
-// Two of these were green until the rails were sharpened. The pool case asked for a leeway the ONE
-// RULE refuses, so the law refused it whatever this door did and the case could not tell a pool
-// rule from no rule; it now asks for the sealed leeway, which fits everywhere. And the re-declared
-// parent was unasserted, so a leeway could silently strand the container it was setting.
+// REVERT PROBES, MEASURED against this file as it stands — 16 cases. Re-measure when you add one.
+//   the fence drops its colon                        → 11 red, 4 green
+//   the fence admits an empty segment                →  1 red, 15 green
+//   no bound on the name's length or depth           →  1 red, 15 green
+//   leeway admits the caller's OWN container         →  1 red, 15 green
+//   declare skips the standing-name check            →  1 red, 15 green
+//   declare writes no parent edge                    →  8 red, 7 green
+//   declare declares the target and not the middles  →  1 red, 15 green
+//   leeway drops the record's pool refusal           →  1 red, 15 green
+//   leeway asks the name and not the reach           →  1 red, 15 green
+//   the standing check is gone                       →  1 red, 15 green
+//   the unbound check is gone                        →  1 red, 15 green
+//   the parser drops an unknown key                  →  1 red, 15 green
+//   the leeway re-declaration drops the parent       →  3 red, 12 green
+//   the reservation is gone from the minting door    →  1 red, 15 green
+//   the reservation is folded into userNameDefect    →  1 red, 15 green
+//   the refusal helper slices a non-law error        →  1 red, 15 green
+//
+// SIX OF THESE PROBES WERE GREEN BEFORE AN INDEPENDENT REVIEW, and each green was a rail that
+// looked right: the pool case asked for a leeway the one rule refused anyway, so it could not tell
+// a pool rule from no rule; the parser was exercised with one switch, so two thirds of it could
+// have been deleted; the reservation was asserted against the rule rather than a door; a
+// re-declared parent was unasserted; and two refusals were read as booleans, so a different rule's
+// sentence satisfied them.
 
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { signClaims } from "@bombadil/rhizomatic";
 import { containerClaims, readContainerTable } from "../../src/gateway/container.js";
+import { subtreeOf } from "../../src/server/subtree.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { SEALED_LEEWAY, type Leeway, type Terms } from "../../src/gateway/leeway.js";
-import { serve, type ServerHandle } from "../../src/server/http.js";
-import { userNameDefect } from "../../src/server/users.js";
+import { appendRefusal, serve, type ServerHandle } from "../../src/server/http.js";
+import { run } from "../../src/cli/cli.js";
+import { readCredentials, type ScryptParams } from "../../src/server/credentials.js";
+import { reservedNameDefect, userNameDefect } from "../../src/server/users.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
+import { readOAuthFile } from "../../src/server/oauth-file.js";
 import {
   closeAll,
   connect,
@@ -77,6 +105,9 @@ const OPEN: Leeway = { ...SEALED_LEEWAY, receive: true, delegate: OPEN_TERMS };
 const ANNEX: Leeway = { ...SEALED_LEEWAY, receive: false, delegate: OPEN_TERMS };
 /** A namespace: nothing below it may declare a leeway at all. */
 const NAMESPACE: Leeway = { ...SEALED_LEEWAY, delegate: "off" };
+
+/** A fixed, cheap cost so one `user create` does not pay the interactive scrypt floor. */
+const CHEAP_SCRYPT: ScryptParams = { N: 16, r: 1, p: 1, keylen: 16 };
 
 const peers: ServerHandle[] = [];
 /** A second store with one lens and one row, served with an operator door token — the "offer". */
@@ -121,6 +152,10 @@ const declareAs = (gw: Gateway, container: string, leeway: Leeway): Promise<unkn
     signClaims(containerClaims(spec, OPERATOR, gw.nextTimestamp()), OPERATOR_SEED),
   ]);
 };
+
+/** Terms nested `depth` levels deep, each level delegating to the next. */
+const nest = (depth: number): Record<string, unknown> =>
+  depth <= 0 ? { envelope: "small" } : { envelope: "small", delegate: nest(depth - 1) };
 
 const recOf = (gw: Gateway, name: string) =>
   readContainerTable(gw.reactor, gw.operatorAuthor).containers.get(name);
@@ -195,9 +230,13 @@ describe("§58 — the container roster", () => {
     expect(shared.isError, shared.text).toBe(true);
     expect(shared.text).toMatch(FENCE);
     expect(recOf(gateway, "ada:journalism")).toBeUndefined();
-    // And the fence itself — the connection's own container — is not a name it may re-declare.
+    // And the fence itself is outside the fence: `ada:journal` does not begin `ada:journal:`, so
+    // the connection cannot re-declare its own container either. The rule that refuses it is the
+    // fence, not the standing-name check — the case below owns that one — so the sentence is read
+    // here rather than the boolean alone.
     const self = await declareTool(base, ada, "ada:journal");
-    expect(self.isError, "its own container already stands").toBe(true);
+    expect(self.isError, self.text).toBe(true);
+    expect(self.text, "refused by the fence").toMatch(FENCE);
     expect(recOf(gateway, "ada:journal")?.leewayDeclared, "untouched").toBe(false);
     await closeAll();
   });
@@ -256,8 +295,12 @@ describe("§58 — the container roster", () => {
     const channel = gateway.channelStatus().find((c) => c.into === "ada:journal:notes");
     expect(channel, "the channel stands").toBeDefined();
     expect(channel!.openedBy, "opened by the connection's container").toBe("ada:journal");
-    // And the refusal before it was the LEEWAY, not the fence: same call, same names.
+    // And the refusal before it was the LEEWAY, not the fence: same call, same names, and the
+    // sentence names the container that does not receive. A boolean alone could not tell the two
+    // rules apart, and the fence is the one this file tests everywhere else.
     expect(before.isError, "the same call was refused before the switch").toBe(true);
+    expect(before.text, "and refused for the leeway, not the fence").toMatch(/does not receive/);
+    expect(before.text, "naming the container whose leeway said no").toContain("ada:journal");
     await closePeers();
     await closeAll();
   });
@@ -284,14 +327,208 @@ describe("§58 — the container roster", () => {
     await declareTool(base, ada, "ada:journal:notes");
     const wide = await leewayTool(base, ada, { name: "ada:journal:notes", receive: true });
     expect(wide.isError, wide.text).toBe(true);
-    expect(wide.text, "the refusal names the ceiling, not the fence").toMatch(
-      /delegates nothing|namespace|does not fit|refus/i,
+    // NAMES THE CEILING. The alternation must not admit a fence-shaped or generic refusal, so it
+    // matches the law's own words and the case then asserts the container whose terms refused.
+    expect(wide.text, "the refusal names the rule").toMatch(/delegates nothing|does not fit/);
+    expect(wide.text, "and the container whose terms refused").toContain("ada:journal");
+    expect(wide.text, "and it is the law's sentence, not the raw fault").not.toMatch(
+      /malformed law/,
     );
     expect(recOf(gateway, "ada:journal:notes")?.leewayDeclared, "nothing was written").toBe(false);
     // The other side: under terms that allow it, the same call completes.
     await declareAs(gateway, "ada:journal", OPEN);
     const fits = await leewayTool(base, ada, { name: "ada:journal:notes", receive: true });
     expect(fits.isError, fits.text).toBe(false);
+    await closeAll();
+  });
+
+  it("declare names every level it stands on, so the person's own doors can see it", async () => {
+    // REACH IS WALKED BY DECLARED PARENT EDGES; THE FENCE IS READ FROM THE NAME. A container hung
+    // off an undeclared middle is governed by the leeway walk, which climbs by name, and invisible
+    // to every door the person has, which walks edges. So the missing middles are declared with it.
+    const { base, gateway } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    const deep = await declareTool(base, ada, "ada:journal:notes:drafts:old");
+    expect(deep.isError, deep.text).toBe(false);
+    for (const level of [
+      "ada:journal:notes",
+      "ada:journal:notes:drafts",
+      "ada:journal:notes:drafts:old",
+    ]) {
+      const rec = recOf(gateway, level);
+      expect(rec, `${level} stands`).toBeDefined();
+      expect(rec!.parent, `${level} hangs off its path parent`).toBe(
+        level.slice(0, level.lastIndexOf(":")),
+      );
+    }
+    // The object level: the person's own reach, walked by edges, reaches all of it.
+    const reach = subtreeOf(gateway.containers(), "ada");
+    for (const level of ["ada:journal:notes", "ada:journal:notes:drafts:old"]) {
+      expect(reach.has(level), `${level} is in the person's reach`).toBe(true);
+    }
+    // And it is SHARED, not separate: a separate container with no backend fails the scope walk
+    // closed, so one successful declaration would brick every later read this connection makes.
+    expect(recOf(gateway, "ada:journal:notes:drafts")?.posture).toBe("shared");
+    const still = await callTool(base, ada, "loam_query", { query: "{ __typename }" });
+    expect(still.isError, `the connection still reads: ${still.text}`).toBe(false);
+    await closeAll();
+  });
+
+  it("declare refuses a name with an empty segment, and a name without end", async () => {
+    const { base, gateway } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    const before = gateway.containers().containers.size;
+    // `ada:journal:` passes a bare prefix test and is the fence itself. It would stand as a
+    // container whose listed name reads as its parent's, and whose children's fence doubles the
+    // colon.
+    for (const bad of [
+      "ada:journal:",
+      "ada:journal::notes",
+      "ada:journal:notes:",
+      `ada:journal:${"x".repeat(600)}`,
+      `ada:journal${":x".repeat(20)}`,
+    ]) {
+      const r = await declareTool(base, ada, bad);
+      expect(r.isError, `${bad.slice(0, 40)} is refused`).toBe(true);
+      expect(r.text).toMatch(FENCE);
+    }
+    expect(gateway.containers().containers.size, "and none of them stands").toBe(before);
+    await closeAll();
+  });
+
+  it("leeway asks the record, not only the name: a pool and a name whose edge is elsewhere", async () => {
+    const { base, gateway } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    await declareAs(gateway, "ada:journal", OPEN);
+
+    // A POOL, ASKED OF THE RECORD. The law lets an `inboxOf` stand on any name, so a name inside
+    // the fence can carry one. The name argument would admit it; the record's own pointer is what
+    // refuses, and the pointer survives.
+    await declareTool(base, ada, "ada:journal:held");
+    await gateway.append([
+      signClaims(
+        containerClaims(
+          {
+            container: "ada:journal:held",
+            trust: "curated",
+            posture: "shared",
+            membership: recOf(gateway, "ada:journal:held")!.membership,
+            parent: "ada:journal",
+            inboxOf: "ada:journal",
+          },
+          OPERATOR,
+          gateway.nextTimestamp(),
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    expect(recOf(gateway, "ada:journal:held")?.inboxOf, "premise: it is a pool").toBe(
+      "ada:journal",
+    );
+    const pooled = await leewayTool(base, ada, { name: "ada:journal:held", receive: true });
+    expect(pooled.isError, pooled.text).toBe(true);
+    expect(pooled.text, "and names its host").toContain("takes its leeway from ada:journal");
+    expect(recOf(gateway, "ada:journal:held")?.inboxOf, "the pointer survives").toBe("ada:journal");
+
+    // A NAME WHOSE EDGE IS ELSEWHERE. The fence reads the name; reach walks the parent edge. The
+    // law refuses only cycles and cross-trust moves, so the two can disagree — and then the name
+    // is not the question to ask.
+    await declareAs(gateway, "ada:elsewhere", OPEN);
+    await gateway.append([
+      signClaims(
+        containerClaims(
+          {
+            container: "ada:journal:away",
+            trust: "curated",
+            posture: "shared",
+            membership: recOf(gateway, "ada:journal:held")!.membership,
+            parent: "ada:elsewhere",
+          },
+          OPERATOR,
+          gateway.nextTimestamp(),
+        ),
+        OPERATOR_SEED,
+      ),
+    ]);
+    const away = await leewayTool(base, ada, { name: "ada:journal:away", receive: true });
+    expect(away.isError, away.text).toBe(true);
+    expect(away.text, "the refusal names the disagreement").toMatch(/does not stand inside it/);
+    expect(recOf(gateway, "ada:journal:away")?.leewayDeclared, "nothing was written").toBe(false);
+    await closeAll();
+  });
+
+  it("leeway writes every switch it was given, and nothing it was not", async () => {
+    // THE WHOLE PAYLOAD, NOT JUST ONE SWITCH. Every field this verb parses is asked for here and
+    // read back off the record: the three switches, the envelope, and nested terms. Without this
+    // case the parser could be replaced by one that reads `receive` and hard-codes the rest.
+    const { base, gateway } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    await declareAs(gateway, "ada:journal", OPEN);
+    await declareTool(base, ada, "ada:journal:notes");
+    const set = await leewayTool(base, ada, {
+      name: "ada:journal:notes",
+      receive: true,
+      offer: true,
+      publish: true,
+      envelope: "medium",
+      delegate: { receive: true, offer: false, publish: true, envelope: "small", delegate: "same" },
+    });
+    expect(set.isError, set.text).toBe(false);
+    expect(recOf(gateway, "ada:journal:notes")?.leeway).toEqual({
+      receive: true,
+      offer: true,
+      publish: true,
+      envelope: "medium",
+      delegate: {
+        receive: true,
+        offer: false,
+        publish: true,
+        envelope: "small",
+        delegate: "same",
+      },
+    });
+
+    // AND NOTHING IT WAS NOT. Every switch starts off, so a second call naming only the container
+    // turns all of them off again — an omitted field is not an unchanged field.
+    const cleared = await leewayTool(base, ada, { name: "ada:journal:notes" });
+    expect(cleared.isError, cleared.text).toBe(false);
+    expect(recOf(gateway, "ada:journal:notes")?.leeway).toEqual(SEALED_LEEWAY);
+    await closeAll();
+  });
+
+  it("leeway refuses a shape the law does not admit, and writes nothing", async () => {
+    const { base, gateway } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    await declareAs(gateway, "ada:journal", OPEN);
+    await declareTool(base, ada, "ada:journal:notes");
+    const stood = { name: "ada:journal:notes", receive: true, envelope: "medium" as const };
+    expect((await leewayTool(base, ada, stood)).isError, "premise: it stands").toBe(false);
+
+    // Each of these is a shape the leeway law has no reading for. The door names the shape rather
+    // than coercing it into something the caller did not ask for — a silent coercion here would
+    // write a leeway nobody chose, which is the one thing a permission must never do.
+    const bad: [Record<string, unknown>, RegExp][] = [
+      [{ envelope: "enormous" }, /envelope is "small", "medium" or "large"/],
+      [{ envelope: 3 }, /envelope is "small", "medium" or "large"/],
+      [{ delegate: "yes please" }, /a leeway is an object/],
+      [{ delegate: { envelope: "enormous" } }, /envelope is "small", "medium" or "large"/],
+      [{ delegate: nest(40) }, /nests deeper/],
+      // THE REFUSAL THAT MATTERS MOST: a misspelled switch. Dropping it would write a permission
+      // the caller did not choose and report it as what they asked for.
+      [{ recieve: true }, /unknown key "recieve"/],
+      [{ delegate: { publsh: true } }, /unknown key "publsh"/],
+    ];
+    for (const [args, why] of bad) {
+      const r = await leewayTool(base, ada, { name: "ada:journal:notes", ...args });
+      expect(r.isError, `${JSON.stringify(args)} is refused`).toBe(true);
+      expect(r.text, `${JSON.stringify(args)} says which shape`).toMatch(why);
+      // And the leeway that stood is still standing: a refusal writes nothing.
+      expect(recOf(gateway, "ada:journal:notes")?.leeway.envelope, "unchanged").toBe("medium");
+      expect(recOf(gateway, "ada:journal:notes")?.leeway.receive, "unchanged").toBe(true);
+    }
+    // The other side of the nesting depth: one level short of the refusal is accepted.
+    const deep = await leewayTool(base, ada, { name: "ada:journal:notes", delegate: nest(20) });
+    expect(deep.isError, deep.text).toBe(false);
     await closeAll();
   });
 
@@ -326,6 +563,36 @@ describe("§58 — the container roster", () => {
     await closeAll();
   });
 
+  it("a connection whose standing ended shapes nothing, though its token still says bound", async () => {
+    // STANDING LIVES IN THE POOL, NOT THE TOKEN. A person can end a connection by striking its
+    // write grant in its inbox pool; the token is untouched and keeps resolving with its container
+    // recorded. These verbs write with the STORE'S OWN KEY, so they ask the pool, like every
+    // federation road does, rather than trusting the token's own word.
+    const { base, gateway, connectorsHome } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    await declareAs(gateway, "ada:journal", OPEN);
+    expect((await declareTool(base, ada, "ada:journal:before")).isError, "premise").toBe(false);
+
+    const grant = readOAuthFile(connectorsHome).grants[0]!;
+    await gateway.revokeConnection({
+      inbox: gateway.connectionInboxes.get(grant.inbox!)!,
+      connectionKey: grant.actor,
+      ownerSeed: OPERATOR_SEED,
+    });
+
+    for (const [verb, args] of [
+      ["loam_container_declare", { name: "ada:journal:after" }],
+      ["loam_container_leeway", { name: "ada:journal:before", receive: true }],
+    ] as const) {
+      const r = await callTool(base, ada, verb, args);
+      expect(r.isError, `${verb} is refused`).toBe(true);
+      expect(r.text, `${verb} says the standing ended`).toMatch(/no longer stands/);
+    }
+    expect(recOf(gateway, "ada:journal:after"), "and nothing was declared").toBeUndefined();
+    expect(recOf(gateway, "ada:journal:before")?.leewayDeclared, "nor shaped").toBe(false);
+    await closeAll();
+  });
+
   it("an unbound caller is refused every roster verb, and is offered them anyway", async () => {
     const { base, gateway } = await connectionServer();
     // `op-token` is the operator's own door token: full authority, and bound to no container.
@@ -342,16 +609,53 @@ describe("§58 — the container roster", () => {
     await closeAll();
   });
 
-  it("the pool tokens are not names a person may take", () => {
+  it("a refusal is the store's own sentence, whole", () => {
+    // A container defect arrives wrapped as "malformed law: <why>", and the wrapper carries
+    // nothing a caller can act on. Slicing on the marker's index alone cuts thirteen characters
+    // off every OTHER failure — and the one that matters most, the store cannot write, is exactly
+    // an other failure.
+    expect(appendRefusal(new Error("malformed law: the terms above forbid it"))).toBe(
+      "the terms above forbid it",
+    );
+    const plain = "this gateway can no longer persist: the disk is gone";
+    expect(appendRefusal(new Error(plain)), "an ordinary fault survives whole").toBe(plain);
+    expect(appendRefusal(new Error("malformed law:")), "and an empty why keeps the whole").toBe(
+      "malformed law:",
+    );
+  });
+
+  it("the pool tokens are not names a person may take, at the door that mints one", async () => {
     // A leeway walk hops a container whose leading token is `inbox` or `channel` to its host. A
-    // person named `inbox` would own a home the walk reads as a pool, so the name is refused at
-    // the one door that mints one.
-    for (const reserved of ["inbox", "channel", "INBOX"]) {
-      expect(userNameDefect(reserved), `${reserved} is refused`).toBeDefined();
+    // person named `inbox` would own a home the walk reads as a pool.
+    for (const reserved of ["inbox", "channel"]) {
+      expect(reservedNameDefect(reserved), `${reserved} may not be minted`).toBeDefined();
+      expect(reservedNameDefect(reserved), "and says why").toMatch(/reserved/);
+      // AT MINTING ONLY, AND THIS IS THE HALF THAT MATTERS. `userNameDefect` is asked on every
+      // read and every login, so folding the reservation in would strand a person already named
+      // `inbox` in a store provisioned before this rule: no login, no roles, and no road back.
+      expect(userNameDefect(reserved), `${reserved} at rest still resolves`).toBeUndefined();
     }
-    // The other side: a name that merely starts with those letters is an ordinary name.
+    // The other side: a name that merely starts with those letters is an ordinary name. `inboxer`
+    // is the sharp one — a prefix test rather than an exact one would refuse it.
     for (const ok of ["inboxer", "channels", "ada"]) {
-      expect(userNameDefect(ok), `${ok} is a name`).toBeUndefined();
+      expect(reservedNameDefect(ok), `${ok} may be minted`).toBeUndefined();
+    }
+
+    // THE DOOR. `loam user create` is where a person's name is minted; nothing is written when it
+    // refuses, and an ordinary name still mints.
+    const home = mkdtempSync(join(tmpdir(), "loam-roster-user-"));
+    try {
+      const err: string[] = [];
+      const io = { out: () => {}, err: (m: string) => err.push(m) };
+      const pw = { readSecret: () => Promise.resolve("pw"), scrypt: CHEAP_SCRYPT };
+      expect(await run(["init", "--home", home, "--no-user"], io)).toBe(0);
+      expect(await run(["user", "create", "inbox", "--home", home], io, pw)).toBe(2);
+      expect(err.join("\n"), "the door says why").toMatch(/reserved/);
+      expect(readCredentials(home).users["inbox"], "and mints nothing").toBeUndefined();
+      expect(await run(["user", "create", "inboxer", "--home", home], io, pw)).toBe(0);
+      expect(readCredentials(home).users["inboxer"], "the ordinary name mints").toBeDefined();
+    } finally {
+      rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 });
