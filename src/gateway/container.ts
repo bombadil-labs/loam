@@ -1161,6 +1161,52 @@ export function danglingAncestor(table: ContainerTable, name: string): string | 
   return undefined;
 }
 
+/**
+ * Do this container's PARENT EDGES lead somewhere other than `fence`?
+ *
+ * NOT `subtreeUnder`, and the difference is a whole class of container. Plenty stand with no parent
+ * edge at all — declared by name alone, which every road did before the tree was made to agree with
+ * the names — and those are not outside anything; refusing them would break law already at rest.
+ * What is outside is a container whose edges DO lead somewhere, and lead elsewhere: the law admits
+ * a parent that disagrees with the name (it refuses only cycles and cross-trust moves), so a name
+ * under this fence can resolve inside a subtree the caller was never bound to.
+ *
+ * So: walk the edges. Meeting the fence is inside. Running out of edges is inside, because nothing
+ * was ever said about where it hangs. Only a chain that ends somewhere else is outside.
+ */
+/**
+ * The first name in this container's parent chain that does not stand, or absent when the whole
+ * chain stands. `name` itself counts: a container that is gone breaks its own chain.
+ *
+ * ONE QUESTION, ASKED BY EVERY ROAD THAT ACTS ON A BINDING'S AUTHORITY. A shared drop strikes one
+ * container and leaves its descendants standing, so "does my container stand" and "does my
+ * container hang from anything" are different questions with the same stakes.
+ */
+export function chainBreaksAt(table: ContainerTable, name: string): string | undefined {
+  const seen = new Set<string>();
+  for (let at: string | undefined = name; at !== undefined && !seen.has(at);) {
+    seen.add(at);
+    const rec = table.containers.get(at);
+    if (rec === undefined) return at;
+    at = rec.parent;
+  }
+  return undefined;
+}
+
+export function edgeLeavesFence(table: ContainerTable, name: string, fence: string): boolean {
+  const seen = new Set<string>();
+  let hops = 0;
+  for (let at: string | undefined = name; at !== undefined && !seen.has(at);) {
+    if (at === fence) return false;
+    seen.add(at);
+    const rec = table.containers.get(at);
+    if (rec === undefined || rec.parent === undefined) return hops > 0 && at !== fence;
+    at = rec.parent;
+    hops += 1;
+  }
+  return hops > 0;
+}
+
 export function subtreeUnder(table: ContainerTable, root: string): string[] {
   const reach = new Set<string>([root]);
   for (;;) {
@@ -1864,8 +1910,14 @@ export function poolForBindingImpl(gw: Gateway, binding: ConnectionBinding): Gat
   // the write lands durably in the pool and the read that follows it refuses by name, so the door
   // answers 200 with an error over a delta that is really there — and every retry mints another.
   // Refuse before anything is signed; the connection is bound nowhere until it consents again.
+  //
+  // THE WHOLE CHAIN, NOT THE NAME. A shared drop strikes only the container it names, so dropping
+  // a container leaves its descendants standing — including one a connection is bound to. Asking
+  // the name alone let that connection keep appending law into a subtree the person had removed
+  // from every page they have: unseeable, and un-droppable, because their pages walk edges. This
+  // is the same question the MCP roster asks; both write on the binding's authority, so both ask it.
   const table = readContainerTable(gw.reactor, gw.operatorAuthor);
-  if (!table.containers.has(binding.container)) {
+  if (chainBreaksAt(table, binding.container) !== undefined) {
     throw new Error(
       `the container ${binding.container} this connection is bound to no longer stands, so this ` +
         `write is refused — it would land where nothing can read it. Consent again and choose a ` +

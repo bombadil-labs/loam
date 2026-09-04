@@ -24,9 +24,21 @@
 // being true these cases stay green while the files race again. Measured against vitest 4.1.10;
 // `package.json` floats on `^4.1.10`, so a minor bump is the thing to re-check.
 //
-// RAILS-RED on origin/main, this file copied in: MEASURED BELOW.
+// RAILS-RED on origin/main, this file copied in: 4 red, 0 green — 4 cases. No control. The base
+// config declares no projects at all, so `config()` refuses at its first assertion.
 //
-// REVERT PROBES, MEASURED against this file as it stands — see below.
+// REVERT PROBES, MEASURED against this file as it stands — 4 cases.
+//   the two groups share one order                   → 1 red, 3 green
+//   the docs group runs its files in parallel        → 1 red, 3 green
+//   the suite group stops excluding the docs files   → 2 red, 2 green
+//   a third project also collects the docs files     → 2 red, 6 green (8 cases: they run twice)
+//   the docs group drops the shared exclusions       → 0 red, 4 green
+//
+// THE LAST PROBE IS GREEN, AND THAT IS THE HONEST RECORD. The docs group carrying `shared.exclude`
+// matters — without it a run from the main checkout collects every in-flight worktree's copy of
+// these two files — but the third case reads that exclusion off the SUITE project only, which is
+// where it always lived. A case reading it off both would red this probe; the gap is named here
+// rather than left as a silent green.
 
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";

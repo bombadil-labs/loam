@@ -74,6 +74,7 @@ import {
   registerPrefixesOf,
 } from "../gateway/accounts.js";
 import {
+  chainBreaksAt,
   containerClaims,
   everDeclared,
   governingLeeway,
@@ -82,6 +83,7 @@ import {
   readContainerTable,
   receivesNow,
   danglingAncestor,
+  edgeLeavesFence,
   subtreeUnder,
   type ContainerTable,
 } from "../gateway/container.js";
@@ -641,13 +643,18 @@ function mintableAt(
   // the leeway verb exists to catch exactly that — so the dropped ancestor may be a container in
   // someone else's subtree, and naming it would teach this caller that it existed. The refusal
   // says what is true of the caller's own name and stops.
-  if (
-    danglingAncestor(table, root) !== undefined ||
-    !subtreeUnder(table, binding.container).includes(root)
-  ) {
+  // THREE CONDITIONS, THREE SENTENCES. One message for all of them would tell a caller a drop
+  // happened when none did, and send them after a person who dropped nothing.
+  if (danglingAncestor(table, root) !== undefined) {
     return (
       `${root} stands, but it hangs from a container that was dropped, so it is reachable from ` +
       `no page the person has. Nothing may be made beneath it.`
+    );
+  }
+  if (edgeLeavesFence(table, root, binding.container)) {
+    return (
+      `${root} bears a name inside your container but does not stand inside it: its parent is ` +
+      `elsewhere, so nothing may be made beneath it.`
     );
   }
   return undefined;
@@ -675,11 +682,7 @@ function connectionStands(gateway: Gateway, binding: ConnectionBinding): boolean
   // person's pages make, and reachable only by the connection bound to it. Asking the chain means
   // dropping a container ends the connections bound beneath it too, which is what a person
   // dropping a room expects.
-  for (let at: string | undefined = binding.container; at !== undefined;) {
-    const rec = table.containers.get(at);
-    if (rec === undefined) return false;
-    at = rec.parent;
-  }
+  if (chainBreaksAt(table, binding.container) !== undefined) return false;
   return openerStands(gateway, { openedBy: binding.container, openedFrom: binding.inbox });
 }
 
@@ -748,10 +751,22 @@ function receiveRefusal(
       "absent leeway is every switch off"
     );
   }
-  return governed.leeway.receive
-    ? undefined
-    : `the container ${governed.at} does not receive: the leeway in force there has its receive ` +
-        "switch off";
+  if (!governed.leeway.receive) {
+    return (
+      `the container ${governed.at} does not receive: the leeway in force there has its receive ` +
+      "switch off"
+    );
+  }
+  // THE EDGE IS DELIBERATELY NOT ASKED HERE, and the asymmetry with the write verbs is the point.
+  // §58's walls settled it: NAMES ARE PATHS, and the name governs. A container named under this
+  // binding but declared with a parent elsewhere still resolves its leeway by name, so the switch
+  // the person set on THIS container is the one in force — an edge check would refuse a receive
+  // the person's own leeway already permits, and subtree-walls.test.ts pins that both ways.
+  //
+  // The write verbs ask it, because they are not the same act. `declare` and `leeway` write law
+  // that governs everything below a name, and where that law is administered from is exactly what
+  // the edge says. Receiving lands bytes under a name whose governing leeway is already resolved.
+  return undefined;
 }
 
 // A container a connection declares serves through what is nested inside it, exactly like the

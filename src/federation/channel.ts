@@ -1732,16 +1732,47 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
             `declaring it again would restore what the drop removed`,
         );
       }
-      await gw.append([
-        signClaims(
-          containerClaims(
-            { container: opts.into, trust: "curated", posture: "shared", membership: AGGREGATOR },
-            gw.operatorAuthor!,
-            gw.nextTimestamp(),
+      // IT HANGS FROM SOMETHING, WHATEVER ITS DEPTH. This branch used to declare `into` with no
+      // parent at any depth, which MAKES the orphan every other rule here refuses: a container
+      // holding a live peer channel that no page of the person's can show or drop, because their
+      // pages walk edges. A name with a colon hangs from its path parent, and every undeclared
+      // level between them is declared with it — the same walk the bound branch makes. A
+      // colon-free name is a root and hangs from nothing, which is what a root is.
+      const missingHere: string[] = [];
+      let up = opts.into;
+      while (!table.containers.has(up) && up.includes(":")) {
+        missingHere.push(up);
+        up = up.slice(0, up.lastIndexOf(":"));
+      }
+      const struckHere = missingHere.find((container) =>
+        everDeclared(gw.reactor, gw.operatorAuthor, container),
+      );
+      if (struckHere !== undefined) {
+        throw new Error(
+          `${struckHere} was declared and then dropped, so a channel cannot be opened beneath ` +
+            `it — declaring it again would restore what the drop removed`,
+        );
+      }
+      await gw.append(
+        (missingHere.length === 0 ? [opts.into] : missingHere.reverse()).map((container) =>
+          signClaims(
+            containerClaims(
+              {
+                container,
+                trust: "curated",
+                posture: "shared",
+                membership: AGGREGATOR,
+                ...(container.includes(":")
+                  ? { parent: container.slice(0, container.lastIndexOf(":")) }
+                  : {}),
+              },
+              gw.operatorAuthor!,
+              gw.nextTimestamp(),
+            ),
+            gw.options.seed!,
           ),
-          gw.options.seed,
         ),
-      ]);
+      );
     } else {
       // A container a BOUND CONNECTION names is declared under its path parent, and so is every
       // undeclared name between it and the nearest declared ancestor (SPEC §58 position 5: the
