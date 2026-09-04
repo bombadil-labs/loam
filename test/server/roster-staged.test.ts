@@ -35,6 +35,7 @@
 //   the preview names only the other channels       → 1 red, 7 green
 //   the roster block swallows the staged verbs      → 1 red, 7 green (and 1 red in container-tools)
 //   the promote fault is echoed to the caller       → 0 red, 8 green
+//   a description promises an expiry it lacks       → 1 red, 7 green
 //
 // THE LAST PROBE IS GREEN, AND THAT IS THE HONEST RECORD. `containerScope` throws only when a
 // SEPARATE container in the gather is not attached, and this fixture has no detached pool to
@@ -163,6 +164,26 @@ async function withChannel(): Promise<{
   return { base, gateway, ada, channel, poolSize: [...pool.reactor.snapshot()].length };
 }
 
+/** One tool's declaration, as the door advertises it. */
+async function toolNamed(
+  base: string,
+  want: string,
+): Promise<
+  { name: string; description?: string; annotations?: Record<string, unknown> } | undefined
+> {
+  const res = await fetch(`${base}/default/mcp`, {
+    method: "POST",
+    headers: { authorization: `Bearer op-token`, "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+  });
+  const body = (await res.json()) as {
+    result?: {
+      tools?: { name: string; description?: string; annotations?: Record<string, unknown> }[];
+    };
+  };
+  return (body.result?.tools ?? []).find((t) => t.name === want);
+}
+
 describe("§58 — the roster stages, and a person decides", () => {
   it("sever wants the channel by name, and stages nothing without one", async () => {
     // `channelStatus(undefined)` returns EVERY channel, so an omitted argument used to stage the
@@ -195,6 +216,16 @@ describe("§58 — the roster stages, and a person decides", () => {
     expect(said.channel).toBe(channel);
     expect(said.purgedNothing, "it says so plainly").toBe(true);
     expect(said.confirmAt, "and hands a person the page").toContain("/admin/container");
+    // AND THE DESCRIPTION PROMISES ONLY WHAT THE REPLY CARRIES. Both names of this act once said
+    // they return an expiry, and a staged id; there is neither. A tool description is read by a
+    // machine that will plan around it, so an overclaim there is the same defect as an overclaim
+    // in the preview — which is what this whole file is about.
+    for (const verb of ["loam_container_sever", "loam_federate_drop"]) {
+      const described = await toolNamed(base, verb);
+      expect(described, `${verb} is offered`).toBeDefined();
+      expect(described!.description, `${verb} promises no expiry`).not.toMatch(/expiry/);
+      expect(described!.description, `${verb} promises no staged id`).not.toMatch(/staged id/);
+    }
     expect(said.wouldPurge.join(" "), "naming what would go").toContain(channel);
     // TWO-SIDED, LIKE EVERY OTHER PREVIEW OF A REMOVAL. `wouldSurvive` listing only the OTHER
     // channels is an empty array on a store with one, under a field name that reads as a claim
@@ -262,20 +293,25 @@ describe("§58 — the roster stages, and a person decides", () => {
     await connect(base, "bea", "notes");
     const before = [...gateway.reactor.snapshot()].length;
     const beaHeld = gateway.containerScope({ containers: ["bea:notes"] })[0];
-    const elsewhere =
-      beaHeld === undefined
-        ? undefined
-        : await callTool(base, ada, "loam_container_promote_stage", { delta: beaHeld.id });
+    // ASSERTED, NOT ASSUMED. Guarding the comparison behind `if (beaHeld)` would let the whole
+    // point of this case vanish the day the fixture stops yielding one — which is the shape this
+    // case was rewritten to repair.
+    expect(beaHeld, "premise: bea's container holds something").toBeDefined();
+    expect(
+      gateway.containerScope({ containers: ["ada:journal"] }).some((d) => d.id === beaHeld!.id),
+      "premise: and it is outside ada's gather",
+    ).toBe(false);
+    const elsewhere = await callTool(base, ada, "loam_container_promote_stage", {
+      delta: beaHeld!.id,
+    });
     const invented = await callTool(base, ada, "loam_container_promote_stage", {
       delta: "0".repeat(64),
     });
     expect(invented.isError, invented.text).toBe(true);
     expect(invented.text).toMatch(/nothing in ada:journal's gather/);
-    if (elsewhere !== undefined) {
-      expect(elsewhere.isError, elsewhere.text).toBe(true);
-      expect(elsewhere.text, "word for word what a name nobody holds gets").toBe(invented.text);
-      expect(elsewhere.text, "and it names no other container").not.toContain("bea:notes");
-    }
+    expect(elsewhere.isError, elsewhere.text).toBe(true);
+    expect(elsewhere.text, "word for word what a name nobody holds gets").toBe(invented.text);
+    expect(elsewhere.text, "and it names no other container").not.toContain("bea:notes");
     expect([...gateway.reactor.snapshot()].length, "and nothing was adopted").toBe(before);
     await closePeers();
     await closeAll();

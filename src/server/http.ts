@@ -1770,8 +1770,8 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     {
       name: "loam_federate_drop",
       description:
-        "STAGE a channel sever. This does NOT purge anything: it returns a staged id, a link, an " +
-        "expiry, and a preview of what would be removed and what would survive. A person completes " +
+        "STAGE a channel sever. This does NOT purge anything: it returns a link and a preview of " +
+        "what would be removed and what would survive. A person completes " +
         "it in the browser — an agent cannot, by construction. To stop receiving and KEEP what " +
         "arrived, use loam_federate_set with receiving false instead; that is reversible and this " +
         "is not.",
@@ -1834,10 +1834,10 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       name: "loam_container_sever",
       description:
         "STAGE the sever of a channel your container opened. This is loam_federate_drop under the " +
-        "roster's name, and it PURGES NOTHING: it returns a link, an expiry and a preview of what " +
-        "would go and what would stay. A person completes it in the browser, because an agent " +
-        "cannot hold a session. To stop receiving and KEEP what arrived, set receiving false " +
-        "instead; that is reversible and this is not.",
+        "roster's name, and it PURGES NOTHING: it returns a link and a preview of what would go " +
+        "and what would stay. A person completes it in the browser, because an agent cannot hold " +
+        "a session. To stop receiving and KEEP what arrived, set receiving false instead; that is " +
+        "reversible and this is not.",
       inputSchema: {
         type: "object",
         properties: { channel: { type: "string" } },
@@ -2420,8 +2420,12 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           } catch (err) {
             // THE FAULT IS THE SERVER'S, NOT THE CALLER'S SENTENCE. The raw refusal names the
             // container it could not attach, which can be a sibling pool this caller never opened.
-            // The admin page maps the same throw onto a fixed sentence and logs the detail; this
-            // is one act on two roads, and they answer the same way.
+            // So it is collapsed into one sentence and the detail is logged.
+            //
+            // NOT WORD FOR WORD WITH THE ADMIN PAGE, and deliberately. That page tells a person
+            // WHICH condition it met — a detached container gets its own permanent sentence — and
+            // a person is entitled to know that; a scoped caller is not, because the sentence
+            // would name a container it never opened. One rule, two audiences.
             options.connectors?.onFault?.(
               `the roster's promote-stage could not read the gather of "${binding.container}": ` +
                 appendRefusal(err),
@@ -2431,8 +2435,8 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
                 {
                   type: "text",
                   text:
-                    `${binding.container}'s gather cannot be read right now, so nothing was ` +
-                    `staged.`,
+                    `${binding.container}'s gather cannot be read, so nothing was staged. A ` +
+                    `person can see why on the container's own page.`,
                 },
               ],
               isError: true,
@@ -2456,7 +2460,13 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           // THE SECOND GATE THE PAGE ASKS. A delta already in the primary ground has nothing left
           // to move, and the page renders no control for it — so staging one would hand a person a
           // link to a button that is not there, over a preview naming something that can never be
-          // adopted. The preview must be true of what a completion would do.
+          // adopted.
+          //
+          // IT IS NOT EVERY GATE. The page refuses again if no pool holds the output, and promote
+          // itself refuses a withdrawn or dangling one; those depend on state this call cannot
+          // pin, and the page recomputes them at the moment a person acts. What this gate buys is
+          // that a stage is not offered over a delta that is already home — the one refusal a
+          // nomination can be sure of.
           if (gateway.reactor.get(held.id) !== undefined) {
             reply({
               content: [
