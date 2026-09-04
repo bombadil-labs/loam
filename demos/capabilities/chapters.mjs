@@ -2149,6 +2149,71 @@ export const CHAPTERS = [
             proof: "test/browser/consent-binding.test.ts",
             door: null,
           },
+          {
+            says:
+              "A container's leeway is three switches, an envelope and delegation terms, every " +
+              "switch off by default; a child's leeway must fit its parent's TERMS and never its " +
+              "parent's own switches, so a sealed room may hold an open annex, and a container " +
+              "that delegates nothing makes its subtree a pure namespace.",
+            spec: "spec/58-a-connection-is-a-peer.md",
+            proof: "test/gateway/leeway-fit.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "The leeway is a declaration on the container, so a re-declaration carries the " +
+              "record forward whole - an omitted leeway is a deleted one - and an absent leeway " +
+              "reads as every switch off, which is why no store needed a migration.",
+            spec: "spec/58-a-connection-is-a-peer.md",
+            proof: "test/gateway/leeway-declaration.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "A bound connection needs no grant: it registers law under its container's path " +
+              "AND ITS COLON, that law is folded into its own container's surface and nobody " +
+              "else's, and it survives a restart.",
+            spec: "spec/58-a-connection-is-a-peer.md",
+            proof: "test/server/derived-standing.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "A connection follows another store only into its own subtree and only where the " +
+              "leeway in force says receive; what arrives serves that container alone, and the " +
+              "channel ends when the connection's standing does.",
+            spec: "spec/58-a-connection-is-a-peer.md",
+            proof: "test/server/subtree-receive.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "The five controls are rendered in words on the consent page and on the " +
+              "container's own page - native controls, labelled and described, each carrying its " +
+              "capability and its risk in a sentence, unchecked by default.",
+            spec: "spec/58-a-connection-is-a-peer.md",
+            proof: "test/server/leeway-copy.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "In conversation a connection declares a container inside its own subtree, sets " +
+              "what a container below it may do, and follows a store into it - each verb fenced " +
+              "to the path and its colon, and none of them able to shape the container it is " +
+              "bound to.",
+            spec: "spec/58-a-connection-is-a-peer.md",
+            proof: "test/server/container-tools.test.ts",
+            door: null,
+          },
+          {
+            says:
+              "Severing a channel and promoting an output are STAGED: the tools move no bytes, " +
+              "they hand back a preview and a link, and a person completes the act behind a " +
+              "session gate a connector token cannot obtain.",
+            spec: "spec/58-a-connection-is-a-peer.md",
+            proof: "test/server/roster-staged.test.ts",
+            door: null,
+          },
         ],
       },
     ],
