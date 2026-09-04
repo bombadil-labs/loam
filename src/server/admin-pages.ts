@@ -591,11 +591,15 @@ ${hiddenPair(formToken, name)}
   // page shows when a container is created, rendered from what this container declared — and a
   // container that declared none shows every switch off, which is what it has.
   //
-  // A POOL NEVER REACHES THIS PAGE: the door fences it to the person's own subtree, which parent
-  // edges walk and an inboxOf edge does not join. A pool's leeway is the container it was opened
-  // into, and the slice that gives a pool a page owes that sentence with it.
+  // A POOL DOES REACH THIS PAGE — a person's reach joins inboxOf edges as well as parent ones —
+  // and it is not shaped here: an inbox or a channel pool takes what the container it was opened
+  // into allows, so this page names that container instead of offering a switch that governs
+  // nothing.
   const leewayForm = (name: string, rec: ResolvedContainer, formToken: string): string =>
-    `<form method="post" action="${ADMIN_LEEWAY_PATH}">
+    rec.inboxOf !== undefined
+      ? `<p>This pool takes its leeway from <code>${escapeHtml(rec.inboxOf)}</code>, the container
+it was opened into. Change it there.</p>`
+      : `<form method="post" action="${ADMIN_LEEWAY_PATH}">
 ${hiddenPair(formToken, name)}
 ${leewayFields(
   rec.leewayDeclared ? rec.leeway : undefined,

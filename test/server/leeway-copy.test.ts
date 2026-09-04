@@ -36,6 +36,8 @@
 //   saving drops the container's parent                     → 1 red, 7 green
 //   a risk sentence loses its closing clause                → 1 red, 7 green
 //   a risk sentence is emptied outright                     → 1 red, 7 green
+//   the page binds each risk to the WRONG control            → 1 red, 8 green
+//   the save drops a pool's pointer to its host              → 1 red, 8 green
 // The last two are why the spec case compares for EQUALITY. It once compared by containment, and
 // a truncated warning is still a substring of the warning while an empty one is a substring of
 // everything: the one rail whose job is to hold the promise where the spec put it would have
@@ -45,10 +47,11 @@
 // test/browser/leeway-controls.test.ts, which is where a broken tag or a folded-away control is
 // caught. Both files belong in the same mutation run for that reason.
 //
-// NOT HERE, and said so: a POOL's page. An inbox or a channel pool is reachable from no person's
-// container page — the door fences that page to the person's own subtree, which parent edges walk
-// and an inboxOf edge does not join — so a pool renders no leeway form and this file cannot ask
-// for one. The slice that gives a pool a page owes the question with it.
+// A POOL REACHES BOTH DOORS, and neither shapes it. A person's reach joins inboxOf edges as well
+// as parent ones, so a pool's page loads and the save door answers for it. An earlier draft of
+// this file said the opposite, in a comment, and shipped a save that re-declared a pool without
+// the pointer to its host — severing it from that container for good, and out of the person's
+// reach, so no door could put it back. Both doors now name the container the pool was opened into.
 //
 // NOT HERE, and said so: the browser drives these controls in test/browser/leeway-controls.test.ts,
 // which is where "unfolds beneath it when on" is proven, since a CSS rule is not a string this
@@ -180,6 +183,15 @@ describe("§58 — the five controls, in words", () => {
     for (const c of LEEWAY_CONTROLS) {
       expect(wiring.labels, `${c.label} has a label`).toContain(`leeway_${c.field}`);
       expect(wiring.described, `${c.label} has its risk bound`).toContain(`leeway_${c.field}_risk`);
+      // Bound to ITS OWN risk. Every sentence being somewhere on the page is not the promise;
+      // the promise is that the sentence under a switch is that switch's.
+      const para = html.match(
+        new RegExp(`<p class="risk" id="leeway_${c.field}_risk">([^<]*)</p>`),
+      );
+      expect(para, `${c.label} has a risk paragraph`).not.toBeNull();
+      expect(text(para![1]!), `${c.label}'s paragraph carries ${c.label}'s risk`).toBe(
+        flat(c.risk),
+      );
     }
     await closeAll();
   });
@@ -434,6 +446,44 @@ describe("§58 — the five controls, in words", () => {
     await closeAll();
   });
 
+  it("a pool is not shaped here: its page names its host, and the save door refuses it", async () => {
+    const { base, gateway } = await connectionServer();
+    await connect(base, "ada", "journal");
+    const inbox = [...gateway.connectionInboxes.keys()][0]!;
+    const before = readContainerTable(gateway.reactor, gateway.operatorAuthor).containers.get(
+      inbox,
+    )!;
+    expect(before.inboxOf, "premise: it is a pool of ada:journal").toBe("ada:journal");
+    const shown = await containerPage(base, "ada", inbox);
+    expect(shown.html, "the page reaches it").toContain(inbox);
+    expect(text(shown.html), "and names where its leeway comes from").toContain(
+      "takes its leeway from",
+    );
+    expect(shown.html, "and offers no form").not.toContain('action="/admin/leeway"');
+    const refused = await fetch(`${base}${ADMIN_LEEWAY_PATH}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `${SESSION_COOKIE}=${shown.session}`,
+        ...SAME_ORIGIN,
+      },
+      body: new URLSearchParams({
+        form_token: formTokenOf(shown.html),
+        name: inbox,
+        leeway_receive: "on",
+        leeway_envelope: "small",
+      }).toString(),
+      redirect: "manual",
+    });
+    expect(refused.status).toBe(409);
+    const after = readContainerTable(gateway.reactor, gateway.operatorAuthor).containers.get(
+      inbox,
+    )!;
+    expect(after.inboxOf, "the pool keeps its host").toBe("ada:journal");
+    expect(after.leewayDeclared, "and declares nothing of its own").toBe(false);
+    await closeAll();
+  });
+
   it("saving a leeway carries the container's record whole", async () => {
     // A leeway is saved by re-declaring the container, so everything the record already held has
     // to ride along. Dropping the parent would orphan a child from the tree its name says it is
@@ -503,6 +553,7 @@ describe("§58 — the five controls, in words", () => {
     expect(after.membership, "and so did the membership").toEqual(before.membership);
     expect(after.trust).toBe(before.trust);
     expect(after.posture).toBe(before.posture);
+    expect(after.version, "and the version").toBe(before.version);
     await closeAll();
   });
 

@@ -320,11 +320,28 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     const target = targetOf(gw, gated.user, gated.fields, res);
     if (target === undefined) return;
     const rec = target.rec;
+    // A POOL'S LEEWAY IS NOT THE PERSON'S TO SET HERE. An inbox or a channel pool takes what the
+    // container it was opened into allows, and a person's reach DOES join those edges — so this
+    // door is reachable for a pool and must say no. It said yes, and re-declared the pool without
+    // the pointer to its host, which severed it from that container for good: its members stopped
+    // composing there, and the severed name left the person's reach, so no door could reach it
+    // again to put it back.
+    if (rec.inboxOf !== undefined) {
+      refuse(
+        res,
+        409,
+        `This pool takes its leeway from ${escapeHtml(rec.inboxOf)}, the container it was opened ` +
+          "into. Change it there. Nothing was changed here.",
+      );
+      return;
+    }
     const spec = {
       container: target.name,
       trust: rec.trust,
       posture: rec.posture,
       ...(rec.parent === undefined ? {} : { parent: rec.parent }),
+      // Latest-wins is per DECLARATION: a knob that stands and is omitted here is deleted.
+      ...(rec.inboxOf === undefined ? {} : { inboxOf: rec.inboxOf }),
       ...(rec.membership === undefined ? {} : { membership: rec.membership }),
       ...(rec.membershipAt === undefined ? {} : { membershipAt: rec.membershipAt }),
       ...(rec.version === undefined ? {} : { version: rec.version }),
