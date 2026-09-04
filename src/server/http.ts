@@ -81,7 +81,9 @@ import {
   openerStands,
   readContainerTable,
   receivesNow,
+  danglingAncestor,
   subtreeUnder,
+  type ContainerTable,
 } from "../gateway/container.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
 import { readSeed, readUserSeed, userSeedPath } from "../cli/config.js";
@@ -601,6 +603,50 @@ function federateStanding(
  * a pure namespace and inherits. The refusal names only the connection's own container, never
  * another's: no oracle.
  */
+/**
+ * May a connection mint `missing` beneath `root` — the standing name its walk stopped at? The
+ * sentence refusing it, or absent.
+ *
+ * TWO QUESTIONS, AND THE NAME ANSWERS NEITHER. A person drops a shared container by striking that
+ * ONE container's declarations, which leaves its children standing with a parent edge pointing at
+ * a name the table no longer holds.
+ *
+ *   - A struck level in `missing` is not an undeclared one. Re-minting it restores the dropped
+ *     subtree to its reader, so a level that was ever declared stops the walk.
+ *   - And the name the walk STOPPED at may itself be one of those orphans. It stands, so the walk
+ *     is satisfied — but it hangs off nothing the person can reach, and everything minted beneath
+ *     it inherits that invisibility. Reach is walked by PARENT EDGES, so that is the question to
+ *     ask: does the stopping name sit inside the connection's own container by edges, not by name.
+ *
+ * Together they are the whole of it. A name is mintable only where the person can still see what
+ * it will hang from.
+ */
+function mintableAt(
+  gateway: Gateway,
+  binding: ConnectionBinding,
+  table: ContainerTable,
+  root: string,
+  missing: readonly string[],
+): string | undefined {
+  const struck = missing.find((container) =>
+    everDeclared(gateway.reactor, gateway.operatorAuthor, container),
+  );
+  if (struck !== undefined) {
+    return (
+      `${struck} was declared and then dropped. Making a name there would restore what the drop ` +
+      `removed, so it is refused. Ask the person who dropped it.`
+    );
+  }
+  const dangling = danglingAncestor(table, root);
+  if (dangling !== undefined) {
+    return (
+      `${root} hangs from ${dangling}, which was dropped, so it is reachable from no page the ` +
+      `person has. Nothing may be made beneath it.`
+    );
+  }
+  return undefined;
+}
+
 const STANDING_ENDED =
   "this connection no longer stands in its container, so it shapes nothing here. Ask the person " +
   "who connected you to connect you again.";
@@ -662,16 +708,30 @@ function receiveRefusal(
       `and its colon — and ${prefix} is outside ${into}:`
     );
   }
+  // AND THE NAME MUST HANG INSIDE THE CONTAINER, not merely begin with it. A person's drop strikes
+  // one container and leaves its children standing with a parent edge pointing at a name the table
+  // no longer holds; those children keep passing every test made of the NAME. Reach is walked by
+  // parent edges, so a peer's bytes must not be able to land under one of them — invisible to
+  // every door the person has, and un-droppable because their pages cannot see it.
+  const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+  let root = into;
+  while (root !== binding.container && !table.containers.has(root) && root.includes(":")) {
+    root = root.slice(0, root.lastIndexOf(":"));
+  }
+  const dangling = danglingAncestor(table, root);
+  if (dangling !== undefined) {
+    return (
+      `${root} hangs from ${dangling}, which was dropped, so it is reachable from no page the ` +
+      `person has — a channel cannot be opened there`
+    );
+  }
   // READ WHAT THE FOLD READS. The walk is not capped at the binding: an ancestor's terms narrow
   // what stands below them, and a door that stopped climbing at the binding admitted a follow the
   // fold then refused to serve — peer bytes landing in a subtree the person had closed. What the
   // cap was doing is kept, and said plainly: a leeway must be declared AT OR INSIDE the binding's
   // own container, so a connection never inherits a room it was not bound to. No refusal names a
   // container outside the binding.
-  const governed = governingLeeway(
-    readContainerTable(gateway.reactor, gateway.operatorAuthor),
-    into,
-  );
+  const governed = governingLeeway(table, into);
   const declaredHere =
     governed !== undefined &&
     (governed.at === binding.container || fenceAdmits(fence, governed.at));
@@ -2037,35 +2097,18 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             // container itself — undoing a person's drop, with the store's own key, at the request
             // of the party the drop was aimed at.
             const missing: string[] = [];
-            for (
-              let at = target;
-              at !== binding.container && !table.containers.has(at) && at.includes(":");
+            let root = target;
+            while (
+              root !== binding.container &&
+              !table.containers.has(root) &&
+              root.includes(":")
             ) {
-              missing.push(at);
-              at = at.slice(0, at.lastIndexOf(":"));
+              missing.push(root);
+              root = root.slice(0, root.lastIndexOf(":"));
             }
-            // A MISSING LEVEL IS NOT ALWAYS AN UNDECLARED ONE. A person drops a shared container by
-            // striking its declarations, which leaves its descendants standing but out of reach —
-            // their parent edge points at a name the table no longer holds. To this walk that is
-            // indistinguishable from a name nobody ever declared, and re-minting it hands the
-            // person's dropped subtree straight back to its reader. So the walk asks the other
-            // question, and a struck level stops it.
-            const struck = missing.find((container) =>
-              everDeclared(gateway.reactor, gateway.operatorAuthor!, container),
-            );
-            if (struck !== undefined) {
-              reply({
-                content: [
-                  {
-                    type: "text",
-                    text:
-                      `${struck} was declared and then dropped, so this name cannot be made ` +
-                      `beneath it. Declaring it again would restore what the drop removed. Ask ` +
-                      `the person who dropped it.`,
-                  },
-                ],
-                isError: true,
-              });
+            const unmintable = mintableAt(gateway, binding, table, root, missing);
+            if (unmintable !== undefined) {
+              reply({ content: [{ type: "text", text: unmintable }], isError: true });
               return;
             }
             try {

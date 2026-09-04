@@ -38,45 +38,60 @@
 //
 // RAILS-RED on origin/main, this file copied in: the suite does not LOAD there — it imports
 // src/server/refusal.js, a module this slice adds — so every case is red and vitest reports one
-// failed suite rather than twenty-one failed cases. Measured at the last revision whose imports
+// failed suite rather than twenty-three failed cases. Measured at the last revision whose imports
 // the base could resolve: 16 red, 0 green over 16 cases, no control.
 //
-// REVERT PROBES, MEASURED against this file as it stands — 21 cases. Re-measure when you add one.
-//   the fence drops its colon                            → 14 red,  7 green
-//   the fence admits an empty level                      →  1 red, 20 green
-//   no bound on the name's length or depth               →  1 red, 20 green
-//   leeway admits the caller's OWN container             →  1 red, 20 green
-//   declare skips the standing-name check                →  1 red, 20 green
-//   declare writes no parent edge                        →  8 red, 13 green
-//   declare declares the target and not the middles      →  2 red, 19 green
-//   declare mints back a level the person dropped        →  1 red, 20 green
-//   receive mints back a level the person dropped        →  1 red, 20 green
-//   declare reports only the name it was asked for       →  1 red, 20 green
-//   leeway drops the record's pool refusal               →  1 red, 20 green
-//   leeway asks the name and not the reach               →  1 red, 20 green
-//   the standing check asks one name, not the chain      →  1 red, 20 green
-//   the standing check is gone entirely                  →  3 red, 18 green
-//   the act's other name asks nothing                    →  1 red, 20 green
-//   the roster block swallows the receive verb           →  1 red, 20 green
-//   federate_set does not ask the connection             →  1 red, 20 green
-//   receive skips the shared name rule                   →  1 red, 20 green
-//   the unbound check is gone                            →  1 red, 20 green
-//   the parser drops an unknown key                      →  2 red, 19 green
-//   the door reports success over a refused append       →  1 red, 20 green
-//   the leeway re-declaration drops the parent           →  3 red, 18 green
-//   the reservation is gone from loam init --user        →  1 red, 20 green
-//   the reservation is gone from user create             →  1 red, 20 green
-//   the reservation is gone from pen create              →  1 red, 20 green
-//   the reservation is folded into userNameDefect        →  1 red, 20 green
-//   the refusal helper slices a non-law error            →  1 red, 20 green
-//   the walk climbs past the connection's own container  →  0 red, 21 green
-//   the receive walk climbs past the opener's container  →  0 red, 21 green
+// REVERT PROBES, MEASURED against this file as it stands — 23 cases. Re-measure when you add one.
+//   the fence drops its colon                            → 16 red,  7 green
+//   the fence admits an empty level                      →  1 red, 22 green
+//   no bound on the name's length or depth               →  1 red, 22 green
+//   leeway admits the caller's OWN container             →  1 red, 22 green
+//   declare skips the standing-name check                →  1 red, 22 green
+//   declare writes no parent edge                        →  9 red, 14 green
+//   declare declares the target and not the middles      →  3 red, 20 green
+//   declare mints back a level the person dropped        →  1 red, 22 green
+//   receive mints back a level the person dropped        →  1 red, 22 green
+//   the declare door does not ask if the edge dangles    →  1 red, 22 green
+//   the receive door does not ask if the edge dangles    →  1 red, 22 green
+//   declare reports only the name it was asked for       →  1 red, 22 green
+//   leeway drops the record's pool refusal               →  1 red, 22 green
+//   leeway asks the name and not the reach               →  1 red, 22 green
+//   the standing check asks one name, not the chain      →  1 red, 22 green
+//   the standing check is gone entirely                  →  3 red, 20 green
+//   the act's other name asks nothing                    →  1 red, 22 green
+//   the roster block swallows the receive verb           →  1 red, 22 green
+//   federate_set does not ask the connection             →  1 red, 22 green
+//   receive skips the shared name rule                   →  1 red, 22 green
+//   the unbound check is gone                            →  1 red, 22 green
+//   the parser drops an unknown key                      →  2 red, 21 green
+//   the door reports success over a refused append       →  1 red, 22 green
+//   the leeway re-declaration drops the parent           →  3 red, 20 green
+//   the reservation is gone from loam init --user        →  1 red, 22 green
+//   the reservation is gone from user create             →  1 red, 22 green
+//   the reservation is gone from pen create              →  1 red, 22 green
+//   the reservation is folded into userNameDefect        →  1 red, 22 green
+//   the refusal helper slices a non-law error            →  1 red, 22 green
+//   everDeclared answers across authors with no operator →  1 red, 22 green
+//   everDeclared forgets a struck name                   →  2 red, 21 green
+//   everDeclared counts malformed law as having stood    →  0 red, 23 green
+//   the walk climbs past the connection's own container  →  0 red, 23 green
+//   the receive walk climbs past the opener's container  →  0 red, 23 green
 //
-// THE LAST TWO PROBES ARE GREEN, AND THAT IS THE HONEST RECORD. Each walk that declares missing
+// THE LAST THREE PROBES ARE GREEN, AND THAT IS THE HONEST RECORD. Malformed law cannot be
+// appended through any door, so no case can build a store where `everDeclared` would meet one; the
+// filter is there because a legacy or migrated ground could carry one, and counting it would refuse
+// a road forever over a container nobody ever had. Each walk that declares missing
 // levels is guarded twice: it stops at the connection's own container, and it refuses a level that
 // was declared and then struck. The second guard refuses first in every state a rail can reach, so
 // the first is defence in depth and no case can red it alone. Written down rather than dropped,
 // because a probe removed for being green reads exactly like a probe never run.
+//
+// THE SCAN THIS FILE DRIVES IS A TARGETED LOOKUP, not a store walk. `everDeclared` reads the
+// substrate's target index, because the walk calls it once per missing level and the scanning form
+// cost a full materialization of every delta each time — sixteen store-sized passes on one request
+// (H8). No case here can see that difference; the rail is the container rails staying green while
+// the read changed shape, and the reason is written at the function. T276 carries the three
+// remaining hot reads this lens found in the same file, none of them new law.
 //
 // ONE CASE IS HELPER-LEVEL, and says so here: `a refusal is the store's own sentence, whole` calls
 // `appendRefusal` directly. Every other case in this file goes through a door.
@@ -90,6 +105,10 @@
 // leaves its descendants standing alone, and `federate_set` wrote on a binding it never weighed.
 // Two claims from round three were refuted by reading the code: the append and register roads do
 // ask, through `poolForBinding`, which refuses a dropped container before anything is signed.
+// Round four: the drop was STILL growable, through the descendants that outlived it. A walk that
+// stops at the first STANDING name is satisfied by an orphan whose own parent was struck — the
+// struck level never enters the walk at all — so both doors now ask whether the name they stopped
+// at hangs from anything, and the unbound receive branch got the struck-name rule it never had.
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -98,6 +117,7 @@ import { describe, expect, it } from "vitest";
 import { signClaims } from "@bombadil/rhizomatic";
 import {
   containerClaims,
+  everDeclared,
   readContainerTable,
   survivingDeclarationIds,
 } from "../../src/gateway/container.js";
@@ -739,6 +759,66 @@ describe("§58 — the container roster", () => {
     await closeAll();
   });
 
+  it("the dropped subtree is not grown through a descendant that outlived it", async () => {
+    // THE ORPHAN IS THE ROAD. A shared drop strikes one container and leaves its children standing.
+    // A walk that stops at the first STANDING name is satisfied by one of those children — the
+    // struck level never enters the walk at all — and everything minted beneath it inherits the
+    // orphan's invisibility. So the door asks reach by PARENT EDGES, not by name.
+    const { base, gateway } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    await declareAs(gateway, "ada", OPEN);
+    await declareAs(gateway, "ada:journal", OPEN);
+    expect((await declareTool(base, ada, "ada:journal:work")).isError, "premise").toBe(false);
+    expect((await declareTool(base, ada, "ada:journal:work:notes")).isError, "premise").toBe(false);
+
+    const ids = survivingDeclarationIds(
+      gateway.reactor,
+      gateway.operatorAuthor!,
+      "ada:journal:work",
+    );
+    await gateway.append(
+      ids.map((id) =>
+        signClaims(
+          {
+            timestamp: gateway.nextTimestamp(),
+            author: OPERATOR,
+            pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
+          },
+          OPERATOR_SEED,
+        ),
+      ),
+    );
+    // The orphan: it stands, and it is out of the person's reach.
+    expect(
+      recOf(gateway, "ada:journal:work:notes"),
+      "premise: the child outlived it",
+    ).toBeDefined();
+    expect(
+      subtreeOf(gateway.containers(), "ada").has("ada:journal:work:notes"),
+      "premise: and is unreachable",
+    ).toBe(false);
+
+    // Neither road may hang anything from it.
+    const grown = await declareTool(base, ada, "ada:journal:work:notes:z");
+    expect(grown.isError, grown.text).toBe(true);
+    expect(grown.text, "and it names the dropped level its edge hangs from").toMatch(
+      /hangs from ada:journal:work, which was dropped/,
+    );
+    expect(recOf(gateway, "ada:journal:work:notes:z"), "nothing was made").toBeUndefined();
+
+    const from = await peerStore();
+    const received = await callTool(base, ada, "loam_container_receive", {
+      from,
+      into: "ada:journal:work:notes",
+      prefix: "ada:journal:work:notes:peer",
+      token: PEER_TOKEN,
+    });
+    expect(received.isError, received.text).toBe(true);
+    expect(gateway.channelStatus().length, "and no peer bytes landed there").toBe(0);
+    await closePeers();
+    await closeAll();
+  });
+
   it("a connection bound BELOW a dropped container stands with it, and falls with it", async () => {
     // A shared drop strikes one name. A connection bound to a descendant keeps its own container's
     // declaration, so asking only that name leaves the dropped subtree reachable by exactly the
@@ -907,6 +987,44 @@ describe("§58 — the container roster", () => {
       expect(r.text, `${verb} says why`).toMatch(/not bound|bound connection/i);
     }
     expect(recOf(gateway, "ada:journal:notes"), "and nothing was declared").toBeUndefined();
+    await closeAll();
+  });
+
+  it("everDeclared answers the mint question, and fails closed", async () => {
+    // HELPER-LEVEL, and said so. Both halves below are unreachable through a door — the fixture
+    // always has an operator, and the append refuses malformed law — so they are asked here
+    // directly. They are the two directions this predicate must not get wrong: a false ABSENCE is
+    // a licence to mint, and a false PRESENCE refuses a road forever.
+    const { gateway, base } = await connectionServer();
+    const ada = await connect(base, "ada", "journal");
+    await declareTool(base, ada, "ada:journal:notes");
+    const op = gateway.operatorAuthor!;
+
+    expect(everDeclared(gateway.reactor, op, "ada:journal:notes"), "a standing name").toBe(true);
+    expect(everDeclared(gateway.reactor, op, "ada:journal:never"), "a name nobody made").toBe(
+      false,
+    );
+
+    // Struck, and still true: that is the whole point — the table forgets it, this does not.
+    const ids = survivingDeclarationIds(gateway.reactor, op, "ada:journal:notes");
+    await gateway.append(
+      ids.map((id) =>
+        signClaims(
+          {
+            timestamp: gateway.nextTimestamp(),
+            author: OPERATOR,
+            pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
+          },
+          OPERATOR_SEED,
+        ),
+      ),
+    );
+    expect(recOf(gateway, "ada:journal:notes"), "the table forgets it").toBeUndefined();
+    expect(everDeclared(gateway.reactor, op, "ada:journal:notes"), "this does not").toBe(true);
+
+    // FAILS CLOSED, and closed here is TRUE. With no operator to weigh law by, a store cannot say
+    // a name was never declared — and saying so would be a licence to mint it.
+    expect(everDeclared(gateway.reactor, undefined, "ada:journal:never")).toBe(true);
     await closeAll();
   });
 

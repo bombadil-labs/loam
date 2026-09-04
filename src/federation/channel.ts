@@ -19,6 +19,7 @@ import { contentAddress, makeNegationClaims, signClaims } from "@bombadil/rhizom
 import type { Container } from "../gateway/container.js";
 import {
   containerClaims,
+  danglingAncestor,
   everDeclared,
   openerStands,
   readContainerTable,
@@ -1711,6 +1712,16 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
   const table = readContainerTable(gw.reactor, gw.operatorAuthor);
   if (!table.containers.has(opts.into)) {
     if (opts.openedBy === undefined) {
+      // THE STRUCK-NAME RULE IS NOT THE BOUND CALLER'S ALONE. A grant-holding caller reaches this
+      // branch, and re-declaring a name a person dropped reattaches every surviving descendant to
+      // it — worse here, because this declaration carries no parent, so the restored name is not
+      // in the person's reach either. They cannot see it and cannot drop it again.
+      if (everDeclared(gw.reactor, gw.operatorAuthor, opts.into)) {
+        throw new Error(
+          `${opts.into} was declared and then dropped, so a channel cannot be opened into it — ` +
+            `declaring it again would restore what the drop removed`,
+        );
+      }
       await gw.append([
         signClaims(
           containerClaims(
@@ -1736,17 +1747,27 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
       const seed = gw.options.seed;
       const stop = opts.openedBy;
       const missing: string[] = [];
-      for (let at = opts.into; at !== stop && !table.containers.has(at) && at.includes(":");) {
+      let at = opts.into;
+      while (at !== stop && !table.containers.has(at) && at.includes(":")) {
         missing.push(at);
         at = at.slice(0, at.lastIndexOf(":"));
       }
       const struck = missing.find((container) =>
-        everDeclared(gw.reactor, gw.operatorAuthor!, container),
+        everDeclared(gw.reactor, gw.operatorAuthor, container),
       );
       if (struck !== undefined) {
         throw new Error(
-          `${struck} was declared and then dropped, so a channel cannot be opened beneath it — ` +
+          `${struck} was declared and then dropped, so a channel cannot be opened there — ` +
             `declaring it again would restore what the drop removed`,
+        );
+      }
+      // AND THE NAME THE WALK STOPPED AT MAY ITSELF BE AN ORPHAN. It stands, so the walk is
+      // satisfied — but its own parent was dropped, so it hangs off nothing the person can reach
+      // and a pool composed beneath it is invisible to every door they have.
+      const dangling = danglingAncestor(table, at);
+      if (dangling !== undefined) {
+        throw new Error(
+          `${at} hangs from ${dangling}, which was dropped, so a channel cannot be opened there`,
         );
       }
       await gw.append(

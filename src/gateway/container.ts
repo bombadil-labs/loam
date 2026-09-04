@@ -54,7 +54,7 @@ import {
   SIZE_ENVELOPES,
 } from "./envelope.js";
 import { withNegationClosure, withNegationClosureAcross } from "./ingest.js";
-import { lawfulNegated, lawfulSnapshot } from "./registration.js";
+import { lawfulDeltasAt, lawfulNegated, lawfulSnapshot } from "./registration.js";
 import { readTrustPolicyAt, type TrustPolicy } from "./trust.js";
 import { Gateway, type ConnectionBinding, type FederationReport } from "./gateway.js";
 
@@ -758,13 +758,14 @@ export function survivingDeclarationIds(
   operator: string,
   entity: string,
 ): string[] {
+  // Filed AT the container's entity, so the target index answers it — the same H8 rule as
+  // `everDeclared` below, on the road that drops a container. `lawfulDeltasAt` carries no negation
+  // closure of its own, so the strike filter stays here.
   const negated = lawfulNegated(reactor, operator);
-  const out: string[] = [];
-  for (const delta of lawfulSnapshot(reactor, operator)) {
-    if (negated(delta.id)) continue;
-    if (containerRef(delta.claims, CTX_CONTAINER) === entity) out.push(delta.id);
-  }
-  return out;
+  return lawfulDeltasAt(reactor, { entity, context: CTX_CONTAINER }, operator)
+    .filter((delta) => !negated(delta.id))
+    .filter((delta) => containerRef(delta.claims, CTX_CONTAINER) === entity)
+    .map((delta) => delta.id);
 }
 
 /**
@@ -776,11 +777,35 @@ export function survivingDeclarationIds(
  * restores every surviving descendant to the reader, which is the person's act undone by the party
  * it was aimed at.
  */
-export function everDeclared(reactor: Reactor, operator: string, entity: string): boolean {
-  for (const delta of lawfulSnapshot(reactor, operator)) {
-    if (containerRef(delta.claims, CTX_CONTAINER) === entity) return true;
-  }
-  return false;
+export function everDeclared(
+  reactor: Reactor,
+  operator: string | undefined,
+  entity: string,
+): boolean {
+  // FAILS CLOSED, AND CLOSED HERE MEANS TRUE. A false ABSENCE is a licence to mint — it is what
+  // lets a walk declare this name — so a store with no operator to weigh law by cannot be allowed
+  // to answer "never declared". `readContainerTable` fails closed the other way, returning an
+  // empty table, and the two directions agree: neither hands out a name it could not judge.
+  if (operator === undefined) return true;
+  // THE TARGETED LOOKUP, NOT A SCAN (H8). A declaration is filed AT the container's entity, so the
+  // substrate's own target index answers this in the size of that one container's history rather
+  // than the size of the store. The scanning form cost a full materialization of every delta, and
+  // the walk that calls this calls it once per missing level — sixteen store-sized passes on one
+  // request.
+  //
+  // NOT A DERIVED MEMO, and that distinction is the whole of H8's index trap here. A false ABSENCE
+  // is a licence to mint: it is what lets the walk re-declare a name, so a stale index would hand
+  // a dropped subtree back to its reader. `byTarget` is written by ingest beside the set it
+  // indexes and replayed whole by an erase, so it cannot answer absent for a delta the store
+  // holds; a Set maintained on this side could.
+  // WELL-FORMED ONLY. Malformed law binds nothing — `computeContainerTable` skips a declaration
+  // whose trust or posture the law refuses — so a name that only ever carried one never stood, and
+  // reporting it as dropped would refuse a road forever over a container nobody ever had.
+  return lawfulDeltasAt(reactor, { entity, context: CTX_CONTAINER }, operator).some(
+    (delta) =>
+      containerRef(delta.claims, CTX_CONTAINER) === entity &&
+      containerDefect(delta, reactor, operator) === undefined,
+  );
 }
 
 const retractionOf = (targetId: string, author: string, timestamp: number): Claims => ({
@@ -1086,6 +1111,29 @@ export function openerStands(
   if (!channel.openedFrom.startsWith(stem)) return false;
   const key = channel.openedFrom.slice(stem.length);
   return holdsGrant(inbox.reactor, STORE_ENTITY, key, "write", gw.operatorAuthor);
+}
+
+/**
+ * The nearest ancestor edge of `name` that points at a container the table does not hold, or
+ * absent if every edge lands somewhere.
+ *
+ * A DANGLING EDGE IS WHAT A DROP LEAVES BEHIND. Dropping a shared container strikes that one
+ * container's declarations; its children keep standing and keep their `parent`, which now names
+ * nothing. Such a child passes every test made of its NAME while being unreachable from the
+ * person's own pages, which walk edges — so it must not be somewhere new law can be hung.
+ *
+ * A container with NO parent edge is not dangling. Plenty stand that way by design, declared by
+ * name alone; this asks only that the edges a record actually carries land on something.
+ */
+export function danglingAncestor(table: ContainerTable, name: string): string | undefined {
+  const seen = new Set<string>();
+  for (let at: string | undefined = name; at !== undefined && !seen.has(at);) {
+    seen.add(at);
+    const rec = table.containers.get(at);
+    if (rec === undefined) return at === name ? undefined : at;
+    at = rec.parent;
+  }
+  return undefined;
 }
 
 export function subtreeUnder(table: ContainerTable, root: string): string[] {
