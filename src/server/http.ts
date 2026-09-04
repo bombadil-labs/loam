@@ -32,7 +32,7 @@ import {
   parseBodyFields as parseAppBody,
   readBodyStrict as readBody,
 } from "./body.js";
-import { authorForSeed, type Delta } from "@bombadil/rhizomatic";
+import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { Kind, OperationTypeNode, parse, type DocumentNode } from "graphql";
 import { fromWire, toWire, type WireDelta } from "../federation/wire.js";
 import { buildOpenApi, handleRest } from "../surface/rest.js";
@@ -74,6 +74,7 @@ import {
   registerPrefixesOf,
 } from "../gateway/accounts.js";
 import {
+  containerClaims,
   governingLeeway,
   inboxName,
   openerStands,
@@ -89,6 +90,7 @@ import { ADMIN_CONTAINER_PATH } from "./admin-pages.js";
 import { refusalKey } from "../gateway/lifecycle.js";
 import type { ChannelStatus } from "../federation/channel.js";
 import type { ConnectionBinding } from "../gateway/gateway.js";
+import type { EnvelopeSize, Leeway, Terms } from "../gateway/leeway.js";
 
 export { type UserDoorOptions } from "./session.js";
 
@@ -641,6 +643,60 @@ function receiveRefusal(
     ? undefined
     : `the container ${governed.at} does not receive: the leeway in force there has its receive ` +
         "switch off";
+}
+
+/**
+ * The leeway a container tool was asked for, or the sentence refusing it. Every switch starts off,
+ * so an absent field is off — the same default the page renders, arrived at from the other side —
+ * and a size or a terms object that is not one of the shapes the law admits is refused here rather
+ * than coerced into something the caller did not ask for.
+ */
+function leewayFromTool(args: Record<string, unknown>): Leeway | string {
+  const size = (given: unknown): EnvelopeSize | undefined =>
+    given === undefined
+      ? "small"
+      : given === "small" || given === "medium" || given === "large"
+        ? given
+        : undefined;
+  const badSize = (where: string): string =>
+    `the ${where}envelope is small, medium or large, and what you gave is none of them.`;
+  const terms = (given: unknown, depth: number): Terms | string => {
+    if (typeof given !== "object" || given === null) return "the terms are an object.";
+    const t = given as Record<string, unknown>;
+    const envelope = size(t["envelope"]);
+    if (envelope === undefined) return badSize("terms' ");
+    if (depth >= 8) return "these terms nest deeper than any subtree they could govern.";
+    let delegate: "off" | "same" | Terms;
+    if (t["delegate"] === undefined || t["delegate"] === false) delegate = "off";
+    else if (t["delegate"] === "same" || t["delegate"] === true) delegate = "same";
+    else {
+      const inner = terms(t["delegate"], depth + 1);
+      if (typeof inner === "string") return inner;
+      delegate = inner;
+    }
+    return {
+      receive: t["receive"] === true,
+      offer: t["offer"] === true,
+      publish: t["publish"] === true,
+      envelope,
+      delegate,
+    };
+  };
+  const envelope = size(args["envelope"]);
+  if (envelope === undefined) return badSize("");
+  let delegate: "off" | Terms = "off";
+  if (args["delegate"] !== undefined) {
+    const asked = terms(args["delegate"], 0);
+    if (typeof asked === "string") return asked;
+    delegate = asked;
+  }
+  return {
+    receive: args["receive"] === true,
+    offer: args["offer"] === true,
+    publish: args["publish"] === true,
+    envelope,
+    delegate,
+  };
 }
 
 /** May this caller see or act on THIS channel? A bound connection owns the channels its container opened. */
@@ -1516,6 +1572,72 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       },
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
+    {
+      name: "loam_container_declare",
+      description:
+        "Declare a container INSIDE your own — the path and its colon. A connection shapes its own " +
+        "subtree and nothing beside it: a name one level up, a sibling, or a name that merely " +
+        "shares your letters is refused with the sentence naming the rule. The new container " +
+        "declares no leeway of its own, so it inherits what yours allows until you set one with " +
+        "loam_container_leeway.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "the container to declare, under your own path" },
+        },
+        required: ["name"],
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    {
+      name: "loam_container_leeway",
+      description:
+        "Set what a container in your subtree may do: receive, offer, publish, an envelope size, " +
+        "and the terms below it. Every switch starts off. A leeway that does not fit the terms " +
+        "above it is refused with the sentence naming the ceiling, and a change is a delta the " +
+        "next request obeys. Your own container's leeway is the person's to set, not yours.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "a container BELOW your own" },
+          receive: { type: "boolean", description: "may it follow other stores (default false)" },
+          offer: { type: "boolean", description: "may its descendants be offered (default false)" },
+          publish: { type: "boolean", description: "may lenses be public here (default false)" },
+          envelope: {
+            type: "string",
+            description: "how much compute may run behind glass: small, medium or large",
+          },
+          delegate: {
+            type: "object",
+            description:
+              "the terms a child may differ within: the same switches, an envelope ceiling, and " +
+              "`same` to carry these terms further down. Absent means it delegates nothing.",
+          },
+        },
+        required: ["name"],
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    {
+      name: "loam_container_receive",
+      description:
+        "Follow another store INTO your own subtree: a channel into your container or one below " +
+        "it, under a prefix inside it, where that container's leeway says receive is on. What " +
+        "arrives is kept in a pool of its own and serves your container alone. This is the same " +
+        "act as loam_federate_connect, named for the roster; an unbound caller uses that one.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          from: { type: "string", description: "the peer's mount address" },
+          into: { type: "string", description: "your container, or one below it" },
+          prefix: { type: "string", description: "the namespace YOU assign this peer" },
+          token: { type: "string", description: "the peer's door token, if it wants one" },
+          bless: { type: "boolean", description: "bind law that arrives (default true)" },
+        },
+        required: ["from", "into", "prefix"],
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
   ];
 
   // `gateway.query` runs whatever document it is handed — graphql executes a `mutation` operation as
@@ -1779,7 +1901,180 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         // §46 over MCP (T188). Authority is the CONTAINER-SCOPED federate grant, never the operator
         // role — see federateStanding. A caller with no standing meets the same refusal whichever
         // channel it named, so the tool cannot be used to learn which channels exist (§12/T78).
-        if (name === "loam_federate_connect") {
+        // THE CONTAINER ROSTER (SPEC §58 position 3). A connection shapes its own subtree in
+        // conversation and reaches nothing beside it. Every verb here answers the same two
+        // questions in the same order: is this caller bound, and is the name it gave inside the
+        // fence its binding draws — the path AND ITS COLON, so a sibling sharing the letters is
+        // outside. A refusal names only the caller's own container.
+        if (typeof name === "string" && name.startsWith("loam_container_")) {
+          const asked = args as Record<string, unknown>;
+          const binding = identity.binding;
+          if (binding === undefined) {
+            reply({
+              content: [
+                {
+                  type: "text",
+                  text:
+                    "the container tools are a bound connection's: they shape the container this " +
+                    "connection lives in. This token is not bound to one.",
+                },
+              ],
+              isError: true,
+            });
+            return;
+          }
+          // A POOL IS OUTSIDE THIS FENCE BY ITS NAME. A pool leads with `inbox:` or `channel:`,
+          // and a bound container's name never does — a person may not take those names — so no
+          // name a connection can reach is a pool, and these verbs need no rule of their own for
+          // one. The person's own page carries that rule, because a person's reach does join the
+          // pool edge.
+          const fence = `${binding.container}:`;
+          const below = (given: unknown): string | undefined =>
+            typeof given === "string" && fenceAdmits(fence, given) && !given.includes(NUL)
+              ? given
+              : undefined;
+
+          if (name === "loam_container_declare") {
+            const target = below(asked["name"]);
+            if (target === undefined) {
+              reply({
+                content: [
+                  {
+                    type: "text",
+                    text:
+                      `a connection declares only inside its own container — the path and its ` +
+                      `colon — so a name must begin ${fence} and this one does not.`,
+                  },
+                ],
+                isError: true,
+              });
+              return;
+            }
+            const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+            if (table.containers.has(target)) {
+              reply({
+                content: [{ type: "text", text: `${target} already stands.` }],
+                isError: true,
+              });
+              return;
+            }
+            try {
+              // Declared under its PATH parent, which the fence guarantees is at or inside the
+              // binding's own container: names are paths and the tree agrees with the names, so
+              // reach — walked by parent edges — finds it where its name says it is.
+              await gateway.append([
+                signClaims(
+                  containerClaims(
+                    {
+                      container: target,
+                      trust: "curated",
+                      posture: "separate",
+                      parent: target.slice(0, target.lastIndexOf(":")),
+                    },
+                    gateway.operatorAuthor!,
+                    gateway.nextTimestamp(),
+                  ),
+                  gateway.options.seed!,
+                ),
+              ]);
+            } catch (err) {
+              reply({
+                content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+                isError: true,
+              });
+              return;
+            }
+            reply({
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(
+                    { container: target, leeway: "inherited — set one with loam_container_leeway" },
+                    null,
+                    1,
+                  ),
+                },
+              ],
+            });
+            return;
+          }
+
+          if (name === "loam_container_leeway") {
+            // A CONNECTION SHAPES BELOW ITSELF, NEVER ITSELF. Its own container's leeway is what
+            // the person granted it; a connection that could widen that would be granting itself.
+            const target = below(asked["name"]);
+            if (target === undefined) {
+              reply({
+                content: [
+                  {
+                    type: "text",
+                    text:
+                      `a connection sets a leeway only below its own container — the path and its ` +
+                      `colon — so a name must begin ${fence} and this one does not. Your own ` +
+                      `container's leeway is the person's to set, on its page.`,
+                  },
+                ],
+                isError: true,
+              });
+              return;
+            }
+            const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+            const rec = table.containers.get(target);
+            if (rec === undefined) {
+              reply({
+                content: [{ type: "text", text: `${target} is not declared. Declare it first.` }],
+                isError: true,
+              });
+              return;
+            }
+            const want = leewayFromTool(asked);
+            if (typeof want === "string") {
+              reply({ content: [{ type: "text", text: want }], isError: true });
+              return;
+            }
+            try {
+              await gateway.append([
+                signClaims(
+                  containerClaims(
+                    {
+                      container: target,
+                      trust: rec.trust,
+                      posture: rec.posture,
+                      ...(rec.parent === undefined ? {} : { parent: rec.parent }),
+                      ...(rec.membership === undefined ? {} : { membership: rec.membership }),
+                      ...(rec.membershipAt === undefined ? {} : { membershipAt: rec.membershipAt }),
+                      ...(rec.version === undefined ? {} : { version: rec.version }),
+                      leeway: want,
+                    },
+                    gateway.operatorAuthor!,
+                    gateway.nextTimestamp(),
+                  ),
+                  gateway.options.seed!,
+                ),
+              ]);
+            } catch (err) {
+              const detail = err instanceof Error ? err.message : String(err);
+              const why = detail.slice(detail.indexOf("malformed law:") + "malformed law:".length);
+              reply({
+                content: [{ type: "text", text: why.trim() === "" ? detail : why.trim() }],
+                isError: true,
+              });
+              return;
+            }
+            reply({
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({ container: target, leeway: want }, null, 1),
+                },
+              ],
+            });
+            return;
+          }
+        }
+
+        // The roster's receive is this act, named for its caller: one road, two names.
+        if (name === "loam_federate_connect" || name === "loam_container_receive") {
           const standing = federateStanding(gateway, identity);
           const into = typeof args.into === "string" ? args.into : undefined;
           const from = typeof args.from === "string" ? args.from : undefined;
