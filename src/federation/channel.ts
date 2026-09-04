@@ -17,7 +17,12 @@ import type { Delta } from "@bombadil/rhizomatic";
 import type { Claims } from "@bombadil/rhizomatic";
 import { contentAddress, makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
 import type { Container } from "../gateway/container.js";
-import { containerClaims, readContainerTable, openerStands } from "../gateway/container.js";
+import {
+  containerClaims,
+  openerStands,
+  readContainerTable,
+  receivesNow,
+} from "../gateway/container.js";
 import type { FederationReport, Gateway } from "../gateway/gateway.js";
 import { legalNameFor } from "../gateway/gql.js";
 import { parseOffer } from "./offer.js";
@@ -2063,6 +2068,7 @@ export function keepSyncingImpl(gw: Gateway, opts: { everyMs?: number } = {}): S
     // Read every record ONCE per tick: `channelStatus` walks the whole ground, and asking it per
     // channel made the tick quadratic in the store (H8).
     const records = new Map(gw.channelStatus().map((s) => [s.name, s]));
+    const table = readContainerTable(gw.reactor, gw.operatorAuthor);
     for (const channel of [...gw.federationChannels.values()]) {
       // THE CASCADE: a channel whose opener no longer stands is not synced — its record stands,
       // untouched, but nothing it would receive is served and nothing more is pulled. A channel
@@ -2070,6 +2076,9 @@ export function keepSyncingImpl(gw: Gateway, opts: { everyMs?: number } = {}): S
       // it to the person's own would sync what the store no longer knows about.
       const record = records.get(channel.name);
       if (record === undefined || !openerStands(gw, record)) continue;
+      // And a bound channel obeys its container's switch here too: the fold refusing to SERVE what
+      // a closed container followed would still leave the peer's bytes landing in it.
+      if (record.openedBy !== undefined && !receivesNow(table, record.into)) continue;
       if (stopped) return;
       try {
         await channel.sync();

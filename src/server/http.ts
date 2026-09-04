@@ -618,12 +618,20 @@ function receiveRefusal(
       `and its colon — and ${prefix} is outside ${into}:`
     );
   }
+  // READ WHAT THE FOLD READS. The walk is not capped at the binding: an ancestor's terms narrow
+  // what stands below them, and a door that stopped climbing at the binding admitted a follow the
+  // fold then refused to serve — peer bytes landing in a subtree the person had closed. What the
+  // cap was doing is kept, and said plainly: a leeway must be declared AT OR INSIDE the binding's
+  // own container, so a connection never inherits a room it was not bound to. No refusal names a
+  // container outside the binding.
   const governed = governingLeeway(
     readContainerTable(gateway.reactor, gateway.operatorAuthor),
     into,
-    binding.container,
   );
-  if (governed === undefined) {
+  const declaredHere =
+    governed !== undefined &&
+    (governed.at === binding.container || fenceAdmits(fence, governed.at));
+  if (!declaredHere) {
     return (
       `the container ${binding.container} does not receive: no leeway is declared for it, and an ` +
       "absent leeway is every switch off"
@@ -631,7 +639,8 @@ function receiveRefusal(
   }
   return governed.leeway.receive
     ? undefined
-    : `the container ${governed.at} does not receive: its leeway's receive switch is off`;
+    : `the container ${governed.at} does not receive: the leeway in force there has its receive ` +
+        "switch off";
 }
 
 /** May this caller see or act on THIS channel? A bound connection owns the channels its container opened. */

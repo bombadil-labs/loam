@@ -17,7 +17,8 @@
 // wait on the roster slice's verbs; the publish switch has no road yet (§12's public lens for a
 // bound connection is the roster's too); offering is T264's. A revoked opener's channel is also
 // skipped by the standing sync, which no rail here observes: the fold and the doors are what a
-// reader can see, and they are pinned.
+// reader can see, and they are pinned. The standing sync obeys the same switch as the fold and the
+// doors, so a closed container follows nothing more; no rail here watches a tick.
 //
 // THE CASCADE IS A SUSPENSION, KEYED ON STANDING, and that is a decision rather than a fallback.
 // Nothing is struck: a channel serves exactly while the binding that opened it stands, so if the
@@ -27,25 +28,29 @@
 // it. The alternative, striking each channel's record inside the revoke, would make revocation
 // final and unrecoverable, and nothing in position 4 asks for that.
 //
-// RAILS-RED on origin/main, this file copied in: 9 red, 1 green — 10 cases. The green is a
+// RAILS-RED on origin/main, this file copied in: 10 red, 1 green — 11 cases. The green is a
 // CONTROL: under terms that allow it, an annex that declared receive on already received on main
 // (the walk there stops at the annex's own leeway); it pins that this slice did not narrow that.
 //
-// REVERT PROBES, MEASURED against this file as it stands — 10 cases. Re-measure when you add one.
-//   fit not weighed where a leeway is declared             → 3 red, 7 green
-//   the read never narrows by the terms above              → 3 red, 7 green
-//   the narrowing keeps the raw delegate chain             → 1 red, 9 green
-//   the terms do not descend a level per level             → 2 red, 8 green
-//   the chains do not descend inside one another           → 1 red, 9 green
-//   a record that names an opener but no binding stands    → 1 red, 9 green
-//   a tightened switch never reaches a standing channel    → 1 red, 9 green
-//   only the doors weigh receive, never the fold           → 1 red, 9 green
-//   the opener always stands                               → 2 red, 8 green
-//   the larger envelope wins a narrowing                   → 1 red, 9 green
-// Two probes are named apart because they measure two descents: the terms a parent delegates
+// REVERT PROBES, MEASURED against this file as it stands — 11 cases. Re-measure when you add one.
+//   fit not weighed where a leeway is declared             → 3 red,  8 green
+//   the read never narrows by the terms above              → 5 red,  6 green
+//   the terms do not descend a level per level             → 2 red,  9 green
+//   the chains do not descend inside one another           → 1 red, 10 green
+//   the open door caps its walk at the binding             → 1 red, 10 green
+//   the open door inherits a room above the binding        → 1 red, 10 green
+//   a record that names an opener but no binding stands    → 1 red, 10 green
+//   a tightened switch reaches nothing                     → 1 red, 10 green
+//   only the doors weigh receive, never the fold           → 1 red, 10 green
+//   the opener always stands                               → 2 red,  9 green
+//   the larger envelope wins a narrowing                   → 1 red, 10 green
+// The two door probes are named apart because they pull in opposite directions: capping the walk
+// at the binding let a tightening ABOVE it pass, and removing the cap outright let a connection
+// inherit a room it was never bound to. What the cap was doing is kept as its own rule — a leeway
+// must be declared at or inside the binding's own container — and each half reds its own case.
+// The two descent probes are named apart for the same reason: the terms a parent delegates
 // descend one level per container level, and the chains those terms carry descend inside one
-// another. The first was pinned by the depth-two case; the second needed the depth-three one,
-// and was green until it existed.
+// another. The second was green until the depth-three case existed.
 //
 // A sealed child under a parent that delegates nothing, and the person's home narrowing nothing
 // below it, are pinned only by rails that landed before this slice and are frozen: reverting
@@ -75,13 +80,16 @@ import { serve, type ServerHandle } from "../../src/server/http.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 import {
+  OPERATOR,
+  OPERATOR_SEED,
   closeAll,
   connect,
   connectionServer,
+  consent,
   grantOf,
-  OPERATOR,
-  OPERATOR_SEED,
+  pkce,
   poolOf,
+  redeem,
 } from "../helpers/connection-fixture.js";
 import { FERN } from "../spike/garden.js";
 
@@ -196,6 +204,15 @@ async function fieldsOf(base: string, bearer: string): Promise<string[]> {
   };
   return (body.data?.__schema?.queryType?.fields ?? []).map((f) => f.name);
 }
+/** Bind a connection to a container that already stands, however deep it sits. */
+const connectTo = async (base: string, user: string, container: string): Promise<string> => {
+  const p = pkce();
+  const { code, status } = await consent(base, user, p.challenge, { bind: container });
+  expect(status, `consent to ${container}`).toBe(302);
+  const res = await redeem(base, code, p.verifier);
+  expect(res.status).toBe(200);
+  return ((await res.json()) as { access_token: string }).access_token;
+};
 const servesPeer = async (base: string, bearer: string, prefix: string): Promise<boolean> =>
   (await fieldsOf(base, bearer)).some((f) => f.startsWith(prefix.replace(/[^A-Za-z0-9_]/g, "_")));
 /** The envelope a pool renders under, by its container name. */
@@ -496,6 +513,46 @@ describe("§58 — leeway fits its parent's terms, and cascades", () => {
       envelopeOf(gateway, channelName("ada:journal", "ada:journal:peer")),
       "the container's own pool",
     ).toEqual({ maxConcurrentRenders: 16, renderTimeoutMs: 2000, maxMemoryMb: 512 });
+    await closePeers();
+    await closeAll();
+  });
+
+  it("a tightening ABOVE the binding reaches the open door, not only the fold", async () => {
+    // The door read a leeway capped at the binding's own container while the fold read the whole
+    // chain. A person who closed the room above a helper stopped the helper's rows being SERVED
+    // and not the helper's following: the peer's bytes went on landing in a subtree she had
+    // closed. Both reads are the same read now.
+    const { base, gateway } = await connectionServer();
+    await connect(base, "ada", "agent1");
+    await declare(gateway, "ada:agent1", {
+      ...SEALED_LEEWAY,
+      receive: true,
+      delegate: TERMS_RECEIVE,
+    });
+    await declare(gateway, "ada:agent1:helper", { ...SEALED_LEEWAY, receive: true }, "ada:agent1");
+    const helper = await connectTo(base, "ada", "ada:agent1:helper");
+    const peer = await peerStore();
+    expect((await receive(base, helper, "ada:agent1:helper", peer)).isError, "before").toBe(false);
+    // The person closes the room above the helper.
+    await declare(gateway, "ada:agent1", { ...SEALED_LEEWAY, receive: true, delegate: TERMS_NONE });
+    const after = await receive(base, helper, "ada:agent1:helper:more", peer);
+    expect(after.isError, "the door obeys the tightening above").toBe(true);
+    expect(after.text).toMatch(/ada:agent1:helper does not receive/);
+    // The refusal names the binding's own container, never the room above it.
+    expect(after.text).not.toMatch(/\bada:agent1 does not receive/);
+    // Two-sided: a binding whose chain nobody tightened still receives, and one bound to a
+    // container that declared nothing is still refused for declaring nothing.
+    const bea = await connect(base, "bea", "notes");
+    await declare(gateway, "bea:notes", { ...SEALED_LEEWAY, receive: true });
+    expect((await receive(base, bea, "bea:notes:inbox", peer)).isError, "untouched").toBe(false);
+    // A leeway ABOVE the binding is not the binding's to inherit: the person's home may receive
+    // and a room she never gave a leeway to still does not.
+    await declare(gateway, "ada", { ...SEALED_LEEWAY, receive: true });
+    const quiet = await connect(base, "ada", "quiet");
+    const silent = await receive(base, quiet, "ada:quiet:inbox", peer);
+    expect(silent.isError).toBe(true);
+    expect(silent.text).toMatch(/no leeway is declared for it/);
+    expect(silent.text).toMatch(/ada:quiet does not receive/);
     await closePeers();
     await closeAll();
   });
