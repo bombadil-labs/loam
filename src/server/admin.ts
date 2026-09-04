@@ -340,8 +340,9 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
       trust: rec.trust,
       posture: rec.posture,
       ...(rec.parent === undefined ? {} : { parent: rec.parent }),
-      // Latest-wins is per DECLARATION: a knob that stands and is omitted here is deleted.
-      ...(rec.inboxOf === undefined ? {} : { inboxOf: rec.inboxOf }),
+      // No `inboxOf` here, and that is not an omission: the refusal above is the safeguard, and a
+      // carry beside it would be a line no case can reach — read as a second guard, killed by no
+      // mutation, and left standing as the only one if the refusal is ever relaxed.
       ...(rec.membership === undefined ? {} : { membership: rec.membership }),
       ...(rec.membershipAt === undefined ? {} : { membershipAt: rec.membershipAt }),
       ...(rec.version === undefined ? {} : { version: rec.version }),

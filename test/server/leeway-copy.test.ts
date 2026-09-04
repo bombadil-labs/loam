@@ -37,7 +37,11 @@
 //   a risk sentence loses its closing clause                → 1 red, 7 green
 //   a risk sentence is emptied outright                     → 1 red, 7 green
 //   the page binds each risk to the WRONG control            → 1 red, 8 green
-//   the save drops a pool's pointer to its host              → 1 red, 8 green
+//   the save door admits a pool                             → 1 red, 8 green
+// That row measures the REFUSAL, which is the whole safeguard: a pool is turned away before any
+// declaration is built, so nothing carries its pointer forward and nothing needs to. An earlier
+// draft carried the pointer beside the refusal, which no case could reach and no mutation could
+// kill — a line that reads as a second guard and is not one.
 // The last two are why the spec case compares for EQUALITY. It once compared by containment, and
 // a truncated warning is still a substring of the warning while an empty one is a substring of
 // everything: the one rail whose job is to hold the promise where the spec put it would have
