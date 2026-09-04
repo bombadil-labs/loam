@@ -26,6 +26,12 @@
 // and `registerPrefixesOf` keeps its other callers — this file pins only what a CONNECTION's
 // register door reads.
 //
+// BLOCKED, AND THE FILE SAYS SO. This rail is written and measured, and the change it guards
+// cannot land yet: `test/server/derived-standing.test.ts` carries a case asserting the very union
+// this retires, that file is a frozen rail, and rails-guard refuses an edit to one. The case's own
+// comment names this slice as the one that retires it — it was written to be retired — and nothing
+// in the process lets a slice retire a frozen rail on its own word. T279 carries the decision.
+//
 // RAILS-RED on origin/main, this file copied in: 1 red, 2 green — 3 cases. TWO ARE CONTROLS, and
 // they are the reason this file is as much about what does NOT change as what does: the mint still
 // standing, and an unbound key's grant still conferring, are both true on the base and must stay
@@ -152,6 +158,10 @@ describe("§58 — a connection's fence is its container, and a grant adds nothi
       const help = await run(["grant", "--help"], io);
       expect(help, "the verb is still documented").toBe(0);
       expect(out.join("\n"), "and still named").toMatch(/--verb=register/);
+      // NAMED HONESTLY: this case asserts the DOCUMENTATION boundary, not a behaviour. It cannot
+      // fail from any change to `registerStanding`. What it is here for is to record that the mint
+      // is deliberately untouched — and T279 carries the four surfaces that still REPORT the union
+      // as if it stood, including this verb's own success sentence, which no rail here can see.
     } finally {
       rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
