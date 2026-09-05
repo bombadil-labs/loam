@@ -1,4 +1,4 @@
-/** Internal experimental LIVE-only reference projection (T281), not a package API.
+/** Internal experimental receiving reference projection (T281/T282), not a package API.
  * The caller supplies authenticated destination authority and explicitly separated source
  * scopes. Source IDs are boundary assertions, not facts inferred from signer identity.
  * No ingestion adapter, signer, ambient ground, dependency interpreter or persistent cache.
@@ -10,6 +10,7 @@
  */
 import { Reactor, computeId, verifyDelta, type Delta } from "@bombadil/rhizomatic";
 import { lawfulNegated, lensOf, readRegistrations, type Registration } from "./registration.js";
+import { selectReceivingSnapshot } from "./receive-snapshot.js";
 
 interface Input {
   readonly receiver: string;
@@ -18,7 +19,10 @@ interface Input {
   readonly sources: readonly { readonly id: string; readonly deltas: readonly Delta[] }[];
 }
 interface Decision {
-  kind: "binding" | "curse";
+  kind: "binding" | "curse" | "pause";
+  id?: string;
+  bindingId?: string;
+  selection?: unknown;
   relationship: string;
   reading: string;
   source?: string;
@@ -35,7 +39,8 @@ export interface LiveReceivingResult {
     | "missing-source"
     | "unsupported"
     | "conflict"
-    | "invalid-input";
+    | "invalid-input"
+    | "invalid-selection";
   readonly relationship?: string;
   readonly source?: string;
   readonly destination?: string;
@@ -83,10 +88,15 @@ function parse(d: Delta): Decision | undefined {
         ]
       : v.kind === "curse"
         ? ["kind", "relationship", "reading"]
-        : [];
+        : v.kind === "pause"
+          ? ["kind", "relationship", "reading", "bindingId"]
+          : [];
+  const hasSelection = Object.hasOwn(v, "selection");
+  const selectionAllowed = v.kind === "pause" || (v.kind === "binding" && v.mode === "one-time");
   if (
     keys.length === 0 ||
-    Object.keys(v).length !== keys.length ||
+    Object.keys(v).length !== keys.length + (hasSelection && selectionAllowed ? 1 : 0) ||
+    (v.kind === "pause" && !hasSelection) ||
     !keys.every((k) => nonempty(v[k]))
   )
     throw new Error("decision shape");
@@ -124,7 +134,7 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
       // Stranger claims are verified but never acquire recipient policy authority.
       if (d.claims.author !== input.receiver) continue;
       const decision = parse(d);
-      if (decision !== undefined && !negated(d.id)) decisions.push(decision);
+      if (decision !== undefined && !negated(d.id)) decisions.push({ ...decision, id: d.id });
     }
     const groups = new Map<string, Decision[]>();
     for (const d of decisions.filter((d) => d.kind === "binding")) {
@@ -156,7 +166,7 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
         results.push({ ...base, status: "cursed" });
         continue;
       }
-      if (d.mode !== "live") {
+      if (d.mode !== "live" && !(d.mode === "one-time" && d.selection !== undefined)) {
         results.push({ ...base, status: "unsupported" });
         continue;
       }
@@ -165,17 +175,79 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
         results.push({ ...base, status: "missing-source" });
         continue;
       }
-      const rows = readRegistrations(source, d.sourceAuthor).filter(
-        (r) => r.entity === d.entity && lensOf(r) === d.reading,
-      );
-      if (rows.length !== 1) {
-        results.push({ ...base, status: rows.length > 1 ? "conflict" : "unavailable" });
+      let selected: Registration;
+      let operand = source;
+      const pauses = decisions.filter((p) => p.kind === "pause" && p.bindingId === d.id);
+      if (
+        d.mode === "live" &&
+        pauses.some((p) => p.relationship !== relationship || p.reading !== d.reading)
+      ) {
+        results.push({ ...base, status: "invalid-selection" });
         continue;
       }
-      const selected = rows[0]!;
+      if (
+        d.mode === "live" &&
+        pauses.some(
+          (p) =>
+            p.selection !== null &&
+            selectReceivingSnapshot(source, d, p.selection, true).status === "invalid-selection",
+        )
+      ) {
+        results.push({ ...base, status: "invalid-selection" });
+        continue;
+      }
+      // Equivalent pauses are idempotent by normalized selection; incompatible surviving
+      // decisions require explicit recipient negation rather than a timestamp guess.
+      const pauseKeys = new Set(
+        pauses.map((p) => {
+          const value = p.selection;
+          if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+            const v = value as Record<string, unknown>;
+            return JSON.stringify([
+              v.source,
+              v.registrationId,
+              v.versionId,
+              Array.isArray(v.memberIds) ? [...(v.memberIds as unknown[])].sort() : v.memberIds,
+            ]);
+          }
+          return JSON.stringify(value);
+        }),
+      );
+      if (d.mode === "live" && pauseKeys.size > 1) {
+        results.push({ ...base, status: "conflict" });
+        continue;
+      }
+      const pause = d.mode === "live" ? pauses[0] : undefined;
+      if (pause?.selection === null) {
+        results.push({ ...base, status: "unavailable" });
+        continue;
+      }
+      if (d.mode === "one-time" || pause !== undefined) {
+        const pinned = selectReceivingSnapshot(
+          source,
+          d,
+          pause === undefined ? d.selection : pause.selection,
+          pause !== undefined,
+        );
+        if (pinned.status !== "selected") {
+          results.push({ ...base, status: pinned.status });
+          continue;
+        }
+        selected = pinned.registration;
+        operand = pinned.operand;
+      } else {
+        const rows = readRegistrations(source, d.sourceAuthor).filter(
+          (r) => r.entity === d.entity && lensOf(r) === d.reading,
+        );
+        if (rows.length !== 1) {
+          results.push({ ...base, status: rows.length > 1 ? "conflict" : "unavailable" });
+          continue;
+        }
+        selected = rows[0]!;
+      }
       // The legacy reader drops malformed resolver envelopes. That tolerance must
       // not turn withheld code into an apparently equivalent policy-only field.
-      const bindingPointers = source.get(selected.boundId!)!.claims.pointers;
+      const bindingPointers = operand.get(selected.boundId!)!.claims.pointers;
       const rootsPointers = bindingPointers.filter((p) => p.role === "roots");
       if (
         rootsPointers.length !== 1 ||

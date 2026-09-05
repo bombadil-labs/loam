@@ -212,11 +212,59 @@ describe("exact receiving snapshot operands", () => {
       const a = law(),
         absent = observed(FERN, "height", 99, 90, S),
         s = defect === "missing" ? selection([...a, absent], a[3]!.id) : selection(a);
-      if (defect === "duplicate") s.memberIds.push(a[0]!.id);
+      if (defect === "duplicate") Object.assign(s, selection([...a, a[0]!], a[3]!.id));
       if (defect === "address") s.versionId = "wrong";
       if (defect === "registration") s.registrationId = a[0]!.id;
       if (defect === "source") s.source = "other";
       expect(run(a, [decision({ ...body, mode: "one-time", selection: s })])[0]!.status).toBe(
+        "invalid-selection",
+      );
+    });
+  it("accepts an exact manifest at a one-character source identity", () => {
+    const a = law();
+    const signed = decision({
+      ...body,
+      source: "s",
+      mode: "one-time",
+      selection: { ...selection(a), source: "s" },
+    });
+    const result = projectLiveReceiving({
+      receiver,
+      destination: body.destination,
+      decisions: [signed],
+      sources: [{ id: "s", deltas: a }],
+    })[0]!;
+    expect(result.status).toBe("selected");
+    expect(result.registration!.boundId).toBe(a[3]!.id);
+    expect(height(result)).toBe(22);
+  });
+  for (const malformed of [
+    "null",
+    "extra-key",
+    "nonarray-members",
+    "empty-source",
+    "nul-member",
+    "number-member",
+    "object-registration",
+  ] as const)
+    it(`refuses malformed ${malformed} manifest as invalid-selection`, () => {
+      const a = law();
+      const selected = selection(a);
+      const invalid =
+        malformed === "null"
+          ? null
+          : malformed === "extra-key"
+            ? { ...selected, unexpected: "not permitted" }
+            : malformed === "nonarray-members"
+              ? { ...selected, memberIds: {} }
+              : malformed === "empty-source"
+                ? { ...selected, source: "" }
+                : malformed === "nul-member"
+                  ? { ...selected, memberIds: [...selected.memberIds, "\0"] }
+                  : malformed === "object-registration"
+                    ? { ...selected, registrationId: { length: 1 } }
+                    : { ...selected, memberIds: [...selected.memberIds, 17] };
+      expect(run(a, [decision({ ...body, mode: "one-time", selection: invalid })])[0]!.status).toBe(
         "invalid-selection",
       );
     });
