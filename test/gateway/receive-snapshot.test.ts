@@ -107,7 +107,11 @@ function height(result: ReturnType<typeof run>[number], extra = false) {
   ])
     data.ingest(d);
   data.register("reading", reg.hyperschema.body, reg.roots);
-  return resolveView(reg.schema, data.materializedView("reading", FERN)!).height;
+  const view = resolveView(reg.schema, data.materializedView("reading", FERN)!);
+  if (view === null || typeof view !== "object" || Array.isArray(view))
+    throw new Error("expected object view");
+  if (!("height" in view)) throw new Error("expected height field");
+  return view.height;
 }
 const olderPolicy: Schema = {
   ...PLANT_POLICY,
@@ -141,7 +145,7 @@ describe("exact receiving snapshot operands", () => {
         publishHyperSchemaClaims({ ...PLANT, body: { kind: "input" } }, body.entity, author, 40),
         S,
       );
-    const ds = [...a, ...law(5, olderPolicy), replacement],
+    const ds = [...a, ...law(20, olderPolicy), replacement],
       result = run(ds, [binding, p]);
     expect(result[0]!.status).toBe("selected");
     expect(result[0]!.registration!.hyperschema.body).toEqual(PLANT.body);
@@ -169,6 +173,27 @@ describe("exact receiving snapshot operands", () => {
       expect(height(run([...all, strike(withdrawn, S, 60)], [binding, p])[0]!)).toBe(22);
       expect(height(run([...members, strike(pinned, X)], [binding, p])[0]!)).toBe(22);
     });
+  it("a stranger cannot lift pause to follow held M2", () => {
+    const a = law(),
+      b = law(20, olderPolicy),
+      p = pause(a);
+    const result = run([...a, ...b], [binding, p, strike(p, X)])[0]!;
+    expect(result.status).toBe("selected");
+    expect(result.registration!.boundId).toBe(a[3]!.id);
+    expect(height(result)).toBe(22);
+  });
+  it("withdrawal of unselected older definitions preserves the selected law", () => {
+    const a = law(),
+      older = law(5);
+    const oldSchema = signClaims({ ...a[2]!.claims, timestamp: 4 }, S);
+    const members = [...older, ...a, oldSchema];
+    const p = pause(members, { selection: selection(members, a[3]!.id) });
+    const result = run([...members, strike(older[0]!), strike(oldSchema)], [binding, p])[0]!;
+    expect(result.status).toBe("selected");
+    expect(result.registration!.boundId).toBe(a[3]!.id);
+    expect(result.registration!.hyperschema.body).toEqual(PLANT.body);
+    expect(height(result)).toBe(22);
+  });
   it("null pause remains empty and resume immediately follows already held M2", () => {
     const a = law(),
       b = law(20, olderPolicy);
@@ -185,8 +210,8 @@ describe("exact receiving snapshot operands", () => {
   for (const defect of ["missing", "duplicate", "address", "registration", "source"] as const)
     it(`refuses ${defect} manifest with explicit status`, () => {
       const a = law(),
-        s = selection(a);
-      if (defect === "missing") s.memberIds.push("missing");
+        absent = observed(FERN, "height", 99, 90, S),
+        s = defect === "missing" ? selection([...a, absent], a[3]!.id) : selection(a);
       if (defect === "duplicate") s.memberIds.push(a[0]!.id);
       if (defect === "address") s.versionId = "wrong";
       if (defect === "registration") s.registrationId = a[0]!.id;
