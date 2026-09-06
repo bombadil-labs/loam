@@ -6,9 +6,13 @@ pipeline from `loam_register` to a queried view. Everything here is transcribed 
 (`rhizomatic/term-json` and the register door), not paraphrased: if a shape is not on this page,
 the parser refuses it.
 
-**Who this is for.** A connection holding a register grant (`loam grant <client_id>
---verb=register --prefix=<ns>:`). You may register schemas whose names sit under your prefix —
-nothing else. The examples use the `sync:` namespace.
+**Who this is for.** A bound connection registers under its container path followed by `:`.
+For example, a connection bound to `ada:journal` may register `ada:journal:entry`.
+An explicit register grant does not widen that binding. An unbound key may use an operator's
+register grant (`loam grant <client_id> --verb=register --prefix=<ns>:`) instead.
+Both the program and reading names must fit the caller's registration fence. The examples
+below use `sync:`; a bound connection can use them when bound to the `sync` container.
+Reading a schema does not grant permission to register under its namespace.
 
 ---
 
@@ -34,7 +38,7 @@ nothing else. The examples use the `sync:` namespace.
 
 | field | meaning |
 |---|---|
-| `hyperschema.name` | the PROGRAM's name. Must sit under your granted prefix. |
+| `hyperschema.name` | the PROGRAM's name. Must sit under your registration prefix. |
 | `hyperschema.alg` | the algebra version. Use `1`. |
 | `hyperschema.body` | the term program (§3) that gathers deltas into a HyperView. |
 | `schema` | the READING (§6): how each gathered property resolves to a single value. |
@@ -302,7 +306,7 @@ Rules, all mechanical:
 
 | refusal | meaning |
 |---|---|
-| `registration is constitutional: it requires an operator token` | you hold no register grant, or your grant does not cover these names. The sentence is identical for both, deliberately. |
+| `registration is constitutional: it requires an operator token` | you have no registration standing, or these names fall outside your binding or applicable key grants. A grant cannot widen a bound connection. The refusal sentence deliberately does not distinguish these cases. |
 | `unknown term op …` | the body used an op outside §3's list. |
 | `pred must be true \| false \| match \| hasPointer \| and \| or \| not \| inView` | a predicate node without a recognized key. |
 | `propPolicy must be pick \| all \| merge \| conflicts \| absentAs` | a policy node without a recognized key. |

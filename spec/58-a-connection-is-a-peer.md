@@ -82,12 +82,16 @@ bound connection's standing from its pool, and `loam grant revoke` strikes that 
 only the store-wide one that no longer exists — a report naming a strike nobody performed is the
 shape §11's discipline refuses.
 
-**REGISTRATION IS THE NAMED EXCEPTION.** The binding does not route it and does not refuse it.
-Registration is constitutional (§17), its standing is an operator's explicit `register` grant and
-never the binding's, and its deltas land in the primary under the store's own signature exactly as
-they did before this section. Position 2 gives a connection law under its own container path
-instead; the slice that builds it is S2, with the inbox pool's own publish, the §47 fold, and a
-re-attach at boot. Until then a bound connection that holds a register grant shapes the store.
+**REGISTRATION FOLLOWS THE BINDING.** A bound connection's registration fence is its
+container path followed by `:`. An explicit key grant does not widen it. Both program and
+reading names must fit that fence; accepted declarations publish through the inbox pool and
+serve its container scope through the §47 fold. Names outside the fence refuse before
+publication. Registration remains constitutional (§17): the pool publishes through its
+authorized operator path. An unbound key's explicit `register` grants still authorize its
+namespaces in the primary, and the operator's own registration remains unrestricted.
+
+This is registration authority. Reading or adopting another source's declarative law does not
+confer permission to publish under that source's namespace.
 
 ## 58.4 Reads are the container's
 

@@ -458,11 +458,9 @@ const REGISTRATION_REFUSAL = "registration is constitutional: it requires an ope
  *
  * Law a bound connection names under its own container path lives on its inbox pool, never in the
  * primary — the same seam the write path takes through `sinkFor` — and the container's fold is what
- * serves it, to the container alone. Law the same connection names under a prefix an operator
- * GRANTED it lands where it always did: the primary, served to everyone, until the slice that
- * retires `loam grant --verb=register` for connections. Routing every bound identity to its pool
- * regardless of the name sent granted law into a pool whose fold fenced it out — written, and
- * served to nobody.
+ * serves it, to the container alone. A bound connection's names outside that fence are
+ * refused before routing, even when a key grant names them. An unbound grant-holder's law
+ * still publishes to the primary. The name check here preserves the explicit destination.
  *
  * `toPool` records the decision for the outcome: only a pool publish is answered by the container's
  * fold, so only a pool publish has its `bound` re-read from there.
@@ -548,20 +546,16 @@ function registerStanding(
   // container path AND ITS COLON, so `ada:journalx` — a sibling sharing the letters — is outside
   // the fence, and so is `ada:journal` itself: the fence is what lives UNDER the container.
   //
-  // Unioned with any grant the connection also holds rather than replacing it, because nothing a
-  // connection can do today may stop working before its replacement has landed. The slice that
-  // retires `loam grant --verb=register` for connections is the one that removes this union.
-  const bound = identity.binding === undefined ? [] : [`${identity.binding.container}:`];
-  if (identity.actor === undefined) return bound.length === 0 ? undefined : bound;
+  if (identity.binding !== undefined) return [`${identity.binding.container}:`];
+  if (identity.actor === undefined) return undefined;
   let author: string;
   try {
     author = authorForSeed(identity.actor);
   } catch {
-    return bound.length === 0 ? undefined : bound; // an actor that names no key holds no grant
+    return undefined; // an actor that names no key holds no grant
   }
   const granted = registerPrefixesOf(gateway.reactor, author, gateway.operatorAuthor);
-  const prefixes = [...granted, ...bound];
-  return prefixes.length === 0 ? undefined : prefixes;
+  return granted.length === 0 ? undefined : granted;
 }
 
 /**
@@ -1644,11 +1638,12 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       name: "loam_register",
       description:
         "Define a schema as schema-schema deltas and register it. The operator registers anywhere; " +
-        "a connection may instead hold register standing over a namespace — the operator mints it " +
-        "with `loam grant <client_id> --verb=register --prefix=<ns>:` — and then every name in the " +
-        "registration (the program's and the reading's) must sit under that prefix. Resolver code " +
-        "never rides a scoped registration; code arrives by federation and blessing. The surface " +
-        "serves the new type immediately; republishing at the same entity evolves it.",
+        "a bound connection registers under its container path followed by a colon. An explicit " +
+        "key grant does not widen that fence. An unbound key may instead hold register standing " +
+        "over granted namespace prefixes. Both the program and reading names must fit the caller's " +
+        "registration fence. Resolver code never rides a scoped registration; code arrives by " +
+        "federation and blessing. The surface serves the new type immediately; republishing at " +
+        "the same entity evolves it.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2050,7 +2045,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         const name = params["name"];
         if (name === "loam_register") {
           // The same constitutional gate as POST /register: the root is the operator's, and a
-          // connection holding a scoped `register` grant may shape its own namespace (§7).
+          // bound connection names law under its container; an unbound key may use its grants.
           const fence = registerStanding(gateway, identity);
           if (fence === undefined) {
             reply({
