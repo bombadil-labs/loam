@@ -443,14 +443,15 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "                        this home cannot name; struck grants shown struck, never omitted",
       "  revoke <client_id>    bump the connector's generation and strike its write grant",
       "  <client_id> --verb=register --prefix=<p>",
-      "                        let the connector register schemas whose name starts with <p>",
+      "                        record a register grant for the connector key under <p>",
       "",
-      "REGISTER STANDING IS SCOPED AND THE SCOPE IS MANDATORY. `--prefix` fences the connector to",
-      "one entity namespace: a connector granted `thread:` may register `thread:groove` and refuses",
-      "everything else, root included. The prefix is a literal prefix of the schema name — it is not",
-      "case-folded, not percent-decoded, and not normalized. Registration at the root stays the",
-      "operator's and no grant can hand it out. The store still signs every registration itself; the",
-      "grant delegates the authority to ask, never a signing key.",
+      "REGISTER STANDING IS SCOPED. A bound connection may register only under its container",
+      "prefix. This key grant does not widen that fence; loam_whoami reports registerPrefixes.",
+      "For an unbound key, --prefix grants registration under the named namespace. A key granted",
+      "`thread:` may register `thread:groove`. The prefix is mandatory and literal: it is not",
+      "case-folded, percent-decoded, or normalized. Registration at the root stays the operator's",
+      "and no grant can hand it out. The store signs every registration itself; the grant delegates",
+      "the authority to ask, never a signing key.",
       "",
       "REVOKE BINDS AT ONCE. Bumping the generation makes every live token and in-flight code stop",
       "matching, so a running server refuses that connector on its next request with no restart. It",
@@ -3290,8 +3291,8 @@ async function cmdGrantMint(
   const prefix = parsed.flags.get("prefix");
   if (prefix === undefined || prefix.length === 0) {
     io.err(
-      "grant: --verb=register wants a non-empty --prefix — the entity namespace the connector " +
-        "may register inside. Registration at the root is the operator's and is not delegable.",
+      "grant: --verb=register wants a non-empty --prefix for the key grant. " +
+        "A bound connection still uses its container fence. Root registration is not delegable.",
     );
     return 2;
   }
