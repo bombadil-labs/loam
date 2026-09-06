@@ -30,6 +30,11 @@
       "file": "test/server/oauth-token.test.ts",
       "sha256": "2619f84935913179857a8a756ee6b39177dd14f3182a34435b6240d3b5000269",
       "authorized": "Myk's word 2026-09-03: SPEC 58 S2 makes /register no longer an operator-only door - a BOUND connection names law under its own container path and its colon, which the landed spec already says S2 would do (spec/58-a-connection-is-a-peer.md:88). Case (7) asserted 403 for an empty body, which now draws a 400 shape complaint because the caller genuinely HAS scoped standing; returning 403 would report an absence of standing that is no longer true. The case keeps its subject and sharpens it: federate still refuses the connector token, and register still refuses a ROOT name from it. Every other case in the file is unchanged."
+    },
+    {
+      "file": "test/server/derived-standing.test.ts",
+      "sha256": "b17c10e26fc676daf719854b92b243cd232936fd671be0781d17b4a4cb0bb83f",
+      "authorized": "T279 / PR557, prepared under Myk's 2026-09-06 standing instruction to make obvious decisions gated by ceremony. The anticipated temporary grant union is retired: a bound connection reports only its container prefix, refuses a granted outside prefix, and neither stores nor serves that rejected law. Its own-container and mixed-name controls remain; every other case is unchanged. The unbound primary/global-serving behavior is separately retained in test/server/grant-retired.test.ts. This exact revision becomes authorized only by landing this declaration on the base before the implementation; the implementation cannot self-authorize."
     }
   ]
 }
