@@ -27,7 +27,7 @@ describe("physical custody without administrative authority", () => {
   it("prefers one batch probe and preserves its receiver", async () => {
     const target = {
       retained: new Set(["a"]),
-      holds: vi.fn((_id: string) => Promise.reject(new Error("fallback forbidden"))),
+      holds: vi.fn(() => Promise.reject(new Error("fallback forbidden"))),
       heldAmong: vi.fn(function (this: { retained: Set<string> }, ids: Iterable<string>) {
         return Promise.resolve(new Set([...ids].filter((id) => this.retained.has(id))));
       }),

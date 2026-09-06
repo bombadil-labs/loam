@@ -1,3 +1,4 @@
+import { probePhysicalRetention } from "./custody.js";
 // Erasure — degrees of forgetting (SPEC §11). The store remembers THAT it forgot — who asked,
 // when, which id — never what. A TOMBSTONE is an append-only claim at `loam:erasure` naming
 // the erased delta; the bytes themselves are purged from every tier (the seam's purge, PR
@@ -993,15 +994,9 @@ export async function erasureStandings(
   };
   if (ids.length === 0 || seen.has(gw)) return { standings, unasked };
   seen.add(gw);
-  try {
-    if (gw.backend.heldAmong) {
-      for (const id of await gw.backend.heldAmong(ids)) note(id, "held");
-    } else {
-      for (const id of ids) if (await gw.backend.holds(id)) note(id, "held");
-    }
-  } catch {
-    for (const id of ids) note(id, "unasked"); // proven nothing here, in either direction
-  }
+  const physical = await probePhysicalRetention(gw.backend, ids);
+  for (const id of physical.held) note(id, "held");
+  for (const id of physical.unasked) note(id, "unasked");
   // ASKED EVEN WHERE THE BYTES COULD NOT BE. The reactor is a separate question from the tier, and
   // a ground with no receipt still owes the delivery whatever its disk would have said.
   const tombs = readTombstones(gw.reactor, gw.operatorAuthor);
