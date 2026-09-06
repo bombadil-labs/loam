@@ -3,6 +3,7 @@ import { expect, it } from "vitest";
 import {
   Reactor,
   authorForSeed,
+  makeNegationClaims,
   publishHyperSchemaClaims,
   publishSchemaClaims,
   resolveView,
@@ -162,6 +163,20 @@ for (const mode of ["one-time", "paused"] as const) {
     const policy = decisions(mode, members, a[3]!);
     const result = run(members, policy);
     assertSelected(result, a[3]!, PLANT, 22);
+    for (const pinned of [a[0]!, a[2]!]) {
+      const withdrawal = signClaims(makeNegationClaims(authorA, 40, pinned.id), A);
+      const withdrawn = run([...members, withdrawal], policy);
+      if (mode === "paused") {
+        expect(withdrawn[0]!.status).toBe("unavailable");
+        expect(withdrawn[0]!.registration).toBeUndefined();
+      } else assertSelected(withdrawn, a[3]!, PLANT, 22);
+      const restore = signClaims(makeNegationClaims(authorA, 41, withdrawal.id), A);
+      assertSelected(run([...members, withdrawal, restore], policy), a[3]!, PLANT, 22);
+    }
+    for (const unselected of [b[0]!, foreignDefinition]) {
+      const withdrawal = signClaims(makeNegationClaims(authorA, 42, unselected.id), A);
+      assertSelected(run([...members, withdrawal], policy), a[3]!, PLANT, 22);
+    }
     expect(
       run([...members].reverse().concat(members), [...policy].reverse().concat(policy)),
     ).toEqual(result);
