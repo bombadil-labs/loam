@@ -1640,7 +1640,8 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         "Define a schema as schema-schema deltas and register it. The operator registers anywhere; " +
         "a bound connection registers under its container path followed by a colon. An explicit " +
         "key grant does not widen that fence. An unbound key may instead hold register standing " +
-        "over granted namespace prefixes. Both the program and reading names must fit the caller's " +
+        "over granted namespace prefixes, minted with `loam grant <client_id> --verb=register " +
+        "--prefix=<ns>:`. Both the program and reading names must fit the caller's " +
         "registration fence. Resolver code never rides a scoped registration; code arrives by " +
         "federation and blessing. The surface serves the new type immediately; republishing at " +
         "the same entity evolves it.",
