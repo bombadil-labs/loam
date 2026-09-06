@@ -8,22 +8,19 @@ meet with no referee, and why the ground never forgets who signed what.
 You just connected Claude to one of these. This page is the answer to the honest first question:
 *okay, but what is actually different here, and what do I do with it?*
 
-## First, one command: give Claude room to grow shapes
+## First, find Claude's registration namespace
 
-Out of the box, a connected Claude can read and write the stock shapes — `person`, `org`,
-`event`, `note`, `post` — and nothing else. Defining a *new* shape is constitutional: it needs a
-grant, and consent gives a connection only a place to live — one container under your name, where
-its writes land and its reads resolve. So, once, on the store's machine:
+A connected Claude can read and write the shapes available in its container.
+It can also define new shapes under that container's registration prefix.
+The container you chose at consent determines this prefix.
+An explicit key grant does not widen it.
 
-```bash
-loam grant list
-loam grant <client_id> --verb=register --prefix=mine:
-```
-
-The first names your connectors and their ids; the second lets that one define shapes whose
-names start with `mine:` — its own namespace, and nothing else. Then restart `loam serve`: a
-running server honors a grant only after a restart. From here on, every shape Claude defines is
-called `mine:something`, and it answers at the field `mine_something`.
+Ask Claude to call `loam_whoami` and read `registerPrefixes`.
+Then ask it to read `loam_docs(topic: "register-grammar")` before defining a shape.
+For example, a connection bound to `ada:journal` has the prefix `ada:journal:`.
+It can define `ada:journal:log`, which answers at the GraphQL field `ada_journal_log`.
+Use your returned prefix in place of `ada:journal:` in the examples below.
+No extra grant or server restart is needed for this bound registration standing.
 
 ## Three things to feel, alone
 
@@ -31,10 +28,10 @@ called `mine:something`, and it answers at the field `mine_something`.
 thoughts. Rate a book, then change your mind and rate it again. Now, in the same conversation,
 while Claude still has the shape in front of it:
 
-> "Register a second reading of the log, named `mine:logFirst`, that keeps the *first* rating I
+> "Register a second reading of the log, named `ada:journal:logFirst`, that keeps the *first* rating I
 > ever gave instead of the latest — and show me that book through both."
 
-`mine_log` and `mine_logFirst` disagree, and both are right by their own declared law, from the
+`ada_journal_log` and `ada_journal_logFirst` disagree, and both are right by their own declared law, from the
 same facts, with nothing copied. This is the whole idea in one move: the store holds every claim;
 a reading decides what they add up to. Two apps can read one store differently on purpose.
 
@@ -113,7 +110,7 @@ Then *"who is in the garden, by name?"* — shallow-read, so an org lists its pe
 dragging in their whole worlds.
 
 **A log of anything.** Books, films, birds, wines. There is no "media log" feature and you do not
-need one: with its `mine:` namespace, Claude reads the store's own registration manual, defines
+need one: with its container namespace, Claude reads the store's own registration manual, defines
 the shape, and files entries as itself. Your log, its clerk. Open a channel to a friend and their
 entries arrive under the prefix you assign, each still signed by them.
 

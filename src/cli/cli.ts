@@ -443,14 +443,15 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "                        this home cannot name; struck grants shown struck, never omitted",
       "  revoke <client_id>    bump the connector's generation and strike its write grant",
       "  <client_id> --verb=register --prefix=<p>",
-      "                        let the connector register schemas whose name starts with <p>",
+      "                        record a register grant for the connector key under <p>",
       "",
-      "REGISTER STANDING IS SCOPED AND THE SCOPE IS MANDATORY. `--prefix` fences the connector to",
-      "one entity namespace: a connector granted `thread:` may register `thread:groove` and refuses",
-      "everything else, root included. The prefix is a literal prefix of the schema name — it is not",
-      "case-folded, not percent-decoded, and not normalized. Registration at the root stays the",
-      "operator's and no grant can hand it out. The store still signs every registration itself; the",
-      "grant delegates the authority to ask, never a signing key.",
+      "REGISTER STANDING IS SCOPED. A bound connection may register only under its container",
+      "prefix. This key grant does not widen that fence; loam_whoami reports registerPrefixes.",
+      "For an unbound key, --prefix grants registration under the named namespace. A key granted",
+      "`thread:` may register `thread:groove`. The prefix is mandatory and literal: it is not",
+      "case-folded, percent-decoded, or normalized. Registration at the root stays the operator's",
+      "and no grant can hand it out. The store signs every registration itself; the grant delegates",
+      "the authority to ask, never a signing key.",
       "",
       "REVOKE BINDS AT ONCE. Bumping the generation makes every live token and in-flight code stop",
       "matching, so a running server refuses that connector on its next request with no restart. It",
@@ -3214,7 +3215,7 @@ function connectorActor(
   label: string,
   io: IO,
   user: string | undefined,
-): { actor: string } | { code: number } {
+): { actor: string; container?: string } | { code: number } {
   let file;
   try {
     file = readOAuthFile(home);
@@ -3251,12 +3252,16 @@ function connectorActor(
     );
     return { code: 2 };
   }
-  return { actor: grant.actor };
+  return {
+    actor: grant.actor,
+    ...(grant.container !== undefined ? { container: grant.container } : {}),
+  };
 }
 
-// `loam grant <client_id> --verb=register --prefix=<p>` — the operator hands a connection authority
-// over one entity namespace. Only `register` is minted here: `write` standing is the token
-// exchange's to grant (it mints the actor seed in the same breath), and `admin` is not a connector's
+// `loam grant <client_id> --verb=register --prefix=<p>` records a namespace grant for a key.
+// It does not widen a bound connection's container fence. Only `register` is minted here:
+// `write` standing is the token exchange's to grant (it mints the actor seed in the same breath),
+// and `admin` is not a connector's
 // to hold. The grant is one operator-signed delta, so revoking it is one strike.
 async function cmdGrantMint(
   clientId: string,
@@ -3286,8 +3291,8 @@ async function cmdGrantMint(
   const prefix = parsed.flags.get("prefix");
   if (prefix === undefined || prefix.length === 0) {
     io.err(
-      "grant: --verb=register wants a non-empty --prefix — the entity namespace the connector " +
-        "may register inside. Registration at the root is the operator's and is not delegable.",
+      "grant: --verb=register wants a non-empty --prefix for the key grant. " +
+        "A bound connection still uses its container fence. Root registration is not delegable.",
     );
     return 2;
   }
@@ -3323,13 +3328,21 @@ async function cmdGrantMint(
   } finally {
     await gateway.close();
   }
-  io.out(
-    `loam: granted ${clientId} register standing under "${prefix}"\n` +
-      `  it may register schemas whose name starts with "${prefix}" and nothing else — not the ` +
-      `root, not a neighbouring namespace\n` +
-      `  the grant is in ${path}; \`loam grant revoke ${clientId}\` strikes it, and the next ` +
-      `request refuses`,
-  );
+  if (found.container !== undefined) {
+    io.out(
+      `loam: recorded ${clientId} register grant under "${prefix}"\n` +
+        `  this does not widen its bound registration fence "${found.container}:"\n` +
+        `  the key grant is recorded in ${path}`,
+    );
+  } else {
+    io.out(
+      `loam: granted ${clientId} register standing under "${prefix}"\n` +
+        `  it may register schemas whose name starts with "${prefix}" and nothing else — not the ` +
+        `root, not a neighbouring namespace\n` +
+        `  the grant is in ${path}; \`loam grant revoke ${clientId}\` strikes it, and the next ` +
+        `request refuses`,
+    );
+  }
   // The fence re-reads standing per request, but from the SERVER's own reactor, which
   // materialized at boot — a live server sees this grant only after a restart.
   const staleness = servingWarning(home, path);

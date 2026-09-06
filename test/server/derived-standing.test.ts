@@ -368,10 +368,9 @@ describe("§58 position 2 — the binding is the register grant, and the law ser
     await closeAll();
   });
 
-  it("law under a GRANTED prefix still lands in the primary and serves everyone — nothing stops working before its replacement", async () => {
-    // A bound key that also holds an explicit `register` grant keeps that grant until the slice
-    // that retires it. Routing every bound identity to its pool sent granted law into a pool whose
-    // fold fenced it out — written, served to nobody. The route is decided by the NAME.
+  it("a grant does not widen a bound connection's registration fence", async () => {
+    // T279 retires the temporary union after container-derived standing landed.
+    // The key grant remains data, but it cannot widen this connection's binding.
     const { base, gateway, connectorsHome } = await connectionServer();
     const ada = await connect(base, "ada", "journal");
     const key = authorForSeed(grantOf(connectorsHome, "ada").actorSeed);
@@ -384,15 +383,14 @@ describe("§58 position 2 — the binding is the register grant, and the law ser
     const who = (await (
       await fetch(`${base}/default/whoami`, { headers: { authorization: `Bearer ${ada}` } })
     ).json()) as { registerPrefixes: string[] };
-    expect(who.registerPrefixes).toEqual(expect.arrayContaining(["zed:", "ada:journal:"]));
+    expect(who.registerPrefixes).toEqual(["ada:journal:"]);
 
     const granted = await register(base, ada, envelope("zed:thing"));
-    expect(granted.status).toBe(200);
-    expect(((await granted.json()) as { bound: boolean }).bound).toBe(true);
-    expect(lensesIn(gateway)).toContain("zed:thing"); // the PRIMARY, as before this slice
+    expect(granted.status).toBe(403);
+    expect(lensesIn(gateway)).not.toContain("zed:thing");
     expect(pools(gateway).flatMap(lensesIn)).not.toContain("zed:thing");
-    expect(await serves(base, "op-token", "zed_thing")).toBe(true);
-    expect(await serves(base, ada, "zed_thing")).toBe(true);
+    expect(await serves(base, "op-token", "zed_thing")).toBe(false);
+    expect(await serves(base, ada, "zed_thing")).toBe(false);
     // ...while law under the container path still takes the pool.
     expect((await register(base, ada, envelope("ada:journal:own"))).status).toBe(200);
     expect(lensesIn(gateway)).not.toContain("ada:journal:own");
