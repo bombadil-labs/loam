@@ -21,6 +21,12 @@
 //   a pause on a one-time binding is ignored instead of refused     → 1 red, 55 green
 //   NUL is accepted inside a decision identity                      → 1 red, 55 green
 //   a selection is admitted on a live binding                       → 1 red, 55 green
+// Measured again at 60 cases:
+//   a curse under another reading is ignored, not refused           → 1 red, 59 green
+//   a pause naming a binding the policy never held is ignored       → 1 red, 59 green
+//   the snapshot path drops its lens-name filter                    → 1 red, 59 green
+//   the live path drops its hyperschema-entity filter               → 1 red, 59 green
+//   an empty receiver or destination projects [] instead of refusing → 1 red, 59 green
 // HOLLOW-TEST SURVIVORS that are equivalent, and why:
 //   receive-policy.ts parse: `return undefined` → `return null` yields a decision with no kind,
 //     which every kind filter drops; no output changes.

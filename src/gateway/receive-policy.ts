@@ -160,11 +160,14 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
         results.push({ relationship, destination: input.destination, status: "conflict" });
         continue;
       }
-      if (
-        decisions.some(
-          (c) => c.kind === "curse" && c.relationship === relationship && c.reading === d.reading,
-        )
-      ) {
+      // A curse names a relationship and its reading. One that names this relationship under
+      // another reading is a decision the projection cannot honour: refused, never ignored.
+      const curses = decisions.filter((c) => c.kind === "curse" && c.relationship === relationship);
+      if (curses.some((c) => c.reading !== d.reading)) {
+        results.push({ ...base, status: "invalid-selection" });
+        continue;
+      }
+      if (curses.length > 0) {
         results.push({ ...base, status: "cursed" });
         continue;
       }
@@ -180,9 +183,17 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
       let selected: Registration;
       let operand = source;
       const pauses = decisions.filter((p) => p.kind === "pause" && p.bindingId === d.id);
-      // A pause pins a LIVE binding to a snapshot. On a one-time binding it is a decision the
-      // projection cannot honour, so it is refused rather than ignored.
+      // A pause pins a LIVE binding to a snapshot. On a one-time binding, or naming a binding the
+      // policy never held, it is a decision the projection cannot honour: refused, never ignored.
+      // A pause on a lawfully STRUCK binding is different: the receiver withdrew it, so it is inert.
+      const stray = decisions.some(
+        (p) =>
+          p.kind === "pause" &&
+          p.relationship === relationship &&
+          policy.get(p.bindingId!) === undefined,
+      );
       if (
+        stray ||
         (d.mode !== "live" && pauses.length > 0) ||
         pauses.some((p) => p.relationship !== relationship || p.reading !== d.reading)
       ) {

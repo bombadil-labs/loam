@@ -21,6 +21,12 @@
 //   a pause on a one-time binding is ignored instead of refused     → 1 red, 55 green
 //   NUL is accepted inside a decision identity                      → 1 red, 55 green
 //   a selection is admitted on a live binding                       → 1 red, 55 green
+// Measured again at 60 cases:
+//   a curse under another reading is ignored, not refused           → 1 red, 59 green
+//   a pause naming a binding the policy never held is ignored       → 1 red, 59 green
+//   the snapshot path drops its lens-name filter                    → 1 red, 59 green
+//   the live path drops its hyperschema-entity filter               → 1 red, 59 green
+//   an empty receiver or destination projects [] instead of refusing → 1 red, 59 green
 // HOLLOW-TEST SURVIVORS that are equivalent, and why:
 //   receive-policy.ts parse: `return undefined` → `return null` yields a decision with no kind,
 //     which every kind filter drops; no output changes.
@@ -257,6 +263,55 @@ describe("experimental live receiving projection", () => {
     expect(run(ds, [binding, bad])[0]!.status).toBe("invalid-input");
     expect(run(ds, [binding, bad, strike(bad, R)])[0]!.status).toBe("selected");
     expect(run(ds, [binding, bad, strike(bad, X)])[0]!.status).toBe("invalid-input");
+  });
+  it("refuses a curse under another reading and a pause naming a binding the policy never held", () => {
+    const ds = law();
+    const foreign = decision(
+      { kind: "curse", relationship: body.relationship, reading: "Other" },
+      R,
+      30,
+    );
+    expect(run(ds, [binding, foreign])[0]!.status).toBe("invalid-selection");
+    const stray = decision(
+      {
+        kind: "pause",
+        relationship: body.relationship,
+        reading: body.reading,
+        bindingId: "ff".repeat(32),
+        selection: null,
+      },
+      R,
+      31,
+    );
+    expect(run(ds, [binding, stray])[0]!.status).toBe("invalid-selection");
+  });
+  it("refuses an empty receiver or destination as invalid input, not as an empty projection", () => {
+    const ds = law();
+    for (const input of [{ receiver: "" }, { destination: "" }])
+      expect(
+        projectLiveReceiving({
+          receiver,
+          destination,
+          decisions: [binding],
+          sources: [{ id: "media_log", deltas: ds }],
+          ...input,
+        }),
+      ).toEqual([{ status: "invalid-input" }]);
+  });
+  it("a source registration of another hyperschema entity under the same lens is not this binding's law", () => {
+    const c = registrationDeltaClaims(
+      "hyperschema:Other",
+      "Plant",
+      PLANT_POLICY,
+      [FERN],
+      author,
+      () => 10,
+    );
+    const other = [
+      signClaims(publishHyperSchemaClaims(PLANT, "hyperschema:Other", author, 10), S),
+      ...[c.living, c.snapshot, c.binding].map((c) => signClaims(c, S)),
+    ];
+    expect(run(other)[0]!.status).toBe("unavailable");
   });
   it("two source registration entities claiming one lens are a conflict, not a pick", () => {
     const ds = law();
