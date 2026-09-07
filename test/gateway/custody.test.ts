@@ -1,3 +1,21 @@
+// T285: a physical retention probe that needs no Gateway and carries no erasure authority.
+//
+// RAILS-RED on origin/main, this file copied in: the suite does not LOAD there. It imports
+// src/gateway/custody.js, which this slice adds, so vitest reports one failed suite and no cases.
+//
+// REVERT PROBES, each guard deleted in turn on this tree (6 cases):
+//   batch answers outside the request are counted as held     → 1 red
+//   a failed batch probe falls back to the narrower tier       → 2 red
+//   a failed probe throws instead of reporting unasked         → 2 red
+//   the batch probe is never used                              → 3 red
+//   the empty-request guard is removed                         → 1 red
+//   the holds fallback records nothing                         → 2 red
+//
+// WHAT THIS RAIL DOES NOT ASSERT: the fold of held and unasked back into erasureStandings. That
+// fold is driven by test/gateway/store-health.test.ts and the erase rails; deleting the held
+// re-note reddens seven of their cases, deleting the unasked re-note reddens two.
+// The RetentionProbe type narrows what a caller may CALL, not what the object CAN do: the object
+// handed in by erase.ts is the full backend. Do not read the type as a security boundary.
 import { describe, expect, it, vi } from "vitest";
 import { probePhysicalRetention } from "../../src/gateway/custody.js";
 import { MemoryBackend } from "../../src/store/memory.js";

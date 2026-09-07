@@ -1,4 +1,3 @@
-import { probePhysicalRetention } from "./custody.js";
 // Erasure — degrees of forgetting (SPEC §11). The store remembers THAT it forgot — who asked,
 // when, which id — never what. A TOMBSTONE is an append-only claim at `loam:erasure` naming
 // the erased delta; the bytes themselves are purged from every tier (the seam's purge, PR
@@ -20,6 +19,7 @@ import { probePhysicalRetention } from "./custody.js";
 // preimage; partial redaction = reassert with values replaced.
 
 import { sha256 } from "@noble/hashes/sha2.js";
+import { probePhysicalRetention } from "./custody.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { DeltaSet, Reactor, signClaims } from "@bombadil/rhizomatic";
 import type { Claims, Delta } from "@bombadil/rhizomatic";
