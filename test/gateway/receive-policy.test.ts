@@ -12,6 +12,24 @@
 //   a stranger's decision deltas acquire recipient policy authority → 2 red, 47 green
 //   a manifest with duplicate memberIds is admitted                 → 1 red, 48 green
 //   a manifest carrying extra keys is admitted                      → 1 red, 48 green
+// Measured again at 56 cases, one guard deleted per probe:
+//   the registrationId guard is removed                             → 1 red, 55 green
+//   two candidates for one lens count as one                        → 1 red, 55 green
+//   two registration rows for one lens are served, not a conflict   → 1 red, 55 green
+//   only fix programs are refused, not expand or resolve            → 1 red, 55 green
+//   a struck malformed decision is parsed before its strike is read → 1 red, 55 green
+//   a pause on a one-time binding is ignored instead of refused     → 1 red, 55 green
+//   NUL is accepted inside a decision identity                      → 1 red, 55 green
+//   a selection is admitted on a live binding                       → 1 red, 55 green
+// HOLLOW-TEST SURVIVORS that are equivalent, and why:
+//   receive-policy.ts parse: `return undefined` → `return null` yields a decision with no kind,
+//     which every kind filter drops; no output changes.
+//   receive-snapshot.ts manifest: dropping one field from the nonempty check; the same field is
+//     compared against the binding, the registration, or the version address two lines later and
+//     refuses with the same status.
+//   receive-snapshot.ts definitionId: the id tie-break; the substrate hands definition rows in id
+//     order already, so the comparator's tie branch is never the deciding read. The case
+//     "equal-timestamp definitions pin the lower id" pins the observable order either way.
 // No probe is green. The projection is pure and unwired: no door reaches it, and these rails are
 // the whole of what proves it.
 import { describe, expect, it } from "vitest";
@@ -212,5 +230,50 @@ describe("experimental live receiving projection", () => {
       S,
     );
     expect(run([...ds, dependent])[0]!.status).toBe("unsupported");
+  });
+  it("refuses expand and resolve programs, NUL identities and a selection on a live binding", () => {
+    const ds = law();
+    for (const program of [
+      {
+        kind: "expand",
+        role: { kind: "exact", value: "tag" },
+        schema: { kind: "name", name: "Other" },
+        of: { kind: "input" },
+      },
+      { kind: "resolve", schema: PLANT_POLICY, of: { kind: "input" } },
+    ] as const) {
+      const dependent = signClaims(
+        publishHyperSchemaClaims({ ...PLANT, body: program }, entity, author, 90),
+        S,
+      );
+      expect(run([...ds, dependent])[0]!.status).toBe("unsupported");
+    }
+    expect(run(ds, [decision({ ...body, source: "media\0log" })])[0]!.status).toBe("invalid-input");
+    expect(run(ds, [decision({ ...body, selection: null })])[0]!.status).toBe("invalid-input");
+  });
+  it("a struck malformed decision is not input; a surviving one still refuses the batch", () => {
+    const ds = law();
+    const bad = decision({ kind: "binding" }, R, 2);
+    expect(run(ds, [binding, bad])[0]!.status).toBe("invalid-input");
+    expect(run(ds, [binding, bad, strike(bad, R)])[0]!.status).toBe("selected");
+    expect(run(ds, [binding, bad, strike(bad, X)])[0]!.status).toBe("invalid-input");
+  });
+  it("two source registration entities claiming one lens are a conflict, not a pick", () => {
+    const ds = law();
+    const other = signClaims(
+      {
+        ...ds[3]!.claims,
+        pointers: ds[3]!.claims.pointers.map((p) =>
+          p.target.kind === "entity" && p.target.entity.context === "loam.registration"
+            ? {
+                ...p,
+                target: { ...p.target, entity: { ...p.target.entity, id: "registration:other" } },
+              }
+            : p,
+        ),
+      },
+      S,
+    );
+    expect(run([...ds, other])[0]!.status).toBe("conflict");
   });
 });

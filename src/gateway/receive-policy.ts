@@ -133,8 +133,10 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
     for (const d of policy.snapshot()) {
       // Stranger claims are verified but never acquire recipient policy authority.
       if (d.claims.author !== input.receiver) continue;
+      // A lawfully struck delta is not live input, however malformed; only survivors are parsed.
+      if (negated(d.id)) continue;
       const decision = parse(d);
-      if (decision !== undefined && !negated(d.id)) decisions.push({ ...decision, id: d.id });
+      if (decision !== undefined) decisions.push({ ...decision, id: d.id });
     }
     const groups = new Map<string, Decision[]>();
     for (const d of decisions.filter((d) => d.kind === "binding")) {
@@ -178,15 +180,16 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
       let selected: Registration;
       let operand = source;
       const pauses = decisions.filter((p) => p.kind === "pause" && p.bindingId === d.id);
+      // A pause pins a LIVE binding to a snapshot. On a one-time binding it is a decision the
+      // projection cannot honour, so it is refused rather than ignored.
       if (
-        d.mode === "live" &&
+        (d.mode !== "live" && pauses.length > 0) ||
         pauses.some((p) => p.relationship !== relationship || p.reading !== d.reading)
       ) {
         results.push({ ...base, status: "invalid-selection" });
         continue;
       }
       if (
-        d.mode === "live" &&
         pauses.some(
           (p) =>
             p.selection !== null &&
@@ -213,11 +216,11 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
           return JSON.stringify(value);
         }),
       );
-      if (d.mode === "live" && pauseKeys.size > 1) {
+      if (pauseKeys.size > 1) {
         results.push({ ...base, status: "conflict" });
         continue;
       }
-      const pause = d.mode === "live" ? pauses[0] : undefined;
+      const pause = pauses[0];
       if (pause?.selection === null) {
         results.push({ ...base, status: "unavailable" });
         continue;

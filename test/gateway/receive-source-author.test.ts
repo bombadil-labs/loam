@@ -12,6 +12,24 @@
 //   a stranger's decision deltas acquire recipient policy authority → 2 red, 47 green
 //   a manifest with duplicate memberIds is admitted                 → 1 red, 48 green
 //   a manifest carrying extra keys is admitted                      → 1 red, 48 green
+// Measured again at 56 cases, one guard deleted per probe:
+//   the registrationId guard is removed                             → 1 red, 55 green
+//   two candidates for one lens count as one                        → 1 red, 55 green
+//   two registration rows for one lens are served, not a conflict   → 1 red, 55 green
+//   only fix programs are refused, not expand or resolve            → 1 red, 55 green
+//   a struck malformed decision is parsed before its strike is read → 1 red, 55 green
+//   a pause on a one-time binding is ignored instead of refused     → 1 red, 55 green
+//   NUL is accepted inside a decision identity                      → 1 red, 55 green
+//   a selection is admitted on a live binding                       → 1 red, 55 green
+// HOLLOW-TEST SURVIVORS that are equivalent, and why:
+//   receive-policy.ts parse: `return undefined` → `return null` yields a decision with no kind,
+//     which every kind filter drops; no output changes.
+//   receive-snapshot.ts manifest: dropping one field from the nonempty check; the same field is
+//     compared against the binding, the registration, or the version address two lines later and
+//     refuses with the same status.
+//   receive-snapshot.ts definitionId: the id tie-break; the substrate hands definition rows in id
+//     order already, so the comparator's tie branch is never the deciding read. The case
+//     "equal-timestamp definitions pin the lower id" pins the observable order either way.
 // No probe is green. The projection is pure and unwired: no door reaches it, and these rails are
 // the whole of what proves it.
 import { expect, it } from "vitest";

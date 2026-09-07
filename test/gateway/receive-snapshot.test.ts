@@ -12,6 +12,24 @@
 //   a stranger's decision deltas acquire recipient policy authority → 2 red, 47 green
 //   a manifest with duplicate memberIds is admitted                 → 1 red, 48 green
 //   a manifest carrying extra keys is admitted                      → 1 red, 48 green
+// Measured again at 56 cases, one guard deleted per probe:
+//   the registrationId guard is removed                             → 1 red, 55 green
+//   two candidates for one lens count as one                        → 1 red, 55 green
+//   two registration rows for one lens are served, not a conflict   → 1 red, 55 green
+//   only fix programs are refused, not expand or resolve            → 1 red, 55 green
+//   a struck malformed decision is parsed before its strike is read → 1 red, 55 green
+//   a pause on a one-time binding is ignored instead of refused     → 1 red, 55 green
+//   NUL is accepted inside a decision identity                      → 1 red, 55 green
+//   a selection is admitted on a live binding                       → 1 red, 55 green
+// HOLLOW-TEST SURVIVORS that are equivalent, and why:
+//   receive-policy.ts parse: `return undefined` → `return null` yields a decision with no kind,
+//     which every kind filter drops; no output changes.
+//   receive-snapshot.ts manifest: dropping one field from the nonempty check; the same field is
+//     compared against the binding, the registration, or the version address two lines later and
+//     refuses with the same status.
+//   receive-snapshot.ts definitionId: the id tie-break; the substrate hands definition rows in id
+//     order already, so the comparator's tie branch is never the deciding read. The case
+//     "equal-timestamp definitions pin the lower id" pins the observable order either way.
 // No probe is green. The projection is pure and unwired: no door reaches it, and these rails are
 // the whole of what proves it.
 import { describe, expect, it } from "vitest";
@@ -188,6 +206,25 @@ describe("exact receiving snapshot operands", () => {
       expect(height(run([...all, strike(withdrawn, S, 60)], [binding, p])[0]!)).toBe(22);
       expect(height(run([...members, strike(pinned, X)], [binding, p])[0]!)).toBe(22);
     });
+  it("equal-timestamp definitions pin the lower id, whatever order the manifest lists them", () => {
+    const a = law();
+    // A second hyperschema publication for the SAME entity at the SAME timestamp, different content.
+    const twin = signClaims(
+      publishHyperSchemaClaims({ ...PLANT, body: { kind: "input" } }, body.entity, author, 10),
+      S,
+    );
+    const [low, high] = [a[0]!, twin].sort((x, y) => (x.id < y.id ? -1 : 1));
+    // Both ingestion orders: a tie-break that falls back to insertion order fails one of them.
+    for (const members of [
+      [high!, ...a.slice(1), low!],
+      [low!, ...a.slice(1), high!],
+    ]) {
+      const p = pause(members, { selection: selection(members, a[3]!.id) });
+      expect(run(members, [binding, p])[0]!.status).toBe("selected");
+      expect(run([...members, strike(low!)], [binding, p])[0]!.status).toBe("unavailable");
+      expect(run([...members, strike(high!)], [binding, p])[0]!.status).toBe("selected");
+    }
+  });
   it("a stranger cannot lift pause to follow held M2", () => {
     const a = law(),
       b = law(20, olderPolicy),
@@ -222,19 +259,59 @@ describe("exact receiving snapshot operands", () => {
       expect(height(result)).toBe(11);
     }
   });
-  for (const defect of ["missing", "duplicate", "address", "registration", "source"] as const)
+  for (const defect of [
+    "missing",
+    "duplicate",
+    "address",
+    "registration",
+    "superseded-registration",
+    "contested-lens",
+    "source",
+  ] as const)
     it(`refuses ${defect} manifest with explicit status`, () => {
       const a = law(),
-        absent = observed(FERN, "height", 99, 90, S),
-        s = defect === "missing" ? selection([...a, absent], a[3]!.id) : selection(a);
+        older = law(5),
+        absent = observed(FERN, "height", 99, 90, S);
+      // A second registration entity by the same author, naming the same hyperschema and lens.
+      const other = signClaims(
+        {
+          ...a[3]!.claims,
+          pointers: a[3]!.claims.pointers.map((p) =>
+            p.target.kind === "entity" && p.target.entity.context === "loam.registration"
+              ? {
+                  ...p,
+                  target: { ...p.target, entity: { ...p.target.entity, id: "registration:other" } },
+                }
+              : p,
+          ),
+        },
+        S,
+      );
+      const members =
+        defect === "superseded-registration"
+          ? [...older, ...a]
+          : defect === "contested-lens"
+            ? [...a, other]
+            : a;
+      const s = selection(
+        defect === "missing" ? [...a, absent] : members,
+        defect === "superseded-registration" ? older[3]!.id : a[3]!.id,
+      );
       if (defect === "duplicate") Object.assign(s, selection([...a, a[0]!], a[3]!.id));
       if (defect === "address") s.versionId = "wrong";
       if (defect === "registration") s.registrationId = a[0]!.id;
       if (defect === "source") s.source = "other";
-      expect(run(a, [decision({ ...body, mode: "one-time", selection: s })])[0]!.status).toBe(
+      expect(run(members, [decision({ ...body, mode: "one-time", selection: s })])[0]!.status).toBe(
         "invalid-selection",
       );
     });
+  it("a pause on a one-time binding is refused, not ignored", () => {
+    const a = law(),
+      one = once(a);
+    expect(run(a, [one])[0]!.status).toBe("selected");
+    expect(run(a, [one, pause(null, { bindingId: one.id })])[0]!.status).toBe("invalid-selection");
+    expect(run(a, [one, pause(a, { bindingId: one.id })])[0]!.status).toBe("invalid-selection");
+  });
   it("accepts an exact manifest at a one-character source identity", () => {
     const a = law();
     const signed = decision({
