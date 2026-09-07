@@ -1,4 +1,3 @@
-import { currentPoolDeclaration } from "../federation/local-channel-events.js";
 // The CONTAINER (SPEC §27, ticket T32) — the named generalization of the quarantine pool, and the
 // at-rest vocabulary for §27.1's knob vector. A container is an entity the operator names,
 // declared by an operator-signed claim at `loam.container`; the declaration is the at-rest form
@@ -778,6 +777,29 @@ function boundContainer(
     return undefined;
   }
   return { name, trust, posture };
+}
+
+/** The declaration identity used by the container reader, excluding malformed and control rows. */
+export function containerDeclarationName(claims: Claims): string | undefined {
+  return boundContainer(claims)?.name;
+}
+
+/** Latest surviving declaration for one container, under the reader's own binding rules. */
+export function currentContainerDeclarationId(
+  reactor: Reactor,
+  operator: string | undefined,
+  entity: string,
+): string | undefined {
+  if (operator === undefined) return undefined;
+  const negated = lawfulNegated(reactor, operator);
+  return [...reactor.snapshot()]
+    .filter(
+      (delta) =>
+        delta.claims.author === operator &&
+        !negated(delta.id) &&
+        containerDeclarationName(delta.claims) === entity,
+    )
+    .sort((a, b) => b.claims.timestamp - a.claims.timestamp || b.id.localeCompare(a.id))[0]?.id;
 }
 
 // The surviving lawful declaration ids for one entity — what a strike-the-declaration act negates.
@@ -1755,7 +1777,10 @@ async function openSeparate(
     trust: spec.trust,
     posture: "separate",
     gateway: pool,
-    declarationId: spec.entity === undefined ? undefined : currentPoolDeclaration(gw, spec.entity),
+    declarationId:
+      spec.entity === undefined
+        ? undefined
+        : currentContainerDeclarationId(gw.reactor, gw.operatorAuthor, spec.entity),
     members: () => [...pool.reactor.snapshot()],
     reseed,
     // Drop DISCARDS — at the bytes, on every backend (T72). Purge everything the container can NAME,
