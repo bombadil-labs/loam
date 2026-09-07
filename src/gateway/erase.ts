@@ -19,6 +19,7 @@
 // preimage; partial redaction = reassert with values replaced.
 
 import { sha256 } from "@noble/hashes/sha2.js";
+import { probePhysicalRetention } from "./custody.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { DeltaSet, Reactor, signClaims } from "@bombadil/rhizomatic";
 import type { Claims, Delta } from "@bombadil/rhizomatic";
@@ -993,15 +994,9 @@ export async function erasureStandings(
   };
   if (ids.length === 0 || seen.has(gw)) return { standings, unasked };
   seen.add(gw);
-  try {
-    if (gw.backend.heldAmong) {
-      for (const id of await gw.backend.heldAmong(ids)) note(id, "held");
-    } else {
-      for (const id of ids) if (await gw.backend.holds(id)) note(id, "held");
-    }
-  } catch {
-    for (const id of ids) note(id, "unasked"); // proven nothing here, in either direction
-  }
+  const physical = await probePhysicalRetention(gw.backend, ids);
+  for (const id of physical.held) note(id, "held");
+  for (const id of physical.unasked) note(id, "unasked");
   // ASKED EVEN WHERE THE BYTES COULD NOT BE. The reactor is a separate question from the tier, and
   // a ground with no receipt still owes the delivery whatever its disk would have said.
   const tombs = readTombstones(gw.reactor, gw.operatorAuthor);
