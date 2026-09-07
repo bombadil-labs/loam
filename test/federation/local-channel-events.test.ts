@@ -1,6 +1,20 @@
 // T288 — local receive is an act of this channel service, not a transferable signature.
 // All destructive fixtures are MemoryBackend instances or this file's own mkdtemp SQLite stores.
 // Raw writes below represent the explicitly trusted restore/corruption boundary, never federation.
+//
+// RAILS-RED on origin/main, the seven local-channel suites copied in: none LOADS there. Each imports
+// src/federation/local-channel-events.js, which this slice adds, so vitest reports seven failed
+// suites and no cases. The revert probes an independent review ran on this tree, one guard deleted
+// per probe: the append door's protected refusal (8 red), the federate door's (7 red), the
+// transitive closure over strikes (6 red), the local-control branch of survivingTombstones (1 red),
+// the eraseReplica authority check (1 red), the two-opens ambiguity (1 red), the exact declaration
+// checks on sync (4 red), the partial-opening guard on retry (1 red), and a protected-set memo that
+// never sweeps the arrival log (red across the suites).
+//
+// WHAT THESE RAILS DO NOT ASSERT: a reader resolving through a Schema or a door over the `received`
+// operand. No consumer resolves through it yet; `sourceStanding` re-ingests the operand into a fresh
+// Reactor and asks lawfulNegated, which is the nearest reader available. The slice that first
+// resolves through `received` owes the object-level rail.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   authorForSeed,

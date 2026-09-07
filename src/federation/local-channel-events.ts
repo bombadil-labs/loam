@@ -30,45 +30,84 @@ export function sameVerifiedDelta(a: Delta | undefined, b: Delta): boolean {
     JSON.stringify(toWire(a)) === JSON.stringify(toWire(b))
   );
 }
-export function protectedIngressIds(reactor: Reactor, batch: readonly Delta[]): Set<string> {
-  const all = [...reactor.snapshot(), ...batch];
-  const protectedIds = new Set<string>();
-  const dependents = new Map<string, Set<string>>();
-  for (const d of all) {
-    let local = false,
-      control = false;
-    for (const pointer of d.claims.pointers) {
-      if (pointer.target.kind === "entity") {
-        if (pointer.target.entity.context === LOCAL_EVENT) local = true;
-        if (pointer.target.entity.context === LOCAL_CONTROL) {
-          local = true;
-          control = true;
-        }
-      } else if (
-        pointer.target.kind === "delta" &&
-        (pointer.role === "negates" || pointer.role === "erases")
-      ) {
-        const target = pointer.target.deltaRef.delta;
-        const next = dependents.get(target) ?? new Set<string>();
-        next.add(d.id);
-        dependents.set(target, next);
+// What one delta contributes to the protected set: is it itself a local event or control record,
+// which protected target does a control marker remember, and which deltas does it negate or erase.
+function protectedContribution(d: Delta): {
+  local: boolean;
+  remembered: string | undefined;
+  strikes: string[];
+} {
+  let local = false,
+    control = false;
+  const strikes: string[] = [];
+  for (const pointer of d.claims.pointers) {
+    if (pointer.target.kind === "entity") {
+      if (pointer.target.entity.context === LOCAL_EVENT) local = true;
+      if (pointer.target.entity.context === LOCAL_CONTROL) {
+        local = true;
+        control = true;
       }
+    } else if (
+      pointer.target.kind === "delta" &&
+      (pointer.role === "negates" || pointer.role === "erases")
+    ) {
+      strikes.push(pointer.target.deltaRef.delta);
     }
+  }
+  // Markers remember the protected target even after its bytes have gone.
+  const remembered = control ? tombstoneTarget(d.claims) : undefined;
+  return { local, remembered, strikes };
+}
+interface ProtectedMemo {
+  swept: number; // arrival-log high-water mark
+  roots: Set<string>; // local events, controls, and the targets controls remember
+  dependents: Map<string, Set<string>>; // struck id → the ids that strike it
+}
+const protectedMemo = new WeakMap<Reactor, ProtectedMemo>();
+// The door runs this on EVERY append and federate, so it must not walk the store each time (H8).
+// The memo sweeps the reactor's arrival log once per delta; a call then costs the batch plus the
+// closure over protected ids, never the whole ground.
+export function protectedIngressIds(reactor: Reactor, batch: readonly Delta[]): Set<string> {
+  let memo = protectedMemo.get(reactor);
+  if (memo === undefined) {
+    memo = { swept: 0, roots: new Set(), dependents: new Map() };
+    protectedMemo.set(reactor, memo);
+  }
+  const log = reactor.arrivalLog();
+  for (; memo.swept < log.length; memo.swept += 1) {
+    const d = log[memo.swept]!;
+    const { local, remembered, strikes } = protectedContribution(d);
+    if (local) memo.roots.add(d.id);
+    if (remembered !== undefined) memo.roots.add(remembered);
+    for (const target of strikes) {
+      const next = memo.dependents.get(target) ?? new Set<string>();
+      next.add(d.id);
+      memo.dependents.set(target, next);
+    }
+  }
+  // The batch is overlaid, never written into the memo: it has not arrived yet, and may be refused.
+  const protectedIds = new Set(memo.roots);
+  const batchDependents = new Map<string, Set<string>>();
+  for (const d of batch) {
+    const { local, remembered, strikes } = protectedContribution(d);
     if (local) protectedIds.add(d.id);
-    // Markers remember the protected target even after its bytes have gone.
-    if (control) {
-      const target = tombstoneTarget(d.claims);
-      if (target !== undefined) protectedIds.add(target);
+    if (remembered !== undefined) protectedIds.add(remembered);
+    for (const target of strikes) {
+      const next = batchDependents.get(target) ?? new Set<string>();
+      next.add(d.id);
+      batchDependents.set(target, next);
     }
   }
   const queue = [...protectedIds];
   for (let cursor = 0; cursor < queue.length; cursor += 1) {
-    for (const dependent of dependents.get(queue[cursor]!) ?? []) {
-      if (!protectedIds.has(dependent)) {
-        protectedIds.add(dependent);
-        queue.push(dependent);
+    const struck = queue[cursor]!;
+    for (const source of [memo.dependents.get(struck), batchDependents.get(struck)])
+      for (const dependent of source ?? []) {
+        if (!protectedIds.has(dependent)) {
+          protectedIds.add(dependent);
+          queue.push(dependent);
+        }
       }
-    }
   }
   return protectedIds;
 }

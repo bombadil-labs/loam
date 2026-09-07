@@ -135,7 +135,8 @@ describe("T288 protected ingress closure has bounded linear work", () => {
       };
       return { ...delta, claims };
     });
-    const empty = { snapshot: () => [] } as unknown as Reactor;
+    // An empty ground: the protected set sweeps the arrival log once, then reads only the batch.
+    const empty = { snapshot: () => [], arrivalLog: () => [] } as unknown as Reactor;
 
     const protectedIds = protectedIngressIds(empty, watched);
 
