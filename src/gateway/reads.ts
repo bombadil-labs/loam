@@ -56,10 +56,11 @@ const hviewDigest = (h: HView): string => contentAddress(bytesOf(hviewCanonicalH
 // through their own reading's resolvers. A reading's name IS its lens name, so this is the live
 // binding whose lens matches. Children resolve through the LIVE reading even under a pinned parent:
 // a version pins the lens the door asked for, not the whole world's readings.
-const readingResolversOf =
-  (gw: Gateway) =>
-  (name: string): ResolverSpecs | undefined =>
-    gw.registered.find((r) => lensOf(r) === name)?.resolvers;
+const readingResolversOf = (gw: Gateway, binding?: ConnectionBinding) => {
+  const registered = binding === undefined ? gw.registered : gw.boundSurface(binding).registered;
+  return (name: string): ResolverSpecs | undefined =>
+    registered.find((r) => lensOf(r) === name)?.resolvers;
+};
 
 // The moment as a delta set (SPEC §26): the surviving snapshot filtered to the deltas IN FORCE
 // at T — author-timestamp `≤ T`, and a negation counts only if ITS OWN timestamp is `≤ T` (a
@@ -377,7 +378,7 @@ export function resolvedNodeImpl(
       resolveView(def.schema, hview) as Record<string, View>,
       hview,
       def.schema,
-      readingResolversOf(gw),
+      readingResolversOf(gw, binding),
       gw.resolverMemo,
     ),
     hview,
