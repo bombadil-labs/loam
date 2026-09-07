@@ -1813,6 +1813,10 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
   }
   // Past the ambiguity check, so a live handle is returned only for the channel that was ASKED for.
   const standingBeforeOpen = channelStatusImpl(gw, name)[0];
+  // A declaration can survive a failed attachment before any status exists. Retrying
+  // may complete that legacy lifecycle, but it is not a fresh protected opening.
+  const priorPoolLifecycle =
+    currentPoolDeclaration(gw, name) !== undefined || gw.channelPools.has(name);
   const existing = gw.federationChannels.get(name);
   if (existing !== undefined) return existing; // idempotent: re-opening resumes the same pool
 
@@ -2057,6 +2061,7 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
     (opts.openedBy === undefined && opts.openedFrom === undefined) ||
     (eventText(opts.openedBy) && eventText(opts.openedFrom) && openerStands(gw, opts));
   if (
+    !priorPoolLifecycle &&
     eventText(name) &&
     eventText(opts.into) &&
     eventText(opts.prefix) &&
