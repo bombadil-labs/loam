@@ -39,7 +39,7 @@ describe("T288 R2 regression controls", () => {
           },
         },
       );
-      const opts = { into: "friends", prefix: "peer", source: { pull: async () => [] } };
+      const opts = { into: "friends", prefix: "peer", source: { pull: () => Promise.resolve([]) } };
       const name = "channel:friends:peer";
       try {
         await expect(gw.openChannel(opts)).rejects.toThrow(`fixture ${fault} failure`);
@@ -77,7 +77,7 @@ describe("T288 R2 regression controls", () => {
       const ch = await gw.openChannel({
         into: "friends",
         prefix: "peer",
-        source: { pull: async () => [source] },
+        source: { pull: () => Promise.resolve([source]) },
       });
       await ch.sync();
       const receipt = [...gw.reactor.snapshot()].find(
