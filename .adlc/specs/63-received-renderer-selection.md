@@ -1,0 +1,159 @@
+# Exact received renderer/current-law selection
+
+## User story
+
+A connected caller asks which received renderer can read the current law in their bound channel. The metadata API returns the exact renderer and current registration IDs, or a typed refusal. Repeating the request after law or connection changes observes the current state. Criterion 1 drives this internal API through real connection, receive, and adoption fixtures. Serving and activation remain later work.
+
+## Prerequisite and approval status
+
+This selection slice belongs to approved T278 work. Myk delegated routine design and implementation decisions. Independent P1 review found six concrete failure causes, an executable contract, and no unresolved product questions. Its four precision clarifications are incorporated below.
+
+Build from verified local prerequisite revision `efeb749efa660ff2ac0087938356f56fa7d4b99b` on `feature/t278-local-channel-events`. Its full `npm run check` passed 3296 tests with 5 skips. At handoff, strict T288 P4 still lacks flail evidence and P5 remains pending; this is neither upstream landing nor completed prerequisite gate evidence. Do not modify T288 while its P5 contract hash is frozen. Its dependency edge to this service-minted ticket remains deferred until that freeze is released; this body records the actual local source prerequisite. The isolated dispatch forecast covers only this selection writer and never claims the full backlog DAG is complete. No source or tests exist for this slice yet, and rails remain empty until authored independently.
+
+## Deliverable and scope
+
+Deliver a real read-only metadata API that a standing bound connection can use to select an exact received renderer and the current law it would read. It returns full source renderer and current registration IDs for the later activation request. It does not admit/evaluate renderer or resolver code, append deltas, mint grants/support, expose tools/HTTP, or claim active/mounted status. No registry, cache of authority or new hash.
+
+Source scope: new `src/federation/renderer-selection.ts`; `src/gateway/adopt-law.ts` for a narrowly exact read-only classifier and existing structural law comparison; new `test/federation/renderer-selection.test.ts`. Existing T288/T286 helpers are consumed without behavior changes. Any additional implementation file requires explicit scope revision before rails.
+
+## Public internal API
+
+```ts
+export interface RendererSelectionRequester {
+  readonly requester: string; // author key, not seed
+  readonly binding: ConnectionBinding;
+}
+export interface ReceivedRendererSelection {
+  readonly destination: string;
+  readonly channel: string;
+  readonly opening: string;
+  readonly route: string;
+  readonly sourceDelta: string;
+  readonly sourceLens: string;
+  readonly destinationLens: string;
+  readonly sourceRegistration: string;
+  readonly destinationRegistration: string;
+  readonly sourceLineage: readonly string[];
+}
+export type RendererSelectionCode =
+  | "invalid_request" | "not_authorized" | "source_unavailable"
+  | "renderer_ineligible" | "law_unavailable";
+export class RendererSelectionRefusal extends Error {
+  readonly code: RendererSelectionCode;
+}
+export function selectRendererForActivation(
+  gw: Gateway,
+  requester: RendererSelectionRequester,
+  input: {readonly channel:string; readonly route:string},
+): ReceivedRendererSelection;
+```
+
+Synchronous, no seed needed. Input strings must be nonempty/NUL-free; requester is a valid author key, binding is exact `{container,inbox}`. Missing/malformed arguments throw invalid_request. Return detached deeply frozen metadata; sourceLineage is sorted unique full delta IDs. sourceDelta is the full verified renderer ID, the only renderer expectation needed later. No semantic renderer identity is introduced. Destination is binding.container; no arbitrary destination argument.
+
+Selection is an instantaneous metadata answer. Later mutation must independently rerun it after real admission and at commit; accepting this object as a privileged token is forbidden. This slice has no persistence entry point.
+
+## Authority and complete source operand
+
+Use `connectionStands`, exact `inboxName(binding.container,requester)`, attached inbox existence, and `boundChannelAdmits` from T286. Require actual container tree reach of channel.into under binding.container, exact openedBy/openedFrom match, current receive leeway, and T288 `localChannelEvidence(gw,channel).state === "open"`. Its opening must agree with selected channel status/attachment. Unbound/wrong actor/inbox/standing/ancestry/reach -> not_authorized. Legacy/closed/unavailable protected evidence -> source_unavailable. These checks provide metadata eligibility, not a read grant for another person.
+
+Use the COMPLETE T288 received operand. Do not create a narrower authority input by filtering missing refs. Erasure of ANY previously received source member—including an old registration, old definition or unrelated received member—makes T288 evidence unavailable and this selector must refuse source_unavailable. A later good registration cannot waive that history hole. Loss of an old destination-only audit ref is separate and does not itself corrupt source evidence; this slice only selects current rows and creates no audit records.
+
+Source survival is per-record-author over received deltas, including full received forward negation lineage. Foreign-author strikes cannot retract another author's renderer/registration/definition. Root-seeded/raw pooled facts or strikes absent from received evidence are excluded. Do not call `arrivedBindings` or `readForeignRenderers`: those use whole-pool membership and exclude receiver-operator authors, both wrong here.
+
+## Strict renderer selection
+
+Recognize renderer candidates in received evidence by their renderer entity/context before permissive parsing. For exact requested route, choose the current surviving candidate using existing latest `(timestamp,id)` order after per-author survival. Do not fall back to older valid code when the current raw candidate is malformed or write-capable: refuse renderer_ineligible.
+
+Validate original raw claims: exactly one renderer marker with role `renders`, matching `renderer:<route>` at CTX_RENDERER and exactly one route/schema/consumes/bundle scalar of proper type; no duplicate scalar roles; route nonempty and no `/` or NUL; schema nonempty/NUL-free; consumes JSON array of nonempty distinct field names; bundle nonempty string. Any pen/writable/versionId marker refuses, even malformed half-shapes that rendererBindingOf drops. Allow ordinary signed provenance/negates pointers that do not conflict with renderer fields; do not silently misparse duplicate renderer markers. Source ID/signature were validated by T288 but confirm parser never treats unverified standalone metadata as a source. A source-author withdrawal can expose the earlier surviving route candidate under existing latest-survivor semantics; returned sourceDelta tells the caller exactly which one that is.
+
+If complete received evidence contains no candidate for the requested route, refuse `renderer_ineligible`, not `source_unavailable`. Candidate recognition remains broad enough to detect malformed reserved renderer markers before strict role validation.
+
+No module body is evaluated to check syntax/export validity. `renderer_ineligible` here covers declarative shape, not actual worker admission. Later slice uses T287 plus explicit current-budget rendererAdmitted.
+
+## Exact current-law classifier: concrete extraction
+
+Current `adopt-law.ts:schemaExport` (~529) cannot be called unchanged: it picks a manifest alias with latest-overall fallback and tolerates missing living/snapshot lineage. Add a separate exact read-only helper sharing only pure low-level functions (`entityOf`, source-author strike/operand construction, structural schema address comparison, validated JSON parsing) as applicable. Existing schemaExport/adoptLaw behavior must remain unchanged.
+
+Proposed helper:
+
+```ts
+export interface ExactReceivedSchema {
+  readonly registration: string;
+  readonly lens: string;
+  readonly entity: string;
+  readonly author: string;
+  readonly hyperschema: HyperSchema;
+  readonly schema: Schema;
+  readonly roots: readonly string[];
+  readonly lineage: readonly string[];
+}
+export function classifyExactReceivedSchema(
+  received: readonly Delta[], lens: string, registration: string,
+): ExactReceivedSchema;
+export function sameSchemaLaw(
+  left: Pick<ExactReceivedSchema,"hyperschema"|"schema">,
+  right: {readonly hyperschema:HyperSchema; readonly schema:Schema},
+): boolean;
+```
+
+Helper throws ordinary Error on invalid law; selector maps it to law_unavailable. It is metadata-only, with no Gateway/module-version/manifest/adopt callback. sameSchemaLaw uses existing private schemaLawAddress arithmetic; export an equality wrapper, not a second hash vocabulary. It deliberately excludes roots/resolvers, handled explicitly below.
+
+Classifier algorithm:
+
+1. Validate named full registration ID exists in received, has exact registration role/context schema, and survives its own author's received negation algebra. Require exactly one hyperschema entity ref, living schema entity ref and schemaVersion entity ref, valid roots JSON and exact source lens derived from `schema:<lens>`. No alias fallback.
+2. Identify ALL surviving valid registration bindings for this exact lens (coexisting other lenses are separate). The supplied registration must be the current latest survivor for its hyperschema entity/lens under `(timestamp,id)`. If competing hyperschema entities claim the same lens in received evidence, refuse ambiguity in this bounded selector; do not guess a new cross-entity authority policy. A newer unstruck valid binding makes an older adoption pointer stale even if the old binding still survives. Malformed registration bindings are excluded from the valid-registration winner set, matching existing registration readers; they do not hide an otherwise current valid binding. This differs from raw renderer winner selection: a malformed newest raw renderer refuses rather than revealing older code. Malformed winning definition payloads also refuse rather than falling back.
+3. Resolve current hyperschema definition for that named entity and the EXACT frozen schema snapshot entity referenced by the current binding. Use source-author-scoped operand masking so foreign strikes do not undo the survival decision inside `loadHyperSchema`/`loadSchema`, whose bootstrap otherwise uses author-blind masking. Do not parse the latest living-schema contents as the frozen snapshot. `registration.ts:readRegistrations` at ~1193 demonstrates current-surviving-binding -> frozen-snapshot behavior.
+4. Require all definition/snapshot payload deltas actually used by those loads present, valid and surviving in received. Return complete required lineage: named binding plus selected current hyperschema definition delta(s) and selected frozen-schema definition delta(s), deduplicated. The living schema entity ref is a naming reference, not a requirement to use today's living schema payload; no artificial equality with a newer living definition. The actual loaders consume one winning definition row each, so v1 payload lineage is exactly binding ID + hyperschema winner ID + frozen-schema winner ID, deduplicated. No `filter(undefined)` shortcut on required lineage.
+5. Parse roots strictly as string array and return detached values. Parse relevant resolver declarations as metadata only where needed for shape; never load/run their code. Malformed required policy/binding fields refuse rather than silently dropping data.
+
+Concrete loader evidence: `node_modules/@bombadil/rhizomatic/src/schema-deltas.ts:75` and `:149` evaluate the bootstrap, read `result.hview.props.get("definition")`, and select ONE row by timestamp descending then ID ASCENDING at equal timestamp. These payloads are whole canonical term blobs; they do not assemble fields from multiple rows. Determine lineage using that exact bootstrap result over the same scoped operand, then call the existing loaders for canonical parsing. Preserve their tie-break, which differs from latest-registration `(timestamp,id)` ascending-then-last semantics. Do not choose a convenient defines-role scan that disagrees with what bootstrap actually loads: its gather selects entity/context, and a malformed winning row must refuse exactly as the loader does. Equal-timestamp definition fixtures must force this distinction. This is bounded read-only extraction, not a new loader or manifest Source.
+
+## Destination join, roots and resolver withholding
+
+Derive destinationLens=`${channel.prefix}:${sourceLens}` by existing bindArrived mapping. Locate CURRENT row in `gw.boundSurface(binding).registered`: require exact lens, `channel===input.channel`, origin=store and boundId present. Root/inbox/sibling matching strings cannot satisfy this.
+
+Read live `readLawAdoptions(pool.reactor,pool.operatorAuthor)` and require a join with adoptedDelta==CURRENT destination boundId. For each candidate, classify its sourceDelta with exact helper and sourceLens. Accept adopted-from or witnessed only if alias==sourceLens, target==classified.entity, producedBy==classified.author, CURRENT source law equals CURRENT actual bound destination law, and source/destination roots arrays are equal in their preserved registration order. Require a unique source registration result; multiple duplicate narrative rows for the SAME exact result are harmless, conflicting valid joins refuse. Old adoption lawAddress alone is not current-content proof. The adoption narrative is corroboration, not protected local custody; actual received evidence and present content are decisive.
+
+Validate renderer.consumes against fields of actual current destination schema exactly as current renderer publication coverage does; no dependency adoption/resolution fallback. Current curse/withdrawal that removes destination law causes law_unavailable. Also honor current channel curses for the derived living name rather than letting stale provenance override retirement.
+
+Existing withheld resolver stubs stay withheld. sameSchemaLaw excludes resolver code and therefore never attests resolver authorization. Selector returns IDs/metadata without compiling/loading/running resolvers, does not replace stubs, and does not grant code. A selected renderer may later fail a specific read due to independently existing withheld resolver behavior; selection does not claim successful rendering. Independent existing destination resolver authorization remains unchanged.
+
+## Current schema changes: settled behavior
+
+Each call reselects current source registration and current destination law; no registration pin/asOf argument and no call to resolvePinned. Lawfully evolve source only while destination still references old surviving registration -> law_unavailable. Evolve destination through actual existing adoption to the new current source -> selection succeeds with new registration IDs and the SAME original renderer sourceDelta if renderer did not change. Retract latest source registration -> use its current surviving predecessor only if destination now matches it; the living schema entity may still be ahead, and its content must not override predecessor's frozen snapshot. Coexisting sibling lenses never substitute for requested sourceLens.
+
+Mutable hyperschema/definition under unchanged registration ID is compared using current content and complete required lineage. Missing received source member always refuses complete operand, even if considered “old.” No support/audit lifecycle exception is implemented here.
+
+## Acceptance criteria
+
+All new rails in `test/federation/renderer-selection.test.ts`, using real channel open/receive evidence and actual existing schema publication/adoption. Literal malformed renderer/registration/adoption fixtures are independently constructed signed claims, not only production-builder roundtrips.
+
+1. Real bound receive of renderer and schema plus lawful prefixed adoption returns full source renderer, opening, current source/destination registration IDs and complete lineage; snapshot backend IDs before/after proves selection writes NOTHING. An initialization-throwing bundle still selects when shape/law eligible and does not run, proving admission is separate. Compare operator/peer pools and root too. Verify: `npm test -- test/federation/renderer-selection.test.ts`.
+2. Missing/wrong requester binding, revoked connection/ancestor, sibling/parent/prefix lookalike and wrong exact opening inbox refuse typed authority/source codes; legacy/incomplete T288 evidence refuses. Genuine received renderer authored by receiver operator remains eligible; pooled-only/root-seeded foreign renderer does not. Verify: `npm test -- test/federation/renderer-selection.test.ts`.
+3. Independent raw renderer fixtures: pen-only/writable-only/versionId/duplicate schema markers/wrong roles/malformed consumes refuse; current malformed candidate cannot reveal an older valid candidate. Full IDs returned; no truncated identity or second hash. Verify: `npm test -- test/federation/renderer-selection.test.ts`.
+4. Received renderer strike, strike-of-strike and foreign-author strike across two authors produce correct latest surviving sourceDelta while bytes remain. Repeat for registration and definition lineage, preserving full received closure. Verify: `npm test -- test/federation/renderer-selection.test.ts`.
+5. Two coexisting source lenses with different frozen policies select only the exact named lane. A source registration referenced by old adoption but superseded by a newer unstruck registration refuses; exact adoption of latest then succeeds. Conflicting source entities for same lens refuse rather than arbitrary latest fallback. Verify: `npm test -- test/federation/renderer-selection.test.ts`.
+6. Actual source/destination evolution and later latest-registration withdrawal exercise frozen snapshot of the current survivor while living schema is ahead. No resolvePinned/asOf calls. Renderer code ID remains same across valid law evolution. Mutable destination definition under unchanged boundId cannot pass old adoption address. Verify: `npm test -- test/federation/renderer-selection.test.ts`.
+7. Witnessed equal lawful channel law passes only with exact current source/equality/root join; forged same-key narrative, wrong channel, source author, alias or target cannot manufacture equality/custody. Existing withheld resolver bytes remain unchanged and never execute during selection. Verify: `npm test -- test/federation/renderer-selection.test.ts`.
+8. Erase ANY received source member, including old registration with a newer valid pair -> source_unavailable from T288 completeness. Missing referenced current snapshot/definition also refuses. A separate destination-only old metadata erasure does not become historical selection; only current row/join decides. Verify: `npm test -- test/federation/renderer-selection.test.ts`.
+9. Current curse or destination withdrawal refuses despite old adoption records; roots mismatch and consumes outside current schema refuse. No grants/renderer/resolver/adoption support deltas, worker admission or serving result produced. Verify: `npm test -- test/federation/renderer-selection.test.ts`.
+10. Default root adoptLaw/bindArrived behavior remains passing under existing `test/gateway/adopt-law.test.ts`, `test/federation/bind-on-arrival.test.ts`, `test/gateway/bound-fold.test.ts` and related actual suite paths confirmed before freeze. T288 ingress/receipt controls are not weakened to construct fixtures. Verify: `npm test -- test/gateway/adopt-law.test.ts test/federation/bind-on-arrival.test.ts test/gateway/bound-fold.test.ts`.
+
+11. Equal-timestamp hyperschema and frozen-schema definition fixtures force ascending-ID loader winners, opposite to latest-registration tie-breaking. Assert the exact winning lineage ID AND parsed policy. A malformed bootstrap-winning payload refuses without substituting an older definition; include a row that a defines-role-only scan would misclassify. Verify: `npm test -- test/federation/renderer-selection.test.ts`.
+12. Separate valid-registration winner filtering from raw renderer failure: a newer malformed registration does not supersede the valid current binding; a newer valid registration does. A malformed newest raw renderer and malformed winning definition each refuse without fallback. An absent requested route in otherwise complete evidence returns renderer_ineligible. Verify: `npm test -- test/federation/renderer-selection.test.ts`.
+
+## Later slice boundary
+
+Durable activation/withdrawal remains cohesive inside ingestion's existing private validated persistence owner: actual confined admission, current-budget check, independent queued reselection, actor inbox append, protected control/erasure and replay. Its support listing must enumerate expected inbox declarations and refuse missing attachments instead of returning a partial array. None of those APIs is added here. Later serving independently scopes reader B and checks activator A; this selector grants neither reader authority nor mounted route.
+
+No product choice is outstanding. Independent review: `/tmp/loam-t278-evidence/T278-selection-p1-review.md` and `T278-selection-p1-verdict.json`. The review is an executability assessment, not implementation approval. Actual P1/P2 outputs are recorded separately.
+
+## Full validation
+
+After implementation, run `npm run check` in the isolated worktree. Record actual P3/P4/P5 results independently; design gate success does not satisfy them.
+
+
+## Human-confirmed initial availability
+
+Myk accepted the conservative initial availability rule after the P1 readback: renderer selection refuses when any delta attested as received for the current channel opening is missing, erased or invalid, even if it appears unrelated or an older valid registration has been replaced. Ordinary curse and source retraction retain bytes and do not by themselves create this missing-history condition. This limitation is accepted for the initial version; it does not authorize weakened custody proof or change the scoped read-only selection deliverable. Any more selective availability rule requires its own sound dependency and negation evidence before implementation. The existing ADLC workflow remains in force; the delegated-approval tooling proposal is shelved.
+
