@@ -36,6 +36,12 @@ import {
 } from "./render-worker.js";
 import { workerLimitsOf } from "./envelope.js";
 import { lawfulNegated, lawfulSnapshot, lensOf, type LensName } from "./registration.js";
+import {
+  createRootRendererContext,
+  rendererContextStands,
+  rendererContextRefusal,
+  type RendererContext,
+} from "./renderer-context.js";
 
 export const CTX_RENDERER = "loam.renderer";
 
@@ -796,17 +802,9 @@ export async function prepareRouteImpl(
 ): Promise<void> {
   const binding = gw.renderers().find((r) => r.route === route);
   if (binding !== undefined) {
-    // THE DOOR DECIDES HERE TOO, on every gateway and not only where a channel is involved.
-    // Admitting is EVALUATING a module body (now in §23.9's confined realm), and this branch runs on
-    // a pool's own mount as readily as on the root — so a route this door could never serve must not
-    // be a route this door can make it run. Admitting only what could be served is the same rule the
-    // serve path keeps. A binding that federates in AFTER boot is refused here and nowhere else, so
-    // this is the only place that can say why its route went dark. Only a FRESH refusal is reported:
-    // the memo makes that once per bundle rather than once per request, so an operator gets a line
-    // rather than a flood.
+    // The compatibility route API tolerates unservable routes; the explicit primitive refuses them.
     if (routeServableOn(gw, binding, door)) {
-      const refusals = await admitRenderers([binding.bundle], rendererAdmissionBudget(gw));
-      for (const r of refusals) if (r.fresh) reportUnmounted([binding], r.bundle, r.why);
+      await prepareRendererInContext(binding, createRootRendererContext(gw, door, Date.now));
     }
     return;
   }
@@ -818,6 +816,40 @@ export async function prepareRouteImpl(
   // own admission budget on the pool's gateway.
   const app = channelApp(gw, route, door);
   if (app !== undefined) await app.pool.prepareRoute(app.route, door);
+}
+
+/** Bound contexts intentionally exclude pens and historical readings in this intermediate seam. */
+function contextAllows(context: RendererContext, binding: RendererBinding, asOf?: number): boolean {
+  if (!rendererContextStands(context)) return false;
+  return (
+    context.kind === "root" ||
+    (binding.pen === undefined &&
+      binding.writable === undefined &&
+      binding.versionId === undefined &&
+      asOf === undefined)
+  );
+}
+
+export async function prepareRendererInContext(
+  binding: RendererBinding,
+  context: RendererContext,
+): Promise<void> {
+  if (!contextAllows(context, binding)) throw rendererContextRefusal();
+  const now = context.now();
+  if (!Number.isFinite(now)) throw rendererContextRefusal();
+  const servable =
+    context.kind === "root"
+      ? routeServableOn(context.execution, binding, context.door)
+      : context.authority
+          .boundSurface(context.binding)
+          .registered.some((r) => lensOf(r) === binding.schemaName);
+  if (!servable) throw rendererContextRefusal();
+  const refusals = await admitRenderers(
+    [binding.bundle],
+    rendererAdmissionBudget(context.execution),
+  );
+  if (!contextAllows(context, binding)) throw rendererContextRefusal();
+  for (const r of refusals) if (r.fresh) reportUnmounted([binding], r.bundle, r.why);
 }
 
 // ONE VOICE for "this route is dark and here is why", shared by the bind path and the serve path so
@@ -866,9 +898,44 @@ export async function serveRouteImpl(
     const app = channelApp(gw, route, door);
     return app === undefined ? gone : app.pool.serveRoute(app.route, entity, door, gesture, asOf);
   }
+  return renderRendererInContext(binding, entity, createRootRendererContext(gw, door, Date.now), {
+    ...(gesture === undefined ? {} : { gesture }),
+    ...(asOf === undefined ? {} : { asOf }),
+  });
+}
+
+export async function renderRendererInContext(
+  binding: RendererBinding,
+  entity: string,
+  context: RendererContext,
+  options?: {
+    readonly gesture?: {
+      readonly reads: readonly ReadGesture[];
+      readonly state: Record<string, string>;
+    };
+    readonly asOf?: number;
+  },
+): Promise<{ status: number; contentType: string; body: string }> {
+  const gone = { status: 404, contentType: "text/plain; charset=utf-8", body: "no such route" };
+  if (!contextAllows(context, binding, options?.asOf)) return gone;
+  const now = context.now();
+  if (!Number.isFinite(now)) return gone;
+  const gw = context.execution;
+  const door = context.door;
+  const { gesture, asOf } = options ?? {};
   let node: ResolvedNode;
   try {
-    if (binding.versionId === undefined) {
+    if (context.kind === "bound") {
+      const surface = context.authority.boundSurface(context.binding);
+      if (!surface.registered.some((r) => lensOf(r) === binding.schemaName)) return gone;
+      node = context.authority.resolvedNode(
+        binding.schemaName,
+        entity,
+        undefined,
+        now,
+        context.binding,
+      );
+    } else if (binding.versionId === undefined) {
       // A LATEST renderer: its lens must be in THIS door's surface — registered (full) or bare-name
       // publicly declared (public). A schema withdrawn after the renderer was published thus darkens the
       // route too — the app is a view over surviving law (§23.6). No 404-vs-error oracle.
@@ -883,7 +950,8 @@ export async function serveRouteImpl(
       // one narrower ground, nothing about the render time-cased. Threaded HERE rather than at each
       // door, because the app door is two call sites and one of them would otherwise keep quietly
       // answering the present.
-      node = surface.hooks.resolve(binding.schemaName, entity, asOf);
+      // surface.hooks.resolve delegates to this same method; supply the context's clock explicitly.
+      node = gw.resolvedNode(binding.schemaName, entity, asOf, now);
     } else {
       // A PINNED renderer. The anonymous door serves it IFF the operator publicly declared THAT pin
       // (§23.8 — a declaration is publication, not a probe); every undeclared pin stays a uniform 404,
@@ -899,9 +967,10 @@ export async function serveRouteImpl(
       if (pinned === undefined) return gone;
       // Both pins at once (SPEC §26): an OLD lens over an OLD ground. They are orthogonal, so a
       // pinned route reads the past through the reading it froze rather than through the latest.
-      node = gw.resolvePinned(pinned, entity, asOf);
+      node = gw.resolvePinned(pinned, entity, asOf, now);
     }
   } catch (err) {
+    if (context.kind === "bound") return gone;
     // A resolve fault is unusual (the lens is registered); leak the reason only to the full (token)
     // door, never to a stranger.
     if (door === "public") return { ...gone, status: 400, body: "the route could not be rendered" };
@@ -922,6 +991,8 @@ export async function serveRouteImpl(
   // say so in bytes the bundle never touched. Applied FIRST, so §24.7's banner still lands first in
   // the body — a probationary store's most urgent statement stays the one at the top.
   const framed = (r: { status: number; contentType: string; body: string }) => {
+    // Every worker branch returns here after its await, while its slot is still in the finally scope.
+    if (!contextAllows(context, binding, asOf)) return gone;
     if (r.status !== 200 || !r.contentType.startsWith("text/html")) return r;
     let body = frameAsOf(r.body, node);
     const p = gw.probation;
@@ -942,7 +1013,7 @@ export async function serveRouteImpl(
   const state: Record<string, string> = door === "public" ? {} : (gesture?.state ?? {});
   if (door === "full") {
     for (const g of gesture?.reads ?? []) {
-      reads[readKey(g.lens, g.entity)] = resolveGesture(gw, g, asOf);
+      reads[readKey(g.lens, g.entity)] = resolveGesture(context, g, now, asOf);
     }
   }
   // Built LAZILY: a refused render must cost nothing, and `bytesEnvelope` walks the whole view. The
@@ -1051,8 +1122,15 @@ export async function serveRouteImpl(
 // request — `?asOf=T&read=Lens:entity` is one GET — so a mediated read left at the present would put
 // today's value inside a page the frame stamps "as of T". That is worse than an unpinned read: the
 // door's own chrome vouches for the wrong number.
-function resolveGesture(gw: Gateway, g: ReadGesture, asOf?: number): ReadResult {
-  const surface = gw.surface("full");
+function resolveGesture(
+  context: RendererContext,
+  g: ReadGesture,
+  now: number,
+  asOf?: number,
+): ReadResult {
+  const gw = context.kind === "bound" ? context.authority : context.execution;
+  const bound = context.kind === "bound" ? context.binding : undefined;
+  const surface = bound === undefined ? gw.surface("full") : gw.boundSurface(bound);
   const lens = g.lens as LensName;
   if (surface === undefined || !surface.registered.some((r) => lensOf(r) === lens)) {
     return {
@@ -1060,7 +1138,7 @@ function resolveGesture(gw: Gateway, g: ReadGesture, asOf?: number): ReadResult 
     };
   }
   try {
-    const node = surface.hooks.resolve(lens, g.entity, asOf);
+    const node = gw.resolvedNode(lens, g.entity, asOf, now, bound);
     // Absence is an answer, not an error: an entity the store has nothing for resolves to an EMPTY
     // view, and the renderer draws its own "nothing here". Only a fault is a refusal. An entity that
     // had not been spoken of yet at T is exactly that same absence, reached down the time axis.
