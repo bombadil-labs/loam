@@ -144,7 +144,37 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
       group.push(d);
       groups.set(d.relationship, group);
     }
+    // A pause pins ONE of the receiver's live bindings, named by id under its own relationship and
+    // reading. A pause on a binding the receiver lawfully struck is inert: the receiver withdrew it.
+    // Every other pause is a decision the projection cannot honour, and it is refused rather than
+    // ignored: the relationship it claims, and the relationship of any binding it names, both
+    // refuse. A claimed relationship with no binding still earns its own refusal row.
+    const bindings = decisions.filter((b) => b.kind === "binding");
+    const withdrawnBinding = (id: string): boolean => {
+      const named = policy.get(id);
+      if (named === undefined || named.claims.author !== input.receiver || !negated(id))
+        return false;
+      try {
+        return parse(named)?.kind === "binding";
+      } catch {
+        return false;
+      }
+    };
+    const stray = new Set<string>();
+    for (const p of decisions) {
+      if (p.kind !== "pause") continue;
+      const named = bindings.find((b) => b.id === p.bindingId);
+      const honoured =
+        named === undefined
+          ? withdrawnBinding(p.bindingId!)
+          : named.relationship === p.relationship && named.reading === p.reading;
+      if (honoured) continue;
+      stray.add(p.relationship);
+      if (named !== undefined) stray.add(named.relationship);
+    }
     const results: LiveReceivingResult[] = [];
+    for (const relationship of [...stray].filter((r) => !groups.has(r)).sort())
+      results.push({ relationship, destination: input.destination, status: "invalid-selection" });
     for (const [relationship, group] of [...groups].sort(([a], [b]) =>
       a < b ? -1 : a > b ? 1 : 0,
     )) {
@@ -181,27 +211,10 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
       }
       let selected: Registration;
       let operand = source;
+      // Only pauses that name THIS binding under its own relationship and reading reach here; a
+      // pause pins a live binding, so one on a one-time binding is refused as well.
       const pauses = decisions.filter((p) => p.kind === "pause" && p.bindingId === d.id);
-      // A pause pins a LIVE binding to a snapshot. On a one-time binding, or naming anything other
-      // than one of the receiver's own bindings, it is a decision the projection cannot honour:
-      // refused, never ignored. A pause on a binding the receiver lawfully STRUCK is different: the
-      // receiver withdrew that binding, so the pause is inert.
-      const withdrawn = (id: string) => {
-        const named = policy.get(id);
-        return named !== undefined && named.claims.author === input.receiver && negated(id);
-      };
-      const stray = decisions.some(
-        (p) =>
-          p.kind === "pause" &&
-          p.relationship === relationship &&
-          !decisions.some((b) => b.kind === "binding" && b.id === p.bindingId) &&
-          !withdrawn(p.bindingId!),
-      );
-      if (
-        stray ||
-        (d.mode !== "live" && pauses.length > 0) ||
-        pauses.some((p) => p.relationship !== relationship || p.reading !== d.reading)
-      ) {
+      if (stray.has(relationship) || (d.mode !== "live" && pauses.length > 0)) {
         results.push({ ...base, status: "invalid-selection" });
         continue;
       }

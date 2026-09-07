@@ -25,6 +25,11 @@
 //   a curse under a sibling reading curses this reading too          → 1 red, 59 green
 //   a pause on a binding the receiver struck is refused, not inert   → 1 red, 59 green
 //   any delta the policy holds counts as a binding for a pause       → 1 red, 59 green
+// Measured again at 61 cases:
+//   any struck receiver delta makes a pause inert, not only a binding → 1 red, 60 green
+//   a pause naming another relationship's binding leaves it serving  → 1 red, 60 green
+//   a pause under a relationship with no binding is ignored          → 1 red, 60 green
+//   a pause naming any receiver binding is honoured                  → 2 red, 59 green
 //   a pause naming no binding of the receiver is ignored            → 1 red, 59 green
 //   the snapshot path drops its lens-name filter                    → 1 red, 59 green
 //   the live path drops its hyperschema-entity filter               → 1 red, 59 green
@@ -316,6 +321,40 @@ describe("experimental live receiving projection", () => {
       31,
     );
     expect(run(ds, [binding, stray])[0]!.status).toBe("invalid-selection");
+  });
+  it("a pause is refused unless it names one of the receiver's bindings under that binding's own relationship", () => {
+    const ds = law();
+    const pauseOn = (bindingId: string, relationship = body.relationship, ts = 40) =>
+      decision(
+        { kind: "pause", relationship, reading: body.reading, bindingId, selection: null },
+        R,
+        ts,
+      );
+    // A struck curse and a struck malformed decision are receiver-authored and withdrawn, but they
+    // were never bindings: a pause naming either is refused, not inert.
+    const curse = decision(
+      { kind: "curse", relationship: body.relationship, reading: "Plant" },
+      R,
+      30,
+    );
+    const bad = decision({ kind: "binding" }, R, 31);
+    for (const struck of [curse, bad])
+      expect(run(ds, [binding, struck, strike(struck, R), pauseOn(struck.id)])[0]!.status).toBe(
+        "invalid-selection",
+      );
+    // A pause that claims relationship A but names B's binding refuses both relationships.
+    const other = decision({ ...body, relationship: "zz-other" }, R, 3);
+    expect(run(ds, [binding, other, pauseOn(other.id)]).map((r) => r.status)).toEqual([
+      "invalid-selection",
+      "invalid-selection",
+    ]);
+    // A pause under a relationship with no binding earns its own refusal row; the binding it
+    // does not touch still serves.
+    expect(
+      run(ds, [binding, pauseOn("ff".repeat(32), "no-such-rel")]).map((r) => r.status),
+    ).toEqual(["invalid-selection", "selected"]);
+    // Control: a pause naming the binding under its own relationship is honoured.
+    expect(run(ds, [binding, pauseOn(binding.id)])[0]!.status).toBe("unavailable");
   });
   it("refuses an empty receiver or destination as invalid input, not as an empty projection", () => {
     const ds = law();
