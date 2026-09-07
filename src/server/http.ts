@@ -74,19 +74,17 @@ import {
   registerPrefixesOf,
 } from "../gateway/accounts.js";
 import {
-  chainBreaksAt,
   containerClaims,
   everDeclared,
   governingLeeway,
   inboxName,
-  openerStands,
   readContainerTable,
-  receivesNow,
   danglingAncestor,
   treeRootsOf,
   withinSubtree,
   type ContainerTable,
 } from "../gateway/container.js";
+import { boundChannelAdmits, connectionStands } from "../gateway/connection-authority.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
 import { readSeed, readUserSeed, userSeedPath } from "../cli/config.js";
 import { DOC_TOPICS } from "./docs-content.js";
@@ -669,28 +667,6 @@ const STANDING_ENDED =
   "this connection no longer stands in its container, so it shapes nothing here. Ask the person " +
   "who connected you to connect you again.";
 
-/**
- * Does this connection still stand? TWO QUESTIONS, NOT ONE, and every road that writes on a
- * binding's authority asks both.
- *
- * `openerStands` proves the inbox pool is attached and that the write grant in it survives. It
- * says nothing about the CONTAINER, and a pool outlives the container it was bound under: dropping
- * a shared container strikes that container's declarations and leaves the pool declared and
- * attached. A connection whose container was dropped must not act — least of all through a walk
- * that declares missing levels, which would re-declare the container the person just dropped, with
- * the store's own key, at the request of the party the drop was aimed at.
- */
-function connectionStands(gateway: Gateway, binding: ConnectionBinding): boolean {
-  const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
-  // THE WHOLE CHAIN, NOT THE NAME. A shared drop strikes only the container it names, so a
-  // descendant keeps its own declaration and stands alone: absent from every parent-edge walk the
-  // person's pages make, and reachable only by the connection bound to it. Asking the chain means
-  // dropping a container ends the connections bound beneath it too, which is what a person
-  // dropping a room expects.
-  if (chainBreaksAt(table, binding.container) !== undefined) return false;
-  return openerStands(gateway, { openedBy: binding.container, openedFrom: binding.inbox });
-}
-
 function receiveRefusal(
   gateway: Gateway,
   binding: ConnectionBinding,
@@ -900,15 +876,7 @@ function channelAdmits(
 ): boolean {
   return identity.binding === undefined
     ? federateAdmits(standing, channel.into)
-    : // THE CONNECTION FIRST, THE CHANNEL SECOND. `openerStands` weighs the CHANNEL's opener
-      // against its pool; it says nothing about whether the container this connection is bound to
-      // still stands. A channel's own `into` survives its container's drop, so without this a
-      // dropped connection could still flip a channel back on and keep pulling a peer's data into
-      // the subtree the person removed.
-      connectionStands(gateway, identity.binding) &&
-        channel.openedFrom === identity.binding.inbox &&
-        openerStands(gateway, channel) &&
-        receivesNow(readContainerTable(gateway.reactor, gateway.operatorAuthor), channel.into);
+    : boundChannelAdmits(gateway, identity.binding, channel);
 }
 
 function federateAdmits(standing: readonly string[] | undefined, container: string): boolean {
