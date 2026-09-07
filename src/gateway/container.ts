@@ -791,14 +791,11 @@ export function currentContainerDeclarationId(
   entity: string,
 ): string | undefined {
   if (operator === undefined) return undefined;
+  // Filed AT the container's entity, so the target index answers it (H8); `lawfulDeltasAt` already
+  // keeps only the operator's deltas and carries no negation closure, so the strike filter is here.
   const negated = lawfulNegated(reactor, operator);
-  return [...reactor.snapshot()]
-    .filter(
-      (delta) =>
-        delta.claims.author === operator &&
-        !negated(delta.id) &&
-        containerDeclarationName(delta.claims) === entity,
-    )
+  return lawfulDeltasAt(reactor, { entity, context: CTX_CONTAINER }, operator)
+    .filter((delta) => !negated(delta.id) && containerDeclarationName(delta.claims) === entity)
     .sort((a, b) => b.claims.timestamp - a.claims.timestamp || b.id.localeCompare(a.id))[0]?.id;
 }
 

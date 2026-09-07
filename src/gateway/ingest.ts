@@ -240,7 +240,8 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
     if (dead.has(d.id)) {
       throw new Error(
         `append rejected: delta ${d.id} was erased — a tombstone at ${ERASE_ENTITY} refuses ` +
-          `its return (strike the tombstone to forgive it)`,
+          `its return (strike an ordinary tombstone to forgive it; a local-control tombstone ` +
+          `is not forgiven)`,
       );
     }
     const cited = slateRefusal(slates, d);
