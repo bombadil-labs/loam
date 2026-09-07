@@ -20,7 +20,8 @@ import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { Gateway, type ConnectionBinding } from "../../src/gateway/gateway.js";
 import { boundChannelAdmits, connectionStands } from "../../src/gateway/connection-authority.js";
 import { containerClaims, openerStands, readContainerTable } from "../../src/gateway/container.js";
-import { revocationClaims } from "../../src/gateway/accounts.js";
+import { holdsGrant, revocationClaims } from "../../src/gateway/accounts.js";
+import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { SEALED_LEEWAY, type Leeway } from "../../src/gateway/leeway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 
@@ -153,11 +154,23 @@ describe("live bound connection authority", () => {
       expect(boundChannelAdmits(gateway, first.binding, first.status)).toBe(true);
       expect(boundChannelAdmits(gateway, second.binding, second.status)).toBe(true);
     });
+    // Delta level: the revocation is one strike in the inbox pool, and the grant no longer holds
+    // there. Object level: the checks read that strike at once.
+    const inbox = gateway.connectionInboxes.get(first.inbox.entity!)!.gateway!;
+    const strikes = () =>
+      [...inbox.reactor.snapshot()].filter((d) =>
+        d.claims.pointers.some((p) => p.role === "negates" && p.target.kind === "delta"),
+      ).length;
+    const before = strikes();
     await gateway.revokeConnection({
       inbox: first.inbox,
       connectionKey: first.key,
       ownerSeed: OWNER_SEED,
     });
+    expect(strikes()).toBe(before + 1);
+    expect(
+      holdsGrant(inbox.reactor, STORE_ENTITY, first.key, "write", gateway.operatorAuthor),
+    ).toBe(false);
     probes(gateway, () => {
       expect(connectionStands(gateway, first.binding)).toBe(false);
       expect(boundChannelAdmits(gateway, first.binding, first.status)).toBe(false);
