@@ -53,18 +53,14 @@ export function createBoundRendererContext(input: {
   readonly now: () => number;
 }): RendererContext {
   if (
-    input === null ||
-    typeof input !== "object" ||
-    !(input.authority instanceof Gateway) ||
+    !(input?.authority instanceof Gateway) ||
     !(input.execution instanceof Gateway) ||
     typeof input.destination !== "string" ||
     input.destination === "" ||
     typeof input.requester !== "string" ||
     input.requester === "" ||
     typeof input.now !== "function" ||
-    input.binding === null ||
-    typeof input.binding !== "object" ||
-    input.binding.container !== input.destination ||
+    input.binding?.container !== input.destination ||
     input.binding.inbox !== inboxName(input.destination, input.requester) ||
     input.execution.envelope === undefined
   )
