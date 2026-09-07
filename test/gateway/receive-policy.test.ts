@@ -33,21 +33,31 @@
 // Measured again at 61 cases:
 //   a struck binding of any relationship makes a pause inert          → 1 red, 60 green
 //   a stray relationship with no row for this destination is silent   → 1 red, 60 green
+// Measured again at 62 cases:
+//   a dependency nested inside another term is not walked             → 1 red, 61 green
+//   pause keys keep memberIds order, so permutations conflict         → 1 red, 61 green
+//   result rows keep arrival order instead of relationship order      → 1 red, 61 green
 //   a pause naming no binding of the receiver is ignored            → 1 red, 59 green
 //   the snapshot path drops its lens-name filter                    → 1 red, 59 green
 //   the live path drops its hyperschema-entity filter               → 1 red, 59 green
 //   an empty receiver or destination projects [] instead of refusing → 1 red, 59 green
-// HOLLOW-TEST SURVIVORS that are equivalent, and why:
+// HOLLOW-TEST SURVIVORS (uncapped run, 175 mutants) that are equivalent, and why:
 //   receive-policy.ts parse: `return undefined` → `return null` yields a decision with no kind,
 //     which every kind filter drops; no output changes.
+//   receive-policy.ts pause pre-check: the `paused` flag passed to selectReceivingSnapshot; only
+//     the invalid-selection status is read there, and that status does not depend on the flag.
+//   receive-policy.ts pause keys: `JSON.stringify(value)` for a non-object selection → null; the
+//     only non-object selection is null, so every such pause still shares one key.
+//   receive-policy.ts resolver envelope: the primitive-or-string clause; a malformed envelope is
+//     dropped by the legacy reader and refused as unsupported before this line runs.
 //   receive-snapshot.ts manifest: dropping one field from the nonempty check; the same field is
 //     compared against the binding, the registration, or the version address two lines later and
 //     refuses with the same status.
 //   receive-snapshot.ts definitionId: the id tie-break; the substrate hands definition rows in id
 //     order already, so the comparator's tie branch is never the deciding read. The case
 //     "equal-timestamp definitions pin the lower id" pins the observable order either way.
-// No probe is green. The projection is pure and unwired: no door reaches it, and these rails are
-// the whole of what proves it.
+//   receive-snapshot.ts author clause: readRegistrations already filtered to the source author, so
+//     the clause cannot fail; it stays for the type narrowing it provides.
 import { describe, expect, it } from "vitest";
 import {
   authorForSeed,
@@ -246,6 +256,24 @@ describe("experimental live receiving projection", () => {
       S,
     );
     expect(run([...ds, dependent])[0]!.status).toBe("unsupported");
+    // A dependency nested inside another term is refused the same way.
+    const nested = signClaims(
+      publishHyperSchemaClaims(
+        {
+          ...PLANT,
+          body: {
+            kind: "prune",
+            keep: "all",
+            of: { kind: "fix", schema: { kind: "name", name: "Other" }, entity: FERN },
+          },
+        },
+        entity,
+        author,
+        91,
+      ),
+      S,
+    );
+    expect(run([...ds, nested])[0]!.status).toBe("unsupported");
   });
   it("refuses expand and resolve programs, NUL identities and a selection on a live binding", () => {
     const ds = law();
@@ -387,6 +415,16 @@ describe("experimental live receiving projection", () => {
     ).toEqual([
       [body.relationship, "selected"],
       ["zz-other", "invalid-selection"],
+    ]);
+    // Rows are ordered by relationship, not by the order decisions arrived.
+    expect(
+      run(ds, [binding, pauseOn("ff".repeat(32), "aaa-stray")]).map((r) => [
+        r.relationship,
+        r.status,
+      ]),
+    ).toEqual([
+      ["aaa-stray", "invalid-selection"],
+      [body.relationship, "selected"],
     ]);
     // Control: a pause naming the binding under its own relationship is honoured.
     expect(run(ds, [binding, pauseOn(binding.id)])[0]!.status).toBe("unavailable");

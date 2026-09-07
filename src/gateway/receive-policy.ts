@@ -169,9 +169,7 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
       if (named !== undefined) stray.add(named.relationship);
     }
     const results: LiveReceivingResult[] = [];
-    for (const [relationship, group] of [...groups].sort(([a], [b]) =>
-      a < b ? -1 : a > b ? 1 : 0,
-    )) {
+    for (const [relationship, group] of groups) {
       if (!group.some((d) => d.destination === input.destination)) continue;
       const d = group[0]!;
       const base = {
@@ -330,8 +328,9 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
         withheldResolverFields: Object.keys(selected.resolvers ?? {}).sort(),
       });
     }
-    // A refused pause is reported at every destination: a stray relationship that produced no row
-    // above, because it has no binding or none for this destination, earns its own refusal row.
+    // A refused pause is never silent: a stray relationship that produced no row above, because it
+    // has no binding or none for this destination, earns its own refusal row. Where the loop already
+    // refused the relationship for an earlier reason, that refusal is the one reported.
     for (const relationship of [...stray].sort())
       if (!results.some((r) => r.relationship === relationship))
         results.push({ relationship, destination: input.destination, status: "invalid-selection" });
