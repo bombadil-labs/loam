@@ -48,8 +48,6 @@
 //     the invalid-selection status is read there, and that status does not depend on the flag.
 //   receive-policy.ts pause keys: `JSON.stringify(value)` for a non-object selection → null; the
 //     only non-object selection is null, so every such pause still shares one key.
-//   receive-policy.ts resolver envelope: the primitive-or-string clause; a malformed envelope is
-//     dropped by the legacy reader and refused as unsupported before this line runs.
 //   receive-snapshot.ts manifest: dropping one field from the nonempty check; the same field is
 //     compared against the binding, the registration, or the version address two lines later and
 //     refuses with the same status.
