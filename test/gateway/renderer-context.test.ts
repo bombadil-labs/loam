@@ -1,5 +1,32 @@
 // T287: an explicitly selected renderer executes against one live law/data context.
 // These are trusted library contexts, not activation records or newly mounted HTTP routes.
+//
+// RAILS-RED on origin/main, the four renderer-context suites copied in: none LOADS there. Each
+// imports src/gateway/renderer-context.js, which this slice adds, so vitest reports four failed
+// suites and no cases. The revert probes below are the instrument for the cases.
+//
+// REVERT PROBES, MEASURED across the four suites together (26 cases), one guard deleted per probe:
+//   every field check at issuance (gateway, door, clock, destination, requester,
+//     container === destination, inbox === inboxName, envelope present)     → 1 red each
+//   the outer freeze / the nested binding freeze                             → 1 red / 2 red
+//   the issued-set check (a field-perfect copy of a context)                 → 1 red
+//   connectionStands read live at entry / after admission / after the worker → 3, 1, 1 red
+//   contextAllows standing                                                   → 5 red
+//   bound pen, writable, versionId, asOf refusals                            → 1 red each
+//   prepare: finite clock / servable lens / post-admit recheck               → 1 red each
+//   bound catch → uniform 404; gesture refused → 404; gesture bound catch    → 1 red each
+//   reads.ts child resolvers from the bound fold                             → 1 red
+//   render reads root ground instead of the bound one                        → 13 red
+// Two render-side guards are MIRRORS of prepare-side ones and are not reached on their own: the
+// finite-clock check and the bound-surface lens check in renderRendererInContext. Deleting either
+// leaves every case green, because the resolve fault they pre-empt is folded to the same 404 by
+// the bound catch. They stay as the cheaper refusal; the catch is the rail that protects them.
+//
+// NOT ASSERTED HERE: an `authority` gateway that is real but foreign to the binding (a second root
+// that declared the same container and inbox names) would pass connectionStands against its own
+// table. The factory does not tie authority to the binding; the activation slice that mints
+// contexts from a door owns that rail. Nor is the RendererBinding tied to the context: a host
+// caller may pass any bundle under the execution envelope, which the ticket names as the next slice.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { authorForSeed, parseTerm, signClaims } from "@bombadil/rhizomatic";
 import { Gateway, type ConnectionBinding } from "../../src/gateway/gateway.js";
@@ -442,7 +469,7 @@ describe("explicit renderer execution context", () => {
     const second = createBoundRendererContext(f.args(f.second));
     await prepareRendererInContext(f.renderer, first);
     await prepareRendererInContext(f.renderer, second);
-    expect((await renderRendererInContext(f.renderer, FERN, first)).status).toBe(200);
+    expect((await renderRendererInContext(f.renderer, FERN, first)).body).toContain("first=201");
     await f.gateway.append([
       signClaims(revocationClaims(f.ancestor.id, OP, f.gateway.nextTimestamp()), OP_SEED),
     ]);
@@ -454,7 +481,7 @@ describe("explicit renderer execution context", () => {
     // Restore the explicitly dropped ancestor with an operator declaration, then revoke ONLY the
     // first inbox's write grant. Context reuse must reread each independent authority dimension.
     await declare(f.gateway, "home");
-    expect((await renderRendererInContext(f.renderer, FERN, first)).status).toBe(200);
+    expect((await renderRendererInContext(f.renderer, FERN, first)).body).toContain("first=201");
     await f.gateway.revokeConnection({
       inbox: f.first.inbox,
       connectionKey: f.first.requester,
