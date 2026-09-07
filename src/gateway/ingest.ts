@@ -5,6 +5,7 @@ import {
   parseLocalEvent,
   localEraseTarget,
   openingAgrees,
+  localChannelEvidence,
   eventHeader,
   eventPrimitive,
   eventRef,
@@ -74,13 +75,27 @@ export async function appendImpl(gw: Gateway, deltas: Iterable<Delta>): Promise<
   return appendValidated(gw, batch);
 }
 
-/** Channel service operations construct and sign their own claims, never import caller deltas. */
-export async function issueChannelEvent(
+type LifecycleEventInput =
+  | { action: "open"; opening: Omit<LocalChannelOpening, "id"> }
+  | { action: "close"; channel: string; opening: string };
+
+/** Channel lifecycle callers cannot construct receive receipts, including JavaScript callers. */
+export async function issueChannelEvent(gw: Gateway, input: LifecycleEventInput): Promise<Delta> {
+  if (input.action !== "open" && input.action !== "close")
+    throw new Error("local channel received events require actual receive admission");
+  return persistChannelEvent(gw, input);
+}
+
+async function persistChannelEvent(
   gw: Gateway,
   input:
-    | { action: "open"; opening: Omit<LocalChannelOpening, "id"> }
-    | { action: "received"; channel: string; opening: string; received: readonly string[] }
-    | { action: "close"; channel: string; opening: string },
+    | LifecycleEventInput
+    | {
+        action: "received";
+        channel: string;
+        opening: string;
+        received: readonly string[];
+      },
 ): Promise<Delta> {
   if (gw.options.seed === undefined || gw.operatorAuthor === undefined)
     throw new Error("local event requires an operated gateway");
@@ -124,6 +139,74 @@ export async function issueChannelEvent(
     throw new Error("local channel event did not ingest");
   return d;
 }
+export type ChannelReceiveResult =
+  | { readonly ok: true; readonly report: FederationReport }
+  | {
+      readonly ok: false;
+      readonly report: FederationReport;
+      readonly error: unknown;
+      readonly missingAdmittedIds: boolean;
+    };
+
+/** Internal receive primitive: the caller already owns the channel's commit queue. */
+export async function receiveChannelOfferInCommit(
+  gw: Gateway,
+  opening: LocalChannelOpening,
+  offered: readonly Delta[],
+): Promise<ChannelReceiveResult> {
+  const expected = { ...opening };
+  const offer = structuredClone([...offered]);
+  const pool = gw.channelPools.get(expected.channel);
+  const ground = pool?.gateway;
+  const currentEvidence = () => {
+    const evidence = localChannelEvidence(gw, expected.channel);
+    if (
+      ground === undefined ||
+      gw.channelPools.get(expected.channel) !== pool ||
+      pool?.gateway !== ground ||
+      ground.attachedTo !== gw ||
+      !gw.quarantinePools.has(ground) ||
+      evidence.state !== "open" ||
+      evidence.opening.id !== expected.id ||
+      evidence.opening.channel !== expected.channel ||
+      evidence.opening.into !== expected.into ||
+      evidence.opening.prefix !== expected.prefix ||
+      evidence.opening.from !== expected.from ||
+      evidence.opening.openedBy !== expected.openedBy ||
+      evidence.opening.openedFrom !== expected.openedFrom ||
+      evidence.opening.statusAtOpen !== expected.statusAtOpen ||
+      evidence.opening.poolDeclaration !== expected.poolDeclaration
+    )
+      throw new Error("stale channel receive: opening association changed or unavailable");
+    return evidence;
+  };
+  currentEvidence();
+  // Use the actual door, including its admission and persistence fault seams.
+  const report = await ground!.federate(offer, { ids: true, admittedIds: true });
+  let missingAdmittedIds = false;
+  try {
+    const recorded = new Set(currentEvidence().received.map((d) => d.id));
+    if (report.admittedIds === undefined) {
+      if (report.accepted > 0 || offer.some((d) => !recorded.has(d.id))) {
+        missingAdmittedIds = true;
+        throw new Error("pool did not report actual admitted IDs");
+      }
+    } else {
+      const received = [...new Set(report.admittedIds.filter((id) => !recorded.has(id)))].sort();
+      if (received.length > 0)
+        await persistChannelEvent(gw, {
+          action: "received",
+          channel: expected.channel,
+          opening: expected.id,
+          received,
+        });
+    }
+    return { ok: true, report };
+  } catch (error) {
+    return { ok: false, report, error, missingAdmittedIds };
+  }
+}
+
 /** Marked erasures reach this only from the operated erase service or verified attached fan-out. */
 export async function appendLocalErasure(gw: Gateway, tombstone: Delta): Promise<void> {
   if (localEraseTarget(tombstone, gw.reactor, gw.operatorAuthor) === undefined)
