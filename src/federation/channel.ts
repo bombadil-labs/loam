@@ -1,4 +1,4 @@
-import { issueChannelEvent } from "../gateway/ingest.js";
+import { issueChannelEvent, receiveChannelOfferInCommit } from "../gateway/ingest.js";
 import {
   localChannelEvidence,
   localChannelLifecycle,
@@ -1383,11 +1383,13 @@ export function prefixOfChannelName(name: string): string | undefined {
  */
 async function syncChannel(
   gw: Gateway,
-  ground: Gateway,
+  pool: Container,
+  declarationId: string | undefined,
   name: string,
   opts: OpenChannelOptions,
   incarnation?: LocalChannelOpening,
 ): Promise<SyncReport> {
+  const ground = pool.gateway;
   let offered: readonly Delta[] = [],
     fault: unknown,
     failed = false;
@@ -1403,7 +1405,10 @@ async function syncChannel(
     const current = channelStatusImpl(gw, name)[0];
     if (
       current === undefined ||
-      gw.channelPools.get(name)?.gateway !== ground ||
+      ground === undefined ||
+      gw.channelPools.get(name) !== pool ||
+      pool.declarationId !== declarationId ||
+      currentPoolDeclaration(gw, name) !== declarationId ||
       ground.attachedTo !== gw ||
       !gw.quarantinePools.has(ground) ||
       current.into !== opts.into ||
@@ -1582,33 +1587,18 @@ async function syncChannelCommit(
   // `ids: true` is what lets custody POINT at the arrivals instead of counting them. The door
   // already knows which deltas it newly ingested; recovering that afterwards would mean diffing
   // reactor snapshots around the call, a pass over the whole store on every poll (H8).
-  const report = await ground.federate([...offered], {
-    ids: true,
-    ...(incarnation === undefined ? {} : { admittedIds: true }),
-  });
-  if (incarnation !== undefined) {
+  const received =
+    incarnation === undefined
+      ? undefined
+      : await receiveChannelOfferInCommit(gw, incarnation, offered);
+  const report =
+    received === undefined ? await ground.federate([...offered], { ids: true }) : received.report;
+  if (received !== undefined && !received.ok) {
     try {
-      const evidence = localChannelEvidence(gw, name);
-      if (evidence.state !== "open" || evidence.opening.id !== incarnation.id)
-        throw new Error("channel opening unavailable after source commit");
-      const recorded = new Set(evidence.received.map((d) => d.id));
-      if (report.admittedIds === undefined) {
-        // A broken report still owes the legacy named-count refusal. Quiet offers whose
-        // complete operand was already attested need no new event or admission assertion.
-        if (report.accepted > 0 && report.acceptedIds === undefined)
-          await attestArrival(gw, ground, name, from, report, owed);
-        if (report.accepted > 0 || offered.some((d) => !recorded.has(d.id)))
-          throw new Error("pool did not report actual admitted IDs");
-      } else {
-        const received = report.admittedIds.filter((id) => !recorded.has(id));
-        if (received.length > 0)
-          await issueChannelEvent(gw, {
-            action: "received",
-            channel: name,
-            opening: incarnation.id,
-            received,
-          });
-      }
+      // Preserve the existing named-count refusal after a successful source commit.
+      if (received.missingAdmittedIds && report.accepted > 0 && report.acceptedIds === undefined)
+        await attestArrival(gw, ground, name, from, report, owed);
+      throw received.error;
     } catch (err) {
       await stamp(
         gw,
@@ -1991,14 +1981,16 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
     const pool = gw.channelPools.get(name) ?? (await attachChannelPool(gw, name));
     gw.channelPools.set(name, pool);
     const state = localChannelEvidence(gw, name);
-    const incarnation = state.state === "open" ? state.opening : undefined;
+    const incarnation =
+      state.state === "open" || state.state === "closed" ? state.opening : undefined;
+    const declarationId = pool.declarationId;
     const resumed: Channel = {
       name,
       into: standingBeforeOpen.into,
       prefix: standingBeforeOpen.prefix,
       ...opener(standingBeforeOpen),
       pool,
-      sync: () => syncChannel(gw, pool.gateway!, name, opts, incarnation),
+      sync: () => syncChannel(gw, pool, declarationId, name, opts, incarnation),
     };
     gw.federationChannels.set(name, resumed);
     return resumed;
@@ -2113,7 +2105,7 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
     // Union, and idempotent by construction: the pool's append de-duplicates by delta id, so a
     // second sync of an unchanged peer accepts nothing and refuses nothing. Polling is therefore
     // safe at any interval, which is what lets the transport stay behind this contract.
-    sync: () => syncChannel(gw, ground, name, opts, incarnation),
+    sync: () => syncChannel(gw, pool, poolDeclaration.id, name, opts, incarnation),
   };
 
   gw.federationChannels.set(name, channel);
@@ -2707,7 +2699,8 @@ export function sourceFor(
  */
 export function resumeChannelImpl(gw: Gateway, standing: ChannelStatus, token: string): Channel {
   const evidence = localChannelEvidence(gw, standing.name);
-  const incarnation = evidence.state === "open" ? evidence.opening : undefined;
+  const incarnation =
+    evidence.state === "open" || evidence.state === "closed" ? evidence.opening : undefined;
   const poolOf = (): Container => {
     const held = gw.channelPools.get(standing.name);
     if (held === undefined) {
@@ -2718,6 +2711,8 @@ export function resumeChannelImpl(gw: Gateway, standing: ChannelStatus, token: s
     }
     return held;
   };
+  const pool = poolOf();
+  const declarationId = pool.declarationId;
   const opts = {
     into: standing.into,
     prefix: standing.prefix,
@@ -2740,6 +2735,6 @@ export function resumeChannelImpl(gw: Gateway, standing: ChannelStatus, token: s
     get pool(): Container {
       return poolOf();
     },
-    sync: () => syncChannel(gw, poolOf().gateway!, standing.name, opts, incarnation),
+    sync: () => syncChannel(gw, pool, declarationId, standing.name, opts, incarnation),
   };
 }
