@@ -8,8 +8,8 @@ import {
   type Reactor,
 } from "@bombadil/rhizomatic";
 import type { Gateway } from "../gateway/gateway.js";
+import { containerDeclarationName, currentContainerDeclarationId } from "../gateway/container.js";
 import { channelStatusImpl } from "./channel.js";
-import { lawfulNegated } from "../gateway/registration.js";
 import { eraseDefect, isTombstone, readTombstones, tombstoneTarget } from "../gateway/erase.js";
 import { toWire } from "./wire.js";
 
@@ -32,28 +32,43 @@ export function sameVerifiedDelta(a: Delta | undefined, b: Delta): boolean {
 }
 export function protectedIngressIds(reactor: Reactor, batch: readonly Delta[]): Set<string> {
   const all = [...reactor.snapshot(), ...batch];
-  const protectedIds = new Set(all.filter(reservedLocal).map((d) => d.id));
-  // Markers remember the protected target even after its bytes have gone.
-  for (const d of all)
-    if (inLocalContext(d, LOCAL_CONTROL)) {
-      const id = tombstoneTarget(d.claims);
-      if (id !== undefined) protectedIds.add(id);
-    }
-  for (let changed = true; changed;) {
-    changed = false;
-    for (const d of all)
-      if (
-        !protectedIds.has(d.id) &&
-        d.claims.pointers.some(
-          (p) =>
-            (p.role === "negates" || p.role === "erases") &&
-            p.target.kind === "delta" &&
-            protectedIds.has(p.target.deltaRef.delta),
-        )
+  const protectedIds = new Set<string>();
+  const dependents = new Map<string, Set<string>>();
+  for (const d of all) {
+    let local = false,
+      control = false;
+    for (const pointer of d.claims.pointers) {
+      if (pointer.target.kind === "entity") {
+        if (pointer.target.entity.context === LOCAL_EVENT) local = true;
+        if (pointer.target.entity.context === LOCAL_CONTROL) {
+          local = true;
+          control = true;
+        }
+      } else if (
+        pointer.target.kind === "delta" &&
+        (pointer.role === "negates" || pointer.role === "erases")
       ) {
-        protectedIds.add(d.id);
-        changed = true;
+        const target = pointer.target.deltaRef.delta;
+        const next = dependents.get(target) ?? new Set<string>();
+        next.add(d.id);
+        dependents.set(target, next);
       }
+    }
+    if (local) protectedIds.add(d.id);
+    // Markers remember the protected target even after its bytes have gone.
+    if (control) {
+      const target = tombstoneTarget(d.claims);
+      if (target !== undefined) protectedIds.add(target);
+    }
+  }
+  const queue = [...protectedIds];
+  for (let cursor = 0; cursor < queue.length; cursor += 1) {
+    for (const dependent of dependents.get(queue[cursor]!) ?? []) {
+      if (!protectedIds.has(dependent)) {
+        protectedIds.add(dependent);
+        queue.push(dependent);
+      }
+    }
   }
   return protectedIds;
 }
@@ -206,21 +221,7 @@ export function localEraseTarget(
   return target;
 }
 export function currentPoolDeclaration(gw: Gateway, name: string): string | undefined {
-  const negated = lawfulNegated(gw.reactor, gw.operatorAuthor);
-  return [...gw.reactor.snapshot()]
-    .filter(
-      (d) =>
-        d.claims.author === gw.operatorAuthor &&
-        !negated(d.id) &&
-        d.claims.pointers.some(
-          (p) =>
-            p.role === "container" &&
-            p.target.kind === "entity" &&
-            p.target.entity.context === "loam.container" &&
-            p.target.entity.id === name,
-        ),
-    )
-    .sort((a, b) => b.claims.timestamp - a.claims.timestamp || b.id.localeCompare(a.id))[0]?.id;
+  return currentContainerDeclarationId(gw.reactor, gw.operatorAuthor, name);
 }
 const field = (d: Delta, role: string): unknown => {
   const ps = d.claims.pointers.filter((p) => p.role === role);
@@ -253,13 +254,7 @@ export function openingAgrees(gw: Gateway, o: LocalChannelOpening): boolean {
     field(status, "openedBy") === o.openedBy &&
     field(status, "openedFrom") === o.openedFrom &&
     field(declaration, "inboxOf") === o.into &&
-    declaration.claims.pointers.some(
-      (p) =>
-        p.role === "container" &&
-        p.target.kind === "entity" &&
-        p.target.entity.context === "loam.container" &&
-        p.target.entity.id === o.channel,
-    )
+    containerDeclarationName(declaration.claims) === o.channel
   );
 }
 type LocalChannelLifecycle =
@@ -326,6 +321,9 @@ function projectLocalChannelHistory(gw: Gateway, channel: string): LocalChannelH
     return dead.size > 0 && relevant.length > 0
       ? unavailable("erased opening")
       : { state: "legacy" };
+  for (const event of events)
+    if (event.action === "open" && !openingAgrees(gw, event.opening))
+      return unavailable("opening association disagrees with referenced status/pool");
   const pool = gw.channelPools.get(channel),
     status = channelStatusImpl(gw, channel)[0];
   if (
