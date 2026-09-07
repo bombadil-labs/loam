@@ -22,8 +22,10 @@
 //   NUL is accepted inside a decision identity                      → 1 red, 55 green
 //   a selection is admitted on a live binding                       → 1 red, 55 green
 // Measured again at 60 cases:
-//   a curse under another reading is ignored, not refused           → 1 red, 59 green
-//   a pause naming a binding the policy never held is ignored       → 1 red, 59 green
+//   a curse under a sibling reading curses this reading too          → 1 red, 59 green
+//   a pause on a binding the receiver struck is refused, not inert   → 1 red, 59 green
+//   any delta the policy holds counts as a binding for a pause       → 1 red, 59 green
+//   a pause naming no binding of the receiver is ignored            → 1 red, 59 green
 //   the snapshot path drops its lens-name filter                    → 1 red, 59 green
 //   the live path drops its hyperschema-entity filter               → 1 red, 59 green
 //   an empty receiver or destination projects [] instead of refusing → 1 red, 59 green
@@ -264,14 +266,44 @@ describe("experimental live receiving projection", () => {
     expect(run(ds, [binding, bad, strike(bad, R)])[0]!.status).toBe("selected");
     expect(run(ds, [binding, bad, strike(bad, X)])[0]!.status).toBe("invalid-input");
   });
-  it("refuses a curse under another reading and a pause naming a binding the policy never held", () => {
+  it("a curse under a sibling reading leaves this reading alone; a pause must name one of the receiver's bindings", () => {
     const ds = law();
-    const foreign = decision(
+    // Spec 60: the curse key is (relationship, served reading); it is not a content-global ban.
+    const sibling = decision(
       { kind: "curse", relationship: body.relationship, reading: "Other" },
       R,
       30,
     );
-    expect(run(ds, [binding, foreign])[0]!.status).toBe("invalid-selection");
+    expect(run(ds, [binding, sibling])[0]!.status).toBe("selected");
+    const own = decision(
+      { kind: "curse", relationship: body.relationship, reading: "Plant" },
+      R,
+      32,
+    );
+    expect(run(ds, [binding, sibling, own])[0]!.status).toBe("cursed");
+    // A pause naming a stranger's binding, the receiver's curse on another relationship, or an id
+    // never held: refused, never ignored.
+    const strangers = decision(body, X, 33);
+    const elsewhere = decision({ kind: "curse", relationship: "other", reading: "Plant" }, R, 32);
+    for (const named of [strangers.id, elsewhere.id, "ff".repeat(32)])
+      expect(
+        run(ds, [
+          binding,
+          strangers,
+          elsewhere,
+          decision(
+            {
+              kind: "pause",
+              relationship: body.relationship,
+              reading: body.reading,
+              bindingId: named,
+              selection: null,
+            },
+            R,
+            34,
+          ),
+        ])[0]!.status,
+      ).toBe("invalid-selection");
     const stray = decision(
       {
         kind: "pause",

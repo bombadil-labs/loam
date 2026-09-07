@@ -160,14 +160,13 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
         results.push({ relationship, destination: input.destination, status: "conflict" });
         continue;
       }
-      // A curse names a relationship and its reading. One that names this relationship under
-      // another reading is a decision the projection cannot honour: refused, never ignored.
-      const curses = decisions.filter((c) => c.kind === "curse" && c.relationship === relationship);
-      if (curses.some((c) => c.reading !== d.reading)) {
-        results.push({ ...base, status: "invalid-selection" });
-        continue;
-      }
-      if (curses.length > 0) {
+      // The curse key is (relationship, served reading). A curse under a sibling reading is not a
+      // ban on this one: it constrains nothing here and is honoured by leaving this reading alone.
+      if (
+        decisions.some(
+          (c) => c.kind === "curse" && c.relationship === relationship && c.reading === d.reading,
+        )
+      ) {
         results.push({ ...base, status: "cursed" });
         continue;
       }
@@ -183,14 +182,20 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
       let selected: Registration;
       let operand = source;
       const pauses = decisions.filter((p) => p.kind === "pause" && p.bindingId === d.id);
-      // A pause pins a LIVE binding to a snapshot. On a one-time binding, or naming a binding the
-      // policy never held, it is a decision the projection cannot honour: refused, never ignored.
-      // A pause on a lawfully STRUCK binding is different: the receiver withdrew it, so it is inert.
+      // A pause pins a LIVE binding to a snapshot. On a one-time binding, or naming anything other
+      // than one of the receiver's own bindings, it is a decision the projection cannot honour:
+      // refused, never ignored. A pause on a binding the receiver lawfully STRUCK is different: the
+      // receiver withdrew that binding, so the pause is inert.
+      const withdrawn = (id: string) => {
+        const named = policy.get(id);
+        return named !== undefined && named.claims.author === input.receiver && negated(id);
+      };
       const stray = decisions.some(
         (p) =>
           p.kind === "pause" &&
           p.relationship === relationship &&
-          policy.get(p.bindingId!) === undefined,
+          !decisions.some((b) => b.kind === "binding" && b.id === p.bindingId) &&
+          !withdrawn(p.bindingId!),
       );
       if (
         stray ||
