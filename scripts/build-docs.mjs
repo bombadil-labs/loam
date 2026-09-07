@@ -37,7 +37,7 @@ const SUMMARIES = {
 };
 
 // Repo-internal docs: in the tree for people working on Loam, never compiled into the package.
-const INTERNAL = new Set(["wsl-migration"]);
+const INTERNAL = new Set(["wsl-migration", "project-context"]);
 
 export async function generate() {
   // The rosters must be disjoint, checked FIRST: a topic in both would be silently skipped by the
