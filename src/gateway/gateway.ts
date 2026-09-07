@@ -275,6 +275,7 @@ export interface FederationReport {
    * and serialize whole, so it stays exactly what it was for everyone who wants the counts.
    */
   readonly acceptedIds?: readonly string[];
+  readonly admittedIds?: readonly string[];
 }
 
 /**
@@ -967,6 +968,8 @@ export class Gateway {
    * — the documented sever verb could not succeed anywhere it mattered.
    */
   readonly channelPools = new Map<string, Container>();
+  /** Ordering only; replay authority remains the protected deltas. */
+  readonly channelCommitTails = new Map<string, Promise<void>>();
 
   /**
    * Set on a POOL's own gateway when it is a federation channel's pool (§46.1). It is what tells a
@@ -1364,7 +1367,7 @@ export class Gateway {
   // Admit a batch of peer deltas (SPEC §8): the body lives in ingest.ts.
   async federate(
     deltas: Iterable<Delta>,
-    opts: { admit?: (d: Delta) => boolean; ids?: boolean } = {},
+    opts: { admit?: (d: Delta) => boolean; ids?: boolean; admittedIds?: boolean } = {},
   ): Promise<FederationReport> {
     return federateImpl(this, deltas, opts);
   }

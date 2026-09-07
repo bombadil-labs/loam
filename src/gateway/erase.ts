@@ -1,3 +1,11 @@
+import { appendLocalErasure } from "./ingest.js";
+import {
+  LOCAL_EVENT,
+  LOCAL_CONTROL,
+  inLocalContext,
+  localEraseTarget,
+  sameVerifiedDelta,
+} from "../federation/local-channel-events.js";
 // Erasure — degrees of forgetting (SPEC §11). The store remembers THAT it forgot — who asked,
 // when, which id — never what. A TOMBSTONE is an append-only claim at `loam:erasure` naming
 // the erased delta; the bytes themselves are purged from every tier (the seam's purge, PR
@@ -207,7 +215,11 @@ export function survivingTombstones(reactor: Reactor, operator: string | undefin
   const negated = lawfulNegated(reactor, operator);
   const out: Delta[] = [];
   for (const delta of reactor.snapshot()) {
-    if (!isTombstone(delta.claims) || negated(delta.id)) continue; // struck = forgiven
+    if (!isTombstone(delta.claims)) continue;
+    if (inLocalContext(delta, LOCAL_CONTROL)) {
+      // Generic preplanted strikes never become local forgiveness when a marked order lands.
+      if (localEraseTarget(delta, reactor, operator) === undefined) continue;
+    } else if (negated(delta.id)) continue; // ordinary struck tombstone = forgiven
     if (delta.claims.author !== operator) continue; // erasure is the operator's alone
     const { targetId, count } = tombstoneParts(delta.claims);
     if (targetId === undefined || count.erases !== 1) continue; // shape the door enforces
@@ -804,16 +816,34 @@ export async function eraseImpl(
         `its declaration first — un-slating is free (§29.8).`,
     );
   }
+  const protectedTarget = target !== undefined && inLocalContext(target, LOCAL_EVENT);
+  const localClaims = (claims: Claims): Claims =>
+    protectedTarget
+      ? {
+          ...claims,
+          pointers: [
+            ...claims.pointers,
+            {
+              role: "local-control",
+              target: { kind: "entity", entity: { id, context: LOCAL_CONTROL } },
+            },
+            { role: "local-control-version", target: { kind: "primitive", value: 1 } },
+            { role: "local-control-kind", target: { kind: "primitive", value: "erase" } },
+          ],
+        }
+      : claims;
   const tombstone =
     already ??
     signClaims(
-      eraseClaims(
-        id,
-        target!.claims.author,
-        gw.operatorAuthor,
-        gw.nextTimestamp(),
-        opts.reason,
-        opts.slate,
+      localClaims(
+        eraseClaims(
+          id,
+          target!.claims.author,
+          gw.operatorAuthor,
+          gw.nextTimestamp(),
+          opts.reason,
+          opts.slate,
+        ),
       ),
       seed,
     );
@@ -828,7 +858,8 @@ export async function eraseImpl(
   // a surviving delta dangling at the hole, which the manifest exists to enumerate.
   const { citations, citationTiers } = danglingCitations(gw, id, (dId) => dId === tombstone.id);
   if (already === undefined) {
-    await gw.append([tombstone]);
+    if (inLocalContext(tombstone, LOCAL_CONTROL)) await appendLocalErasure(gw, tombstone);
+    else await gw.append([tombstone]);
     await gw.flush(); // the tombstone must be ground before the target stops being ground
   }
   // The purge count is evidence of work, never the verdict: 0 means "never held" as often as
@@ -1070,7 +1101,25 @@ export async function eraseReplicaImpl(
   if (defect !== undefined) {
     throw new Error(`a replica purge is the operator's alone: ${defect}`);
   }
-  await gw.federate([tombstone], { admit: () => true }); // lawful (checked above) — trust policy does not apply
+  if (
+    inLocalContext(tombstone, LOCAL_CONTROL) ||
+    (gw.reactor.get(id) !== undefined && inLocalContext(gw.reactor.get(id)!, LOCAL_EVENT))
+  ) {
+    if (localEraseTarget(tombstone, gw.reactor, gw.operatorAuthor) !== id)
+      throw new Error("replica requires exact marked local erasure");
+    let cursor = gw;
+    const chain = new Set<Gateway>();
+    let authorized = false;
+    while (cursor.attachedTo !== undefined && !chain.has(cursor)) {
+      chain.add(cursor);
+      const parent = cursor.attachedTo;
+      if (!parent.quarantinePools.has(cursor)) break;
+      if (sameVerifiedDelta(parent.reactor.get(tombstone.id), tombstone)) authorized = true;
+      cursor = parent;
+    }
+    if (!authorized) throw new Error("replica has no attached held local erasure authority");
+    await appendLocalErasure(gw, tombstone);
+  } else await gw.federate([tombstone], { admit: () => true });
   await gw.flush();
   if (!readTombstones(gw.reactor, gw.operatorAuthor).has(id)) {
     throw new Error(
