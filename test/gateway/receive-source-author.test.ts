@@ -1,4 +1,19 @@
 // Source membership and law authorship are independent receiving boundaries.
+//
+// RAILS-RED on origin/main, this file copied in: the suite does not LOAD there. It imports
+// src/gateway/receive-policy.js and src/gateway/receive-snapshot.js, both of which this slice adds,
+// so vitest reports one failed suite rather than per-case failures. That measures the import graph;
+// the revert probes below are the instrument for the cases.
+//
+// REVERT PROBES, MEASURED against the four receiving rails together (49 cases). Each probe deletes
+// one guard in the projection and records how many cases go red.
+//   two surviving bindings for one relationship no longer refuse   → 2 red, 47 green
+//   programs carrying expand/fix/resolve are no longer refused      → 2 red, 47 green
+//   a stranger's decision deltas acquire recipient policy authority → 2 red, 47 green
+//   a manifest with duplicate memberIds is admitted                 → 1 red, 48 green
+//   a manifest carrying extra keys is admitted                      → 1 red, 48 green
+// No probe is green. The projection is pure and unwired: no door reaches it, and these rails are
+// the whole of what proves it.
 import { expect, it } from "vitest";
 import {
   Reactor,
