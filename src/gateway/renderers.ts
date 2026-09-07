@@ -1012,8 +1012,18 @@ export async function renderRendererInContext(
   const reads: Record<string, ReadResult> = {};
   const state: Record<string, string> = door === "public" ? {} : (gesture?.state ?? {});
   if (door === "full") {
-    for (const g of gesture?.reads ?? []) {
-      reads[readKey(g.lens, g.entity)] = resolveGesture(context, g, now, asOf);
+    try {
+      for (const g of gesture?.reads ?? []) {
+        const result = resolveGesture(context, g, now, asOf);
+        // Bound operational faults stop before the worker; ordinary scoped absence stays a read answer.
+        if (context.kind === "bound" && "error" in result && result.error.code === "refused") {
+          return gone;
+        }
+        reads[readKey(g.lens, g.entity)] = result;
+      }
+    } catch (err) {
+      if (context.kind === "bound") return gone;
+      throw err;
     }
   }
   // Built LAZILY: a refused render must cost nothing, and `bytesEnvelope` walks the whole view. The
