@@ -30,6 +30,9 @@
 //   a pause naming another relationship's binding leaves it serving  → 1 red, 60 green
 //   a pause under a relationship with no binding is ignored          → 1 red, 60 green
 //   a pause naming any receiver binding is honoured                  → 2 red, 59 green
+// Measured again at 61 cases:
+//   a struck binding of any relationship makes a pause inert          → 1 red, 60 green
+//   a stray relationship with no row for this destination is silent   → 1 red, 60 green
 //   a pause naming no binding of the receiver is ignored            → 1 red, 59 green
 //   the snapshot path drops its lens-name filter                    → 1 red, 59 green
 //   the live path drops its hyperschema-entity filter               → 1 red, 59 green

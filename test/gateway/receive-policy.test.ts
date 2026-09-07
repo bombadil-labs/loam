@@ -30,6 +30,9 @@
 //   a pause naming another relationship's binding leaves it serving  → 1 red, 60 green
 //   a pause under a relationship with no binding is ignored          → 1 red, 60 green
 //   a pause naming any receiver binding is honoured                  → 2 red, 59 green
+// Measured again at 61 cases:
+//   a struck binding of any relationship makes a pause inert          → 1 red, 60 green
+//   a stray relationship with no row for this destination is silent   → 1 red, 60 green
 //   a pause naming no binding of the receiver is ignored            → 1 red, 59 green
 //   the snapshot path drops its lens-name filter                    → 1 red, 59 green
 //   the live path drops its hyperschema-entity filter               → 1 red, 59 green
@@ -351,8 +354,40 @@ describe("experimental live receiving projection", () => {
     // A pause under a relationship with no binding earns its own refusal row; the binding it
     // does not touch still serves.
     expect(
-      run(ds, [binding, pauseOn("ff".repeat(32), "no-such-rel")]).map((r) => r.status),
-    ).toEqual(["invalid-selection", "selected"]);
+      run(ds, [binding, pauseOn("ff".repeat(32), "no-such-rel")]).map((r) => [
+        r.relationship,
+        r.status,
+      ]),
+    ).toEqual([
+      [body.relationship, "selected"],
+      ["no-such-rel", "invalid-selection"],
+    ]);
+    // The inert branch asks the same question: a struck binding of ANOTHER relationship does not
+    // make a pause inert, and the pause's claimed relationship still refuses.
+    expect(
+      run(ds, [binding, other, strike(other, R), pauseOn(other.id)]).map((r) => [
+        r.relationship,
+        r.status,
+      ]),
+    ).toEqual([
+      [body.relationship, "invalid-selection"],
+      ["zz-other", "invalid-selection"],
+    ]);
+    // A stray relationship whose only binding serves another destination is still reported here.
+    const elsewhere = decision(
+      { ...body, relationship: "zz-other", destination: "bob_outbox", reading: "Plant2" },
+      R,
+      4,
+    );
+    expect(
+      run(ds, [binding, elsewhere, pauseOn(elsewhere.id, "zz-other")]).map((r) => [
+        r.relationship,
+        r.status,
+      ]),
+    ).toEqual([
+      [body.relationship, "selected"],
+      ["zz-other", "invalid-selection"],
+    ]);
     // Control: a pause naming the binding under its own relationship is honoured.
     expect(run(ds, [binding, pauseOn(binding.id)])[0]!.status).toBe("unavailable");
   });

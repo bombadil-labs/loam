@@ -150,31 +150,25 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
     // ignored: the relationship it claims, and the relationship of any binding it names, both
     // refuse. A claimed relationship with no binding still earns its own refusal row.
     const bindings = decisions.filter((b) => b.kind === "binding");
-    const withdrawnBinding = (id: string): boolean => {
+    const withdrawnBinding = (id: string): Decision | undefined => {
       const named = policy.get(id);
-      if (named === undefined || named.claims.author !== input.receiver || !negated(id))
-        return false;
+      if (named === undefined || named.claims.author !== input.receiver || !negated(id)) return;
       try {
-        return parse(named)?.kind === "binding";
+        const parsed = parse(named);
+        return parsed?.kind === "binding" ? parsed : undefined;
       } catch {
-        return false;
+        return undefined;
       }
     };
     const stray = new Set<string>();
     for (const p of decisions) {
       if (p.kind !== "pause") continue;
-      const named = bindings.find((b) => b.id === p.bindingId);
-      const honoured =
-        named === undefined
-          ? withdrawnBinding(p.bindingId!)
-          : named.relationship === p.relationship && named.reading === p.reading;
-      if (honoured) continue;
+      const named = bindings.find((b) => b.id === p.bindingId) ?? withdrawnBinding(p.bindingId!);
+      if (named?.relationship === p.relationship && named.reading === p.reading) continue;
       stray.add(p.relationship);
       if (named !== undefined) stray.add(named.relationship);
     }
     const results: LiveReceivingResult[] = [];
-    for (const relationship of [...stray].filter((r) => !groups.has(r)).sort())
-      results.push({ relationship, destination: input.destination, status: "invalid-selection" });
     for (const [relationship, group] of [...groups].sort(([a], [b]) =>
       a < b ? -1 : a > b ? 1 : 0,
     )) {
@@ -336,6 +330,14 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
         withheldResolverFields: Object.keys(selected.resolvers ?? {}).sort(),
       });
     }
+    // A refused pause is reported at every destination: a stray relationship that produced no row
+    // above, because it has no binding or none for this destination, earns its own refusal row.
+    for (const relationship of [...stray].sort())
+      if (!results.some((r) => r.relationship === relationship))
+        results.push({ relationship, destination: input.destination, status: "invalid-selection" });
+    results.sort((a, b) =>
+      a.relationship! < b.relationship! ? -1 : a.relationship! > b.relationship! ? 1 : 0,
+    );
     // A receiving name cannot silently choose between independent relationships.
     return results.map((r) =>
       r.status === "selected" &&
