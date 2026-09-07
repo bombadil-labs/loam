@@ -262,8 +262,27 @@ export function openingAgrees(gw: Gateway, o: LocalChannelOpening): boolean {
     )
   );
 }
-export function localChannelEvidence(gw: Gateway, channel: string): LocalChannelEvidence {
-  const unavailable = (reason: string): LocalChannelEvidence => ({ state: "unavailable", reason });
+type LocalChannelLifecycle =
+  | Exclude<LocalChannelEvidence, { readonly state: "open" }>
+  | { readonly state: "open"; readonly opening: LocalChannelOpening };
+type LocalChannelHistory =
+  | Exclude<LocalChannelLifecycle, { readonly state: "open" }>
+  | {
+      readonly state: "open";
+      readonly opening: LocalChannelOpening;
+      readonly ground: Gateway;
+      readonly receivedIds: readonly string[];
+    };
+
+/** Cleanup requires a valid lifecycle, even when received source bytes have been erased. */
+export function localChannelLifecycle(gw: Gateway, channel: string): LocalChannelLifecycle {
+  const history = projectLocalChannelHistory(gw, channel);
+  return history.state === "open"
+    ? Object.freeze({ state: "open", opening: history.opening })
+    : history;
+}
+function projectLocalChannelHistory(gw: Gateway, channel: string): LocalChannelHistory {
+  const unavailable = (reason: string): LocalChannelHistory => ({ state: "unavailable", reason });
   const rows = [...gw.reactor.snapshot()];
   const dead = new Set<string>();
   for (const d of rows)
@@ -349,12 +368,18 @@ export function localChannelEvidence(gw: Gateway, channel: string): LocalChannel
   const ids = new Set(
     events.flatMap((e) => (e.action === "received" && e.opening === o.id ? e.received : [])),
   );
+  return { state: "open", opening, ground: pool.gateway, receivedIds: [...ids].sort() };
+}
+export function localChannelEvidence(gw: Gateway, channel: string): LocalChannelEvidence {
+  const history = projectLocalChannelHistory(gw, channel);
+  if (history.state !== "open") return history;
+  const { opening, ground, receivedIds } = history;
   const received: Delta[] = [];
-  const sourceDead = readTombstones(pool.gateway.reactor, pool.gateway.operatorAuthor);
-  for (const id of [...ids].sort()) {
-    const d = pool.gateway.reactor.get(id);
+  const sourceDead = readTombstones(ground.reactor, ground.operatorAuthor);
+  for (const id of receivedIds) {
+    const d = ground.reactor.get(id);
     if (d === undefined || sourceDead.has(id) || !sameVerifiedDelta(d, d))
-      return unavailable(`missing received source ${id}`);
+      return { state: "unavailable", reason: `missing received source ${id}` };
     received.push(immutableCopy(d));
   }
   return Object.freeze({ state: "open", opening, received: Object.freeze(received) });

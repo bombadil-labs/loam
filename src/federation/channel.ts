@@ -1,6 +1,8 @@
 import { issueChannelEvent } from "../gateway/ingest.js";
 import {
   localChannelEvidence,
+  localChannelLifecycle,
+  currentPoolDeclaration,
   withChannelCommit,
   type LocalChannelOpening,
 } from "./local-channel-events.js";
@@ -2005,16 +2007,15 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
   // The pool is UNTRUSTED and SEPARATE. Untrusted because a peer's law is inert until blessed
   // (§28); separate because its own ground is what keeps the peer's bytes out of the receiver's
   // store and keeps `drop` a physical purge.
-  await gw.append([
-    signClaims(
-      containerClaims(
-        { container: name, trust: "untrusted", posture: "separate", inboxOf: opts.into },
-        gw.operatorAuthor!,
-        gw.nextTimestamp(),
-      ),
-      gw.options.seed,
+  const poolDeclaration = signClaims(
+    containerClaims(
+      { container: name, trust: "untrusted", posture: "separate", inboxOf: opts.into },
+      gw.operatorAuthor!,
+      gw.nextTimestamp(),
     ),
-  ]);
+    gw.options.seed,
+  );
+  await gw.append([poolDeclaration]);
 
   // IDEMPOTENT ACROSS PROCESSES, not only within one. A booted store re-attaches its pools before
   // it rebuilds its channels, and a channel whose peer credential is missing is attached and
@@ -2056,7 +2057,27 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
 
   gw.channelPools.set(name, pool);
   let incarnation: LocalChannelOpening | undefined;
-  if (opts.prefix !== "") {
+  // Legacy callers may use values outside the protected vocabulary or an invalid binding.
+  // Keep their existing channel behavior without issuing protected custody for that association.
+  const eventText = (value: string | undefined, empty = false): boolean =>
+    value !== undefined && (empty || value.length > 0) && !value.includes("\0");
+  const protectedOpener =
+    (opts.openedBy === undefined && opts.openedFrom === undefined) ||
+    (eventText(opts.openedBy) && eventText(opts.openedFrom) && openerStands(gw, opts));
+  if (
+    eventText(name) &&
+    eventText(opts.into) &&
+    eventText(opts.prefix) &&
+    eventText(opts.from ?? "", true) &&
+    protectedOpener
+  ) {
+    if (
+      pool.declarationId !== poolDeclaration.id ||
+      currentPoolDeclaration(gw, name) !== poolDeclaration.id ||
+      ground.attachedTo !== gw ||
+      !gw.quarantinePools.has(ground)
+    )
+      throw new Error(`openChannel: ${name} changed its exact pool association during opening`);
     const event = await issueChannelEvent(gw, {
       action: "open",
       opening: {
@@ -2066,7 +2087,7 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
         from: opts.from ?? "",
         ...opener(opts),
         statusAtOpen,
-        poolDeclaration: pool.declarationId!,
+        poolDeclaration: poolDeclaration.id,
       },
     });
     incarnation = {
@@ -2077,8 +2098,11 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
       from: opts.from ?? "",
       ...opener(opts),
       statusAtOpen,
-      poolDeclaration: pool.declarationId!,
+      poolDeclaration: poolDeclaration.id,
     };
+    const state = localChannelLifecycle(gw, name);
+    if (state.state !== "open" || state.opening.id !== incarnation.id)
+      throw new Error(`openChannel: ${name} changed its exact association during event issuance`);
   }
   const channel: Channel = {
     name,
@@ -2162,7 +2186,7 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
         `and a channel pool that is not separate cannot be severed provably (§46)`,
     );
   }
-  const evidence = localChannelEvidence(gw, name);
+  const evidence = localChannelLifecycle(gw, name);
   if (evidence.state === "open")
     await issueChannelEvent(gw, { action: "close", channel: name, opening: evidence.opening.id });
   else if (evidence.state === "unavailable")
