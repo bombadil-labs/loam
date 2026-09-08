@@ -217,7 +217,7 @@ it.each(["unmarked hole", "wrong cached pool", "changed declaration", "malformed
       gw.reactor.ingest(bad);
     }
     const bytes = await ch.pool.gateway!.backend.deltasSince(new Set());
-    await expect(gw.dropChannel(ch.name)).rejects.toThrow();
+    await expect(gw.dropChannel(ch.name)).rejects.toThrow("no exact cleanup authority");
     expect(await ch.pool.gateway!.backend.deltasSince(new Set())).toEqual(bytes);
     expect(events(gw, "cleanup")).toHaveLength(0);
   },
@@ -266,4 +266,18 @@ it("retry never reuses an erased cleanup record whose bytes remain", async () =>
   expect(cleanups).toHaveLength(2);
   expect(cleanups.some((d) => d.id !== first.id)).toBe(true);
   expect(gw.channelPools.has(ch.name)).toBe(false);
+});
+
+it("refuses a detached cached handle after replacement under the same declaration", async () => {
+  const { gw, ch, opening } = await fixture(true);
+  await gw.erase(opening.id);
+  await ch.pool.detach();
+  const replacement = await gw.openContainer({ name: ch.name, backend: new MemoryBackend() });
+  gw.channelPools.set(ch.name, replacement);
+  expect(replacement.declarationId).toBe(ch.pool.declarationId);
+  expect(replacement.gateway).not.toBe(ch.pool.gateway);
+  const replacementBytes = await replacement.gateway!.backend.deltasSince(new Set());
+  await expect(gw.dropChannel(ch.name)).rejects.toThrow("no exact cleanup authority");
+  expect(await replacement.gateway!.backend.deltasSince(new Set())).toEqual(replacementBytes);
+  expect(events(gw, "cleanup")).toHaveLength(0);
 });

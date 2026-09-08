@@ -28,7 +28,8 @@
     "test/federation/local-channel-receive-boundary.test.ts",
     "test/federation/local-channel-r2-regressions.test.ts",
     "test/federation/local-channel-r3-regressions.test.ts",
-    "test/federation/local-channel-erased-opening-cleanup.test.ts"
+    "test/federation/local-channel-erased-opening-cleanup.test.ts",
+    "journal/2026-09-08-erased-opening-cleanup.md"
   ],
   "title": "Record protected local channel incarnations and validated receive events"
 }
