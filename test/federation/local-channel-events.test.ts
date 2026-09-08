@@ -12,7 +12,8 @@
 // never sweeps the arrival log (red across the suites). Measured again at 110 cases: a marker that
 // does not make this channel's erased history unavailable (1 red); a re-open that ignores whether
 // the caller's options agree with the standing record, cached handle or not (1 red); a guard or a
-// sync that compares an omitted `from` against the record instead of accepting it (1 red each).
+// sync that compares an omitted `from` against the record instead of accepting it (1 red each);
+// an attached replica that starts out authorized to purge a local event (1 red).
 //
 // WHAT THESE RAILS DO NOT ASSERT: a reader resolving through a Schema or a door over the `received`
 // operand. No consumer resolves through it yet; `sourceStanding` re-ingests the operand into a fresh
@@ -1408,11 +1409,24 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
   });
   it("direct unattached eraseReplica cannot mint event deletion authority from a same-key fresh tombstone", async () => {
     const { gw } = await home();
-    const { ch } = await channel(gw);
+    const { ch, pool } = await channel(gw);
     const target = gw.reactor.get(opened(gw, ch.name).opening.id)!;
     const tombstone = markedErase(target);
     expect(gw.reactor.get(tombstone.id)).toBeUndefined();
     await expect(gw.eraseReplica(tombstone, target.id)).rejects.toThrow();
+    // An ATTACHED pool has no authority of its own either: a real marked tombstone from another
+    // home, valid in shape and signed by the same operator key, is refused until THIS parent holds it.
+    const { gw: elsewhere } = await home();
+    const { ch: far } = await channel(elsewhere);
+    const farOpening = opened(elsewhere, far.name).opening.id;
+    await elsewhere.erase(farOpening);
+    const farTombstone = [...elsewhere.reactor.snapshot()].find((d) =>
+      inLocalContext(d, LOCAL_CONTROL),
+    )!;
+    await expect(pool.eraseReplica(farTombstone, farOpening)).rejects.toThrow(
+      "no attached held local erasure authority",
+    );
+    expect(pool.reactor.get(farTombstone.id)).toBeUndefined();
     expect(gw.reactor.get(target.id)).toBeDefined();
     expect(gw.reactor.get(tombstone.id)).toBeUndefined();
     expect(localChannelEvidence(gw, ch.name).state).toBe("open");
