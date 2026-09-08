@@ -1982,6 +1982,21 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
   }
 
   if (standingBeforeOpen !== undefined) {
+    // A resumed handle carries the standing record's identity and syncs with the caller's options;
+    // the two must agree, or every sync would refuse while the handle stayed cached. A changed
+    // source or scope is a different relationship: drop the standing channel first.
+    const s = standingBeforeOpen;
+    if (
+      s.into !== opts.into ||
+      s.prefix !== opts.prefix ||
+      s.from !== (opts.from ?? "") ||
+      s.openedBy !== opts.openedBy ||
+      s.openedFrom !== opts.openedFrom
+    )
+      throw new Error(
+        `channel ${name} already stands with into=${s.into} prefix=${s.prefix} from=${s.from}; ` +
+          `re-open it with the same options, or drop it before opening it another way`,
+      );
     const pool = gw.channelPools.get(name) ?? (await attachChannelPool(gw, name));
     gw.channelPools.set(name, pool);
     const state = localChannelEvidence(gw, name);

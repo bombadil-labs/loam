@@ -817,8 +817,14 @@ export async function eraseImpl(
     );
   }
   const protectedTarget = target !== undefined && inLocalContext(target, LOCAL_EVENT);
+  // The marker names the CHANNEL the erased event belonged to. Once the bytes are gone the marker
+  // is all that separates an erased opening from a channel that never had one; without the name,
+  // an erased history reads as plain legacy history and a resumed handle runs unprotected.
+  const erasedChannel = target?.claims.pointers.find(
+    (p) => p.target.kind === "entity" && p.target.entity.context === LOCAL_EVENT,
+  )?.target;
   const localClaims = (claims: Claims): Claims =>
-    protectedTarget
+    protectedTarget && erasedChannel?.kind === "entity"
       ? {
           ...claims,
           pointers: [
@@ -829,6 +835,10 @@ export async function eraseImpl(
             },
             { role: "local-control-version", target: { kind: "primitive", value: 1 } },
             { role: "local-control-kind", target: { kind: "primitive", value: "erase" } },
+            {
+              role: "local-control-channel",
+              target: { kind: "primitive", value: erasedChannel.entity.id },
+            },
           ],
         }
       : claims;

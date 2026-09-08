@@ -9,7 +9,9 @@
 // transitive closure over strikes (6 red), the local-control branch of survivingTombstones (1 red),
 // the eraseReplica authority check (1 red), the two-opens ambiguity (1 red), the exact declaration
 // checks on sync (4 red), the partial-opening guard on retry (1 red), and a protected-set memo that
-// never sweeps the arrival log (red across the suites).
+// never sweeps the arrival log (red across the suites). Measured again at 110 cases: a marker that
+// does not make this channel's erased history unavailable (1 red); a resume that ignores whether
+// the caller's options agree with the standing record (1 red).
 //
 // WHAT THESE RAILS DO NOT ASSERT: a reader resolving through a Schema or a door over the `received`
 // operand. No consumer resolves through it yet; `sourceStanding` re-ingests the operand into a fresh
@@ -36,6 +38,9 @@ import { lawfulNegated } from "../../src/gateway/registration.js";
 import { SEALED_LEEWAY } from "../../src/gateway/leeway.js";
 import { channelRecordClaims, resumeChannelImpl } from "../../src/federation/channel.js";
 import {
+  inLocalContext,
+  LOCAL_CONTROL,
+  localControlChannel,
   localChannelEvidence,
   withChannelCommit,
 } from "../../src/federation/local-channel-events.js";
@@ -1293,6 +1298,59 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     await gw.append([signed({ ...legacy.claims, timestamp: gw.nextTimestamp() })]);
     expect(localChannelEvidence(gw, ch.name).state).toBe("unavailable");
     expect(events(gw, "open")).toEqual([]);
+  });
+  it("erase(open) before any receipt is erased history, never legacy: a resumed handle cannot sync unprotected", async () => {
+    const { gw } = await home();
+    const { ch, offering, source } = await channel(gw);
+    const opening = opened(gw, ch.name).opening;
+    await gw.erase(opening.id);
+    // Delta level: the opening's bytes are gone and one marker names this channel.
+    expect(gw.reactor.get(opening.id)).toBeUndefined();
+    expect(events(gw, "open")).toEqual([]);
+    expect(
+      [...gw.reactor.snapshot()].filter(
+        (d) => inLocalContext(d, LOCAL_CONTROL) && localControlChannel(d) === `channel:${ch.name}`,
+      ),
+    ).toHaveLength(1);
+    // Object level: the history is unavailable, and stays so across a cross-process resume.
+    expect(localChannelEvidence(gw, ch.name)).toEqual({
+      state: "unavailable",
+      reason: "erased opening",
+    });
+    gw.federationChannels.delete(ch.name);
+    const resumed = await gw.openChannel({
+      into: "friends",
+      prefix: "peer",
+      from: "https://peer.example/default",
+      source,
+    });
+    offering.push(fact());
+    await expect(resumed.sync()).rejects.toThrow("no matching protected incarnation");
+    expect(localChannelEvidence(gw, ch.name).state).toBe("unavailable");
+    expect(events(gw, "received")).toEqual([]);
+  });
+  it("re-opening a standing channel with other options refuses before caching a handle", async () => {
+    const { gw } = await home();
+    const { ch, offering, source } = await channel(gw);
+    gw.federationChannels.delete(ch.name);
+    await expect(
+      gw.openChannel({
+        into: "friends",
+        prefix: "peer",
+        from: "https://peer.example/other",
+        source,
+      }),
+    ).rejects.toThrow("drop it before opening it another way");
+    expect(gw.federationChannels.has(ch.name)).toBe(false);
+    const same = await gw.openChannel({
+      into: "friends",
+      prefix: "peer",
+      from: "https://peer.example/default",
+      source,
+    });
+    offering.push(fact());
+    await same.sync();
+    expect(opened(gw, ch.name).received).toHaveLength(1);
   });
   it("erase(close) revives only its still-attached exact opening, never a successfully dropped pool", async () => {
     const { gw, pools } = await home();
