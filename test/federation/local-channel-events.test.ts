@@ -10,8 +10,8 @@
 // the eraseReplica authority check (1 red), the two-opens ambiguity (1 red), the exact declaration
 // checks on sync (4 red), the partial-opening guard on retry (1 red), and a protected-set memo that
 // never sweeps the arrival log (red across the suites). Measured again at 110 cases: a marker that
-// does not make this channel's erased history unavailable (1 red); a resume that ignores whether
-// the caller's options agree with the standing record (1 red).
+// does not make this channel's erased history unavailable (1 red); a re-open that ignores whether
+// the caller's options agree with the standing record, cached handle or not (1 red).
 //
 // WHAT THESE RAILS DO NOT ASSERT: a reader resolving through a Schema or a door over the `received`
 // operand. No consumer resolves through it yet; `sourceStanding` re-ingests the operand into a fresh
@@ -1332,15 +1332,21 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
   it("re-opening a standing channel with other options refuses before caching a handle", async () => {
     const { gw } = await home();
     const { ch, offering, source } = await channel(gw);
-    gw.federationChannels.delete(ch.name);
-    await expect(
+    const other = () =>
       gw.openChannel({
         into: "friends",
         prefix: "peer",
         from: "https://peer.example/other",
         source,
-      }),
-    ).rejects.toThrow("drop it before opening it another way");
+      });
+    // With the handle cached, the mismatch refuses instead of handing back the cached handle.
+    await expect(other()).rejects.toThrow("drop it before opening it another way");
+    expect(gw.federationChannels.get(ch.name)).toBe(ch);
+    // Without a live handle, the same refusal, and nothing is cached. The message names no source.
+    gw.federationChannels.delete(ch.name);
+    const refusal = await other().catch((e: Error) => e.message);
+    expect(refusal).toContain("drop it before opening it another way");
+    expect(refusal).not.toContain("peer.example");
     expect(gw.federationChannels.has(ch.name)).toBe(false);
     const same = await gw.openChannel({
       into: "friends",

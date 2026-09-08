@@ -1817,6 +1817,23 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
   // may complete that legacy lifecycle, but it is not a fresh protected opening.
   const priorPoolLifecycle =
     currentPoolDeclaration(gw, name) !== undefined || gw.channelPools.has(name);
+  // A standing channel is re-opened only with the options it stands with: a cached handle and a
+  // resumed one both sync with the caller's options against the standing record, and a mismatch
+  // would either be ignored or refuse on every sync. A changed source or scope is a different
+  // relationship: drop the standing channel first. The refusal names the channel and the act only;
+  // a caller who cannot read the standing record must not learn its source from this message.
+  if (
+    standingBeforeOpen !== undefined &&
+    (standingBeforeOpen.into !== opts.into ||
+      standingBeforeOpen.prefix !== opts.prefix ||
+      standingBeforeOpen.from !== (opts.from ?? "") ||
+      standingBeforeOpen.openedBy !== opts.openedBy ||
+      standingBeforeOpen.openedFrom !== opts.openedFrom)
+  )
+    throw new Error(
+      `channel ${name} already stands with other options; re-open it with the options it ` +
+        `stands with, or drop it before opening it another way`,
+    );
   const existing = gw.federationChannels.get(name);
   if (existing !== undefined) return existing; // idempotent: re-opening resumes the same pool
 
@@ -1982,21 +1999,6 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
   }
 
   if (standingBeforeOpen !== undefined) {
-    // A resumed handle carries the standing record's identity and syncs with the caller's options;
-    // the two must agree, or every sync would refuse while the handle stayed cached. A changed
-    // source or scope is a different relationship: drop the standing channel first.
-    const s = standingBeforeOpen;
-    if (
-      s.into !== opts.into ||
-      s.prefix !== opts.prefix ||
-      s.from !== (opts.from ?? "") ||
-      s.openedBy !== opts.openedBy ||
-      s.openedFrom !== opts.openedFrom
-    )
-      throw new Error(
-        `channel ${name} already stands with into=${s.into} prefix=${s.prefix} from=${s.from}; ` +
-          `re-open it with the same options, or drop it before opening it another way`,
-      );
     const pool = gw.channelPools.get(name) ?? (await attachChannelPool(gw, name));
     gw.channelPools.set(name, pool);
     const state = localChannelEvidence(gw, name);
