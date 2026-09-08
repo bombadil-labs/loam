@@ -222,9 +222,11 @@ export function localEraseTarget(
   );
   const versions = d.claims.pointers.filter((p) => p.role === "local-control-version");
   const kinds = d.claims.pointers.filter((p) => p.role === "local-control-kind");
+  const channels = d.claims.pointers.filter((p) => p.role === "local-control-channel");
   const marker = markers[0],
     version = versions[0],
     kind = kinds[0],
+    channel = channels[0],
     target = tombstoneTarget(d.claims);
   if (
     markers.length !== 1 ||
@@ -237,10 +239,21 @@ export function localEraseTarget(
     version.target.value !== 1 ||
     kinds.length !== 1 ||
     kind?.target.kind !== "primitive" ||
-    kind.target.value !== "erase"
+    kind.target.value !== "erase" ||
+    channels.length !== 1 ||
+    channel?.target.kind !== "primitive" ||
+    !text(channel.target.value) ||
+    !channel.target.value.startsWith("channel:")
   )
     return;
   return target;
+}
+/** The channel entity id a validated local-control marker names; call after localEraseTarget. */
+export function localControlChannel(d: Delta): string | undefined {
+  const p = d.claims.pointers.find((p) => p.role === "local-control-channel");
+  return p?.target.kind === "primitive" && typeof p.target.value === "string"
+    ? p.target.value
+    : undefined;
 }
 export function currentPoolDeclaration(gw: Gateway, name: string): string | undefined {
   return currentContainerDeclarationId(gw.reactor, gw.operatorAuthor, name);
@@ -302,12 +315,14 @@ function projectLocalChannelHistory(gw: Gateway, channel: string): LocalChannelH
   const unavailable = (reason: string): LocalChannelHistory => ({ state: "unavailable", reason });
   const rows = [...gw.reactor.snapshot()];
   const dead = new Set<string>();
+  let erasedHere = 0; // markers naming THIS channel: erased history is never legacy history
   for (const d of rows)
     if (inLocalContext(d, LOCAL_CONTROL)) {
       const target = localEraseTarget(d, gw.reactor, gw.operatorAuthor);
       if (target === undefined)
         return unavailable("unsupported or malformed local control history");
       dead.add(target);
+      if (localControlChannel(d) === `channel:${channel}`) erasedHere += 1;
     }
   const named = (d: Delta): boolean =>
     d.claims.pointers.some(
@@ -340,7 +355,7 @@ function projectLocalChannelHistory(gw: Gateway, channel: string): LocalChannelH
     events.push(parsed);
   }
   if (events.length === 0)
-    return dead.size > 0 && relevant.length > 0
+    return erasedHere > 0 || (dead.size > 0 && relevant.length > 0)
       ? unavailable("erased opening")
       : { state: "legacy" };
   for (const event of events)
