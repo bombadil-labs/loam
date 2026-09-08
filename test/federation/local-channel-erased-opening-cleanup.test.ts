@@ -241,3 +241,29 @@ it("rechecks attachment after persisting cleanup and does not purge a replacemen
   expect(events(gw, "cleanup")).toHaveLength(1);
   expect(ref(events(gw, "cleanup")[0]!, "opening")).toBeUndefined();
 });
+
+it("retry never reuses an erased cleanup record whose bytes remain", async () => {
+  const { gw, ch, opening } = await fixture();
+  await gw.erase(opening.id);
+  const pool = ch.pool.gateway!.backend;
+  const purgePool = pool.purge.bind(pool);
+  pool.purge = () => Promise.reject(new Error("pool unavailable"));
+  await expect(gw.dropChannel(ch.name)).rejects.toThrow("pool unavailable");
+  const first = events(gw, "cleanup")[0]!;
+  pool.purge = purgePool;
+  const purgeRoot = gw.backend.purge.bind(gw.backend);
+  gw.backend.purge = (ids) => {
+    const batch = [...ids];
+    return batch.includes(first.id)
+      ? Promise.reject(new Error("root unavailable"))
+      : purgeRoot(batch);
+  };
+  await expect(gw.erase(first.id)).rejects.toThrow();
+  gw.backend.purge = purgeRoot;
+  expect(gw.reactor.get(first.id)).toBeDefined();
+  await expect(gw.dropChannel(ch.name)).resolves.toBeUndefined();
+  const cleanups = events(gw, "cleanup");
+  expect(cleanups).toHaveLength(2);
+  expect(cleanups.some((d) => d.id !== first.id)).toBe(true);
+  expect(gw.channelPools.has(ch.name)).toBe(false);
+});
