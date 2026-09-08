@@ -1,10 +1,12 @@
-// T288 CONTROL: the MCP connect door names no `from` to the gateway, so a channel the CLI opened
-// re-connects over MCP with the same address once a standing channel must be re-opened with the
-// options it stands with. This case PASSES on origin/main (the guard does not exist there); it is a
-// control that pins the re-connect this PR must not narrow, and it goes red when the guard compares
-// an omitted `from` against the record. The door records from="" for a channel it opens itself; a
-// caller-chosen address is deliberately NOT recorded, because a resumed channel would send the
-// operator's stored peer token to it after a restart.
+// T288: the MCP connect door names its peer as `pullsFrom`, compared against a standing record but
+// never recorded. A channel the CLI opened re-connects over MCP from the same address and refuses
+// another address, so a second peer's data cannot be received under an opening that names the
+// first. A channel MCP opened records no address (a recorded caller-chosen address would receive
+// the operator's stored peer token after a restart) and so re-connects from any address.
+//
+// RAILS-RED on origin/main, this file copied in: 1 red, 0 green (the other-address re-connect is
+// accepted there). REVERT PROBES on this tree: the door names no `pullsFrom` → 1 red; `pullsFrom`
+// yields to every record → 1 red; `pullsFrom` disagrees with an address-less record too → 1 red.
 import { afterEach, describe, expect, it } from "vitest";
 import { channelName, sourceFor } from "../../src/federation/channel.js";
 import { parseOffer } from "../../src/federation/offer.js";
@@ -69,8 +71,8 @@ const connect = (base: string, from: string, into: string) =>
     token: PEER_TOKEN,
   });
 
-describe("the MCP connect door carries no address into the record", () => {
-  it("re-connects a CLI-opened channel and syncs it; a channel it opens itself records no address", async () => {
+describe("the MCP connect door compares its peer against the record and never records it", () => {
+  it("re-connects a CLI-opened channel from the same address, refuses another, and lets an address-less channel re-connect from any", async () => {
     const { base, gateway } = await connectionServer();
     const from = await peerStore();
     const readOffer = () => {
@@ -85,8 +87,19 @@ describe("the MCP connect door carries no address into the record", () => {
     const again = await connect(base, from, "friends");
     expect(again.isError, again.text).toBe(false);
     expect(gateway.channelStatus(channelName("friends", "friends:peer"))[0]?.from).toBe(from);
+    const other = await peerStore();
+    const changed = await connect(base, other, "friends");
+    expect(changed.isError).toBe(true);
+    expect(changed.text).toContain("drop it before opening it another way");
+    expect(changed.text).not.toContain(from);
+    expect(changed.text).not.toContain(other);
+    expect(gateway.channelStatus(channelName("friends", "friends:peer"))[0]?.from).toBe(from);
+    // A channel MCP opened records no address, so it has nothing to disagree with.
     const fresh = await connect(base, from, "pals");
     expect(fresh.isError, fresh.text).toBe(false);
+    expect(gateway.channelStatus(channelName("pals", "pals:peer"))[0]?.from).toBe("");
+    const moved = await connect(base, other, "pals");
+    expect(moved.isError, moved.text).toBe(false);
     expect(gateway.channelStatus(channelName("pals", "pals:peer"))[0]?.from).toBe("");
   });
 });
