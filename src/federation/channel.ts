@@ -65,6 +65,14 @@ export interface OpenChannelOptions {
    * home (T196).
    */
   readonly from?: string;
+  /**
+   * The address this handle's `source` actually pulls from, when the caller does not want it
+   * RECORDED: an MCP re-connect names its peer here. It is compared against a standing record that
+   * names an address, so a re-connect cannot feed one peer's data into an opening that names
+   * another; it is never written, so a caller-chosen address cannot become the one a booted store
+   * resumes with its stored credential. A record with no address has nothing to disagree with.
+   */
+  readonly pullsFrom?: string;
   /** Whether law arriving on this channel binds. Reversible; see §46's two toggles. */
   readonly bless?: boolean;
   /**
@@ -230,6 +238,15 @@ export const CTX_CHANNEL = "loam.channel";
  * The opener a record carries forward, or nothing: ONE derivation for every stamp, so no stamp can
  * drop a bound connection's channel back into the root fold by forgetting the field.
  */
+/** Does the caller's address disagree with the record's? `from` is strict; `pullsFrom` yields to a
+ * record that names no address; a caller naming neither agrees with whatever stands. */
+const fromDisagrees = (
+  recorded: string,
+  opts: { readonly from?: string; readonly pullsFrom?: string },
+): boolean =>
+  opts.from !== undefined
+    ? recorded !== opts.from
+    : opts.pullsFrom !== undefined && recorded !== "" && recorded !== opts.pullsFrom;
 const opener = (of: {
   readonly openedBy?: string;
   readonly openedFrom?: string;
@@ -1413,7 +1430,7 @@ async function syncChannel(
       !gw.quarantinePools.has(ground) ||
       current.into !== opts.into ||
       current.prefix !== opts.prefix ||
-      (opts.from !== undefined && current.from !== opts.from) ||
+      fromDisagrees(current.from, opts) ||
       current.openedBy !== opts.openedBy ||
       current.openedFrom !== opts.openedFrom
     )
@@ -1822,12 +1839,12 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
   // would either be ignored or refuse on every sync. A changed source or scope is a different
   // relationship: drop the standing channel first. The refusal names the channel and the act only;
   // a caller who cannot read the standing record must not learn its source from this message.
-  // A caller that names no `from` (the MCP door never records one) agrees with whatever stands.
+  // The MCP door names its peer as `pullsFrom`, compared but never recorded (see the option).
   if (
     standingBeforeOpen !== undefined &&
     (standingBeforeOpen.into !== opts.into ||
       standingBeforeOpen.prefix !== opts.prefix ||
-      (opts.from !== undefined && standingBeforeOpen.from !== opts.from) ||
+      fromDisagrees(standingBeforeOpen.from, opts) ||
       standingBeforeOpen.openedBy !== opts.openedBy ||
       standingBeforeOpen.openedFrom !== opts.openedFrom)
   )
