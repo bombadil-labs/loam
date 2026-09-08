@@ -117,6 +117,7 @@ export type LocalChannelEvidence =
 export type LocalEvent =
   | { action: "open"; opening: LocalChannelOpening }
   | { action: "received"; channel: string; opening: string; received: string[] }
+  | { action: "cleanup"; channel: string; poolDeclaration: string; erasures: string[] }
   | { action: "close"; channel: string; opening: string };
 export function parseLocalEvent(d: Delta, operator: string | undefined): LocalEvent | undefined {
   if (
@@ -193,6 +194,17 @@ export function parseLocalEvent(d: Delta, operator: string | undefined): LocalEv
       },
     };
   }
+  if (action === "cleanup") {
+    const poolDeclaration = ref("pool-declaration");
+    if (poolDeclaration === undefined || primitive("reason") !== "erased-opening") return;
+    const erasures: string[] = [];
+    while (i < ps.length) {
+      const id = ref("erasure");
+      if (id === undefined || (erasures.length > 0 && erasures[erasures.length - 1]! >= id)) return;
+      erasures.push(id);
+    }
+    return erasures.length > 0 ? { action, channel, poolDeclaration, erasures } : undefined;
+  }
   const opening = ref("opening");
   if (opening === undefined) return;
   if (action === "close" && primitive("reason") === "drop" && i === ps.length)
@@ -246,7 +258,34 @@ export function localEraseTarget(
     !channel.target.value.startsWith("channel:")
   )
     return;
+  const declarations = d.claims.pointers.filter(
+    (p) => p.role === "local-control-opening-declaration",
+  );
+  if (declarations.length > 0) {
+    const pointer = declarations[0]!;
+    if (
+      declarations.length !== 1 ||
+      pointer.target.kind !== "delta" ||
+      pointer.target.deltaRef.context !== undefined ||
+      !address(pointer.target.deltaRef.delta)
+    )
+      return;
+    const held = reactor.get(target);
+    if (held !== undefined) {
+      const event = parseLocalEvent(held, operator);
+      if (
+        event?.action !== "open" ||
+        event.opening.poolDeclaration !== pointer.target.deltaRef.delta ||
+        `channel:${event.opening.channel}` !== channel.target.value
+      )
+        return;
+    }
+  }
   return target;
+}
+function erasedOpeningDeclaration(d: Delta): string | undefined {
+  const p = d.claims.pointers.find((p) => p.role === "local-control-opening-declaration");
+  return p?.target.kind === "delta" ? p.target.deltaRef.delta : undefined;
 }
 /** The channel entity id a validated local-control marker names; call after localEraseTarget. */
 export function localControlChannel(d: Delta): string | undefined {
@@ -297,6 +336,7 @@ type LocalChannelLifecycle =
   | { readonly state: "open"; readonly opening: LocalChannelOpening };
 type LocalChannelHistory =
   | Exclude<LocalChannelLifecycle, { readonly state: "open" }>
+  | { readonly state: "erased"; readonly cleanup: LocalChannelCleanup }
   | {
       readonly state: "open";
       readonly opening: LocalChannelOpening;
@@ -304,9 +344,22 @@ type LocalChannelHistory =
       readonly receivedIds: readonly string[];
     };
 
+export interface LocalChannelCleanup {
+  readonly poolDeclaration: string;
+  readonly erasures: readonly string[];
+  readonly recorded?: string;
+}
+
+/** Cleanup eligibility never substitutes for an opening or a receive operand. */
+export function localChannelCleanup(gw: Gateway, channel: string): LocalChannelCleanup | undefined {
+  const history = projectLocalChannelHistory(gw, channel);
+  return history.state === "erased" ? history.cleanup : undefined;
+}
+
 /** Cleanup requires a valid lifecycle, even when received source bytes have been erased. */
 export function localChannelLifecycle(gw: Gateway, channel: string): LocalChannelLifecycle {
   const history = projectLocalChannelHistory(gw, channel);
+  if (history.state === "erased") return { state: "unavailable", reason: "erased opening" };
   return history.state === "open"
     ? Object.freeze({ state: "open", opening: history.opening })
     : history;
@@ -315,6 +368,7 @@ function projectLocalChannelHistory(gw: Gateway, channel: string): LocalChannelH
   const unavailable = (reason: string): LocalChannelHistory => ({ state: "unavailable", reason });
   const rows = [...gw.reactor.snapshot()];
   const dead = new Set<string>();
+  const erasures = new Map<string, Delta>(); // erased target → same-channel local tombstone
   let erasedHere = 0; // markers naming THIS channel: erased history is never legacy history
   for (const d of rows)
     if (inLocalContext(d, LOCAL_CONTROL)) {
@@ -322,7 +376,10 @@ function projectLocalChannelHistory(gw: Gateway, channel: string): LocalChannelH
       if (target === undefined)
         return unavailable("unsupported or malformed local control history");
       dead.add(target);
-      if (localControlChannel(d) === `channel:${channel}`) erasedHere += 1;
+      if (localControlChannel(d) === `channel:${channel}`) {
+        erasedHere += 1;
+        erasures.set(target, d);
+      }
     }
   const named = (d: Delta): boolean =>
     d.claims.pointers.some(
@@ -348,16 +405,15 @@ function projectLocalChannelHistory(gw: Gateway, channel: string): LocalChannelH
   if (relevant.some((d) => !named(d)))
     return unavailable("event channel disagrees with referenced opening");
   const events: LocalEvent[] = [];
+  const eventIds = new Map<LocalEvent, string>();
   for (const d of relevant) {
     if (dead.has(d.id)) continue;
     const parsed = parseLocalEvent(d, gw.operatorAuthor);
     if (parsed === undefined) return unavailable("invalid local event history");
     events.push(parsed);
+    eventIds.set(parsed, d.id);
   }
-  if (events.length === 0)
-    return erasedHere > 0 || (dead.size > 0 && relevant.length > 0)
-      ? unavailable("erased opening")
-      : { state: "legacy" };
+  if (events.length === 0 && erasedHere === 0 && relevant.length === 0) return { state: "legacy" };
   for (const event of events)
     if (event.action === "open" && !openingAgrees(gw, event.opening))
       return unavailable("opening association disagrees with referenced status/pool");
@@ -377,26 +433,87 @@ function projectLocalChannelHistory(gw: Gateway, channel: string): LocalChannelH
     (e): e is Extract<LocalEvent, { action: "open" }> =>
       e.action === "open" && e.opening.poolDeclaration === declaration,
   );
-  if (opens.length !== 1)
-    return unavailable(
-      opens.length > 1 ? "multiple ambiguous current openings" : "missing current opening",
-    );
-  const o = opens[0]!.opening;
+  if (opens.length > 1) return unavailable("multiple ambiguous current openings");
+  const o = opens[0]?.opening;
   if (
-    !openingAgrees(gw, o) ||
-    status.into !== o.into ||
-    status.prefix !== o.prefix ||
-    status.from !== o.from ||
-    status.openedBy !== o.openedBy ||
-    status.openedFrom !== o.openedFrom
+    o !== undefined &&
+    (!openingAgrees(gw, o) ||
+      status.into !== o.into ||
+      status.prefix !== o.prefix ||
+      status.from !== o.from ||
+      status.openedBy !== o.openedBy ||
+      status.openedFrom !== o.openedFrom)
   )
     return unavailable("opening association disagrees with status/pool");
-  for (const event of events)
+
+  // A cleanup discharges only named, locally erased history, never arbitrary missing references.
+  const discharged = new Set<string>();
+  const recorded: Extract<LocalEvent, { action: "cleanup" }>[] = [];
+  for (const event of events) {
+    if (event.action !== "cleanup") continue;
+    const decl = gw.reactor.get(event.poolDeclaration);
     if (
-      event.action !== "open" &&
-      !events.some((e) => e.action === "open" && e.opening.id === event.opening)
+      decl === undefined ||
+      !sameVerifiedDelta(decl, decl) ||
+      decl.claims.author !== gw.operatorAuthor ||
+      containerDeclarationName(decl.claims) !== channel
     )
-      return unavailable("missing referenced opening");
+      return unavailable("invalid cleanup declaration");
+    for (const id of event.erasures) {
+      const marker = gw.reactor.get(id);
+      if (
+        marker === undefined ||
+        localEraseTarget(marker, gw.reactor, gw.operatorAuthor) === undefined ||
+        localControlChannel(marker) !== `channel:${channel}`
+      )
+        return unavailable("invalid cleanup erasure");
+      discharged.add(id);
+    }
+    if (event.poolDeclaration === declaration) recorded.push(event);
+  }
+  const needed = new Set<string>();
+  for (const event of events) {
+    if (event.action !== "received" && event.action !== "close") continue;
+    if (events.some((e) => e.action === "open" && e.opening.id === event.opening)) continue;
+    const marker = erasures.get(event.opening);
+    if (marker === undefined) return unavailable("missing referenced opening");
+    if (!discharged.has(marker.id)) needed.add(marker.id);
+  }
+  if (o === undefined) {
+    const erased = [...erasures.values()].filter(
+      (d) => erasedOpeningDeclaration(d) === declaration,
+    );
+    if (erased.length !== 1) return unavailable("erased opening has no exact declaration evidence");
+    needed.add(erased[0]!.id);
+  }
+  if (needed.size > 0 || recorded.length > 0) {
+    const decl = gw.reactor.get(declaration)!;
+    if (
+      pool.entity !== channel ||
+      pool.posture !== "separate" ||
+      readTombstones(gw.reactor, gw.operatorAuthor).has(declaration) ||
+      field(decl, "inboxOf") !== status.into ||
+      channel !== `channel:${status.into}:${status.prefix}`
+    )
+      return unavailable("cleanup pool/status association changed");
+    const all = [...new Set([...needed, ...recorded.flatMap((event) => event.erasures)])].sort();
+    const held = recorded
+      .filter(
+        (event) =>
+          event.erasures.length === all.length && event.erasures.every((id, i) => id === all[i]),
+      )
+      .map((event) => eventIds.get(event)!)
+      .sort()[0];
+    return {
+      state: "erased",
+      cleanup: {
+        poolDeclaration: declaration,
+        erasures: all,
+        ...(held === undefined ? {} : { recorded: held }),
+      },
+    };
+  }
+  if (o === undefined) return unavailable("missing current opening");
   const opening = Object.freeze({ ...o });
   if (events.some((e) => e.action === "close" && e.opening === o.id))
     return { state: "closed", opening };
@@ -407,6 +524,7 @@ function projectLocalChannelHistory(gw: Gateway, channel: string): LocalChannelH
 }
 export function localChannelEvidence(gw: Gateway, channel: string): LocalChannelEvidence {
   const history = projectLocalChannelHistory(gw, channel);
+  if (history.state === "erased") return { state: "unavailable", reason: "erased opening" };
   if (history.state !== "open") return history;
   const { opening, ground, receivedIds } = history;
   const received: Delta[] = [];

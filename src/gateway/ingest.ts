@@ -6,6 +6,7 @@ import {
   localEraseTarget,
   openingAgrees,
   localChannelEvidence,
+  localChannelCleanup,
   eventHeader,
   eventPrimitive,
   eventRef,
@@ -77,11 +78,12 @@ export async function appendImpl(gw: Gateway, deltas: Iterable<Delta>): Promise<
 
 type LifecycleEventInput =
   | { action: "open"; opening: Omit<LocalChannelOpening, "id"> }
+  | { action: "cleanup"; channel: string }
   | { action: "close"; channel: string; opening: string };
 
 /** Channel lifecycle callers cannot construct receive receipts, including JavaScript callers. */
 export async function issueChannelEvent(gw: Gateway, input: LifecycleEventInput): Promise<Delta> {
-  if (input.action !== "open" && input.action !== "close")
+  if (input.action !== "open" && input.action !== "close" && input.action !== "cleanup")
     throw new Error("local channel received events require actual receive admission");
   return persistChannelEvent(gw, input);
 }
@@ -121,6 +123,16 @@ async function persistChannelEvent(
     pointers.push(
       eventRef("status-at-open", o.statusAtOpen),
       eventRef("pool-declaration", o.poolDeclaration),
+    );
+  } else if (input.action === "cleanup") {
+    const cleanup = localChannelCleanup(gw, channel);
+    if (cleanup === undefined)
+      throw new Error("local cleanup requires exact erased opening evidence");
+    if (cleanup.recorded !== undefined) return gw.reactor.get(cleanup.recorded)!;
+    pointers.push(
+      eventRef("pool-declaration", cleanup.poolDeclaration),
+      eventPrimitive("reason", "erased-opening"),
+      ...cleanup.erasures.map((id) => eventRef("erasure", id)),
     );
   } else {
     pointers.push(eventRef("opening", input.opening));

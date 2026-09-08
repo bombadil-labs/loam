@@ -36,12 +36,12 @@ const opts = (prefix = "peer") => ({
   into: "friends",
   prefix,
   from: "https://peer.example",
-  source: { pull: async () => [] as Delta[] },
+  source: { pull: () => Promise.resolve([] as Delta[]) },
 });
 async function fixture(receive = false) {
   const gw = await home();
   const source = observed(FERN, "height", 100, 1000, "aa".repeat(32));
-  const ch = await gw.openChannel({ ...opts(), source: { pull: async () => [source] } });
+  const ch = await gw.openChannel({ ...opts(), source: { pull: () => Promise.resolve([source]) } });
   if (receive) await ch.sync();
   const evidence = localChannelEvidence(gw, ch.name);
   if (evidence.state !== "open") throw new Error(evidence.state);
@@ -70,13 +70,19 @@ it.each([false, true])(
   async (receive) => {
     const { gw, ch, opening, source } = await fixture(receive);
     const sibling = await gw.openChannel(opts("sibling"));
-    const siblingBytes = await sibling.pool.gateway!.backend.deltasSince(new Set());
     const root = observed(FERN, "height", 9, 100, seed);
     await gw.append([root]);
     const erased = await gw.erase(opening.id);
+    const siblingBytes = await sibling.pool.gateway!.backend.deltasSince(new Set());
     expect(localChannelEvidence(gw, ch.name).state).toBe("unavailable");
     await expect(ch.sync()).rejects.toThrow();
     const backend = ch.pool.gateway!.backend;
+    const close = backend.close.bind(backend);
+    let bytesAtClose: Delta[] | undefined;
+    backend.close = async () => {
+      bytesAtClose = await backend.deltasSince(new Set());
+      await close();
+    };
     const purge = backend.purge.bind(backend);
     backend.purge = async (ids) => {
       const cleanup = events(gw, "cleanup");
@@ -102,7 +108,7 @@ it.each([false, true])(
       return purge(ids);
     };
     await gw.dropChannel(ch.name);
-    expect(await backend.deltasSince(new Set())).toEqual([]);
+    expect(bytesAtClose).toEqual([]);
     expect(await gw.backend.holds(root.id)).toBe(true);
     expect(await sibling.pool.gateway!.backend.deltasSince(new Set())).toEqual(siblingBytes);
     expect(gw.channelPools.has(ch.name)).toBe(false);
@@ -119,7 +125,10 @@ it.each([false, true])(
       seed,
     );
     expect(parseLocalEvent(malformed, gw.operatorAuthor)).toBeUndefined();
-    const fresh = await gw.openChannel({ ...opts(), source: { pull: async () => [source] } });
+    const fresh = await gw.openChannel({
+      ...opts(),
+      source: { pull: () => Promise.resolve([source]) },
+    });
     await fresh.sync();
     const now = localChannelEvidence(gw, fresh.name);
     expect(now.state).toBe("open");
@@ -156,9 +165,9 @@ it("a failed cleanup append prevents purge, while a failed purge can retry after
   };
   const backend = ch.pool.gateway!.backend;
   let purges = 0;
-  backend.purge = async () => {
+  backend.purge = () => {
     purges++;
-    throw new Error("pool purge fault");
+    return Promise.reject(new Error("pool purge fault"));
   };
   await expect(gw.dropChannel(ch.name)).rejects.toThrow("cleanup persist fault");
   expect(purges).toBe(0);

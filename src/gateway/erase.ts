@@ -5,6 +5,7 @@ import {
   inLocalContext,
   localEraseTarget,
   sameVerifiedDelta,
+  parseLocalEvent,
 } from "../federation/local-channel-events.js";
 // Erasure — degrees of forgetting (SPEC §11). The store remembers THAT it forgot — who asked,
 // when, which id — never what. A TOMBSTONE is an append-only claim at `loam:erasure` naming
@@ -817,6 +818,7 @@ export async function eraseImpl(
     );
   }
   const protectedTarget = target !== undefined && inLocalContext(target, LOCAL_EVENT);
+  const erasedEvent = target === undefined ? undefined : parseLocalEvent(target, gw.operatorAuthor);
   // The marker names the CHANNEL the erased event belonged to. Once the bytes are gone the marker
   // is all that separates an erased opening from a channel that never had one; without the name,
   // an erased history reads as plain legacy history and a resumed handle runs unprotected.
@@ -839,6 +841,17 @@ export async function eraseImpl(
               role: "local-control-channel",
               target: { kind: "primitive", value: erasedChannel.entity.id },
             },
+            ...(erasedEvent?.action === "open"
+              ? [
+                  {
+                    role: "local-control-opening-declaration",
+                    target: {
+                      kind: "delta" as const,
+                      deltaRef: { delta: erasedEvent.opening.poolDeclaration },
+                    },
+                  },
+                ]
+              : []),
           ],
         }
       : claims;

@@ -2,6 +2,7 @@ import { issueChannelEvent, receiveChannelOfferInCommit } from "../gateway/inges
 import {
   localChannelEvidence,
   localChannelLifecycle,
+  localChannelCleanup,
   currentPoolDeclaration,
   withChannelCommit,
   type LocalChannelOpening,
@@ -2221,8 +2222,25 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
   const evidence = localChannelLifecycle(gw, name);
   if (evidence.state === "open")
     await issueChannelEvent(gw, { action: "close", channel: name, opening: evidence.opening.id });
-  else if (evidence.state === "unavailable")
-    throw new Error(`dropChannel refused: ${evidence.reason}`);
+  else if (evidence.state === "unavailable") {
+    const exactCleanup = () => {
+      const cleanup = localChannelCleanup(gw, name);
+      if (
+        cleanup === undefined ||
+        gw.channelPools.get(name) !== pool ||
+        (gw.federationChannels.get(name) !== undefined &&
+          gw.federationChannels.get(name)!.pool !== pool) ||
+        pool.declarationId !== cleanup.poolDeclaration
+      )
+        throw new Error(`dropChannel refused: ${evidence.reason}; no exact cleanup authority`);
+      return cleanup;
+    };
+    const before = exactCleanup();
+    const event = await issueChannelEvent(gw, { action: "cleanup", channel: name });
+    const after = exactCleanup();
+    if (after.poolDeclaration !== before.poolDeclaration || after.recorded !== event.id)
+      throw new Error("dropChannel refused: cleanup association changed during persistence");
+  }
   await pool.drop();
   gw.federationChannels.delete(name);
   gw.channelPools.delete(name);
