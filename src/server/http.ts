@@ -2513,6 +2513,9 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             const channel = await gateway.openChannel({
               into,
               prefix,
+              // The record keeps the peer's address; a re-connect must carry it, or the standing
+              // channel reads as opened another way and resume after a restart has no source.
+              from,
               bless: args.bless !== false,
               ...(identity.binding === undefined
                 ? {}
