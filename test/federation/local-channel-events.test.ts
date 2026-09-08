@@ -11,7 +11,8 @@
 // checks on sync (4 red), the partial-opening guard on retry (1 red), and a protected-set memo that
 // never sweeps the arrival log (red across the suites). Measured again at 110 cases: a marker that
 // does not make this channel's erased history unavailable (1 red); a re-open that ignores whether
-// the caller's options agree with the standing record, cached handle or not (1 red).
+// the caller's options agree with the standing record, cached handle or not (1 red); a guard or a
+// sync that compares an omitted `from` against the record instead of accepting it (1 red each).
 //
 // WHAT THESE RAILS DO NOT ASSERT: a reader resolving through a Schema or a door over the `received`
 // operand. No consumer resolves through it yet; `sourceStanding` re-ingests the operand into a fresh
@@ -1348,6 +1349,12 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     expect(refusal).toContain("drop it before opening it another way");
     expect(refusal).not.toContain("peer.example");
     expect(gw.federationChannels.has(ch.name)).toBe(false);
+    // A caller that names no source agrees with whatever stands: the MCP door never records one.
+    const unnamed = await gw.openChannel({ into: "friends", prefix: "peer", source });
+    offering.push(fact(2));
+    await unnamed.sync();
+    expect(opened(gw, ch.name).received).toHaveLength(1);
+    gw.federationChannels.delete(ch.name);
     const same = await gw.openChannel({
       into: "friends",
       prefix: "peer",
@@ -1356,7 +1363,7 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     });
     offering.push(fact());
     await same.sync();
-    expect(opened(gw, ch.name).received).toHaveLength(1);
+    expect(opened(gw, ch.name).received).toHaveLength(2);
   });
   it("erase(close) revives only its still-attached exact opening, never a successfully dropped pool", async () => {
     const { gw, pools } = await home();

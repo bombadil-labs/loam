@@ -1,11 +1,10 @@
-// T288: the MCP connect door carries the peer's address. A channel the CLI opened re-connects over
-// MCP with the same address; a channel MCP opened records the address, so it resumes after a
-// restart; a different address for a standing channel refuses and names no address.
-//
-// RAILS-RED on origin/main, this file copied in: 1 red, 0 green. The door there omits `from`, so an
-// MCP-opened channel records from="" and the second assertion fails. REVERT PROBE on this tree: the
-// door omits `from` again → 1 red. This file is not in T288's declared rails; the ticket shard is
-// frozen for this PR, and the case guards the door rather than the events.
+// T288 CONTROL: the MCP connect door names no `from` to the gateway, so a channel the CLI opened
+// re-connects over MCP with the same address once a standing channel must be re-opened with the
+// options it stands with. This case PASSES on origin/main (the guard does not exist there); it is a
+// control that pins the re-connect this PR must not narrow, and it goes red when the guard compares
+// an omitted `from` against the record. The door records from="" for a channel it opens itself; a
+// caller-chosen address is deliberately NOT recorded, because a resumed channel would send the
+// operator's stored peer token to it after a restart.
 import { afterEach, describe, expect, it } from "vitest";
 import { channelName, sourceFor } from "../../src/federation/channel.js";
 import { parseOffer } from "../../src/federation/offer.js";
@@ -70,8 +69,8 @@ const connect = (base: string, from: string, into: string) =>
     token: PEER_TOKEN,
   });
 
-describe("the MCP connect door carries the peer's address", () => {
-  it("re-connects a CLI-opened channel with the same address, records the address it opens with, and refuses another address without naming one", async () => {
+describe("the MCP connect door carries no address into the record", () => {
+  it("re-connects a CLI-opened channel and syncs it; a channel it opens itself records no address", async () => {
     const { base, gateway } = await connectionServer();
     const from = await peerStore();
     const readOffer = () => {
@@ -88,12 +87,6 @@ describe("the MCP connect door carries the peer's address", () => {
     expect(gateway.channelStatus(channelName("friends", "friends:peer"))[0]?.from).toBe(from);
     const fresh = await connect(base, from, "pals");
     expect(fresh.isError, fresh.text).toBe(false);
-    expect(gateway.channelStatus(channelName("pals", "pals:peer"))[0]?.from).toBe(from);
-    const other = await peerStore();
-    const changed = await connect(base, other, "friends");
-    expect(changed.isError).toBe(true);
-    expect(changed.text).toContain("drop it before opening it another way");
-    expect(changed.text).not.toContain(from);
-    expect(changed.text).not.toContain(other);
+    expect(gateway.channelStatus(channelName("pals", "pals:peer"))[0]?.from).toBe("");
   });
 });

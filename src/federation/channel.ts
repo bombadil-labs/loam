@@ -1413,7 +1413,7 @@ async function syncChannel(
       !gw.quarantinePools.has(ground) ||
       current.into !== opts.into ||
       current.prefix !== opts.prefix ||
-      current.from !== (opts.from ?? "") ||
+      (opts.from !== undefined && current.from !== opts.from) ||
       current.openedBy !== opts.openedBy ||
       current.openedFrom !== opts.openedFrom
     )
@@ -1822,11 +1822,12 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
   // would either be ignored or refuse on every sync. A changed source or scope is a different
   // relationship: drop the standing channel first. The refusal names the channel and the act only;
   // a caller who cannot read the standing record must not learn its source from this message.
+  // A caller that names no `from` (the MCP door never records one) agrees with whatever stands.
   if (
     standingBeforeOpen !== undefined &&
     (standingBeforeOpen.into !== opts.into ||
       standingBeforeOpen.prefix !== opts.prefix ||
-      standingBeforeOpen.from !== (opts.from ?? "") ||
+      (opts.from !== undefined && standingBeforeOpen.from !== opts.from) ||
       standingBeforeOpen.openedBy !== opts.openedBy ||
       standingBeforeOpen.openedFrom !== opts.openedFrom)
   )
