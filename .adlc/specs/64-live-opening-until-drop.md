@@ -209,6 +209,19 @@ criterion names its verification.
 10. Full bar green and hollow-test run first on the clean tip, then recorded. Verify:
     `npm run check` and `adlc hollow-test --base origin/t288/local-channel-events --max 300 --test-cmd "timeout -k 10 600 npx vitest run test/federation/local-channel-*.test.ts"`
 
+## Review round 7 of the build, 2026-09-09
+
+The round-6 liveness clause met the seed from the other side: the root's own peer-authored deltas
+are copied into every later incarnation's pool, no receipt names them, and one stranger's byte in
+the root made every earlier opening under that name uneraseable forever. A byte the root also
+holds is the root's, not the earlier opening's; the clause now counts only peer bytes that no
+receipt names AND the root does not hold. Known and left: a later incarnation's receive whose
+receipt append faulted (federate admitted, receipt lost) leaves a peer byte no receipt names until
+the peer re-offers it, and an earlier opening's erase refuses until then; the status record shows
+that debt as `unattested`. The refusal for a store no declaration names now says the true road:
+re-declare the name and drop, or remove the store by hand. The scoped fail-closed clause has its
+rail.
+
 ## Review round 6 of the build, 2026-09-09
 
 Round 5's fresh-open refusal was wrong at the seam: a separate pool is seeded from the root at

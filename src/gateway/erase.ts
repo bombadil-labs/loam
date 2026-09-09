@@ -766,14 +766,19 @@ async function liveOpening(
     return named!.declarationId === o.poolDeclaration
       ? "its pool is still attached and holds bytes"
       : "a pool no opening names is attached under its name and holds bytes";
-  // A later incarnation under the same name owns only what its receipts name. The store is keyed
-  // by name, so a peer byte in that pool that no receipt of the standing incarnation names was
-  // left there by an earlier one, and this opening is the only lineage it has (spec 64).
+  // A later incarnation under the same name owns only what its receipts name, plus what the seed
+  // copied in from the root (a separate pool is seeded from the primary at attach, so the root's
+  // own peer bytes ride along). The store is keyed by name, so a peer byte in that pool that no
+  // receipt names and the root does not hold was left there by an earlier incarnation, and this
+  // opening is the only lineage it has (spec 64).
   if (another) {
     const owned = receiptsNaming(gw, named!.declarationId!);
     if (
       [...named!.gateway!.reactor.snapshot()].some(
-        (d) => d.claims.author !== gw.operatorAuthor && !owned.has(d.id),
+        (d) =>
+          d.claims.author !== gw.operatorAuthor &&
+          !owned.has(d.id) &&
+          gw.reactor.get(d.id) === undefined,
       )
     )
       return "a later incarnation under its name holds bytes that no receipt of that incarnation names";
@@ -782,7 +787,11 @@ async function liveOpening(
     const backend = gw.options.channelBackend(o.channel);
     try {
       if ((await backend.deltasSince(new Set())).length > 0)
-        return "its pool's store still holds bytes although its declaration was struck";
+        return (
+          "its pool's store still holds bytes although its declaration was struck, and no " +
+          "declaration names that store for a drop to reach: re-declare the name and drop it, or " +
+          "remove the store by hand"
+        );
     } finally {
       await backend.close();
     }

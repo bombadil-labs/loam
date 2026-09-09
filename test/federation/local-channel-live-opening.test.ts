@@ -20,6 +20,8 @@
 // earlier opening live → 1 red; an unparseable event of this channel does not fail closed →
 // 1 red. Round 5's open-time refusal was withdrawn in round 6: a separate pool is seeded from
 // the root, so it refused every fresh open over a root that held a stranger's record.
+// After review round 7 (128 cases): bytes the root also holds count against an earlier opening
+// → 1 red; the orphan question fails closed on ANY channel's unreadable event → 1 red.
 // The boot-unattachable pool is not a case here: the base already refuses it as unreachable. The
 // struck-declaration case measures both halves of the byte side: the attached pool, and the
 // store reopened by name with no handle in memory (the fixture keeps one store per name, as the
@@ -332,6 +334,72 @@ describe("spec 64: a live opening cannot be erased", () => {
     const gw = await first.restart();
     await expect(gw.dropChannel(a.ch.name)).rejects.toThrow(/dropChannel refused/);
     expect(first.holds(a.ch.name, fact(1).id)).toBe(true);
+  });
+  it("a stranger's byte in the root rides the seed into every later pool and does not keep an earlier opening live", async () => {
+    const { gw } = await home();
+    const stranger = observed(FERN, "height", 77, 2077, "b7".repeat(32));
+    await gw.federate([stranger], { admit: () => true });
+    expect(gw.reactor.get(stranger.id)).toBeDefined();
+    const { ch, offering } = await channel(gw);
+    offering.push(fact(1));
+    await ch.sync();
+    const first = opened(gw, ch.name).opening;
+    await gw.dropChannel(ch.name);
+    const feed = peer();
+    const again = await gw.openChannel({
+      into: "friends",
+      prefix: "peer",
+      from: "https://peer.example/peer",
+      source: feed.source,
+    });
+    feed.offering.push(fact(2));
+    await again.sync();
+    // The seed copied the stranger's byte into the new pool; no receipt names it; the root holds it.
+    expect(again.pool.gateway!.reactor.get(stranger.id)).toBeDefined();
+    await gw.erase(first.id);
+    expect(gw.reactor.get(first.id)).toBeUndefined();
+    feed.offering.push(fact(3));
+    await again.sync();
+    expect(
+      opened(gw, ch.name)
+        .received.map((d) => d.id)
+        .sort(),
+    ).toEqual([fact(2).id, fact(3).id].sort());
+  });
+  it("another channel's unreadable event does not close this pool's orphan question", async () => {
+    const first = await home();
+    const other = await channel(first.gw, "other");
+    other.offering.push(fact(9));
+    await other.ch.sync();
+    const otherOpening = first.gw.reactor.get(opened(first.gw, other.ch.name).opening.id)!;
+    const unreadable = signClaims(
+      {
+        ...otherOpening.claims,
+        timestamp: first.gw.nextTimestamp(),
+        pointers: otherOpening.claims.pointers.filter((p) => p.role !== "parent-container"),
+      },
+      SEED,
+    );
+    await first.primary.append([unreadable]);
+    const a = await channel(first.gw);
+    a.offering.push(fact(1));
+    await a.ch.sync();
+    const opening = opened(first.gw, a.ch.name).opening;
+    await first.gw.append([
+      signClaims(
+        containerClaims(
+          { container: a.ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
+          OP,
+          first.gw.nextTimestamp(),
+        ),
+        SEED,
+      ),
+    ]);
+    const gw = await first.restart();
+    await gw.dropChannel(a.ch.name);
+    expect(first.holds(a.ch.name, fact(1).id)).toBe(false);
+    await gw.erase(opening.id);
+    expect(gw.reactor.get(opening.id)).toBeUndefined();
   });
   it("both orphan states read the same after a restart: the erase refuses or the drop works, never a strand", async () => {
     // Struck and replaced by hand, then a restart that re-attaches under the new declaration.
