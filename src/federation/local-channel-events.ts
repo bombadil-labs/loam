@@ -116,8 +116,8 @@ export type LocalChannelEvidence =
     };
 export type LocalEvent =
   | { action: "open"; opening: LocalChannelOpening }
-  | { action: "received"; channel: string; opening: string; received: string[] }
-  | { action: "close"; channel: string; opening: string };
+  | { action: "received"; channel: string; into: string; opening: string; received: string[] }
+  | { action: "close"; channel: string; into: string; opening: string };
 export function parseLocalEvent(d: Delta, operator: string | undefined): LocalEvent | undefined {
   if (
     operator === undefined ||
@@ -155,6 +155,15 @@ export function parseLocalEvent(d: Delta, operator: string | undefined): LocalEv
   };
   if (primitive("version") !== 1) return;
   const action = primitive("action");
+  const parent = ps[i++];
+  if (
+    parent?.role !== PARENT_CONTAINER ||
+    parent.target.kind !== "entity" ||
+    parent.target.entity.context !== LOCAL_EVENT ||
+    !text(parent.target.entity.id)
+  )
+    return;
+  const parentContainer = parent.target.entity.id;
   if (action === "open") {
     const nonce = primitive("nonce"),
       into = primitive("into"),
@@ -165,6 +174,7 @@ export function parseLocalEvent(d: Delta, operator: string | undefined): LocalEv
       typeof nonce !== "string" ||
       !/^[0-9a-f]{64}$/.test(nonce) ||
       !text(into) ||
+      into !== parentContainer ||
       !text(prefix) ||
       !text(from, true)
     )
@@ -196,7 +206,7 @@ export function parseLocalEvent(d: Delta, operator: string | undefined): LocalEv
   const opening = ref("opening");
   if (opening === undefined) return;
   if (action === "close" && primitive("reason") === "drop" && i === ps.length)
-    return { action, channel, opening };
+    return { action, channel, into: parentContainer, opening };
   if (action !== "received") return;
   const received: string[] = [];
   while (i < ps.length) {
@@ -204,7 +214,32 @@ export function parseLocalEvent(d: Delta, operator: string | undefined): LocalEv
     if (id === undefined || (received.length > 0 && received[received.length - 1]! >= id)) return;
     received.push(id);
   }
-  return received.length > 0 ? { action, channel, opening, received } : undefined;
+  return received.length > 0
+    ? { action, channel, into: parentContainer, opening, received }
+    : undefined;
+}
+/**
+ * The channels whose lineage says they were opened INTO this container, read from the receiver's
+ * root ground by the parent-container pointer: the bound connection's lineage read, scoped to its
+ * binding's container, and the operator's when it asks for one container. An erased opening is
+ * not listed; its marker says the channel is gone.
+ */
+export function localChannelsInContainer(gw: Gateway, container: string): string[] {
+  const rows = [...gw.reactor.snapshot()];
+  const dead = new Set<string>();
+  for (const d of rows)
+    if (inLocalContext(d, LOCAL_CONTROL)) {
+      const target = localEraseTarget(d, gw.reactor, gw.operatorAuthor);
+      if (target !== undefined) dead.add(target);
+    }
+  const names = new Set<string>();
+  for (const d of rows) {
+    if (!inLocalContext(d, LOCAL_EVENT) || dead.has(d.id)) continue;
+    const parsed = parseLocalEvent(d, gw.operatorAuthor);
+    if (parsed?.action === "open" && parsed.opening.into === container)
+      names.add(parsed.opening.channel);
+  }
+  return [...names].sort();
 }
 export function localEraseTarget(
   d: Delta,
@@ -471,7 +506,11 @@ export const eventRef = (role: string, delta: string): Claims["pointers"][number
   role,
   target: { kind: "delta", deltaRef: { delta } },
 });
-export function eventHeader(channel: string, action: string): Claims["pointers"] {
+// The parent container rides every event at a PINNED position, in the event vocabulary (never
+// `container`/`loam.container`, which the container table would read as law). It scopes reads:
+// a bound connection's lineage read filters by it, and so may the operator's.
+export const PARENT_CONTAINER = "parent-container";
+export function eventHeader(channel: string, action: string, into: string): Claims["pointers"] {
   return [
     {
       role: "event",
@@ -479,5 +518,9 @@ export function eventHeader(channel: string, action: string): Claims["pointers"]
     },
     eventPrimitive("version", 1),
     eventPrimitive("action", action),
+    {
+      role: PARENT_CONTAINER,
+      target: { kind: "entity", entity: { id: into, context: LOCAL_EVENT } },
+    },
   ];
 }

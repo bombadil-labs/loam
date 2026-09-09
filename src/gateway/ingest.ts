@@ -100,7 +100,18 @@ async function persistChannelEvent(
   if (gw.options.seed === undefined || gw.operatorAuthor === undefined)
     throw new Error("local event requires an operated gateway");
   const channel = input.action === "open" ? input.opening.channel : input.channel;
-  const pointers = [...eventHeader(channel, input.action)];
+  // The parent container comes from the opening this event belongs to, never from the caller.
+  const into =
+    input.action === "open"
+      ? input.opening.into
+      : (() => {
+          const held = gw.reactor.get(input.opening);
+          const parsed = held === undefined ? undefined : parseLocalEvent(held, gw.operatorAuthor);
+          if (parsed?.action !== "open" || parsed.opening.channel !== channel)
+            throw new Error("local channel event names no held opening of its channel");
+          return parsed.opening.into;
+        })();
+  const pointers = [...eventHeader(channel, input.action, into)];
   if (input.action === "open") {
     const o = input.opening;
     const nonce = [...globalThis.crypto.getRandomValues(new Uint8Array(32))]

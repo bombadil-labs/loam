@@ -62,6 +62,7 @@ function openLiteral(
       entity("event", `channel:${name}`, EVENT),
       primitive("version", 1),
       primitive("action", "open"),
+      entity("parent-container", "friends", EVENT),
       primitive("nonce", "34".repeat(32)),
       primitive("into", "friends"),
       primitive("prefix", "peer"),

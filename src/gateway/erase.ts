@@ -1,5 +1,7 @@
 import { appendLocalErasure } from "./ingest.js";
 import {
+  withChannelCommit,
+  parseLocalEvent,
   LOCAL_EVENT,
   LOCAL_CONTROL,
   inLocalContext,
@@ -740,10 +742,43 @@ export function sealCommitment(salt: string, author: string): string {
 // THAT it forgot — never what. Live subscriptions re-attach exactly as they do after a schema
 // evolution or a crash; an animated gateway's runner must be re-attached (the host holds the old
 // reactor).
+/** Why an opening is still live, or undefined when its pool is gone. */
+async function liveOpening(
+  gw: Gateway,
+  o: { channel: string; poolDeclaration: string },
+): Promise<string | undefined> {
+  const negated = lawfulNegated(gw.reactor, gw.operatorAuthor);
+  if (gw.reactor.get(o.poolDeclaration) !== undefined && !negated(o.poolDeclaration))
+    return "its pool's declaration still stands";
+  const attached = gw.channelPools.get(o.channel)?.gateway;
+  if (attached !== undefined && [...attached.reactor.snapshot()].length > 0)
+    return "its pool is still attached and holds bytes";
+  if (attached === undefined && gw.options.channelBackend !== undefined) {
+    const backend = gw.options.channelBackend(o.channel);
+    try {
+      if ((await backend.deltasSince(new Set())).length > 0)
+        return "its pool's store still holds bytes although its declaration was struck";
+    } finally {
+      await backend.close();
+    }
+  }
+  return undefined;
+}
+/** The received and close events that reference one opening and still stand. */
+function incarnationMembers(gw: Gateway, openingId: string): string[] {
+  const out: string[] = [];
+  for (const d of gw.reactor.snapshot()) {
+    if (!inLocalContext(d, LOCAL_EVENT) || isTombstone(d.claims)) continue;
+    const parsed = parseLocalEvent(d, gw.operatorAuthor);
+    if (parsed !== undefined && parsed.action !== "open" && parsed.opening === openingId)
+      out.push(d.id);
+  }
+  return out.sort();
+}
 export async function eraseImpl(
   gw: Gateway,
   id: string,
-  opts: { reason?: string; slate?: string } = {},
+  opts: { reason?: string; slate?: string; cascade?: boolean } = {},
 ): Promise<{
   erased: string;
   citations: string[];
@@ -817,11 +852,46 @@ export async function eraseImpl(
     );
   }
   const protectedTarget = target !== undefined && inLocalContext(target, LOCAL_EVENT);
+  // SPEC 64: A LIVE OPENING CANNOT BE ERASED. Erasing it would leave the pool's bytes with no
+  // lineage, and a random erasure must not be able to nuke a subset of the store. Live means the
+  // pool declaration survives, attached or not, or the pool still holds bytes. The refusal names
+  // the pool and the road: drop it first; read or extract its deltas until then.
+  const erasedEvent =
+    target !== undefined && protectedTarget
+      ? parseLocalEvent(target, gw.operatorAuthor)
+      : undefined;
+  if (erasedEvent?.action === "open" && !isTombstone(target!.claims)) {
+    const o = erasedEvent.opening;
+    const live = await liveOpening(gw, o);
+    if (live !== undefined) {
+      throw new Error(
+        `erase ${id} refused: it is the opening of channel "${o.channel}", and ${live}. ` +
+          `Drop the channel first (dropChannel "${o.channel}"); its pool's deltas can be read or ` +
+          `extracted until then. Nothing was removed.`,
+      );
+    }
+    // A DROPPED incarnation's opening takes its receipts and close with it, receipts and close
+    // FIRST and the opening LAST, in one channel commit: a crash before the opening's tombstone
+    // leaves every surviving receipt resolvable, and a re-run finishes. Settled members are skipped.
+    if (opts.cascade !== false)
+      await withChannelCommit(gw, o.channel, async () => {
+        for (const member of incarnationMembers(gw, id)) {
+          if (
+            survivingTombstones(gw.reactor, gw.operatorAuthor).some(
+              (d) => tombstoneParts(d.claims).targetId === member,
+            )
+          )
+            continue;
+          await eraseImpl(gw, member, { ...opts, cascade: false });
+        }
+      });
+  }
   // The marker names the CHANNEL the erased event belonged to. Once the bytes are gone the marker
   // is all that separates an erased opening from a channel that never had one; without the name,
   // an erased history reads as plain legacy history and a resumed handle runs unprotected.
   const erasedChannel = target?.claims.pointers.find(
-    (p) => p.target.kind === "entity" && p.target.entity.context === LOCAL_EVENT,
+    (p) =>
+      p.role === "event" && p.target.kind === "entity" && p.target.entity.context === LOCAL_EVENT,
   )?.target;
   const localClaims = (claims: Claims): Claims =>
     protectedTarget && erasedChannel?.kind === "entity"

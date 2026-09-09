@@ -110,6 +110,10 @@ describe("T288 channel cleanup after real received-source erasure", () => {
           { role: "version", target: { kind: "primitive", value: 1 } },
           { role: "action", target: { kind: "primitive", value: "close" } },
           {
+            role: "parent-container",
+            target: { kind: "entity", entity: { id: "friends", context: EVENT } },
+          },
+          {
             role: "opening",
             target: { kind: "delta", deltaRef: { delta: initial.opening.id } },
           },

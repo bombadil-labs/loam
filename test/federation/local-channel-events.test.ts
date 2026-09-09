@@ -144,8 +144,13 @@ const r = (role: string, id: string): Claims["pointers"][number] => ({
   role,
   target: { kind: "delta", deltaRef: { delta: id } },
 });
-function header(name: string, action: string) {
-  return [e("event", `channel:${name}`, EVENT), p("version", 1), p("action", action)];
+function header(name: string, action: string, into = "friends") {
+  return [
+    e("event", `channel:${name}`, EVENT),
+    p("version", 1),
+    p("action", action),
+    e("parent-container", into, EVENT),
+  ];
 }
 // Independently spelled literal fixtures; no production event builder/parser is imported.
 function openLiteral(name: string, status: string, declaration: string, bound?: string): Claims {
@@ -414,6 +419,7 @@ describe("T288 exact local lifecycle and independent v1 vocabulary", () => {
       "event",
       "version",
       "action",
+      "parent-container",
       "nonce",
       "into",
       "prefix",
@@ -1284,52 +1290,93 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     expect(sourceStanding(gw, ch.name, a.id)).toBe(true);
     expect(ch.pool.gateway!.reactor.get(s.id)).toBeDefined();
   });
-  it("erase(open) loses incarnation without removing receipt/source/bystander; controls cannot recreate it", async () => {
+  it("erase(open) on a LIVE channel refuses and removes nothing; after the drop it takes the incarnation's receipts and close with it", async () => {
     const { gw } = await home();
     const { ch, offering, pool } = await channel(gw);
     offering.push(fact());
     await ch.sync();
     const opening = opened(gw, ch.name).opening;
     const receipt = events(gw, "received")[0]!;
-    const report = await gw.erase(opening.id);
-    expect(report.citations).toContain(receipt.id);
-    expect(gw.reactor.get(receipt.id)).toBeDefined();
+    // Spec 64: a live opening cannot be erased. The refusal names the pool and the road.
+    const before = [...gw.reactor.snapshot()].length;
+    await expect(gw.erase(opening.id)).rejects.toThrow(/its pool's declaration still stands/);
+    await expect(gw.erase(opening.id)).rejects.toThrow(/Drop the channel first/);
+    expect([...gw.reactor.snapshot()]).toHaveLength(before);
+    expect(gw.reactor.get(opening.id)).toBeDefined();
     expect(pool.reactor.get(fact().id)).toBeDefined();
-    expect(localChannelEvidence(gw, ch.name).state).toBe("unavailable");
-    const legacy = gw.reactor.get(opening.statusAtOpen)!;
-    await gw.append([signed({ ...legacy.claims, timestamp: gw.nextTimestamp() })]);
-    expect(localChannelEvidence(gw, ch.name).state).toBe("unavailable");
-    expect(events(gw, "open")).toEqual([]);
-  });
-  it("erase(open) before any receipt is erased history, never legacy: a resumed handle cannot sync unprotected", async () => {
-    const { gw } = await home();
-    const { ch, offering, source } = await channel(gw);
-    const opening = opened(gw, ch.name).opening;
-    await gw.erase(opening.id);
-    // Delta level: the opening's bytes are gone and one marker names this channel.
-    expect(gw.reactor.get(opening.id)).toBeUndefined();
-    expect(events(gw, "open")).toEqual([]);
+    expect(localChannelEvidence(gw, ch.name).state).toBe("open");
+    // Still receiving: nothing about the channel changed.
+    offering.push(fact(2));
+    await ch.sync();
+    expect(ids(opened(gw, ch.name).received)).toEqual([fact().id, fact(2).id].sort());
+    // Drop first. Then the erase proceeds and takes the incarnation's receipts and close with it.
+    await gw.dropChannel(ch.name);
+    const close = events(gw, "close")[0]!;
+    const report = await gw.erase(opening.id);
+    expect(report.erased).toBe(opening.id);
+    for (const gone of [opening.id, receipt.id, close.id]) {
+      expect(gw.reactor.get(gone)).toBeUndefined();
+      expect(await gw.backend.holds(gone)).toBe(false);
+    }
+    // Every member carries its own marker naming this channel; the root's other records stand.
     expect(
       [...gw.reactor.snapshot()].filter(
         (d) => inLocalContext(d, LOCAL_CONTROL) && localControlChannel(d) === `channel:${ch.name}`,
-      ),
-    ).toHaveLength(1);
-    // Object level: the history is unavailable, and stays so across a cross-process resume.
+      ).length,
+    ).toBeGreaterThanOrEqual(3);
+    expect(gw.reactor.get(opening.statusAtOpen)).toBeDefined();
     expect(localChannelEvidence(gw, ch.name)).toEqual({
       state: "unavailable",
       reason: "erased opening",
     });
+    expect(events(gw, "open")).toEqual([]);
+    expect(events(gw, "received")).toEqual([]);
+  });
+  it("erase(open) before any receipt refuses while the pool stands, and after the drop leaves erased history, never legacy", async () => {
+    const { gw } = await home();
+    const { ch, offering, source } = await channel(gw);
+    const opening = opened(gw, ch.name).opening;
+    await expect(gw.erase(opening.id)).rejects.toThrow(/Drop the channel first/);
+    expect(gw.reactor.get(opening.id)).toBeDefined();
+    // A DETACHED pool is still live: its declaration stands. Measured on a sibling channel.
+    const { ch: kept } = await channel(gw, peer(), "peer2");
+    const keptOpening = opened(gw, kept.name).opening;
+    await kept.pool.detach("kept for extraction");
+    await expect(gw.erase(keptOpening.id)).rejects.toThrow(/its pool's declaration still stands/);
+    expect(gw.reactor.get(keptOpening.id)).toBeDefined();
+    // Drop, then erase. The marker names this channel and the history reads erased, never legacy.
+    await gw.dropChannel(ch.name);
+    await gw.erase(opening.id);
+    expect(gw.reactor.get(opening.id)).toBeUndefined();
+    expect(
+      events(gw, "open").filter((d) =>
+        d.claims.pointers.some(
+          (p) => p.target.kind === "entity" && p.target.entity.id === `channel:${ch.name}`,
+        ),
+      ),
+    ).toEqual([]);
+    expect(
+      [...gw.reactor.snapshot()].filter(
+        (d) => inLocalContext(d, LOCAL_CONTROL) && localControlChannel(d) === `channel:${ch.name}`,
+      ).length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(localChannelEvidence(gw, ch.name)).toEqual({
+      state: "unavailable",
+      reason: "erased opening",
+    });
+    // A fresh open of the same name is a new protected opening that receives cleanly.
     gw.federationChannels.delete(ch.name);
-    const resumed = await gw.openChannel({
+    const fresh = await gw.openChannel({
       into: "friends",
       prefix: "peer",
       from: "https://peer.example/default",
       source,
     });
     offering.push(fact());
-    await expect(resumed.sync()).rejects.toThrow("no matching protected incarnation");
-    expect(localChannelEvidence(gw, ch.name).state).toBe("unavailable");
-    expect(events(gw, "received")).toEqual([]);
+    await fresh.sync();
+    const now = opened(gw, ch.name);
+    expect(now.opening.id).not.toBe(opening.id);
+    expect(ids(now.received)).toEqual([fact().id]);
   });
   it("re-opening a standing channel with other options refuses before caching a handle", async () => {
     const { gw } = await home();
@@ -1419,9 +1466,17 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     const { gw: elsewhere } = await home();
     const { ch: far } = await channel(elsewhere);
     const farOpening = opened(elsewhere, far.name).opening.id;
+    await elsewhere.dropChannel(far.name);
     await elsewhere.erase(farOpening);
-    const farTombstone = [...elsewhere.reactor.snapshot()].find((d) =>
-      inLocalContext(d, LOCAL_CONTROL),
+    const farTombstone = [...elsewhere.reactor.snapshot()].find(
+      (d) =>
+        inLocalContext(d, LOCAL_CONTROL) &&
+        d.claims.pointers.some(
+          (p) =>
+            p.role === "erases" &&
+            p.target.kind === "delta" &&
+            p.target.deltaRef.delta === farOpening,
+        ),
     )!;
     await expect(pool.eraseReplica(farTombstone, farOpening)).rejects.toThrow(
       "no attached held local erasure authority",
