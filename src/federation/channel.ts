@@ -2211,7 +2211,30 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
   // THE MARK RIDES THIS ONE TOO. A drop that REFUSES leaves the pool attached for the life of the
   // process — deliberately, so an operator can look at what could not be purged — and an unmarked
   // pool is one with an open anonymous door.
-  const pool = channel?.pool ?? attached ?? (await attachChannelPool(gw, name));
+  // A handle whose pool is no longer attached here is STALE: a drop that discarded the bytes and
+  // then failed to strike the declaration closes the pool and leaves the handle behind. The re-run
+  // the refusal asks for must not drop through that closed store; it re-attaches, which is safe
+  // over the emptied store, and settles the listing (spec 64).
+  const cached = channel?.pool ?? attached;
+  const stale =
+    cached !== undefined &&
+    (cached.gateway === undefined ||
+      !gw.quarantinePools.has(cached.gateway) ||
+      cached.gateway.attachedTo !== gw);
+  if (stale) {
+    gw.federationChannels.delete(name);
+    gw.channelPools.delete(name);
+    if (gw.options.channelBackend === undefined)
+      throw new Error(
+        `dropChannel refused: the handle on "${name}" is stale (its pool is no longer attached) ` +
+          `and this store has no channelBackend to re-open it with. Configure channelBackend and ` +
+          `drop again. Nothing was removed.`,
+      );
+  }
+  const pool = stale
+    ? await attachChannelPool(gw, name)
+    : (cached ?? (await attachChannelPool(gw, name)));
+  if (stale) gw.channelPools.set(name, pool); // the lifecycle read asks channelPools, not the handle
   if (pool.drop === undefined) {
     throw new Error(
       `dropChannel refused: ${name} has no drop — only a SEPARATE container purges its own bytes, ` +

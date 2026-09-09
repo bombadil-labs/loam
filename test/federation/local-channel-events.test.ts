@@ -15,6 +15,14 @@
 // sync that compares an omitted `from` against the record instead of accepting it (1 red each);
 // an attached replica that starts out authorized to purge a local event (1 red).
 //
+// REVISED AS A WHOLE FOR SPEC 64 (T289), before this file froze: every lifecycle literal carries the
+// parent-container pointer, and the two erase(open) cases pin the new rule — a live opening cannot
+// be erased, the drop comes first, and a dropped incarnation's erase takes its receipts and close.
+// RAILS-RED of the revised file on the T288 tip (4e3b8b52): 10 red, 65 green. The greens are the
+// T288 cases the revision did not touch, controls that the pointer and the rule narrowed nothing
+// else; the reds are the six literal comparisons, the two erase(open) cases, and the two
+// preplanted-tombstone cases whose predicted ids moved with the pointer.
+//
 // WHAT THESE RAILS DO NOT ASSERT: a reader resolving through a Schema or a door over the `received`
 // operand. No consumer resolves through it yet; `sourceStanding` re-ingests the operand into a fresh
 // Reactor and asks lawfulNegated, which is the nearest reader available. The slice that first

@@ -4,7 +4,10 @@
   "duration": 3,
   "edges": [],
   "id": "T289",
-  "rails": [],
+  "rails": [
+    "test/federation/local-channel-live-opening.test.ts",
+    "test/federation/local-channel-container-scope.test.ts"
+  ],
   "scope": [
     "src/federation/local-channel-events.ts",
     "src/federation/channel.ts",

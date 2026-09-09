@@ -750,10 +750,13 @@ async function liveOpening(
   const negated = lawfulNegated(gw.reactor, gw.operatorAuthor);
   if (gw.reactor.get(o.poolDeclaration) !== undefined && !negated(o.poolDeclaration))
     return "its pool's declaration still stands";
-  const attached = gw.channelPools.get(o.channel)?.gateway;
+  // The pool under this NAME may be a later incarnation; only the pool declared by THIS opening
+  // counts, and when another incarnation holds the name, the name's backend is that one's too.
+  const named = gw.channelPools.get(o.channel);
+  const attached = named?.declarationId === o.poolDeclaration ? named.gateway : undefined;
   if (attached !== undefined && [...attached.reactor.snapshot()].length > 0)
     return "its pool is still attached and holds bytes";
-  if (attached === undefined && gw.options.channelBackend !== undefined) {
+  if (named === undefined && gw.options.channelBackend !== undefined) {
     const backend = gw.options.channelBackend(o.channel);
     try {
       if ((await backend.deltasSince(new Set())).length > 0)
