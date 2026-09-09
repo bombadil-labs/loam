@@ -9,7 +9,7 @@
 // pointer instead of the `event` role → 0 red, EQUIVALENT today (the parser pins `event` first), kept
 // as a role read on purpose. The cascade probe in local-channel-live-opening.test.ts also reds the
 // first case here. Measured again after review round 1: a closed incarnation is still listed →
-// 1 red.
+// 1 red. After review round 2: standing ignores the pool declaration → 2 red.
 import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -198,6 +198,42 @@ describe("spec 64: lifecycle events name their parent container", () => {
     await expect(gw.append([record])).rejects.toThrow(/never slated/);
     expect(localChannelEvidence(gw, ch.name).state).toBe("open");
   });
+  it("a refused drop leaves a close beside a standing pool and the channel stays listed; a close erased before its opening leaves the dropped channel unlisted", async () => {
+    const gw = await home();
+    const { ch, offering } = await open(gw, "friends", "friends:peer");
+    offering.push(fact(1));
+    await ch.sync();
+    // Refused drop: the close lands first, the purge refuses, the declaration and the pool stand.
+    const pool = ch.pool.gateway!.backend as MemoryBackend & { failPurge?: boolean };
+    const purge = pool.purge.bind(pool);
+    pool.purge = () => Promise.reject(new Error("fixture purge failure"));
+    await expect(gw.dropChannel(ch.name)).rejects.toThrow(/could not be proven clean/);
+    expect(localChannelsInContainer(gw, "friends")).toEqual([ch.name]);
+    expect(localChannelEvidence(gw, ch.name).state).not.toBe("open");
+    pool.purge = purge;
+    await gw.dropChannel(ch.name);
+    expect(localChannelsInContainer(gw, "friends")).toEqual([]);
+    // Now erase the dropped opening with the close's purge faulting: the close is tombstoned and
+    // gone from the reactor, the opening stays; the channel must still read as dropped.
+    const opening = eventsOf(gw, ch.name).find(
+      (d) =>
+        d.claims.pointers[2]?.target.kind === "primitive" &&
+        d.claims.pointers[2].target.value === "open",
+    )!;
+    const primary = gw.backend as MemoryBackend;
+    const primaryPurge = primary.purge.bind(primary);
+    let purges = 0;
+    primary.purge = (ids) => {
+      purges += 1;
+      return purges === 1 ? Promise.reject(new Error("fixture purge failure")) : primaryPurge(ids);
+    };
+    await expect(gw.erase(opening.id)).rejects.toThrow();
+    expect(gw.reactor.get(opening.id)).toBeDefined();
+    expect(localChannelsInContainer(gw, "friends")).toEqual([]);
+    primary.purge = primaryPurge;
+    await gw.erase(opening.id);
+    expect(localChannelsInContainer(gw, "friends")).toEqual([]);
+  });
   it("a bound connection's lineage read lists the channels opened into its container and no others; the operator's read filters by container", async () => {
     const gw = await home();
     for (const container of ["ada:journal", "bea:notes"])
@@ -241,7 +277,8 @@ describe("spec 64: lifecycle events name their parent container", () => {
     expect(localChannelsInContainer(gw, "bea:notes")).toEqual([b.ch.name]);
     expect(localChannelsInContainer(gw, "friends")).toEqual([root.ch.name]);
     expect(localChannelsInContainer(gw, "nobody")).toEqual([]);
-    // A dropped incarnation is no longer listed, erased or not; its sibling still is.
+    // A dropped incarnation is no longer listed, erased or not; its sibling still is. Standing is
+    // the surviving pool declaration, the erase door's own liveness test, never a close event.
     const aOpening = opened(gw, a.ch.name).opening.id;
     await gw.dropChannel(a.ch.name);
     expect(localChannelsInContainer(gw, "ada:journal")).toEqual([]);

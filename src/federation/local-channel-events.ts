@@ -8,6 +8,7 @@ import {
   type Reactor,
 } from "@bombadil/rhizomatic";
 import type { Gateway } from "../gateway/gateway.js";
+import { lawfulNegated } from "../gateway/registration.js";
 import { containerDeclarationName, currentContainerDeclarationId } from "../gateway/container.js";
 import { channelStatusImpl } from "./channel.js";
 import { eraseDefect, isTombstone, readTombstones, tombstoneTarget } from "../gateway/erase.js";
@@ -221,8 +222,9 @@ export function parseLocalEvent(d: Delta, operator: string | undefined): LocalEv
 /**
  * The channels whose lineage says they were opened INTO this container and still stand, read from
  * the receiver's root ground by the parent-container pointer. This is the container-scoped read a
- * bound door will serve from; no door serves it yet. A closed (dropped) incarnation is not listed,
- * and neither is an erased one.
+ * bound door will serve from; no door serves it yet. Standing means the opening's pool declaration
+ * survives, the erase door's own liveness test; a dropped incarnation is not listed, and neither
+ * is an erased one.
  */
 export function localChannelsInContainer(gw: Gateway, container: string): string[] {
   const rows = [...gw.reactor.snapshot()];
@@ -232,19 +234,19 @@ export function localChannelsInContainer(gw: Gateway, container: string): string
       const target = localEraseTarget(d, gw.reactor, gw.operatorAuthor);
       if (target !== undefined) dead.add(target);
     }
-  const opens = new Map<string, LocalChannelOpening>();
-  const closed = new Set<string>();
+  // An incarnation STANDS while its pool declaration survives, the same test the erase door uses
+  // for liveness. A close event is not the sign: a refused drop leaves a close beside a standing
+  // pool, and an erase that faulted after the close's tombstone leaves none beside a dropped one.
+  const negated = lawfulNegated(gw.reactor, gw.operatorAuthor);
+  const names = new Set<string>();
   for (const d of rows) {
     if (!inLocalContext(d, LOCAL_EVENT) || dead.has(d.id)) continue;
     const parsed = parseLocalEvent(d, gw.operatorAuthor);
-    if (parsed?.action === "open") opens.set(d.id, parsed.opening);
-    else if (parsed?.action === "close") closed.add(parsed.opening);
+    if (parsed?.action !== "open" || parsed.opening.into !== container) continue;
+    const declaration = parsed.opening.poolDeclaration;
+    if (gw.reactor.get(declaration) !== undefined && !negated(declaration))
+      names.add(parsed.opening.channel);
   }
-  // A closed incarnation was dropped: not a channel the container has. Erased openings are absent
-  // already; their markers say the channel is gone.
-  const names = new Set<string>();
-  for (const [id, opening] of opens)
-    if (opening.into === container && !closed.has(id)) names.add(opening.channel);
   return [...names].sort();
 }
 export function localEraseTarget(

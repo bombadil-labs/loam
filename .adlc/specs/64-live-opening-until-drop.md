@@ -167,8 +167,9 @@ criterion names its verification.
 3. After `dropChannel`, erasing the opening erases its receipts and close first and the opening
    last, each with a marked tombstone naming the channel and the pool declaration; a member purge
    that faults leaves its tombstone recorded and its bytes held, and the re-run erases that member
-   again rather than skipping it; a fault before the opening's own purge leaves the opening intact
-   and the history readable, and a re-run finishes; the sibling channel's receipts and the root ground are unchanged; evidence
+   again rather than skipping it; a fault before the opening's own purge leaves the opening intact,
+   so every surviving receipt still resolves and no history reads `missing referenced opening` or
+   `invalid local event history`, and a re-run finishes; the sibling channel's receipts and the root ground are unchanged; evidence
    reads `unavailable: erased`; a fresh same-name open is a new protected opening that receives
    cleanly, and a LATER incarnation that already existed keeps receiving. A drop whose declaration
    strike failed after the purge completes on re-run. Verify:
@@ -199,6 +200,16 @@ criterion names its verification.
    `git -C <worktree-at-566-tip> stash && npx vitest run test/federation/local-channel-live-opening.test.ts test/federation/local-channel-container-scope.test.ts`
 10. Full bar green and hollow-test run first on the clean tip, then recorded. Verify:
     `npm run check` and `adlc hollow-test --base origin/t288/local-channel-events --max 300 --test-cmd "timeout -k 10 600 npx vitest run test/federation/local-channel-*.test.ts"`
+
+## Review round 2 of the build, 2026-09-09
+
+The container read decided "dropped" from a close event. A refused drop leaves a close beside a
+standing pool, and an erase that faulted after the close's tombstone leaves none beside a dropped
+one, so the read disagreed with the erase door both ways. It now decides "standing" the way the
+erase door decides "live": the opening's pool declaration survives. The fixture's per-name store
+now hands out a fresh handle over the same bytes on every call, as a file does, so a byte check
+that closes its own handle never closes a live pool's. "History stays readable" in criterion 3
+now says what it means.
 
 ## Review round 1 of the build, 2026-09-09
 

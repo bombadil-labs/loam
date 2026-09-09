@@ -44,28 +44,33 @@ class FaultBackend extends MemoryBackend {
   failPurgeAfter = Number.POSITIVE_INFINITY;
   purges = 0;
   failNextRetraction = false;
-  isClosed = false;
   constructor(reopen?: FaultBackend) {
     super();
-    // Reopening a closed store carries its bytes, the way a file on disk carries them.
-    if (reopen !== undefined) for (const d of reopen.carried()) void super.append([d]);
+    // A fresh handle over the same bytes, the way a file on disk carries them across handles.
+    if (reopen !== undefined) void super.append(reopen.carried());
   }
   private held: Delta[] = [];
   carried(): Delta[] {
     return this.held;
   }
-  override async close(): Promise<void> {
-    this.held = await super.deltasSince(new Set());
-    this.isClosed = true;
-    return super.close();
+  override async append(deltas: Iterable<Delta>): Promise<number> {
+    const batch = [...deltas];
+    const n = await this.appendChecked(batch);
+    this.held = [...this.held, ...batch];
+    return n;
   }
   override async purge(ids: Iterable<string>): Promise<number> {
+    const gone = new Set(ids);
+    const n = await this.purgeChecked(gone);
+    this.held = this.held.filter((d) => !gone.has(d.id));
+    return n;
+  }
+  private async purgeChecked(ids: Set<string>): Promise<number> {
     if (this.purges >= this.failPurgeAfter) throw new Error("fixture purge failure");
     this.purges += 1;
     return super.purge(ids);
   }
-  override async append(deltas: Iterable<Delta>): Promise<number> {
-    const batch = [...deltas];
+  private async appendChecked(batch: readonly Delta[]): Promise<number> {
     if (
       this.failNextRetraction &&
       batch.some((d) => d.claims.pointers.some((p) => p.role === "negates"))
@@ -79,16 +84,14 @@ class FaultBackend extends MemoryBackend {
 async function home() {
   const primary = new FaultBackend();
   const pools = new Map<string, FaultBackend>();
-  // ONE STORE PER NAME, like the CLI's sqlite file: a re-attach opens the same bytes. A closed store
-  // is reopened carrying its bytes, so a byte check after a strike sees what the pool held.
+  // ONE STORE PER NAME, like the CLI's sqlite file: every call opens a FRESH handle over the same
+  // bytes, so a byte check that opens and closes its own handle never closes a live pool's.
   const gw = await Gateway.boot(
     primary,
     assembleGenesis({ operatorSeed: SEED, registrations: [] }),
     {
       channelBackend: (name) => {
-        const held = pools.get(name);
-        if (held !== undefined && !held.isClosed) return held;
-        const backend = new FaultBackend(held);
+        const backend = new FaultBackend(pools.get(name));
         pools.set(name, backend);
         return backend;
       },
@@ -187,7 +190,12 @@ describe("spec 64: a live opening cannot be erased", () => {
     // Cross-process: no handle in memory, the store on disk still holds the bytes.
     gw.federationChannels.delete(ch.name);
     gw.channelPools.delete(ch.name);
-    expect(await pools.get(ch.name)!.holds(fact(1).id)).toBe(true);
+    expect(
+      pools
+        .get(ch.name)!
+        .carried()
+        .some((d) => d.id === fact(1).id),
+    ).toBe(true);
     const unattached = await gw.erase(opening.id).catch((e: Error) => e.message);
     expect(unattached).toContain(
       "its pool's store still holds bytes although its declaration was struck",
