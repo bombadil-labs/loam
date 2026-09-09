@@ -1,0 +1,17 @@
+{
+  "body": "# T289 — erase(opening) is a drop; lifecycle under the container\n\nWorking spec: `.adlc/specs/64-erased-opening-drops-the-pool.md`. Read it first; it carries the user stories, Myk's two rulings of 2026-09-08, the contract, and the acceptance criteria with their verification paths. This ticket stacks on T288 (#566). PR #567's cleanup vocabulary is superseded and must not merge.\n\n## What to build\n\n1. `Gateway.erase(openingId)` on a protected `open` event purges and detaches the exact attached pool the opening's `poolDeclaration` names, through the same byte-verified path `dropChannel` uses, inside the same erase. It erases that incarnation's `received` and `close` events with marked tombstones. A pool purge that refuses makes the whole erase refuse; nothing is written first.\n2. After the erase: evidence `unavailable: erased`; stale `sync` refuses; `drop` refuses as already gone; a fresh `openChannel` of the same name is a new protected opening.\n3. Every protected lifecycle event carries an entity pointer at the parent container (role `container`, context `loam.container`, id = `into`). A bound connection's surface over `into` includes those events and no others. The container drop road cascades over them with marked tombstones.\n4. Remove T288's transitional `erased opening` refusal of `drop` once the erase itself drops.\n\n## Acceptance criteria\n\nThe spec's criteria 1–10 are the rail list. Two rail files: `test/federation/local-channel-erased-opening-drop.test.ts` (criteria 1–4) and `test/federation/local-channel-container-scope.test.ts` (criteria 6–8). Criterion 5 reuses `test/federation/local-channel-events.test.ts`. Every purging case asserts a named live bystander at the bytes. Each rail file records its rails-red run on the #566 tip and its revert probes in its header. Declare `rails` on this ticket only when the files exist.\n\nVerify: `npx vitest run test/federation/local-channel-erased-opening-drop.test.ts test/federation/local-channel-container-scope.test.ts`, then `npm run check`, then `adlc hollow-test --base origin/t288/local-channel-events --max 300 --test-cmd \"timeout -k 10 600 npx vitest run test/federation/local-channel-*.test.ts\"` on the clean tip before any evidence is recorded.\n\n## Merge\n\nThis widens what erase purges: an erased opening now takes its pool with it. Myk merges. The PR body states that in one line.",
+  "category": "feature",
+  "duration": 3,
+  "edges": [],
+  "id": "T289",
+  "rails": [],
+  "scope": [
+    "src/federation/local-channel-events.ts",
+    "src/federation/channel.ts",
+    "src/gateway/erase.ts",
+    "src/gateway/ingest.ts",
+    "test/federation/local-channel-erased-opening-drop.test.ts",
+    "test/federation/local-channel-container-scope.test.ts"
+  ],
+  "title": "Erasing a channel opening drops its pool; lifecycle events file under the parent container"
+}
