@@ -1,0 +1,18 @@
+{
+  "body": "# T289 — erase refuses a live opening; drop first; lifecycle under the container\n\nWorking spec: `.adlc/specs/64-live-opening-until-drop.md`. Read it first; it carries the user stories, Myk's rulings of 2026-09-08 and the correction of 2026-09-09, two premortems, the contract, and the acceptance criteria with their verification paths. This ticket stacks on T288 (#566). PR #567's cleanup vocabulary is superseded and must not merge.\n\n## What to build\n\n1. An opening is LIVE while its pool declaration survives (`currentPoolDeclaration(channel)` equals the opening's `poolDeclaration`), attached or not. `Gateway.erase(openingId)` on a live protected `open` event writes nothing and refuses. The message names the pool container, says it must be dropped first, and says its deltas can be read or extracted until then. The channel is untouched: sync, reads and drop all work as today.\n2. `Gateway.erase(openingId)` on an opening whose declaration is struck and whose pool holds no bytes erases that incarnation's receipts and close first and the opening last, inside one channel commit, each with a marked tombstone naming the channel and the pool declaration. It touches no pool. A later incarnation of the same name is unaffected.\n3. Every protected lifecycle event carries an entity pointer at the parent container: role `parent-container`, context `loam.local.channel.event`, id = the `into` container name, appended after the event header. Never role `container` at `loam.container`. A bound connection's lineage read filters by it; the operator's read may filter by it. One pointer, at `into`, never per ancestor.\n4. Remove T288's outright erase of a live opening and its `erased opening` refusal of `drop`; under this spec that state cannot arise for a live pool.\n\n## Acceptance criteria\n\nThe spec's criteria 1–10 are the rail list. Two rail files: `test/federation/local-channel-live-opening.test.ts` (criteria 1–3) and `test/federation/local-channel-container-scope.test.ts` (criteria 6–7). Criteria 4, 5 and 8 revise or reuse `test/federation/local-channel-events.test.ts`. Every purging case asserts a named live bystander at the bytes. Each rail file records its rails-red run on the #566 tip and its revert probes in its header. The two T288 cases named under Migration are revised in the same stack or through the authorized revision road. Declare `rails` on this ticket only when the files exist.\n\nVerify: `npx vitest run test/federation/local-channel-live-opening.test.ts test/federation/local-channel-container-scope.test.ts test/federation/local-channel-events.test.ts`, then `npm run check`, then `adlc hollow-test --base origin/t288/local-channel-events --max 300 --test-cmd \"timeout -k 10 600 npx vitest run test/federation/local-channel-*.test.ts\"` on the clean tip before any evidence is recorded.\n\n## Merge\n\nErase never purges a live pool under this ticket; only the operator's drop does, as today. The one cascade it adds is erasing a dropped incarnation's lineage records with its opening. Myk merges, because it changes what the erase door promises.",
+  "category": "feature",
+  "duration": 3,
+  "edges": [],
+  "id": "T289",
+  "rails": [],
+  "scope": [
+    "src/federation/local-channel-events.ts",
+    "src/federation/channel.ts",
+    "src/gateway/erase.ts",
+    "src/gateway/ingest.ts",
+    "test/federation/local-channel-live-opening.test.ts",
+    "test/federation/local-channel-container-scope.test.ts",
+    "test/federation/local-channel-events.test.ts"
+  ],
+  "title": "A live channel opening cannot be erased until its pool is dropped; lifecycle events file under the parent container"
+}
