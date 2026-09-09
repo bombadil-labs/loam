@@ -16,6 +16,10 @@
 // After review round 3 (123 cases): an orphaned attached pool cannot be dropped → 2 red.
 // After review round 4 (124 cases): a pool under another declaration is always another
 // incarnation → 1 red; the drop road ignores an orphan after a restart → 1 red.
+// After review round 5 (126 cases plus prefix-collision): a fresh opening attaches over leftover
+// bytes → 1 red; a name with no status is severed even with a pool attached → 1 red; an
+// unparseable event does not fail closed → 1 red; every name is held to the leftover check →
+// 1 red in test/federation/prefix-collision.test.ts, a stranger's record that is no lineage.
 // The boot-unattachable pool is not a case here: the base already refuses it as unreachable. The
 // struck-declaration case measures both halves of the byte side: the attached pool, and the
 // store reopened by name with no handle in memory (the fixture keeps one store per name, as the
@@ -246,6 +250,82 @@ describe("spec 64: a live opening cannot be erased", () => {
     expect(events(gw, ch.name, "close")).toEqual([]); // nothing was open, so nothing is closed
     await gw.erase(opening.id);
     expect(gw.reactor.get(opening.id)).toBeUndefined();
+  });
+  it("a fresh opening refuses a store that still holds bytes no opening names; the old opening's erase still refuses", async () => {
+    const first = await home();
+    const a = await channel(first.gw);
+    a.offering.push(fact(1));
+    await a.ch.sync();
+    const opening = opened(first.gw, a.ch.name).opening;
+    // Strike the declaration AND the status records by hand, no drop: the store keeps its bytes.
+    const struck = [
+      ...survivingDeclarationIds(first.gw.reactor, OP, a.ch.name),
+      ...[...first.gw.reactor.snapshot()]
+        .filter((d) =>
+          d.claims.pointers.some(
+            (p) =>
+              p.target.kind === "entity" &&
+              p.target.entity.context === "loam.channel" &&
+              p.target.entity.id === `channel:${a.ch.name}`,
+          ),
+        )
+        .map((d) => d.id),
+    ];
+    for (const id of struck)
+      await first.gw.append([
+        signClaims(makeNegationClaims(OP, first.gw.nextTimestamp(), id), SEED),
+      ]);
+    const gw = await first.restart();
+    expect(first.holds(a.ch.name, fact(1).id)).toBe(true);
+    const feed = peer();
+    await expect(
+      gw.openChannel({
+        into: "friends",
+        prefix: "peer",
+        from: "https://peer.example/peer",
+        source: feed.source,
+      }),
+    ).rejects.toThrow(/still holds bytes that no opening names/);
+    // No opening was written; the old one's erase still refuses; the road the refusal names works.
+    expect(events(gw, a.ch.name, "open").filter((d) => d.id !== opening.id)).toEqual([]);
+    await expect(gw.erase(opening.id)).rejects.toThrow(/holds bytes/);
+    expect(first.holds(a.ch.name, fact(1).id)).toBe(true);
+    await gw.dropChannel(a.ch.name);
+    expect(first.holds(a.ch.name, fact(1).id)).toBe(false);
+    await gw.erase(opening.id);
+    expect(gw.reactor.get(opening.id)).toBeUndefined();
+  });
+  it("an event this reader cannot parse makes the orphan question fail closed: the drop refuses rather than purges", async () => {
+    const first = await home();
+    const a = await channel(first.gw);
+    a.offering.push(fact(1));
+    await a.ch.sync();
+    const opening = opened(first.gw, a.ch.name).opening;
+    await first.gw.append([
+      signClaims(
+        containerClaims(
+          { container: a.ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
+          OP,
+          first.gw.nextTimestamp(),
+        ),
+        SEED,
+      ),
+    ]);
+    // Plant, through the trusted restore boundary, an open literal this parser cannot read: it
+    // lacks the parent-container pointer. Then restart, so boot reads it as history.
+    const held = first.gw.reactor.get(opening.id)!;
+    const unreadable = signClaims(
+      {
+        ...held.claims,
+        timestamp: first.gw.nextTimestamp(),
+        pointers: held.claims.pointers.filter((p) => p.role !== "parent-container"),
+      },
+      SEED,
+    );
+    await first.primary.append([unreadable]);
+    const gw = await first.restart();
+    await expect(gw.dropChannel(a.ch.name)).rejects.toThrow(/dropChannel refused/);
+    expect(first.holds(a.ch.name, fact(1).id)).toBe(true);
   });
   it("both orphan states read the same after a restart: the erase refuses or the drop works, never a strand", async () => {
     // Struck and replaced by hand, then a restart that re-attaches under the new declaration.

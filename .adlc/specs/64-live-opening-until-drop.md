@@ -209,6 +209,18 @@ criterion names its verification.
 10. Full bar green and hollow-test run first on the clean tip, then recorded. Verify:
     `npm run check` and `adlc hollow-test --base origin/t288/local-channel-events --max 300 --test-cmd "timeout -k 10 600 npx vitest run test/federation/local-channel-*.test.ts"`
 
+## Review round 5 of the build, 2026-09-09
+
+Strike a channel's declaration and status records by hand, restart, open the same name afresh:
+the name-keyed store still held the old bytes, the fresh opening attached over them, and the old
+opening's erase read the pool as a later incarnation's and reported clean. A fresh protected
+opening now refuses a store that still holds bytes no opening names, before the opening is
+written, for a name that once carried a protected opening; a name that never did (a stranger's
+record, a legacy channel) is not held to it. The pool stays attached under the declaration the
+open minted, so the drop is the road out, and the drop addresses an attached pool under a name
+with no status record instead of calling it severed. `orphanedDeclaration` fails closed on an
+event it cannot parse, so a purge never rides a parser change; a rail plants one and restarts.
+
 ## Review round 4 of the build, 2026-09-09
 
 The orphan road held only inside the process that made the orphan. After a restart, boot

@@ -255,11 +255,29 @@ export function localChannelsInContainer(gw: Gateway, container: string): string
  * so a struck declaration never sits beneath a pool here. The erase door and the drop both ask
  * this, so that an orphan reads the same across a restart as inside the process that made it.
  */
+/** Did this channel name ever carry a protected opening, standing or erased? */
+export function channelHadOpening(gw: Gateway, channel: string): boolean {
+  const id = `channel:${channel}`;
+  for (const d of gw.reactor.snapshot()) {
+    if (inLocalContext(d, LOCAL_EVENT)) {
+      if (
+        d.claims.pointers.some(
+          (p) => p.role === "event" && p.target.kind === "entity" && p.target.entity.id === id,
+        )
+      )
+        return true;
+    } else if (inLocalContext(d, LOCAL_CONTROL) && localControlChannel(d) === id) return true;
+  }
+  return false;
+}
 export function orphanedDeclaration(gw: Gateway, declaration: string): boolean {
   for (const d of gw.reactor.snapshot()) {
     if (!inLocalContext(d, LOCAL_EVENT)) continue;
     const parsed = parseLocalEvent(d, gw.operatorAuthor);
-    if (parsed?.action === "open" && parsed.opening.poolDeclaration === declaration) return false;
+    // An event this reader cannot parse is not "no opening names it"; it fails closed, so a purge
+    // never rides a parser change or a malformed restore.
+    if (parsed === undefined) return false;
+    if (parsed.action === "open" && parsed.opening.poolDeclaration === declaration) return false;
   }
   return true;
 }
