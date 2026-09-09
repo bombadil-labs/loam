@@ -24,6 +24,14 @@ Baseline: `origin/main` at `74bd30ce`, 2026-09-08.
   purged as part of the erase; no later cleanup act exists.
 - Channel lifecycle events are tracked by the parent container, not only at the root.
 
+**Decided by Myk, 2026-09-08, in chat, after the premortem:**
+
+- The channel's ordinary status stamps stay when the opening is erased. The marker says the lineage
+  is gone; the status says what it was about. Erasing the status would make the hole unexplainable.
+- One container pointer, at `into`, never one per ancestor. A pointer per ancestor would carry a
+  container's records outside the context that bounds them, and would freeze the tree shape into
+  every event.
+
 **Superseded by these rulings:** PR #567's cleanup vocabulary (`cleanup` events, the `erased`
 history state, the retry protocol). It is not to be merged. T288's "erased opening" refusal of
 `drop` stays only as the transitional state between #566 landing and this ticket landing.
@@ -145,11 +153,3 @@ old opening purges a re-opened pool; two T288 cases pin the behaviour this repla
 order writes the tombstone first, so "nothing written" was false; the erase needs the channel
 commit lock; and story 4 named a container drop road the code does not have, and criterion 7 a
 scoping mechanism the gather does not have.
-
-## Questions to settle before P3
-
-- Should erasing the opening also erase the channel's status stamps (`loam:channel` records), or
-  do they stay as ordinary history? Recommendation: they stay; they are not protected events and
-  a later reader needs them to explain the hole.
-- The container pointer: one pointer to the `into` container, or one per ancestor? Recommendation:
-  one, at `into`; reach walks the parent edges already.
