@@ -10,13 +10,19 @@
 //   a dropped incarnation's erase leaves its receipts and close    → 5 red
 //   a surviving declaration does not make the opening live         → 3 red
 //   a stale handle is not re-registered on drop re-run             → 1 red
-// The boot-unattachable pool is not a case here: the base already refuses it as unreachable, and
-// the struck-declaration case above measures the byte-side half of liveness instead.
+// Measured again after review round 1 (120 cases across the nine suites):
+//   a tombstoned member is skipped whether or not it is settled     → 1 red
+//   the struck-declaration byte check through the store is gone     → 1 red
+// The boot-unattachable pool is not a case here: the base already refuses it as unreachable. The
+// struck-declaration case measures both halves of the byte side: the attached pool, and the
+// store reopened by name with no handle in memory (the fixture keeps one store per name, as the
+// CLI's sqlite file does).
 import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { survivingDeclarationIds } from "../../src/gateway/container.js";
+import { readTombstones } from "../../src/gateway/erase.js";
 import {
   inLocalContext,
   LOCAL_CONTROL,
@@ -38,6 +44,21 @@ class FaultBackend extends MemoryBackend {
   failPurgeAfter = Number.POSITIVE_INFINITY;
   purges = 0;
   failNextRetraction = false;
+  isClosed = false;
+  constructor(reopen?: FaultBackend) {
+    super();
+    // Reopening a closed store carries its bytes, the way a file on disk carries them.
+    if (reopen !== undefined) for (const d of reopen.carried()) void super.append([d]);
+  }
+  private held: Delta[] = [];
+  carried(): Delta[] {
+    return this.held;
+  }
+  override async close(): Promise<void> {
+    this.held = await super.deltasSince(new Set());
+    this.isClosed = true;
+    return super.close();
+  }
   override async purge(ids: Iterable<string>): Promise<number> {
     if (this.purges >= this.failPurgeAfter) throw new Error("fixture purge failure");
     this.purges += 1;
@@ -58,12 +79,16 @@ class FaultBackend extends MemoryBackend {
 async function home() {
   const primary = new FaultBackend();
   const pools = new Map<string, FaultBackend>();
+  // ONE STORE PER NAME, like the CLI's sqlite file: a re-attach opens the same bytes. A closed store
+  // is reopened carrying its bytes, so a byte check after a strike sees what the pool held.
   const gw = await Gateway.boot(
     primary,
     assembleGenesis({ operatorSeed: SEED, registrations: [] }),
     {
       channelBackend: (name) => {
-        const backend = new FaultBackend();
+        const held = pools.get(name);
+        if (held !== undefined && !held.isClosed) return held;
+        const backend = new FaultBackend(held);
         pools.set(name, backend);
         return backend;
       },
@@ -147,18 +172,27 @@ describe("spec 64: a live opening cannot be erased", () => {
     expect(events(gw, ch.name, "close")).toHaveLength(1);
     expect(bytes(siblingPool)).toEqual(before.sibling);
   });
-  it("a declaration struck through the append door with the pool's bytes still held refuses and names the orphaned pool", async () => {
-    const { gw } = await home();
+  it("a declaration struck through the append door with the pool's bytes still held refuses and names the orphaned pool, attached or not", async () => {
+    const { gw, pools } = await home();
     const { ch, offering, pool } = await channel(gw);
     offering.push(fact(1));
     await ch.sync();
     const opening = opened(gw, ch.name).opening;
     for (const id of survivingDeclarationIds(gw.reactor, OP, ch.name))
       await gw.append([signClaims(makeNegationClaims(OP, gw.nextTimestamp(), id), SEED)]);
-    const refusal = await gw.erase(opening.id).catch((e: Error) => e.message);
-    expect(refusal).toContain("its pool is still attached and holds bytes");
+    const attached = await gw.erase(opening.id).catch((e: Error) => e.message);
+    expect(attached).toContain("its pool is still attached and holds bytes");
     expect(gw.reactor.get(opening.id)).toBeDefined();
     expect(pool.reactor.get(fact(1).id)).toBeDefined();
+    // Cross-process: no handle in memory, the store on disk still holds the bytes.
+    gw.federationChannels.delete(ch.name);
+    gw.channelPools.delete(ch.name);
+    expect(await pools.get(ch.name)!.holds(fact(1).id)).toBe(true);
+    const unattached = await gw.erase(opening.id).catch((e: Error) => e.message);
+    expect(unattached).toContain(
+      "its pool's store still holds bytes although its declaration was struck",
+    );
+    expect(gw.reactor.get(opening.id)).toBeDefined();
   });
 });
 
@@ -210,6 +244,35 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     expect(await primary.holds(siblingReceipt.id)).toBe(true);
     expect(gw.reactor.get(opening.statusAtOpen)).toBeDefined();
     expect(opened(gw, sibling.name).received.map((d) => d.id)).toEqual([fact(2).id]);
+  });
+  it("a member whose purge faulted is erased again on the re-run, never skipped for its tombstone", async () => {
+    const { gw, primary } = await home();
+    const { ch, offering } = await channel(gw);
+    offering.push(fact(1));
+    await ch.sync();
+    const opening = opened(gw, ch.name).opening;
+    const receipt = events(gw, ch.name, "received")[0]!;
+    await gw.dropChannel(ch.name);
+    const close = events(gw, ch.name, "close")[0]!;
+    // The FIRST member purge fails, whichever member sorts first: its tombstone lands, its bytes
+    // stay held, and the other member is untouched.
+    primary.purges = 0;
+    primary.failPurgeAfter = 0;
+    await expect(gw.erase(opening.id)).rejects.toThrow(/STILL HELD/);
+    const dead = readTombstones(gw.reactor, OP);
+    const held = [receipt, close].filter((m) => dead.has(m.id));
+    expect(held).toHaveLength(1);
+    expect(await primary.holds(held[0]!.id)).toBe(true);
+    expect(gw.reactor.get(held[0]!.id)).toBeDefined();
+    expect(gw.reactor.get(opening.id)).toBeDefined();
+    // The re-run erases that member again, anchoring on its tombstone, then finishes.
+    primary.failPurgeAfter = Number.POSITIVE_INFINITY;
+    const report = await gw.erase(opening.id);
+    expect(report.erased).toBe(opening.id);
+    for (const m of [receipt, close, gw.reactor.get(opening.id) ?? opening]) {
+      expect(await primary.holds(m.id)).toBe(false);
+      expect(gw.reactor.get(m.id)).toBeUndefined();
+    }
   });
   it("a later incarnation of the same name keeps receiving after the earlier one's opening is erased", async () => {
     const { gw } = await home();

@@ -874,17 +874,18 @@ export async function eraseImpl(
       );
     }
     // A DROPPED incarnation's opening takes its receipts and close with it, receipts and close
-    // FIRST and the opening LAST, in one channel commit: a crash before the opening's tombstone
-    // leaves every surviving receipt resolvable, and a re-run finishes. Settled members are skipped.
+    // FIRST under the channel commit and the opening LAST, below: a crash before the opening's
+    // tombstone leaves every surviving receipt resolvable, and a re-run finishes. No receipt can
+    // land in between: a receipt needs a sync under a surviving declaration, and this one is
+    // struck. SETTLED members are skipped: tombstoned AND held by no tier. A member whose purge
+    // faulted has a tombstone and must be erased again; that erase anchors on it.
     if (opts.cascade !== false)
       await withChannelCommit(gw, o.channel, async () => {
         for (const member of incarnationMembers(gw, id)) {
-          if (
-            survivingTombstones(gw.reactor, gw.operatorAuthor).some(
-              (d) => tombstoneParts(d.claims).targetId === member,
-            )
-          )
-            continue;
+          const tombstoned = survivingTombstones(gw.reactor, gw.operatorAuthor).some(
+            (d) => tombstoneParts(d.claims).targetId === member,
+          );
+          if (tombstoned && !(await erasureOutstanding(gw, member))) continue;
           await eraseImpl(gw, member, { ...opts, cascade: false });
         }
       });

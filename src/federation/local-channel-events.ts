@@ -219,10 +219,10 @@ export function parseLocalEvent(d: Delta, operator: string | undefined): LocalEv
     : undefined;
 }
 /**
- * The channels whose lineage says they were opened INTO this container, read from the receiver's
- * root ground by the parent-container pointer: the bound connection's lineage read, scoped to its
- * binding's container, and the operator's when it asks for one container. An erased opening is
- * not listed; its marker says the channel is gone.
+ * The channels whose lineage says they were opened INTO this container and still stand, read from
+ * the receiver's root ground by the parent-container pointer. This is the container-scoped read a
+ * bound door will serve from; no door serves it yet. A closed (dropped) incarnation is not listed,
+ * and neither is an erased one.
  */
 export function localChannelsInContainer(gw: Gateway, container: string): string[] {
   const rows = [...gw.reactor.snapshot()];
@@ -232,13 +232,19 @@ export function localChannelsInContainer(gw: Gateway, container: string): string
       const target = localEraseTarget(d, gw.reactor, gw.operatorAuthor);
       if (target !== undefined) dead.add(target);
     }
-  const names = new Set<string>();
+  const opens = new Map<string, LocalChannelOpening>();
+  const closed = new Set<string>();
   for (const d of rows) {
     if (!inLocalContext(d, LOCAL_EVENT) || dead.has(d.id)) continue;
     const parsed = parseLocalEvent(d, gw.operatorAuthor);
-    if (parsed?.action === "open" && parsed.opening.into === container)
-      names.add(parsed.opening.channel);
+    if (parsed?.action === "open") opens.set(d.id, parsed.opening);
+    else if (parsed?.action === "close") closed.add(parsed.opening);
   }
+  // A closed incarnation was dropped: not a channel the container has. Erased openings are absent
+  // already; their markers say the channel is gone.
+  const names = new Set<string>();
+  for (const [id, opening] of opens)
+    if (opening.into === container && !closed.has(id)) names.add(opening.channel);
   return [...names].sort();
 }
 export function localEraseTarget(

@@ -8,7 +8,8 @@
 // `into` need not match its parent pointer → 1 red; the marker reads the first event-context
 // pointer instead of the `event` role → 0 red, EQUIVALENT today (the parser pins `event` first), kept
 // as a role read on purpose. The cascade probe in local-channel-live-opening.test.ts also reds the
-// first case here.
+// first case here. Measured again after review round 1: a closed incarnation is still listed →
+// 1 red.
 import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -240,9 +241,10 @@ describe("spec 64: lifecycle events name their parent container", () => {
     expect(localChannelsInContainer(gw, "bea:notes")).toEqual([b.ch.name]);
     expect(localChannelsInContainer(gw, "friends")).toEqual([root.ch.name]);
     expect(localChannelsInContainer(gw, "nobody")).toEqual([]);
-    // After a drop and an erase, the channel is no longer listed; its sibling still is.
+    // A dropped incarnation is no longer listed, erased or not; its sibling still is.
     const aOpening = opened(gw, a.ch.name).opening.id;
     await gw.dropChannel(a.ch.name);
+    expect(localChannelsInContainer(gw, "ada:journal")).toEqual([]);
     await gw.erase(aOpening);
     expect(localChannelsInContainer(gw, "ada:journal")).toEqual([]);
     expect(localChannelsInContainer(gw, "bea:notes")).toEqual([b.ch.name]);

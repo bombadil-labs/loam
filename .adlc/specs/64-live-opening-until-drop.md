@@ -88,11 +88,14 @@ strike of the declaration. After it, the opening is no longer live.
 
 `Gateway.erase(openingId)` on an opening whose declaration is struck (the incarnation was dropped)
 erases that incarnation directly: its `received` events and its `close` FIRST, each with a marked
-tombstone naming the channel and the pool declaration, and the opening LAST, all inside one
-`withChannelCommit(channel)`. Each member is one ordinary erase with the existing retry anchor,
-and an already-settled member is skipped, not faulted. The order is the crash guarantee: a crash
-before the opening's tombstone leaves the opening intact, so every surviving receipt still
-resolves, the history stays readable, and a re-run of `erase(openingId)` finishes. It touches no
+tombstone naming the channel and the pool declaration, under `withChannelCommit(channel)`, and the
+opening LAST, by the ordinary erase that follows. Each member is one ordinary erase with the
+existing retry anchor. A member is skipped only when SETTLED: tombstoned and held by no tier. A
+member whose purge faulted has a tombstone and is erased again, anchoring on it. The order is the
+crash guarantee: a crash before the opening's tombstone leaves the opening intact, so every
+surviving receipt still resolves, the history stays readable, and a re-run of `erase(openingId)`
+finishes. No receipt can land between the members and the opening: a receipt needs a sync under
+a surviving declaration, and a dropped incarnation's is struck. It touches no
 pool; the pool is already gone. A later incarnation of the same name is unaffected, because the
 erased receipts no longer reference a hole. This is the one cascade this spec adds, and it is
 stated as such: erasing a dropped incarnation's opening removes that incarnation's lineage
@@ -118,11 +121,12 @@ The record still lives in the receiver's root reactor: the operator signs it and
 operator's authority. The pointer scopes READS, not membership: a shared container's members come
 from its membership term, and the pointer joins no term.
 
-- The bound connection's lineage read (the same read that serves `channelStatus` to a bound door)
-  filters lifecycle events by the `into` pointer equal to its binding's container. It lists that
-  container's channels and no others.
-- The operator's read may filter by the pointer to list one container's channels without a name
-  scan.
+- `localChannelsInContainer(gw, container)` is the container-scoped lineage read: the channels
+  whose surviving opening names that container, minus closed (dropped) incarnations and erased
+  ones. A bound door that lists a connection's channels will serve from it, scoped to the binding's
+  container. No door serves it in this slice; T288's bound status door still scopes by
+  `openedFrom`, the same set for channels a connection opened itself.
+- The operator's read may call it to list one container's channels without a name scan.
 - Container reach walks and the container table never treat a lifecycle event as law.
 - Dropping a shared container does not cascade over these events; there is no such road today
   (`drop()` is a separate container's total forget). That stays out of scope here.
@@ -161,9 +165,10 @@ criterion names its verification.
    refuses and names the orphaned pool. Verify:
    `npx vitest run test/federation/local-channel-live-opening.test.ts`
 3. After `dropChannel`, erasing the opening erases its receipts and close first and the opening
-   last, each with a marked tombstone naming the channel and the pool declaration; a fault
-   injected after the receipts' tombstones leaves the opening intact and the history readable, and
-   a re-run finishes; the sibling channel's receipts and the root ground are unchanged; evidence
+   last, each with a marked tombstone naming the channel and the pool declaration; a member purge
+   that faults leaves its tombstone recorded and its bytes held, and the re-run erases that member
+   again rather than skipping it; a fault before the opening's own purge leaves the opening intact
+   and the history readable, and a re-run finishes; the sibling channel's receipts and the root ground are unchanged; evidence
    reads `unavailable: erased`; a fresh same-name open is a new protected opening that receives
    cleanly, and a LATER incarnation that already existed keeps receiving. A drop whose declaration
    strike failed after the purge completes on re-run. Verify:
@@ -181,8 +186,8 @@ criterion names its verification.
    federate doors still refuse the event; a §29 slate selecting a lifecycle event is refused.
    Verify:
    `npx vitest run test/federation/local-channel-container-scope.test.ts`
-7. A bound connection's lineage read lists the channels opened into its container and none from
-   another container; the operator's read filtered by pointer lists one container's channels.
+7. `localChannelsInContainer` lists the channels opened into a container and none from another,
+   for a bound opening and a root one alike; a dropped incarnation is not listed, erased or not.
    Verify:
    `npx vitest run test/federation/local-channel-container-scope.test.ts`
 8. The two T288 cases named under Migration are revised in the same stack or through the
@@ -194,6 +199,17 @@ criterion names its verification.
    `git -C <worktree-at-566-tip> stash && npx vitest run test/federation/local-channel-live-opening.test.ts test/federation/local-channel-container-scope.test.ts`
 10. Full bar green and hollow-test run first on the clean tip, then recorded. Verify:
     `npm run check` and `adlc hollow-test --base origin/t288/local-channel-events --max 300 --test-cmd "timeout -k 10 600 npx vitest run test/federation/local-channel-*.test.ts"`
+
+## Review round 1 of the build, 2026-09-09
+
+An independent review of the implementation found the cascade skipped a member on tombstone
+PRESENCE, so a member whose purge faulted was skipped on the re-run and the opening was erased
+with a clean report while the member's bytes stayed held. The skip is now on SETTLEMENT, the
+unattached byte check has a rail over a per-name store, the container read drops closed
+incarnations, and the contract says the opening's tombstone follows the members' commit rather
+than sharing it. The review also noted that the CLI's channel backend factory creates the store's
+directory and file when asked for a name, so a byte check for a name whose file was removed mints
+an empty file; that is the factory's shape, noted for the CLI, not fixed here.
 
 ## Premortem 3, 2026-09-09
 
