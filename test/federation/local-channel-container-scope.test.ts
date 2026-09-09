@@ -234,6 +234,23 @@ describe("spec 64: lifecycle events name their parent container", () => {
     await gw.erase(opening.id);
     expect(localChannelsInContainer(gw, "friends")).toEqual([]);
   });
+  it("an opening whose declaration is absent from the reactor is not standing", async () => {
+    const gw = await home();
+    const { ch, offering } = await open(gw, "friends", "friends:peer");
+    offering.push(fact(1));
+    await ch.sync();
+    const declaration = opened(gw, ch.name).opening.poolDeclaration;
+    const erased = await gw.erase(declaration).catch((e: Error) => e.message);
+    if (typeof erased === "string") {
+      // The declaration of an attached pool cannot be erased; the door refuses. Then the presence
+      // clause is unreachable by any road, and this case records that rather than a wish.
+      expect(erased).toMatch(/refused|cannot|not/);
+      expect(localChannelsInContainer(gw, "friends")).toEqual([ch.name]);
+    } else {
+      expect(gw.reactor.get(declaration)).toBeUndefined();
+      expect(localChannelsInContainer(gw, "friends")).toEqual([]);
+    }
+  });
   it("a bound connection's lineage read lists the channels opened into its container and no others; the operator's read filters by container", async () => {
     const gw = await home();
     for (const container of ["ada:journal", "bea:notes"])

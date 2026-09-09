@@ -227,20 +227,19 @@ export function parseLocalEvent(d: Delta, operator: string | undefined): LocalEv
  * is an erased one.
  */
 export function localChannelsInContainer(gw: Gateway, container: string): string[] {
-  const rows = [...gw.reactor.snapshot()];
-  const dead = new Set<string>();
-  for (const d of rows)
-    if (inLocalContext(d, LOCAL_CONTROL)) {
-      const target = localEraseTarget(d, gw.reactor, gw.operatorAuthor);
-      if (target !== undefined) dead.add(target);
-    }
   // An incarnation STANDS while its pool declaration survives, the same test the erase door uses
   // for liveness. A close event is not the sign: a refused drop leaves a close beside a standing
   // pool, and an erase that faulted after the close's tombstone leaves none beside a dropped one.
+  // An erased opening is gone from the reactor; one whose purge faulted stays, but its declaration
+  // is struck already, so the declaration test covers it and no marker scan is needed.
+  // H8: this walks the snapshot. The parent-container pointer is an entity pointer, so a door
+  // that serves this read per request must switch to `reactor.byTarget(container)` filtered to
+  // the event context, the affordance `lawfulDeltasAt` uses; then one `get` and one negation
+  // read per opening.
   const negated = lawfulNegated(gw.reactor, gw.operatorAuthor);
   const names = new Set<string>();
-  for (const d of rows) {
-    if (!inLocalContext(d, LOCAL_EVENT) || dead.has(d.id)) continue;
+  for (const d of gw.reactor.snapshot()) {
+    if (!inLocalContext(d, LOCAL_EVENT)) continue;
     const parsed = parseLocalEvent(d, gw.operatorAuthor);
     if (parsed?.action !== "open" || parsed.opening.into !== container) continue;
     const declaration = parsed.opening.poolDeclaration;

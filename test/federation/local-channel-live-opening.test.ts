@@ -13,6 +13,7 @@
 // Measured again after review round 1 (120 cases across the nine suites):
 //   a tombstoned member is skipped whether or not it is settled     → 1 red
 //   the struck-declaration byte check through the store is gone     → 1 red
+// After review round 3 (123 cases): an orphaned attached pool cannot be dropped → 2 red.
 // The boot-unattachable pool is not a case here: the base already refuses it as unreachable. The
 // struck-declaration case measures both halves of the byte side: the attached pool, and the
 // store reopened by name with no handle in memory (the fixture keeps one store per name, as the
@@ -21,7 +22,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
-import { survivingDeclarationIds } from "../../src/gateway/container.js";
+import { containerClaims, survivingDeclarationIds } from "../../src/gateway/container.js";
 import { readTombstones } from "../../src/gateway/erase.js";
 import {
   inLocalContext,
@@ -44,33 +45,14 @@ class FaultBackend extends MemoryBackend {
   failPurgeAfter = Number.POSITIVE_INFINITY;
   purges = 0;
   failNextRetraction = false;
-  constructor(reopen?: FaultBackend) {
+  // THE FILE: one byte store per name, shared by every handle over it, the way a sqlite file is.
+  // A handle seeds itself from the file, and every append or purge through it changes the file.
+  constructor(private readonly file: Delta[] = []) {
     super();
-    // A fresh handle over the same bytes, the way a file on disk carries them across handles.
-    if (reopen !== undefined) void super.append(reopen.carried());
-  }
-  private held: Delta[] = [];
-  carried(): Delta[] {
-    return this.held;
+    if (file.length > 0) void MemoryBackend.prototype.append.call(this, [...file]);
   }
   override async append(deltas: Iterable<Delta>): Promise<number> {
     const batch = [...deltas];
-    const n = await this.appendChecked(batch);
-    this.held = [...this.held, ...batch];
-    return n;
-  }
-  override async purge(ids: Iterable<string>): Promise<number> {
-    const gone = new Set(ids);
-    const n = await this.purgeChecked(gone);
-    this.held = this.held.filter((d) => !gone.has(d.id));
-    return n;
-  }
-  private async purgeChecked(ids: Set<string>): Promise<number> {
-    if (this.purges >= this.failPurgeAfter) throw new Error("fixture purge failure");
-    this.purges += 1;
-    return super.purge(ids);
-  }
-  private async appendChecked(batch: readonly Delta[]): Promise<number> {
     if (
       this.failNextRetraction &&
       batch.some((d) => d.claims.pointers.some((p) => p.role === "negates"))
@@ -78,27 +60,37 @@ class FaultBackend extends MemoryBackend {
       this.failNextRetraction = false;
       throw new Error("fixture retraction failure");
     }
-    return super.append(batch);
+    const n = await super.append(batch);
+    for (const d of batch) if (!this.file.some((f) => f.id === d.id)) this.file.push(d);
+    return n;
+  }
+  override async purge(ids: Iterable<string>): Promise<number> {
+    if (this.purges >= this.failPurgeAfter) throw new Error("fixture purge failure");
+    this.purges += 1;
+    const gone = new Set(ids);
+    const n = await super.purge(gone);
+    for (let k = this.file.length - 1; k >= 0; k -= 1)
+      if (gone.has(this.file[k]!.id)) this.file.splice(k, 1);
+    return n;
   }
 }
 async function home() {
   const primary = new FaultBackend();
-  const pools = new Map<string, FaultBackend>();
-  // ONE STORE PER NAME, like the CLI's sqlite file: every call opens a FRESH handle over the same
-  // bytes, so a byte check that opens and closes its own handle never closes a live pool's.
+  const files = new Map<string, Delta[]>();
   const gw = await Gateway.boot(
     primary,
     assembleGenesis({ operatorSeed: SEED, registrations: [] }),
     {
       channelBackend: (name) => {
-        const backend = new FaultBackend(pools.get(name));
-        pools.set(name, backend);
-        return backend;
+        const file = files.get(name) ?? [];
+        files.set(name, file);
+        return new FaultBackend(file);
       },
     },
   );
   homes.push(gw);
-  return { gw, primary, pools };
+  const holds = (name: string, id: string) => (files.get(name) ?? []).some((d) => d.id === id);
+  return { gw, primary, holds };
 }
 function peer() {
   const offering: Delta[] = [];
@@ -176,7 +168,7 @@ describe("spec 64: a live opening cannot be erased", () => {
     expect(bytes(siblingPool)).toEqual(before.sibling);
   });
   it("a declaration struck through the append door with the pool's bytes still held refuses and names the orphaned pool, attached or not", async () => {
-    const { gw, pools } = await home();
+    const { gw, holds } = await home();
     const { ch, offering, pool } = await channel(gw);
     offering.push(fact(1));
     await ch.sync();
@@ -190,17 +182,47 @@ describe("spec 64: a live opening cannot be erased", () => {
     // Cross-process: no handle in memory, the store on disk still holds the bytes.
     gw.federationChannels.delete(ch.name);
     gw.channelPools.delete(ch.name);
-    expect(
-      pools
-        .get(ch.name)!
-        .carried()
-        .some((d) => d.id === fact(1).id),
-    ).toBe(true);
+    expect(holds(ch.name, fact(1).id)).toBe(true);
     const unattached = await gw.erase(opening.id).catch((e: Error) => e.message);
     expect(unattached).toContain(
       "its pool's store still holds bytes although its declaration was struck",
     );
     expect(gw.reactor.get(opening.id)).toBeDefined();
+    // The road the refusal names works while the pool is ATTACHED: the drop purges the orphaned
+    // pool, then the erase proceeds. With no handle and no declaration, the container layer cannot
+    // re-open the store, so that state needs a re-declaration or the file removed by hand.
+    await expect(gw.dropChannel(ch.name)).rejects.toThrow(/no surviving declaration/);
+    gw.channelPools.set(ch.name, ch.pool);
+    gw.federationChannels.set(ch.name, ch);
+    await gw.dropChannel(ch.name);
+    expect(holds(ch.name, fact(1).id)).toBe(false);
+    await gw.erase(opening.id);
+    expect(gw.reactor.get(opening.id)).toBeUndefined();
+  });
+  it("a second declaration under the channel's name by hand orphans the pool: sync and erase refuse, the drop purges it and strikes both, then the erase proceeds", async () => {
+    const { gw, holds } = await home();
+    const { ch, offering } = await channel(gw);
+    offering.push(fact(1));
+    await ch.sync();
+    const opening = opened(gw, ch.name).opening;
+    await gw.append([
+      signClaims(
+        containerClaims(
+          { container: ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
+          OP,
+          gw.nextTimestamp(),
+        ),
+        SEED,
+      ),
+    ]);
+    expect(survivingDeclarationIds(gw.reactor, OP, ch.name)).toHaveLength(2);
+    await expect(ch.sync()).rejects.toThrow();
+    await expect(gw.erase(opening.id)).rejects.toThrow(/Drop the channel first/);
+    await gw.dropChannel(ch.name);
+    expect(survivingDeclarationIds(gw.reactor, OP, ch.name)).toEqual([]);
+    expect(holds(ch.name, fact(1).id)).toBe(false);
+    await gw.erase(opening.id);
+    expect(gw.reactor.get(opening.id)).toBeUndefined();
   });
 });
 
@@ -313,19 +335,18 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     void source;
   });
   it("a drop whose declaration strike failed after the purge completes on re-run, and then the opening can be erased", async () => {
-    const { gw, primary, pools } = await home();
+    const { gw, primary, holds } = await home();
     const { ch, offering } = await channel(gw);
     offering.push(fact(1));
     await ch.sync();
     const opening = opened(gw, ch.name).opening;
-    const store = pools.get(ch.name)!;
-    expect(await store.holds(fact(1).id)).toBe(true);
+    expect(holds(ch.name, fact(1).id)).toBe(true);
     primary.failNextRetraction = true;
     // The purge ran and the store closed; only the strike failed, so the declaration stands.
     await expect(gw.dropChannel(ch.name)).rejects.toThrow(
       /discarded .* at the bytes .* could not be struck/,
     );
-    await expect(store.holds(fact(1).id)).rejects.toThrow(/closed/);
+    expect(holds(ch.name, fact(1).id)).toBe(false);
     expect(survivingDeclarationIds(gw.reactor, OP, ch.name)).not.toEqual([]);
     // Still live: the declaration stands over a store the sweep cannot reach, so the erase refuses
     // up front (§27.7's completeness guard) and removes nothing.

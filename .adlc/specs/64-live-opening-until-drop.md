@@ -58,16 +58,24 @@ recording no address. Both belong to a separate ticket.
 
 ### A live opening cannot be erased; the drop comes first
 
-An opening is LIVE while its pool declaration survives (`currentPoolDeclaration(channel)` equals
-the opening's `poolDeclaration`), whether or not a handle is attached in this process, OR while
-the pool's backend still holds any byte. Detached, boot-unreadable and simply closed pools are all
+An opening is LIVE while its pool declaration SURVIVES (it is held and not struck; not "equals
+the current declaration": a second declaration under the same name by hand must not make the
+first opening erasable while its pool's bytes stand), whether or not a handle is attached in this
+process, OR while the pool's backend still holds any byte. Detached, boot-unreadable and simply closed pools are all
 live by the first test. The second test covers a declaration struck through the ordinary append
 door without a purge: the opening then reads dropped by the table, but the erase must open the
 pool's backend (as the erasure fan-out already does for a declared separate container) and
 refuse, naming the orphaned pool, if it still holds bytes. Only a completed DROP makes an opening
 not live.
 
-Two drop edges are part of this contract. If the drop's byte purge succeeds and its declaration
+Three drop edges are part of this contract. An ORPHANED pool, one whose declaration the operator
+struck or replaced by hand while its bytes stayed attached under the channel's name, has no
+opening that agrees with it, so the lifecycle reads `attached pool declaration changed`; `drop`
+purges it anyway, strikes whatever still declares the name, and writes no close, because nothing
+was open; the opening's own erase then takes the lineage. That is the road the erase refusal
+names, and it must work in that state while the pool is attached. With no handle in memory and no
+surviving declaration, the container layer cannot re-open the store; that state is reported as
+such, and the operator re-declares the name or removes the file by hand. If the drop's byte purge succeeds and its declaration
 strike then fails, the pool is unregistered with its bytes gone and the declaration alive; a
 re-run of `dropChannel` on that state verifies the bytes are gone and completes the strike and
 the status strikes, so the opening stops being live. And a §29 slate whose selection includes a
@@ -200,6 +208,17 @@ criterion names its verification.
    `git -C <worktree-at-566-tip> stash && npx vitest run test/federation/local-channel-live-opening.test.ts test/federation/local-channel-container-scope.test.ts`
 10. Full bar green and hollow-test run first on the clean tip, then recorded. Verify:
     `npm run check` and `adlc hollow-test --base origin/t288/local-channel-events --max 300 --test-cmd "timeout -k 10 600 npx vitest run test/federation/local-channel-*.test.ts"`
+
+## Review round 3 of the build, 2026-09-09
+
+Two operator-made states stranded the channel: a second declaration under the channel's name by
+hand, and a declaration struck by hand with the pool's bytes still attached. In both, the erase
+refused and named the drop, and the drop refused as `attached pool declaration changed`. The drop
+now purges an orphaned attached pool, strikes what still declares the name, and writes no close;
+the erase then proceeds. The contract's liveness sentence said "equals the current declaration"
+while the code, correctly, tests survival; the sentence now says survival and why. The container
+read lost its marker scan (the declaration test subsumes it) and names the targeted read a door
+must use. The fixture carries bytes across every hop.
 
 ## Review round 2 of the build, 2026-09-09
 
