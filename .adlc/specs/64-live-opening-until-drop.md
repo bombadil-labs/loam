@@ -209,6 +209,18 @@ criterion names its verification.
 10. Full bar green and hollow-test run first on the clean tip, then recorded. Verify:
     `npm run check` and `adlc hollow-test --base origin/t288/local-channel-events --max 300 --test-cmd "timeout -k 10 600 npx vitest run test/federation/local-channel-*.test.ts"`
 
+## Review round 6 of the build, 2026-09-09
+
+Round 5's fresh-open refusal was wrong at the seam: a separate pool is seeded from the root at
+attach, so any stranger's delta in the root made the leftover check fire for every fresh open of
+a protected name, forever, and each refusal left a surviving declaration with no status, which
+wedged every erase in the store after a restart. Withdrawn. The hole closes where it lives: an
+opening is LIVE while a pool under its name holds a peer byte that no receipt of the standing
+incarnation names, because the name keys the store and such a byte is the earlier opening's. A
+fresh open over a leftover store is allowed and noted as T288's looseness; the old opening's
+erase refuses until that incarnation is dropped. The orphan question fails closed only on an
+unreadable event of the SAME channel.
+
 ## Review round 5 of the build, 2026-09-09
 
 Strike a channel's declaration and status records by hand, restart, open the same name afresh:

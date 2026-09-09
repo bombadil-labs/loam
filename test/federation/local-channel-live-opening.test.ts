@@ -16,10 +16,10 @@
 // After review round 3 (123 cases): an orphaned attached pool cannot be dropped → 2 red.
 // After review round 4 (124 cases): a pool under another declaration is always another
 // incarnation → 1 red; the drop road ignores an orphan after a restart → 1 red.
-// After review round 5 (126 cases plus prefix-collision): a fresh opening attaches over leftover
-// bytes → 1 red; a name with no status is severed even with a pool attached → 1 red; an
-// unparseable event does not fail closed → 1 red; every name is held to the leftover check →
-// 1 red in test/federation/prefix-collision.test.ts, a stranger's record that is no lineage.
+// After review rounds 5 and 6 (126 cases): a later incarnation's unnamed bytes do not keep an
+// earlier opening live → 1 red; an unparseable event of this channel does not fail closed →
+// 1 red. Round 5's open-time refusal was withdrawn in round 6: a separate pool is seeded from
+// the root, so it refused every fresh open over a root that held a stranger's record.
 // The boot-unattachable pool is not a case here: the base already refuses it as unreachable. The
 // struck-declaration case measures both halves of the byte side: the attached pool, and the
 // store reopened by name with no handle in memory (the fixture keeps one store per name, as the
@@ -251,7 +251,7 @@ describe("spec 64: a live opening cannot be erased", () => {
     await gw.erase(opening.id);
     expect(gw.reactor.get(opening.id)).toBeUndefined();
   });
-  it("a fresh opening refuses a store that still holds bytes no opening names; the old opening's erase still refuses", async () => {
+  it("a fresh opening over a store an earlier incarnation left behind does not let that incarnation's erase report clean", async () => {
     const first = await home();
     const a = await channel(first.gw);
     a.offering.push(fact(1));
@@ -277,23 +277,29 @@ describe("spec 64: a live opening cannot be erased", () => {
       ]);
     const gw = await first.restart();
     expect(first.holds(a.ch.name, fact(1).id)).toBe(true);
+    // The fresh open attaches over the leftover store: the name keys the file. The new
+    // incarnation's receipts name only what it received, so the old bytes are still the old
+    // opening's, and its erase refuses until the incarnation holding them is dropped.
     const feed = peer();
-    await expect(
-      gw.openChannel({
-        into: "friends",
-        prefix: "peer",
-        from: "https://peer.example/peer",
-        source: feed.source,
-      }),
-    ).rejects.toThrow(/still holds bytes that no opening names/);
-    // No opening was written; the old one's erase still refuses; the road the refusal names works.
-    expect(events(gw, a.ch.name, "open").filter((d) => d.id !== opening.id)).toEqual([]);
-    await expect(gw.erase(opening.id)).rejects.toThrow(/holds bytes/);
+    const fresh = await gw.openChannel({
+      into: "friends",
+      prefix: "peer",
+      from: "https://peer.example/peer",
+      source: feed.source,
+    });
+    feed.offering.push(fact(2));
+    await fresh.sync();
+    const second = opened(gw, a.ch.name).opening;
+    expect(second.id).not.toBe(opening.id);
+    await expect(gw.erase(opening.id)).rejects.toThrow(/no receipt of that incarnation names/);
     expect(first.holds(a.ch.name, fact(1).id)).toBe(true);
+    expect(gw.reactor.get(opening.id)).toBeDefined();
     await gw.dropChannel(a.ch.name);
     expect(first.holds(a.ch.name, fact(1).id)).toBe(false);
     await gw.erase(opening.id);
     expect(gw.reactor.get(opening.id)).toBeUndefined();
+    await gw.erase(second.id);
+    expect(gw.reactor.get(second.id)).toBeUndefined();
   });
   it("an event this reader cannot parse makes the orphan question fail closed: the drop refuses rather than purges", async () => {
     const first = await home();

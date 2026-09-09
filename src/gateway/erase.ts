@@ -7,6 +7,7 @@ import {
   inLocalContext,
   localEraseTarget,
   orphanedDeclaration,
+  receiptsNaming,
   sameVerifiedDelta,
 } from "../federation/local-channel-events.js";
 // Erasure — degrees of forgetting (SPEC §11). The store remembers THAT it forgot — who asked,
@@ -765,6 +766,18 @@ async function liveOpening(
     return named!.declarationId === o.poolDeclaration
       ? "its pool is still attached and holds bytes"
       : "a pool no opening names is attached under its name and holds bytes";
+  // A later incarnation under the same name owns only what its receipts name. The store is keyed
+  // by name, so a peer byte in that pool that no receipt of the standing incarnation names was
+  // left there by an earlier one, and this opening is the only lineage it has (spec 64).
+  if (another) {
+    const owned = receiptsNaming(gw, named!.declarationId!);
+    if (
+      [...named!.gateway!.reactor.snapshot()].some(
+        (d) => d.claims.author !== gw.operatorAuthor && !owned.has(d.id),
+      )
+    )
+      return "a later incarnation under its name holds bytes that no receipt of that incarnation names";
+  }
   if (named === undefined && gw.options.channelBackend !== undefined) {
     const backend = gw.options.channelBackend(o.channel);
     try {

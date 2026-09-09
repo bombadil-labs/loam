@@ -255,31 +255,48 @@ export function localChannelsInContainer(gw: Gateway, container: string): string
  * so a struck declaration never sits beneath a pool here. The erase door and the drop both ask
  * this, so that an orphan reads the same across a restart as inside the process that made it.
  */
-/** Did this channel name ever carry a protected opening, standing or erased? */
-export function channelHadOpening(gw: Gateway, channel: string): boolean {
-  const id = `channel:${channel}`;
-  for (const d of gw.reactor.snapshot()) {
-    if (inLocalContext(d, LOCAL_EVENT)) {
-      if (
-        d.claims.pointers.some(
-          (p) => p.role === "event" && p.target.kind === "entity" && p.target.entity.id === id,
-        )
-      )
-        return true;
-    } else if (inLocalContext(d, LOCAL_CONTROL) && localControlChannel(d) === id) return true;
-  }
-  return false;
-}
 export function orphanedDeclaration(gw: Gateway, declaration: string): boolean {
+  const held = gw.reactor.get(declaration);
+  const channel = held === undefined ? undefined : containerDeclarationName(held.claims);
+  const named = (d: Delta) =>
+    d.claims.pointers.some(
+      (p) =>
+        p.role === "event" &&
+        p.target.kind === "entity" &&
+        p.target.entity.id === `channel:${channel}`,
+    );
   for (const d of gw.reactor.snapshot()) {
-    if (!inLocalContext(d, LOCAL_EVENT)) continue;
+    if (!inLocalContext(d, LOCAL_EVENT) || !named(d)) continue;
     const parsed = parseLocalEvent(d, gw.operatorAuthor);
-    // An event this reader cannot parse is not "no opening names it"; it fails closed, so a purge
-    // never rides a parser change or a malformed restore.
+    // An event of THIS channel the reader cannot parse is not "no opening names it"; it fails
+    // closed, so a purge never rides a parser change or a malformed restore. Another channel's
+    // unreadable event is that channel's problem, not this pool's.
     if (parsed === undefined) return false;
     if (parsed.action === "open" && parsed.opening.poolDeclaration === declaration) return false;
   }
   return true;
+}
+/**
+ * Every delta id a surviving receipt of the incarnation under this declaration names. A pool
+ * holding a peer byte outside this set holds something that incarnation never received, and an
+ * erase of an EARLIER opening of the same name must count it as that opening's, not skip it.
+ */
+export function receiptsNaming(gw: Gateway, declaration: string): Set<string> {
+  const openings = new Set<string>();
+  const events: LocalEvent[] = [];
+  for (const d of gw.reactor.snapshot()) {
+    if (!inLocalContext(d, LOCAL_EVENT)) continue;
+    const parsed = parseLocalEvent(d, gw.operatorAuthor);
+    if (parsed === undefined) continue;
+    if (parsed.action === "open" && parsed.opening.poolDeclaration === declaration)
+      openings.add(d.id);
+    else events.push(parsed);
+  }
+  const named = new Set<string>();
+  for (const e of events)
+    if (e.action === "received" && openings.has(e.opening))
+      for (const id of e.received) named.add(id);
+  return named;
 }
 export function localEraseTarget(
   d: Delta,

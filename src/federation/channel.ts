@@ -3,7 +3,6 @@ import {
   localChannelEvidence,
   localChannelLifecycle,
   currentPoolDeclaration,
-  channelHadOpening,
   orphanedDeclaration,
   withChannelCommit,
   type LocalChannelOpening,
@@ -2061,25 +2060,6 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
       `openChannel: ${name} resolved without its own ground — a pool must be separate`,
     );
   }
-  // A FRESH PROTECTED OPENING STARTS OVER AN EMPTY STORE (spec 64). The backend is keyed by name,
-  // so a store an earlier incarnation left behind, with its declaration and status struck by hand
-  // and never dropped, attaches here with its bytes, and a fresh opening over it would serve them
-  // as if it had received them while the old opening's erase reported clean. Refuse before the
-  // opening is written. The pool stays attached under the declaration just minted, which no
-  // opening names, so `dropChannel` is the road out; it purges the leftover store.
-  // Only a name that once carried a PROTECTED opening is held to this: a store a stranger's
-  // record or a legacy channel left bytes in has no lineage this opening could be mistaken for.
-  const leftover =
-    channelHadOpening(gw, name) &&
-    [...ground.reactor.snapshot()].some((d) => d.claims.author !== gw.operatorAuthor);
-  if (standingBeforeOpen === undefined && !priorPoolLifecycle && leftover) {
-    gw.channelPools.set(name, pool);
-    throw new Error(
-      `openChannel refused: the store for "${name}" still holds bytes that no opening names. ` +
-        `An earlier incarnation was struck by hand without a drop. Run dropChannel "${name}" to ` +
-        `purge that store, then open "${name}" afresh. No opening was written.`,
-    );
-  }
 
   // The opening record: `lastSyncedAt: 0` says NEVER SYNCED, which is deliberately distinct from a
   // stale timestamp. A channel that has never reached its peer must not read as merely quiet.
@@ -2197,10 +2177,7 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
   // A NAME THIS STORE NEVER HAD gets a sentence, not the container layer's internals. Without this
   // it surfaced as `openContainer: no surviving declaration names "..."` — true, and it tells a
   // person nothing about what they typed wrong.
-  // A name with no status record is severed, unless a pool is ATTACHED under it: a store an
-  // earlier incarnation left behind, attached by a refused fresh open or by boot under a
-  // hand-made declaration. That pool has bytes and a road out, this drop (spec 64).
-  if (channelStatusImpl(gw, name).length === 0 && gw.channelPools.get(name) === undefined) {
+  if (channelStatusImpl(gw, name).length === 0) {
     const severed = channelsEverImpl(gw, name)[0];
     throw new Error(
       severed === undefined
