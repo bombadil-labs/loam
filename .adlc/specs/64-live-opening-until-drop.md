@@ -209,6 +209,18 @@ criterion names its verification.
 10. Full bar green and hollow-test run first on the clean tip, then recorded. Verify:
     `npm run check` and `adlc hollow-test --base origin/t288/local-channel-events --max 300 --test-cmd "timeout -k 10 600 npx vitest run test/federation/local-channel-*.test.ts"`
 
+## Review round 4 of the build, 2026-09-09
+
+The orphan road held only inside the process that made the orphan. After a restart, boot
+re-attaches the pool under the hand-made declaration, the lifecycle reads `missing current
+opening`, the drop fell to the generic refusal, and in the struck-and-replaced case the erase
+went through and stranded the bytes: the attached pool's different declaration id read as "a
+later incarnation" with a lineage of its own. Both doors now ask the same question: does any
+surviving opening NAME the declaration the attached pool sits under? If none does, the pool is an
+orphan: its bytes count against the opening that erase is asked about, and the drop purges it
+whatever the lifecycle reason reads. A rail restarts the store in both orphan states. "Writes no
+close" is now asserted.
+
 ## Review round 3 of the build, 2026-09-09
 
 Two operator-made states stranded the channel: a second declaration under the channel's name by

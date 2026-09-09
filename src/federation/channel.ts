@@ -3,6 +3,7 @@ import {
   localChannelEvidence,
   localChannelLifecycle,
   currentPoolDeclaration,
+  orphanedDeclaration,
   withChannelCommit,
   type LocalChannelOpening,
 } from "./local-channel-events.js";
@@ -2246,12 +2247,17 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
     await issueChannelEvent(gw, { action: "close", channel: name, opening: evidence.opening.id });
   else if (
     evidence.state === "unavailable" &&
-    evidence.reason === "attached pool declaration changed"
+    (evidence.reason === "attached pool declaration changed" ||
+      (pool.declarationId !== undefined && orphanedDeclaration(gw, pool.declarationId)))
   )
-    // AN ORPHANED POOL. The operator struck or replaced its declaration by hand, so no opening
-    // agrees with it and no close can name one; its bytes are still attached under this name. The
-    // drop is the one road out (spec 64): purge it, strike what still declares the name, and let
-    // the opening's own erase take the lineage afterwards. Nothing is closed that was not open.
+    // AN ORPHANED POOL. The operator struck or replaced its declaration by hand. Inside the
+    // process that made it, the handle still sits under the opening's declaration and the
+    // lifecycle reads "attached pool declaration changed"; after a restart, boot re-attaches under
+    // the hand-made declaration, which no opening names, and the lifecycle reads "missing current
+    // opening". Either way its bytes are attached under this name with no opening that agrees, so
+    // no close can name one. The drop is the one road out (spec 64): purge it, strike what still
+    // declares the name, and let the opening's own erase take the lineage afterwards. Nothing is
+    // closed that was not open.
     void 0;
   else if (evidence.state === "unavailable")
     throw new Error(`dropChannel refused: ${evidence.reason}`);

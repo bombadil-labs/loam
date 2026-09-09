@@ -6,6 +6,7 @@ import {
   LOCAL_CONTROL,
   inLocalContext,
   localEraseTarget,
+  orphanedDeclaration,
   sameVerifiedDelta,
 } from "../federation/local-channel-events.js";
 // Erasure — degrees of forgetting (SPEC §11). The store remembers THAT it forgot — who asked,
@@ -750,12 +751,20 @@ async function liveOpening(
   const negated = lawfulNegated(gw.reactor, gw.operatorAuthor);
   if (gw.reactor.get(o.poolDeclaration) !== undefined && !negated(o.poolDeclaration))
     return "its pool's declaration still stands";
-  // The pool under this NAME may be a later incarnation; only the pool declared by THIS opening
-  // counts, and when another incarnation holds the name, the name's backend is that one's too.
+  // The pool under this NAME may be a later incarnation, in which case its bytes are that
+  // incarnation's and its opening carries their lineage. It is another incarnation only when an
+  // opening NAMES its declaration; otherwise it is an orphan the operator declared by hand, and
+  // its bytes still count against this opening, which is the only lineage they have.
   const named = gw.channelPools.get(o.channel);
-  const attached = named?.declarationId === o.poolDeclaration ? named.gateway : undefined;
+  const another =
+    named !== undefined &&
+    named.declarationId !== o.poolDeclaration &&
+    !orphanedDeclaration(gw, named.declarationId!);
+  const attached = named !== undefined && !another ? named.gateway : undefined;
   if (attached !== undefined && [...attached.reactor.snapshot()].length > 0)
-    return "its pool is still attached and holds bytes";
+    return named!.declarationId === o.poolDeclaration
+      ? "its pool is still attached and holds bytes"
+      : "a pool no opening names is attached under its name and holds bytes";
   if (named === undefined && gw.options.channelBackend !== undefined) {
     const backend = gw.options.channelBackend(o.channel);
     try {

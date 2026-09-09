@@ -248,6 +248,21 @@ export function localChannelsInContainer(gw: Gateway, container: string): string
   }
   return [...names].sort();
 }
+/**
+ * Is a pool attached under this declaration an ORPHAN? It is when no surviving opening names the
+ * declaration: the operator declared it by hand, beside or instead of the one an opening named.
+ * Boot attaches only surviving declarations and a handle keeps the declaration it attached under,
+ * so a struck declaration never sits beneath a pool here. The erase door and the drop both ask
+ * this, so that an orphan reads the same across a restart as inside the process that made it.
+ */
+export function orphanedDeclaration(gw: Gateway, declaration: string): boolean {
+  for (const d of gw.reactor.snapshot()) {
+    if (!inLocalContext(d, LOCAL_EVENT)) continue;
+    const parsed = parseLocalEvent(d, gw.operatorAuthor);
+    if (parsed?.action === "open" && parsed.opening.poolDeclaration === declaration) return false;
+  }
+  return true;
+}
 export function localEraseTarget(
   d: Delta,
   reactor: Reactor,

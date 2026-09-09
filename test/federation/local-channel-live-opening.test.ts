@@ -14,6 +14,8 @@
 //   a tombstoned member is skipped whether or not it is settled     → 1 red
 //   the struck-declaration byte check through the store is gone     → 1 red
 // After review round 3 (123 cases): an orphaned attached pool cannot be dropped → 2 red.
+// After review round 4 (124 cases): a pool under another declaration is always another
+// incarnation → 1 red; the drop road ignores an orphan after a restart → 1 red.
 // The boot-unattachable pool is not a case here: the base already refuses it as unreachable. The
 // struck-declaration case measures both halves of the byte side: the attached pool, and the
 // store reopened by name with no handle in memory (the fixture keeps one store per name, as the
@@ -75,7 +77,8 @@ class FaultBackend extends MemoryBackend {
   }
 }
 async function home() {
-  const primary = new FaultBackend();
+  const primaryFile: Delta[] = [];
+  const primary = new FaultBackend(primaryFile);
   const files = new Map<string, Delta[]>();
   const gw = await Gateway.boot(
     primary,
@@ -90,7 +93,26 @@ async function home() {
   );
   homes.push(gw);
   const holds = (name: string, id: string) => (files.get(name) ?? []).some((d) => d.id === id);
-  return { gw, primary, holds };
+  // A RESTART: close this process's gateway and boot another over the same primary and the same
+  // files. Boot re-attaches every declared pool under its current declaration.
+  const restart = async () => {
+    await gw.close();
+    homes.splice(homes.indexOf(gw), 1);
+    const again = await Gateway.boot(
+      new FaultBackend(primaryFile),
+      assembleGenesis({ operatorSeed: SEED, registrations: [] }),
+      {
+        channelBackend: (name) => {
+          const file = files.get(name) ?? [];
+          files.set(name, file);
+          return new FaultBackend(file);
+        },
+      },
+    );
+    homes.push(again);
+    return again;
+  };
+  return { gw, primary, holds, restart };
 }
 function peer() {
   const offering: Delta[] = [];
@@ -221,8 +243,63 @@ describe("spec 64: a live opening cannot be erased", () => {
     await gw.dropChannel(ch.name);
     expect(survivingDeclarationIds(gw.reactor, OP, ch.name)).toEqual([]);
     expect(holds(ch.name, fact(1).id)).toBe(false);
+    expect(events(gw, ch.name, "close")).toEqual([]); // nothing was open, so nothing is closed
     await gw.erase(opening.id);
     expect(gw.reactor.get(opening.id)).toBeUndefined();
+  });
+  it("both orphan states read the same after a restart: the erase refuses or the drop works, never a strand", async () => {
+    // Struck and replaced by hand, then a restart that re-attaches under the new declaration.
+    const first = await home();
+    const a = await channel(first.gw);
+    a.offering.push(fact(1));
+    await a.ch.sync();
+    const aOpening = opened(first.gw, a.ch.name).opening;
+    for (const id of survivingDeclarationIds(first.gw.reactor, OP, a.ch.name))
+      await first.gw.append([
+        signClaims(makeNegationClaims(OP, first.gw.nextTimestamp(), id), SEED),
+      ]);
+    await first.gw.append([
+      signClaims(
+        containerClaims(
+          { container: a.ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
+          OP,
+          first.gw.nextTimestamp(),
+        ),
+        SEED,
+      ),
+    ]);
+    const gw = await first.restart();
+    expect(gw.channelPools.get(a.ch.name)).toBeDefined();
+    // The erase must not strand the bytes: the attached pool is no other incarnation's.
+    await expect(gw.erase(aOpening.id)).rejects.toThrow(/no opening names is attached/);
+    expect(first.holds(a.ch.name, fact(1).id)).toBe(true);
+    await gw.dropChannel(a.ch.name);
+    expect(first.holds(a.ch.name, fact(1).id)).toBe(false);
+    expect(survivingDeclarationIds(gw.reactor, OP, a.ch.name)).toEqual([]);
+    await gw.erase(aOpening.id);
+    expect(gw.reactor.get(aOpening.id)).toBeUndefined();
+    // A second declaration by hand, then a restart.
+    const second = await home();
+    const b = await channel(second.gw);
+    b.offering.push(fact(2));
+    await b.ch.sync();
+    const bOpening = opened(second.gw, b.ch.name).opening;
+    await second.gw.append([
+      signClaims(
+        containerClaims(
+          { container: b.ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
+          OP,
+          second.gw.nextTimestamp(),
+        ),
+        SEED,
+      ),
+    ]);
+    const gw2 = await second.restart();
+    await expect(gw2.erase(bOpening.id)).rejects.toThrow(/Drop the channel first/);
+    await gw2.dropChannel(b.ch.name);
+    expect(second.holds(b.ch.name, fact(2).id)).toBe(false);
+    await gw2.erase(bOpening.id);
+    expect(gw2.reactor.get(bOpening.id)).toBeUndefined();
   });
 });
 
