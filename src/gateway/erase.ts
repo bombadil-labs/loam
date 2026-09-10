@@ -749,21 +749,9 @@ async function liveOpening(
   gw: Gateway,
   o: { channel: string; poolDeclaration: string },
 ): Promise<string | undefined> {
-  // With its status gone, dropChannel calls the name severed; the container handle still drops.
   const drop =
-    gw.channelStatus(o.channel).length > 0
-      ? `Drop the channel first (dropChannel "${o.channel}"); its pool's deltas can be read or ` +
-        `extracted until then.`
-      : `Its status is gone, so dropChannel calls it severed: drop it through its container ` +
-        `handle (openContainer({ name: "${o.channel}" }), then drop()); its deltas can be read ` +
-        `or extracted until then.`;
-  const negated = lawfulNegated(gw.reactor, gw.operatorAuthor);
-  if (gw.reactor.get(o.poolDeclaration) !== undefined && !negated(o.poolDeclaration))
-    return `its pool's declaration still stands. ${drop}`;
-  // The pool under this NAME may be a later incarnation, in which case its bytes are that
-  // incarnation's and its opening carries their lineage. It is another incarnation only when an
-  // opening NAMES its declaration; otherwise it is an orphan the operator declared by hand, and
-  // its bytes still count against this opening, which is the only lineage they have.
+    `Drop the channel first (dropChannel "${o.channel}"); its pool's deltas can be read or ` +
+    `extracted until then.`;
   // The same staleness test the drop applies: a handle whose pool was dropped or detached through
   // the container is a mirror of nothing, and reads as no handle.
   const cached = gw.channelPools.get(o.channel);
@@ -773,6 +761,21 @@ async function liveOpening(
     gw.quarantinePools.has(cached.gateway)
       ? cached
       : undefined;
+  // A container attached BY HAND under the name (openContainer) is not the channel pool, but its
+  // bytes are under the name all the same, and the drop cannot attach past it.
+  const byHand = gw.attachedContainers.get(o.channel);
+  if (byHand !== undefined && byHand !== named?.gateway && byHand.reactor.size !== 0)
+    return (
+      "a container attached by hand under its name holds bytes: detach() it, then drop the " +
+      "channel (dropChannel), then erase again."
+    );
+  const negated = lawfulNegated(gw.reactor, gw.operatorAuthor);
+  if (gw.reactor.get(o.poolDeclaration) !== undefined && !negated(o.poolDeclaration))
+    return `its pool's declaration still stands. ${drop}`;
+  // The pool under this NAME may be a later incarnation, in which case its bytes are that
+  // incarnation's and its opening carries their lineage. It is another incarnation only when an
+  // opening NAMES its declaration; otherwise it is an orphan the operator declared by hand, and
+  // its bytes still count against this opening, which is the only lineage they have.
   const another =
     named !== undefined &&
     named.declarationId !== o.poolDeclaration &&
@@ -805,14 +808,6 @@ async function liveOpening(
       );
   }
   if (named === undefined) {
-    // No channel pool is registered under the name. A container attached BY HAND under it
-    // (openContainer) is not a channel pool, but its bytes are under the name all the same.
-    const byHand = gw.attachedContainers.get(o.channel);
-    if (byHand !== undefined && byHand.reactor.size !== 0)
-      return (
-        "a container attached by hand under its name holds bytes: detach() it, then drop the " +
-        "channel (dropChannel), then erase again."
-      );
     // A declaration can stand with no handle in memory: the pool detached on the record, or its
     // store unreadable when this process booted. Attached again, that incarnation's own bytes are
     // its own and the erase proceeds; a drop would purge them, so it is not the road named.

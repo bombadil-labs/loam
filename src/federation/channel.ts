@@ -2177,7 +2177,10 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
   // A NAME THIS STORE NEVER HAD gets a sentence, not the container layer's internals. Without this
   // it surfaced as `openContainer: no surviving declaration names "..."` — true, and it tells a
   // person nothing about what they typed wrong.
-  if (channelStatusImpl(gw, name).length === 0) {
+  // A name with no status record but a STANDING declaration is not severed: its stamps were
+  // struck by hand, its pool is still declared, and this door is the road to purge it (spec 64).
+  const statusGone = channelStatusImpl(gw, name).length === 0;
+  if (statusGone && currentPoolDeclaration(gw, name) === undefined) {
     const severed = channelsEverImpl(gw, name)[0];
     throw new Error(
       severed === undefined
@@ -2249,7 +2252,8 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
     await issueChannelEvent(gw, { action: "close", channel: name, opening: evidence.opening.id });
   else if (
     evidence.state === "unavailable" &&
-    (evidence.reason === "attached pool declaration changed" ||
+    (statusGone ||
+      evidence.reason === "attached pool declaration changed" ||
       (pool.declarationId !== undefined && orphanedDeclaration(gw, pool.declarationId)))
   )
     // AN ORPHANED POOL. The operator struck or replaced its declaration by hand. Inside the
@@ -2259,7 +2263,8 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
     // opening". Either way its bytes are attached under this name with no opening that agrees, so
     // no close can name one. The drop is the one road out (spec 64): purge it, strike what still
     // declares the name, and let the opening's own erase take the lineage afterwards. Nothing is
-    // closed that was not open.
+    // closed that was not open. A name whose STATUS was struck by hand is the same road: the
+    // lifecycle cannot pair its opening with a status that no longer stands.
     void 0;
   else if (evidence.state === "unavailable")
     throw new Error(`dropChannel refused: ${evidence.reason}`);

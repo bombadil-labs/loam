@@ -209,6 +209,22 @@ criterion names its verification.
 10. Full bar green and hollow-test run first on the clean tip, then recorded. Verify:
     `npm run check` and `adlc hollow-test --base origin/t288/local-channel-events --max 300 --test-cmd "timeout -k 10 600 npx vitest run test/federation/local-channel-*.test.ts"`
 
+## Review round 13 of the build, 2026-09-09
+
+Round 12's container-handle road could not be run from the sentence that named it: in the one
+state that shows the text the pool is attached, so `openContainer` by name refuses, and a handle
+drop leaves this process's channel maps stale. The fix is the sentence round 5 wrote and round 6
+withdrew, now deliberately landed: `dropChannel` does not call a name severed while a declaration
+stands under it. A name whose status stamps were struck by hand drops through the door, which
+purges the pool, strikes the declaration and clears the maps; no close is written, since the
+lifecycle cannot pair the opening with a status that no longer stands, and the opening's own erase
+takes the lineage afterwards. The drop sentence is one sentence again. The hand-attached check now
+runs before the declaration check, since the drop cannot attach past a container attached by hand
+under the name. What the drop can now remove that it could not before: an attached pool under a
+name with no status record and a standing declaration. Known and left: a channel pool dropped
+through its container handle leaves this process's channel maps stale until a restart or a drop
+through the door; the erase reads past the stale entry, and no text names the handle road.
+
 ## Review round 12 of the build, 2026-09-09
 
 Three more roads measured from their states, all in the refuse direction. A name whose status
@@ -307,7 +323,7 @@ opening now refuses a store that still holds bytes no opening names, before the 
 written, for a name that once carried a protected opening; a name that never did (a stranger's
 record, a legacy channel) is not held to it. The pool stays attached under the declaration the
 open minted, so the drop is the road out, and the drop addresses an attached pool under a name
-with no status record instead of calling it severed. `orphanedDeclaration` fails closed on an
+with no status record instead of calling it severed (withdrawn in round 6, landed in round 13). `orphanedDeclaration` fails closed on an
 event it cannot parse, so a purge never rides a parser change; a rail plants one and restarts.
 
 ## Review round 4 of the build, 2026-09-09
