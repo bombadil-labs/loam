@@ -31,7 +31,10 @@
 // After review round 11 (133 cases): the struck-declaration text names a fresh open while the
 // status still stands, where an open resumes and needs the declaration → 1 red; the drop road on
 // a later incarnation's unnamed bytes did not say it severs the standing incarnation → 1 red.
-// RAILS-RED on 4e3b8b52, the whole file as of round 11: 16 red, 1 green. The green case is "an event this reader cannot parse makes the orphan question fail closed": the base's
+// After review round 12 (134 cases): a name whose status was struck by hand is sent to a drop
+// that calls it severed → 1 red; a dropped pool's stale handle reads as a pool that holds bytes →
+// 1 red; the hand-attached road's drop() left a name with stamps and no declaration → 1 red.
+// RAILS-RED on 4e3b8b52, the whole file as of round 12: 17 red, 1 green. The green case is "an event this reader cannot parse makes the orphan question fail closed": the base's
 // drop also throws on an unreadable history. Its scoped guard is measured by the revert probe.
 // The struck-declaration case measures both halves of the byte side: the attached pool, and the
 // store reopened by name with no handle in memory (the fixture keeps one store per name, as the
@@ -149,6 +152,20 @@ async function channel(gw: Gateway, prefix = "peer") {
   });
   return { ch, ...feed, pool: ch.pool.gateway! };
 }
+// The operator's status stamps of one channel, by id: what a strike by hand negates.
+const statusIds = (gw: Gateway, name: string) =>
+  [...gw.reactor.snapshot()]
+    .filter(
+      (d) =>
+        d.claims.author === OP &&
+        d.claims.pointers.some(
+          (p) =>
+            p.target.kind === "entity" &&
+            p.target.entity.id === `channel:${name}` &&
+            p.target.entity.context === "loam.channel",
+        ),
+    )
+    .map((d) => d.id);
 function opened(gw: Gateway, name: string) {
   const evidence = localChannelEvidence(gw, name);
   if (evidence.state !== "open") throw new Error(`expected open: ${JSON.stringify(evidence)}`);
@@ -733,10 +750,36 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     });
     expect(hand.gateway!.reactor.get(fact(1).id)).toBeDefined();
     const refusal = await gw.erase(opening.id).catch((e: Error) => e.message);
-    expect(refusal).toContain("drop() it, then erase again");
+    expect(refusal).toContain("detach() it, then drop the channel (dropChannel), then erase again");
     expect(gw.reactor.get(opening.id)).toBeDefined();
-    await hand.drop();
+    // The road, run to its end: the name is severed on the record, not left with stamps and no
+    // declaration (a container drop() alone leaves that, and every boot then fails to attach it).
+    await hand.detach("kept for extraction");
+    await gw.dropChannel(ch.name);
     expect(holds(ch.name, fact(1).id)).toBe(false);
+    await gw.erase(opening.id);
+    expect(gw.reactor.get(opening.id)).toBeUndefined();
+    expect(gw.channelStatus(ch.name)).toHaveLength(0);
+  });
+  it("status stamps struck by hand while the declaration stands: the refusal names the container handle's drop, which works, and a stale handle is not a pool", async () => {
+    const { gw, holds } = await home();
+    const { ch, offering } = await channel(gw);
+    offering.push(fact(1));
+    await ch.sync();
+    const opening = opened(gw, ch.name).opening;
+    for (const id of statusIds(gw, ch.name))
+      await gw.append([signClaims(makeNegationClaims(OP, gw.nextTimestamp(), id), SEED)]);
+    expect(gw.channelStatus(ch.name)).toHaveLength(0);
+    const refusal = await gw.erase(opening.id).catch((e: Error) => e.message);
+    expect(refusal).toContain("its pool's declaration still stands");
+    expect(refusal).toContain("drop it through its container handle");
+    expect(refusal).not.toContain('dropChannel "');
+    await expect(gw.dropChannel(ch.name)).rejects.toThrow(/severed/);
+    // The handle's drop purges the store and strikes the declaration. The map still holds the
+    // dropped handle; the erase reads it as no pool, as the drop would, and proceeds.
+    await ch.pool.drop();
+    expect(holds(ch.name, fact(1).id)).toBe(false);
+    expect(gw.channelPools.get(ch.name)).toBeDefined();
     await gw.erase(opening.id);
     expect(gw.reactor.get(opening.id)).toBeUndefined();
   });
@@ -748,18 +791,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     const opening = opened(first.gw, ch.name).opening;
     const struck = [
       ...survivingDeclarationIds(first.gw.reactor, OP, ch.name),
-      ...[...first.gw.reactor.snapshot()]
-        .filter(
-          (d) =>
-            d.claims.author === OP &&
-            d.claims.pointers.some(
-              (p) =>
-                p.target.kind === "entity" &&
-                p.target.entity.id === `channel:${ch.name}` &&
-                p.target.entity.context === "loam.channel",
-            ),
-        )
-        .map((d) => d.id),
+      ...statusIds(first.gw, ch.name),
     ];
     for (const id of struck)
       await first.gw.append([

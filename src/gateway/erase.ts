@@ -749,9 +749,14 @@ async function liveOpening(
   gw: Gateway,
   o: { channel: string; poolDeclaration: string },
 ): Promise<string | undefined> {
+  // With its status gone, dropChannel calls the name severed; the container handle still drops.
   const drop =
-    `Drop the channel first (dropChannel "${o.channel}"); its pool's deltas can be read or ` +
-    `extracted until then.`;
+    gw.channelStatus(o.channel).length > 0
+      ? `Drop the channel first (dropChannel "${o.channel}"); its pool's deltas can be read or ` +
+        `extracted until then.`
+      : `Its status is gone, so dropChannel calls it severed: drop it through its container ` +
+        `handle (openContainer({ name: "${o.channel}" }), then drop()); its deltas can be read ` +
+        `or extracted until then.`;
   const negated = lawfulNegated(gw.reactor, gw.operatorAuthor);
   if (gw.reactor.get(o.poolDeclaration) !== undefined && !negated(o.poolDeclaration))
     return `its pool's declaration still stands. ${drop}`;
@@ -759,7 +764,15 @@ async function liveOpening(
   // incarnation's and its opening carries their lineage. It is another incarnation only when an
   // opening NAMES its declaration; otherwise it is an orphan the operator declared by hand, and
   // its bytes still count against this opening, which is the only lineage they have.
-  const named = gw.channelPools.get(o.channel);
+  // The same staleness test the drop applies: a handle whose pool was dropped or detached through
+  // the container is a mirror of nothing, and reads as no handle.
+  const cached = gw.channelPools.get(o.channel);
+  const named =
+    cached?.gateway !== undefined &&
+    cached.gateway.attachedTo === gw &&
+    gw.quarantinePools.has(cached.gateway)
+      ? cached
+      : undefined;
   const another =
     named !== undefined &&
     named.declarationId !== o.poolDeclaration &&
@@ -796,7 +809,10 @@ async function liveOpening(
     // (openContainer) is not a channel pool, but its bytes are under the name all the same.
     const byHand = gw.attachedContainers.get(o.channel);
     if (byHand !== undefined && byHand.reactor.size !== 0)
-      return "a container attached by hand under its name holds bytes: drop() it, then erase again.";
+      return (
+        "a container attached by hand under its name holds bytes: detach() it, then drop the " +
+        "channel (dropChannel), then erase again."
+      );
     // A declaration can stand with no handle in memory: the pool detached on the record, or its
     // store unreadable when this process booted. Attached again, that incarnation's own bytes are
     // its own and the erase proceeds; a drop would purge them, so it is not the road named.

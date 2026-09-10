@@ -209,6 +209,18 @@ criterion names its verification.
 10. Full bar green and hollow-test run first on the clean tip, then recorded. Verify:
     `npm run check` and `adlc hollow-test --base origin/t288/local-channel-events --max 300 --test-cmd "timeout -k 10 600 npx vitest run test/federation/local-channel-*.test.ts"`
 
+## Review round 12 of the build, 2026-09-09
+
+Three more roads measured from their states, all in the refuse direction. A name whose status
+stamps were struck by hand while its declaration stands is one `dropChannel` calls severed, so the
+drop sentence now branches on the status: standing, `dropChannel`; gone, the container handle's
+own `drop()`. The probe read the channel-pool map without the staleness test the drop applies, so
+a pool dropped or detached through its handle read as a pool that holds bytes; the probe now
+applies the same test (attached to this gateway, in the quarantine set) and reads a stale handle
+as no handle. This retires round 11's known-and-left. The hand-attached road named the container's
+`drop()`, which leaves the name with status stamps and no declaration, a name every boot then
+fails to attach; the road is detach, then `dropChannel`, and the rail asserts the stamps are gone.
+
 ## Review round 11 of the build, 2026-09-09
 
 Round 10's roads, measured from each state. The struck-declaration text named a fresh open, which
@@ -218,11 +230,8 @@ re-declare by hand then drop; gone, open again then drop. The drop named for a l
 unnamed bytes severs that standing incarnation and purges its pool; the text now says so, since no
 narrower road exists (the root never held those bytes, so the root cannot erase them one by one).
 The hand-attached text named detach as well as drop; detached, the container is a standing
-declaration and the erase refuses twice more, so the text names drop alone. Known and left: a
-pool detached through its handle stays in the channel-pool map of this process; the probe then
-reads the detached container's own reactor, which is a stale mirror of the store, and the erase
-proceeds on it. A boot over that store attaches the pool afresh. The rail that models the
-no-handle state says which state it models.
+declaration and the erase refuses twice more, so the text names drop alone. Round 12 retired the stale-handle read
+this round left; the rail that models the no-handle state says which state it models.
 
 ## Review round 10 of the build, 2026-09-09
 
