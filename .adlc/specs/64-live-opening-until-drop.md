@@ -209,6 +209,19 @@ criterion names its verification.
 10. Full bar green and hollow-test run first on the clean tip, then recorded. Verify:
     `npm run check` and `adlc hollow-test --base origin/t288/local-channel-events --max 300 --test-cmd "timeout -k 10 600 npx vitest run test/federation/local-channel-*.test.ts"`
 
+## Review round 10 of the build, 2026-09-09
+
+Round 9's registration fix stood. Its two no-handle refusal texts did not: both named
+`dropChannel`, which refuses a name whose status stamps are struck ("already severed"), and which,
+for a LIVE later incarnation whose pool was detached in this process, would purge that
+incarnation's bytes; attached again, those bytes are its own and the earlier erase proceeds. And a
+container attached by hand under the channel's name (openContainer) sat in the attached set but not
+in the channel-pool map, so the probe said no pool was attached while the drop said one was. Now:
+the probe reads the hand-attached container's bytes and names detach or drop; the standing
+declaration text names re-attach (open the channel again with its options, or restart), never a
+drop; the struck-declaration text names a fresh open under the name, which attaches the store,
+then the drop. Three rails, each run to completion along its named road.
+
 ## Review round 9 of the build, 2026-09-09
 
 Round 8's control was wrong in its second half, and round 9 measured it: a drop run in the

@@ -744,14 +744,17 @@ export function sealCommitment(salt: string, author: string): string {
 // THAT it forgot — never what. Live subscriptions re-attach exactly as they do after a schema
 // evolution or a crash; an animated gateway's runner must be re-attached (the host holds the old
 // reactor).
-/** Why an opening is still live, or undefined when its pool is gone. */
+/** Why an opening is still live and the road out of it, or undefined when its pool is gone. */
 async function liveOpening(
   gw: Gateway,
   o: { channel: string; poolDeclaration: string },
 ): Promise<string | undefined> {
+  const drop =
+    `Drop the channel first (dropChannel "${o.channel}"); its pool's deltas can be read or ` +
+    `extracted until then.`;
   const negated = lawfulNegated(gw.reactor, gw.operatorAuthor);
   if (gw.reactor.get(o.poolDeclaration) !== undefined && !negated(o.poolDeclaration))
-    return "its pool's declaration still stands";
+    return `its pool's declaration still stands. ${drop}`;
   // The pool under this NAME may be a later incarnation, in which case its bytes are that
   // incarnation's and its opening carries their lineage. It is another incarnation only when an
   // opening NAMES its declaration; otherwise it is an orphan the operator declared by hand, and
@@ -764,8 +767,8 @@ async function liveOpening(
   const attached = named !== undefined && !another ? named.gateway : undefined;
   if (attached !== undefined && attached.reactor.size !== 0)
     return named!.declarationId === o.poolDeclaration
-      ? "its pool is still attached and holds bytes"
-      : "a pool no opening names is attached under its name and holds bytes";
+      ? `its pool is still attached and holds bytes. ${drop}`
+      : `a pool no opening names is attached under its name and holds bytes. ${drop}`;
   // A later incarnation under the same name owns only what its receipts name, plus what the seed
   // copied in from the root (a separate pool is seeded from the primary at attach, so the root's
   // own peer bytes ride along). The store is keyed by name, so a peer byte in that pool that no
@@ -781,17 +784,29 @@ async function liveOpening(
           gw.reactor.get(d.id) === undefined,
       )
     )
-      return "a later incarnation under its name holds bytes that no receipt of that incarnation names";
+      return (
+        "a later incarnation under its name holds bytes that no receipt of that incarnation " +
+        `names. ${drop}`
+      );
   }
   if (named === undefined) {
+    // No channel pool is registered under the name. A container attached BY HAND under it
+    // (openContainer) is not a channel pool, but its bytes are under the name all the same.
+    const byHand = gw.attachedContainers.get(o.channel);
+    if (byHand !== undefined && byHand.reactor.size !== 0)
+      return (
+        "a container attached by hand under its name holds bytes: detach() or drop() it, then " +
+        "erase again."
+      );
     // A declaration can stand with no handle in memory: the pool detached on the record, or its
-    // store unreadable when this process booted. The store is that declaration's to drop, and the
-    // drop attaches the pool before it purges.
+    // store unreadable when this process booted. Attached again, that incarnation's own bytes are
+    // its own and the erase proceeds; a drop would purge them, so it is not the road named.
     const standing = currentContainerDeclarationId(gw.reactor, gw.operatorAuthor, o.channel);
     if (standing !== undefined && standing !== o.poolDeclaration)
       return (
-        "a declaration under its name still stands while no pool is attached here: drop the " +
-        "channel (dropChannel), which attaches its pool first"
+        "a declaration under its name still stands while no pool is attached here: attach it " +
+        "first (open the channel again with the options it stands with, or restart this store), " +
+        "then erase again."
       );
   }
   if (named === undefined && gw.options.channelBackend !== undefined) {
@@ -800,8 +815,8 @@ async function liveOpening(
       if ((await backend.deltasSince(new Set())).length > 0)
         return (
           "its pool's store still holds bytes although its declaration was struck, and no " +
-          "declaration names that store for a drop to reach: re-declare the name and drop it, or " +
-          "remove the store by hand"
+          "declaration names that store for a drop to reach: open the channel again under this " +
+          "name, which attaches the store, then drop it, or remove the store by hand."
         );
     } finally {
       await backend.close();
@@ -910,9 +925,8 @@ export async function eraseImpl(
     const live = await liveOpening(gw, o);
     if (live !== undefined) {
       throw new Error(
-        `erase ${id} refused: it is the opening of channel "${o.channel}", and ${live}. ` +
-          `Drop the channel first (dropChannel "${o.channel}"); its pool's deltas can be read or ` +
-          `extracted until then. Nothing was removed.`,
+        `erase ${id} refused: it is the opening of channel "${o.channel}", and ${live} ` +
+          `Nothing was removed.`,
       );
     }
     // A DROPPED incarnation's opening takes its receipts and close with it, receipts and close

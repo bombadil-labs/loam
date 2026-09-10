@@ -25,7 +25,10 @@
 // After review rounds 8 and 9 (130 cases): a boot-skipped pool's in-process drop attaches the pool
 // without registering it → 1 red; the no-handle road names a re-declaration while a declaration
 // stands → 1 red; a one-delta store reads as empty (`> 1`) → 1 red.
-// RAILS-RED on 4e3b8b52, the whole file as of round 9: 13 red, 1 green. The green case is "an event this reader cannot parse makes the orphan question fail closed": the base's
+// After review round 10 (133 cases): a hand-attached container under the name is invisible to the
+// probe → 1 red; the standing-declaration text names a drop that purges a live incarnation → 1
+// red; the struck-declaration text names a re-declaration that the drop then refuses → 1 red.
+// RAILS-RED on 4e3b8b52, the whole file as of round 10: 16 red, 1 green. The green case is "an event this reader cannot parse makes the orphan question fail closed": the base's
 // drop also throws on an unreadable history. Its scoped guard is measured by the revert probe.
 // The struck-declaration case measures both halves of the byte side: the attached pool, and the
 // store reopened by name with no handle in memory (the fixture keeps one store per name, as the
@@ -215,9 +218,11 @@ describe("spec 64: a live opening cannot be erased", () => {
     expect(attached).toContain("its pool is still attached and holds bytes");
     expect(gw.reactor.get(opening.id)).toBeDefined();
     expect(pool.reactor.get(fact(1).id)).toBeDefined();
-    // Cross-process: no handle in memory, the store on disk still holds the bytes.
+    // Cross-process: no handle in memory, the store on disk still holds the bytes. The three maps
+    // are what another process would not have; the pool object itself is this process's.
     gw.federationChannels.delete(ch.name);
     gw.channelPools.delete(ch.name);
+    gw.attachedContainers.delete(ch.name);
     expect(holds(ch.name, fact(1).id)).toBe(true);
     const unattached = await gw.erase(opening.id).catch((e: Error) => e.message);
     expect(unattached).toContain(
@@ -234,7 +239,7 @@ describe("spec 64: a live opening cannot be erased", () => {
     expect(gw.reactor.get(opening.id)).toBeDefined();
     // The road the refusal names works while the pool is ATTACHED: the drop purges the orphaned
     // pool, then the erase proceeds. With no handle and no declaration, the container layer cannot
-    // re-open the store, so that state needs a re-declaration or the file removed by hand.
+    // re-open the store; a fresh open under the name attaches it (the case below measures that).
     await expect(gw.dropChannel(ch.name)).rejects.toThrow(/no surviving declaration/);
     gw.channelPools.set(ch.name, ch.pool);
     gw.federationChannels.set(ch.name, ch);
@@ -644,6 +649,116 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     expect(gw.reactor.get(opening.id)).toBeDefined();
     await gw.dropChannel(ch.name);
     expect(holds(ch.name, fact(1).id)).toBe(false);
+    await gw.erase(opening.id);
+    expect(gw.reactor.get(opening.id)).toBeUndefined();
+  });
+  it("a later LIVE incarnation detached in this process: the earlier opening's refusal names re-attach, not a drop, and the re-attached pool keeps its bytes", async () => {
+    const { gw, holds } = await home();
+    const { ch, offering } = await channel(gw);
+    offering.push(fact(1));
+    await ch.sync();
+    const earlier = opened(gw, ch.name).opening;
+    await gw.dropChannel(ch.name);
+    const feed = peer();
+    const opts = {
+      into: "friends",
+      prefix: "peer",
+      from: "https://peer.example/peer",
+      source: feed.source,
+    };
+    const again = await gw.openChannel(opts);
+    feed.offering.push(fact(2));
+    await again.sync();
+    await again.pool.detach("kept for extraction");
+    gw.federationChannels.delete(ch.name);
+    gw.channelPools.delete(ch.name);
+    const refusal = await gw.erase(earlier.id).catch((e: Error) => e.message);
+    expect(refusal).toContain("attach it first");
+    expect(refusal).not.toContain("dropChannel");
+    expect(gw.reactor.get(earlier.id)).toBeDefined();
+    // The road: the open resumes the standing incarnation; its bytes are its own; the erase proceeds.
+    await gw.openChannel(opts);
+    await gw.erase(earlier.id);
+    expect(gw.reactor.get(earlier.id)).toBeUndefined();
+    expect(holds(ch.name, fact(2).id)).toBe(true);
+    expect(localChannelEvidence(gw, ch.name).state).toBe("open");
+  });
+  it("a container attached by hand under the channel's name holds bytes: the erase says so; detached, the drop purges it and the erase proceeds", async () => {
+    const { gw, holds } = await home();
+    const { ch, offering } = await channel(gw);
+    offering.push(fact(1));
+    await ch.sync();
+    const opening = opened(gw, ch.name).opening;
+    for (const id of survivingDeclarationIds(gw.reactor, OP, ch.name))
+      await gw.append([signClaims(makeNegationClaims(OP, gw.nextTimestamp(), id), SEED)]);
+    await gw.append([
+      signClaims(
+        containerClaims(
+          { container: ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
+          OP,
+          gw.nextTimestamp(),
+        ),
+        SEED,
+      ),
+    ]);
+    await ch.pool.detach("kept for extraction");
+    gw.federationChannels.delete(ch.name);
+    gw.channelPools.delete(ch.name);
+    const hand = await gw.openContainer({
+      name: ch.name,
+      backend: gw.options.channelBackend!(ch.name),
+    });
+    expect(hand.gateway!.reactor.get(fact(1).id)).toBeDefined();
+    const refusal = await gw.erase(opening.id).catch((e: Error) => e.message);
+    expect(refusal).toContain("attached by hand under its name holds bytes");
+    expect(gw.reactor.get(opening.id)).toBeDefined();
+    await hand.detach("kept for extraction");
+    await gw.dropChannel(ch.name);
+    expect(holds(ch.name, fact(1).id)).toBe(false);
+    await gw.erase(opening.id);
+    expect(gw.reactor.get(opening.id)).toBeUndefined();
+  });
+  it("status stamps and declaration struck by hand, no handle: the refusal names a fresh open, which attaches the store; the drop then purges it and the erase proceeds", async () => {
+    const first = await home();
+    const { ch, offering } = await channel(first.gw);
+    offering.push(fact(1));
+    await ch.sync();
+    const opening = opened(first.gw, ch.name).opening;
+    const struck = [
+      ...survivingDeclarationIds(first.gw.reactor, OP, ch.name),
+      ...[...first.gw.reactor.snapshot()]
+        .filter(
+          (d) =>
+            d.claims.author === OP &&
+            d.claims.pointers.some(
+              (p) =>
+                p.target.kind === "entity" &&
+                p.target.entity.id === `channel:${ch.name}` &&
+                p.target.entity.context === "loam.channel",
+            ),
+        )
+        .map((d) => d.id),
+    ];
+    for (const id of struck)
+      await first.gw.append([
+        signClaims(makeNegationClaims(OP, first.gw.nextTimestamp(), id), SEED),
+      ]);
+    const gw = await first.restart();
+    expect(gw.channelPools.get(ch.name)).toBeUndefined();
+    expect(first.holds(ch.name, fact(1).id)).toBe(true);
+    const refusal = await gw.erase(opening.id).catch((e: Error) => e.message);
+    expect(refusal).toContain("open the channel again under this name");
+    expect(refusal).not.toContain("re-declare");
+    await expect(gw.dropChannel(ch.name)).rejects.toThrow(/severed|no channel named/);
+    const feed = peer();
+    await gw.openChannel({
+      into: "friends",
+      prefix: "peer",
+      from: "https://peer.example/peer",
+      source: feed.source,
+    });
+    await gw.dropChannel(ch.name);
+    expect(first.holds(ch.name, fact(1).id)).toBe(false);
     await gw.erase(opening.id);
     expect(gw.reactor.get(opening.id)).toBeUndefined();
   });
