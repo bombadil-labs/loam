@@ -59,6 +59,20 @@ describe("holdsAny: the whole-store byte probe", () => {
     expect(await store.holdsAny()).toBe(false);
     await store.close();
   });
+  it("sqlite: a persisted list of owed ids answers true over an empty table, one id being enough", async () => {
+    const file = join(tmp(), "s.sqlite");
+    await new SqliteBackend(file).close();
+    const raw = new Database(file);
+    raw
+      .prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('truncation-outstanding', ?)")
+      .run(JSON.stringify([`1e20${"cd".repeat(32)}`]));
+    raw.close();
+    const store = new SqliteBackend(file);
+    expect(await store.holdsAny()).toBe(true);
+    await store.purge([`1e20${"cd".repeat(32)}`]);
+    expect(await store.holdsAny()).toBe(false);
+    await store.close();
+  });
   it("mirror: true while either tier holds, false when both are clean", async () => {
     await roundTrip(new MirrorBackend(new MemoryBackend(), new MemoryBackend()));
     const primary = new MemoryBackend();
