@@ -209,6 +209,19 @@ criterion names its verification.
 10. Full bar green and hollow-test run first on the clean tip, then recorded. Verify:
     `npm run check` and `adlc hollow-test --base origin/t288/local-channel-events --max 300 --test-cmd "timeout -k 10 600 npx vitest run test/federation/local-channel-*.test.ts"`
 
+## Review round 15 of the build, 2026-09-09
+
+Round 14's gate admitted a declaration by hand under a name that once was a channel: the drop
+attached a store by name through the channel backend, purged that one, struck the declaration
+and reversed a detach record, while a hand container over its own store kept its bytes (H7, the
+over-claim direction; reachable through the library API, not the CLI, whose only backend is the
+factory's). A shared declaration under such a name dropped through the door with no pool to
+purge. The gate now asks the question the rest of this spec asks: with the status gone, the drop
+proceeds only when a channel opening names the standing declaration (`orphanedDeclaration`
+false); a hand-made declaration is an orphan and the name reads severed, as on the base. What
+the drop can now remove that it could not before, restated narrowly: the channel's own attached
+pool, under its own declaration, after its status stamps were struck by hand.
+
 ## Review round 14 of the build, 2026-09-09
 
 Round 13's widening reached past the channel door: the severed test read the generic container

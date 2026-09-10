@@ -39,11 +39,14 @@
 // After review round 14 (136 cases): the drop purged any hand-declared container under a name
 // this store never had as a channel, minting a store by name → 1 red; the round-13 case is
 // two-sided now (a sibling opened before the strike keeps its bytes).
-// RAILS-RED on 4e3b8b52, the whole file as of round 14: 18 red, 2 green. The green cases: "an
+// After review round 15 (137 cases): a declaration by hand under a name that once was a channel
+// passed the gate, and the drop purged a store the factory minted, not the hand container's → 1
+// red. The gate now asks whether a channel opening names the standing declaration.
+// RAILS-RED on 4e3b8b52, the whole file as of round 15: 18 red, 3 green. The green cases: "an
 // event this reader cannot parse makes the orphan question fail closed" (the base's drop also
-// throws on an unreadable history) and the never-a-channel case (the base refused by status alone,
-// which the round-13 widening had loosened). Each green case's own guard is measured by a revert
-// probe above, not by the base.
+// throws on an unreadable history), the never-a-channel case and the once-a-channel hand
+// declaration case (the base refused both by status alone, which the round-13 widening had
+// loosened). Each green case's own guard is measured by a revert probe above, not by the base.
 // The struck-declaration case measures both halves of the byte side: the attached pool, and the
 // store reopened by name with no handle in memory (the fixture keeps one store per name, as the
 // CLI's sqlite file does).
@@ -832,6 +835,60 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
       expect(files.has(name)).toBe(false);
       expect(survivingDeclarationIds(gw.reactor, OP, name)).toHaveLength(1);
     }
+  });
+  it("a declaration by hand under a name that once was a channel is not the drop door's: separate with its own store, detached or not, and shared", async () => {
+    const { gw, files } = await home();
+    const { ch, offering } = await channel(gw);
+    offering.push(fact(1));
+    await ch.sync();
+    await gw.dropChannel(ch.name);
+    const factoryOpens = files.size;
+    // A separate container by hand with ITS OWN store, first attached, then detached to keep.
+    await gw.append([
+      signClaims(
+        containerClaims(
+          { container: ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
+          OP,
+          gw.nextTimestamp(),
+        ),
+        SEED,
+      ),
+    ]);
+    const own: Delta[] = [];
+    const hand = await gw.openContainer({ name: ch.name, backend: new FaultBackend(own) });
+    await hand.gateway!.federate([fact(7)]);
+    expect(own.some((d) => d.id === fact(7).id)).toBe(true);
+    await expect(gw.dropChannel(ch.name)).rejects.toThrow(/already severed/);
+    await hand.detach("kept for extraction");
+    await expect(gw.dropChannel(ch.name)).rejects.toThrow(/already severed/);
+    expect(own.some((d) => d.id === fact(7).id)).toBe(true);
+    expect(survivingDeclarationIds(gw.reactor, OP, ch.name)).toHaveLength(1);
+    expect(files.size).toBe(factoryOpens);
+    // A SHARED container by hand under the name: no pool exists to purge, so no purge is reported.
+    for (const id of survivingDeclarationIds(gw.reactor, OP, ch.name))
+      await gw.append([signClaims(makeNegationClaims(OP, gw.nextTimestamp(), id), SEED)]);
+    await gw.append([
+      signClaims(
+        containerClaims(
+          {
+            container: ch.name,
+            trust: "curated",
+            posture: "shared",
+            inboxOf: "friends",
+            membership: {
+              op: "select",
+              pred: { hasPointer: { context: { exact: "x" } } },
+              in: "input",
+            },
+          },
+          OP,
+          gw.nextTimestamp(),
+        ),
+        SEED,
+      ),
+    ]);
+    await expect(gw.dropChannel(ch.name)).rejects.toThrow(/already severed/);
+    expect(survivingDeclarationIds(gw.reactor, OP, ch.name)).toHaveLength(1);
   });
   it("a container attached by hand under a live channel's name while its pool is detached: the erase names detach then drop, and that road works", async () => {
     const { gw, holds } = await home();

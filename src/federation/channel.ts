@@ -2177,14 +2177,19 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
   // A NAME THIS STORE NEVER HAD gets a sentence, not the container layer's internals. Without this
   // it surfaced as `openContainer: no surviving declaration names "..."` — true, and it tells a
   // person nothing about what they typed wrong.
-  // A name this store ONCE HAD as a channel, with no status record but a STANDING declaration,
-  // is not severed: its stamps were struck by hand, its pool is still declared, and this door is
-  // the road to purge it (spec 64). A name that was never a channel is not this door's, whatever
-  // container declaration stands under it: purging it here would mint a store by name and
-  // report a purge of bytes it never reached.
+  // A name with no status record whose STANDING declaration a channel opening names is not
+  // severed: its stamps were struck by hand, its pool is still the channel's, and this door is the
+  // road to purge it (spec 64). Any other declaration under the name (a container declared by
+  // hand, before or after a clean drop, separate or shared) is not this door's: purging it here
+  // would attach a store by name through the channel backend and report a purge of bytes it
+  // never reached.
   const statusGone = channelStatusImpl(gw, name).length === 0;
   const severed = channelsEverImpl(gw, name)[0];
-  if (statusGone && (severed === undefined || currentPoolDeclaration(gw, name) === undefined)) {
+  const standing = currentPoolDeclaration(gw, name);
+  if (
+    statusGone &&
+    (severed === undefined || standing === undefined || orphanedDeclaration(gw, standing))
+  ) {
     throw new Error(
       severed === undefined
         ? `dropChannel refused: this store has no channel named "${name}" — ` +
