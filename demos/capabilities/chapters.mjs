@@ -2226,4 +2226,47 @@ export const CHAPTERS = [
       },
     ],
   },
+  {
+    n: 27,
+    slug: "a-channel-remembers-its-incarnations",
+    title: "A channel remembers its incarnations",
+    thesis:
+      "A channel's opening, what it received and its close are the receiver's own signed records, written only by the channel service - and an opening whose pool still holds bytes cannot be erased, on any tier, until the pool is dropped.",
+    covers: ["spec/59-local-channel-incarnations.md"],
+    body: [
+      {
+        kind: "prose",
+        text: "Before this, a store could not say which incarnation of a channel name received what. Now every fresh open writes an open event, every sync that admits bytes writes a receipt naming exactly the ids the ingest accepted, and a drop writes a close - all under one reserved context that the generic doors refuse outright, so a peer cannot forge a receipt. Erasure is the other half: a live opening is refused, with the pool and the road named, because erasing it would leave bytes with no lineage; a dropped incarnation's opening takes its receipts and close with it. And whether a pool is empty is asked at the bytes on every tier, never read from one - a mirror that kept a byte after the primary purged keeps the opening live.",
+      },
+      {
+        kind: "claims",
+        claims: [
+          {
+            says: "A fresh open, a sync and a drop write open, received and close events the receiver signs; the append and federate doors refuse the whole family and every strike of it, whatever the signer.",
+            spec: "spec/59-local-channel-incarnations.md",
+            proof: "test/federation/local-channel-events.test.ts",
+            door: null,
+          },
+          {
+            says: "Erasing a live opening writes nothing and refuses, naming the pool and the drop as the road; after the drop, erasing the opening takes the incarnation's receipts and close with it, receipts first and the opening last, and a fault mid-way leaves the history readable for a re-run.",
+            spec: "spec/59-local-channel-incarnations.md",
+            proof: "test/federation/local-channel-live-opening.test.ts",
+            door: null,
+          },
+          {
+            says: "Every lifecycle event names its parent container, a container's channels are listed from that pointer without a scan by name, and a slate that would pin a lifecycle event is refused.",
+            spec: "spec/59-local-channel-incarnations.md",
+            proof: "test/federation/local-channel-container-scope.test.ts",
+            door: null,
+          },
+          {
+            says: "Every store driver answers whether it holds any byte and which ids it holds on every tier it owns, refusing rather than answering short; a mirror pair asks both tiers.",
+            spec: "spec/59-local-channel-incarnations.md",
+            proof: "test/store/holds-any.test.ts",
+            door: null,
+          },
+        ],
+      },
+    ],
+  },
 ];
