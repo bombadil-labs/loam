@@ -22,14 +22,12 @@
 // the root, so it refused every fresh open over a root that held a stranger's record.
 // After review round 7 (128 cases): bytes the root also holds count against an earlier opening
 // → 1 red; the orphan question fails closed on ANY channel's unreadable event → 1 red.
-// Review round 8 (129 cases) added one CONTROL: a standing declaration whose pool a boot could
-// not attach is refused by the unreachable-store check before the liveness probe runs, so the
-// probe's no-handle road cannot misname it. RAILS-RED of this whole file on 4e3b8b52 after round
-// 8: 11 red, 2 green. The two green: that control, and the other-channel unreadable-event case,
-// which the base also refuses (it fails closed on ANY unreadable event); its scoped guard is
-// measured by the revert probe above, not by the base.
-// The boot-unattachable pool is not a case here: the base already refuses it as unreachable. The
-// struck-declaration case measures both halves of the byte side: the attached pool, and the
+// After review rounds 8 and 9 (130 cases): a boot-skipped pool's in-process drop attaches the pool
+// without registering it → 1 red; the no-handle road names a re-declaration while a declaration
+// stands → 1 red; a one-delta store reads as empty (`> 1`) → 1 red.
+// RAILS-RED on 4e3b8b52, the whole file as of round 9: 13 red, 1 green. The green case is "an event this reader cannot parse makes the orphan question fail closed": the base's
+// drop also throws on an unreadable history. Its scoped guard is measured by the revert probe.
+// The struck-declaration case measures both halves of the byte side: the attached pool, and the
 // store reopened by name with no handle in memory (the fixture keeps one store per name, as the
 // CLI's sqlite file does).
 import { afterEach, describe, expect, it } from "vitest";
@@ -128,7 +126,7 @@ async function home() {
     homes.push(again);
     return again;
   };
-  return { gw, primary, holds, restart, failAttach };
+  return { gw, primary, holds, restart, failAttach, files };
 }
 function peer() {
   const offering: Delta[] = [];
@@ -206,7 +204,7 @@ describe("spec 64: a live opening cannot be erased", () => {
     expect(bytes(siblingPool)).toEqual(before.sibling);
   });
   it("a declaration struck through the append door with the pool's bytes still held refuses and names the orphaned pool, attached or not", async () => {
-    const { gw, holds } = await home();
+    const { gw, holds, files } = await home();
     const { ch, offering, pool } = await channel(gw);
     offering.push(fact(1));
     await ch.sync();
@@ -224,6 +222,14 @@ describe("spec 64: a live opening cannot be erased", () => {
     const unattached = await gw.erase(opening.id).catch((e: Error) => e.message);
     expect(unattached).toContain(
       "its pool's store still holds bytes although its declaration was struck",
+    );
+    expect(gw.reactor.get(opening.id)).toBeDefined();
+    // ONE byte is enough. The seed never leaves a store this small; a hand-written one can be.
+    const file = files.get(ch.name)!;
+    file.splice(0, file.length, ...file.filter((d) => d.id === fact(1).id));
+    expect(file).toHaveLength(1);
+    expect(await gw.erase(opening.id).catch((e: Error) => e.message)).toContain(
+      "still holds bytes although its declaration was struck",
     );
     expect(gw.reactor.get(opening.id)).toBeDefined();
     // The road the refusal names works while the pool is ATTACHED: the drop purges the orphaned
@@ -575,10 +581,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     ).toEqual([fact(2).id, fact(3).id].sort());
     void source;
   });
-  it("CONTROL: a later declaration whose pool a boot could not attach stops the erase at the unreachable-store refusal, before the liveness probe", async () => {
-    // Passes on the base: the §11 sweep refuses a declared container that is neither attached nor
-    // detached on the record. It stands here to say why the liveness probe has no road for that
-    // state, and that the road the refusal names (attach, or drop) works.
+  it("a pool a boot could not attach: the erase is refused as unreachable, the drop attaches and registers it, then the erase proceeds", async () => {
     const first = await home();
     const { ch, offering } = await channel(first.gw);
     offering.push(fact(1));
@@ -594,6 +597,8 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     });
     feed.offering.push(fact(2));
     await again.sync();
+    // The pool's store is unreadable at boot, then readable again: the later declaration stands
+    // on the record and no handle is in memory. The §11 sweep refuses before the liveness probe.
     first.failAttach.add(ch.name);
     const gw = await first.restart();
     expect(gw.channelPools.get(ch.name)).toBeUndefined();
@@ -602,14 +607,45 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     );
     expect(gw.reactor.get(earlier.id)).toBeDefined();
     expect(first.holds(ch.name, fact(2).id)).toBe(true);
-    // The road: a boot over the readable store attaches the pool; the drop purges it; the earlier
-    // opening's erase then proceeds. `dropChannel` reads its evidence before it attaches, so the
-    // drop alone does not reach a pool a boot skipped.
-    const booted = await first.restart();
-    await booted.dropChannel(ch.name);
+    // The drop in this process attaches the pool, registers it for its own lifecycle read, and
+    // purges it. The earlier opening's erase then proceeds.
+    await gw.dropChannel(ch.name);
     expect(first.holds(ch.name, fact(2).id)).toBe(false);
-    await booted.erase(earlier.id);
-    expect(booted.reactor.get(earlier.id)).toBeUndefined();
+    await gw.erase(earlier.id);
+    expect(gw.reactor.get(earlier.id)).toBeUndefined();
+  });
+  it("a hand-made declaration that stands detached on the record with no handle: the erase names the drop, the drop works, then the erase proceeds", async () => {
+    const { gw, holds } = await home();
+    const { ch, offering } = await channel(gw);
+    offering.push(fact(1));
+    await ch.sync();
+    const opening = opened(gw, ch.name).opening;
+    for (const id of survivingDeclarationIds(gw.reactor, OP, ch.name))
+      await gw.append([signClaims(makeNegationClaims(OP, gw.nextTimestamp(), id), SEED)]);
+    await gw.append([
+      signClaims(
+        containerClaims(
+          { container: ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
+          OP,
+          gw.nextTimestamp(),
+        ),
+        SEED,
+      ),
+    ]);
+    await ch.pool.detach("kept for extraction");
+    gw.federationChannels.delete(ch.name);
+    gw.channelPools.delete(ch.name);
+    expect(holds(ch.name, fact(1).id)).toBe(true);
+    const refusal = await gw.erase(opening.id).catch((e: Error) => e.message);
+    expect(refusal).toContain(
+      "a declaration under its name still stands while no pool is attached",
+    );
+    expect(refusal).not.toContain("re-declare");
+    expect(gw.reactor.get(opening.id)).toBeDefined();
+    await gw.dropChannel(ch.name);
+    expect(holds(ch.name, fact(1).id)).toBe(false);
+    await gw.erase(opening.id);
+    expect(gw.reactor.get(opening.id)).toBeUndefined();
   });
   it("a drop whose declaration strike failed after the purge completes on re-run, and then the opening can be erased", async () => {
     const { gw, primary, holds } = await home();

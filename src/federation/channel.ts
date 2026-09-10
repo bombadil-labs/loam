@@ -2235,7 +2235,9 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
   const pool = stale
     ? await attachChannelPool(gw, name)
     : (cached ?? (await attachChannelPool(gw, name)));
-  if (stale) gw.channelPools.set(name, pool); // the lifecycle read asks channelPools, not the handle
+  // The lifecycle read asks channelPools, not the handle: a pool attached here (stale handle, or
+  // none, as after a boot that could not read the store) is registered before it is read.
+  gw.channelPools.set(name, pool);
   if (pool.drop === undefined) {
     throw new Error(
       `dropChannel refused: ${name} has no drop — only a SEPARATE container purges its own bytes, ` +

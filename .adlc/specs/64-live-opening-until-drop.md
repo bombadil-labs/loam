@@ -209,6 +209,18 @@ criterion names its verification.
 10. Full bar green and hollow-test run first on the clean tip, then recorded. Verify:
     `npm run check` and `adlc hollow-test --base origin/t288/local-channel-events --max 300 --test-cmd "timeout -k 10 600 npx vitest run test/federation/local-channel-*.test.ts"`
 
+## Review round 9 of the build, 2026-09-09
+
+Round 8's control was wrong in its second half, and round 9 measured it: a drop run in the
+process whose boot could not read the pool's store attached the pool without registering it, so
+its own lifecycle read refused, a second drop said the pool was already attached, and the erase
+then fell through to the no-handle road, which said no declaration named the store. The drop
+now registers every pool it attaches. The no-handle road checks for a standing declaration
+under the name first and names the drop, which attaches the pool. Round 8's claim that the
+`> 1` mutant on the store's byte count is equivalent was refuted: a hand-written store can hold
+one delta, and the mutant erased the opening over it; the rail trims the store to one byte. The
+pool emptiness read uses the reactor's size. The header's green case was misnamed; corrected.
+
 ## Review round 8 of the build, 2026-09-09
 
 No correctness defect in the round-7 clause: a peer byte the root holds has the root's own ingest
@@ -222,8 +234,7 @@ iterator instead of a spread. Known and left: the whole-snapshot walks in `recei
 an opening; the targeted read is `reactor.byTarget("channel:<name>")` filtered to the event
 context. Mutants that survive on this code and why: the member-skip's `tombstoned` guard
 (an un-tombstoned held member is "held", so the skip never fires for it either way), the
-cascade flag on the recursive call (a member has no members), and the store's byte count on the
-no-handle road (`> 0` to `> 1`: the fixture's store always holds the seed plus the byte).
+cascade flag on the recursive call (a member has no members), and, as round 8 believed and round 9 refuted, the store's byte count on the no-handle road.
 
 ## Review round 7 of the build, 2026-09-09
 

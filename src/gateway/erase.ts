@@ -38,7 +38,7 @@ import type { Claims, Delta } from "@bombadil/rhizomatic";
 import { evalTerm, parseTerm } from "@bombadil/rhizomatic";
 import { lawfulNegated, readRegistrations } from "./registration.js";
 import { programMaskJson } from "./listing.js";
-import { unreachableStoreReport } from "./container.js";
+import { currentContainerDeclarationId, unreachableStoreReport } from "./container.js";
 import {
   CTX_SLATE,
   danglingCitations,
@@ -762,7 +762,7 @@ async function liveOpening(
     named.declarationId !== o.poolDeclaration &&
     !orphanedDeclaration(gw, named.declarationId!);
   const attached = named !== undefined && !another ? named.gateway : undefined;
-  if (attached !== undefined && !attached.reactor.snapshot()[Symbol.iterator]().next().done)
+  if (attached !== undefined && attached.reactor.size !== 0)
     return named!.declarationId === o.poolDeclaration
       ? "its pool is still attached and holds bytes"
       : "a pool no opening names is attached under its name and holds bytes";
@@ -782,6 +782,17 @@ async function liveOpening(
       )
     )
       return "a later incarnation under its name holds bytes that no receipt of that incarnation names";
+  }
+  if (named === undefined) {
+    // A declaration can stand with no handle in memory: the pool detached on the record, or its
+    // store unreadable when this process booted. The store is that declaration's to drop, and the
+    // drop attaches the pool before it purges.
+    const standing = currentContainerDeclarationId(gw.reactor, gw.operatorAuthor, o.channel);
+    if (standing !== undefined && standing !== o.poolDeclaration)
+      return (
+        "a declaration under its name still stands while no pool is attached here: drop the " +
+        "channel (dropChannel), which attaches its pool first"
+      );
   }
   if (named === undefined && gw.options.channelBackend !== undefined) {
     const backend = gw.options.channelBackend(o.channel);
