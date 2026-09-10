@@ -1000,7 +1000,9 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
       from: "https://peer.example/peer",
       source: feed.source,
     });
-    await expect(gw.dropChannel(ch.name)).rejects.toThrow(/bytes that no read named/);
+    await expect(gw.dropChannel(ch.name)).rejects.toThrow(
+      /bytes that no read named .* heal its store while nothing is attached/,
+    );
     expect(first.mirrors.get(ch.name)!.some((d) => d.id === fact(1).id)).toBe(true);
     await new MirrorBackend(
       new FaultBackend(file),

@@ -82,6 +82,7 @@ function holdsNothing(err: unknown): boolean {
 
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
+const DELTA_ID = /^1e20[0-9a-f]{64}$/;
 export class ArchiveBackend implements StoreBackend {
   private closed = false;
   // Ids known on disk (read or written by this handle) — the cheap fast-path; the filesystem
@@ -371,7 +372,16 @@ export class ArchiveBackend implements StoreBackend {
         if (holdsNothing(err)) continue;
         throw err;
       }
-      if (names.some((name) => name.endsWith(".json") || name.endsWith(".tmp"))) return true;
+      // The same names `purge` sweeps: `<id>.json` and the crash-left `<id>.json.<pid>.tmp`. A
+      // stray file of another shape is not this store's bytes and must not refuse every drop.
+      for (const name of names) {
+        const cut = name.endsWith(".json")
+          ? name.length - ".json".length
+          : name.endsWith(".tmp")
+            ? name.indexOf(".json.")
+            : -1;
+        if (cut > 0 && DELTA_ID.test(name.slice(0, cut))) return true;
+      }
     }
     return false;
   }

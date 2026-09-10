@@ -839,7 +839,8 @@ async function liveOpening(
             ? "re-declare the name by hand, then drop the channel, or remove the store by hand."
             : "open the channel again under this name, which attaches the store, then drop it, " +
               "or remove the store by hand.") +
-          " If the drop finds bytes no read names, heal the store first (loam repair)."
+          " If the drop finds bytes no read names, heal the store while nothing is attached to " +
+          "it, then open it again and drop."
         );
     } finally {
       await backend.close();

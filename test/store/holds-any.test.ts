@@ -71,9 +71,13 @@ describe("holdsAny: the whole-store byte probe", () => {
     const store = new ArchiveBackend(root);
     expect(await store.holdsAny()).toBe(false);
     mkdirSync(join(root, "ab"), { recursive: true });
-    writeFileSync(join(root, "ab", "1e20abc.json.123.tmp"), "{}");
+    // A stray file of another shape is not this store's bytes: purge never sweeps it.
+    writeFileSync(join(root, "ab", "notes.json"), "{}");
+    expect(await store.holdsAny()).toBe(false);
+    const stray = `1e20${"ab".repeat(32)}.json.123.tmp`;
+    writeFileSync(join(root, "ab", stray), "{}");
     expect(await store.holdsAny()).toBe(true);
-    rmSync(join(root, "ab", "1e20abc.json.123.tmp"));
+    rmSync(join(root, "ab", stray));
     if (process.getuid?.() !== 0) {
       chmodSync(join(root, "ab"), 0o000);
       await expect(store.holdsAny()).rejects.toThrow();

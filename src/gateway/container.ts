@@ -1857,8 +1857,9 @@ async function openSeparate(
         // false at the bytes (H7). A driver without the probe leaves that byte to heal, as before.
         if (target.backend.holdsAny !== undefined && (await target.backend.holdsAny())) {
           refuse(
-            `${who}'s store still holds bytes that no read named after the sweep: heal the store ` +
-              `(loam repair) so every tier shows what it holds, then drop again`,
+            `${who}'s store still holds bytes that no read named after the sweep (a tier a partial ` +
+              `purge left behind): detach() it, heal its store while nothing is attached to it so ` +
+              `every tier shows what it holds, open it again, then drop again`,
           );
         }
       };

@@ -220,11 +220,19 @@ driver (memory, sqlite, archive, local storage, and the mirror pair, which asks 
 refuses when a tier cannot answer). Both erase roads ask it; a store without it, or one that
 refuses, is not proven empty and the erase refuses. The separate container's drop asks it after
 its sweep, so a byte no read named (the mirror's) refuses the drop instead of a clean report; the
-road is a heal (`loam repair`), which replants the mirror's rows into the primary, then the drop.
+road is a heal of the pair while nothing is attached to it (a heal is not safe on a live store, and
+a handle reads its store once at open), which replants the mirror's rows into the primary, then an
+open and the drop. No CLI road heals a channel pool today: the CLI's pools are plain sqlite files,
+and `loam serve` heals only the primary at boot; the refusal names the acts, not a command.
 Rails: the mirror shape run to the end along that road, a driver without the probe, and a
 store-level rail per driver. Known and left: a driver without the probe keeps the old drop
-behaviour (its stragglers are heal's), and the erase over such a store refuses until the store
-is removed by hand, as its text says.
+behaviour (its stragglers are heal's; the contract says so), and the erase over such a store
+refuses until the store is removed by hand, as its text says. Round 19 (independent, on this fix)
+found the road text named `loam repair`, which is the §25 pen tool and heals nothing, and the
+archive probe counting files its purge never sweeps; both corrected, the archive probe now reads
+the same two name shapes as its purge. A sqlite handle's persisted truncation debt answers true
+once and is cleared by that handle's own close, so one refusal can precede a clean re-run; `holds`
+shares that shape and it is fail-closed.
 
 ## Review round 16 of the build, 2026-09-09
 
