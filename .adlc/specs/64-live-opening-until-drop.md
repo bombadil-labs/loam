@@ -209,6 +209,21 @@ criterion names its verification.
 10. Full bar green and hollow-test run first on the clean tip, then recorded. Verify:
     `npm run check` and `adlc hollow-test --base origin/t288/local-channel-events --max 300 --test-cmd "timeout -k 10 600 npx vitest run test/federation/local-channel-*.test.ts"`
 
+## Review round 11 of the build, 2026-09-09
+
+Round 10's roads, measured from each state. The struck-declaration text named a fresh open, which
+attaches a store no declaration names only when the status stamps are gone too; with the status
+standing an open resumes and needs the declaration. The text now branches on the status: standing,
+re-declare by hand then drop; gone, open again then drop. The drop named for a later incarnation's
+unnamed bytes severs that standing incarnation and purges its pool; the text now says so, since no
+narrower road exists (the root never held those bytes, so the root cannot erase them one by one).
+The hand-attached text named detach as well as drop; detached, the container is a standing
+declaration and the erase refuses twice more, so the text names drop alone. Known and left: a
+pool detached through its handle stays in the channel-pool map of this process; the probe then
+reads the detached container's own reactor, which is a stale mirror of the store, and the erase
+proceeds on it. A boot over that store attaches the pool afresh. The rail that models the
+no-handle state says which state it models.
+
 ## Review round 10 of the build, 2026-09-09
 
 Round 9's registration fix stood. Its two no-handle refusal texts did not: both named

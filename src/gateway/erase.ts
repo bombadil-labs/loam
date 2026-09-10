@@ -786,7 +786,9 @@ async function liveOpening(
     )
       return (
         "a later incarnation under its name holds bytes that no receipt of that incarnation " +
-        `names. ${drop}`
+        `names. Drop the channel first (dropChannel "${o.channel}"): that severs the standing ` +
+        "incarnation and purges its pool with those bytes; its deltas can be read or extracted " +
+        "until then."
       );
   }
   if (named === undefined) {
@@ -794,10 +796,7 @@ async function liveOpening(
     // (openContainer) is not a channel pool, but its bytes are under the name all the same.
     const byHand = gw.attachedContainers.get(o.channel);
     if (byHand !== undefined && byHand.reactor.size !== 0)
-      return (
-        "a container attached by hand under its name holds bytes: detach() or drop() it, then " +
-        "erase again."
-      );
+      return "a container attached by hand under its name holds bytes: drop() it, then erase again.";
     // A declaration can stand with no handle in memory: the pool detached on the record, or its
     // store unreadable when this process booted. Attached again, that incarnation's own bytes are
     // its own and the erase proceeds; a drop would purge them, so it is not the road named.
@@ -815,8 +814,13 @@ async function liveOpening(
       if ((await backend.deltasSince(new Set())).length > 0)
         return (
           "its pool's store still holds bytes although its declaration was struck, and no " +
-          "declaration names that store for a drop to reach: open the channel again under this " +
-          "name, which attaches the store, then drop it, or remove the store by hand."
+          "declaration names that store for a drop to reach: " +
+          // With its status standing, an open RESUMES and needs the declaration; only a fresh
+          // open (status gone) attaches a store no declaration names.
+          (gw.channelStatus(o.channel).length > 0
+            ? "re-declare the name by hand, then drop the channel, or remove the store by hand."
+            : "open the channel again under this name, which attaches the store, then drop it, " +
+              "or remove the store by hand.")
         );
     } finally {
       await backend.close();
