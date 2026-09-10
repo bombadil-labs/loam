@@ -40,9 +40,15 @@ const eaccesForceable = ((): boolean => {
     return true;
   } finally {
     chmodSync(probe, 0o755);
-    rmSync(probe, { recursive: true, force: true });
+    try {
+      rmSync(probe, { recursive: true, force: true });
+    } catch {
+      // A scratch dir a scanner still holds is not this file's concern; the answer stands.
+    }
   }
 })();
+// Where a read cannot be denied (Windows, root), the unreadable-fan case is a visible skip.
+const denied = eaccesForceable ? it : it.skip;
 
 async function roundTrip(store: StoreBackend) {
   expect(typeof store.holdsAny).toBe("function");
@@ -119,7 +125,7 @@ describe("holdsAny and ids: the whole-store byte probe and the inventory", () =>
     await expect(store.holdsAny()).rejects.toThrow(/could not be proven empty/);
     await expect(store.ids()).rejects.toThrow(/could not be listed/);
   });
-  it("archive: a crash-left .tmp counts as bytes, and an unreadable fan refuses where the platform can deny a read", async () => {
+  it("archive: a crash-left .tmp counts as bytes; a stray file of another shape does not", async () => {
     const root = tmp();
     const store = new ArchiveBackend(root);
     expect(await store.holdsAny()).toBe(false);
@@ -127,17 +133,25 @@ describe("holdsAny and ids: the whole-store byte probe and the inventory", () =>
     // A stray file of another shape is not this store's bytes: purge never sweeps it.
     writeFileSync(join(root, "ab", "notes.json"), "{}");
     expect(await store.holdsAny()).toBe(false);
+    expect(await store.ids()).toEqual(new Set());
     const stray = `1e20${"ab".repeat(32)}.json.123.tmp`;
     writeFileSync(join(root, "ab", stray), "{}");
     expect(await store.holdsAny()).toBe(true);
     expect(await store.ids()).toEqual(new Set([`1e20${"ab".repeat(32)}`]));
-    rmSync(join(root, "ab", stray));
-    if (eaccesForceable) {
-      chmodSync(join(root, "ab"), 0o000);
+    await store.close();
+  });
+  denied("archive: an unreadable fan refuses both the probe and the inventory", async () => {
+    const root = tmp();
+    const store = new ArchiveBackend(root);
+    mkdirSync(join(root, "ab"), { recursive: true });
+    writeFileSync(join(root, "ab", `1e20${"ab".repeat(32)}.json`), "{}");
+    chmodSync(join(root, "ab"), 0o000);
+    try {
       await expect(store.holdsAny()).rejects.toThrow();
       await expect(store.ids()).rejects.toThrow();
+    } finally {
       chmodSync(join(root, "ab"), 0o700);
+      await store.close();
     }
-    await store.close();
   });
 });
