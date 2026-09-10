@@ -1,3 +1,16 @@
+import { signClaims } from "@bombadil/rhizomatic";
+import {
+  protectedIngressIds,
+  sameVerifiedDelta,
+  parseLocalEvent,
+  localEraseTarget,
+  openingAgrees,
+  localChannelEvidence,
+  eventHeader,
+  eventPrimitive,
+  eventRef,
+  type LocalChannelOpening,
+} from "../federation/local-channel-events.js";
 // The ingest doors (ticket T19: the Gateway's two entry points for deltas, in their own module).
 // APPEND is the governed door: the batch is validated whole (verified signatures, the erasure
 // holes, capability standing, resource budgets), persisted BEFORE it is served, refused loudly.
@@ -11,7 +24,8 @@
 // membership / registration / binding-definition authored by anyone but this store's operator binds
 // nothing (grantHeld / readRegistrations / readBindingDefinitions all filter on the operator). This
 // rests on one invariant the federation must keep: DISTINCT OPERATOR SEEDS ACROSS INSTANCES — two
-// stores sharing an operator seed trust each other's constitution completely. Give every instance
+// stores sharing an operator seed share legacy constitutional authority. Protected local channel
+// events and controls are excluded regardless of signature. Give every instance
 // its own operator identity. (The §24.1 quarantine pool is the one sanctioned shared-seed case.)
 //
 // These are the implementations behind `Gateway.append` / `federate` / `admitFor` / `offeredDeltas`
@@ -52,6 +66,167 @@ import { readTrustPolicy } from "./trust.js";
 // trust is the reader's). Authorization reads the state as it stands before the batch — a batch
 // cannot bootstrap its own permissions.
 export async function appendImpl(gw: Gateway, deltas: Iterable<Delta>): Promise<AppendReceipt> {
+  const batch = [...deltas];
+  const protectedIds = protectedIngressIds(gw.reactor, batch);
+  if (batch.some((d) => protectedIds.has(d.id)))
+    throw new Error(
+      "append rejected: protected local channel event/control requires the local service",
+    );
+  return appendValidated(gw, batch);
+}
+
+type LifecycleEventInput =
+  | { action: "open"; opening: Omit<LocalChannelOpening, "id"> }
+  | { action: "close"; channel: string; opening: string };
+
+/** Channel lifecycle callers cannot construct receive receipts, including JavaScript callers. */
+export async function issueChannelEvent(gw: Gateway, input: LifecycleEventInput): Promise<Delta> {
+  if (input.action !== "open" && input.action !== "close")
+    throw new Error("local channel received events require actual receive admission");
+  return persistChannelEvent(gw, input);
+}
+
+async function persistChannelEvent(
+  gw: Gateway,
+  input:
+    | LifecycleEventInput
+    | {
+        action: "received";
+        channel: string;
+        opening: string;
+        received: readonly string[];
+      },
+): Promise<Delta> {
+  if (gw.options.seed === undefined || gw.operatorAuthor === undefined)
+    throw new Error("local event requires an operated gateway");
+  const channel = input.action === "open" ? input.opening.channel : input.channel;
+  // The parent container comes from the opening this event belongs to, never from the caller.
+  const into =
+    input.action === "open"
+      ? input.opening.into
+      : (() => {
+          const held = gw.reactor.get(input.opening);
+          const parsed = held === undefined ? undefined : parseLocalEvent(held, gw.operatorAuthor);
+          if (parsed?.action !== "open" || parsed.opening.channel !== channel)
+            throw new Error("local channel event names no held opening of its channel");
+          return parsed.opening.into;
+        })();
+  const pointers = [...eventHeader(channel, input.action, into)];
+  if (input.action === "open") {
+    const o = input.opening;
+    const nonce = [...globalThis.crypto.getRandomValues(new Uint8Array(32))]
+      .map((n) => n.toString(16).padStart(2, "0"))
+      .join("");
+    pointers.push(
+      eventPrimitive("nonce", nonce),
+      eventPrimitive("into", o.into),
+      eventPrimitive("prefix", o.prefix),
+      eventPrimitive("from", o.from),
+      eventPrimitive("opener-kind", o.openedBy === undefined ? "root" : "bound"),
+    );
+    if (o.openedBy !== undefined)
+      pointers.push(
+        eventPrimitive("opened-by", o.openedBy),
+        eventPrimitive("opened-from", o.openedFrom!),
+      );
+    pointers.push(
+      eventRef("status-at-open", o.statusAtOpen),
+      eventRef("pool-declaration", o.poolDeclaration),
+    );
+  } else {
+    pointers.push(eventRef("opening", input.opening));
+    if (input.action === "close") pointers.push(eventPrimitive("reason", "drop"));
+    else pointers.push(...input.received.map((id) => eventRef("received", id)));
+  }
+  const d = signClaims(
+    { author: gw.operatorAuthor, timestamp: gw.nextTimestamp(), pointers },
+    gw.options.seed,
+  );
+  const parsed = parseLocalEvent(d, gw.operatorAuthor);
+  if (parsed === undefined || (parsed.action === "open" && !openingAgrees(gw, parsed.opening)))
+    throw new Error("invalid local channel event association");
+  const receipt = await appendValidated(gw, [d]);
+  if (receipt.accepted + receipt.duplicates !== 1 || !sameVerifiedDelta(gw.reactor.get(d.id), d))
+    throw new Error("local channel event did not ingest");
+  return d;
+}
+export type ChannelReceiveResult =
+  | { readonly ok: true; readonly report: FederationReport }
+  | {
+      readonly ok: false;
+      readonly report: FederationReport;
+      readonly error: unknown;
+      readonly missingAdmittedIds: boolean;
+    };
+
+/** Internal receive primitive: the caller already owns the channel's commit queue. */
+export async function receiveChannelOfferInCommit(
+  gw: Gateway,
+  opening: LocalChannelOpening,
+  offered: readonly Delta[],
+): Promise<ChannelReceiveResult> {
+  const expected = { ...opening };
+  const offer = structuredClone([...offered]);
+  const pool = gw.channelPools.get(expected.channel);
+  const ground = pool?.gateway;
+  const currentEvidence = () => {
+    const evidence = localChannelEvidence(gw, expected.channel);
+    if (
+      ground === undefined ||
+      gw.channelPools.get(expected.channel) !== pool ||
+      pool?.gateway !== ground ||
+      ground.attachedTo !== gw ||
+      !gw.quarantinePools.has(ground) ||
+      evidence.state !== "open" ||
+      evidence.opening.id !== expected.id ||
+      evidence.opening.channel !== expected.channel ||
+      evidence.opening.into !== expected.into ||
+      evidence.opening.prefix !== expected.prefix ||
+      evidence.opening.from !== expected.from ||
+      evidence.opening.openedBy !== expected.openedBy ||
+      evidence.opening.openedFrom !== expected.openedFrom ||
+      evidence.opening.statusAtOpen !== expected.statusAtOpen ||
+      evidence.opening.poolDeclaration !== expected.poolDeclaration
+    )
+      throw new Error("stale channel receive: opening association changed or unavailable");
+    return evidence;
+  };
+  currentEvidence();
+  // Use the actual door, including its admission and persistence fault seams.
+  const report = await ground!.federate(offer, { ids: true, admittedIds: true });
+  let missingAdmittedIds = false;
+  try {
+    const recorded = new Set(currentEvidence().received.map((d) => d.id));
+    if (report.admittedIds === undefined) {
+      if (report.accepted > 0 || offer.some((d) => !recorded.has(d.id))) {
+        missingAdmittedIds = true;
+        throw new Error("pool did not report actual admitted IDs");
+      }
+    } else {
+      const received = [...new Set(report.admittedIds.filter((id) => !recorded.has(id)))].sort();
+      if (received.length > 0)
+        await persistChannelEvent(gw, {
+          action: "received",
+          channel: expected.channel,
+          opening: expected.id,
+          received,
+        });
+    }
+    return { ok: true, report };
+  } catch (error) {
+    return { ok: false, report, error, missingAdmittedIds };
+  }
+}
+
+/** Marked erasures reach this only from the operated erase service or verified attached fan-out. */
+export async function appendLocalErasure(gw: Gateway, tombstone: Delta): Promise<void> {
+  if (localEraseTarget(tombstone, gw.reactor, gw.operatorAuthor) === undefined)
+    throw new Error("invalid local erasure control");
+  await appendValidated(gw, [tombstone]);
+  if (!sameVerifiedDelta(gw.reactor.get(tombstone.id), tombstone))
+    throw new Error("local erasure did not ingest");
+}
+async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<AppendReceipt> {
   if (gw.writeFailure !== undefined) {
     throw new Error(`this gateway can no longer persist: ${gw.writeFailure.message}`);
   }
@@ -76,7 +251,8 @@ export async function appendImpl(gw: Gateway, deltas: Iterable<Delta>): Promise<
     if (dead.has(d.id)) {
       throw new Error(
         `append rejected: delta ${d.id} was erased — a tombstone at ${ERASE_ENTITY} refuses ` +
-          `its return (strike the tombstone to forgive it)`,
+          `its return (strike an ordinary tombstone to forgive it; a local-control tombstone ` +
+          `is not forgiven)`,
       );
     }
     const cited = slateRefusal(slates, d);
@@ -454,12 +630,15 @@ export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], v
 export async function federateImpl(
   gw: Gateway,
   deltas: Iterable<Delta>,
-  opts: { admit?: (d: Delta) => boolean; ids?: boolean } = {},
+  opts: { admit?: (d: Delta) => boolean; ids?: boolean; admittedIds?: boolean } = {},
 ): Promise<FederationReport> {
   if (gw.writeFailure !== undefined) {
     throw new Error(`this gateway can no longer persist: ${gw.writeFailure.message}`);
   }
+  if (opts.admittedIds === true && opts.ids !== true)
+    throw new Error("admittedIds requires ids: true");
   const all = [...deltas];
+  const protectedIds = protectedIngressIds(gw.reactor, all);
   const byPolicy = opts.admit === undefined; // whose boundary this is, and so who owns the closure
   const admit = opts.admit ?? admitForImpl(gw); // the store's trust policy, unless overridden
   // The door remembers the hole (SPEC §11): a tombstoned id is refused re-entry even past an
@@ -483,6 +662,7 @@ export async function federateImpl(
     // not disagree about what lawful loam:public data is. Everything the readers trust
     // downstream passed a door here.
     if (
+      protectedIds.has(d.id) ||
       computeId(d.claims) !== d.id ||
       verifyDelta(d) !== "verified" ||
       dead.has(d.id) ||
@@ -515,12 +695,18 @@ export async function federateImpl(
   // `acceptedIds` and `accepted` cannot disagree about which deltas newly landed. Anything that
   // recovered the set afterwards would be answering a different question a moment later.
   const acceptedIds: string[] = [];
+  const admittedIds = new Set<string>();
   if (admitted.length > 0) {
     await gw.backend.append(admitted);
     for (const d of admitted) gw.justPersisted.add(d.id);
     try {
       for (const d of admitted) {
-        if (gw.ingestVia(d).status === "accepted") acceptedIds.push(d.id);
+        const result = gw.ingestVia(d);
+        if (result.status === "accepted") {
+          acceptedIds.push(d.id);
+          admittedIds.add(d.id);
+        } else if (result.status === "duplicate" && sameVerifiedDelta(gw.reactor.get(d.id), d))
+          admittedIds.add(d.id);
       }
     } finally {
       for (const d of admitted) gw.justPersisted.delete(d.id);
@@ -537,5 +723,11 @@ export async function federateImpl(
   const counts = { offered: all.length, accepted, rejected, held };
   // The ids ride only when asked (see FederationReport): the counts are what every other caller
   // reads, and the report keeps exactly the shape they compare.
-  return opts.ids === true ? { ...counts, acceptedIds } : counts;
+  return opts.ids === true
+    ? {
+        ...counts,
+        acceptedIds,
+        ...(opts.admittedIds === true ? { admittedIds: [...admittedIds].sort() } : {}),
+      }
+    : counts;
 }

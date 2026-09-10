@@ -62,6 +62,24 @@ export interface StoreBackend {
   // that cannot examine part of its store REJECTS rather than answer a false clean, H9).
   heldAmong?(ids: Iterable<string>): Promise<Set<string>>;
 
+  // OPTIONAL whole-store companion to `holds`: does this backend hold bytes filed under ANY id,
+  // on any tier it owns? Same reach as `holds` (everything `purge` sweeps, never `deltasSince`,
+  // which answers from one tier or skips a straggler by design) and the same fail-closed: a tier
+  // it cannot examine REJECTS rather than answer empty (H9). A caller that needs "this store is
+  // empty" and finds this absent must not fall back to a read: it refuses (the erase door does),
+  // or it stays silent and leaves such a store's stragglers to heal (the container drop, as it
+  // did before the probe existed).
+  holdsAny?(): Promise<boolean>;
+
+  // OPTIONAL inventory: the id of every delta this backend holds, on any tier it owns — the
+  // question "account for every byte" asks. Same reach as `holds` and the same fail-closed: a
+  // tier that cannot be listed, or a debt whose ids cannot be named, REJECTS rather than answer
+  // a shorter list (H9). Not `deltasSince`, which answers from one tier and skips a straggler by
+  // design. A caller that must account for a store and finds this absent must refuse. It lists
+  // DELTA ids: a row under the store's prefix that is not a delta (a UI writer's key, an
+  // unparseable row) is `holdsAny`'s to count and the §25 pen's to settle, never listed here.
+  ids?(): Promise<Set<string>>;
+
   // Release held resources.
   close(): Promise<void>;
 }

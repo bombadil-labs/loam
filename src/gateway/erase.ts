@@ -1,3 +1,15 @@
+import { appendLocalErasure } from "./ingest.js";
+import {
+  withChannelCommit,
+  parseLocalEvent,
+  LOCAL_EVENT,
+  LOCAL_CONTROL,
+  inLocalContext,
+  localEraseTarget,
+  orphanedDeclaration,
+  receiptsNaming,
+  sameVerifiedDelta,
+} from "../federation/local-channel-events.js";
 // Erasure — degrees of forgetting (SPEC §11). The store remembers THAT it forgot — who asked,
 // when, which id — never what. A TOMBSTONE is an append-only claim at `loam:erasure` naming
 // the erased delta; the bytes themselves are purged from every tier (the seam's purge, PR
@@ -26,7 +38,7 @@ import type { Claims, Delta } from "@bombadil/rhizomatic";
 import { evalTerm, parseTerm } from "@bombadil/rhizomatic";
 import { lawfulNegated, readRegistrations } from "./registration.js";
 import { programMaskJson } from "./listing.js";
-import { unreachableStoreReport } from "./container.js";
+import { currentContainerDeclarationId, unreachableStoreReport } from "./container.js";
 import {
   CTX_SLATE,
   danglingCitations,
@@ -40,6 +52,7 @@ import {
   type SlateHealth,
 } from "./slate.js";
 import type { Gateway } from "./gateway.js";
+import type { StoreBackend } from "../store/backend.js";
 
 export const ERASE_ENTITY = "loam:erasure";
 export const CTX_ERASE = "loam.erasure";
@@ -207,7 +220,11 @@ export function survivingTombstones(reactor: Reactor, operator: string | undefin
   const negated = lawfulNegated(reactor, operator);
   const out: Delta[] = [];
   for (const delta of reactor.snapshot()) {
-    if (!isTombstone(delta.claims) || negated(delta.id)) continue; // struck = forgiven
+    if (!isTombstone(delta.claims)) continue;
+    if (inLocalContext(delta, LOCAL_CONTROL)) {
+      // Generic preplanted strikes never become local forgiveness when a marked order lands.
+      if (localEraseTarget(delta, reactor, operator) === undefined) continue;
+    } else if (negated(delta.id)) continue; // ordinary struck tombstone = forgiven
     if (delta.claims.author !== operator) continue; // erasure is the operator's alone
     const { targetId, count } = tombstoneParts(delta.claims);
     if (targetId === undefined || count.erases !== 1) continue; // shape the door enforces
@@ -728,10 +745,161 @@ export function sealCommitment(salt: string, author: string): string {
 // THAT it forgot — never what. Live subscriptions re-attach exactly as they do after a schema
 // evolution or a crash; an animated gateway's runner must be re-attached (the host holds the old
 // reactor).
+/** Why an opening is still live and the road out of it, or undefined when its pool is gone. */
+async function liveOpening(
+  gw: Gateway,
+  o: { channel: string; poolDeclaration: string },
+): Promise<string | undefined> {
+  const drop =
+    `Drop the channel first (dropChannel "${o.channel}"); its pool's deltas can be read or ` +
+    `extracted until then.`;
+  // The same staleness test the drop applies: a handle whose pool was dropped or detached through
+  // the container is a mirror of nothing, and reads as no handle.
+  const cached = gw.channelPools.get(o.channel);
+  const named =
+    cached?.gateway !== undefined &&
+    cached.gateway.attachedTo === gw &&
+    gw.quarantinePools.has(cached.gateway)
+      ? cached
+      : undefined;
+  // A container attached BY HAND under the name (openContainer) is not the channel pool, but its
+  // bytes are under the name all the same, and the drop cannot attach past it.
+  const byHand = gw.attachedContainers.get(o.channel);
+  if (byHand !== undefined && byHand !== named?.gateway && byHand.reactor.size !== 0)
+    return (
+      "a container attached by hand under its name holds bytes: detach() it, then drop the " +
+      "channel (dropChannel), then erase again."
+    );
+  const negated = lawfulNegated(gw.reactor, gw.operatorAuthor);
+  if (gw.reactor.get(o.poolDeclaration) !== undefined && !negated(o.poolDeclaration))
+    return `its pool's declaration still stands. ${drop}`;
+  // The pool under this NAME may be a later incarnation, in which case its bytes are that
+  // incarnation's and its opening carries their lineage. It is another incarnation only when an
+  // opening NAMES its declaration; otherwise it is an orphan the operator declared by hand, and
+  // its bytes still count against this opening, which is the only lineage they have.
+  const another =
+    named !== undefined &&
+    named.declarationId !== o.poolDeclaration &&
+    !orphanedDeclaration(gw, named.declarationId!);
+  const attached = named !== undefined && !another ? named.gateway : undefined;
+  // The reactor mirrors one tier's read; the bytes question is the backend's, on every tier.
+  if (
+    attached !== undefined &&
+    (attached.reactor.size !== 0 || (await storeHoldsAny(attached.backend)))
+  )
+    return named!.declarationId === o.poolDeclaration
+      ? `its pool is still attached and holds bytes. ${drop}`
+      : `a pool no opening names is attached under its name and holds bytes. ${drop}`;
+  // A later incarnation under the same name owns only what its receipts name, plus what the seed
+  // copied in from the root (a separate pool is seeded from the primary at attach, so the root's
+  // own peer bytes ride along). The store is keyed by name, so a peer byte in that pool that no
+  // receipt names and the root does not hold was left there by an earlier incarnation, and this
+  // opening is the only lineage it has (spec 64).
+  if (another) {
+    // ACCOUNT FOR EVERY BYTE under the name, on every tier: the store's inventory, not a read
+    // (a read answers from one tier, and a mirror can keep what a partial purge left). A byte is
+    // the later incarnation's when one of its receipts names it; the root's when the root holds
+    // it (the seed copies the root's own bytes into every pool); the pool's own when the pool
+    // resolves it as operator-authored (its marker). Anything else has this opening as its only
+    // lineage, whether or not a receipt of this incarnation still names it: a receipt can be
+    // erased by hand, and the bytes it named do not go with it. A store that cannot be listed
+    // cannot be accounted for, and that refuses too (H9).
+    const owned = receiptsNaming(gw, named.declarationId!);
+    const pool = named.gateway!;
+    const inventory = await storeInventory(pool.backend);
+    if (typeof inventory === "string")
+      return (
+        "a later incarnation under its name holds a store whose bytes cannot be listed on every " +
+        `tier (${inventory}), so this opening's bytes cannot be accounted for. Drop the channel ` +
+        `first (dropChannel "${o.channel}"): that severs the standing incarnation and purges its pool.`
+      );
+    let stray = 0;
+    for (const id of inventory) {
+      if (owned.has(id) || gw.reactor.get(id) !== undefined) continue;
+      if (pool.reactor.get(id)?.claims.author === gw.operatorAuthor) continue;
+      stray += 1;
+    }
+    if (stray > 0)
+      return (
+        `a later incarnation under its name holds ${stray} byte(s) that no receipt of that ` +
+        `incarnation names and the root does not hold. Drop the channel first (dropChannel ` +
+        `"${o.channel}"): that severs the standing incarnation and purges its pool with those ` +
+        "bytes; its deltas can be read or extracted until then. If the drop finds bytes no read " +
+        "names, heal the store while nothing is attached to it, then open it again and drop. A " +
+        "byte the root erased and could not purge here is that erasure's: re-run it first."
+      );
+  }
+  if (named === undefined) {
+    // A declaration can stand with no handle in memory: the pool detached on the record, or its
+    // store unreadable when this process booted. Attached again, that incarnation's own bytes are
+    // its own and the erase proceeds; a drop would purge them, so it is not the road named.
+    const standing = currentContainerDeclarationId(gw.reactor, gw.operatorAuthor, o.channel);
+    if (standing !== undefined && standing !== o.poolDeclaration)
+      return (
+        "a declaration under its name still stands while no pool is attached here: attach it " +
+        "first (open the channel again with the options it stands with, or restart this store), " +
+        "then erase again."
+      );
+  }
+  if (named === undefined && gw.options.channelBackend !== undefined) {
+    const backend = gw.options.channelBackend(o.channel);
+    try {
+      // At the bytes, on every tier: a read answers from one tier and a mirror can keep what a
+      // partial purge left. A store that cannot answer is not proven empty.
+      if (await storeHoldsAny(backend))
+        return (
+          "its pool's store still holds bytes although its declaration was struck, and no " +
+          "declaration names that store for a drop to reach: " +
+          // With its status standing, an open RESUMES and needs the declaration; only a fresh
+          // open (status gone) attaches a store no declaration names.
+          (gw.channelStatus(o.channel).length > 0
+            ? "re-declare the name by hand, then drop the channel, or remove the store by hand."
+            : "open the channel again under this name, which attaches the store, then drop it, " +
+              "or remove the store by hand.") +
+          " If the drop finds bytes no read names, heal the store while nothing is attached to " +
+          "it, then open it again and drop."
+        );
+    } finally {
+      await backend.close();
+    }
+  }
+  return undefined;
+}
+// Every id a store holds on any tier, or undefined when it cannot be listed: a backend with no
+// inventory, or a tier that refuses, cannot be accounted for (H9).
+async function storeInventory(backend: StoreBackend): Promise<Set<string> | string> {
+  if (backend.ids === undefined) return "the store offers no inventory";
+  try {
+    return await backend.ids();
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+// Does a store hold bytes on any tier? Unprovable is TRUE: a backend with no whole-store probe,
+// or a tier that refuses the question, cannot license an erasure (H9).
+async function storeHoldsAny(backend: StoreBackend): Promise<boolean> {
+  if (backend.holdsAny === undefined) return true;
+  try {
+    return await backend.holdsAny();
+  } catch {
+    return true;
+  }
+}
+/** The received and close events that reference one opening and still stand. */
+function incarnationMembers(gw: Gateway, openingId: string): string[] {
+  const out: string[] = [];
+  for (const d of gw.reactor.snapshot()) {
+    if (!inLocalContext(d, LOCAL_EVENT) || isTombstone(d.claims)) continue;
+    const parsed = parseLocalEvent(d, gw.operatorAuthor);
+    if (parsed !== undefined && parsed.action !== "open" && parsed.opening === openingId)
+      out.push(d.id);
+  }
+  return out.sort();
+}
 export async function eraseImpl(
   gw: Gateway,
   id: string,
-  opts: { reason?: string; slate?: string } = {},
+  opts: { reason?: string; slate?: string; cascade?: boolean } = {},
 ): Promise<{
   erased: string;
   citations: string[];
@@ -804,16 +972,79 @@ export async function eraseImpl(
         `its declaration first — un-slating is free (§29.8).`,
     );
   }
+  const protectedTarget = target !== undefined && inLocalContext(target, LOCAL_EVENT);
+  // SPEC 64: A LIVE OPENING CANNOT BE ERASED. Erasing it would leave the pool's bytes with no
+  // lineage, and a random erasure must not be able to nuke a subset of the store. Live means the
+  // pool declaration survives, attached or not, or the pool still holds bytes. The refusal names
+  // the pool and the road: drop it first; read or extract its deltas until then.
+  const erasedEvent =
+    target !== undefined && protectedTarget
+      ? parseLocalEvent(target, gw.operatorAuthor)
+      : undefined;
+  if (erasedEvent?.action === "open" && !isTombstone(target!.claims)) {
+    const o = erasedEvent.opening;
+    const live = await liveOpening(gw, o);
+    if (live !== undefined) {
+      throw new Error(
+        `erase ${id} refused: it is the opening of channel "${o.channel}", and ${live} ` +
+          `Nothing was removed.`,
+      );
+    }
+    // A DROPPED incarnation's opening takes its receipts and close with it, receipts and close
+    // FIRST under the channel commit and the opening LAST, below: a crash before the opening's
+    // tombstone leaves every surviving receipt resolvable, and a re-run finishes. No receipt can
+    // land in between: a receipt needs a sync under a surviving declaration, and this one is
+    // struck. SETTLED members are skipped: tombstoned AND held by no tier. A member whose purge
+    // faulted has a tombstone and must be erased again; that erase anchors on it.
+    if (opts.cascade !== false)
+      await withChannelCommit(gw, o.channel, async () => {
+        for (const member of incarnationMembers(gw, id)) {
+          const tombstoned = survivingTombstones(gw.reactor, gw.operatorAuthor).some(
+            (d) => tombstoneParts(d.claims).targetId === member,
+          );
+          if (tombstoned && !(await erasureOutstanding(gw, member))) continue;
+          await eraseImpl(gw, member, { ...opts, cascade: false });
+        }
+      });
+  }
+  // The marker names the CHANNEL the erased event belonged to. Once the bytes are gone the marker
+  // is all that separates an erased opening from a channel that never had one; without the name,
+  // an erased history reads as plain legacy history and a resumed handle runs unprotected.
+  const erasedChannel = target?.claims.pointers.find(
+    (p) =>
+      p.role === "event" && p.target.kind === "entity" && p.target.entity.context === LOCAL_EVENT,
+  )?.target;
+  const localClaims = (claims: Claims): Claims =>
+    protectedTarget && erasedChannel?.kind === "entity"
+      ? {
+          ...claims,
+          pointers: [
+            ...claims.pointers,
+            {
+              role: "local-control",
+              target: { kind: "entity", entity: { id, context: LOCAL_CONTROL } },
+            },
+            { role: "local-control-version", target: { kind: "primitive", value: 1 } },
+            { role: "local-control-kind", target: { kind: "primitive", value: "erase" } },
+            {
+              role: "local-control-channel",
+              target: { kind: "primitive", value: erasedChannel.entity.id },
+            },
+          ],
+        }
+      : claims;
   const tombstone =
     already ??
     signClaims(
-      eraseClaims(
-        id,
-        target!.claims.author,
-        gw.operatorAuthor,
-        gw.nextTimestamp(),
-        opts.reason,
-        opts.slate,
+      localClaims(
+        eraseClaims(
+          id,
+          target!.claims.author,
+          gw.operatorAuthor,
+          gw.nextTimestamp(),
+          opts.reason,
+          opts.slate,
+        ),
       ),
       seed,
     );
@@ -828,7 +1059,8 @@ export async function eraseImpl(
   // a surviving delta dangling at the hole, which the manifest exists to enumerate.
   const { citations, citationTiers } = danglingCitations(gw, id, (dId) => dId === tombstone.id);
   if (already === undefined) {
-    await gw.append([tombstone]);
+    if (inLocalContext(tombstone, LOCAL_CONTROL)) await appendLocalErasure(gw, tombstone);
+    else await gw.append([tombstone]);
     await gw.flush(); // the tombstone must be ground before the target stops being ground
   }
   // The purge count is evidence of work, never the verdict: 0 means "never held" as often as
@@ -1070,7 +1302,25 @@ export async function eraseReplicaImpl(
   if (defect !== undefined) {
     throw new Error(`a replica purge is the operator's alone: ${defect}`);
   }
-  await gw.federate([tombstone], { admit: () => true }); // lawful (checked above) — trust policy does not apply
+  if (
+    inLocalContext(tombstone, LOCAL_CONTROL) ||
+    (gw.reactor.get(id) !== undefined && inLocalContext(gw.reactor.get(id)!, LOCAL_EVENT))
+  ) {
+    if (localEraseTarget(tombstone, gw.reactor, gw.operatorAuthor) !== id)
+      throw new Error("replica requires exact marked local erasure");
+    let cursor = gw;
+    const chain = new Set<Gateway>();
+    let authorized = false;
+    while (cursor.attachedTo !== undefined && !chain.has(cursor)) {
+      chain.add(cursor);
+      const parent = cursor.attachedTo;
+      if (!parent.quarantinePools.has(cursor)) break;
+      if (sameVerifiedDelta(parent.reactor.get(tombstone.id), tombstone)) authorized = true;
+      cursor = parent;
+    }
+    if (!authorized) throw new Error("replica has no attached held local erasure authority");
+    await appendLocalErasure(gw, tombstone);
+  } else await gw.federate([tombstone], { admit: () => true });
   await gw.flush();
   if (!readTombstones(gw.reactor, gw.operatorAuthor).has(id)) {
     throw new Error(

@@ -488,6 +488,26 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     return this.db.prepare("SELECT 1 FROM deltas WHERE id = ?").get(id) !== undefined;
   }
 
+  async holdsAny(): Promise<boolean> {
+    this.assertOpen();
+    // An owed truncation may leave page images in the sidecar: unprovable answers TRUE (H9).
+    if (this.truncationUnknown || this.truncationOwed.size > 0) return true;
+    return this.db.prepare("SELECT 1 FROM deltas LIMIT 1").get() !== undefined;
+  }
+
+  async ids(): Promise<Set<string>> {
+    this.assertOpen();
+    // A debt it cannot name is a list it cannot finish (H9).
+    if (this.truncationUnknown)
+      throw new Error(
+        "this store owes a truncation whose ids it cannot name: its inventory is unprovable",
+      );
+    const out = new Set<string>(this.truncationOwed);
+    for (const row of this.db.prepare("SELECT id FROM deltas").all() as { id: string }[])
+      out.add(row.id);
+    return out;
+  }
+
   async close(): Promise<void> {
     // Closing the last connection checkpoints and unlinks the sidecar anyway, but done
     // implicitly it leaves the persisted debt row behind — a phantom `holds` true over

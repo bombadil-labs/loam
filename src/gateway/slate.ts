@@ -338,6 +338,25 @@ function slateStateDefect(claims: Claims, reactor: Reactor, operator: string): s
   if (!frozen.ok) return `slate "${container}": ${frozen.why} (H9: the record fails closed)`;
   const agreed = freezeAgreement(reactor, frozen.term, pinned.version);
   if (agreed !== undefined) return `slate "${container}": ${agreed}`;
+  // A protected local channel event is never slated (spec 64): the slate's cite closure would
+  // refuse the drop's own close event, and the cut would fault on the live opening forever. The
+  // road for a channel is drop, then erase.
+  for (const id of extensionalIds(frozen.term) ?? []) {
+    const member = reactor.get(id);
+    if (
+      member !== undefined &&
+      member.claims.pointers.some(
+        (p) =>
+          p.target.kind === "entity" &&
+          (p.target.entity.context === "loam.local.channel.event" ||
+            p.target.entity.context === "loam.local.channel.control"),
+      )
+    )
+      return (
+        `slate "${container}" condemns ${id}, a protected local channel record. A channel is ` +
+        `never slated: drop it (dropChannel), then erase what its history left.`
+      );
+  }
 
   const table = readContainerTable(reactor, operator);
   const rec = table.containers.get(container);

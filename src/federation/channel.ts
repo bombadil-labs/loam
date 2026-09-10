@@ -1,3 +1,12 @@
+import { issueChannelEvent, receiveChannelOfferInCommit } from "../gateway/ingest.js";
+import {
+  localChannelEvidence,
+  localChannelLifecycle,
+  currentPoolDeclaration,
+  orphanedDeclaration,
+  withChannelCommit,
+  type LocalChannelOpening,
+} from "./local-channel-events.js";
 // §46 — federation is container-to-container. A channel receives a peer's deltas into a NESTED POOL
 // inside the receiving container, and law that arrives binds there under names the RECEIVER assigns.
 //
@@ -57,6 +66,14 @@ export interface OpenChannelOptions {
    * home (T196).
    */
   readonly from?: string;
+  /**
+   * The address this handle's `source` actually pulls from, when the caller does not want it
+   * RECORDED: an MCP re-connect names its peer here. It is compared against a standing record that
+   * names an address, so a re-connect cannot feed one peer's data into an opening that names
+   * another; it is never written, so a caller-chosen address cannot become the one a booted store
+   * resumes with its stored credential. A record with no address has nothing to disagree with.
+   */
+  readonly pullsFrom?: string;
   /** Whether law arriving on this channel binds. Reversible; see §46's two toggles. */
   readonly bless?: boolean;
   /**
@@ -222,6 +239,15 @@ export const CTX_CHANNEL = "loam.channel";
  * The opener a record carries forward, or nothing: ONE derivation for every stamp, so no stamp can
  * drop a bound connection's channel back into the root fold by forgetting the field.
  */
+/** Does the caller's address disagree with the record's? `from` is strict; `pullsFrom` yields to a
+ * record that names no address; a caller naming neither agrees with whatever stands. */
+const fromDisagrees = (
+  recorded: string,
+  opts: { readonly from?: string; readonly pullsFrom?: string },
+): boolean =>
+  opts.from !== undefined
+    ? recorded !== opts.from
+    : opts.pullsFrom !== undefined && recorded !== "" && recorded !== opts.pullsFrom;
 const opener = (of: {
   readonly openedBy?: string;
   readonly openedFrom?: string;
@@ -1375,6 +1401,71 @@ export function prefixOfChannelName(name: string): string | undefined {
  */
 async function syncChannel(
   gw: Gateway,
+  pool: Container,
+  declarationId: string | undefined,
+  name: string,
+  opts: OpenChannelOptions,
+  incarnation?: LocalChannelOpening,
+): Promise<SyncReport> {
+  const ground = pool.gateway;
+  let offered: readonly Delta[] = [],
+    fault: unknown,
+    failed = false;
+  if (channelStatusImpl(gw, name)[0]?.receiving !== false) {
+    try {
+      offered = await opts.source.pull();
+    } catch (err) {
+      fault = err;
+      failed = true;
+    }
+  }
+  return withChannelCommit(gw, name, async () => {
+    const current = channelStatusImpl(gw, name)[0];
+    if (
+      current === undefined ||
+      ground === undefined ||
+      gw.channelPools.get(name) !== pool ||
+      pool.declarationId !== declarationId ||
+      currentPoolDeclaration(gw, name) !== declarationId ||
+      ground.attachedTo !== gw ||
+      !gw.quarantinePools.has(ground) ||
+      current.into !== opts.into ||
+      current.prefix !== opts.prefix ||
+      fromDisagrees(current.from, opts) ||
+      current.openedBy !== opts.openedBy ||
+      current.openedFrom !== opts.openedFrom
+    )
+      throw new Error(
+        `stale channel operation ${name}: severed or changed association; re-open with loam federate open`,
+      );
+    const evidence = localChannelEvidence(gw, name);
+    if (
+      incarnation !== undefined &&
+      (evidence.state !== "open" || evidence.opening.id !== incarnation.id)
+    )
+      throw new Error(`stale channel operation ${name}: protected opening changed or unavailable`);
+    if (incarnation === undefined && evidence.state !== "legacy")
+      throw new Error(`channel ${name}: no matching protected incarnation on handle`);
+    return syncChannelCommit(
+      gw,
+      ground,
+      name,
+      {
+        ...opts,
+        source: {
+          pull: () => {
+            if (failed) throw fault;
+            return Promise.resolve(offered);
+          },
+        },
+      },
+      incarnation,
+    );
+  });
+}
+
+async function syncChannelCommit(
+  gw: Gateway,
   ground: Gateway,
   name: string,
   opts: {
@@ -1386,6 +1477,7 @@ async function syncChannel(
     openedBy?: string;
     openedFrom?: string;
   },
+  incarnation?: LocalChannelOpening,
 ): Promise<SyncReport> {
   const before = channelStatusImpl(gw, name)[0];
   // WHAT THE RECORD THIS SYNC BUILDS ON COULD NOT SAY. Every stamp below copies most of its fields
@@ -1513,7 +1605,39 @@ async function syncChannel(
   // `ids: true` is what lets custody POINT at the arrivals instead of counting them. The door
   // already knows which deltas it newly ingested; recovering that afterwards would mean diffing
   // reactor snapshots around the call, a pass over the whole store on every poll (H8).
-  const report = await ground.federate([...offered], { ids: true });
+  const received =
+    incarnation === undefined
+      ? undefined
+      : await receiveChannelOfferInCommit(gw, incarnation, offered);
+  const report =
+    received === undefined ? await ground.federate([...offered], { ids: true }) : received.report;
+  if (received !== undefined && !received.ok) {
+    try {
+      // Preserve the existing named-count refusal after a successful source commit.
+      if (received.missingAdmittedIds && report.accepted > 0 && report.acceptedIds === undefined)
+        await attestArrival(gw, ground, name, from, report, owed);
+      throw received.error;
+    } catch (err) {
+      await stamp(
+        gw,
+        {
+          name,
+          into: opts.into,
+          prefix: opts.prefix,
+          ...opener(opts),
+          receiving: before?.receiving ?? true,
+          blessing: before?.blessing ?? opts.bless !== false,
+          lastSyncedAt: before?.lastSyncedAt ?? 0,
+          consecutiveFailures: (before?.consecutiveFailures ?? 0) + 1,
+          from,
+          unattested: [...new Set([...owed, ...(report.acceptedIds ?? [])])],
+        },
+        illegible,
+        false,
+      );
+      throw err;
+    }
+  }
   // Read from the GROUND on every sync, not from the open-time option. Note this blesses the pool's
   // CONTENTS rather than this sync's arrivals, so resuming binds what landed while blessing was off.
   const blessing = before?.blessing ?? opts.bless !== false;
@@ -1622,6 +1746,11 @@ async function syncChannel(
 }
 
 export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Promise<Channel> {
+  return withChannelCommit(gw, channelName(opts.into, opts.prefix), () =>
+    openChannelCommit(gw, opts),
+  );
+}
+async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise<Channel> {
   if (gw.options.seed === undefined) {
     throw new Error(
       "openChannel: only an operated store can open a federation channel — the pool's declaration " +
@@ -1701,6 +1830,29 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
     }
   }
   // Past the ambiguity check, so a live handle is returned only for the channel that was ASKED for.
+  const standingBeforeOpen = channelStatusImpl(gw, name)[0];
+  // A declaration can survive a failed attachment before any status exists. Retrying
+  // may complete that legacy lifecycle, but it is not a fresh protected opening.
+  const priorPoolLifecycle =
+    currentPoolDeclaration(gw, name) !== undefined || gw.channelPools.has(name);
+  // A standing channel is re-opened only with the options it stands with: a cached handle and a
+  // resumed one both sync with the caller's options against the standing record, and a mismatch
+  // would either be ignored or refuse on every sync. A changed source or scope is a different
+  // relationship: drop the standing channel first. The refusal names the channel and the act only;
+  // a caller who cannot read the standing record must not learn its source from this message.
+  // The MCP door names its peer as `pullsFrom`, compared but never recorded (see the option).
+  if (
+    standingBeforeOpen !== undefined &&
+    (standingBeforeOpen.into !== opts.into ||
+      standingBeforeOpen.prefix !== opts.prefix ||
+      fromDisagrees(standingBeforeOpen.from, opts) ||
+      standingBeforeOpen.openedBy !== opts.openedBy ||
+      standingBeforeOpen.openedFrom !== opts.openedFrom)
+  )
+    throw new Error(
+      `channel ${name} already stands with other options; re-open it with the options it ` +
+        `stands with, or drop it before opening it another way`,
+    );
   const existing = gw.federationChannels.get(name);
   if (existing !== undefined) return existing; // idempotent: re-opening resumes the same pool
 
@@ -1865,19 +2017,37 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
     }
   }
 
+  if (standingBeforeOpen !== undefined) {
+    const pool = gw.channelPools.get(name) ?? (await attachChannelPool(gw, name));
+    gw.channelPools.set(name, pool);
+    const state = localChannelEvidence(gw, name);
+    const incarnation =
+      state.state === "open" || state.state === "closed" ? state.opening : undefined;
+    const declarationId = pool.declarationId;
+    const resumed: Channel = {
+      name,
+      into: standingBeforeOpen.into,
+      prefix: standingBeforeOpen.prefix,
+      ...opener(standingBeforeOpen),
+      pool,
+      sync: () => syncChannel(gw, pool, declarationId, name, opts, incarnation),
+    };
+    gw.federationChannels.set(name, resumed);
+    return resumed;
+  }
+
   // The pool is UNTRUSTED and SEPARATE. Untrusted because a peer's law is inert until blessed
   // (§28); separate because its own ground is what keeps the peer's bytes out of the receiver's
   // store and keeps `drop` a physical purge.
-  await gw.append([
-    signClaims(
-      containerClaims(
-        { container: name, trust: "untrusted", posture: "separate", inboxOf: opts.into },
-        gw.operatorAuthor!,
-        gw.nextTimestamp(),
-      ),
-      gw.options.seed,
+  const poolDeclaration = signClaims(
+    containerClaims(
+      { container: name, trust: "untrusted", posture: "separate", inboxOf: opts.into },
+      gw.operatorAuthor!,
+      gw.nextTimestamp(),
     ),
-  ]);
+    gw.options.seed,
+  );
+  await gw.append([poolDeclaration]);
 
   // IDEMPOTENT ACROSS PROCESSES, not only within one. A booted store re-attaches its pools before
   // it rebuilds its channels, and a channel whose peer credential is missing is attached and
@@ -1898,7 +2068,7 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
   // fresh record while the prior ones are struck, and it is the legitimate way a severed channel
   // comes back (the re-open path the stamp guard names). Everything else that stamps — a sync poll,
   // a toggle set — must refuse over a severed lineage rather than resurrect it.
-  await stamp(
+  const statusAtOpen = await stamp(
     gw,
     {
       name,
@@ -1917,6 +2087,56 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
     true,
   );
 
+  gw.channelPools.set(name, pool);
+  let incarnation: LocalChannelOpening | undefined;
+  // Legacy callers may use values outside the protected vocabulary or an invalid binding.
+  // Keep their existing channel behavior without issuing protected custody for that association.
+  const eventText = (value: string | undefined, empty = false): boolean =>
+    value !== undefined && (empty || value.length > 0) && !value.includes("\0");
+  const protectedOpener =
+    (opts.openedBy === undefined && opts.openedFrom === undefined) ||
+    (eventText(opts.openedBy) && eventText(opts.openedFrom) && openerStands(gw, opts));
+  if (
+    !priorPoolLifecycle &&
+    eventText(name) &&
+    eventText(opts.into) &&
+    eventText(opts.prefix) &&
+    eventText(opts.from ?? "", true) &&
+    protectedOpener
+  ) {
+    if (
+      pool.declarationId !== poolDeclaration.id ||
+      currentPoolDeclaration(gw, name) !== poolDeclaration.id ||
+      ground.attachedTo !== gw ||
+      !gw.quarantinePools.has(ground)
+    )
+      throw new Error(`openChannel: ${name} changed its exact pool association during opening`);
+    const event = await issueChannelEvent(gw, {
+      action: "open",
+      opening: {
+        channel: name,
+        into: opts.into,
+        prefix: opts.prefix,
+        from: opts.from ?? "",
+        ...opener(opts),
+        statusAtOpen,
+        poolDeclaration: poolDeclaration.id,
+      },
+    });
+    incarnation = {
+      id: event.id,
+      channel: name,
+      into: opts.into,
+      prefix: opts.prefix,
+      from: opts.from ?? "",
+      ...opener(opts),
+      statusAtOpen,
+      poolDeclaration: poolDeclaration.id,
+    };
+    const state = localChannelLifecycle(gw, name);
+    if (state.state !== "open" || state.opening.id !== incarnation.id)
+      throw new Error(`openChannel: ${name} changed its exact association during event issuance`);
+  }
   const channel: Channel = {
     name,
     into: opts.into,
@@ -1926,7 +2146,7 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
     // Union, and idempotent by construction: the pool's append de-duplicates by delta id, so a
     // second sync of an unchanged peer accepts nothing and refuses nothing. Polling is therefore
     // safe at any interval, which is what lets the transport stay behind this contract.
-    sync: () => syncChannel(gw, ground, name, opts),
+    sync: () => syncChannel(gw, pool, poolDeclaration.id, name, opts, incarnation),
   };
 
   gw.federationChannels.set(name, channel);
@@ -1951,16 +2171,42 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
  * Freezing is the reversible act and lives on the toggles; this one does not come back.
  */
 export async function dropChannelImpl(gw: Gateway, name: string): Promise<void> {
+  return withChannelCommit(gw, name, () => dropChannelCommit(gw, name));
+}
+async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
   // A NAME THIS STORE NEVER HAD gets a sentence, not the container layer's internals. Without this
   // it surfaced as `openContainer: no surviving declaration names "..."` — true, and it tells a
   // person nothing about what they typed wrong.
-  if (channelStatusImpl(gw, name).length === 0) {
-    const severed = channelsEverImpl(gw, name)[0];
+  // A name with no status record whose STANDING declaration a channel opening names is not
+  // severed: its stamps were struck by hand, its pool is still the channel's, and this door is the
+  // road to purge it (spec 64). Any other declaration under the name (a container declared by
+  // hand, before or after a clean drop, separate or shared) is not this door's: purging it here
+  // would attach a store by name through the channel backend and report a purge of bytes it
+  // never reached.
+  const statusGone = channelStatusImpl(gw, name).length === 0;
+  const severed = channelsEverImpl(gw, name)[0];
+  const standing = currentPoolDeclaration(gw, name);
+  if (
+    statusGone &&
+    (severed === undefined || standing === undefined || orphanedDeclaration(gw, standing))
+  ) {
+    // "Nothing left to remove" must be true at the bytes: a pool still attached here under the
+    // name (its records struck by hand in this process) is named, with the road out.
+    const attached = gw.channelPools.get(name)?.gateway;
+    const held =
+      attached !== undefined &&
+      attached.attachedTo === gw &&
+      gw.quarantinePools.has(attached) &&
+      attached.reactor.size !== 0;
     throw new Error(
       severed === undefined
         ? `dropChannel refused: this store has no channel named "${name}" — ` +
             `\`loam federate list\` names the ones it has.`
-        : `dropChannel refused: "${name}" was already severed, so there is nothing left to remove.`,
+        : held
+          ? `dropChannel refused: "${name}" reads severed (no status record, and no declaration ` +
+            `a channel opening names), but a pool is still attached here under that name and ` +
+            `holds bytes. Restart this store, open the channel again under the name, then drop it.`
+          : `dropChannel refused: "${name}" was already severed, so there is nothing left to remove.`,
     );
   }
 
@@ -1989,13 +2235,59 @@ export async function dropChannelImpl(gw: Gateway, name: string): Promise<void> 
   // THE MARK RIDES THIS ONE TOO. A drop that REFUSES leaves the pool attached for the life of the
   // process — deliberately, so an operator can look at what could not be purged — and an unmarked
   // pool is one with an open anonymous door.
-  const pool = channel?.pool ?? attached ?? (await attachChannelPool(gw, name));
+  // A handle whose pool is no longer attached here is STALE: a drop that discarded the bytes and
+  // then failed to strike the declaration closes the pool and leaves the handle behind. The re-run
+  // the refusal asks for must not drop through that closed store; it re-attaches, which is safe
+  // over the emptied store, and settles the listing (spec 64).
+  const cached = channel?.pool ?? attached;
+  const stale =
+    cached !== undefined &&
+    (cached.gateway === undefined ||
+      !gw.quarantinePools.has(cached.gateway) ||
+      cached.gateway.attachedTo !== gw);
+  if (stale) {
+    gw.federationChannels.delete(name);
+    gw.channelPools.delete(name);
+    if (gw.options.channelBackend === undefined)
+      throw new Error(
+        `dropChannel refused: the handle on "${name}" is stale (its pool is no longer attached) ` +
+          `and this store has no channelBackend to re-open it with. Configure channelBackend and ` +
+          `drop again. Nothing was removed.`,
+      );
+  }
+  const pool = stale
+    ? await attachChannelPool(gw, name)
+    : (cached ?? (await attachChannelPool(gw, name)));
+  // The lifecycle read asks channelPools, not the handle: a pool attached here (stale handle, or
+  // none, as after a boot that could not read the store) is registered before it is read.
+  gw.channelPools.set(name, pool);
   if (pool.drop === undefined) {
     throw new Error(
       `dropChannel refused: ${name} has no drop — only a SEPARATE container purges its own bytes, ` +
         `and a channel pool that is not separate cannot be severed provably (§46)`,
     );
   }
+  const evidence = localChannelLifecycle(gw, name);
+  if (evidence.state === "open")
+    await issueChannelEvent(gw, { action: "close", channel: name, opening: evidence.opening.id });
+  else if (
+    evidence.state === "unavailable" &&
+    (statusGone ||
+      evidence.reason === "attached pool declaration changed" ||
+      (pool.declarationId !== undefined && orphanedDeclaration(gw, pool.declarationId)))
+  )
+    // AN ORPHANED POOL. The operator struck or replaced its declaration by hand. Inside the
+    // process that made it, the handle still sits under the opening's declaration and the
+    // lifecycle reads "attached pool declaration changed"; after a restart, boot re-attaches under
+    // the hand-made declaration, which no opening names, and the lifecycle reads "missing current
+    // opening". Either way its bytes are attached under this name with no opening that agrees, so
+    // no close can name one. The drop is the one road out (spec 64): purge it, strike what still
+    // declares the name, and let the opening's own erase take the lineage afterwards. Nothing is
+    // closed that was not open. A name whose STATUS was struck by hand is the same road: the
+    // lifecycle cannot pair its opening with a status that no longer stands.
+    void 0;
+  else if (evidence.state === "unavailable")
+    throw new Error(`dropChannel refused: ${evidence.reason}`);
   await pool.drop();
   gw.federationChannels.delete(name);
   gw.channelPools.delete(name);
@@ -2076,7 +2368,7 @@ async function stamp(
   // REQUIRED, no default: every caller states whether it is the re-open that legitimately writes over
   // a struck lineage, so a new caller must decide rather than inherit a silent bypass.
   opening: boolean,
-): Promise<void> {
+): Promise<string> {
   // A STALE HANDLE MUST NOT RE-STAMP A SEVERED CHANNEL BACK INTO EXISTENCE (T233). `dropChannel`
   // negates every live record for this pool, but a handle captured before the sever still reaches
   // this stamp: a sync poll that accepts nothing sails past the pool's own purged ground and lands
@@ -2098,14 +2390,14 @@ async function stamp(
     gw.operatorAuthor!,
     gw.nextTimestamp(),
   );
-  await gw.append([
-    signClaims(
-      illegible.length === 0
-        ? claims
-        : { ...claims, pointers: claims.pointers.filter((p) => !illegible.includes(p.role)) },
-      gw.options.seed!,
-    ),
-  ]);
+  const delta = signClaims(
+    illegible.length === 0
+      ? claims
+      : { ...claims, pointers: claims.pointers.filter((p) => !illegible.includes(p.role)) },
+    gw.options.seed!,
+  );
+  await gw.append([delta]);
+  return delta.id;
 }
 
 /**
@@ -2511,6 +2803,9 @@ export function sourceFor(
  * channel pulls exactly the way a freshly opened one does.
  */
 export function resumeChannelImpl(gw: Gateway, standing: ChannelStatus, token: string): Channel {
+  const evidence = localChannelEvidence(gw, standing.name);
+  const incarnation =
+    evidence.state === "open" || evidence.state === "closed" ? evidence.opening : undefined;
   const poolOf = (): Container => {
     const held = gw.channelPools.get(standing.name);
     if (held === undefined) {
@@ -2521,6 +2816,8 @@ export function resumeChannelImpl(gw: Gateway, standing: ChannelStatus, token: s
     }
     return held;
   };
+  const pool = poolOf();
+  const declarationId = pool.declarationId;
   const opts = {
     into: standing.into,
     prefix: standing.prefix,
@@ -2543,6 +2840,6 @@ export function resumeChannelImpl(gw: Gateway, standing: ChannelStatus, token: s
     get pool(): Container {
       return poolOf();
     },
-    sync: () => syncChannel(gw, poolOf().gateway!, standing.name, opts),
+    sync: () => syncChannel(gw, pool, declarationId, standing.name, opts, incarnation),
   };
 }

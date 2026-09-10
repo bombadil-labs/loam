@@ -779,6 +779,26 @@ function boundContainer(
   return { name, trust, posture };
 }
 
+/** The declaration identity used by the container reader, excluding malformed and control rows. */
+export function containerDeclarationName(claims: Claims): string | undefined {
+  return boundContainer(claims)?.name;
+}
+
+/** Latest surviving declaration for one container, under the reader's own binding rules. */
+export function currentContainerDeclarationId(
+  reactor: Reactor,
+  operator: string | undefined,
+  entity: string,
+): string | undefined {
+  if (operator === undefined) return undefined;
+  // Filed AT the container's entity, so the target index answers it (H8); `lawfulDeltasAt` already
+  // keeps only the operator's deltas and carries no negation closure, so the strike filter is here.
+  const negated = lawfulNegated(reactor, operator);
+  return lawfulDeltasAt(reactor, { entity, context: CTX_CONTAINER }, operator)
+    .filter((delta) => !negated(delta.id) && containerDeclarationName(delta.claims) === entity)
+    .sort((a, b) => b.claims.timestamp - a.claims.timestamp || b.id.localeCompare(a.id))[0]?.id;
+}
+
 // The surviving lawful declaration ids for one entity — what a strike-the-declaration act negates.
 export function survivingDeclarationIds(
   reactor: Reactor,
@@ -1304,6 +1324,8 @@ export interface ContainerOptions {
 }
 
 export interface Container {
+  /** Exact declaration captured at attachment, never advanced by later imports. */
+  readonly declarationId?: string | undefined;
   /** The declared entity, absent for an anonymous container (today's nameless pool). */
   readonly entity?: string;
   readonly trust: ContainerTrust;
@@ -1752,6 +1774,10 @@ async function openSeparate(
     trust: spec.trust,
     posture: "separate",
     gateway: pool,
+    declarationId:
+      spec.entity === undefined
+        ? undefined
+        : currentContainerDeclarationId(gw.reactor, gw.operatorAuthor, spec.entity),
     members: () => [...pool.reactor.snapshot()],
     reseed,
     // Drop DISCARDS — at the bytes, on every backend (T72). Purge everything the container can NAME,
@@ -1826,6 +1852,17 @@ async function openSeparate(
             refuse(`${who}'s §25 pen still holds ${pen.length} set-aside row(s) after the sweep`);
           }
         }
+        // The whole-store verdict: a byte no read and no session named (a mirror tier a partial
+        // purge left behind) is still this store's, and a drop that reported it clean would be
+        // false at the bytes (H7). A driver without the probe leaves that byte to heal, as before.
+        if (target.backend.holdsAny !== undefined && (await target.backend.holdsAny())) {
+          refuse(
+            `${who}'s store still holds bytes that no read named after the sweep (a tier a partial ` +
+              `purge left behind). To discard it: take it out of scope first (detach()), heal its ` +
+              `store while nothing is attached to it so every tier shows what it holds, open it ` +
+              `again, then drop again`,
+          );
+        }
       };
       // The subtree, in the SAME walk the §24.5 envelope report runs (`poolsBeneath` — one
       // traversal, two consumers, so what a report can bill a drop can always reach). Collected
@@ -1837,8 +1874,8 @@ async function openSeparate(
           emptied.push(`"${handle}"`);
         }
         await discardBytes(pool, "this pool");
-        // What no read and no session ever named is outside drop's jurisdiction — a straggler
-        // bearing an unlisted id is heal's domain (§11), stated rather than implied clean.
+        // What no read and no session ever named is heal's to surface (§11); a store that can
+        // answer the whole-store question refuses above rather than read as clean.
       } catch (err) {
         if (err instanceof Error && err.message.startsWith("drop refused:")) throw err;
         refuse(

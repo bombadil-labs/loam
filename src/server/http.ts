@@ -2513,6 +2513,9 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             const channel = await gateway.openChannel({
               into,
               prefix,
+              // Compared against a standing record's address, never recorded: a re-connect cannot
+              // feed another peer's data into an opening that names this one's peer.
+              pullsFrom: from,
               bless: args.bless !== false,
               ...(identity.binding === undefined
                 ? {}

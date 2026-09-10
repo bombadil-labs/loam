@@ -82,6 +82,7 @@ function holdsNothing(err: unknown): boolean {
 
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
+const DELTA_ID = /^1e20[0-9a-f]{64}$/;
 export class ArchiveBackend implements StoreBackend {
   private closed = false;
   // Ids known on disk (read or written by this handle) — the cheap fast-path; the filesystem
@@ -357,6 +358,56 @@ export class ArchiveBackend implements StoreBackend {
       }
     }
     return false;
+  }
+
+  // The whole-store form of `holds`: any delta file or crash-left `.tmp` in any fan, with the
+  // same fail-closed on a fan it cannot read.
+  async holdsAny(): Promise<boolean> {
+    this.assertOpen();
+    for (const { name: fan } of fanEntries(this.root)) {
+      let names: readonly string[];
+      try {
+        names = readdirSync(join(this.root, fan));
+      } catch (err) {
+        if (holdsNothing(err)) continue;
+        throw err;
+      }
+      // The same names `purge` sweeps: `<id>.json` and the crash-left `<id>.json.<pid>.tmp`. A
+      // stray file of another shape is not this store's bytes and must not refuse every drop.
+      for (const name of names) {
+        const cut = name.endsWith(".json")
+          ? name.length - ".json".length
+          : name.endsWith(".tmp")
+            ? name.indexOf(".json.")
+            : -1;
+        if (cut > 0 && DELTA_ID.test(name.slice(0, cut))) return true;
+      }
+    }
+    return false;
+  }
+
+  // The inventory: every id at either name shape in every fan; a fan it cannot read refuses.
+  async ids(): Promise<Set<string>> {
+    this.assertOpen();
+    const out = new Set<string>();
+    for (const { name: fan } of fanEntries(this.root)) {
+      let names: readonly string[];
+      try {
+        names = readdirSync(join(this.root, fan));
+      } catch (err) {
+        if (holdsNothing(err)) continue;
+        throw err;
+      }
+      for (const name of names) {
+        const cut = name.endsWith(".json")
+          ? name.length - ".json".length
+          : name.endsWith(".tmp")
+            ? name.indexOf(".json.")
+            : -1;
+        if (cut > 0 && DELTA_ID.test(name.slice(0, cut))) out.add(name.slice(0, cut));
+      }
+    }
+    return out;
   }
 
   // The batch companion to `holds` (SPEC §11 byte verdict). `heal` asks its verdict about the whole
