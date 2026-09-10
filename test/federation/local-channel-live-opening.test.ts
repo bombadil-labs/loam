@@ -36,8 +36,14 @@
 // 1 red; the hand-attached road's drop() left a name with stamps and no declaration → 1 red.
 // After review round 13 (135 cases): the drop calls a name severed while its declaration stands
 // → 1 red; a container attached by hand is not seen while the declaration stands → 1 red.
-// RAILS-RED on 4e3b8b52, the whole file as of round 13: 18 red, 1 green. The green case is "an event this reader cannot parse makes the orphan question fail closed": the base's
-// drop also throws on an unreadable history. Its scoped guard is measured by the revert probe.
+// After review round 14 (136 cases): the drop purged any hand-declared container under a name
+// this store never had as a channel, minting a store by name → 1 red; the round-13 case is
+// two-sided now (a sibling opened before the strike keeps its bytes).
+// RAILS-RED on 4e3b8b52, the whole file as of round 14: 18 red, 2 green. The green cases: "an
+// event this reader cannot parse makes the orphan question fail closed" (the base's drop also
+// throws on an unreadable history) and the never-a-channel case (the base refused by status alone,
+// which the round-13 widening had loosened). Each green case's own guard is measured by a revert
+// probe above, not by the base.
 // The struck-declaration case measures both halves of the byte side: the attached pool, and the
 // store reopened by name with no handle in memory (the fixture keeps one store per name, as the
 // CLI's sqlite file does).
@@ -769,6 +775,10 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     offering.push(fact(1));
     await ch.sync();
     const opening = opened(gw, ch.name).opening;
+    // A live bystander opened BEFORE the strike and the drop.
+    const { ch: sibling, offering: siblingOffering } = await channel(gw, "peer0");
+    siblingOffering.push(fact(9));
+    await sibling.sync();
     for (const id of statusIds(gw, ch.name))
       await gw.append([signClaims(makeNegationClaims(OP, gw.nextTimestamp(), id), SEED)]);
     expect(gw.channelStatus(ch.name)).toHaveLength(0);
@@ -777,6 +787,8 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     expect(refusal).toContain(`Drop the channel first (dropChannel "${ch.name}")`);
     await gw.dropChannel(ch.name);
     expect(holds(ch.name, fact(1).id)).toBe(false);
+    expect(holds(sibling.name, fact(9).id)).toBe(true);
+    expect(localChannelEvidence(gw, sibling.name).state).toBe("open");
     expect(gw.channelPools.get(ch.name)).toBeUndefined();
     expect(gw.federationChannels.get(ch.name)).toBeUndefined();
     await gw.erase(opening.id);
@@ -802,6 +814,24 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     expect(gw.channelPools.get(other.name)).toBeDefined();
     await gw.erase(otherOpening.id);
     expect(gw.reactor.get(otherOpening.id)).toBeUndefined();
+  });
+  it("a hand-declared container under a name this store never had as a channel is not the drop door's: refused, no store minted, declaration kept", async () => {
+    const { gw, files } = await home();
+    for (const name of ["mydata", "channel:friends:zzz"]) {
+      await gw.append([
+        signClaims(
+          containerClaims(
+            { container: name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
+            OP,
+            gw.nextTimestamp(),
+          ),
+          SEED,
+        ),
+      ]);
+      await expect(gw.dropChannel(name)).rejects.toThrow(/no channel named/);
+      expect(files.has(name)).toBe(false);
+      expect(survivingDeclarationIds(gw.reactor, OP, name)).toHaveLength(1);
+    }
   });
   it("a container attached by hand under a live channel's name while its pool is detached: the erase names detach then drop, and that road works", async () => {
     const { gw, holds } = await home();

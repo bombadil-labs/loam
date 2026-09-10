@@ -209,6 +209,16 @@ criterion names its verification.
 10. Full bar green and hollow-test run first on the clean tip, then recorded. Verify:
     `npm run check` and `adlc hollow-test --base origin/t288/local-channel-events --max 300 --test-cmd "timeout -k 10 600 npx vitest run test/federation/local-channel-*.test.ts"`
 
+## Review round 14 of the build, 2026-09-09
+
+Round 13's widening reached past the channel door: the severed test read the generic container
+table, so any hand-declared separate container, channel or not, dropped through `dropChannel`,
+which minted a store by name through the channel backend and reported a purge of bytes it never
+reached (H7). The door now takes only a name this store once had as a channel: with the status
+gone, it refuses unless a channel record ever stood under the name AND a declaration stands. The
+round-13 rail is two-sided now: a sibling channel opened before the strike keeps its bytes and its
+open evidence, and a hand-declared non-channel container keeps its declaration and gets no store.
+
 ## Review round 13 of the build, 2026-09-09
 
 Round 12's container-handle road could not be run from the sentence that named it: in the one
