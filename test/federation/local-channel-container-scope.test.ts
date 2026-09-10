@@ -16,7 +16,6 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import {
   containerClaims,
-  readContainerTable,
   survivingDeclarationIds,
   termClaims,
 } from "../../src/gateway/container.js";

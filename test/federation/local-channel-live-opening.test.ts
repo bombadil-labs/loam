@@ -22,6 +22,12 @@
 // the root, so it refused every fresh open over a root that held a stranger's record.
 // After review round 7 (128 cases): bytes the root also holds count against an earlier opening
 // → 1 red; the orphan question fails closed on ANY channel's unreadable event → 1 red.
+// Review round 8 (129 cases) added one CONTROL: a standing declaration whose pool a boot could
+// not attach is refused by the unreachable-store check before the liveness probe runs, so the
+// probe's no-handle road cannot misname it. RAILS-RED of this whole file on 4e3b8b52 after round
+// 8: 11 red, 2 green. The two green: that control, and the other-channel unreadable-event case,
+// which the base also refuses (it fails closed on ANY unreadable event); its scoped guard is
+// measured by the revert probe above, not by the base.
 // The boot-unattachable pool is not a case here: the base already refuses it as unreachable. The
 // struck-declaration case measures both halves of the byte side: the attached pool, and the
 // store reopened by name with no handle in memory (the fixture keeps one store per name, as the
@@ -86,11 +92,14 @@ async function home() {
   const primaryFile: Delta[] = [];
   const primary = new FaultBackend(primaryFile);
   const files = new Map<string, Delta[]>();
+  // Names whose NEXT store open fails once: a pool a boot cannot read is left unattached.
+  const failAttach = new Set<string>();
   const gw = await Gateway.boot(
     primary,
     assembleGenesis({ operatorSeed: SEED, registrations: [] }),
     {
       channelBackend: (name) => {
+        if (failAttach.delete(name)) throw new Error("fixture store unreadable");
         const file = files.get(name) ?? [];
         files.set(name, file);
         return new FaultBackend(file);
@@ -109,6 +118,7 @@ async function home() {
       assembleGenesis({ operatorSeed: SEED, registrations: [] }),
       {
         channelBackend: (name) => {
+          if (failAttach.delete(name)) throw new Error("fixture store unreadable");
           const file = files.get(name) ?? [];
           files.set(name, file);
           return new FaultBackend(file);
@@ -118,7 +128,7 @@ async function home() {
     homes.push(again);
     return again;
   };
-  return { gw, primary, holds, restart };
+  return { gw, primary, holds, restart, failAttach };
 }
 function peer() {
   const offering: Delta[] = [];
@@ -564,6 +574,42 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
         .sort(),
     ).toEqual([fact(2).id, fact(3).id].sort());
     void source;
+  });
+  it("CONTROL: a later declaration whose pool a boot could not attach stops the erase at the unreachable-store refusal, before the liveness probe", async () => {
+    // Passes on the base: the §11 sweep refuses a declared container that is neither attached nor
+    // detached on the record. It stands here to say why the liveness probe has no road for that
+    // state, and that the road the refusal names (attach, or drop) works.
+    const first = await home();
+    const { ch, offering } = await channel(first.gw);
+    offering.push(fact(1));
+    await ch.sync();
+    const earlier = opened(first.gw, ch.name).opening;
+    await first.gw.dropChannel(ch.name);
+    const feed = peer();
+    const again = await first.gw.openChannel({
+      into: "friends",
+      prefix: "peer",
+      from: "https://peer.example/peer",
+      source: feed.source,
+    });
+    feed.offering.push(fact(2));
+    await again.sync();
+    first.failAttach.add(ch.name);
+    const gw = await first.restart();
+    expect(gw.channelPools.get(ch.name)).toBeUndefined();
+    await expect(gw.erase(earlier.id)).rejects.toThrow(
+      /neither attached nor covered by a detach record/,
+    );
+    expect(gw.reactor.get(earlier.id)).toBeDefined();
+    expect(first.holds(ch.name, fact(2).id)).toBe(true);
+    // The road: a boot over the readable store attaches the pool; the drop purges it; the earlier
+    // opening's erase then proceeds. `dropChannel` reads its evidence before it attaches, so the
+    // drop alone does not reach a pool a boot skipped.
+    const booted = await first.restart();
+    await booted.dropChannel(ch.name);
+    expect(first.holds(ch.name, fact(2).id)).toBe(false);
+    await booted.erase(earlier.id);
+    expect(booted.reactor.get(earlier.id)).toBeUndefined();
   });
   it("a drop whose declaration strike failed after the purge completes on re-run, and then the opening can be erased", async () => {
     const { gw, primary, holds } = await home();

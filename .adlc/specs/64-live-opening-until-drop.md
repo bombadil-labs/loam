@@ -209,6 +209,22 @@ criterion names its verification.
 10. Full bar green and hollow-test run first on the clean tip, then recorded. Verify:
     `npm run check` and `adlc hollow-test --base origin/t288/local-channel-events --max 300 --test-cmd "timeout -k 10 600 npx vitest run test/federation/local-channel-*.test.ts"`
 
+## Review round 8 of the build, 2026-09-09
+
+No correctness defect in the round-7 clause: a peer byte the root holds has the root's own ingest
+as its lineage, so the promise (no bytes with no lineage) holds. One PLAUSIBLE text finding was
+refuted by measurement: a later incarnation's declaration standing with no handle in memory
+(its pool's store unreadable at boot; a detached pool is re-attached by boot) is refused by the
+§11 unreachable-store check before the liveness probe runs, and that refusal names the attach
+or detach road. A control case records it. The pool emptiness check takes one step of the
+iterator instead of a spread. Known and left: the whole-snapshot walks in `receiptsNaming`,
+`orphanedDeclaration` and `incarnationMembers` on an operator door that runs once per erase of
+an opening; the targeted read is `reactor.byTarget("channel:<name>")` filtered to the event
+context. Mutants that survive on this code and why: the member-skip's `tombstoned` guard
+(an un-tombstoned held member is "held", so the skip never fires for it either way), the
+cascade flag on the recursive call (a member has no members), and the store's byte count on the
+no-handle road (`> 0` to `> 1`: the fixture's store always holds the seed plus the byte).
+
 ## Review round 7 of the build, 2026-09-09
 
 The round-6 liveness clause met the seed from the other side: the root's own peer-authored deltas

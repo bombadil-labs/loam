@@ -762,7 +762,7 @@ async function liveOpening(
     named.declarationId !== o.poolDeclaration &&
     !orphanedDeclaration(gw, named.declarationId!);
   const attached = named !== undefined && !another ? named.gateway : undefined;
-  if (attached !== undefined && [...attached.reactor.snapshot()].length > 0)
+  if (attached !== undefined && !attached.reactor.snapshot()[Symbol.iterator]().next().done)
     return named!.declarationId === o.poolDeclaration
       ? "its pool is still attached and holds bytes"
       : "a pool no opening names is attached under its name and holds bytes";
@@ -772,9 +772,9 @@ async function liveOpening(
   // receipt names and the root does not hold was left there by an earlier incarnation, and this
   // opening is the only lineage it has (spec 64).
   if (another) {
-    const owned = receiptsNaming(gw, named!.declarationId!);
+    const owned = receiptsNaming(gw, named.declarationId!);
     if (
-      [...named!.gateway!.reactor.snapshot()].some(
+      [...named.gateway!.reactor.snapshot()].some(
         (d) =>
           d.claims.author !== gw.operatorAuthor &&
           !owned.has(d.id) &&
