@@ -3,7 +3,7 @@
 // answers false, one byte answers true, a purge back to empty answers false. The mirror pair
 // answers true while EITHER tier holds, and refuses when a tier cannot answer. The archive counts
 // a crash-left `.tmp` and refuses on a fan it cannot read. All stores are this file's own temp dirs.
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, chmodSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -28,6 +28,21 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 const one = (): Delta => observed(FERN, "height", 1, 1, GARDENER_SEED);
+// Can this user, on this filesystem, be denied a directory listing? Root cannot be, and Windows
+// does not deny a read through chmod; where it cannot, the unreadable-fan half does not run.
+const eaccesForceable = ((): boolean => {
+  const probe = mkdtempSync(join(tmpdir(), "loam-holds-any-probe-"));
+  try {
+    chmodSync(probe, 0o000);
+    readdirSync(probe);
+    return false;
+  } catch {
+    return true;
+  } finally {
+    chmodSync(probe, 0o755);
+    rmSync(probe, { recursive: true, force: true });
+  }
+})();
 
 async function roundTrip(store: StoreBackend) {
   expect(typeof store.holdsAny).toBe("function");
@@ -104,7 +119,7 @@ describe("holdsAny and ids: the whole-store byte probe and the inventory", () =>
     await expect(store.holdsAny()).rejects.toThrow(/could not be proven empty/);
     await expect(store.ids()).rejects.toThrow(/could not be listed/);
   });
-  it("archive: a crash-left .tmp counts as bytes, and an unreadable fan refuses", async () => {
+  it("archive: a crash-left .tmp counts as bytes, and an unreadable fan refuses where the platform can deny a read", async () => {
     const root = tmp();
     const store = new ArchiveBackend(root);
     expect(await store.holdsAny()).toBe(false);
@@ -117,7 +132,7 @@ describe("holdsAny and ids: the whole-store byte probe and the inventory", () =>
     expect(await store.holdsAny()).toBe(true);
     expect(await store.ids()).toEqual(new Set([`1e20${"ab".repeat(32)}`]));
     rmSync(join(root, "ab", stray));
-    if (process.getuid?.() !== 0) {
+    if (eaccesForceable) {
       chmodSync(join(root, "ab"), 0o000);
       await expect(store.holdsAny()).rejects.toThrow();
       await expect(store.ids()).rejects.toThrow();
