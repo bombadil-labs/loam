@@ -70,6 +70,14 @@ describe("holdsAny and ids: the whole-store byte probe and the inventory", () =>
   it("sqlite", async () => roundTrip(new SqliteBackend(join(tmp(), "s.sqlite"))));
   it("archive", async () => roundTrip(new ArchiveBackend(tmp())));
   it("local storage", async () => roundTrip(new LocalStorageBackend("garden", new MemStorage())));
+  it("local storage: a row under the prefix that is not a delta counts as bytes but is never listed as an id", async () => {
+    const storage = new MemStorage();
+    storage.setItem("loam:garden:notes", "{}");
+    const store = new LocalStorageBackend("garden", storage);
+    expect(await store.holdsAny()).toBe(true);
+    expect(await store.ids()).toEqual(new Set());
+    await store.close();
+  });
   it("sqlite: an owed truncation answers true over an empty table, and the next checkpoint clears it", async () => {
     const file = join(tmp(), "s.sqlite");
     await new SqliteBackend(file).close();
