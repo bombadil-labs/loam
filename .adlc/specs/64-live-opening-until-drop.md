@@ -221,7 +221,10 @@ drop first; the road is to strike the hand declaration, or a fresh open then dro
 declaration with an EARLIER timestamp does not change the standing one; the drop purges the
 channel's own pool and strikes both declarations, as "whatever still declares the name" says.
 The status-gone drop skips every `unavailable` reason, including another channel's malformed
-control history; the gate has already proven the pool is the channel's own. Sixteen rounds; the
+control history; the gate has already proven the pool is the channel's own. The same state seen
+from another process (restart, then drop before a fresh open) still reads severed with the file
+holding bytes: the store cannot check the file without minting a store by name, and the fresh
+open is the road. Round 17, scoped to round 16's clause, was clean. Seventeen rounds; the
 last five found only roads and texts in the refuse direction, and the widening this build asks
 Myk to decide is stated in one sentence in the PR.
 
