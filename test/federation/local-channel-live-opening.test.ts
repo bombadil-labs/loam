@@ -51,7 +51,10 @@
 // After review round 21 (the reviewer's second finding): the later-incarnation road read only the
 // later pool's reactor, so a reopen then an erase let the earlier opening go while the mirror
 // held its byte → 1 red (the mirror case, extended).
-// RAILS-RED on 4e3b8b52, the whole file as of round 18: 21 red, 3 green (round 16: 19 red, 3 green). The green cases: "an
+// After review round 23 (the reviewer's third finding): a receipt erased by hand took its ids out
+// of the probe, and the earlier opening went while the mirror held the byte → 1 red (the mirror
+// case, extended); a later incarnation over a store with no inventory read as accounted → 1 red.
+// RAILS-RED on 4e3b8b52, the whole file as of round 23: 22 red, 3 green (round 18: 21 red, 3 green). The green cases: "an
 // event this reader cannot parse makes the orphan question fail closed" (the base's drop also
 // throws on an unreadable history), the never-a-channel case and the once-a-channel hand
 // declaration case (the base refused both by status alone, which the round-13 widening had
@@ -974,6 +977,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     offering.push(fact(1));
     await ch.sync();
     const opening = opened(first.gw, ch.name).opening;
+    const receipt = events(first.gw, ch.name, "received")[0]!;
     for (const id of [
       ...survivingDeclarationIds(first.gw.reactor, OP, ch.name),
       ...statusIds(first.gw, ch.name),
@@ -1006,7 +1010,17 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     // Reopened, the later incarnation's reactor shows the seed and its own receipts only; the
     // earlier opening's receipts name the mirror's byte, and the store is asked at the bytes.
     const reopened = await gw.erase(opening.id).catch((e: Error) => e.message);
-    expect(reopened).toContain("still holds, on some tier, 1 byte(s) this opening's receipts name");
+    // Two bytes: the peer's, and the earlier pool's own marker, which the mirror also kept and
+    // the later pool cannot resolve. Unresolvable is unaccounted, so both count until a heal.
+    expect(reopened).toMatch(/holds 2 byte\(s\) that no receipt of that incarnation names/);
+    expect(gw.reactor.get(opening.id)).toBeDefined();
+    // Erasing the earlier receipt by hand forgets the attribution, not the byte: the store's
+    // inventory still accounts for it, and the opening's erase still refuses.
+    await gw.erase(receipt.id);
+    expect(gw.reactor.get(receipt.id)).toBeUndefined();
+    expect(first.mirrors.get(ch.name)!.some((d) => d.id === fact(1).id)).toBe(true);
+    const receiptless = await gw.erase(opening.id).catch((e: Error) => e.message);
+    expect(receiptless).toMatch(/holds 2 byte\(s\) that no receipt of that incarnation names/);
     expect(gw.reactor.get(opening.id)).toBeDefined();
     await expect(gw.dropChannel(ch.name)).rejects.toThrow(
       /bytes that no read named .* heal its store while nothing is attached/,
@@ -1025,6 +1039,35 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     expect(first.mirrors.get(ch.name)!.some((d) => d.id === fact(1).id)).toBe(false);
     await gw2.erase(opening.id);
     expect(gw2.reactor.get(opening.id)).toBeUndefined();
+  });
+  it("a later incarnation over a store with no inventory cannot account for the earlier opening's bytes: the erase refuses", async () => {
+    const first = await home();
+    const { ch, offering } = await channel(first.gw);
+    offering.push(fact(1));
+    await ch.sync();
+    const earlier = opened(first.gw, ch.name).opening;
+    await first.gw.dropChannel(ch.name);
+    first.blind.add(ch.name);
+    const feed = peer();
+    const again = await first.gw.openChannel({
+      into: "friends",
+      prefix: "peer",
+      from: "https://peer.example/peer",
+      source: feed.source,
+    });
+    feed.offering.push(fact(2));
+    await again.sync();
+    const refusal = await first.gw.erase(earlier.id).catch((e: Error) => e.message);
+    expect(refusal).toContain("cannot be listed on every tier");
+    expect(first.gw.reactor.get(earlier.id)).toBeDefined();
+    // Bystander: the later incarnation keeps receiving.
+    feed.offering.push(fact(3));
+    await again.sync();
+    expect(
+      opened(first.gw, ch.name)
+        .received.map((d) => d.id)
+        .sort(),
+    ).toEqual([fact(2).id, fact(3).id].sort());
   });
   it("a store with no whole-store byte probe cannot prove its pool empty: the erase refuses although the read shows nothing", async () => {
     const first = await home();

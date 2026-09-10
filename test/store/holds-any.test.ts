@@ -1,5 +1,5 @@
-// `holdsAny` (SPEC §11): does a store hold bytes filed under ANY id, on any tier it owns? The
-// whole-store form of `holds`, with the same reach and the same fail-closed. Each driver: empty
+// `holdsAny` and `ids` (SPEC §11): does a store hold bytes filed under ANY id, on any tier it
+// owns, and which ids? The whole-store forms of `holds`, with the same reach and fail-closed. Each driver: empty
 // answers false, one byte answers true, a purge back to empty answers false. The mirror pair
 // answers true while EITHER tier holds, and refuses when a tier cannot answer. The archive counts
 // a crash-left `.tmp` and refuses on a fan it cannot read. All stores are this file's own temp dirs.
@@ -31,16 +31,20 @@ const one = (): Delta => observed(FERN, "height", 1, 1, GARDENER_SEED);
 
 async function roundTrip(store: StoreBackend) {
   expect(typeof store.holdsAny).toBe("function");
+  expect(typeof store.ids).toBe("function");
   expect(await store.holdsAny!()).toBe(false);
+  expect(await store.ids!()).toEqual(new Set());
   const d = one();
   await store.append([d]);
   expect(await store.holdsAny!()).toBe(true);
+  expect(await store.ids!()).toEqual(new Set([d.id]));
   await store.purge([d.id]);
   expect(await store.holdsAny!()).toBe(false);
+  expect(await store.ids!()).toEqual(new Set());
   await store.close();
 }
 
-describe("holdsAny: the whole-store byte probe", () => {
+describe("holdsAny and ids: the whole-store byte probe and the inventory", () => {
   it("memory", async () => roundTrip(new MemoryBackend()));
   it("sqlite", async () => roundTrip(new SqliteBackend(join(tmp(), "s.sqlite"))));
   it("archive", async () => roundTrip(new ArchiveBackend(tmp())));
@@ -55,6 +59,7 @@ describe("holdsAny: the whole-store byte probe", () => {
     raw.close();
     const store = new SqliteBackend(file);
     expect(await store.holdsAny()).toBe(true);
+    await expect(store.ids()).rejects.toThrow(/cannot name/);
     await store.purge([`1e20${"ab".repeat(32)}`]);
     expect(await store.holdsAny()).toBe(false);
     await store.close();
@@ -69,6 +74,7 @@ describe("holdsAny: the whole-store byte probe", () => {
     raw.close();
     const store = new SqliteBackend(file);
     expect(await store.holdsAny()).toBe(true);
+    expect(await store.ids()).toEqual(new Set([`1e20${"cd".repeat(32)}`]));
     await store.purge([`1e20${"cd".repeat(32)}`]);
     expect(await store.holdsAny()).toBe(false);
     await store.close();
@@ -83,6 +89,8 @@ describe("holdsAny: the whole-store byte probe", () => {
     await primary.append([d]);
     await primary.purge([d.id]);
     expect(await new MirrorBackend(primary, mirror).holdsAny()).toBe(true);
+    // The inventory is the union: the mirror's lone byte is listed although the primary lost it.
+    expect(await new MirrorBackend(primary, mirror).ids()).toEqual(new Set([d.id]));
   });
   it("mirror: a tier with no probe makes the store unprovable, never empty", async () => {
     const blind: StoreBackend = {
@@ -94,6 +102,7 @@ describe("holdsAny: the whole-store byte probe", () => {
     };
     const store = new MirrorBackend(new MemoryBackend(), blind);
     await expect(store.holdsAny()).rejects.toThrow(/could not be proven empty/);
+    await expect(store.ids()).rejects.toThrow(/could not be listed/);
   });
   it("archive: a crash-left .tmp counts as bytes, and an unreadable fan refuses", async () => {
     const root = tmp();

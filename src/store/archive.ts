@@ -386,6 +386,30 @@ export class ArchiveBackend implements StoreBackend {
     return false;
   }
 
+  // The inventory: every id at either name shape in every fan; a fan it cannot read refuses.
+  async ids(): Promise<Set<string>> {
+    this.assertOpen();
+    const out = new Set<string>();
+    for (const { name: fan } of fanEntries(this.root)) {
+      let names: readonly string[];
+      try {
+        names = readdirSync(join(this.root, fan));
+      } catch (err) {
+        if (holdsNothing(err)) continue;
+        throw err;
+      }
+      for (const name of names) {
+        const cut = name.endsWith(".json")
+          ? name.length - ".json".length
+          : name.endsWith(".tmp")
+            ? name.indexOf(".json.")
+            : -1;
+        if (cut > 0 && DELTA_ID.test(name.slice(0, cut))) out.add(name.slice(0, cut));
+      }
+    }
+    return out;
+  }
+
   // The batch companion to `holds` (SPEC §11 byte verdict). `heal` asks its verdict about the whole
   // accumulated tombstone set at once; answering with per-id `holds` would pay a full sweep for every
   // ABSENT id (the common clean case), so O(dead × files) on the boot path. This walks the FILES ONCE

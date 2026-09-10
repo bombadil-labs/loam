@@ -71,6 +71,13 @@ export interface StoreBackend {
   // did before the probe existed).
   holdsAny?(): Promise<boolean>;
 
+  // OPTIONAL inventory: the id of every delta this backend holds, on any tier it owns — the
+  // question "account for every byte" asks. Same reach as `holds` and the same fail-closed: a
+  // tier that cannot be listed, or a debt whose ids cannot be named, REJECTS rather than answer
+  // a shorter list (H9). Not `deltasSince`, which answers from one tier and skips a straggler by
+  // design. A caller that must account for a store and finds this absent must refuse.
+  ids?(): Promise<Set<string>>;
+
   // Release held resources.
   close(): Promise<void>;
 }

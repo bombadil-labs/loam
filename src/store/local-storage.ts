@@ -279,6 +279,16 @@ export class LocalStorageBackend implements StoreBackend, RepairableBackend {
     return false;
   }
 
+  async ids(): Promise<Set<string>> {
+    this.assertOpen();
+    const out = new Set<string>();
+    for (const key of this.ownedKeys()) {
+      const suffix = key.slice(this.prefix.length);
+      if (isDeltaId(suffix) && this.storage.getItem(key) !== null) out.add(suffix);
+    }
+    return out;
+  }
+
   async purge(ids: Iterable<string>): Promise<number> {
     this.assertOpen();
     let removed = 0;

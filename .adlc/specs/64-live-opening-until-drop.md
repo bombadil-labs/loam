@@ -209,6 +209,22 @@ criterion names its verification.
 10. Full bar green and hollow-test run first on the clean tip, then recorded. Verify:
     `npm run check` and `adlc hollow-test --base origin/t288/local-channel-events --max 300 --test-cmd "timeout -k 10 600 npx vitest run test/federation/local-channel-*.test.ts"`
 
+## Review round 23 of the build, 2026-09-10 (the reviewer's third finding on the PR)
+
+Round 21's probe named the bytes through this opening's receipts, and a receipt can be erased by
+hand (it forgets the attribution, not the byte): erased, its ids left the probe and the opening
+went while the mirror held the byte. The store contract now carries an optional inventory, `ids`,
+the whole-store list with `holds`'s reach and fail-closed (a sqlite debt whose ids it cannot name
+refuses; the mirror lists the union of both tiers and refuses when one cannot be listed), in every
+driver. The later-incarnation road accounts for every byte through it: a byte is the later
+incarnation's when one of its receipts names it, the root's when the root holds it, the pool's own
+when the pool resolves it as operator-authored; anything else has this opening as its only
+lineage, whether or not a receipt still names it, and the erase refuses. A store that cannot be
+listed cannot be accounted for and refuses too. The receipts probe is gone; the inventory subsumes
+it and the one-tier read. Rails: the reviewer's sequence (reopen, erase the receipt by hand, erase
+the opening: refuses), a later incarnation over a store with no inventory, and the inventory in
+the store-level rail per driver.
+
 ## Review round 21 of the build, 2026-09-10 (the reviewer's second finding on the PR)
 
 The later-incarnation road still read the later pool's reactor alone: reopened over a store whose

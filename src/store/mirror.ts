@@ -163,6 +163,25 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
     return results.some((r) => r.status === "fulfilled" && r.value);
   }
 
+  // BOTH tiers, as `holdsAny`: the union of what each lists, and unprovable if either cannot.
+  async ids(): Promise<Set<string>> {
+    const ask = (tier: StoreBackend, label: string): Promise<Set<string>> =>
+      tier.ids === undefined
+        ? Promise.reject(new Error(`the ${label} tier offers no inventory`))
+        : tier.ids();
+    const results = await Promise.allSettled([
+      ask(this.primary, "primary"),
+      ask(this.mirror, "mirror"),
+    ]);
+    const out = new Set<string>();
+    for (const r of results) {
+      if (r.status === "rejected")
+        throw new Error(`a tier could not be listed: ${String(r.reason)}`, { cause: r.reason });
+      for (const id of r.value) out.add(id);
+    }
+    return out;
+  }
+
   async heldAmong(ids: Iterable<string>): Promise<Set<string>> {
     const batch = [...ids];
     const ask = async (tier: StoreBackend): Promise<Set<string>> => {

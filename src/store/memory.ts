@@ -57,6 +57,13 @@ export class MemoryBackend implements StoreBackend {
     return this.set.size > 0;
   }
 
+  async ids(): Promise<Set<string>> {
+    this.assertOpen();
+    const out = new Set<string>();
+    for (const d of this.set) out.add(d.id);
+    return out;
+  }
+
   async close(): Promise<void> {
     this.closed = true;
   }

@@ -796,37 +796,36 @@ async function liveOpening(
   // receipt names and the root does not hold was left there by an earlier incarnation, and this
   // opening is the only lineage it has (spec 64).
   if (another) {
+    // ACCOUNT FOR EVERY BYTE under the name, on every tier: the store's inventory, not a read
+    // (a read answers from one tier, and a mirror can keep what a partial purge left). A byte is
+    // the later incarnation's when one of its receipts names it; the root's when the root holds
+    // it (the seed copies the root's own bytes into every pool); the pool's own when the pool
+    // resolves it as operator-authored (its marker). Anything else has this opening as its only
+    // lineage, whether or not a receipt of this incarnation still names it: a receipt can be
+    // erased by hand, and the bytes it named do not go with it. A store that cannot be listed
+    // cannot be accounted for, and that refuses too (H9).
     const owned = receiptsNaming(gw, named.declarationId!);
-    if (
-      [...named.gateway!.reactor.snapshot()].some(
-        (d) =>
-          d.claims.author !== gw.operatorAuthor &&
-          !owned.has(d.id) &&
-          gw.reactor.get(d.id) === undefined,
-      )
-    )
+    const pool = named.gateway!;
+    const inventory = await storeInventory(pool.backend);
+    if (inventory === undefined)
       return (
-        "a later incarnation under its name holds bytes that no receipt of that incarnation " +
-        `names. Drop the channel first (dropChannel "${o.channel}"): that severs the standing ` +
-        "incarnation and purges its pool with those bytes; its deltas can be read or extracted " +
-        "until then."
+        "a later incarnation under its name holds a store whose bytes cannot be listed on every " +
+        `tier, so this opening's bytes cannot be accounted for. Drop the channel first (dropChannel ` +
+        `"${o.channel}"): that severs the standing incarnation and purges its pool.`
       );
-    // At the bytes, on every tier: the read above answers from one tier, and a mirror can keep
-    // what a partial purge left. This opening's own receipts name what its incarnation received;
-    // any of those still held by the store under the name, on any tier, is a byte whose only
-    // lineage this opening is. A byte no receipt names that only such a tier holds is not
-    // reachable by id from here; a heal replants it into the primary, where the read sees it.
-    const mine = [...receiptsNaming(gw, o.poolDeclaration)].filter(
-      (id) => !owned.has(id) && gw.reactor.get(id) === undefined,
-    );
-    const { held, unasked } = await probePhysicalRetention(named.gateway!.backend, mine);
-    if (held.size > 0 || unasked.size > 0)
+    let stray = 0;
+    for (const id of inventory) {
+      if (owned.has(id) || gw.reactor.get(id) !== undefined) continue;
+      if (pool.reactor.get(id)?.claims.author === gw.operatorAuthor) continue;
+      stray += 1;
+    }
+    if (stray > 0)
       return (
-        `a later incarnation under its name still holds, on some tier, ${held.size} byte(s) this ` +
-        `opening's receipts name${unasked.size > 0 ? ` (and ${unasked.size} could not be asked)` : ""}. ` +
-        `Drop the channel first (dropChannel "${o.channel}"): that severs the standing incarnation ` +
-        "and purges its pool; if the drop finds bytes no read names, heal the store while nothing " +
-        "is attached to it, then open it again and drop."
+        `a later incarnation under its name holds ${stray} byte(s) that no receipt of that ` +
+        `incarnation names and the root does not hold. Drop the channel first (dropChannel ` +
+        `"${o.channel}"): that severs the standing incarnation and purges its pool with those ` +
+        "bytes; its deltas can be read or extracted until then. If the drop finds bytes no read " +
+        "names, heal the store while nothing is attached to it, then open it again and drop."
       );
   }
   if (named === undefined) {
@@ -864,6 +863,16 @@ async function liveOpening(
     }
   }
   return undefined;
+}
+// Every id a store holds on any tier, or undefined when it cannot be listed: a backend with no
+// inventory, or a tier that refuses, cannot be accounted for (H9).
+async function storeInventory(backend: StoreBackend): Promise<Set<string> | undefined> {
+  if (backend.ids === undefined) return undefined;
+  try {
+    return await backend.ids();
+  } catch {
+    return undefined;
+  }
 }
 // Does a store hold bytes on any tier? Unprovable is TRUE: a backend with no whole-store probe,
 // or a tier that refuses the question, cannot license an erasure (H9).
