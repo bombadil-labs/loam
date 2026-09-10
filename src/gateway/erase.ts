@@ -811,6 +811,23 @@ async function liveOpening(
         "incarnation and purges its pool with those bytes; its deltas can be read or extracted " +
         "until then."
       );
+    // At the bytes, on every tier: the read above answers from one tier, and a mirror can keep
+    // what a partial purge left. This opening's own receipts name what its incarnation received;
+    // any of those still held by the store under the name, on any tier, is a byte whose only
+    // lineage this opening is. A byte no receipt names that only such a tier holds is not
+    // reachable by id from here; a heal replants it into the primary, where the read sees it.
+    const mine = [...receiptsNaming(gw, o.poolDeclaration)].filter(
+      (id) => !owned.has(id) && gw.reactor.get(id) === undefined,
+    );
+    const { held, unasked } = await probePhysicalRetention(named.gateway!.backend, mine);
+    if (held.size > 0 || unasked.size > 0)
+      return (
+        `a later incarnation under its name still holds, on some tier, ${held.size} byte(s) this ` +
+        `opening's receipts name${unasked.size > 0 ? ` (and ${unasked.size} could not be asked)` : ""}. ` +
+        `Drop the channel first (dropChannel "${o.channel}"): that severs the standing incarnation ` +
+        "and purges its pool; if the drop finds bytes no read names, heal the store while nothing " +
+        "is attached to it, then open it again and drop."
+      );
   }
   if (named === undefined) {
     // A declaration can stand with no handle in memory: the pool detached on the record, or its

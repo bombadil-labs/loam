@@ -48,6 +48,9 @@
 // tier, so a mirror that kept a byte after the primary's purge let the opening go → 1 red; a store
 // with no whole-store byte probe read as empty → 1 red; the drop reported such a store clean →
 // 1 red (same case).
+// After review round 21 (the reviewer's second finding): the later-incarnation road read only the
+// later pool's reactor, so a reopen then an erase let the earlier opening go while the mirror
+// held its byte → 1 red (the mirror case, extended).
 // RAILS-RED on 4e3b8b52, the whole file as of round 18: 21 red, 3 green (round 16: 19 red, 3 green). The green cases: "an
 // event this reader cannot parse makes the orphan question fail closed" (the base's drop also
 // throws on an unreadable history), the never-a-channel case and the once-a-channel hand
@@ -1000,6 +1003,11 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
       from: "https://peer.example/peer",
       source: feed.source,
     });
+    // Reopened, the later incarnation's reactor shows the seed and its own receipts only; the
+    // earlier opening's receipts name the mirror's byte, and the store is asked at the bytes.
+    const reopened = await gw.erase(opening.id).catch((e: Error) => e.message);
+    expect(reopened).toContain("still holds, on some tier, 1 byte(s) this opening's receipts name");
+    expect(gw.reactor.get(opening.id)).toBeDefined();
     await expect(gw.dropChannel(ch.name)).rejects.toThrow(
       /bytes that no read named .* heal its store while nothing is attached/,
     );

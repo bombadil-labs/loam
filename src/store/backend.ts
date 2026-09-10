@@ -67,8 +67,8 @@ export interface StoreBackend {
   // which answers from one tier or skips a straggler by design) and the same fail-closed: a tier
   // it cannot examine REJECTS rather than answer empty (H9). A caller that needs "this store is
   // empty" and finds this absent must not fall back to a read: it refuses (the erase door does),
-  // or it says the question was not asked (the container drop leaves such a store's stragglers
-  // to heal, as it did before the probe existed).
+  // or it stays silent and leaves such a store's stragglers to heal (the container drop, as it
+  // did before the probe existed).
   holdsAny?(): Promise<boolean>;
 
   // Release held resources.

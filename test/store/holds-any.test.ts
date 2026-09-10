@@ -6,6 +6,7 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Delta } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "../../src/store/backend.js";
@@ -44,6 +45,20 @@ describe("holdsAny: the whole-store byte probe", () => {
   it("sqlite", async () => roundTrip(new SqliteBackend(join(tmp(), "s.sqlite"))));
   it("archive", async () => roundTrip(new ArchiveBackend(tmp())));
   it("local storage", async () => roundTrip(new LocalStorageBackend("garden", new MemStorage())));
+  it("sqlite: an owed truncation answers true over an empty table, and the next checkpoint clears it", async () => {
+    const file = join(tmp(), "s.sqlite");
+    await new SqliteBackend(file).close();
+    const raw = new Database(file);
+    raw
+      .prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('truncation-outstanding', ?)")
+      .run("5");
+    raw.close();
+    const store = new SqliteBackend(file);
+    expect(await store.holdsAny()).toBe(true);
+    await store.purge([`1e20${"ab".repeat(32)}`]);
+    expect(await store.holdsAny()).toBe(false);
+    await store.close();
+  });
   it("mirror: true while either tier holds, false when both are clean", async () => {
     await roundTrip(new MirrorBackend(new MemoryBackend(), new MemoryBackend()));
     const primary = new MemoryBackend();

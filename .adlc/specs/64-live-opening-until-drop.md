@@ -209,6 +209,19 @@ criterion names its verification.
 10. Full bar green and hollow-test run first on the clean tip, then recorded. Verify:
     `npm run check` and `adlc hollow-test --base origin/t288/local-channel-events --max 300 --test-cmd "timeout -k 10 600 npx vitest run test/federation/local-channel-*.test.ts"`
 
+## Review round 21 of the build, 2026-09-10 (the reviewer's second finding on the PR)
+
+The later-incarnation road still read the later pool's reactor alone: reopened over a store whose
+mirror kept the earlier incarnation's byte, the earlier opening's erase proceeded. That road now
+asks the store at the bytes for every byte this opening's own receipts name (the ids an earlier
+incarnation received are on the record), on every tier, and refuses while any is held or cannot
+be asked. A byte no receipt names that only a non-primary tier holds is not reachable by id from
+the shared name; a heal replants it into the primary, where the read sees it, and the drop
+refuses on it until then. The rail runs the reviewer's sequence: reopen, erase refuses, drop
+refuses, heal, drop, erase. Round 20's two wording findings are folded in: the contract says the
+drop stays silent without the probe, and the drop's refusal no longer uses detach for two roads
+in one sentence. A store rail measures the sqlite truncation-debt clause the mutants left.
+
 ## Review round 18 of the build, 2026-09-10 (a reviewer's finding on the PR)
 
 The pool's emptiness was a READ: `deltasSince` on the no-handle road and the pool's reactor on
