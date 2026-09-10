@@ -1058,7 +1058,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     feed.offering.push(fact(2));
     await again.sync();
     const refusal = await first.gw.erase(earlier.id).catch((e: Error) => e.message);
-    expect(refusal).toContain("cannot be listed on every tier");
+    expect(refusal).toContain("cannot be listed on every tier (the store offers no inventory)");
     expect(first.gw.reactor.get(earlier.id)).toBeDefined();
     // Bystander: the later incarnation keeps receiving.
     feed.offering.push(fact(3));

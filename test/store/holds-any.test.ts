@@ -115,10 +115,12 @@ describe("holdsAny and ids: the whole-store byte probe and the inventory", () =>
     const stray = `1e20${"ab".repeat(32)}.json.123.tmp`;
     writeFileSync(join(root, "ab", stray), "{}");
     expect(await store.holdsAny()).toBe(true);
+    expect(await store.ids()).toEqual(new Set([`1e20${"ab".repeat(32)}`]));
     rmSync(join(root, "ab", stray));
     if (process.getuid?.() !== 0) {
       chmodSync(join(root, "ab"), 0o000);
       await expect(store.holdsAny()).rejects.toThrow();
+      await expect(store.ids()).rejects.toThrow();
       chmodSync(join(root, "ab"), 0o700);
     }
     await store.close();

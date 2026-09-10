@@ -807,11 +807,11 @@ async function liveOpening(
     const owned = receiptsNaming(gw, named.declarationId!);
     const pool = named.gateway!;
     const inventory = await storeInventory(pool.backend);
-    if (inventory === undefined)
+    if (typeof inventory === "string")
       return (
         "a later incarnation under its name holds a store whose bytes cannot be listed on every " +
-        `tier, so this opening's bytes cannot be accounted for. Drop the channel first (dropChannel ` +
-        `"${o.channel}"): that severs the standing incarnation and purges its pool.`
+        `tier (${inventory}), so this opening's bytes cannot be accounted for. Drop the channel ` +
+        `first (dropChannel "${o.channel}"): that severs the standing incarnation and purges its pool.`
       );
     let stray = 0;
     for (const id of inventory) {
@@ -825,7 +825,8 @@ async function liveOpening(
         `incarnation names and the root does not hold. Drop the channel first (dropChannel ` +
         `"${o.channel}"): that severs the standing incarnation and purges its pool with those ` +
         "bytes; its deltas can be read or extracted until then. If the drop finds bytes no read " +
-        "names, heal the store while nothing is attached to it, then open it again and drop."
+        "names, heal the store while nothing is attached to it, then open it again and drop. A " +
+        "byte the root erased and could not purge here is that erasure's: re-run it first."
       );
   }
   if (named === undefined) {
@@ -866,12 +867,12 @@ async function liveOpening(
 }
 // Every id a store holds on any tier, or undefined when it cannot be listed: a backend with no
 // inventory, or a tier that refuses, cannot be accounted for (H9).
-async function storeInventory(backend: StoreBackend): Promise<Set<string> | undefined> {
-  if (backend.ids === undefined) return undefined;
+async function storeInventory(backend: StoreBackend): Promise<Set<string> | string> {
+  if (backend.ids === undefined) return "the store offers no inventory";
   try {
     return await backend.ids();
-  } catch {
-    return undefined;
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
   }
 }
 // Does a store hold bytes on any tier? Unprovable is TRUE: a backend with no whole-store probe,

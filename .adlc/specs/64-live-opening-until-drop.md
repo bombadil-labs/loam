@@ -223,7 +223,12 @@ lineage, whether or not a receipt still names it, and the erase refuses. A store
 listed cannot be accounted for and refuses too. The receipts probe is gone; the inventory subsumes
 it and the one-tier read. Rails: the reviewer's sequence (reopen, erase the receipt by hand, erase
 the opening: refuses), a later incarnation over a store with no inventory, and the inventory in
-the store-level rail per driver.
+the store-level rail per driver. Round 24 (independent, on this fix): the archive inventory's
+`.tmp` shape and unreadable-fan refusal had no rail through `ids` (two mutants survived); railed.
+The unlistable refusal now carries the driver's reason. A byte the root erased whose purge here
+faulted counts stray, and the text names the re-run of that erasure as the road. The inventory
+lists delta ids only; a non-delta row under a store's prefix is `holdsAny`'s and the pen's, and
+the contract says so.
 
 ## Review round 21 of the build, 2026-09-10 (the reviewer's second finding on the PR)
 

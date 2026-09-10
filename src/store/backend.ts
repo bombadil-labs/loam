@@ -75,7 +75,9 @@ export interface StoreBackend {
   // question "account for every byte" asks. Same reach as `holds` and the same fail-closed: a
   // tier that cannot be listed, or a debt whose ids cannot be named, REJECTS rather than answer
   // a shorter list (H9). Not `deltasSince`, which answers from one tier and skips a straggler by
-  // design. A caller that must account for a store and finds this absent must refuse.
+  // design. A caller that must account for a store and finds this absent must refuse. It lists
+  // DELTA ids: a row under the store's prefix that is not a delta (a UI writer's key, an
+  // unparseable row) is `holdsAny`'s to count and the §25 pen's to settle, never listed here.
   ids?(): Promise<Set<string>>;
 
   // Release held resources.
