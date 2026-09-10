@@ -2190,11 +2190,23 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
     statusGone &&
     (severed === undefined || standing === undefined || orphanedDeclaration(gw, standing))
   ) {
+    // "Nothing left to remove" must be true at the bytes: a pool still attached here under the
+    // name (its records struck by hand in this process) is named, with the road out.
+    const attached = gw.channelPools.get(name)?.gateway;
+    const held =
+      attached !== undefined &&
+      attached.attachedTo === gw &&
+      gw.quarantinePools.has(attached) &&
+      attached.reactor.size !== 0;
     throw new Error(
       severed === undefined
         ? `dropChannel refused: this store has no channel named "${name}" — ` +
             `\`loam federate list\` names the ones it has.`
-        : `dropChannel refused: "${name}" was already severed, so there is nothing left to remove.`,
+        : held
+          ? `dropChannel refused: "${name}" reads severed (no status record, and no declaration ` +
+            `a channel opening names), but a pool is still attached here under that name and ` +
+            `holds bytes. Restart this store, open the channel again under the name, then drop it.`
+          : `dropChannel refused: "${name}" was already severed, so there is nothing left to remove.`,
     );
   }
 

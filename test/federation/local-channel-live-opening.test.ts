@@ -42,7 +42,9 @@
 // After review round 15 (137 cases): a declaration by hand under a name that once was a channel
 // passed the gate, and the drop purged a store the factory minted, not the hand container's → 1
 // red. The gate now asks whether a channel opening names the standing declaration.
-// RAILS-RED on 4e3b8b52, the whole file as of round 15: 18 red, 3 green. The green cases: "an
+// After review round 16 (138 cases): with status and declaration both struck by hand in this
+// process, the drop said "nothing left to remove" while the attached pool held bytes → 1 red.
+// RAILS-RED on 4e3b8b52, the whole file as of round 16: 19 red, 3 green. The green cases: "an
 // event this reader cannot parse makes the orphan question fail closed" (the base's drop also
 // throws on an unreadable history), the never-a-channel case and the once-a-channel hand
 // declaration case (the base refused both by status alone, which the round-13 widening had
@@ -889,6 +891,40 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     ]);
     await expect(gw.dropChannel(ch.name)).rejects.toThrow(/already severed/);
     expect(survivingDeclarationIds(gw.reactor, OP, ch.name)).toHaveLength(1);
+  });
+  it("status and declaration both struck by hand in this process: the drop names the attached pool it cannot reach and the road out; the road works", async () => {
+    const first = await home();
+    const { ch, offering } = await channel(first.gw);
+    offering.push(fact(1));
+    await ch.sync();
+    const opening = opened(first.gw, ch.name).opening;
+    for (const id of [
+      ...survivingDeclarationIds(first.gw.reactor, OP, ch.name),
+      ...statusIds(first.gw, ch.name),
+    ])
+      await first.gw.append([
+        signClaims(makeNegationClaims(OP, first.gw.nextTimestamp(), id), SEED),
+      ]);
+    await expect(first.gw.erase(opening.id)).rejects.toThrow(/Drop the channel first/);
+    const refusal = await first.gw.dropChannel(ch.name).catch((e: Error) => e.message);
+    expect(refusal).toContain("a pool is still attached here under that name and holds bytes");
+    expect(refusal).not.toContain("nothing left to remove");
+    expect(first.holds(ch.name, fact(1).id)).toBe(true);
+    // The road: restart (boot attaches by status, so nothing attaches), open again under the
+    // name (which attaches the leftover store), drop, erase.
+    const gw = await first.restart();
+    expect(gw.channelPools.get(ch.name)).toBeUndefined();
+    const feed = peer();
+    await gw.openChannel({
+      into: "friends",
+      prefix: "peer",
+      from: "https://peer.example/peer",
+      source: feed.source,
+    });
+    await gw.dropChannel(ch.name);
+    expect(first.holds(ch.name, fact(1).id)).toBe(false);
+    await gw.erase(opening.id);
+    expect(gw.reactor.get(opening.id)).toBeUndefined();
   });
   it("a container attached by hand under a live channel's name while its pool is detached: the erase names detach then drop, and that road works", async () => {
     const { gw, holds } = await home();

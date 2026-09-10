@@ -209,6 +209,22 @@ criterion names its verification.
 10. Full bar green and hollow-test run first on the clean tip, then recorded. Verify:
     `npm run check` and `adlc hollow-test --base origin/t288/local-channel-events --max 300 --test-cmd "timeout -k 10 600 npx vitest run test/federation/local-channel-*.test.ts"`
 
+## Review round 16 of the build, 2026-09-09
+
+Every finding in the refuse direction, in states made by striking records by hand. Fixed: with
+the status and the declaration both struck in this process, the pool still attached, the drop
+said "nothing left to remove" while the pool held bytes; it now names the attached pool and the
+road out (restart, open again under the name, drop). Known and left, each with its road: a hand
+declaration under the name with a LATER timestamp than the channel's own, status struck, reads
+as the standing declaration, is an orphan, and the drop refuses as severed while the erase says
+drop first; the road is to strike the hand declaration, or a fresh open then drop. A hand
+declaration with an EARLIER timestamp does not change the standing one; the drop purges the
+channel's own pool and strikes both declarations, as "whatever still declares the name" says.
+The status-gone drop skips every `unavailable` reason, including another channel's malformed
+control history; the gate has already proven the pool is the channel's own. Sixteen rounds; the
+last five found only roads and texts in the refuse direction, and the widening this build asks
+Myk to decide is stated in one sentence in the PR.
+
 ## Review round 15 of the build, 2026-09-09
 
 Round 14's gate admitted a declaration by hand under a name that once was a channel: the drop
