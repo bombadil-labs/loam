@@ -52,6 +52,7 @@ import {
   type SlateHealth,
 } from "./slate.js";
 import type { Gateway } from "./gateway.js";
+import type { StoreBackend } from "../store/backend.js";
 
 export const ERASE_ENTITY = "loam:erasure";
 export const CTX_ERASE = "loam.erasure";
@@ -781,7 +782,11 @@ async function liveOpening(
     named.declarationId !== o.poolDeclaration &&
     !orphanedDeclaration(gw, named.declarationId!);
   const attached = named !== undefined && !another ? named.gateway : undefined;
-  if (attached !== undefined && attached.reactor.size !== 0)
+  // The reactor mirrors one tier's read; the bytes question is the backend's, on every tier.
+  if (
+    attached !== undefined &&
+    (attached.reactor.size !== 0 || (await storeHoldsAny(attached.backend)))
+  )
     return named!.declarationId === o.poolDeclaration
       ? `its pool is still attached and holds bytes. ${drop}`
       : `a pool no opening names is attached under its name and holds bytes. ${drop}`;
@@ -822,7 +827,9 @@ async function liveOpening(
   if (named === undefined && gw.options.channelBackend !== undefined) {
     const backend = gw.options.channelBackend(o.channel);
     try {
-      if ((await backend.deltasSince(new Set())).length > 0)
+      // At the bytes, on every tier: a read answers from one tier and a mirror can keep what a
+      // partial purge left. A store that cannot answer is not proven empty.
+      if (await storeHoldsAny(backend))
         return (
           "its pool's store still holds bytes although its declaration was struck, and no " +
           "declaration names that store for a drop to reach: " +
@@ -831,13 +838,24 @@ async function liveOpening(
           (gw.channelStatus(o.channel).length > 0
             ? "re-declare the name by hand, then drop the channel, or remove the store by hand."
             : "open the channel again under this name, which attaches the store, then drop it, " +
-              "or remove the store by hand.")
+              "or remove the store by hand.") +
+          " If the drop finds bytes no read names, heal the store first (loam repair)."
         );
     } finally {
       await backend.close();
     }
   }
   return undefined;
+}
+// Does a store hold bytes on any tier? Unprovable is TRUE: a backend with no whole-store probe,
+// or a tier that refuses the question, cannot license an erasure (H9).
+async function storeHoldsAny(backend: StoreBackend): Promise<boolean> {
+  if (backend.holdsAny === undefined) return true;
+  try {
+    return await backend.holdsAny();
+  } catch {
+    return true;
+  }
 }
 /** The received and close events that reference one opening and still stand. */
 function incarnationMembers(gw: Gateway, openingId: string): string[] {

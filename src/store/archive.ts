@@ -359,6 +359,23 @@ export class ArchiveBackend implements StoreBackend {
     return false;
   }
 
+  // The whole-store form of `holds`: any delta file or crash-left `.tmp` in any fan, with the
+  // same fail-closed on a fan it cannot read.
+  async holdsAny(): Promise<boolean> {
+    this.assertOpen();
+    for (const { name: fan } of fanEntries(this.root)) {
+      let names: readonly string[];
+      try {
+        names = readdirSync(join(this.root, fan));
+      } catch (err) {
+        if (holdsNothing(err)) continue;
+        throw err;
+      }
+      if (names.some((name) => name.endsWith(".json") || name.endsWith(".tmp"))) return true;
+    }
+    return false;
+  }
+
   // The batch companion to `holds` (SPEC §11 byte verdict). `heal` asks its verdict about the whole
   // accumulated tombstone set at once; answering with per-id `holds` would pay a full sweep for every
   // ABSENT id (the common clean case), so O(dead × files) on the boot path. This walks the FILES ONCE

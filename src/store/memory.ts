@@ -52,6 +52,11 @@ export class MemoryBackend implements StoreBackend {
     return this.set.has(id);
   }
 
+  async holdsAny(): Promise<boolean> {
+    this.assertOpen();
+    return this.set.size > 0;
+  }
+
   async close(): Promise<void> {
     this.closed = true;
   }

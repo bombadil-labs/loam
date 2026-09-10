@@ -62,6 +62,13 @@ export interface StoreBackend {
   // that cannot examine part of its store REJECTS rather than answer a false clean, H9).
   heldAmong?(ids: Iterable<string>): Promise<Set<string>>;
 
+  // OPTIONAL whole-store companion to `holds`: does this backend hold bytes filed under ANY id,
+  // on any tier it owns? Same reach as `holds` (everything `purge` sweeps, never `deltasSince`,
+  // which answers from one tier or skips a straggler by design) and the same fail-closed: a tier
+  // it cannot examine REJECTS rather than answer empty (H9). A caller that needs "this store is
+  // empty" and finds this absent must refuse, not fall back to a read.
+  holdsAny?(): Promise<boolean>;
+
   // Release held resources.
   close(): Promise<void>;
 }

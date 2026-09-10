@@ -271,6 +271,14 @@ export class LocalStorageBackend implements StoreBackend, RepairableBackend {
     return this.storage.getItem(this.keyFor(id)) !== null;
   }
 
+  async holdsAny(): Promise<boolean> {
+    this.assertOpen();
+    // Every owned key but the seed, including a foreign or unparseable row: retained content is
+    // retained content, whatever the read path makes of it.
+    for (const key of this.ownedKeys()) if (this.storage.getItem(key) !== null) return true;
+    return false;
+  }
+
   async purge(ids: Iterable<string>): Promise<number> {
     this.assertOpen();
     let removed = 0;

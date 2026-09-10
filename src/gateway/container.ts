@@ -1852,6 +1852,15 @@ async function openSeparate(
             refuse(`${who}'s §25 pen still holds ${pen.length} set-aside row(s) after the sweep`);
           }
         }
+        // The whole-store verdict: a byte no read and no session named (a mirror tier a partial
+        // purge left behind) is still this store's, and a drop that reported it clean would be
+        // false at the bytes (H7). A driver without the probe leaves that byte to heal, as before.
+        if (target.backend.holdsAny !== undefined && (await target.backend.holdsAny())) {
+          refuse(
+            `${who}'s store still holds bytes that no read named after the sweep: heal the store ` +
+              `(loam repair) so every tier shows what it holds, then drop again`,
+          );
+        }
       };
       // The subtree, in the SAME walk the §24.5 envelope report runs (`poolsBeneath` — one
       // traversal, two consumers, so what a report can bill a drop can always reach). Collected
@@ -1863,8 +1872,8 @@ async function openSeparate(
           emptied.push(`"${handle}"`);
         }
         await discardBytes(pool, "this pool");
-        // What no read and no session ever named is outside drop's jurisdiction — a straggler
-        // bearing an unlisted id is heal's domain (§11), stated rather than implied clean.
+        // What no read and no session ever named is heal's to surface (§11); a store that can
+        // answer the whole-store question refuses above rather than read as clean.
       } catch (err) {
         if (err instanceof Error && err.message.startsWith("drop refused:")) throw err;
         refuse(

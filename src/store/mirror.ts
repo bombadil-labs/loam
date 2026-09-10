@@ -143,6 +143,26 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
   // the exact cliff `heldAmong` exists to avoid. Same composition as `holds`: both tiers asked
   // (each by its own batch probe if it offers one, else its cheap per-id `holds`), answers
   // unioned, and a tier that cannot answer rejects the whole probe (H9), naming itself.
+  // BOTH tiers, as `holds`: the mirror is where a partial purge leaves what the primary no longer
+  // shows, and a tier that cannot answer the whole-store question makes the store unprovable.
+  async holdsAny(): Promise<boolean> {
+    const ask = (tier: StoreBackend, label: string): Promise<boolean> =>
+      tier.holdsAny === undefined
+        ? Promise.reject(new Error(`the ${label} tier offers no whole-store byte probe`))
+        : tier.holdsAny();
+    const results = await Promise.allSettled([
+      ask(this.primary, "primary"),
+      ask(this.mirror, "mirror"),
+    ]);
+    for (const r of results) {
+      if (r.status === "rejected")
+        throw new Error(`a tier could not be proven empty: ${String(r.reason)}`, {
+          cause: r.reason,
+        });
+    }
+    return results.some((r) => r.status === "fulfilled" && r.value);
+  }
+
   async heldAmong(ids: Iterable<string>): Promise<Set<string>> {
     const batch = [...ids];
     const ask = async (tier: StoreBackend): Promise<Set<string>> => {

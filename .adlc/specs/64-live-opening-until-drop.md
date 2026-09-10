@@ -209,6 +209,23 @@ criterion names its verification.
 10. Full bar green and hollow-test run first on the clean tip, then recorded. Verify:
     `npm run check` and `adlc hollow-test --base origin/t288/local-channel-events --max 300 --test-cmd "timeout -k 10 600 npx vitest run test/federation/local-channel-*.test.ts"`
 
+## Review round 18 of the build, 2026-09-10 (a reviewer's finding on the PR)
+
+The pool's emptiness was a READ: `deltasSince` on the no-handle road and the pool's reactor on
+the attached road, both answered from one tier. A mirror pair whose primary purged and whose
+mirror did not showed nothing to either, and the opening's erase proceeded while the mirror held
+a peer byte, against this spec's first promise. The store contract now carries an optional
+whole-store byte probe, `holdsAny`, with `holds`'s reach and fail-closed, implemented by every
+driver (memory, sqlite, archive, local storage, and the mirror pair, which asks both tiers and
+refuses when a tier cannot answer). Both erase roads ask it; a store without it, or one that
+refuses, is not proven empty and the erase refuses. The separate container's drop asks it after
+its sweep, so a byte no read named (the mirror's) refuses the drop instead of a clean report; the
+road is a heal (`loam repair`), which replants the mirror's rows into the primary, then the drop.
+Rails: the mirror shape run to the end along that road, a driver without the probe, and a
+store-level rail per driver. Known and left: a driver without the probe keeps the old drop
+behaviour (its stragglers are heal's), and the erase over such a store refuses until the store
+is removed by hand, as its text says.
+
 ## Review round 16 of the build, 2026-09-09
 
 Every finding in the refuse direction, in states made by striking records by hand. Fixed: with

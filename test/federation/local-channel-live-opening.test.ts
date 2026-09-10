@@ -44,7 +44,11 @@
 // red. The gate now asks whether a channel opening names the standing declaration.
 // After review round 16 (138 cases): with status and declaration both struck by hand in this
 // process, the drop said "nothing left to remove" while the attached pool held bytes → 1 red.
-// RAILS-RED on 4e3b8b52, the whole file as of round 16: 19 red, 3 green. The green cases: "an
+// After review round 18 (a reviewer's finding, 140 cases): the pool's emptiness was a READ of one
+// tier, so a mirror that kept a byte after the primary's purge let the opening go → 1 red; a store
+// with no whole-store byte probe read as empty → 1 red; the drop reported such a store clean →
+// 1 red (same case).
+// RAILS-RED on 4e3b8b52, the whole file as of round 18: 21 red, 3 green (round 16: 19 red, 3 green). The green cases: "an
 // event this reader cannot parse makes the orphan question fail closed" (the base's drop also
 // throws on an unreadable history), the never-a-channel case and the once-a-channel hand
 // declaration case (the base refused both by status alone, which the round-13 widening had
@@ -65,7 +69,9 @@ import {
   localChannelEvidence,
   localControlChannel,
 } from "../../src/federation/local-channel-events.js";
+import type { StoreBackend } from "../../src/store/backend.js";
 import { MemoryBackend } from "../../src/store/memory.js";
+import { MirrorBackend } from "../../src/store/mirror.js";
 import { FERN, observed } from "../spike/garden.js";
 
 const SEED = "cc".repeat(32);
@@ -75,6 +81,32 @@ const homes: Gateway[] = [];
 afterEach(async () => {
   for (const gw of homes.splice(0)) await gw.close();
 });
+// A driver with no whole-store byte probe: "empty" cannot be proven through it.
+class BlindBackend implements StoreBackend {
+  private readonly inner: MemoryBackend;
+  constructor(private readonly file: Delta[]) {
+    this.inner = new MemoryBackend();
+    void this.inner.append(file);
+  }
+  async append(deltas: Iterable<Delta>): Promise<number> {
+    const batch = [...deltas];
+    const n = await this.inner.append(batch);
+    for (const d of batch) if (!this.file.some((f) => f.id === d.id)) this.file.push(d);
+    return n;
+  }
+  deltasSince(known: ReadonlySet<string>): Promise<Delta[]> {
+    return this.inner.deltasSince(known);
+  }
+  purge(ids: Iterable<string>): Promise<number> {
+    return this.inner.purge(ids);
+  }
+  holds(id: string): Promise<boolean> {
+    return this.inner.holds(id);
+  }
+  close(): Promise<void> {
+    return this.inner.close();
+  }
+}
 class FaultBackend extends MemoryBackend {
   failPurgeAfter = Number.POSITIVE_INFINITY;
   purges = 0;
@@ -114,15 +146,24 @@ async function home() {
   const files = new Map<string, Delta[]>();
   // Names whose NEXT store open fails once: a pool a boot cannot read is left unattached.
   const failAttach = new Set<string>();
+  // Names whose store is a MIRROR pair: the primary is the file above, the mirror its own file.
+  const mirrors = new Map<string, Delta[]>();
+  // Names whose store offers no whole-store byte probe.
+  const blind = new Set<string>();
+  const storeFor = (name: string): StoreBackend => {
+    const file = files.get(name) ?? [];
+    files.set(name, file);
+    const primary = blind.has(name) ? new BlindBackend(file) : new FaultBackend(file);
+    const mirror = mirrors.get(name);
+    return mirror === undefined ? primary : new MirrorBackend(primary, new FaultBackend(mirror));
+  };
   const gw = await Gateway.boot(
     primary,
     assembleGenesis({ operatorSeed: SEED, registrations: [] }),
     {
       channelBackend: (name) => {
         if (failAttach.delete(name)) throw new Error("fixture store unreadable");
-        const file = files.get(name) ?? [];
-        files.set(name, file);
-        return new FaultBackend(file);
+        return storeFor(name);
       },
     },
   );
@@ -139,16 +180,14 @@ async function home() {
       {
         channelBackend: (name) => {
           if (failAttach.delete(name)) throw new Error("fixture store unreadable");
-          const file = files.get(name) ?? [];
-          files.set(name, file);
-          return new FaultBackend(file);
+          return storeFor(name);
         },
       },
     );
     homes.push(again);
     return again;
   };
-  return { gw, primary, holds, restart, failAttach, files };
+  return { gw, primary, holds, restart, failAttach, files, mirrors, blind };
 }
 function peer() {
   const offering: Delta[] = [];
@@ -923,6 +962,81 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     });
     await gw.dropChannel(ch.name);
     expect(first.holds(ch.name, fact(1).id)).toBe(false);
+    await gw.erase(opening.id);
+    expect(gw.reactor.get(opening.id)).toBeUndefined();
+  });
+  it("a mirror tier that kept a peer byte after the primary's purge keeps the opening live although the read shows nothing; the drop purges both tiers", async () => {
+    const first = await home();
+    const { ch, offering } = await channel(first.gw);
+    offering.push(fact(1));
+    await ch.sync();
+    const opening = opened(first.gw, ch.name).opening;
+    for (const id of [
+      ...survivingDeclarationIds(first.gw.reactor, OP, ch.name),
+      ...statusIds(first.gw, ch.name),
+    ])
+      await first.gw.append([
+        signClaims(makeNegationClaims(OP, first.gw.nextTimestamp(), id), SEED),
+      ]);
+    // The primary purged, the mirror did not: the read path shows nothing, the bytes remain.
+    const file = first.files.get(ch.name)!;
+    first.mirrors.set(ch.name, [...file]);
+    file.splice(0, file.length);
+    const gw = await first.restart();
+    expect(gw.channelPools.get(ch.name)).toBeUndefined();
+    const refusal = await gw.erase(opening.id).catch((e: Error) => e.message);
+    expect(refusal).toContain(
+      "its pool's store still holds bytes although its declaration was struck",
+    );
+    expect(gw.reactor.get(opening.id)).toBeDefined();
+    expect(first.mirrors.get(ch.name)!.some((d) => d.id === fact(1).id)).toBe(true);
+    // The road: a fresh open attaches the pair. The drop cannot name the mirror's byte from any
+    // read, so it refuses rather than report clean; a heal replants it into the primary; the
+    // drop then purges both tiers and the erase proceeds.
+    const feed = peer();
+    await gw.openChannel({
+      into: "friends",
+      prefix: "peer",
+      from: "https://peer.example/peer",
+      source: feed.source,
+    });
+    await expect(gw.dropChannel(ch.name)).rejects.toThrow(/bytes that no read named/);
+    expect(first.mirrors.get(ch.name)!.some((d) => d.id === fact(1).id)).toBe(true);
+    await new MirrorBackend(
+      new FaultBackend(file),
+      new FaultBackend(first.mirrors.get(ch.name)),
+    ).heal();
+    expect(file.some((d) => d.id === fact(1).id)).toBe(true);
+    // A handle reads its store once at open (the store contract), so the healed primary is seen
+    // by the next boot, which attaches the pool by its fresh status.
+    const gw2 = await first.restart();
+    await gw2.dropChannel(ch.name);
+    expect(file.some((d) => d.id === fact(1).id)).toBe(false);
+    expect(first.mirrors.get(ch.name)!.some((d) => d.id === fact(1).id)).toBe(false);
+    await gw2.erase(opening.id);
+    expect(gw2.reactor.get(opening.id)).toBeUndefined();
+  });
+  it("a store with no whole-store byte probe cannot prove its pool empty: the erase refuses although the read shows nothing", async () => {
+    const first = await home();
+    const { ch, offering } = await channel(first.gw);
+    offering.push(fact(1));
+    await ch.sync();
+    const opening = opened(first.gw, ch.name).opening;
+    for (const id of [
+      ...survivingDeclarationIds(first.gw.reactor, OP, ch.name),
+      ...statusIds(first.gw, ch.name),
+    ])
+      await first.gw.append([
+        signClaims(makeNegationClaims(OP, first.gw.nextTimestamp(), id), SEED),
+      ]);
+    first.files.get(ch.name)!.splice(0);
+    first.blind.add(ch.name);
+    const gw = await first.restart();
+    await expect(gw.erase(opening.id)).rejects.toThrow(
+      /still holds bytes although its declaration was struck/,
+    );
+    expect(gw.reactor.get(opening.id)).toBeDefined();
+    first.blind.delete(ch.name);
     await gw.erase(opening.id);
     expect(gw.reactor.get(opening.id)).toBeUndefined();
   });

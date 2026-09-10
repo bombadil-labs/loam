@@ -6,7 +6,8 @@
   "id": "T289",
   "rails": [
     "test/federation/local-channel-live-opening.test.ts",
-    "test/federation/local-channel-container-scope.test.ts"
+    "test/federation/local-channel-container-scope.test.ts",
+    "test/store/holds-any.test.ts"
   ],
   "scope": [
     "src/federation/local-channel-events.ts",
