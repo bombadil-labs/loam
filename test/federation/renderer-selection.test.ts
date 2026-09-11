@@ -603,6 +603,12 @@ describe("T278 — exact received renderer selection", () => {
         ),
       }),
       "two routes": (c) => ({ ...c, pointers: [...c.pointers, primitive("route", "hello")] }),
+      "consumes not a list": (c) => ({
+        ...c,
+        pointers: c.pointers.map((p) =>
+          p.role === "consumes" ? primitive("consumes", JSON.stringify("height")) : p,
+        ),
+      }),
     };
     const forged: Record<string, Delta> = {};
     for (const [name, edit] of Object.entries(shapes)) {
@@ -710,6 +716,29 @@ describe("T278 — exact received renderer selection", () => {
     const target3 = rendererAt(w3.received(), "hello")[0]!;
     await w3.pool.federate([strike(MALLORY, MALLORY_SEED, target3.id, w3.pool.nextTimestamp())]);
     expect(w3.select("hello").sourceDelta).toBe(target3.id);
+  });
+
+  it("criterion 3: a received delta carrying a `negates` role at an ENTITY is a note, not a strike, and breaks nothing", async () => {
+    const w = await world();
+    const before = w.select("hello");
+    const note = signClaims(
+      {
+        timestamp: w.alice.nextTimestamp(),
+        author: ALICE,
+        pointers: [
+          { role: "negates", target: { kind: "entity", entity: { id: FERN, context: "height" } } },
+          {
+            role: "why",
+            target: { kind: "primitive", value: "a provenance note, not a negation" },
+          },
+        ],
+      },
+      ALICE_SEED,
+    );
+    await w.alice.append([note]);
+    await w.sync();
+    expect(w.received().some((d) => d.id === note.id)).toBe(true);
+    expect(w.select("hello")).toEqual(before);
   });
 
   it("criterion 8: erasing ANY received member — here one unrelated to the renderer — makes the source unavailable", async () => {
