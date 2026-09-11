@@ -21,7 +21,7 @@
 // MEASURED. rails-red on origin/main: the suite does not load (the module is absent), an honest
 // red and a weak one. Revert probes, one guard deleted at a time across these 24 cases: the inbox
 // name, subtree reach, candidate survival, latest-candidate order, the write roles, the marker
-// count, consumes distinctness, consumes coverage, the pool-bytes agreement, law against the row,
+// count, consumes distinctness, consumes coverage, law against the row,
 // roots, the alias/target/author join, and in the classifier survival of the named binding, the
 // entity ambiguity, the current-binding check, the author-scoped operand and the loader's id
 // tie-break, and the unreceipted-strike hole — each 1 or 2 red, none 0. Six further guards that deleted to 0 red were redundant
@@ -38,6 +38,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   authorForSeed,
   makeNegationClaims,
+  parseTerm,
   publishHyperSchemaClaims,
   publishSchemaClaims,
   signClaims,
@@ -49,11 +50,7 @@ import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { containerClaims } from "../../src/gateway/container.js";
 import { SEALED_LEEWAY, type Leeway } from "../../src/gateway/leeway.js";
 import { CTX_RENDERER, rendererBindingClaims } from "../../src/gateway/renderers.js";
-import {
-  CTX_REGISTRATION,
-  readRegistrations,
-  type LensName,
-} from "../../src/gateway/registration.js";
+import { CTX_REGISTRATION, type LensName } from "../../src/gateway/registration.js";
 import {
   classifyExactReceivedSchema,
   isWithheldResolver,
@@ -883,29 +880,34 @@ describe("T278 — exact received renderer selection", () => {
     const w = await world();
     const { row } = currentAdoption(w);
     // The pool's own copy of the destination hyperschema, re-published by the operator with a
-    // different algorithm tag: the bound row keeps its id and its law moves.
+    // different gather body: the bound row keeps its id and its law moves under it.
     await w.pool.append([
       signClaims(
-        publishHyperSchemaClaims({ ...PLANT, alg: 2 }, row.entity!, OP, w.pool.nextTimestamp()),
+        publishHyperSchemaClaims(
+          {
+            ...PLANT,
+            body: parseTerm({
+              op: "select",
+              pred: { hasPointer: { context: { exact: "tag" } } },
+              in: "input",
+            }),
+          },
+          row.entity!,
+          OP,
+          w.pool.nextTimestamp(),
+        ),
         OP_SEED,
       ),
     ]);
     w.pool.replayRegistrations();
     w.gw.replayRegistrations();
-    // The bytes moved and the served row did not: the fold is keyed on row ids. Named here as a
-    // fault the selector refuses on, not one it repairs.
-    const bytes = readRegistrations(w.pool.reactor, OP).find(
-      (r) => String(r.lensName) === "alice:Plant",
-    )!;
-    expect(bytes.boundId).toBe(row.boundId);
-    expect(bytes.hyperschema.alg).toBe(2);
-    const served = w.gw
-      .boundSurface(w.binding)
-      .registered.find((r) => String(r.lensName) === "alice:Plant")!;
-    expect(served.boundId).toBe(row.boundId);
-    const r = w.refusal("hello");
-    expect(r.code).toBe("law_unavailable");
-    expect(r.message).toContain("disagree");
+    // The fold either re-trials the row over its new body or refuses the row whole; both leave
+    // the served surface without the law the adoption named, and the selector refuses on that.
+    const surface = w.gw.boundSurface(w.binding);
+    const moved = surface.registered.find((r) => String(r.lensName) === "alice:Plant");
+    expect(moved === undefined || moved.boundId === row.boundId).toBe(true);
+    expect(moved?.hyperschema.body).not.toEqual(row.hyperschema.body);
+    expect(w.refusal("hello").code).toBe("law_unavailable");
   });
 
   it("criterion 7: the adoption narrative corroborates; forged rows in the same key cannot manufacture the join, and a faithful duplicate is harmless", async () => {

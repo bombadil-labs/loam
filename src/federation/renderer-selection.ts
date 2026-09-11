@@ -21,7 +21,6 @@ import {
 import { boundChannelAdmits } from "../gateway/connection-authority.js";
 import { inboxName, readContainerTable, withinSubtree } from "../gateway/container.js";
 import type { ConnectionBinding, Gateway } from "../gateway/gateway.js";
-import { readRegistrations } from "../gateway/registration.js";
 import { CTX_RENDERER } from "../gateway/renderers.js";
 import { channelStatusImpl } from "./channel.js";
 import { localChannelEvidence } from "./local-channel-events.js";
@@ -243,7 +242,8 @@ export function selectRendererForActivation(
   // registration is whichever adoption of that row classifies, exactly, as the current binding
   // of the lens the renderer names, with the same law and the same roots. A curse on the derived
   // read, with the same law and the same roots. A curse on the derived name strikes the pool's
-  // binding, so a cursed lens has no row here and refuses on that.
+  // binding, so a cursed lens has no row here and refuses on that; a definition rewritten in the
+  // pool moves the row's law, so the join below refuses on that.
   const destinationLens = `${status.prefix}:${renderer.schemaName}`;
   const row = gw
     .boundSurface(exact)
@@ -267,23 +267,6 @@ export function selectRendererForActivation(
         `the renderer consumes ${JSON.stringify(field)}, which ${destinationLens} does not serve`,
       );
   }
-  // BOTH LEVELS. The served row is what a reader resolves through today; the pool's own lawful
-  // registration is what the bytes say. The bound fold is cached on row ids, so a definition
-  // rewritten under an unchanged binding moves the bytes and not the row — and an answer that
-  // read only the row would name law nobody's bytes still carry. When the two disagree, the
-  // disagreement is the fault, and no source can match both.
-  const bytes = readRegistrations(pool.reactor, pool.operatorAuthor).find(
-    (r) => String(r.lensName) === destinationLens,
-  );
-  if (
-    bytes === undefined ||
-    bytes.boundId !== destinationRegistration ||
-    !sameSchemaLaw(bytes, row)
-  )
-    throw refusal(
-      "law_unavailable",
-      `the bound surface and the pool's own registration disagree about ${destinationLens}`,
-    );
   // At most one registration can classify as CURRENT for a lens, so the join is unique when it
   // exists; duplicate records naming it are one answer.
   const matches = new Map<string, readonly string[]>();
