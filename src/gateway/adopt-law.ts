@@ -45,7 +45,10 @@
 
 import {
   DeltaSet,
+  HYPER_SCHEMA_SCHEMA,
+  SCHEMA_SCHEMA,
   contentAddress,
+  evalTerm,
   loadHyperSchema,
   loadSchema,
   signClaims,
@@ -251,7 +254,7 @@ export function readManifest(members: readonly Delta[]): ManifestRow[] {
 // Recursion is unchanged: a strike retires its target only while it survives itself, so the
 // shipper negating their own retraction revives their law. The scope applies at every rung — a
 // foreign strike on a strike counts for nothing.
-function survivalOver(members: readonly Delta[]): (id: string) => boolean {
+export function survivalOver(members: readonly Delta[]): (id: string) => boolean {
   const byId = new Map(members.map((d) => [d.id, d]));
   const strikes = new Map<string, string[]>();
   for (const d of members) {
@@ -1829,4 +1832,167 @@ export function lawFromImpl(gw: Gateway, versions: readonly ModuleVersion[]): La
     }
   }
   return [...out.values()].map((e) => ({ ...e.row, versions: [...e.versions].sort() }));
+}
+
+// --- the exact reading of RECEIVED law, for a selection that must not guess ---------------------
+
+/**
+ * One registration's law, read EXACTLY from a received operand: the named binding, the definition
+ * row each loader would pick, and nothing chosen on the caller's behalf. `schemaExport` above serves
+ * a BLESSING and is forgiving where a blessing may be — it picks an alias among siblings and falls
+ * back to the latest binding, and a missing living or snapshot row is a timestamp it need not
+ * inherit. A selection that will name what code runs against what law cannot take any of those
+ * three roads, so this reader shares the pure pieces (survival, the operand mask, the address
+ * arithmetic) and throws where `schemaExport` would choose.
+ */
+export interface ExactReceivedSchema {
+  readonly registration: string;
+  readonly lens: string;
+  readonly entity: string;
+  readonly author: string;
+  readonly hyperschema: HyperSchema;
+  readonly schema: Schema;
+  readonly roots: readonly string[];
+  /** The binding, the hyperschema definition row and the frozen-snapshot row, deduplicated. */
+  readonly lineage: readonly string[];
+}
+
+/** Structural identity of two readings — the gather body and the program, never the name. */
+export function sameSchemaLaw(
+  left: Pick<ExactReceivedSchema, "hyperschema" | "schema">,
+  right: { readonly hyperschema: HyperSchema; readonly schema: Schema },
+): boolean {
+  return (
+    schemaLawAddress(left.hyperschema, left.schema) ===
+    schemaLawAddress(right.hyperschema, right.schema)
+  );
+}
+
+interface ExactBinding {
+  readonly id: string;
+  readonly author: string;
+  readonly timestamp: number;
+  readonly entity: string;
+  readonly living: string;
+  readonly snapshot: string;
+  readonly roots: readonly string[];
+}
+
+// A registration binding read STRICTLY: one pointer per role, each of the kind the publish door
+// mints, the roots a JSON string list. Anything else is not a binding of this lens — it is either
+// malformed (excluded from the winner set, as `readRegistrations` excludes it) or another lens's.
+function exactBinding(d: Delta): ExactBinding | undefined {
+  if (!isRegistrationBinding(d.claims)) return undefined;
+  const one = (role: string): Claims["pointers"][number]["target"] | undefined => {
+    const hits = d.claims.pointers.filter((p) => p.role === role);
+    return hits.length === 1 ? hits[0]!.target : undefined;
+  };
+  const entity = one("hyperschema");
+  const living = one("schema");
+  const snapshot = one("schemaVersion");
+  const roots = one("roots");
+  if (
+    entity?.kind !== "entity" ||
+    living?.kind !== "entity" ||
+    snapshot?.kind !== "entity" ||
+    roots?.kind !== "primitive" ||
+    typeof roots.value !== "string"
+  )
+    return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(roots.value);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parsed) || !parsed.every((r) => typeof r === "string")) return undefined;
+  return {
+    id: d.id,
+    author: d.claims.author,
+    timestamp: d.claims.timestamp,
+    entity: entity.entity.id,
+    living: living.entity.id,
+    snapshot: snapshot.entity.id,
+    roots: parsed,
+  };
+}
+
+// The definition row a loader will read for `entity`: rhizomatic's bootstrap, then its own
+// tie-break — timestamp DESCENDING, id ASCENDING — which is not the (timestamp, id)-ascending-
+// then-last order registrations resolve by. The loader is then called for the canonical parse, so
+// a malformed winner refuses exactly where it would, and never by falling back to an older row.
+function definitionWinner(dset: DeltaSet, bootstrap: HyperSchema, entity: string): Delta {
+  const result = evalTerm(bootstrap.body, dset, entity);
+  if (result.sort !== "hview") throw new Error("bootstrap body must yield an HView");
+  const defs = result.hview.props.get("definition") ?? [];
+  const latest = [...defs].sort((a, b) => {
+    const dt = b.delta.claims.timestamp - a.delta.claims.timestamp;
+    if (dt !== 0) return dt;
+    return a.delta.id < b.delta.id ? -1 : 1;
+  })[0];
+  if (latest === undefined) throw new Error(`no surviving schema definition for ${entity}`);
+  return latest.delta;
+}
+
+/**
+ * Read the law the registration `registration` binds for `lens`, from `received` alone.
+ *
+ * Throws, as an ordinary Error, on every road a blessing would take on the caller's behalf: the
+ * binding is absent, struck by its own author, malformed, not for this lens, not the CURRENT
+ * surviving binding of its lens, contested by another entity for the same lens, or backed by a
+ * definition row that will not load. Survival is per author over `received` and its forward
+ * negations only, and the loaders gather over an operand carrying only the strikes that count.
+ */
+export function classifyExactReceivedSchema(
+  received: readonly Delta[],
+  lens: string,
+  registration: string,
+): ExactReceivedSchema {
+  const survives = survivalOver(received);
+  const named = received.find((d) => d.id === registration);
+  if (named === undefined)
+    throw new Error(`registration ${registration} is not among the received`);
+  if (!survives(named.id))
+    throw new Error(`registration ${registration} was retracted by its author`);
+  const binding = exactBinding(named);
+  if (binding === undefined)
+    throw new Error(`registration ${registration} is not a well-formed binding`);
+  // Every surviving well-formed binding of THIS lens, whoever authored it. The named binding must be
+  // the latest among them (which also says it binds this lens at all), and they must all name one
+  // hyperschema entity: two entities claiming one lens is a policy question (§47) this reader does
+  // not answer.
+  const siblings = received
+    .filter((d) => survives(d.id))
+    .map(exactBinding)
+    .filter((b): b is ExactBinding => b !== undefined && b.living === `schema:${lens}`);
+  const entities = new Set(siblings.map((b) => b.entity));
+  if (entities.size > 1)
+    throw new Error(
+      `schema:${lens} is claimed by ${entities.size} hyperschema entities among the received`,
+    );
+  const current = [...siblings]
+    .sort((a, b) =>
+      byAge({ timestamp: a.timestamp, deltaId: a.id }, { timestamp: b.timestamp, deltaId: b.id }),
+    )
+    .at(-1);
+  if (current === undefined || current.id !== binding.id)
+    throw new Error(
+      `registration ${registration} is not the current binding of schema:${lens}` +
+        (current === undefined ? "" : ` (${current.id} is)`),
+    );
+  const dset = operandSet(received, survives, "blessing");
+  const definition = definitionWinner(dset, HYPER_SCHEMA_SCHEMA, binding.entity);
+  const snapshot = definitionWinner(dset, SCHEMA_SCHEMA, binding.snapshot);
+  const hyperschema = loadHyperSchema(dset, binding.entity);
+  const schema = loadSchema(dset, binding.snapshot);
+  return Object.freeze({
+    registration: binding.id,
+    lens,
+    entity: binding.entity,
+    author: binding.author,
+    hyperschema,
+    schema,
+    roots: Object.freeze([...binding.roots]),
+    lineage: Object.freeze([...new Set([binding.id, definition.id, snapshot.id])]),
+  });
 }
