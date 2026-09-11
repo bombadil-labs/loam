@@ -179,7 +179,7 @@ export function selectRendererForActivation(
     throw refusal(
       "source_unavailable",
       evidence.state === "unavailable"
-        ? evidence.reason
+        ? `the attested history of ${input.channel} cannot be read whole: ${evidence.reason}`
         : `${input.channel} has no open attested incarnation (${evidence.state})`,
     );
   // An "open" verdict already certifies that the opening agrees with the standing status and the
@@ -187,6 +187,26 @@ export function selectRendererForActivation(
   const opening = evidence.opening;
   const received = evidence.received;
   const survives = survivalOver(received);
+  const pool = gw.channelPools.get(input.channel)?.gateway;
+  if (pool?.operatorAuthor === undefined)
+    throw refusal("source_unavailable", `${input.channel} has no attached pool`);
+  // WHAT THE RECEIPTS DO NOT SAY. Survival is decided over the received operand alone, so a strike
+  // the pool holds without a receipt — its receipt erased, or the strike admitted under an earlier
+  // incarnation — would count for nothing, and a binding its author took back would read as the
+  // latest surviving word. Such a strike is not admitted into the operand (the operand is T288's,
+  // whole); it is a hole in the history, and the answer refuses rather than reads past it.
+  const receivedIds = new Set(received.map((d) => d.id));
+  for (const d of received) {
+    for (const id of pool.reactor.negationsOf(d.id)) {
+      const n = pool.reactor.get(id);
+      if (n === undefined || n.claims.author !== d.claims.author || receivedIds.has(id)) continue;
+      throw refusal(
+        "source_unavailable",
+        `the pool of ${input.channel} holds ${id}, a strike of received ${d.id} by its own ` +
+          `author, that no surviving receipt of the current opening names`,
+      );
+    }
+  }
 
   // THE RENDERER: the latest surviving candidate at the route, then read strictly. An older valid
   // binding never stands in for a newer malformed or write-capable one — the peer's latest word at
@@ -247,12 +267,6 @@ export function selectRendererForActivation(
         `the renderer consumes ${JSON.stringify(field)}, which ${destinationLens} does not serve`,
       );
   }
-  const pool = gw.channelPools.get(input.channel)?.gateway;
-  if (pool?.operatorAuthor === undefined)
-    throw refusal(
-      "law_unavailable",
-      `${input.channel} has no attached pool to read adoptions from`,
-    );
   // BOTH LEVELS. The served row is what a reader resolves through today; the pool's own lawful
   // registration is what the bytes say. The bound fold is cached on row ids, so a definition
   // rewritten under an unchanged binding moves the bytes and not the row — and an answer that

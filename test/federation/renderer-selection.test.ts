@@ -3,7 +3,8 @@
 //
 // What these rails assert, at both levels. DELTA: the ids the answer names are the ids in the
 // channel's attested received history, in full, and the answer writes nothing to any store — the
-// root, the inbox pool, the channel pool and the peer are snapshotted around every call. OBJECT:
+// root, the inbox pool, the channel pool and the peer are snapshotted around every call, answers
+// and refusals alike, by the `select` helper itself. OBJECT:
 // the law the answer names is the law the bound surface currently serves for that lens, compared
 // by structural address, and every road that would let an older, malformed, write-capable,
 // foreign, erased or superseded delta stand in for the current one refuses with the code the
@@ -16,6 +17,22 @@
 // Fixtures that must be forged are forged by hand: a malformed renderer, a registration claiming
 // another entity, an adoption record naming the wrong source. Each is a signed claim the store
 // would never mint, so a production round-trip could not reach the branch under test.
+//
+// MEASURED. rails-red on origin/main: the suite does not load (the module is absent), an honest
+// red and a weak one. Revert probes, one guard deleted at a time across these 24 cases: the inbox
+// name, subtree reach, candidate survival, latest-candidate order, the write roles, the marker
+// count, consumes distinctness, consumes coverage, the pool-bytes agreement, law against the row,
+// roots, the alias/target/author join, and in the classifier survival of the named binding, the
+// entity ambiguity, the current-binding check, the author-scoped operand and the loader's id
+// tie-break — each 1 or 2 red, none 0. Six further guards that deleted to 0 red were redundant
+// with a check one line later and are gone from the code.
+//
+// INHERITED AND CLOSED ON THIS SIDE ONLY: T288's projection skips an ERASED RECEIPT silently while
+// the opening and other receipts survive (its own rail "erasing a received-strike event
+// deliberately exposes earlier received source support" asserts this), so the received operand
+// can lose a strike its pool still holds. This reader does not widen the operand; it refuses
+// when the pool holds a same-author strike of a received id that no receipt names. T288's own
+// reading is unchanged and its rail still holds.
 
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -143,6 +160,9 @@ interface World {
   readonly stores: () => Gateway[];
 }
 
+const idsOf = (stores: Gateway[]): string[][] =>
+  stores.map((s) => [...s.reactor.snapshot()].map((d) => d.id).sort());
+
 /** The receiver: a bound connection at `owner:room` whose channel `alice` pulls from the peer. */
 async function world(alice?: Gateway, opts: { rootTwin?: boolean } = {}): Promise<World> {
   alice ??= await peer();
@@ -183,9 +203,25 @@ async function world(alice?: Gateway, opts: { rootTwin?: boolean } = {}): Promis
       { requester: over?.requester ?? KEY, binding: over?.binding ?? binding },
       over?.channel ?? ch.name,
     ] as const;
+  const stores = () => [gw, ...gateways.filter((g) => g !== gw), ...gw.attachedContainers.values()];
+  // EVERY selection is the write-nothing instrument: each call runs twice between snapshots of
+  // every store, and a refusal is held to the same rule as an answer.
   const select: World["select"] = (route, over) => {
     const [who, channel] = args(over);
-    return selectRendererForActivation(gw, who, { channel, route });
+    const before = idsOf(stores());
+    const call = () => selectRendererForActivation(gw, who, { channel, route });
+    let answer: ReturnType<typeof call> | undefined;
+    let failure: unknown;
+    for (let i = 0; i < 2; i += 1) {
+      try {
+        answer = call();
+      } catch (err) {
+        failure = err;
+      }
+    }
+    expect(idsOf(stores())).toEqual(before);
+    if (answer === undefined) throw failure;
+    return answer;
   };
   const refusal: World["refusal"] = (route, over) => {
     try {
@@ -196,7 +232,6 @@ async function world(alice?: Gateway, opts: { rootTwin?: boolean } = {}): Promis
     }
     throw new Error(`expected a refusal selecting ${route}`);
   };
-  const stores = () => [gw, ...gateways.filter((g) => g !== gw), ...gw.attachedContainers.values()];
   return {
     alice,
     gw,
@@ -212,8 +247,6 @@ async function world(alice?: Gateway, opts: { rootTwin?: boolean } = {}): Promis
   };
 }
 
-const idsOf = (stores: Gateway[]): string[][] =>
-  stores.map((s) => [...s.reactor.snapshot()].map((d) => d.id).sort());
 /** Run `act` and prove no store gained or lost a delta — the answer is a reading, not a record. */
 function writesNothing(w: World, act: () => unknown): void {
   const before = idsOf(w.stores());
@@ -571,15 +604,28 @@ describe("T278 — exact received renderer selection", () => {
       }),
       "two routes": (c) => ({ ...c, pointers: [...c.pointers, primitive("route", "hello")] }),
     };
+    const forged: Record<string, Delta> = {};
     for (const [name, edit] of Object.entries(shapes)) {
       // Each shape lands at its own route, and ALSO as the newest binding at `hello`, where a valid
       // older one stands: the newest must refuse rather than reveal the older.
-      await rawRenderer(w.alice, ALICE_SEED, { ...HELLO, route: name.replace(/\W/g, "-") }, edit);
+      forged[name] = await rawRenderer(
+        w.alice,
+        ALICE_SEED,
+        { ...HELLO, route: name.replace(/\W/g, "-") },
+        edit,
+      );
     }
     await w.sync();
-    for (const name of Object.keys(shapes)) {
+    for (const [name, delta] of Object.entries(forged)) {
+      expect(
+        w.received().some((d) => d.id === delta.id),
+        name,
+      ).toBe(true);
       const r = w.refusal(name.replace(/\W/g, "-"));
       expect(r.code, name).toBe("renderer_ineligible");
+      // The shape fault, never the absence: a candidate the filter stopped recognising would
+      // refuse too, for the wrong reason.
+      expect(r.message, name).toContain("the current renderer at");
     }
     const valid = w.select("hello");
     const newestAtHello = await rawRenderer(w.alice, ALICE_SEED, HELLO, shapes["pen-only"]);
@@ -610,16 +656,60 @@ describe("T278 — exact received renderer selection", () => {
     // the last of these is the one an unscoped operand would lose.
     const [registration] = registrations(w.received());
     const definition = definitionsOf(w.received(), entityRef(registration!, "hyperschema"))[0]!;
-    await w.alice.federate([
+    const foreign = [
       strike(MALLORY, MALLORY_SEED, v2.id, w.alice.nextTimestamp()),
       strike(MALLORY, MALLORY_SEED, registration!.id, w.alice.nextTimestamp()),
       strike(MALLORY, MALLORY_SEED, definition.id, w.alice.nextTimestamp()),
-    ]);
+    ];
+    await w.alice.federate(foreign);
     await w.sync();
+    for (const d of foreign) expect(w.received().some((r) => r.id === d.id)).toBe(true);
     const answer = w.select("hello");
     expect(answer.sourceDelta).toBe(v2.id);
     expect(answer.sourceRegistration).toBe(registration!.id);
     expect(answer.sourceLineage).toContain(definition.id);
+  });
+
+  it("criteria 4 and 8: a same-author strike the pool holds without a receipt is a hole, not a survivor — an erased receipt, a hand-planted strike, and a stranger's strike as the control", async () => {
+    const w = await world();
+    const v1 = rendererAt(w.received(), "hello")[0]!;
+    const v2 = await rawRenderer(w.alice, ALICE_SEED, { ...HELLO, bundle: BUNDLE + " // v2" });
+    await w.sync();
+    const s = strike(ALICE, ALICE_SEED, v2.id, w.alice.nextTimestamp());
+    await w.alice.append([s]);
+    await w.sync();
+    expect(w.select("hello").sourceDelta).toBe(v1.id);
+    // The operator erases the receipt that attested the strike. T288 reads the earlier support as
+    // standing again (its own rail says so); this reader sees the strike still in the pool with
+    // no receipt naming it, and refuses rather than select the code its author took back.
+    const receipt = [...w.gw.reactor.snapshot()].find(
+      (d) =>
+        hasContext(d, "loam.local.channel.event") &&
+        d.claims.pointers.some(
+          (p) =>
+            p.role === "received" && p.target.kind === "delta" && p.target.deltaRef.delta === s.id,
+        ),
+    )!;
+    await w.gw.erase(receipt.id, { reason: "rail" });
+    expect(w.pool.reactor.get(s.id)).toBeDefined();
+    expect(w.received().some((d) => d.id === s.id)).toBe(false);
+    const erased = w.refusal("hello");
+    expect(erased.code).toBe("source_unavailable");
+    expect(erased.message).toContain(s.id);
+    // A fresh world: the same strike planted straight into the pool, never offered.
+    const w2 = await world();
+    const target = rendererAt(w2.received(), "hello")[0]!;
+    const planted = strike(ALICE, ALICE_SEED, target.id, w2.pool.nextTimestamp());
+    await w2.pool.federate([planted]);
+    expect(w2.received().some((d) => d.id === planted.id)).toBe(false);
+    const hole = w2.refusal("hello");
+    expect(hole.code).toBe("source_unavailable");
+    expect(hole.message).toContain(planted.id);
+    // CONTROL: a stranger's strike in the same position counts nowhere, so it is no hole either.
+    const w3 = await world();
+    const target3 = rendererAt(w3.received(), "hello")[0]!;
+    await w3.pool.federate([strike(MALLORY, MALLORY_SEED, target3.id, w3.pool.nextTimestamp())]);
+    expect(w3.select("hello").sourceDelta).toBe(target3.id);
   });
 
   it("criterion 8: erasing ANY received member — here one unrelated to the renderer — makes the source unavailable", async () => {
@@ -913,6 +1003,38 @@ describe("T278 — exact received renderer selection", () => {
     const answer = w.select("hello");
     expect(answer.sourceRegistration).toBe(registrations(w.received())[0]!.id);
     expect(JSON.stringify(row().resolvers)).toBe(before);
+  });
+
+  it("criterion 8: a current registration whose referenced snapshot never arrived refuses, naming the missing definition", async () => {
+    const w = await world();
+    const [v1] = registrations(w.received());
+    // Well-formed and newest, so it is the current binding of schema:Plant — and its frozen
+    // snapshot entity has no definition row anywhere in the received history.
+    const dangling = signClaims(
+      {
+        ...v1!.claims,
+        timestamp: w.alice.nextTimestamp(),
+        pointers: v1!.claims.pointers.map((p) =>
+          p.role === "schemaVersion" && p.target.kind === "entity"
+            ? {
+                ...p,
+                target: { ...p.target, entity: { ...p.target.entity, id: "schema:Plant@never" } },
+              }
+            : p,
+        ),
+      },
+      ALICE_SEED,
+    );
+    await w.alice.append([dangling]);
+    await w.sync();
+    expect(w.received().some((d) => d.id === dangling.id)).toBe(true);
+    expect(() => classifyExactReceivedSchema(w.received(), "Plant", dangling.id)).toThrow(
+      /no surviving schema definition for schema:Plant@never/,
+    );
+    await forge(w.pool, currentAdoption(w).adoption, { "source-delta": dangling.id });
+    const r = w.refusal("hello");
+    expect(r.code).toBe("law_unavailable");
+    expect(r.message).toContain("schema:Plant@never");
   });
 
   it("criterion 8: erasing an OLD destination-only adoption record does not turn the answer historical", async () => {
