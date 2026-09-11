@@ -24,7 +24,7 @@
 // count, consumes distinctness, consumes coverage, the pool-bytes agreement, law against the row,
 // roots, the alias/target/author join, and in the classifier survival of the named binding, the
 // entity ambiguity, the current-binding check, the author-scoped operand and the loader's id
-// tie-break — each 1 or 2 red, none 0. Six further guards that deleted to 0 red were redundant
+// tie-break, and the unreceipted-strike hole — each 1 or 2 red, none 0. Six further guards that deleted to 0 red were redundant
 // with a check one line later and are gone from the code.
 //
 // INHERITED AND CLOSED ON THIS SIDE ONLY: T288's projection skips an ERASED RECEIPT silently while
