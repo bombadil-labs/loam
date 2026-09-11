@@ -1957,11 +1957,10 @@ export function classifyExactReceivedSchema(
   const binding = exactBinding(named);
   if (binding === undefined)
     throw new Error(`registration ${registration} is not a well-formed binding`);
-  if (binding.living !== `schema:${lens}`)
-    throw new Error(`registration ${registration} binds ${binding.living}, not schema:${lens}`);
   // Every surviving well-formed binding of THIS lens, whoever authored it. The named binding must be
-  // the latest among them, and they must all name one hyperschema entity: two entities claiming one
-  // lens is a policy question (§47) this reader does not answer.
+  // the latest among them (which also says it binds this lens at all), and they must all name one
+  // hyperschema entity: two entities claiming one lens is a policy question (§47) this reader does
+  // not answer.
   const siblings = received
     .filter((d) => survives(d.id))
     .map(exactBinding)

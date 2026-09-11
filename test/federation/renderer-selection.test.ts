@@ -487,6 +487,23 @@ describe("T278 — exact received renderer selection", () => {
     expect(w.refusal("hello", { channel: ghost.name }).code).toBe("source_unavailable");
   });
 
+  it("criterion 2: a channel record naming a container outside the binding's subtree is not_authorized, whatever its opener says", async () => {
+    const w = await world();
+    await declare(w.gw, "owner:other", RECEIVES, ROOT);
+    const status = w.gw.channelStatus(w.channel)[0]!;
+    // Opener and inbox are this connection's; the destination is a sibling it cannot reach. The
+    // opener check alone admits this record; reach refuses it before its history is read.
+    const stray = {
+      ...status,
+      name: "channel:owner:other:stray",
+      prefix: "stray",
+      into: "owner:other",
+    };
+    await w.gw.append([signClaims(channelRecordClaims(stray, OP, w.gw.nextTimestamp()), OP_SEED)]);
+    const r = w.refusal("hello", { channel: stray.name });
+    expect(r.code).toBe("not_authorized");
+  });
+
   it("criterion 2: a renderer the receiver's own operator authored is eligible once RECEIVED; one pooled or root-seeded without a receipt is not", async () => {
     const w = await world();
     // Relayed by the peer: authored by this store's operator, but it arrived through the channel.
@@ -588,10 +605,21 @@ describe("T278 — exact received renderer selection", () => {
     await w.alice.append([ss]);
     await w.sync();
     expect(w.select("hello").sourceDelta).toBe(v2.id);
-    // Mallory's strike, relayed through alice, retracts nothing of alice's.
-    await w.alice.federate([strike(MALLORY, MALLORY_SEED, v2.id, w.alice.nextTimestamp())]);
+    // Mallory's strikes, relayed through alice, retract nothing of alice's: not the renderer, not
+    // the registration, and not a definition row — the loaders' own masking is author-blind, so
+    // the last of these is the one an unscoped operand would lose.
+    const [registration] = registrations(w.received());
+    const definition = definitionsOf(w.received(), entityRef(registration!, "hyperschema"))[0]!;
+    await w.alice.federate([
+      strike(MALLORY, MALLORY_SEED, v2.id, w.alice.nextTimestamp()),
+      strike(MALLORY, MALLORY_SEED, registration!.id, w.alice.nextTimestamp()),
+      strike(MALLORY, MALLORY_SEED, definition.id, w.alice.nextTimestamp()),
+    ]);
     await w.sync();
-    expect(w.select("hello").sourceDelta).toBe(v2.id);
+    const answer = w.select("hello");
+    expect(answer.sourceDelta).toBe(v2.id);
+    expect(answer.sourceRegistration).toBe(registration!.id);
+    expect(answer.sourceLineage).toContain(definition.id);
   });
 
   it("criterion 8: erasing ANY received member — here one unrelated to the renderer — makes the source unavailable", async () => {
@@ -807,6 +835,33 @@ describe("T278 — exact received renderer selection", () => {
     // And a faithful duplicate in THIS pool restores the join: same exact result, one answer.
     await forge(w.pool, adoption, {});
     expect(w.select("hello").sourceRegistration).toBe(good.sourceRegistration);
+  });
+
+  it("criteria 7 and 9: an adoption forged to name the CURRENT source registration still refuses when its law, or only its roots, differ from the served row", async () => {
+    const w = await world();
+    const { row, adoption } = currentAdoption(w);
+    // The peer evolves its policy: v2 is current, the row still carries v1's content.
+    await evolve(w.alice);
+    await w.sync();
+    const [, v2] = registrations(w.received()).sort(
+      (a, b) => a.claims.timestamp - b.claims.timestamp,
+    );
+    await forge(w.pool, adoption, { "source-delta": v2!.id });
+    expect(w.refusal("hello").code).toBe("law_unavailable");
+    // The peer re-registers the SAME law over other roots: v3 is current, the law matches the row
+    // and only the roots do not.
+    await w.alice.publishRegistration(PLANT, PLANT_POLICY, ["plant:oak"]);
+    await w.sync();
+    const [v3] = registrations(w.received()).sort(
+      (a, b) => b.claims.timestamp - a.claims.timestamp,
+    );
+    const law = classifyExactReceivedSchema(w.received(), "Plant", v3!.id);
+    expect(law.roots).toEqual(["plant:oak"]);
+    expect(row.roots).toEqual([FERN]);
+    await forge(w.pool, adoption, { "source-delta": v3!.id });
+    const r = w.refusal("hello");
+    expect(r.code).toBe("law_unavailable");
+    expect(r.message).toContain("does not describe the current source law");
   });
 
   it("criterion 7: a root-registered twin of the peer's law leaves the adoption naming the root's registration, and that is refused, not guessed", async () => {

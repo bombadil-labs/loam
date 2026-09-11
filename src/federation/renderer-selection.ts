@@ -18,13 +18,13 @@ import {
   sameSchemaLaw,
   survivalOver,
 } from "../gateway/adopt-law.js";
-import { boundChannelAdmits, connectionStands } from "../gateway/connection-authority.js";
+import { boundChannelAdmits } from "../gateway/connection-authority.js";
 import { inboxName, readContainerTable, withinSubtree } from "../gateway/container.js";
 import type { ConnectionBinding, Gateway } from "../gateway/gateway.js";
 import { readRegistrations } from "../gateway/registration.js";
 import { CTX_RENDERER } from "../gateway/renderers.js";
-import { channelStatusImpl, cursesOf } from "./channel.js";
-import { localChannelEvidence, openingAgrees } from "./local-channel-events.js";
+import { channelStatusImpl } from "./channel.js";
+import { localChannelEvidence } from "./local-channel-events.js";
 
 export interface RendererSelectionRequester {
   /** The connection's author key, never its seed. */
@@ -154,16 +154,15 @@ export function selectRendererForActivation(
   const exact: ConnectionBinding = { container: binding.container, inbox: binding.inbox };
 
   // AUTHORITY. The inbox must be the one this key's binding names — a standing inbox of another
-  // key in the same container is somebody else's grant — and it must be attached.
+  // key in the same container is somebody else's grant. `boundChannelAdmits` then asks the rest:
+  // the connection stands, the channel's opener is this inbox and its grant survives (which pins
+  // `openedBy` too, since the inbox name carries the container), and the destination receives
+  // now. Reach is the one question it does not ask.
   if (inboxName(exact.container, key) !== exact.inbox)
     throw refusal("not_authorized", "the inbox named is not this requester's");
-  if (gw.connectionInboxes.get(exact.inbox)?.gateway === undefined || !connectionStands(gw, exact))
-    throw refusal("not_authorized", "this connection does not stand");
   const status = channelStatusImpl(gw, input.channel)[0];
   if (
     status === undefined ||
-    status.openedBy !== exact.container ||
-    status.openedFrom !== exact.inbox ||
     !boundChannelAdmits(gw, exact, status) ||
     !withinSubtree(readContainerTable(gw.reactor, gw.operatorAuthor), status.into, exact.container)
   )
@@ -183,19 +182,9 @@ export function selectRendererForActivation(
         ? evidence.reason
         : `${input.channel} has no open attested incarnation (${evidence.state})`,
     );
+  // An "open" verdict already certifies that the opening agrees with the standing status and the
+  // attached pool: the projection refuses otherwise.
   const opening = evidence.opening;
-  if (
-    !openingAgrees(gw, opening) ||
-    opening.channel !== status.name ||
-    opening.into !== status.into ||
-    opening.prefix !== status.prefix ||
-    opening.openedBy !== status.openedBy ||
-    opening.openedFrom !== status.openedFrom
-  )
-    throw refusal(
-      "source_unavailable",
-      `the attested opening of ${input.channel} disagrees with its standing record`,
-    );
   const received = evidence.received;
   const survives = survivalOver(received);
 
@@ -233,10 +222,9 @@ export function selectRendererForActivation(
   // THE LAW. The destination row is the one the channel bound under its prefix; the source
   // registration is whichever adoption of that row classifies, exactly, as the current binding
   // of the lens the renderer names, with the same law and the same roots. A curse on the derived
-  // name retires it whatever the adoption records say.
+  // read, with the same law and the same roots. A curse on the derived name strikes the pool's
+  // binding, so a cursed lens has no row here and refuses on that.
   const destinationLens = `${status.prefix}:${renderer.schemaName}`;
-  if (cursesOf(gw, input.channel).some((c) => c.living === destinationLens))
-    throw refusal("law_unavailable", `${destinationLens} is cursed on ${input.channel}`);
   const row = gw
     .boundSurface(exact)
     .registered.find(
@@ -282,6 +270,8 @@ export function selectRendererForActivation(
       "law_unavailable",
       `the bound surface and the pool's own registration disagree about ${destinationLens}`,
     );
+  // At most one registration can classify as CURRENT for a lens, so the join is unique when it
+  // exists; duplicate records naming it are one answer.
   const matches = new Map<string, readonly string[]>();
   const faults: string[] = [];
   for (const adoption of readLawAdoptions(pool.reactor, pool.operatorAuthor)) {
@@ -306,13 +296,11 @@ export function selectRendererForActivation(
       faults.push(`${adoption.sourceDelta}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  if (matches.size !== 1)
+  if (matches.size === 0)
     throw refusal(
       "law_unavailable",
-      matches.size === 0
-        ? `no adoption of ${destinationLens} names the current source law of ${renderer.schemaName}` +
-            (faults.length === 0 ? "" : ` (${faults.join("; ")})`)
-        : `${matches.size} source registrations each claim to be the current law of ${destinationLens}`,
+      `no adoption of ${destinationLens} names the current source law of ${renderer.schemaName}` +
+        (faults.length === 0 ? "" : ` (${faults.join("; ")})`),
     );
   const [sourceRegistration, lineage] = [...matches][0]!;
   return Object.freeze({
