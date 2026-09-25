@@ -241,9 +241,9 @@ export function erasedFromReading(reactor: Reactor, operator: string | undefined
 
 // The same answer for a delta list assembled across several peers (a container scope over its
 // pools): the ids the list's own lawful erasures hide, and the targets their held negations hold
-// down. A pool can hold an erasure its parent has not seen yet. Local-control erasures are skipped:
-// they and the local channel events they erase are written only to the root store (`ingest.ts`,
-// `persistChannelEvent` and `appendLocalErasure`), whose `refusedIds` `erasedInScope` applies.
+// down. A pool can hold an erasure its parent has not seen yet. A pool can also own a channel, and
+// so hold its own local-control erasures; binding one needs a reactor, so when the list holds any,
+// a throwaway reactor over the list decides it. That cost is paid only in that case.
 export function erasedInDeltas(
   deltas: readonly Delta[],
   operator: string | undefined,
@@ -251,6 +251,17 @@ export function erasedInDeltas(
   const hidden = new Set<string>();
   if (operator === undefined) return hidden;
   const byId = new Map(deltas.map((d) => [d.id, d]));
+  const localControls = deltas.filter(
+    (d) => isTombstone(d.claims) && inLocalContext(d, LOCAL_CONTROL),
+  );
+  if (localControls.length > 0) {
+    const probe = new Reactor();
+    for (const d of deltas) probe.ingest(d);
+    for (const d of localControls) {
+      const target = localEraseTarget(d, probe, operator);
+      if (target !== undefined && byId.has(target)) hidden.add(target);
+    }
+  }
   for (const d of deltas) {
     if (!isTombstone(d.claims) || inLocalContext(d, LOCAL_CONTROL)) continue;
     if (d.claims.author !== operator) continue;

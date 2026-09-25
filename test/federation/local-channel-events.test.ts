@@ -43,7 +43,7 @@ import { join } from "node:path";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { containerClaims, readContainerTable } from "../../src/gateway/container.js";
-import { eraseClaims, readTombstones } from "../../src/gateway/erase.js";
+import { eraseClaims, erasedInDeltas, readTombstones } from "../../src/gateway/erase.js";
 import { lawfulNegated } from "../../src/gateway/registration.js";
 import { SEALED_LEEWAY } from "../../src/gateway/leeway.js";
 import { channelRecordClaims, resumeChannelImpl } from "../../src/federation/channel.js";
@@ -1232,6 +1232,25 @@ describe("T288 strict literal history and exact attachment projection", () => {
 });
 
 describe("T288 explicit trusted-local event erasure and protected controls", () => {
+  // A composed scope can hold a local-control erasure beside the event's retained bytes: a pool can
+  // own a channel of its own. The scope's own erasures must hide that event; a bystander event stays.
+  it("a scope holding a local-control erasure and its event's bytes hides the event", async () => {
+    const { gw } = await home();
+    const { ch, offering } = await channel(gw);
+    offering.push(fact());
+    await ch.sync();
+    const target = events(gw, "received")[0]!;
+    offering.push(fact(2));
+    await ch.sync();
+    const bystander = events(gw, "received").find((d) => d.id !== target.id)!;
+    await gw.erase(target.id, { reason: "withdraw local evidence" });
+    // The event's bytes as a pool that still held them would, beside the store's erasure.
+    const scope = [...gw.reactor.snapshot(), target];
+    const hidden = erasedInDeltas(scope, OP);
+    expect(hidden.has(target.id)).toBe(true);
+    expect(hidden.has(bystander.id)).toBe(false);
+  });
+
   it("erase(received) forgets that operand contribution, preserves bystanders and marks the exact tombstone", async () => {
     const { gw } = await home();
     const { ch, pool, offering } = await channel(gw);
