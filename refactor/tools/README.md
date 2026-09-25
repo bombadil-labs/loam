@@ -13,6 +13,7 @@ repo root. Each takes an optional directory, and the default is `src`.
 | `split.mjs [--files]` | Code lines by subsystem, split into host-bound and host-free function code |
 | `hazards.mjs` | Comment share and hazard (`H1`, ...) and ticket (`T1`, ...) citations, per subsystem |
 | `hermetic-census.mjs` | Functions already hermetic, liftable, or left for a person; by count and by code lines |
+| `ratchet.mjs [--write]` | The census ratchet in `npm run check`: fails when a count in `ratchet.json` rises, or falls without the file being rewritten |
 | `ambient-reach.mjs` | What each function reaches outside itself: imports, module bindings, globals, the clock |
 
 `lib.mjs` holds the shared parsing, the subsystem map and the candidate-function rule. The two
@@ -45,6 +46,13 @@ grep -rhoE "reactor\.snapshot\(\)" src --include=*.ts | wc -l   # full copies of
 - **Ambient reach:** 761 functions reach outside themselves. 75 reach ambient authority. 19 core
   functions read the clock directly.
 - **grep:** 63 reads of `options.seed` in 20 files. 51 calls of `reactor.snapshot()`.
+
+## The ratchet
+
+`ratchet.mjs` counts four things with the syntax tree: the largest import cycle over value
+imports, `options.seed` reads, `reactor.snapshot()` calls, and wall-clock reads in core code. A
+count that falls fails too, until `--write` locks the gain in. The `grep` counts above include
+mentions in comments, so they read a little higher.
 
 ## Using them in M0
 

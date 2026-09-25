@@ -1,0 +1,6 @@
+{
+  "largestImportCycle": 20,
+  "seedReads": 63,
+  "snapshotCalls": 48,
+  "coreClockReads": 18
+}

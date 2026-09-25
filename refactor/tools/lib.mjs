@@ -224,3 +224,127 @@ export function option(args, name, fallback) {
   const i = args.indexOf(name);
   return i >= 0 && i + 1 < args.length ? args[i + 1] : fallback;
 }
+
+// The import graph over `files`: file -> Map(target -> { value, names }), plus external modules
+// and the rhizomatic names each file imports. A type-only import has `value: false`.
+export function importGraph(files) {
+  const known = new Set(files);
+
+  // file -> Map(target -> { value: boolean, names: Set<string> })
+  const edges = new Map();
+  const external = new Map();
+  const rhizomatic = new Map();
+
+  const resolve = (from, spec) => {
+    if (!spec.startsWith(".")) return null;
+    const base = path.join(path.dirname(from), spec);
+    for (const c of [
+      base,
+      base.replace(/\.js$/, ".ts"),
+      `${base}.ts`,
+      path.join(base, "index.ts"),
+    ]) {
+      if (known.has(c)) return c;
+    }
+    return `unresolved:${base}`;
+  };
+
+  for (const file of files) {
+    const { sf } = parse(file);
+    const out = new Map();
+    edges.set(file, out);
+    const add = (spec, typeOnly, names) => {
+      const target = resolve(file, spec);
+      if (target === null) {
+        external.set(spec, (external.get(spec) ?? 0) + 1);
+        if (spec === "@bombadil/rhizomatic") {
+          for (const n of names) rhizomatic.set(n, (rhizomatic.get(n) ?? 0) + 1);
+        }
+        return;
+      }
+      const e = out.get(target) ?? { value: false, names: new Set() };
+      if (!typeOnly) e.value = true;
+      names.forEach((n) => e.names.add(n));
+      out.set(target, e);
+    };
+    for (const st of sf.statements) {
+      if (ts.isImportDeclaration(st) && ts.isStringLiteral(st.moduleSpecifier)) {
+        const c = st.importClause;
+        const names = [];
+        let value = !c; // a bare `import "x"` runs the module
+        if (c?.name) {
+          names.push(c.name.text);
+          value = true;
+        }
+        if (c?.namedBindings && ts.isNamespaceImport(c.namedBindings)) {
+          names.push(`* as ${c.namedBindings.name.text}`);
+          value = true;
+        } else if (c?.namedBindings) {
+          for (const el of c.namedBindings.elements) {
+            names.push((el.propertyName ?? el.name).text);
+            if (!el.isTypeOnly) value = true;
+          }
+        }
+        add(st.moduleSpecifier.text, Boolean(c?.isTypeOnly) || !value, names);
+      } else if (
+        ts.isExportDeclaration(st) &&
+        st.moduleSpecifier &&
+        ts.isStringLiteral(st.moduleSpecifier)
+      ) {
+        const names =
+          st.exportClause && ts.isNamedExports(st.exportClause)
+            ? st.exportClause.elements.map((e) => (e.propertyName ?? e.name).text)
+            : ["*"];
+        add(st.moduleSpecifier.text, st.isTypeOnly, names);
+      }
+    }
+    const dynamic = (n) => {
+      if (
+        ts.isCallExpression(n) &&
+        n.expression.kind === ts.SyntaxKind.ImportKeyword &&
+        n.arguments[0] &&
+        ts.isStringLiteral(n.arguments[0])
+      ) {
+        add(n.arguments[0].text, false, ["(dynamic)"]);
+      }
+      ts.forEachChild(n, dynamic);
+    };
+    dynamic(sf);
+  }
+  return { edges, external, rhizomatic };
+}
+
+// Strongly connected components (Tarjan). With `withTypes` false, type-only imports are ignored.
+export function stronglyConnected(edges, withTypes) {
+  let index = 0;
+  const stack = [];
+  const onStack = new Set();
+  const idx = new Map();
+  const low = new Map();
+  const found = [];
+  const visit = (v) => {
+    idx.set(v, index);
+    low.set(v, index++);
+    stack.push(v);
+    onStack.add(v);
+    for (const [w, e] of edges.get(v) ?? []) {
+      if ((!withTypes && !e.value) || !edges.has(w)) continue;
+      if (!idx.has(w)) {
+        visit(w);
+        low.set(v, Math.min(low.get(v), low.get(w)));
+      } else if (onStack.has(w)) low.set(v, Math.min(low.get(v), idx.get(w)));
+    }
+    if (low.get(v) === idx.get(v)) {
+      const comp = [];
+      let w;
+      do {
+        w = stack.pop();
+        onStack.delete(w);
+        comp.push(w);
+      } while (w !== v);
+      if (comp.length > 1) found.push(comp.sort());
+    }
+  };
+  for (const v of edges.keys()) if (!idx.has(v)) visit(v);
+  return found.sort((a, b) => b.length - a.length);
+}
