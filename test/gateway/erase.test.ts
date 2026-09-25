@@ -134,7 +134,7 @@ describe("Gateway.erase: the manifest, the purge, the re-seat, the hole", () => 
     await gateway.close();
   });
 
-  it("forgiveness is striking the tombstone: the id may then return", async () => {
+  it("negating the erasure retracts the record, and the id still never returns", async () => {
     const { gateway, fact } = await grove();
     await gateway.erase(fact.id);
     const tombstone = [...gateway.reactor.snapshot()].find((d) =>
@@ -143,9 +143,9 @@ describe("Gateway.erase: the manifest, the purge, the re-seat, the hole", () => 
       ),
     );
     await gateway.append([signClaims(makeNegationClaims(OPERATOR, 9000, tombstone!.id), OP_SEED)]);
-    expect(readTombstones(gateway.reactor, OPERATOR).has(fact.id)).toBe(false);
-    await gateway.append([fact]); // welcomed back
-    expect(heights(gateway).length).toBe(1);
+    expect(readTombstones(gateway.reactor, OPERATOR).has(fact.id)).toBe(false); // not standing
+    await expect(gateway.append([fact])).rejects.toThrow(/was erased/); // still refused
+    expect(heights(gateway).length).toBe(0);
     await gateway.close();
   });
 

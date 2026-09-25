@@ -1620,15 +1620,15 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
       expect(localChannelEvidence(gw, ch.name).state).toBe("unavailable");
     },
   );
-  it("ordinary data forgiveness retains its existing behavior", async () => {
+  it("negating an ordinary data erasure does not re-admit the id", async () => {
     const { gw } = await home();
     const a = fact(1, SEED),
       b = fact(2, SEED);
     await gw.append([a, b]);
     const erased = await gw.erase(a.id);
     await gw.append([strike(gw.reactor.get(erased.tombstone)!)]);
-    await gw.append([a]);
-    expect(gw.reactor.get(a.id)).toEqual(a);
+    await expect(gw.append([a])).rejects.toThrow(/erased/);
+    expect(gw.reactor.get(a.id)).toBeUndefined();
     expect(gw.reactor.get(b.id)).toEqual(b);
   });
 });
