@@ -1,10 +1,10 @@
 // T70 (health) — erasure is a PROMISE THAT SETTLES, and health is where the settling is visible.
-// This store is eventually consistent: an erasure is decided the moment the tombstone lands, but
+// This store is eventually consistent: an erasure is decided the moment the erasure lands, but
 // the bytes leave each tier on that tier's own time (a lagging mirror, a locked WAL, a pool that
 // was offline). Myk's call (2026-07-24): that gap is a HEALTH state, not a fault — serve keeps
 // serving, and `health()` answers, live, whether the store's promises have all settled to bytes.
 //
-// Object level: the verdict is the backend's own byte probe over the LIVE tombstone set — never
+// Object level: the verdict is the backend's own byte probe over the LIVE erasure set — never
 // a count, never a boot-time snapshot that goes stale as new erasures land. Both of healthImpl's
 // probe paths are railed here: the per-id `holds` fallback (MemoryBackend has no batch probe) and
 // the batch `heldAmong` path (a MirrorBackend-backed gateway, which also pins that `lagging`
@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from "vitest";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
-import { isTombstone } from "../../src/gateway/erase.js";
+import { isErasure } from "../../src/gateway/erase.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { MirrorBackend } from "../../src/store/mirror.js";
@@ -58,7 +58,7 @@ describe("T70: gateway.health() — the live byte verdict over every erasure pro
     await gw.append([target]);
     await gw.erase(target.id);
 
-    // The erasure executed: tombstone landed, bytes purged — the promise has settled.
+    // The erasure executed: erasure landed, bytes purged — the promise has settled.
     const settled = await gw.health();
     expect(settled.status).toBe("ok");
     expect(settled.erasure.promised).toBe(1); // the promise is remembered...
@@ -150,11 +150,11 @@ describe("T70: gateway.health() — the live byte verdict over every erasure pro
     await gw.erase(target.id);
     expect((await gw.health()).status).toBe("ok"); // settled locally, no pools yet
 
-    // RETAINED BYTES: a pool that carries the tombstone but whose bytes never left — planted
+    // RETAINED BYTES: a pool that carries the erasure but whose bytes never left — planted
     // behind its gateway, as a crash or a partial purge would leave them.
     const poolBackend = new MemoryBackend();
     const pool = await boot(poolBackend);
-    const tombstone = (await backend.deltasSince(new Set())).find((d) => isTombstone(d.claims))!;
+    const tombstone = (await backend.deltasSince(new Set())).find((d) => isErasure(d.claims))!;
     await pool.append([tombstone]); // the promise arrived...
     // ...and provably LANDED (else this phase silently degrades into a second delivery-owed
     // test and the pool-level BYTE probe goes unpinned) — then the bytes are still at rest.
@@ -165,7 +165,7 @@ describe("T70: gateway.health() — the live byte verdict over every erasure pro
     expect(retained.status).toBe("settling");
     expect(retained.erasure.outstanding).toContain(target.id);
 
-    // OWED DELIVERY: a pool that never received the tombstone holds no bytes — and is STILL
+    // OWED DELIVERY: a pool that never received the erasure holds no bytes — and is STILL
     // outstanding, because a replica that has not heard the promise cannot be keeping it.
     gw.quarantinePools.clear();
     const deaf = await boot(new MemoryBackend());

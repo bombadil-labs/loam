@@ -519,5 +519,5 @@ describe("§30: an erase order is still the operator's, and this door widens not
   });
 });
 
-// A tombstone's shape is erase.ts's; this file only ever asks it to exist.
+// An erasure's shape is erase.ts's; this file only ever asks it to exist.
 void eraseClaims;

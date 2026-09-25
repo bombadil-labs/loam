@@ -1,5 +1,5 @@
 // T206 — the erasure surface a person can reach: `loam slate list`, `loam erase`, and the
-// tombstone reader.
+// erasure reader.
 //
 // The morning this exists for: a data-protection officer must answer three questions about a store
 // they do not have a script for. What is staged for erasure and when is it due? What has already
@@ -7,8 +7,8 @@
 // Before this ticket every one of those needed an embedding script.
 //
 // ASSERTED AT BOTH LEVELS. DELTA: what the ground actually holds — the operator-signed
-// `loam.erasure.slate` record and its pinned pair, the surviving tombstone read through
-// `survivingTombstones`. OBJECT: what the operator READS — the exact screen each verb prints. When
+// `loam.erasure.slate` record and its pinned pair, the surviving erasure read through
+// `standingErasures`. OBJECT: what the operator READS — the exact screen each verb prints. When
 // the two disagree the disagreement is the bug, and one level alone cannot see it.
 //
 // TWO-SIDED EVERYWHERE, as every erasure rail in this repo is. A reader's failure mode is OMISSION,
@@ -99,7 +99,7 @@
 //     needs a ground in reach that the receipt never arrived in, and no fixture built from these
 //     three verbs can produce one: an erasure fans out to every pool ATTACHED at the time, and a
 //     channel opened afterwards seeds its pool from a ground that ALREADY holds the receipt
-//     (measured — the pool carries the tombstone the moment `federate open` returns). It is
+//     (measured — the pool carries the erasure the moment `federate open` returns). It is
 //     reachable from the library, where an embedder can erase over a gateway that never attached a
 //     standing channel's pool. Railing it needs that embedder fixture, not a CLI one.
 //   - An unreadable FAN under a NAMED vault at exactly the search bound. The fans of a named vault
@@ -172,8 +172,8 @@ import {
   ESM_RESIDENCY_DISCLOSURE,
   receiptLedger,
   sealCommitment,
-  survivingTombstones,
-  tombstoneTarget,
+  standingErasures,
+  erasureTarget,
   UNSWEPT_AUTH_SURFACES,
 } from "../../src/gateway/erase.js";
 import { frozenMembershipTerm, isSlateRecord, readSlates } from "../../src/gateway/slate.js";
@@ -841,10 +841,10 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
     });
     expect(forgotten.spokenBy).toBe(SUBJECT);
 
-    // DELTA LEVEL: one surviving operator tombstone, and it erases the id we think it does.
-    const tombs = await ground(home, (gw) => survivingTombstones(gw.reactor, OP));
+    // DELTA LEVEL: one surviving operator erasure, and it erases the id we think it does.
+    const tombs = await ground(home, (gw) => standingErasures(gw.reactor, OP));
     expect(tombs).toHaveLength(1);
-    expect(tombstoneTarget(tombs[0]!.claims)).toBe(forgotten.target);
+    expect(erasureTarget(tombs[0]!.claims)).toBe(forgotten.target);
     expect(tombs[0]!.id).toBe(forgotten.tombstone);
 
     // OBJECT LEVEL, the listing: the receipt is on the screen, abbreviated for scanning.
@@ -863,7 +863,7 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
     expect(listedRow, listing).toContain(SUBJECT.slice(0, 20));
     expect(listedRow).toContain("kit asked, under article 17");
 
-    // OBJECT LEVEL, the receipt in full — by the tombstone's own id.
+    // OBJECT LEVEL, the receipt in full — by the erasure's own id.
     clear();
     expect(
       await run(["tombstones", "show", forgotten.tombstone, "--home", home], io()),
@@ -918,7 +918,7 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
       const vera = await note(gw, "note:vera", "title", "vera-erased-marker");
       const kept = await gw.erase(kit.id, { reason: "kit asked" });
       const forgiven = await gw.erase(vera.id, { reason: "vera asked" });
-      // Forgiveness (§11): striking the tombstone withdraws the erasure order, so the id may
+      // Forgiveness (§11): striking the erasure withdraws the erasure order, so the id may
       // return. The receipt stops binding and leaves the surviving set.
       await gw.append([
         signClaims(makeNegationClaims(OP, gw.nextTimestamp(), forgiven.tombstone), OP_SEED),
@@ -926,10 +926,8 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
       return { kept, forgiven };
     });
 
-    // DELTA LEVEL: the ground holds two tombstones and exactly one of them still binds.
-    const surviving = await ground(home, (gw) =>
-      survivingTombstones(gw.reactor, OP).map((d) => d.id),
-    );
+    // DELTA LEVEL: the ground holds two erasures and exactly one of them still binds.
+    const surviving = await ground(home, (gw) => standingErasures(gw.reactor, OP).map((d) => d.id));
     expect(surviving).toEqual([both.kept.tombstone]);
 
     clear();
@@ -945,7 +943,7 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
 
   it("names the cut a receipt belonged to, and stays silent about one for a lone erasure", async () => {
     const home = await noteHome("joined");
-    // A CUT stamps §29.6's join on every tombstone it mints, and drops the slate's container LAST —
+    // A CUT stamps §29.6's join on every erasure it mints, and drops the slate's container LAST —
     // so a join pointing at a container that is gone is the ordinary post-cut state, not a defect.
     const both = await ground(home, async (gw) => {
       const kit = await note(gw, "note:kit", "title", "kit-erased-marker");
@@ -966,7 +964,7 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
 
   it("orders two receipts sharing one moment by their addresses, so one store reads one way", async () => {
     const home = await noteHome("ordered");
-    // Two tombstones at the SAME wall-clock moment. `gw.erase` cannot make this pair — nextTimestamp
+    // Two erasures at the SAME wall-clock moment. `gw.erase` cannot make this pair — nextTimestamp
     // strictly increases — so the claims are signed by hand and appended through the ordinary door,
     // which is the state a store restored from two sources holds. Nothing is purged here: this rail
     // is about the ORDER the listing prints, and only about that.
@@ -1000,8 +998,8 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
 
   it("keeps every reason a receipt carries, and says plainly when it carries none", async () => {
     const home = await noteHome("reasons");
-    // THREE STATES, and only one of them is what `gw.erase` mints. A tombstone with no reason is
-    // ordinary (an older store, or an erase called without one); a tombstone with several is what a
+    // THREE STATES, and only one of them is what `gw.erase` mints. An erasure with no reason is
+    // ordinary (an older store, or an erase called without one); an erasure with several is what a
     // reader that took the FIRST would silently narrow — and narrowing a compliance record is the
     // failure this reader exists to refuse. The door validates the erased id, the author and the
     // §29.6 join, and says nothing about how many reasons ride along, so both are reachable.
@@ -1156,7 +1154,7 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
       return { vera: vera.id, veraClaims: claimsToJson(vera.claims), receipt };
     });
     // A row set aside is OUTSIDE the reactor these verbs read. Left silent, a set-aside strike would
-    // leave a withdrawal reading LIVE and a set-aside tombstone would leave a forgotten id reading
+    // leave a withdrawal reading LIVE and a set-aside erasure would leave a forgotten id reading
     // as never forgotten — and neither screen could tell you it had not looked.
     corrupt(home, world.vera, JSON.stringify({ not: "claims at all" }));
 
@@ -1255,7 +1253,7 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
     const home = await noteHome("cold-receipt");
     // THE TIER MOST LIKELY TO STILL HOLD IT. `MirrorBackend.purge` reaches both sides and reports
     // the archive's refusal AFTER the primary succeeded, so the state this fixture builds is the
-    // ordinary outcome of a failed sweep: the tombstone stands, the primary is clean, and the cold
+    // ordinary outcome of a failed sweep: the erasure stands, the primary is clean, and the cold
     // copy is legible. A verdict computed over the primary alone calls that row swept.
     const target = await ground(
       home,
@@ -1919,7 +1917,7 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
 
   it("prints the receipt's own reason on a REUSE, and says the new one was not recorded", async () => {
     const home = await noteHome("reused-receipt");
-    // THE STATE A FAILED FIRST ORDER LEAVES: the tombstone landed and the sweep did not run. §11
+    // THE STATE A FAILED FIRST ORDER LEAVES: the erasure landed and the sweep did not run. §11
     // lands the receipt before it purges, so this is what an interrupted erase looks like on disk,
     // and the retry the help text calls safe walks straight into it. Staged by appending the
     // receipt through the ordinary door rather than by breaking a tier, which no fixture can do
@@ -1943,7 +1941,7 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     expect(homeHolds(home, "kit-erased-marker")).toBe(true); // the receipt stands over live bytes
 
     // The retry, with a DIFFERENT sentence. It completes the sweep and reuses the standing receipt,
-    // because a tombstone is immutable and a second one would be a second content address.
+    // because an erasure is immutable and a second one would be a second content address.
     expect(
       await run(["erase", world.target, "--reason", "a corrected sentence", "--home", home], io()),
       printed(),
@@ -1951,7 +1949,7 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     const said = printed();
 
     // The receipt is named as REUSED, its own sentence is printed, and this run's sentence is not
-    // attributed to it — the screen recommends `tombstones show` on the very next line, and the two
+    // attributed to it — the screen recommends `erasures show` on the very next line, and the two
     // must not disagree.
     // The RECEIPT LINE's own marker, not merely the word somewhere on the screen — the caveat
     // sentence below carries "REUSED" too, so a bare needle passes with the marker deleted.
@@ -2023,7 +2021,7 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
 
   it("will not call a sweep settled over a tier it could not ask", async () => {
     const home = await noteHome("unprovable");
-    // THE THIRD STATE. `erasureOutstanding` walks the host, its tombstones and the ATTACHED pools —
+    // THE THIRD STATE. `erasureOutstanding` walks the host, its erasures and the ATTACHED pools —
     // and §27.7's guard refuses precisely because a declared container is NOT attached. Over that
     // state its silence means "not asked", so reading it as "clean" prints the settled sentence,
     // with a date, about the one tier this run could not look in.

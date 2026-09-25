@@ -11,7 +11,7 @@ import { authorForSeed, signClaims, type Policy, type Schema } from "@bombadil/r
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { eraseClaims, readTombstones } from "../../src/gateway/erase.js";
+import { eraseClaims, readErasures } from "../../src/gateway/erase.js";
 import { PLANT } from "./fixtures.js";
 import { FERN, observed } from "../spike/garden.js";
 
@@ -95,8 +95,8 @@ describe("§24.8 erasure reaches the quarantine — the law, no evasion", () => 
     // The operator erases it in the PRIMARY — which fans the erasure OUT to the pool.
     await primary.erase(secret.id, { reason: "the subject asked to be forgotten" });
 
-    // (a) the tombstone propagated IN
-    expect(readTombstones(q.gateway.reactor, OP).has(secret.id)).toBe(true);
+    // (a) the erasure propagated IN
+    expect(readErasures(q.gateway.reactor, OP).has(secret.id)).toBe(true);
     // (b) the byte is GONE from the pool — not in its ground, and not in its backend
     expect(holds(q.gateway, secret.id)).toBe(false);
     expect((await poolBackend.deltasSince(new Set())).some((d) => d.id === secret.id)).toBe(false);
@@ -118,7 +118,7 @@ describe("§24.8 erasure reaches the quarantine — the law, no evasion", () => 
     await primary.append([fact]);
     const q = await primary.openQuarantine();
     expect(holds(q.gateway, fact.id)).toBe(true);
-    // A tombstone signed by a NON-operator: eraseDefect refuses it, so eraseReplica must NOT purge.
+    // An erasure signed by a NON-operator: eraseDefect refuses it, so eraseReplica must NOT purge.
     // The refusal is loud (a hostile direct caller handed over a forgery), but the INVARIANT is the
     // byte: the forged order leaves it untouched. The fix removed a TRUST filter, never this CHECK.
     const ALT_SEED = "a1".repeat(32);

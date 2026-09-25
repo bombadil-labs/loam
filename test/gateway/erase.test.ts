@@ -1,7 +1,7 @@
 // SPEC §11's contract: erasure. The store remembers THAT it forgot — who asked, when, which
-// id — never what. Authority is verified while the evidence exists (the tombstone's spoken-by
+// id — never what. Authority is verified while the evidence exists (the erasure's spoken-by
 // is checked against the live target at the door); the bytes are purged from the ground; the
-// gateway re-seats on what remains; and the door refuses the id's return until the tombstone
+// gateway re-seats on what remains; and the door refuses the id's return until the erasure
 // is lawfully struck. Degrees of forgetting compose from erase + append — never mutation.
 
 import { describe, expect, it } from "vitest";
@@ -16,10 +16,10 @@ import { grantClaims } from "../../src/gateway/accounts.js";
 import {
   ERASE_ENTITY,
   eraseClaims,
-  isTombstone,
-  readTombstones,
+  isErasure,
+  readErasures,
   sealCommitment,
-  tombstonesIn,
+  erasuresIn,
 } from "../../src/gateway/erase.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -107,20 +107,20 @@ describe("Gateway.erase: the manifest, the purge, the re-seat, the hole", () => 
     // …the reactor was re-seated without them…
     expect(gateway.reactor.get(fact.id)).toBeUndefined();
     expect(heights(gateway).length).toBe(0);
-    // …and the tombstone is ground: who asked, which id — never what
-    expect(readTombstones(gateway.reactor, OPERATOR).has(fact.id)).toBe(true);
+    // …and the erasure is ground: who asked, which id — never what
+    expect(readErasures(gateway.reactor, OPERATOR).has(fact.id)).toBe(true);
     await gateway.close();
   });
 
   it("only the operator may order erasure — even the record's own author cannot", async () => {
     const { gateway, fact } = await grove();
-    // a hand-built self-tombstone by the record's OWN author is refused at the door
+    // a hand-built self-erasure by the record's OWN author is refused at the door
     const selfTomb = signClaims(eraseClaims(fact.id, GARDENER, GARDENER, 2000), GARDENER_SEED);
     await expect(gateway.append([selfTomb])).rejects.toThrow(/operator/);
-    expect(readTombstones(gateway.reactor, OPERATOR).has(fact.id)).toBe(false);
+    expect(readErasures(gateway.reactor, OPERATOR).has(fact.id)).toBe(false);
     // the operator honors the request and erases; that binds
     await gateway.erase(fact.id, { reason: "honoring a subject's request" });
-    expect(readTombstones(gateway.reactor, OPERATOR).has(fact.id)).toBe(true);
+    expect(readErasures(gateway.reactor, OPERATOR).has(fact.id)).toBe(true);
     await gateway.close();
   });
 
@@ -143,7 +143,7 @@ describe("Gateway.erase: the manifest, the purge, the re-seat, the hole", () => 
       ),
     );
     await gateway.append([signClaims(makeNegationClaims(OPERATOR, 9000, tombstone!.id), OP_SEED)]);
-    expect(readTombstones(gateway.reactor, OPERATOR).has(fact.id)).toBe(false); // not standing
+    expect(readErasures(gateway.reactor, OPERATOR).has(fact.id)).toBe(false); // not standing
     await expect(gateway.append([fact])).rejects.toThrow(/was erased/); // still refused
     expect(heights(gateway).length).toBe(0);
     await gateway.close();
@@ -192,7 +192,7 @@ describe("erasure is per-instance: each operator governs their own ground", () =
     await peer.federate([fact]); // the fact crossed before the unsaying (open trust)
     expect(peer.reactor.get(fact.id)).toBeDefined();
 
-    // the source operator erases on the source; that tombstone is the SOURCE operator's, so it
+    // the source operator erases on the source; that erasure is the SOURCE operator's, so it
     // is refused at the peer's door — a foreign removal-order cannot delete on the peer.
     await source.erase(fact.id);
     const tombstone = [...source.reactor.snapshot()].find((d) =>
@@ -216,7 +216,7 @@ describe("erasure is per-instance: each operator governs their own ground", () =
 
 describe("the door admits only the operator's removal-orders", () => {
   it("a federated tombstone by a non-operator is refused, whatever it claims", async () => {
-    // A tombstone arrives by federation authored by SURVEYOR (not this store's operator). It
+    // An erasure arrives by federation authored by SURVEYOR (not this store's operator). It
     // does not matter what it claims — a removal-order the operator did not sign is refused at
     // the door and never stored.
     const { gateway, fact } = await grove();
@@ -224,7 +224,7 @@ describe("the door admits only the operator's removal-orders", () => {
     const report = await gateway.federate([lie]);
     expect(report.accepted).toBe(0);
     expect(report.rejected).toBe(1);
-    expect(readTombstones(gateway.reactor, OPERATOR).has(fact.id)).toBe(false);
+    expect(readErasures(gateway.reactor, OPERATOR).has(fact.id)).toBe(false);
     expect(gateway.reactor.get(fact.id)).toBeDefined(); // the record is untouched
     await gateway.close();
   });
@@ -235,7 +235,7 @@ describe("the door admits only the operator's removal-orders", () => {
     const preempt = signClaims(eraseClaims(ghostId, SURVEYOR, SURVEYOR, 2000), SURVEYOR_SEED);
     const report = await gateway.federate([preempt]);
     expect(report.rejected).toBe(1);
-    expect(readTombstones(gateway.reactor, OPERATOR).has(ghostId)).toBe(false);
+    expect(readErasures(gateway.reactor, OPERATOR).has(ghostId)).toBe(false);
     await gateway.close();
   });
 
@@ -246,7 +246,7 @@ describe("the door admits only the operator's removal-orders", () => {
     const honest = signClaims(eraseClaims(fact.id, GARDENER, GARDENER, 2000), GARDENER_SEED);
     const report = await gateway.federate([honest]);
     expect(report.rejected).toBe(1);
-    expect(readTombstones(gateway.reactor, OPERATOR).has(fact.id)).toBe(false);
+    expect(readErasures(gateway.reactor, OPERATOR).has(fact.id)).toBe(false);
     expect(gateway.reactor.get(fact.id)).toBeDefined();
     await gateway.close();
   });
@@ -258,20 +258,20 @@ describe("the door admits only the operator's removal-orders", () => {
       signClaims(eraseClaims(fact.id, GARDENER, OPERATOR, 2000), OP_SEED),
       signClaims(eraseClaims(ghostId, "did:key:zAnon", OPERATOR, 2001), OP_SEED),
     ]);
-    const dead = readTombstones(gateway.reactor, OPERATOR);
+    const dead = readErasures(gateway.reactor, OPERATOR);
     expect(dead.has(fact.id)).toBe(true);
     expect(dead.has(ghostId)).toBe(true); // operator pre-emptive refusal is legitimate
     await gateway.close();
   });
 });
 
-describe("tombstonesIn (pre-boot) matches the running store's verdict", () => {
+describe("erasuresIn (pre-boot) matches the running store's verdict", () => {
   it("a lawfully struck tombstone is NOT dead pre-boot — heal will not drop the forgiven record", async () => {
     // The exact heal-vs-forgiveness interaction SPEC §11 says to pin first.
     const { gateway, fact } = await grove();
     await gateway.erase(fact.id); // operator tombstone
     const all1 = [...gateway.reactor.snapshot()];
-    expect(tombstonesIn(all1, OPERATOR).has(fact.id)).toBe(true); // dead while the tombstone stands
+    expect(erasuresIn(all1, OPERATOR).has(fact.id)).toBe(true); // dead while the tombstone stands
     const tombstone = all1.find((d) =>
       d.claims.pointers.some(
         (p) => p.target.kind === "delta" && p.target.deltaRef.delta === fact.id,
@@ -280,7 +280,7 @@ describe("tombstonesIn (pre-boot) matches the running store's verdict", () => {
     await gateway.append([signClaims(makeNegationClaims(OPERATOR, 9000, tombstone!.id), OP_SEED)]);
     const all2 = [...gateway.reactor.snapshot()];
     // forgiven: the pre-boot reader agrees, so a boot heal would carry (not drop) the record
-    expect(tombstonesIn(all2, OPERATOR).has(fact.id)).toBe(false);
+    expect(erasuresIn(all2, OPERATOR).has(fact.id)).toBe(false);
     await gateway.close();
   });
 
@@ -288,8 +288,8 @@ describe("tombstonesIn (pre-boot) matches the running store's verdict", () => {
     const { gateway, fact } = await grove();
     await gateway.erase(fact.id);
     const all = [...gateway.reactor.snapshot()];
-    expect(tombstonesIn(all, OPERATOR)).toEqual(readTombstones(gateway.reactor, OPERATOR));
-    expect(tombstonesIn(all, OPERATOR).has(fact.id)).toBe(true);
+    expect(erasuresIn(all, OPERATOR)).toEqual(readErasures(gateway.reactor, OPERATOR));
+    expect(erasuresIn(all, OPERATOR).has(fact.id)).toBe(true);
     await gateway.close();
   });
 });
@@ -349,11 +349,11 @@ describe("erase refuses to report a completion it cannot evidence", () => {
       /wal|WAL|write-ahead/,
     );
     const tombstonesAfterFirst = [...gateway.reactor.snapshot()].filter((d) =>
-      isTombstone(d.claims),
+      isErasure(d.claims),
     ).length;
 
     // The operator re-runs, exactly as the error instructs. The bytes are already gone, so purge
-    // now returns 0 — which must NOT read as failure, and must NOT append a second tombstone. Its
+    // now returns 0 — which must NOT read as failure, and must NOT append a second erasure. Its
     // checkpoint lands this time, settling the debt mid-call, exactly as sqlite's does.
     backend.purge = async (ids) => {
       const n = await real(ids);
@@ -363,7 +363,7 @@ describe("erase refuses to report a completion it cannot evidence", () => {
     await expect(gateway.erase(fact.id, { reason: "the subject asked" })).resolves.toMatchObject({
       erased: fact.id,
     });
-    expect([...gateway.reactor.snapshot()].filter((d) => isTombstone(d.claims)).length).toBe(
+    expect([...gateway.reactor.snapshot()].filter((d) => isErasure(d.claims)).length).toBe(
       tombstonesAfterFirst,
     );
     await gateway.close();

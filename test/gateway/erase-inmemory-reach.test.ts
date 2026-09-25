@@ -154,7 +154,7 @@ describe("§11 — a live membership watch does not outlive the cut", () => {
     const woken = await promptly(parked);
     expect(woken).not.toBe("still parked");
     // A FRAME must actually have arrived. Without this, everything below passes vacuously on a
-    // `done` result (whose value is undefined), and the fixture's guarantee that the tombstone's
+    // `done` result (whose value is undefined), and the fixture's guarantee that the erasure's
     // pulse lands before the teardown would be a comment rather than an assertion.
     expect(woken === "still parked" ? undefined : woken.done).toBe(false);
     const served = woken === "still parked" ? undefined : woken.value;

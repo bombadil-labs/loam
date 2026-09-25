@@ -230,7 +230,7 @@ export class ArchiveBackend implements StoreBackend {
     // means the delta was never forgotten. Purges are rare; the walk is cheap enough to be
     // thorough.
     const entries = fanEntries(this.root);
-    // Read each fan ONCE, not once per id. `heal` passes the entire accumulated tombstone set as
+    // Read each fan ONCE, not once per id. `heal` passes the entire accumulated erasure set as
     // `dead` (mirror.ts), so a store with 1,000 historical erasures would otherwise do ~256,000
     // directory reads per heal, growing forever. A fan that vanishes between listing and reading is
     // tolerated — the old `existsSync` path was ENOENT-safe and this must stay so.
@@ -256,9 +256,9 @@ export class ArchiveBackend implements StoreBackend {
     // Walk the FILES once and ask each whether its id is dead — not the ids once and search every
     // fan for each. The two answer identically (both visit every file in every fan), but the
     // id-outer form costs ids × fans stat calls plus ids × files string comparisons, and `heal`
-    // hands this the whole accumulated tombstone set on every boot. At 1,000 erasures over 10,000
+    // hands this the whole accumulated erasure set on every boot. At 1,000 erasures over 10,000
     // archived deltas that is ~256,000 `existsSync` and ~10M `startsWith` per start, growing
-    // forever because tombstones are append-only. File-outer is one Set lookup per file.
+    // forever because erasures are append-only. File-outer is one Set lookup per file.
     //
     // Note what is NOT used: `onDisk`. It is an index of what this handle believes it wrote, and a
     // purge that consulted it would see only what the bookkeeping knows — while the whole point of
@@ -411,7 +411,7 @@ export class ArchiveBackend implements StoreBackend {
   }
 
   // The batch companion to `holds` (SPEC §11 byte verdict). `heal` asks its verdict about the whole
-  // accumulated tombstone set at once; answering with per-id `holds` would pay a full sweep for every
+  // accumulated erasure set at once; answering with per-id `holds` would pay a full sweep for every
   // ABSENT id (the common clean case), so O(dead × files) on the boot path. This walks the FILES ONCE
   // — the same file-outer inversion `purge` uses — and reports which requested ids are present. Same
   // reach as `holds`: every fan, both name shapes (`<id>.json` and the crash-left `<id>.json.<pid>.tmp`),

@@ -15,7 +15,7 @@ pull the network. What it cannot be is a place the network calls — stated prou
   **`LocalStorageBackend`** + the `StoreBackend` type, the claim constructors (`grantClaims`,
   `membershipClaims`, `revocationClaims`, `trustClaims`, `publicClaims`, `eraseClaims`,
   `registrationClaims`, `translationClaims`), the readers (`readRegistrations`,
-  `readTrustPolicy`, `readTombstones`, `holdsGrant`), federation (`pullFrom`, `toWire` /
+  `readTrustPolicy`, `readErasures`, `holdsGrant`), federation (`pullFrom`, `toWire` /
   `fromWire`), the `Runner` (an animate tab is a deploy choice too, §6), `mintSeed` /
   `authorForSeed` — and the substrate primitives the surface is SPOKEN in: `parseTerm`,
   `parseSchema`, `signClaims` (learned building it: without these a page could hold a schema

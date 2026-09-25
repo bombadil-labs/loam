@@ -47,11 +47,11 @@ import {
   type ReadingAt,
   type RevivalReport,
   receiptLedger,
-  survivingTombstones,
-  tombstonesIn,
-  tombstoneTarget,
+  standingErasures,
+  erasuresIn,
+  erasureTarget,
   UNSWEPT_AUTH_SURFACES,
-  type TombstoneReceipt,
+  type ErasureReceipt,
 } from "../gateway/erase.js";
 import type { SlateReport } from "../gateway/slate.js";
 import { programMaskJson } from "../gateway/listing.js";
@@ -1182,10 +1182,10 @@ async function cmdServe(
     });
     let healed;
     try {
-      // The law reaches the vault (SPEC §11): tombstoned ids — read straight off BOTH tiers,
+      // The law reaches the vault (SPEC §11): erased ids — read straight off BOTH tiers,
       // before any reactor exists — are excluded from the union, so a cold copy can never
       // replant what the operator erased.
-      const dead = tombstonesIn(
+      const dead = erasuresIn(
         [...(await backend.deltasSince(new Set())), ...(await archive.deltasSince(new Set()))],
         authorForSeed(seed),
       );
@@ -1225,7 +1225,7 @@ async function cmdServe(
       );
     }
     // The sweep's refusals are load-bearing: a report nobody reads is a swallowed error with
-    // extra steps (H9). A refused sweep means a tombstoned id's bytes may still be at rest on
+    // extra steps (H9). A refused sweep means an erased id's bytes may still be at rest on
     // some tier — serve continues (refusing to boot trades a leak for an outage), but the
     // operator is told.
     for (const failure of healed.purgeFailures) {
@@ -1236,13 +1236,13 @@ async function cmdServe(
       );
     }
     // Same reasoning, the other repair: a row still set aside means the store is about to serve with a
-    // strike stranded — a retracted value, a revoked grant, or a tombstone reading LIVE (§25/H1).
+    // strike stranded — a retracted value, a revoked grant, or an erasure reading LIVE (§25/H1).
     // Serving is still right (a legible store beats an outage), and saying nothing is not.
     for (const failure of restore?.stranded ?? []) {
       io.err(`loam: ${failure} Serving anyway; \`loam repair list\` names what the pen holds.`);
     }
     // And what heal DECLINED to plant. This one is not a fault report but a refusal: the archive holds
-    // deltas this boot deliberately did not admit, because an unreadable row may be a tombstone nobody
+    // deltas this boot deliberately did not admit, because an unreadable row may be an erasure nobody
     // could see (§11) or a set-aside strike would have been left behind its target (H1).
     for (const withheld of restore?.replantWithheld ?? []) {
       io.err(`loam: ${withheld}`);
@@ -1637,7 +1637,7 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
 // Land a peer's deltas in the home's store: one command, one door, two sources (SPEC §15).
 // A URL is a live peer (`pullFrom` — a single anti-entropy step); a file is a frozen offer
 // (the same body /federate serves, exported from a browser store or saved off the wire).
-// Both cross through Gateway.federate: verification, trust-admission, tombstones at the door.
+// Both cross through Gateway.federate: verification, trust-admission, erasures at the door.
 // No standing needed — union is union; whether the imported law BINDS is decided by whose
 // operator seed this home holds, never by this command.
 // §46 — federation is container-to-container. The verbs mirror the tool surface T188 exposes to an
@@ -2324,7 +2324,7 @@ async function cmdRepair(args: readonly string[], io: IO): Promise<number> {
           }
         }
         // §25/H1: a quarantined negation no longer suppresses its target, so a retracted value,
-        // revoked grant, or tombstone reads live again — the operator must be told, loudly.
+        // revoked grant, or erasure reads live again — the operator must be told, loudly.
         const stranded = strandedStrikeWarnings(pen);
         if (stranded.length > 0) {
           io.out(
@@ -4146,7 +4146,7 @@ async function cmdClientRevoke(
 // --- the erasure surface (SPEC §11, §29; T206) ---------------------------------------------------
 //
 // Two readers over machinery that already exists — §29.1's slate record, printed, and the per-id
-// receipts `survivingTombstones` governs admission with. Neither invents erasure semantics, and
+// receipts `standingErasures` governs admission with. Neither invents erasure semantics, and
 // neither widens what any sweep can destroy.
 //
 // A CHANNEL'S POOL IS ITS OWN FILE, and a store that does not attach it reads smaller than it is.
@@ -4189,7 +4189,7 @@ async function openTiers(
   // A LAGGING MIRROR IS A QUALIFICATION, not a diagnostic. `MirrorBackend.append` swallows a
   // mirror-write failure into `onLag` while `purge` and `holds` on that same tier can still
   // succeed — so a run can exit 0 saying the archive was swept while the tier never took the
-  // tombstone. Collected rather than printed here, so the caller can file it WITH the claim it
+  // erasure. Collected rather than printed here, so the caller can file it WITH the claim it
   // weakens, or report it as a fault, depending on how the run ends.
   const lagged: string[] = [];
   const path = storePath(home, parsed.flags.get("store"));
@@ -4227,8 +4227,8 @@ const shortId = (id: string): string => (id.length <= 13 ? id : `${id.slice(0, 1
  *
  * `deltasSince` sets a row the driver could not admit ASIDE rather than returning it, so the reactor
  * never sees it. Two inversions follow and neither is visible on the screens above: a set-aside
- * operator negation of a tombstone leaves a WITHDRAWN erasure printing as live, and a set-aside
- * tombstone leaves a forgotten id printing as never forgotten. The receipt listing's own copy argues
+ * operator negation of an erasure leaves a WITHDRAWN erasure printing as live, and a set-aside
+ * erasure leaves a forgotten id printing as never forgotten. The receipt listing's own copy argues
  * that an omission and a revocation must not look alike; a row the reader never saw is the same
  * failure one layer further down.
  */
@@ -4519,7 +4519,7 @@ function scanForVaults(home: string, named: readonly string[]): VaultScan {
     const listed = known ?? listOrFault(dir);
     if ("unreadable" in listed) {
       // NAMED OR NOT. Skipping a named one let the run proceed past this pre-work guard and fail
-      // LATER, after the tombstone had landed, when `ArchiveBackend` rejected the same root — the
+      // LATER, after the erasure had landed, when `ArchiveBackend` rejected the same root — the
       // one state worse than refusing. It also made this guard's own sentence false: the refusal
       // tells the operator that naming the path does not clear it, and naming it did.
       unreadable.push(dir);
@@ -4533,7 +4533,7 @@ function scanForVaults(home: string, named: readonly string[]): VaultScan {
     // an unnamed vault" — belongs to the unnamed case. Skipping the loop for a named vault also
     // skipped its unreadable fans, and at exactly `VAULT_SEARCH_DEPTH` the recursion below stops
     // too, so an unreadable fan under a named vault at the bound was seen by nobody: the run
-    // cleared this pre-work guard and failed later, after the tombstone had landed.
+    // cleared this pre-work guard and failed later, after the erasure had landed.
     let archival = false;
     const fans = new Map<string, ReturnType<typeof listOrFault>>();
     for (const entry of listed.entries) {
@@ -4910,7 +4910,7 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
       // stays what a malformed invocation means. The distinction is what lets a script retry one
       // and fix the other.
       io.err(`erase ${id}: ${err instanceof Error ? err.message : String(err)}`);
-      // A FAILED ERASURE STILL PURGED THE LOCAL TIERS. §11 lands the tombstone, purges, re-seats,
+      // A FAILED ERASURE STILL PURGED THE LOCAL TIERS. §11 lands the erasure, purges, re-seats,
       // and only then reports a replica that refused — so a strike can already be gone while the
       // order reads as failed, and the claim it withdrew is already live. Said HERE because no
       // later run can say it: the re-run boots on the post-purge ground, where nothing came back.
@@ -4929,17 +4929,17 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
         );
       }
       reportRevived(io, cameBack(), gateway, "already", wasNegation, channelCount);
-      const already = survivingTombstones(gateway.reactor, gateway.operatorAuthor).find(
-        (t) => tombstoneTarget(t.claims) === id,
+      const already = standingErasures(gateway.reactor, gateway.operatorAuthor).find(
+        (t) => erasureTarget(t.claims) === id,
       );
       if (already !== undefined) {
         // A receipt exists — but a receipt is a promise, and this run just failed to keep one. The
         // two states read very differently to a compliance officer, so the sweep is ASKED rather
-        // than assumed: an id erased cleanly long ago, versus one whose tombstone stands over bytes
+        // than assumed: an id erased cleanly long ago, versus one whose erasure stands over bytes
         // that are still here.
         // THE PROBE CANNOT ASK AN UNATTACHED CONTAINER, and the completeness guard fires
         // precisely because one is declared and not attached. `erasureOutstanding` walks the host,
-        // its tombstones and the ATTACHED pools — so over exactly the state that made this run
+        // its erasures and the ATTACHED pools — so over exactly the state that made this run
         // refuse, its silence means "not asked" rather than "clean". Read as clean, this screen
         // tells a compliance officer the store forgot a record, naming the settled date, about the
         // one tier it could not look in.
@@ -4957,7 +4957,7 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
         // THE SAME THREE STATES THE RECEIPT READER PRINTS. `erasureOutstanding` folds "a tier
         // refused the question" into "outstanding", so this screen asserted the sweep was NOT
         // finished over a store where nothing had been established either way — while
-        // `tombstones show` called that same state UNPROVEN. One store, two answers.
+        // `erasures show` called that same state UNPROVEN. One store, two answers.
         const standing = await erasureStanding(gateway, id).catch((): ErasureStanding => "unasked");
         const outstanding = standing === "held" || standing === "owed";
         const recorded = new Date(already.claims.timestamp).toISOString();
@@ -5028,7 +5028,7 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
     }
     // THE RECEIPT OUTLIVES A FAILED READING. `cameBack` walks slates, masks and every pool, and
     // any of that can throw — over a ground this erase has just changed. Thrown here, the run
-    // would purge the bytes, land the tombstone, and print a stack trace instead of the receipt id
+    // would purge the bytes, land the erasure, and print a stack trace instead of the receipt id
     // the operator needs to read it back. The reading is a QUALIFICATION of the claim; losing it
     // must not lose the claim.
     try {
@@ -5057,8 +5057,8 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
       `  receipt      ${done.tombstone}${done.minted ? "" : "  (REUSED, not minted by this run)"}\n` +
       `  spoken by    ${done.spokenBy ?? `${LEDGER_NONE} this receipt does not record whose record it forgot`}\n` +
       // THE RECEIPT'S OWN SENTENCE, never the flag's. A retry after a fault REUSES the standing
-      // tombstone and drops `--reason` on the floor, so echoing the argument would print one reason
-      // here and a different one from `tombstones show` on the very next line.
+      // erasure and drops `--reason` on the floor, so echoing the argument would print one reason
+      // here and a different one from `erasures show` on the very next line.
       `  reason       ${done.reasons.length === 0 ? `${LEDGER_NONE} this receipt records none` : done.reasons.join(" · ")}\n` +
       (done.minted || done.reasons.includes(reason)
         ? ""
@@ -5174,7 +5174,7 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
 
 // --- `loam tombstones list | show <id>` ----------------------------------------------------------
 
-// WHAT A STANDING RECEIPT IS WORTH, in one cell. A tombstone is a PROMISE: §11 lands it, then
+// WHAT A STANDING RECEIPT IS WORTH, in one cell. An erasure is a PROMISE: §11 lands it, then
 // purges, then reports a replica that refused — so a receipt can stand over bytes that are still on
 // this disk. Printing "forgotten at <date>" from the receipt alone states a completion nothing
 // asked about, which is the overclaim these screens exist to prevent.
@@ -5185,7 +5185,7 @@ const SWEEP_CELL: Record<ErasureStanding, string> = {
   unasked: "UNPROVEN — a tier refused the question, so nothing here was measured",
 };
 
-function receiptDetail(r: TombstoneReceipt, standing: ErasureStanding): string {
+function receiptDetail(r: ErasureReceipt, standing: ErasureStanding): string {
   const lines = [`loam: receipt ${r.tombstone}`];
   const say = (label: string, text: string): void => {
     lines.push(`  ${label.padEnd(14)}${text}`);
@@ -5218,7 +5218,7 @@ function receiptDetail(r: TombstoneReceipt, standing: ErasureStanding): string {
 
 /** The receipts an invocation will actually print — all of them for `list`, one row for `show`. */
 function wantedRows(
-  receipts: readonly TombstoneReceipt[],
+  receipts: readonly ErasureReceipt[],
   sub: "list" | "show",
   wanted: string | undefined,
 ): string[] {
@@ -5234,7 +5234,7 @@ function wantedRows(
  * unfollowable from the screen that prints it — the same shape as a refusal naming a path its own
  * flag will not take. An ambiguous prefix is refused rather than guessed.
  */
-function matchesReceipt(r: TombstoneReceipt, wanted: string): boolean {
+function matchesReceipt(r: ErasureReceipt, wanted: string): boolean {
   if (wanted.length < 8) return r.tombstone === wanted || r.erased === wanted;
   return r.tombstone.startsWith(wanted) || r.erased.startsWith(wanted);
 }
@@ -5285,7 +5285,7 @@ async function cmdTombstones(args: readonly string[], io: IO): Promise<number> {
   const configured = archivePath(home);
   const cold = configured === undefined ? [] : [configured];
   const { gateway, path } = await openTiers(home, seed, parsed, io, cold);
-  let ledger: { receipts: TombstoneReceipt[]; inert: number };
+  let ledger: { receipts: ErasureReceipt[]; inert: number };
   let pen: PenReading;
   let standings: StandingReport;
   let outside: string[] = [];
@@ -5294,7 +5294,7 @@ async function cmdTombstones(args: readonly string[], io: IO): Promise<number> {
     pen = await setAsideWarning(gateway);
     // ASKED WHILE THE TIERS ARE STILL OPEN. `openTiers` has the host and every attached pool right
     // here; once this block closes them the screen can only repeat what the receipt says, and a
-    // receipt is a promise rather than a report. One walk of the tombstone set per ground, then a
+    // receipt is a promise rather than a report. One walk of the erasure set per ground, then a
     // point lookup per id — never a scan per row.
     // ONLY WHAT THIS INVOCATION WILL PRINT. `show` names one receipt; asking the standing of
     // every receipt in the ledger to print one row is a walk per row of a screen nobody asked for.
@@ -5350,7 +5350,7 @@ async function cmdTombstones(args: readonly string[], io: IO): Promise<number> {
     }
     if (found.length === 0) {
       // "NOT AN ID THIS STORE FORGOT" WOULD CONTRADICT THE GROUND for a forgiven id. Striking a
-      // tombstone withdraws the erasure, and the receipt leaves the surviving set — so an id this
+      // erasure withdraws the erasure, and the receipt leaves the surviving set — so an id this
       // store really did forget, and then forgave, reads here exactly like one it never held. The
       // count of receipts that do not bind is already in hand; the listing discloses it, and so
       // must this, or the two screens disagree about the same store.

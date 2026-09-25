@@ -191,7 +191,7 @@ describe("§24.3 promote-outputs — adopt a quarantine's output as the operator
     const { promoted } = await primary.promote(q.gateway, fact.id);
     await primary.erase(promoted, { reason: "the operator un-said it" });
     // The pool's source delta survives the fan-out (only the adopted id was erased) — and that is not a
-    // door back in: the inherited timestamp makes re-promotion re-mint the SAME id, which the tombstone
+    // door back in: the inherited timestamp makes re-promotion re-mint the SAME id, which the erasure
     // refuses. Without inheritance a fresh timestamp would mint a fresh id and walk the content past §11.
     await expect(primary.promote(q.gateway, fact.id)).rejects.toThrow(/erased|tombstone/);
     await q.drop();

@@ -273,7 +273,7 @@ describe("T131 criterion 5 — the disclosure is not conditional on the erasure 
     expect(disclosesAll(nonSweptOf(afterRefusal))).toBe(true);
     expect(nonSweptOf(afterRefusal)).toEqual(zeroList);
 
-    // Partial / unproven path: a real erasure leaves a surviving tombstone (a promise), then a tier
+    // Partial / unproven path: a real erasure leaves a surviving erasure (a promise), then a tier
     // that cannot be asked makes the byte verdict UNPROVEN — status leaves "ok". The disclosure is
     // still there, identical.
     const { gw, backend } = await plainStore();

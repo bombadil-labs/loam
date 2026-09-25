@@ -17,8 +17,8 @@ import {
 // FEDERATE is the union door: a peer's deltas cross by VERIFICATION alone plus an admission
 // predicate — never authorize() — because federation is union at the substrate, not a governed
 // mutation ("no authority deciding whose truth survives", SPEC §8); whether a peer's facts shape a
-// local view is a read-time TRUST choice. Both doors remember the hole (§11): a tombstoned id is
-// refused re-entry until its tombstone is lawfully struck.
+// local view is a read-time TRUST choice. Both doors remember the hole (§11): an erased id is
+// refused re-entry until its erasure is lawfully struck.
 //
 // Foreign law stays inert by the SAME operator-rooting the local store uses: a federated grant /
 // membership / registration / binding-definition authored by anyone but this store's operator binds
@@ -46,7 +46,7 @@ import {
   ERASE_ENTITY,
   eraseDefect,
   erasedInBatch,
-  isTombstone,
+  isErasure,
   refusedIds,
   erasuresOfErasures,
 } from "./erase.js";
@@ -478,20 +478,20 @@ const NO_DEAD: ReadonlySet<string> = new Set();
 // The ids this store has been ordered to forget, for a caller that runs PER PULSE. `refusedIds`
 // costs two full-ground passes (a lawful-negation materialization, then a walk), and a store that
 // holds no removal order at all can answer without paying either: an ungoverned store honors no
-// erasure (§11), and a tombstone must BE in the ground to bind. The existence probe is exact rather
-// than heuristic, and it deliberately decides nothing else — which tombstones SURVIVE, and whose
+// erasure (§11), and an erasure must BE in the ground to bind. The existence probe is exact rather
+// than heuristic, and it deliberately decides nothing else — which erasures SURVIVE, and whose
 // author confirms them, stays the one place that owns those rules (H8: the cheap answer must not
 // become a second implementation of the expensive one).
 function deadSet(gw: Gateway): ReadonlySet<string> {
   if (gw.operatorAuthor === undefined) return NO_DEAD;
   for (const d of gw.reactor.snapshot()) {
-    if (isTombstone(d.claims)) return refusedIds(gw.reactor, gw.operatorAuthor);
+    if (isErasure(d.claims)) return refusedIds(gw.reactor, gw.operatorAuthor);
   }
   return NO_DEAD;
 }
 
 // Drops what the store has been ORDERED to forget (SPEC §11) from a set a door is about to serve:
-// every id a surviving tombstone names, whether or not its bytes are still held. A tombstone is
+// every id a surviving erasure names, whether or not its bytes are still held. An erasure is
 // ground before its target is purged, and a purge fault leaves it standing over retained bytes, so
 // a door that trusted byte presence would serve a condemned delta for as long as that lasts.
 //
@@ -506,7 +506,7 @@ function deadSet(gw: Gateway): ReadonlySet<string> {
 // For SERVING doors only. `select` and `freeze` stay raw: the erasure and container machinery
 // must see every byte it has to account for (see `readGround` in slate.ts for the same split).
 //
-// "Erased" means a STANDING tombstone names the id. A negated tombstone stops refusing its id here,
+// "Erased" means a STANDING erasure names the id. A negated erasure stops refusing its id here,
 // so a delta whose bytes survived could be served again. Closing that needs a store-level list of
 // refused ids that outlives negation.
 export function withoutErased(gw: Gateway, deltas: readonly Delta[]): Delta[] {
@@ -568,7 +568,7 @@ export function offeredDeltasImpl(gw: Gateway): Delta[] {
 // else is refused loudly at the door. This is `offeredDeltas` parameterized IN ITS SCOPE — the same
 // Term evaluation under a scope the caller names — and NOT the same reading: `offeredDeltas` adds
 // the negation closure a peer must not be denied (H1), and `watch` additionally withholds what a
-// surviving tombstone has condemned (§11), as does the offer (`withoutErased`). A `select` caller
+// surviving erasure has condemned (§11), as does the offer (`withoutErased`). A `select` caller
 // gets neither, by design: `select` is membership machinery, and the erasure cut reads through it,
 // so it hands back exactly what the Term selected, no more.
 export function selectImpl(gw: Gateway, term: unknown): Delta[] {
@@ -601,9 +601,9 @@ export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], v
   // and no context. Without the closure a reader lifting a frame into a View resolves a retracted
   // claim as LIVE, which is the same bug three narrowing doors already paid for.
   //
-  // Then, and only then, drop what the store has been ORDERED to forget (SPEC §11): the tombstone
+  // Then, and only then, drop what the store has been ORDERED to forget (SPEC §11): the erasure
   // is ground BEFORE its target is purged — erase sequences it that way on purpose — so the pulse
-  // that fires in that window is the tombstone's own, carrying a member whose bytes are going away.
+  // that fires in that window is the erasure's own, carrying a member whose bytes are going away.
   //
   // ORDER IS LOAD-BEARING, and it is the mirror of `containerScopeImpl`'s "subtract, THEN close":
   // there, closing last stops a narrowing from REVIVING a claim. Here the closure runs first and the
@@ -656,7 +656,7 @@ export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], v
 // nothing about them. Admission is decided in two passes for that reason — first what is LAWFUL at
 // this door, then what the predicate admits, then the closure over the batch, which widens ONLY by
 // the negations of already-admitted deltas and only among deltas that were lawful anyway. A forged,
-// tombstoned, or malformed negation is refused exactly as before; the widening is of the admission
+// erased, or malformed negation is refused exactly as before; the widening is of the admission
 // PREDICATE, nothing else.
 //
 // AND ONLY WHERE ADMISSION WAS POLICY-DRIVEN. An explicit `admit` is the caller's own trust boundary
@@ -693,7 +693,7 @@ export async function federateImpl(
   const lawful: Delta[] = [];
   let admitted: Delta[] = [];
   for (const d of all) {
-    // A tombstone is a removal-order, not an inert claim — so it faces the same validator at
+    // An erasure is a removal-order, not an inert claim — so it faces the same validator at
     // this door as at the append door (eraseDefect), and an unauthorized or malformed one is
     // refused rather than stored. Likewise a public-read declaration: it OPENS a door, so a
     // malformed one is refused here exactly as at append (publicDefect), and an artifact
@@ -707,7 +707,7 @@ export async function federateImpl(
       dead.has(d.id) ||
       publicDefect(d.claims) !== undefined ||
       artifactDefect(d.claims) !== undefined ||
-      (isTombstone(d.claims) && eraseDefect(d, gw.reactor, gw.operatorAuthor) !== undefined) ||
+      (isErasure(d.claims) && eraseDefect(d, gw.reactor, gw.operatorAuthor) !== undefined) ||
       slateDefect(d, gw.reactor, gw.operatorAuthor) !== undefined ||
       // A cite refusal belongs with the UNLAWFUL group and not with the un-admitted one: the
       // batch-scoped closure below deliberately readmits negations of what crossed, and a delta this

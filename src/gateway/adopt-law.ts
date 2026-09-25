@@ -12,8 +12,8 @@
 // TIMESTAMPS ARE INHERITED FROM THE SOURCE, and that is load-bearing (H4): a delta id hashes
 // {author, pointers, timestamp}, so re-speaking the same content at the same instant re-mints the
 // SAME id. That makes re-blessing idempotent by identity, and it makes an ERASED blessing stay
-// dead — a re-adoption re-mints the very id the tombstone refuses. A fresh timestamp would mint an
-// id no tombstone has heard of, silently bypassing §11.
+// dead — a re-adoption re-mints the very id the erasure refuses. A fresh timestamp would mint an
+// id no erasure has heard of, silently bypassing §11.
 //
 // One consequence follows from the inheritance and must not be mistaken for a destructive variant:
 // a blessing cannot outrank an incumbent by RECENCY, because its timestamp is the source's and the

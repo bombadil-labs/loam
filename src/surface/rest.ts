@@ -409,7 +409,7 @@ export async function handleRest(
       return { status: 200, body: nodeBody(answered) };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      // The same outcomes the other doors map: standing and tombstone refusals are 403, a
+      // The same outcomes the other doors map: standing and erasure refusals are 403, a
       // degraded gateway is the server's trouble (503, as /append answers), the rest 400.
       if (/can no longer persist/.test(message)) return refuse(503, message);
       if (/not permitted|was erased|refused|read-only/.test(message)) return refuse(403, message);

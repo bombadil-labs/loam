@@ -61,10 +61,10 @@ export {
   ERASE_ENTITY,
   eraseClaims,
   eraseDefect,
-  isTombstone,
-  readTombstones,
+  isErasure,
+  readErasures,
   sealCommitment,
-  tombstonesIn,
+  erasuresIn,
   type ErasureHealth,
   type StoreHealth,
 } from "./gateway/erase.js";

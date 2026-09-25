@@ -4,7 +4,7 @@
 // `deltasSince` sets aside a row that fails admission and reads on. That is a narrowing of the
 // delta-set, and the one narrowing that cannot carry a negation closure — the dropped row is
 // precisely what is illegible. A missing CLAIM contributes nothing; a missing NEGATION revives its
-// target (a retracted value, a revoked grant, a tombstone). Two of the three quarantine reasons
+// target (a retracted value, a revoked grant, an erasure). Two of the three quarantine reasons
 // (id-mismatch, invalid-signature) have already PARSED the claims, so the driver can see the row
 // carries a `negates` ref and name the target — turning a silent revival into a loud one the
 // operator can act on (repair discard + re-federate today; automatic recovery under T66).

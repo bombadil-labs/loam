@@ -13,14 +13,14 @@ import {
 // Erasure — degrees of forgetting (SPEC §11). The store remembers THAT it forgot — who asked,
 // when, which id — never what. A TOMBSTONE is an append-only claim at `loam:erasure` naming
 // the erased delta; the bytes themselves are purged from every tier (the seam's purge, PR
-// #34); and admission composes the tombstone set so the id is refused re-entry forever.
+// #34); and admission composes the erasure set so the id is refused re-entry forever.
 // Content addressing is what makes this honest: retaining a hash retains zero content.
 //
 // ONE erasure authority, nobody else: the INSTANCE OPERATOR. Erasure is destructive, so the
 // store is deliberately unforgiving about it — only the operator's own signature orders a
-// record removed, and every door (append AND federation) refuses a tombstone the operator did
+// record removed, and every door (append AND federation) refuses an erasure the operator did
 // not sign, so an unauthorized removal-order is never even stored. This is the GDPR shape: a
-// data subject asks; the operator, as the controller, executes; and the tombstone records the
+// data subject asks; the operator, as the controller, executes; and the erasure records the
 // target's author (`spoken-by`) as the compliance log, verified against the live target while
 // it can still be seen.
 //
@@ -57,12 +57,12 @@ import type { StoreBackend } from "../store/backend.js";
 export const ERASE_ENTITY = "loam:erasure";
 export const CTX_ERASE = "loam.erasure";
 
-// One tombstone: the erased id (a delta-kind ref), the target's author recorded while it
+// One erasure: the erased id (a delta-kind ref), the target's author recorded while it
 // could still be verified, an optional human reason (the compliance log reads itself), and — when
 // the erasure was one member of a CUT (SPEC §29.6) — one optional `slate` pointer. That pointer is
-// the JOIN a graveyard reads: the graveyard does not list its tombstones at all, so "which
-// tombstones belong to this erasure event" stays one small delta whether the cut had four members
-// or forty thousand, and `readTombstones` remains the single per-id law.
+// the JOIN a graveyard reads: the graveyard does not list its erasures at all, so "which
+// erasures belong to this erasure event" stays one small delta whether the cut had four members
+// or forty thousand, and `readErasures` remains the single per-id law.
 export function eraseClaims(
   targetId: string,
   targetAuthor: string,
@@ -89,14 +89,14 @@ export function eraseClaims(
   };
 }
 
-const tombstoneParts = (
+const erasureParts = (
   claims: Claims,
 ): {
   targetId: string | undefined;
   spokenBy: string | undefined;
   slate: string | undefined;
   // EVERY reason on the delta, not the first. The door validates the erased id, the author, and the
-  // §29.6 join, and says nothing about how many reasons a tombstone carries — so a reader that took
+  // §29.6 join, and says nothing about how many reasons an erasure carries — so a reader that took
   // one and dropped the rest would silently narrow a compliance record.
   reasons: string[];
   count: { erases: number; spokenBy: number; slate: number };
@@ -134,17 +134,17 @@ const tombstoneParts = (
   return { targetId, spokenBy, slate, reasons, count };
 };
 
-/** The id a tombstone erases, for readers that join on it (SPEC §29.6's arithmetic). */
-export function tombstoneTarget(claims: Claims): string | undefined {
-  return tombstoneParts(claims).targetId;
+/** The id an erasure erases, for readers that join on it (SPEC §29.6's arithmetic). */
+export function erasureTarget(claims: Claims): string | undefined {
+  return erasureParts(claims).targetId;
 }
 
-/** The slate a tombstone was minted BY, when it was one member of a cut (SPEC §29.6's join). */
-export function tombstoneSlate(claims: Claims): string | undefined {
-  return tombstoneParts(claims).slate;
+/** The slate an erasure was minted BY, when it was one member of a cut (SPEC §29.6's join). */
+export function erasureSlate(claims: Claims): string | undefined {
+  return erasureParts(claims).slate;
 }
 
-export function isTombstone(claims: Claims): boolean {
+export function isErasure(claims: Claims): boolean {
   return claims.pointers.some(
     (p) =>
       p.target.kind === "entity" &&
@@ -153,9 +153,9 @@ export function isTombstone(claims: Claims): boolean {
   );
 }
 
-// Is this delta a tombstone, and if so, is it WELL-FORMED, AUTHORIZED law? Erasure is
+// Is this delta an erasure, and if so, is it WELL-FORMED, AUTHORIZED law? Erasure is
 // DESTRUCTIVE, so this is the strictest gate in the system, run at EVERY door that could admit
-// a tombstone — the append door (authorize) AND the federation door — so that an unauthorized
+// an erasure — the append door (authorize) AND the federation door — so that an unauthorized
 // removal-order is never even stored, let alone honored.
 //
 // ONE authority, and no other: the INSTANCE OPERATOR. Only the operator's own signature orders
@@ -168,15 +168,15 @@ export function eraseDefect(
   reactor: Reactor,
   operator: string | undefined,
 ): string | undefined {
-  if (!isTombstone(delta.claims)) return undefined;
-  const { targetId, spokenBy, slate, count } = tombstoneParts(delta.claims);
+  if (!isErasure(delta.claims)) return undefined;
+  const { targetId, spokenBy, slate, count } = erasureParts(delta.claims);
   if (count.erases !== 1 || targetId === undefined) {
     return "a tombstone erases exactly one delta (one delta-kind `erases` pointer)";
   }
   if (count.spokenBy !== 1 || spokenBy === undefined) {
     return "a tombstone carries exactly one string `spoken-by` (the erased delta's author)";
   }
-  // The §29.6 join is OPTIONAL forever — every tombstone any store already holds carries none, so
+  // The §29.6 join is OPTIONAL forever — every erasure any store already holds carries none, so
   // no §20 step is engaged — but a PRESENT one is validated: a malformed join would make the
   // graveyard's arithmetic unreadable while looking like law.
   if (count.slate > 1 || (count.slate === 1 && slate === undefined)) {
@@ -185,12 +185,12 @@ export function eraseDefect(
   if (operator === undefined || delta.claims.author !== operator) {
     return "erasure is the instance operator's alone: only the operator may order a record removed";
   }
-  // The operator's tombstone must still tell the truth about whose record it forgot, whenever
+  // The operator's erasure must still tell the truth about whose record it forgot, whenever
   // the target can still be seen — an accurate compliance record.
   const target = reactor.get(targetId);
   // An erasure is never itself erased (§11): the refused set is derived from the held erasures, so
   // erasing one would undo an erasure. A target in the same batch is checked by `erasedInBatch`.
-  if (target !== undefined && isTombstone(target.claims)) {
+  if (target !== undefined && isErasure(target.claims)) {
     return "an erasure cannot itself be erased: an erasure is permanent";
   }
   if (target !== undefined && target.claims.author !== spokenBy) {
@@ -203,17 +203,17 @@ export function eraseDefect(
 // operator's erasures bind, so an ungoverned store honors no erasure. A negated erasure
 // leaves this set, while its target id stays in `refusedIds`, which the write and read paths
 // consult.
-export function readTombstones(reactor: Reactor, operator: string | undefined): Set<string> {
+export function readErasures(reactor: Reactor, operator: string | undefined): Set<string> {
   const dead = new Set<string>();
-  for (const tomb of survivingTombstones(reactor, operator)) {
-    dead.add(tombstoneParts(tomb.claims).targetId!); // survivingTombstones proved it well-shaped
+  for (const tomb of standingErasures(reactor, operator)) {
+    dead.add(erasureParts(tomb.claims).targetId!); // standingErasures proved it well-shaped
   }
   return dead;
 }
 
 // The ids this store refuses FOREVER: the target of every erasure that ever bound here, whether
 // or not it was later negated. An erasure is eternal (Myk, 2026-09-25): negating an erasure retracts
-// the record, and the id still never returns. Separate from `survivingTombstones`, which answers "is
+// the record, and the id still never returns. Separate from `standingErasures`, which answers "is
 // this erasure standing testimony now" for receipts, the ledger and as-of reads.
 //
 // DERIVED, NOT PERSISTED, and that rests on one premise: an erasure can never itself be erased (§11).
@@ -222,7 +222,7 @@ export function readTombstones(reactor: Reactor, operator: string | undefined): 
 export function refusedIds(reactor: Reactor, operator: string | undefined): Set<string> {
   const refused = new Set<string>();
   for (const tomb of boundErasures(reactor, operator, false)) {
-    refused.add(tombstoneParts(tomb.claims).targetId!);
+    refused.add(erasureParts(tomb.claims).targetId!);
   }
   return refused;
 }
@@ -253,8 +253,8 @@ export function erasedInDeltas(
   const byId = new Map(deltas.map((d) => [d.id, d]));
   // Only a local-control erasure whose target is in the list can hide anything here.
   const localControls = deltas.filter((d) => {
-    if (!isTombstone(d.claims) || !inLocalContext(d, LOCAL_CONTROL)) return false;
-    const target = tombstoneTarget(d.claims);
+    if (!isErasure(d.claims) || !inLocalContext(d, LOCAL_CONTROL)) return false;
+    const target = erasureTarget(d.claims);
     return target !== undefined && byId.has(target);
   });
   if (localControls.length > 0) {
@@ -266,12 +266,12 @@ export function erasedInDeltas(
     }
   }
   for (const d of deltas) {
-    if (!isTombstone(d.claims) || inLocalContext(d, LOCAL_CONTROL)) continue;
+    if (!isErasure(d.claims) || inLocalContext(d, LOCAL_CONTROL)) continue;
     if (d.claims.author !== operator) continue;
-    const { targetId, spokenBy, count } = tombstoneParts(d.claims);
+    const { targetId, spokenBy, count } = erasureParts(d.claims);
     if (targetId === undefined || count.erases !== 1 || count.spokenBy !== 1) continue;
     const target = byId.get(targetId);
-    if (target === undefined || isTombstone(target.claims)) continue; // an erasure is never erased
+    if (target === undefined || isErasure(target.claims)) continue; // an erasure is never erased
     if (target.claims.author !== spokenBy) continue; // the order must name its target's real author
     hidden.add(targetId);
   }
@@ -325,10 +325,10 @@ export function erasedInBatch(
   const byId = new Map(accepted.map((d) => [d.id, d]));
   const erasesErasure = erasuresOfErasures(accepted);
   for (const d of accepted) {
-    if (!isTombstone(d.claims) || inLocalContext(d, LOCAL_CONTROL)) continue;
+    if (!isErasure(d.claims) || inLocalContext(d, LOCAL_CONTROL)) continue;
     if (erasesErasure.has(d.id)) continue;
     if (d.claims.author !== operator) continue;
-    const { targetId, spokenBy, count } = tombstoneParts(d.claims);
+    const { targetId, spokenBy, count } = erasureParts(d.claims);
     if (targetId === undefined || count.erases !== 1) continue;
     const target = byId.get(targetId);
     if (target !== undefined && target.claims.author !== spokenBy) continue;
@@ -341,21 +341,21 @@ export function erasedInBatch(
 // erased (§11), so the write paths refuse these: append refuses its batch, federate drops them.
 // `eraseDefect` refuses the same thing when the target erasure is already held.
 export function erasuresOfErasures(accepted: readonly Delta[]): Set<string> {
-  const tombs = new Set(accepted.filter((d) => isTombstone(d.claims)).map((d) => d.id));
+  const tombs = new Set(accepted.filter((d) => isErasure(d.claims)).map((d) => d.id));
   const out = new Set<string>();
   for (const d of accepted) {
-    if (!isTombstone(d.claims)) continue;
-    const { targetId } = tombstoneParts(d.claims);
+    if (!isErasure(d.claims)) continue;
+    const { targetId } = erasureParts(d.claims);
     if (targetId !== undefined && tombs.has(targetId)) out.add(d.id);
   }
   return out;
 }
 
-// The surviving, lawful, operator-signed tombstones — the record of what this ground has
-// forgotten (that it forgot, never what). One place computes the set both readTombstones (the
+// The surviving, lawful, operator-signed erasures — the record of what this ground has
+// forgotten (that it forgot, never what). One place computes the set both readErasures (the
 // dead ids) and forgottenSince (the as-of annotation) draw from, so the author-confirmation and
 // forgiveness rules cannot drift between them.
-export function survivingTombstones(reactor: Reactor, operator: string | undefined): Delta[] {
+export function standingErasures(reactor: Reactor, operator: string | undefined): Delta[] {
   return boundErasures(reactor, operator, true);
 }
 
@@ -373,13 +373,13 @@ function boundErasures(
   // walk of the delta set (H8). The index is written with the set, so it cannot lag it.
   for (const id of reactor.byTarget(ERASE_ENTITY)) {
     const delta = reactor.get(id);
-    if (delta === undefined || !isTombstone(delta.claims)) continue;
+    if (delta === undefined || !isErasure(delta.claims)) continue;
     if (inLocalContext(delta, LOCAL_CONTROL)) {
       // Generic preplanted strikes never become local forgiveness when a marked order lands.
       if (localEraseTarget(delta, reactor, operator) === undefined) continue;
     } else if (negated(delta.id)) continue; // ordinary struck tombstone = forgiven
     if (delta.claims.author !== operator) continue; // erasure is the operator's alone
-    const { targetId, count } = tombstoneParts(delta.claims);
+    const { targetId, count } = erasureParts(delta.claims);
     if (targetId === undefined || count.erases !== 1) continue; // shape the door enforces
     out.push(delta);
   }
@@ -776,14 +776,14 @@ export function revivedAcross(
 }
 
 /** One receipt, as a reader sees it: THAT an id was forgotten, by whose order, when, and why. */
-export interface TombstoneReceipt {
+export interface ErasureReceipt {
   /** The receipt's own content address — what an erase prints and what a reader can look up. */
   readonly tombstone: string;
   /** The id it forgot. Retaining a hash retains zero content, which is what makes this honest. */
   readonly erased: string;
   /**
    * The erased delta's author, recorded while the target could still be seen. ABSENT rather than
-   * blank when the tombstone carries none: `eraseDefect` requires it at the DOOR, and replay ingests
+   * blank when the erasure carries none: `eraseDefect` requires it at the DOOR, and replay ingests
    * straight into the reactor, so a receipt replanted from an archive or written by an older version
    * can survive without one. A blank cell reads as an oversight; an absence has to be stated.
    */
@@ -791,50 +791,50 @@ export interface TombstoneReceipt {
   /** Who signed the removal order. §11 admits exactly one signer, so this is always the operator. */
   readonly orderedBy: string;
   readonly at: number;
-  /** Why, in the operator's own words. EMPTY when the tombstone carries none — never invented. */
+  /** Why, in the operator's own words. EMPTY when the erasure carries none — never invented. */
   readonly reasons: readonly string[];
   /** The §29.6 cut this was one member of. Absent on an ordinary single-delta erase, forever. */
   readonly slate?: string;
 }
 
 /**
- * The receipts this ground still stands behind, oldest first — read through `survivingTombstones`,
+ * The receipts this ground still stands behind, oldest first — read through `standingErasures`,
  * so no surface can print a receipt the admission door does not honour, or hide one it does.
  *
- * `inert` is the other half, and it is not decoration. A struck tombstone is FORGIVENESS: the
+ * `inert` is the other half, and it is not decoration. A struck erasure is FORGIVENESS: the
  * erasure is negated (the id stays refused), so the receipt leaves the surviving set. On a
  * screen that merely drops the row, an omission and a revocation look identical — and this listing
  * is read on the morning that difference decides a case. So the count is disclosed.
  *
- * It counts OPERATOR-AUTHORED tombstone-shaped deltas that are not in the surviving set: struck, or
- * malformed in a way the surviving reader refuses. A tombstone signed by anyone else was never a
+ * It counts OPERATOR-AUTHORED erasure-shaped deltas that are not in the surviving set: struck, or
+ * malformed in a way the surviving reader refuses. An erasure signed by anyone else was never a
  * receipt here — the door refuses one at admission — so it is not counted as one lost.
  */
 export function receiptLedger(
   reactor: Reactor,
   operator: string | undefined,
-): { receipts: TombstoneReceipt[]; inert: number } {
+): { receipts: ErasureReceipt[]; inert: number } {
   // ONE walk, not two. `reactor.snapshot()` re-derives every delta's content address on the way in
   // — a full claim validation and a hash each — so a second pass to count the shaped set would pay
-  // the whole store twice. `byTarget(ERASE_ENTITY)` narrows it to the tombstones: the index is
+  // the whole store twice. `byTarget(ERASE_ENTITY)` narrows it to the erasures: the index is
   // written beside the set it indexes, so it cannot go stale against a snapshot taken in the same
   // breath, and a row the driver set aside is invisible to both.
   let shaped = 0;
   if (operator !== undefined) {
     for (const id of reactor.byTarget(ERASE_ENTITY)) {
       const delta = reactor.get(id);
-      if (delta !== undefined && isTombstone(delta.claims) && delta.claims.author === operator) {
+      if (delta !== undefined && isErasure(delta.claims) && delta.claims.author === operator) {
         shaped += 1;
       }
     }
   }
-  const surviving = survivingTombstones(reactor, operator);
+  const surviving = standingErasures(reactor, operator);
   const receipts = surviving
     .map((d) => {
-      const parts = tombstoneParts(d.claims);
+      const parts = erasureParts(d.claims);
       return {
         tombstone: d.id,
-        erased: parts.targetId!, // survivingTombstones proved it well-shaped
+        erased: parts.targetId!, // standingErasures proved it well-shaped
         ...(parts.spokenBy === undefined ? {} : { spokenBy: parts.spokenBy }),
         orderedBy: d.claims.author,
         at: d.claims.timestamp,
@@ -849,7 +849,7 @@ export function receiptLedger(
 // The erasure annotation (SPEC §26): the moments at which this ground lawfully forgot something
 // SINCE a moment T. An as-of read reconstructs the SURVIVING ground at T; an erasure spoken after T
 // may have redacted a fact that stood at T, so the read confesses each discontinuity's TIMESTAMP —
-// never the content, for a tombstone keeps only THAT it forgot and WHEN. Erasures spoken at or
+// never the content, for an erasure keeps only THAT it forgot and WHEN. Erasures spoken at or
 // before T are already baked into the moment's honest absence (the fact was gone by T) and need no
 // mark; a present read needs none at all. Store-wide by necessity: a purged delta's entity is
 // unknowable, so the honest signal is temporal — the sorted moments an erasure fell in the window
@@ -859,7 +859,7 @@ export function forgottenSince(
   operator: string | undefined,
   since: number,
 ): number[] {
-  return survivingTombstones(reactor, operator)
+  return standingErasures(reactor, operator)
     .map((d) => d.claims.timestamp)
     .filter((t) => t > since)
     .sort((a, b) => a - b);
@@ -868,15 +868,15 @@ export function forgottenSince(
 // The pre-boot variant for `loam serve`: given the deltas held across the tiers (before any
 // gateway or reactor exists), report the SAME dead set the running store would — so
 // heal(exclude) is guarded with full fidelity from the first moment. It builds a throwaway
-// reactor from the deltas and defers to readTombstones, so the author-confirmation and the
+// reactor from the deltas and defers to readErasures, so the author-confirmation and the
 // lawful-negation (forgiveness) rules are computed in exactly one place and cannot drift
-// between boot and run. (A lawfully struck tombstone is therefore NOT in the set — heal will
+// between boot and run. (A lawfully struck erasure is therefore NOT in the set — heal will
 // not drop a forgiven record — and a self-erasure that disagrees with its target's author
 // binds nothing here too.)
-export function tombstonesIn(deltas: Iterable<Delta>, operator: string | undefined): Set<string> {
+export function erasuresIn(deltas: Iterable<Delta>, operator: string | undefined): Set<string> {
   const probe = new Reactor();
   for (const d of deltas) probe.ingest(d);
-  return readTombstones(probe, operator);
+  return readErasures(probe, operator);
 }
 
 // Sealed authorship (degree 3): a commitment carried on an anonymous reassertion. Anonymous
@@ -888,12 +888,12 @@ export function sealCommitment(salt: string, author: string): string {
 
 // --- the Gateway's erasure behaviors (ticket T19: the body lives beside its vocabulary) ---------
 // These are the implementations behind `Gateway.erase` / `Gateway.eraseReplica` — thin delegating
-// methods on the class, bodies here where the tombstone vocabulary and its readers already live.
+// methods on the class, bodies here where the erasure vocabulary and its readers already live.
 // They reach the gateway only through its declared internals seam (the `@internal` members on the
 // class — see the seam note in gateway.ts).
 
 // Erase one delta (the body of `Gateway.erase`): verify authority WHILE THE TARGET EXISTS, show the
-// blast radius, land the tombstone (through authorize — the door validates it against the live
+// blast radius, land the erasure (through authorize — the door validates it against the live
 // target), purge every tier, and re-seat the gateway on the post-purge ground. The store remembers
 // THAT it forgot — never what. Live subscriptions re-attach exactly as they do after a schema
 // evolution or a crash; an animated gateway's runner must be re-attached (the host holds the old
@@ -1042,7 +1042,7 @@ async function storeHoldsAny(backend: StoreBackend): Promise<boolean> {
 function incarnationMembers(gw: Gateway, openingId: string): string[] {
   const out: string[] = [];
   for (const d of gw.reactor.snapshot()) {
-    if (!inLocalContext(d, LOCAL_EVENT) || isTombstone(d.claims)) continue;
+    if (!inLocalContext(d, LOCAL_EVENT) || isErasure(d.claims)) continue;
     const parsed = parseLocalEvent(d, gw.operatorAuthor);
     if (parsed !== undefined && parsed.action !== "open" && parsed.opening === openingId)
       out.push(d.id);
@@ -1075,7 +1075,7 @@ export async function eraseImpl(
   // can differ. A declared SEPARATE-posture container (bytes follow posture, so curated and
   // untrusted alike) that is neither attached nor covered by a surviving detach record could
   // hold this byte outside the sweep, so the erase refuses UP FRONT — nothing half-done, no
-  // tombstone standing over an unreported gap. A covered store is returned in `kept`, on the
+  // erasure standing over an unreported gap. A covered store is returned in `kept`, on the
   // record; erasing a detach record out of order re-arms this guard for the NEXT erase.
   const stores = unreachableStoreReport(gw);
   if (stores.faults.length > 0) {
@@ -1088,25 +1088,25 @@ export async function eraseImpl(
   }
   // Retry anchors on the TOMBSTONE, read before the `nothing to erase` guard: a partial attempt
   // can leave the target gone from the reactor while a tier still holds the bytes, and a re-run
-  // must not mint a second tombstone (a fresh timestamp is a new content address).
+  // must not mint a second erasure (a fresh timestamp is a new content address).
   // Anchor only on an erasure that is SURVIVING (a negated one is a negated erasure, and the
   // id stays refused) and that ERASES this id (a pointer merely mentioning it is not an erasure of it).
-  // `survivingTombstones` owns both rules, so the anchor and the dead set cannot drift.
-  const already = survivingTombstones(gw.reactor, gw.operatorAuthor).find(
-    (d) => tombstoneParts(d.claims).targetId === id,
+  // `standingErasures` owns both rules, so the anchor and the dead set cannot drift.
+  const already = standingErasures(gw.reactor, gw.operatorAuthor).find(
+    (d) => erasureParts(d.claims).targetId === id,
   );
   const target = gw.reactor.get(id);
   // Bypass the guard only for an OUTSTANDING erasure — an id erased cleanly long ago also has a
-  // surviving tombstone, and resolving `{ erased }` for it would report work never done.
+  // surviving erasure, and resolving `{ erased }` for it would report work never done.
   // Outstanding is asked of this ground AND its pools; the local backend alone would strand the
-  // pool-retention retry. (A struck tombstone lands here too, correctly: forgiveness withdraws
+  // pool-retention retry. (A struck erasure lands here too, correctly: forgiveness withdraws
   // the erasure, so a fresh one must be spoken rather than the old one silently reused.)
   if (target === undefined && (already === undefined || !(await erasureOutstanding(gw, id)))) {
     throw new Error(`nothing to erase: ${id} is not held here`);
   }
-  if (target !== undefined && isTombstone(target.claims)) {
+  if (target !== undefined && isErasure(target.claims)) {
     // The erasure log is the record of what was forgotten; it stays append-only. Un-erasure
-    // is striking the tombstone (forgiveness), never erasing it.
+    // is striking the erasure (forgiveness), never erasing it.
     throw new Error("the erasure log is append-only: a tombstone cannot itself be erased");
   }
   // A STANDING SLATE'S PINNED MEMBERSHIP TERM is not an ordinary delta (SPEC §29.2): erasing it leaves
@@ -1134,7 +1134,7 @@ export async function eraseImpl(
     target !== undefined && protectedTarget
       ? parseLocalEvent(target, gw.operatorAuthor)
       : undefined;
-  if (erasedEvent?.action === "open" && !isTombstone(target!.claims)) {
+  if (erasedEvent?.action === "open" && !isErasure(target!.claims)) {
     const o = erasedEvent.opening;
     const live = await liveOpening(gw, o);
     if (live !== undefined) {
@@ -1145,15 +1145,15 @@ export async function eraseImpl(
     }
     // A DROPPED incarnation's opening takes its receipts and close with it, receipts and close
     // FIRST under the channel commit and the opening LAST, below: a crash before the opening's
-    // tombstone leaves every surviving receipt resolvable, and a re-run finishes. No receipt can
+    // erasure leaves every surviving receipt resolvable, and a re-run finishes. No receipt can
     // land in between: a receipt needs a sync under a surviving declaration, and this one is
-    // struck. SETTLED members are skipped: tombstoned AND held by no tier. A member whose purge
-    // faulted has a tombstone and must be erased again; that erase anchors on it.
+    // struck. SETTLED members are skipped: erased AND held by no tier. A member whose purge
+    // faulted has an erasure and must be erased again; that erase anchors on it.
     if (opts.cascade !== false)
       await withChannelCommit(gw, o.channel, async () => {
         for (const member of incarnationMembers(gw, id)) {
-          const tombstoned = survivingTombstones(gw.reactor, gw.operatorAuthor).some(
-            (d) => tombstoneParts(d.claims).targetId === member,
+          const tombstoned = standingErasures(gw.reactor, gw.operatorAuthor).some(
+            (d) => erasureParts(d.claims).targetId === member,
           );
           if (tombstoned && !(await erasureOutstanding(gw, member))) continue;
           await eraseImpl(gw, member, { ...opts, cascade: false });
@@ -1206,9 +1206,9 @@ export async function eraseImpl(
   // (T216, `reachableTiers`): the primary AND each directly-attached pool, so a pool-resident citation
   // (a T207 arrival stamp echoing the target) is named rather than omitted. A wall the verdict names
   // `unproven` cannot be reached to enumerate, so it carries no entry. Cascade is the caller's choice.
-  // Excluded BY IDENTITY: only the tombstone this erasure mints or reuses. A shape filter would
+  // Excluded BY IDENTITY: only the erasure this erasure mints or reuses. A shape filter would
   // both catch it on retry (a manifest that varies between attempts, a cascading caller sent to
-  // erase the cut itself) and wrongly drop a struck tombstone from a forgiven earlier erasure —
+  // erase the cut itself) and wrongly drop a struck erasure from a forgiven earlier erasure —
   // a surviving delta dangling at the hole, which the manifest exists to enumerate.
   const { citations, citationTiers } = danglingCitations(gw, id, (dId) => dId === tombstone.id);
   if (already === undefined) {
@@ -1220,7 +1220,7 @@ export async function eraseImpl(
   // "refused to remove", and a mirror returns the max of its two sides, hiding a retaining tier.
   // Only byte-presence (`holds`) answers §11, asked at the end after re-seat and pool fan-out.
   // A local refusal is a fault to COLLECT, never an abort: thrown here it would deny the
-  // tombstone and the sweep to every attached pool — one tier's fault becoming every replica's leak.
+  // erasure and the sweep to every attached pool — one tier's fault becoming every replica's leak.
   let localPurge: unknown;
   try {
     await gw.backend.purge([id]);
@@ -1235,11 +1235,11 @@ export async function eraseImpl(
     localPurge = localPurge ?? err;
   }
   // §24.8 — the erasure reaches every attached QUARANTINE POOL (the operator's own replicas of this
-  // ground): the same tombstone lands there and the byte is purged there too, so a forgotten record can
+  // ground): the same erasure lands there and the byte is purged there too, so a forgotten record can
   // never live on in a staging area inside the operator's own walls. §11 reaches through the one-way
   // glass unconditionally; a quarantine that could hide a purged byte would be an erasure-evasion channel.
   // SETTLE the whole fan-out, then report: a sequential walk aborts at the first refusing pool
-  // and starves every replica behind it of both tombstone and purge — one replica's fault must
+  // and starves every replica behind it of both erasure and purge — one replica's fault must
   // not become every other replica's leak (`MirrorBackend.purge`/`close` compose the same way).
   // `seen` membership is claimed synchronously at dispatch: a pool attached beneath two parents
   // is reachable, and a claim recorded only after the child's awaits could dispatch it twice.
@@ -1269,15 +1269,15 @@ export async function eraseImpl(
     );
   }
   // `kept` is the guard's entry-time reading — the container stores a surviving detach record
-  // deliberately holds outside this sweep, reported rather than silent. The tombstone's id and the
+  // deliberately holds outside this sweep, reported rather than silent. The erasure's id and the
   // target's author ride out too: a cut collects them per member (§29.5) rather than re-deriving them
   // from a ground the purge just moved.
-  // WHAT THE RECEIPT ACTUALLY SAYS, never what the caller asked for. On a retry the tombstone is
+  // WHAT THE RECEIPT ACTUALLY SAYS, never what the caller asked for. On a retry the erasure is
   // REUSED (`already`), and `opts.reason` is dropped on the floor — a second run with a corrected
   // sentence records nothing, so a caller that echoed its own argument would print one reason while
-  // `tombstones show` printed another. `minted` says which of the two runs this was, because
+  // `erasures show` printed another. `minted` says which of the two runs this was, because
   // "safe to re-run" and "your new reason was kept" are different promises.
-  const parts = tombstoneParts(tombstone.claims);
+  const parts = erasureParts(tombstone.claims);
   return {
     erased: id,
     citations,
@@ -1293,7 +1293,7 @@ export async function eraseImpl(
 // Is this erasure still OUTSTANDING anywhere in reach — this ground or any replica of it? Its
 // fault model must be the verdict's, or the two drift: outstanding means bytes held (or
 // unprovable — a tier that cannot answer has proven nothing; H9), OR a reachable replica that
-// does not yet carry the operator's tombstone for the id.
+// does not yet carry the operator's erasure for the id.
 export async function erasureOutstanding(
   gw: Gateway,
   id: string,
@@ -1354,13 +1354,13 @@ export async function erasureStanding(
  * THE ONE WALK, for one id or a thousand.
  *
  * An id is outstanding where bytes are held, where a tier cannot answer (H9 — unprovable is not
- * clean), or where a reachable replica does not yet carry the tombstone. This is the ONLY place
+ * clean), or where a reachable replica does not yet carry the erasure. This is the ONLY place
  * that model lives: the erase door, the health door and the receipt readers all read it from here,
  * because three copies of one fault model in one file is three chances for the screens to disagree
  * about a single store.
  *
- * Batched because the cost is not per id: `readTombstones` walks a whole ground, and
- * `ArchiveBackend.holds` pays a full sweep for every ABSENT id. The tombstone set is read once per
+ * Batched because the cost is not per id: `readErasures` walks a whole ground, and
+ * `ArchiveBackend.holds` pays a full sweep for every ABSENT id. The erasure set is read once per
  * ground, and the backend is asked through `heldAmong` — one pass for the whole set — wherever the
  * driver offers it.
  */
@@ -1384,7 +1384,7 @@ export async function erasureStandings(
   for (const id of physical.unasked) note(id, "unasked");
   // ASKED EVEN WHERE THE BYTES COULD NOT BE. The reactor is a separate question from the tier, and
   // a ground with no receipt still owes the delivery whatever its disk would have said.
-  const tombs = readTombstones(gw.reactor, gw.operatorAuthor);
+  const tombs = readErasures(gw.reactor, gw.operatorAuthor);
   for (const id of ids) if (!tombs.has(id)) note(id, "owed");
   for (const pool of gw.quarantinePools) {
     const sub = await erasureStandings(pool, ids, seen);
@@ -1428,19 +1428,19 @@ async function incompleteErasureFaults(
 }
 
 // Honor an erasure DECIDED by the primary operator (the body of `Gateway.eraseReplica`, SPEC §24.8),
-// called on a pool by the primary's fan-out: land the operator's tombstone (so the pool remembers the
+// called on a pool by the primary's fan-out: land the operator's erasure (so the pool remembers the
 // hole and refuses re-entry — the federation door already enforces that, §11), purge the byte, re-seat,
 // and fan the same order into any pools of THIS pool (the law is transitive — a nested replica is still
 // the operator's replica). No local target need exist; the erasure was decided upstream, and the shared
-// operator makes the tombstone lawful here. This is what keeps a pool from becoming a place a forgotten
+// operator makes the erasure lawful here. This is what keeps a pool from becoming a place a forgotten
 // byte can hide.
 //
-// A FAN-OUT MUST RE-DERIVE ITS OWN REACH. The purge re-checks the tombstone's lawfulness itself
-// (eraseDefect — the authorization gate, checked FIRST and explicitly); the tombstone crosses the
+// A FAN-OUT MUST RE-DERIVE ITS OWN REACH. The purge re-checks the erasure's lawfulness itself
+// (eraseDefect — the authorization gate, checked FIRST and explicitly); the erasure crosses the
 // federation door past the pool's own TRUST policy (an explicit admit — trust is admission
 // configuration, whose data do I want; erasure is LAW, §11 through the one-way glass
 // unconditionally, and a `closed` pool is still the operator's own replica); and if the lawful
-// tombstone STILL did not land, the only remaining cause is the store itself failing — so it
+// erasure STILL did not land, the only remaining cause is the store itself failing — so it
 // THROWS, and the primary's `erase` rejects. Best-effort-and-loud, never a silent success.
 export async function eraseReplicaImpl(
   gw: Gateway,
@@ -1450,7 +1450,7 @@ export async function eraseReplicaImpl(
 ): Promise<void> {
   // Authorization first, on its own: a forged or foreign removal-order is refused WITHOUT purging
   // — loudly, since only a hostile direct caller can reach this branch (the primary's fan-out only
-  // ever hands over the tombstone its own erase door just validated).
+  // ever hands over the erasure its own erase door just validated).
   const defect = eraseDefect(tombstone, gw.reactor, gw.operatorAuthor);
   if (defect !== undefined) {
     throw new Error(`a replica purge is the operator's alone: ${defect}`);
@@ -1475,7 +1475,7 @@ export async function eraseReplicaImpl(
     await appendLocalErasure(gw, tombstone);
   } else await gw.federate([tombstone], { admit: () => true });
   await gw.flush();
-  if (!readTombstones(gw.reactor, gw.operatorAuthor).has(id)) {
+  if (!readErasures(gw.reactor, gw.operatorAuthor).has(id)) {
     throw new Error(
       `the erasure did not complete: the operator's tombstone for ${id} could not land in an attached pool`,
     );
@@ -1492,7 +1492,7 @@ export async function eraseReplicaImpl(
     localPurge = localPurge ?? err; // same fault class, same collection — see eraseImpl
   }
   // Transitive FIRST, verdict LAST (the order `eraseImpl` keeps): a verdict thrown before the
-  // walk would starve every pool behind and beneath this one of both tombstone and purge —
+  // walk would starve every pool behind and beneath this one of both erasure and purge —
   // trading one silent leak for a blocking leak across all the others. `seen` guards the walk
   // against a cycle; the whole walk is settled, then reported, so one unprovable replica cannot
   // hide another.
@@ -1527,13 +1527,13 @@ export async function eraseReplicaImpl(
 // --- health: the settling report (T70; Myk, 2026-07-24) --------------------------------------------
 //
 // This store is eventually consistent about FORGETTING: an erasure is decided the moment its
-// tombstone lands, but the bytes leave each tier on that tier's own time — a lagging mirror, a
+// erasure lands, but the bytes leave each tier on that tier's own time — a lagging mirror, a
 // locked WAL, a pool that was offline. That gap is a HEALTH state, not a fault: serve keeps
 // serving, and health() answers, live, whether every erasure this ground has promised has settled
-// to bytes. Live means computed NOW, from the reactor's surviving tombstones and a byte probe over
+// to bytes. Live means computed NOW, from the reactor's surviving erasures and a byte probe over
 // the backend AND every attached quarantine pool — never a boot-time snapshot that goes stale as
 // erasures land or bytes resurface. (Scope, honestly: the promise SET reads through the reactor,
-// which seeds from the primary's deltasSince — a primary that lost its tombstones mid-run while a
+// which seeds from the primary's deltasSince — a primary that lost its erasures mid-run while a
 // mirror kept a forgotten byte is out of this instrument's sight until the next boot heal.)
 
 export interface ErasureHealth {
@@ -1663,7 +1663,7 @@ async function outstandingAmong(
 }
 
 export async function healthImpl(gw: Gateway, now = Date.now()): Promise<StoreHealth> {
-  const dead = readTombstones(gw.reactor, gw.operatorAuthor);
+  const dead = readErasures(gw.reactor, gw.operatorAuthor);
   const ids = [...dead];
   let erasure: ErasureHealth;
   if (ids.length === 0) {
@@ -1693,7 +1693,7 @@ export async function healthImpl(gw: Gateway, now = Date.now()): Promise<StoreHe
     erasure,
     // Both sections are LAWFUL facts rather than debt, so neither moves `status` — but without them
     // a lapsed compliance window and a forgiven-and-returned id are invisible to every instrument
-    // the store has (a struck tombstone leaves `readTombstones`, and therefore `promised`, entirely).
+    // the store has (a struck erasure leaves `readErasures`, and therefore `promised`, entirely).
     slates: slateHealth(gw, now),
     forgiven: forgivenHealth(gw),
     ...(typeof lagging === "boolean" && { lagging }),

@@ -447,7 +447,7 @@ async function doRevert(lesson) {
   // The erased ids ride along as PROOF rather than an assumption that some earlier sweep
   // cleaned this blob: a revert is the one motion that writes old bytes back, and it must not
   // be the way a forgotten record comes home.
-  const erasedIds = [...loam.readTombstones(gateway.reactor, author)];
+  const erasedIds = [...loam.readErasures(gateway.reactor, author)];
   const restored = restoreCheckpoint(storage, lesson, { erasedIds });
   ui.askRevert = null;
   if (!restored.ok) {
@@ -637,7 +637,7 @@ function renderGlossary() {
  * store and the answer is the same in every session.
  */
 function sweepNow() {
-  const dead = [...loam.readTombstones(gateway.reactor, author)];
+  const dead = [...loam.readErasures(gateway.reactor, author)];
   if (dead.length === 0) return null;
   // ENFORCE FIRST — idempotent, so a second pass finds nothing and that is the point. After it
   // runs, "destroyed just now" is empty BY CONSTRUCTION, which is exactly why the report cannot

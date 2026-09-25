@@ -6,7 +6,7 @@
 // src/federation/local-channel-events.js, which this slice adds, so vitest reports seven failed
 // suites and no cases. The revert probes an independent review ran on this tree, one guard deleted
 // per probe: the append door's protected refusal (8 red), the federate door's (7 red), the
-// transitive closure over strikes (6 red), the local-control branch of survivingTombstones (1 red),
+// transitive closure over strikes (6 red), the local-control branch of standingErasures (1 red),
 // the eraseReplica authority check (1 red), the two-opens ambiguity (1 red), the exact declaration
 // checks on sync (4 red), the partial-opening guard on retry (1 red), and a protected-set memo that
 // never sweeps the arrival log (red across the suites). Measured again at 110 cases: a marker that
@@ -21,7 +21,7 @@
 // RAILS-RED of the revised file on the T288 tip (4e3b8b52): 10 red, 65 green. The greens are the
 // T288 cases the revision did not touch, controls that the pointer and the rule narrowed nothing
 // else; the reds are the six literal comparisons, the two erase(open) cases, and the two
-// preplanted-tombstone cases whose predicted ids moved with the pointer.
+// preplanted-erasure cases whose predicted ids moved with the pointer.
 //
 // WHAT THESE RAILS DO NOT ASSERT: a reader resolving through a Schema or a door over the `received`
 // operand. No consumer resolves through it yet; `sourceStanding` re-ingests the operand into a fresh
@@ -43,7 +43,7 @@ import { join } from "node:path";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { containerClaims, readContainerTable } from "../../src/gateway/container.js";
-import { eraseClaims, erasedInDeltas, readTombstones } from "../../src/gateway/erase.js";
+import { eraseClaims, erasedInDeltas, readErasures } from "../../src/gateway/erase.js";
 import { lawfulNegated } from "../../src/gateway/registration.js";
 import { SEALED_LEEWAY } from "../../src/gateway/leeway.js";
 import { channelRecordClaims, resumeChannelImpl } from "../../src/federation/channel.js";
@@ -1488,7 +1488,7 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     const tombstone = markedErase(target);
     expect(gw.reactor.get(tombstone.id)).toBeUndefined();
     await expect(gw.eraseReplica(tombstone, target.id)).rejects.toThrow();
-    // An ATTACHED pool has no authority of its own either: a real marked tombstone from another
+    // An ATTACHED pool has no authority of its own either: a real marked erasure from another
     // home, valid in shape and signed by the same operator key, is refused until THIS parent holds it.
     const { gw: elsewhere } = await home();
     const { ch: far } = await channel(elsewhere);
@@ -1590,8 +1590,8 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     await expect(gw.erase(target.id)).rejects.toThrow();
     expect(gw.reactor.get(predicted.id)).toEqual(predicted);
     expect(await primary.holds(target.id)).toBe(true);
-    expect(readTombstones(gw.reactor, OP).has(target.id)).toBe(true);
-    expect(readTombstones(pool.reactor, OP).has(target.id)).toBe(true);
+    expect(readErasures(gw.reactor, OP).has(target.id)).toBe(true);
+    expect(readErasures(pool.reactor, OP).has(target.id)).toBe(true);
     expect(pool.reactor.get(predicted.id)).toEqual(predicted);
     expect(opened(gw, ch.name).received).toEqual([]);
     await expect(gw.append([strike(preplant, SEED, 70001)])).rejects.toThrow();
@@ -1602,11 +1602,11 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     const restored = await Gateway.open(root, { seed: SEED, channelBackend: () => restoredPool });
     homes.push(restored);
     await restored.resumeChannels();
-    expect(readTombstones(restored.reactor, OP).has(target.id)).toBe(true);
+    expect(readErasures(restored.reactor, OP).has(target.id)).toBe(true);
     expect(opened(restored, ch.name).received).toEqual([]);
     await restored.erase(target.id);
     expect(await root.holds(target.id)).toBe(false);
-    expect(readTombstones(restored.reactor, OP).has(target.id)).toBe(true);
+    expect(readErasures(restored.reactor, OP).has(target.id)).toBe(true);
   });
   it.each(["mismatched-marker", "duplicate-marker", "unsupported-kind", "unsupported-forgiveness"])(
     "corrupted restored protected control %s yields unavailable",

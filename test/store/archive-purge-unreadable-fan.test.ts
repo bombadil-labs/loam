@@ -13,7 +13,7 @@
 // The rails ask both levels at each wall: what the CALL reports, and what the BYTES and the byte
 // verdicts (`holds`, `heldAmong`) say afterwards. They also pin the two halves that must NOT move —
 // the failures that genuinely ANSWER (ENOENT: the fan is gone; ENOTDIR: the entry is porch, where a
-// README lives) stay tolerated, since `heal` sweeps the whole tombstone set on the boot path and must
+// README lives) stay tolerated, since `heal` sweeps the whole erasure set on the boot path and must
 // not refuse to start over a fan removed mid-walk.
 //
 // AND THE DELETE IS DELIBERATELY NOT WIDENED. A dead byte behind a symlinked fan makes purge REFUSE;

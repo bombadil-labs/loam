@@ -104,7 +104,7 @@ describe("T216 (b) — a PRIMARY-resident citation still enumerates (no regressi
     expect(done.citationTiers.map((t) => t.tier)).toEqual(["primary"]);
 
     // Two-sided: the citing delta survives (it is a dangler, not the target), the bystander is not
-    // named, and the target's own tombstone is excluded from the manifest by identity.
+    // named, and the target's own erasure is excluded from the manifest by identity.
     expect(holdsInReactor(gw, cite.id)).toBe(true);
     expect(done.citations).not.toContain(bystander.id);
     expect(done.citations).not.toContain(done.tombstone);

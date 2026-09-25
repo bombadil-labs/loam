@@ -11,7 +11,7 @@ import type { Gateway } from "../gateway/gateway.js";
 import { lawfulNegated } from "../gateway/registration.js";
 import { containerDeclarationName, currentContainerDeclarationId } from "../gateway/container.js";
 import { channelStatusImpl } from "./channel.js";
-import { eraseDefect, isTombstone, readTombstones, tombstoneTarget } from "../gateway/erase.js";
+import { eraseDefect, isErasure, readErasures, erasureTarget } from "../gateway/erase.js";
 import { toWire } from "./wire.js";
 
 export const LOCAL_EVENT = "loam.local.channel.event";
@@ -56,7 +56,7 @@ function absorb(d: Delta, roots: Set<string>, dependents: Map<string, Set<string
   }
   if (local) roots.add(d.id);
   if (control) {
-    const target = tombstoneTarget(d.claims);
+    const target = erasureTarget(d.claims);
     if (target !== undefined) roots.add(target);
   }
 }
@@ -229,7 +229,7 @@ export function parseLocalEvent(d: Delta, operator: string | undefined): LocalEv
 export function localChannelsInContainer(gw: Gateway, container: string): string[] {
   // An incarnation STANDS while its pool declaration survives, the same test the erase door uses
   // for liveness. A close event is not the sign: a refused drop leaves a close beside a standing
-  // pool, and an erase that faulted after the close's tombstone leaves none beside a dropped one.
+  // pool, and an erase that faulted after the close's erasure leaves none beside a dropped one.
   // An erased opening is gone from the reactor; one whose purge faulted stays, but its declaration
   // is struck already, so the declaration test covers it and no marker scan is needed.
   // H8: this walks the snapshot. The parent-container pointer is an entity pointer, so a door
@@ -304,7 +304,7 @@ export function localEraseTarget(
   operator: string | undefined,
 ): string | undefined {
   if (
-    !isTombstone(d.claims) ||
+    !isErasure(d.claims) ||
     !sameVerifiedDelta(d, d) ||
     eraseDefect(d, reactor, operator) !== undefined
   )
@@ -319,7 +319,7 @@ export function localEraseTarget(
     version = versions[0],
     kind = kinds[0],
     channel = channels[0],
-    target = tombstoneTarget(d.claims);
+    target = erasureTarget(d.claims);
   if (
     markers.length !== 1 ||
     marker?.role !== "local-control" ||
@@ -357,7 +357,7 @@ const field = (d: Delta, role: string): unknown => {
 export function openingAgrees(gw: Gateway, o: LocalChannelOpening): boolean {
   const status = gw.reactor.get(o.statusAtOpen),
     declaration = gw.reactor.get(o.poolDeclaration);
-  const dead = readTombstones(gw.reactor, gw.operatorAuthor);
+  const dead = readErasures(gw.reactor, gw.operatorAuthor);
   if (
     status === undefined ||
     declaration === undefined ||
@@ -502,7 +502,7 @@ export function localChannelEvidence(gw: Gateway, channel: string): LocalChannel
   if (history.state !== "open") return history;
   const { opening, ground, receivedIds } = history;
   const received: Delta[] = [];
-  const sourceDead = readTombstones(ground.reactor, ground.operatorAuthor);
+  const sourceDead = readErasures(ground.reactor, ground.operatorAuthor);
   for (const id of receivedIds) {
     const d = ground.reactor.get(id);
     if (d === undefined || sourceDead.has(id) || !sameVerifiedDelta(d, d))

@@ -3,7 +3,7 @@
  *
  * A container defect arrives wrapped as `malformed law: <why>`, and the wrapper carries nothing a
  * caller can act on. Slicing on the marker's index alone silently cuts thirteen characters off
- * every OTHER failure — the store can no longer persist, the id is tombstoned — so the refusal
+ * every OTHER failure — the store can no longer persist, the id is erased — so the refusal
  * that matters most is the one reported in a mangled sentence.
  *
  * ITS OWN MODULE because two doors need it, and those two doors already point at each other: the

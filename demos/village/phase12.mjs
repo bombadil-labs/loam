@@ -4,7 +4,7 @@
 // holds the original and offers it back on every pulse. Sovereignty both ways: the almanac
 // forgets; the commons remembers; neither can force the other.
 
-import { readTombstones, tombstonesIn } from "../../dist/index.js";
+import { readErasures, erasuresIn } from "../../dist/index.js";
 import {
   AUTHORS,
   SEEDS,
@@ -62,7 +62,7 @@ try {
     "erase clears the bytes and the dossier reverts; the signed hole remains",
     report.erased === regret.id &&
       after !== `regrettable-${ts}` &&
-      readTombstones(almanac.gateway.reactor, almanac.operator).has(regret.id),
+      readErasures(almanac.gateway.reactor, almanac.operator).has(regret.id),
     `bio now: ${JSON.stringify(after)}`,
   );
 
@@ -84,7 +84,7 @@ try {
     "12.4",
     "the vault cannot replant the unsaid: heal is tombstone-guarded, reopen stays clean",
     almanac.gateway.reactor.get(regret.id) === undefined &&
-      tombstonesIn(ground, almanac.operator).has(regret.id),
+      erasuresIn(ground, almanac.operator).has(regret.id),
     `${ground.length} deltas on reopen`,
   );
 } finally {

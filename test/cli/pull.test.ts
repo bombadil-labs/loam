@@ -1,6 +1,6 @@
 // SPEC §15, continuity: `loam pull <url|file>` — one command, one door, two sources. A live
 // peer or a frozen offer, both through Gateway.federate: trust-admission, no standing needed,
-// tombstones still bar the door. Then the fork the operator decides: under the SAME operator
+// erasures still bar the door. Then the fork the operator decides: under the SAME operator
 // seed the imported law BINDS (the CLI store IS the browser store — the operator marker is the
 // same delta by content address); under a foreign seed the deltas cross and the law stays
 // inert, exactly as §5/§7/§14 promise.

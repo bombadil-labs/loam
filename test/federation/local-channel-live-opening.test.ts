@@ -11,7 +11,7 @@
 //   a surviving declaration does not make the opening live         → 3 red
 //   a stale handle is not re-registered on drop re-run             → 1 red
 // Measured again after review round 1 (120 cases across the nine suites):
-//   a tombstoned member is skipped whether or not it is settled     → 1 red
+//   an erased member is skipped whether or not it is settled     → 1 red
 //   the struck-declaration byte check through the store is gone     → 1 red
 // After review round 3 (123 cases): an orphaned attached pool cannot be dropped → 2 red.
 // After review round 4 (124 cases): a pool under another declaration is always another
@@ -67,7 +67,7 @@ import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bomb
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { containerClaims, survivingDeclarationIds } from "../../src/gateway/container.js";
-import { readTombstones } from "../../src/gateway/erase.js";
+import { readErasures } from "../../src/gateway/erase.js";
 import {
   inLocalContext,
   LOCAL_CONTROL,
@@ -632,18 +632,18 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     const receipt = events(gw, ch.name, "received")[0]!;
     await gw.dropChannel(ch.name);
     const close = events(gw, ch.name, "close")[0]!;
-    // The FIRST member purge fails, whichever member sorts first: its tombstone lands, its bytes
+    // The FIRST member purge fails, whichever member sorts first: its erasure lands, its bytes
     // stay held, and the other member is untouched.
     primary.purges = 0;
     primary.failPurgeAfter = 0;
     await expect(gw.erase(opening.id)).rejects.toThrow(/STILL HELD/);
-    const dead = readTombstones(gw.reactor, OP);
+    const dead = readErasures(gw.reactor, OP);
     const held = [receipt, close].filter((m) => dead.has(m.id));
     expect(held).toHaveLength(1);
     expect(await primary.holds(held[0]!.id)).toBe(true);
     expect(gw.reactor.get(held[0]!.id)).toBeDefined();
     expect(gw.reactor.get(opening.id)).toBeDefined();
-    // The re-run erases that member again, anchoring on its tombstone, then finishes.
+    // The re-run erases that member again, anchoring on its erasure, then finishes.
     primary.failPurgeAfter = Number.POSITIVE_INFINITY;
     const report = await gw.erase(opening.id);
     expect(report.erased).toBe(opening.id);

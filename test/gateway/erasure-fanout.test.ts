@@ -1,9 +1,9 @@
 // The erasure fan-out re-derives its own reach (SPEC §24.8 — the T16 correction). Audit 2 found
 // the fan-out TRUSTING conditions instead of RE-DERIVING them, three ways: a pool whose trust
-// policy is `closed` silently swallowed the operator's tombstone (trust policy is not the erasure
+// policy is `closed` silently swallowed the operator's erasure (trust policy is not the erasure
 // law's business — the pool is the operator's OWN replica, §24.1, and §11 reaches through the glass
 // unconditionally); a NESTED pool sat outside the fan-out entirely; and a domain-shaped seeding
-// `admit` dropped the primary's pre-existing tombstones, leaving the pool ready to re-admit purged
+// `admit` dropped the primary's pre-existing erasures, leaving the pool ready to re-admit purged
 // bytes. These rails pin the law: erase in the primary, and the forgotten byte is gone from every
 // attached pool, byte-for-byte — or the operator LEARNS the erasure did not complete. Never a
 // silent success.
@@ -14,7 +14,7 @@ import { signClaims } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { isTombstone, readTombstones } from "../../src/gateway/erase.js";
+import { isErasure, readErasures } from "../../src/gateway/erase.js";
 import { trustClaims } from "../../src/gateway/trust.js";
 import { PLANT } from "./fixtures.js";
 import { FERN, observed } from "../spike/garden.js";
@@ -56,7 +56,7 @@ const backendForgot = async (
   expect(JSON.stringify(atRest)).not.toContain(content);
 };
 
-// A backend that can be made to fail on append — the honest construction of "a tombstone that
+// A backend that can be made to fail on append — the honest construction of "an erasure that
 // genuinely cannot land" (an IO failure at the pool's door), no mocking of the guard under test.
 class FailingBackend extends MemoryBackend {
   fail = false;
@@ -81,12 +81,12 @@ describe("§24.8 rail (a) — a closed-trust pool cannot evade erasure", () => {
     expect(holds(q.gateway, secret.id)).toBe(true); // the pool holds the secret before the erasure
 
     // Trust policy is admission CONFIGURATION; erasure is LAW. §11 reaches through the glass
-    // unconditionally — the tombstone crosses regardless of what the pool's door would admit.
+    // unconditionally — the erasure crosses regardless of what the pool's door would admit.
     await primary.erase(secret.id, {
       reason: "closed means closed, but forgotten means forgotten",
     });
 
-    expect(readTombstones(q.gateway.reactor, OP).has(secret.id)).toBe(true);
+    expect(readErasures(q.gateway.reactor, OP).has(secret.id)).toBe(true);
     expect(holds(q.gateway, secret.id)).toBe(false);
     await backendForgot(poolBackend, secret.id, FORGOTTEN);
     await q.drop();
@@ -197,7 +197,7 @@ describe("§24.8 rail (g) — a pool that retains makes the primary's erase REFU
   it("a retaining pool does not starve the pools ORDERED BEHIND it", async () => {
     // The verdict is thrown AFTER the transitive walk, and the walk is settled before reporting:
     // thrown before, the first retaining pool would starve every sibling and nested pool behind
-    // it of both tombstone and purge — a silent leak in one replica traded for a blocking leak
+    // it of both erasure and purge — a silent leak in one replica traded for a blocking leak
     // across all the others.
     const FORGOTTEN = "a-broken-replica-must-not-shield-the-others";
     const primary = await bootPrimary();
@@ -212,9 +212,9 @@ describe("§24.8 rail (g) — a pool that retains makes the primary's erase REFU
       /STILL HOLDS|pool/i,
     );
 
-    // The healthy replica was still swept and still tombstoned, despite its sibling's fault.
+    // The healthy replica was still swept and still erased, despite its sibling's fault.
     await backendForgot(healthy, secret.id, FORGOTTEN);
-    expect(readTombstones(q2.gateway.reactor, OP).has(secret.id)).toBe(true);
+    expect(readErasures(q2.gateway.reactor, OP).has(secret.id)).toBe(true);
     await q2.drop();
     await q1.detach(); // the sick fixture cannot prove discard — detach, deliberately (T72)
     await primary.close();
@@ -254,7 +254,7 @@ describe("§24.8 rail (g) — a pool that retains makes the primary's erase REFU
   });
 
   it("a pool that never HELD the id but never RECEIVED the tombstone is outstanding work: the retry completes it", async () => {
-    // The guard's fault model is the verdict's: the verdict rejects on failed tombstone
+    // The guard's fault model is the verdict's: the verdict rejects on failed erasure
     // delivery, so a guard asking only about BYTES would strand this erasure — the pool holds
     // nothing, yet still lacks the one delta that keeps it from re-admitting the id forever.
     const primary = await bootPrimary();
@@ -262,7 +262,7 @@ describe("§24.8 rail (g) — a pool that retains makes the primary's erase REFU
     await primary.append([secret]);
     const poolBackend = new FailingBackend();
     // Seeded empty on purpose: the pool never holds the secret's bytes, so ONLY the missing
-    // tombstone can mark the erasure outstanding here.
+    // erasure can mark the erasure outstanding here.
     const q = await primary.openQuarantine({ backend: poolBackend, admit: () => false });
     expect(holds(q.gateway, secret.id)).toBe(false);
 
@@ -273,7 +273,7 @@ describe("§24.8 rail (g) — a pool that retains makes the primary's erase REFU
     await expect(primary.erase(secret.id, { reason: "the subject asked" })).resolves.toMatchObject({
       erased: secret.id,
     });
-    expect(readTombstones(q.gateway.reactor, OP).has(secret.id)).toBe(true); // delivered at last
+    expect(readErasures(q.gateway.reactor, OP).has(secret.id)).toBe(true); // delivered at last
     await q.drop();
     await primary.close();
   });
@@ -324,18 +324,18 @@ describe("§24.8 rails (e)/(f) — the seeding filter narrows what a pool SEES, 
     const primary = await bootPrimary(primaryBackend);
     const secret = observed(FERN, "message", FORGOTTEN, 2000, OP_SEED);
     await primary.append([secret]);
-    // The erasure PRE-DATES the pool: the tombstone is already ground when the pool seeds.
+    // The erasure PRE-DATES the pool: the erasure is already ground when the pool seeds.
     await primary.erase(secret.id, { reason: "forgotten before any pool existed" });
 
     // A domain-shaped admit (§24.2's hand-picked-subset knob): only domain facts pass. Naively
-    // applied, it rejects `loam.erasure` tombstones — they are just offered deltas.
+    // applied, it rejects `loam.erasure` erasures — they are just offered deltas.
     const poolBackend = new MemoryBackend();
     const q = await primary.openQuarantine({
       backend: poolBackend,
       admit: (d) => d.claims.pointers.some((p) => p.role === "subject"),
     });
     // A quarantine inherits the holes along with the ground.
-    expect(readTombstones(q.gateway.reactor, OP).has(secret.id)).toBe(true);
+    expect(readErasures(q.gateway.reactor, OP).has(secret.id)).toBe(true);
 
     // A lagging peer (or a saved offer) re-sends the purged bytes: the door remembers the hole.
     const report = await q.gateway.federate([secret]);
@@ -351,7 +351,7 @@ describe("§24.8 rails (e)/(f) — the seeding filter narrows what a pool SEES, 
     const height = observed(FERN, "height", 7, 2000, OP_SEED);
     const message = observed(FERN, "message", "not for this pool's eyes", 2100, OP_SEED);
     await primary.append([height, message]);
-    // Admit heights only — the tombstone exception must not have broken the domain filter.
+    // Admit heights only — the erasure exception must not have broken the domain filter.
     const q = await primary.openQuarantine({
       admit: (d) =>
         d.claims.pointers.some(
@@ -360,12 +360,12 @@ describe("§24.8 rails (e)/(f) — the seeding filter narrows what a pool SEES, 
     });
     expect(holds(q.gateway, height.id)).toBe(true); // selected → seen
     expect(holds(q.gateway, message.id)).toBe(false); // not selected → never seen
-    expect([...q.gateway.reactor.snapshot()].some((d) => isTombstone(d.claims))).toBe(false);
+    expect([...q.gateway.reactor.snapshot()].some((d) => isErasure(d.claims))).toBe(false);
 
-    // An erasure of the unseen fact still fans out its tombstone (the hole crosses even where
+    // An erasure of the unseen fact still fans out its erasure (the hole crosses even where
     // the byte never did — a later widened reseed must not resurrect it).
     await primary.erase(message.id);
-    expect(readTombstones(q.gateway.reactor, OP).has(message.id)).toBe(true);
+    expect(readErasures(q.gateway.reactor, OP).has(message.id)).toBe(true);
     expect(holds(q.gateway, height.id)).toBe(true); // the filter's positive selection is untouched
     await q.drop();
     await primary.close();

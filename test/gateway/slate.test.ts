@@ -527,7 +527,7 @@ describe("T64 criterion 15 — forgiveness, both sides of the cut", () => {
     expect(gw.graveyards().map((g) => g.id)).toEqual([report.graveyard]);
     expect(await gw.backend.holds(condemned.id)).toBe(false);
     // The DURABLE arithmetic reports it as forgiven WITH its strike id rather than as a missing
-    // tombstone: the graveyard records an event that happened, and forgiveness is a later event.
+    // erasure: the graveyard records an event that happened, and forgiveness is a later event.
     const check = graveyardCompleteness(gw.reactor, OP, report.graveyard);
     expect(check.forgiven).toEqual([
       { member: condemned.id, strike: strike(tombstone, 70_000).id },
@@ -570,11 +570,11 @@ describe("T64 criterion 17 — the mint is new vocabulary only, so no §20 step 
     await second.close();
   });
 
-  it("a tombstone with NO slate pointer still binds at both doors and in readTombstones", async () => {
+  it("a tombstone with NO slate pointer still binds at both doors and in readErasures", async () => {
     const gw = await bootSlateStore();
     const target = observed(FERN, "height", 30, 1000, OP_SEED);
     await gw.append([target]);
-    // A tombstone minted the pre-T64 way — five pointers, no `slate` join.
+    // An erasure minted the pre-T64 way — five pointers, no `slate` join.
     const legacy = signClaims(
       eraseClaims(target.id, OP, OP, 60_000, "an old removal order"),
       OP_SEED,

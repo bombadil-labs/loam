@@ -6,7 +6,7 @@
 //      in the store that can make an ERASED delta readable again. Unlike a purge, that mistake is not
 //      recoverable by re-running anything.
 //   2. §11 — the condemned set heal is handed is derived from READABLE deltas, so an unreadable pen row
-//      may be a lawful tombstone nobody can see. Planting under that uncertainty resurrects what an
+//      may be a lawful erasure nobody can see. Planting under that uncertainty resurrects what an
 //      operator erased; withholding is recoverable on the next boot.
 //   3. H1 — planting a target while the strike on it stays set aside is carry-without-the-strike,
 //      produced by a repair. T57 put the struck ids on the pen; this is the first consumer that acts.

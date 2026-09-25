@@ -12,10 +12,10 @@ import {
   eraseClaims,
   eraseDefect,
   forgottenSince,
-  readTombstones,
+  readErasures,
   receiptLedger,
   sealCommitment,
-  tombstonesIn,
+  erasuresIn,
 } from "../../src/gateway/erase.js";
 import { condemnedClosure } from "../../src/gateway/slate.js";
 import { dataStruck } from "../../src/gateway/accounts.js";
@@ -133,8 +133,8 @@ describe("recordings: erasure decisions", () => {
     const out: Record<string, unknown> = {};
     for (const [mode, op] of Object.entries(OPERATORS)) {
       out[mode] = bothOrders(CORPUS, (r) => ({
-        refused: readTombstones(r, op),
-        refusedBeforeBoot: tombstonesIn(r.snapshot(), op),
+        refused: readErasures(r, op),
+        refusedBeforeBoot: erasuresIn(r.snapshot(), op),
         ledger: receiptLedger(r, op),
         forgottenSince: Object.fromEntries(
           [0, 20, 23, 29].map((t) => [`since ${t}`, forgottenSince(r, op, t)]),
@@ -156,7 +156,7 @@ describe("recordings: erasure decisions", () => {
       return {
         lawfulNegated: lawfulNegated(r, KEY.operator)(struckClaim.id),
         dataStruck: dataStruck(r, KEY.operator)(struckClaim.id),
-        refused: readTombstones(r, KEY.operator).has(strikeOnClaim.id),
+        refused: readErasures(r, KEY.operator).has(strikeOnClaim.id),
       };
     };
     await record("erasure.strike-removal", {
