@@ -241,8 +241,9 @@ export function erasedFromReading(reactor: Reactor, operator: string | undefined
 
 // The same answer for a delta list assembled across several peers (a container scope over its
 // pools): the ids the list's own lawful erasures hide, and the targets their held negations hold
-// down. A pool can hold an erasure its parent has not seen yet. Local-control erasures bind only
-// against their own store's records, so they are left to `erasedFromReading` on that store.
+// down. A pool can hold an erasure its parent has not seen yet. Local-control erasures are skipped:
+// they and the local channel events they erase are written only to the root store (`ingest.ts`,
+// `persistChannelEvent` and `appendLocalErasure`), whose `refusedIds` `erasedInScope` applies.
 export function erasedInDeltas(
   deltas: readonly Delta[],
   operator: string | undefined,
