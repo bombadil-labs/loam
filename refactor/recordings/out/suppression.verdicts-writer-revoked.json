@@ -1,7 +1,7 @@
 {
   "governed": {
     "#claim/by-operator-struck-by-writer": {
-      "dataStruck": true,
+      "dataStruck": false,
       "honoredStrikeOn": {
         "$": "undefined"
       },
@@ -42,7 +42,7 @@
       "struckUnderSelfAuthor": false
     },
     "#claim/struck-by-its-own-author": {
-      "dataStruck": true,
+      "dataStruck": false,
       "honoredStrikeOn": {
         "$": "undefined"
       },
@@ -84,12 +84,13 @@
       "struckUnderSelfAuthor": false
     },
     "#op→writer:write": {
-      "dataStruck": false,
+      "dataStruck": true,
       "honoredStrikeOn": {
-        "$": "undefined"
+        "id": "#strike/revokes-writer-grant",
+        "timestamp": 40
       },
-      "lawfulNegated": false,
-      "struckUnderSelfAuthor": false
+      "lawfulNegated": true,
+      "struckUnderSelfAuthor": true
     },
     "#strike/admin": {
       "dataStruck": false,
@@ -117,6 +118,14 @@
       "struckUnderSelfAuthor": false
     },
     "#strike/operator": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "struckUnderSelfAuthor": false
+    },
+    "#strike/revokes-writer-grant": {
       "dataStruck": false,
       "honoredStrikeOn": {
         "$": "undefined"
@@ -190,7 +199,7 @@
       "struckUnderSelfAuthor": false
     },
     "#strike/writer-own-on-revivable": {
-      "dataStruck": true,
+      "dataStruck": false,
       "honoredStrikeOn": {
         "$": "undefined"
       },
@@ -285,12 +294,13 @@
       "struckUnderSelfAuthor": false
     },
     "#op→writer:write": {
-      "dataStruck": false,
+      "dataStruck": true,
       "honoredStrikeOn": {
-        "$": "undefined"
+        "id": "#strike/revokes-writer-grant",
+        "timestamp": 40
       },
-      "lawfulNegated": false,
-      "struckUnderSelfAuthor": false
+      "lawfulNegated": true,
+      "struckUnderSelfAuthor": true
     },
     "#strike/admin": {
       "dataStruck": false,
@@ -324,6 +334,14 @@
         "timestamp": 30
       },
       "lawfulNegated": true,
+      "struckUnderSelfAuthor": false
+    },
+    "#strike/revokes-writer-grant": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
       "struckUnderSelfAuthor": false
     },
     "#strike/stranger": {

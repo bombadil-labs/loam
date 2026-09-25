@@ -44,6 +44,7 @@ const byOtherWriter = claim("operator", 14, "claim/by-operator-struck-by-writer"
 const revived = claim("writer", 15, "claim/strike-then-counterstrike");
 const twice = claim("writer", 16, "claim/two-strikes-one-struck");
 const plain = claim("writer", 17, "claim/never-struck");
+const selfRevived = claim("writer", 18, "claim/own-strike-then-own-counterstrike");
 
 const s = (target: Delta, by: Who, t: number, label: string): Delta => {
   const d = strike(target, by, t);
@@ -65,6 +66,8 @@ const strangerOnOpStrike = s(
   30,
   "strike/stranger-counter-on-operator-strike",
 );
+const ownStrike = s(selfRevived, "writer", 31, "strike/writer-own-on-revivable");
+const ownCounter = s(ownStrike, "writer", 32, "strike/writer-own-counter");
 
 const CORPUS: readonly Delta[] = [
   adminGrant,
@@ -88,36 +91,56 @@ const CORPUS: readonly Delta[] = [
   twiceB,
   twiceBStruck,
   strangerOnOpStrike,
+  selfRevived,
+  ownStrike,
+  ownCounter,
 ];
+
+// The same corpus after the operator revokes the writer's grant: the trust set changes, so the
+// verdicts on the writer's strikes may change.
+const revokeWriter = signed(
+  strike(writerGrant, "operator", 40).claims,
+  "operator",
+  "strike/revokes-writer-grant",
+);
 
 describe("recordings: suppression, four readers side by side", () => {
   it("content addresses of the corpus", async () => {
     await record("suppression.ids", idsOf(CORPUS));
   });
 
-  it("each reader's verdict on each delta", async () => {
+  const verdicts = (corpus: readonly Delta[]) => {
     const out: Record<string, unknown> = {};
     for (const [mode, op] of [
       ["governed", KEY.operator],
       ["ungoverned", undefined],
     ] as const) {
-      out[mode] = bothOrders(CORPUS, (r) => {
+      out[mode] = bothOrders(corpus, (r) => {
         const lawful = lawfulNegated(r, op);
         const struck = dataStruck(r, op);
         const selfOnly = survivalOver([...r.snapshot()]);
         return Object.fromEntries(
-          CORPUS.map((d) => [
+          corpus.map((d) => [
             d.id,
             {
               lawfulNegated: lawful(d.id),
               dataStruck: struck(d.id),
               honoredStrikeOn: honoredStrikeOn(r, d.id, op),
-              survivalOver: selfOnly(d.id),
+              // survivalOver answers "does it survive"; its inverse reads like the others.
+              struckUnderSelfAuthor: !selfOnly(d.id),
             },
           ]),
         );
       });
     }
-    await record("suppression.verdicts", out);
+    return out;
+  };
+
+  it("each reader's verdict on each delta", async () => {
+    await record("suppression.verdicts", verdicts(CORPUS));
+  });
+
+  it("each reader's verdict after the writer's grant is revoked", async () => {
+    await record("suppression.verdicts-writer-revoked", verdicts([...CORPUS, revokeWriter]));
   });
 });

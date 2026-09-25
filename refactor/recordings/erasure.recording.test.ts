@@ -18,7 +18,20 @@ import {
   tombstonesIn,
 } from "../../src/gateway/erase.js";
 import { condemnedClosure } from "../../src/gateway/slate.js";
-import { bothOrders, idsOf, KEY, Raw, record, signed, strike, type Who } from "./corpus.js";
+import { dataStruck } from "../../src/gateway/accounts.js";
+import { lawfulNegated } from "../../src/gateway/registration.js";
+import {
+  bothOrders,
+  idsOf,
+  ingestTrace,
+  KEY,
+  Raw,
+  reactorOf,
+  record,
+  signed,
+  strike,
+  type Who,
+} from "./corpus.js";
 
 const claim = (by: Who, t: number, label: string): Delta => {
   const claims: Claims = {
@@ -129,6 +142,27 @@ describe("recordings: erasure decisions", () => {
       }));
     }
     await record("erasure.readers", out);
+  });
+
+  it("the substrate accepts every corpus delta", async () => {
+    await record("erasure.ingest", ingestTrace(CORPUS).verdicts);
+  });
+
+  // F1: erasing a strike brings its target back. Removal is modeled as a ground without the
+  // strike's bytes, the state a completed purge leaves; the purge itself is not run here.
+  it("a strike's target before and after the strike's bytes are removed", async () => {
+    const reading = (deltas: readonly Delta[]) => {
+      const r = reactorOf(deltas);
+      return {
+        lawfulNegated: lawfulNegated(r, KEY.operator)(struckClaim.id),
+        dataStruck: dataStruck(r, KEY.operator)(struckClaim.id),
+        refused: readTombstones(r, KEY.operator).has(strikeOnClaim.id),
+      };
+    };
+    await record("erasure.strike-removal", {
+      before: reading(CORPUS),
+      after: reading(CORPUS.filter((d) => d.id !== strikeOnClaim.id)),
+    });
   });
 
   it("the strike closure a slate seeds", async () => {

@@ -1,0 +1,104 @@
+[
+  [
+    "#target/erased",
+    {
+      "status": "accepted"
+    }
+  ],
+  [
+    "#target/forgiven",
+    {
+      "status": "accepted"
+    }
+  ],
+  [
+    "#target/forgiven-then-unforgiven",
+    {
+      "status": "accepted"
+    }
+  ],
+  [
+    "#target/stranger-tombstone",
+    {
+      "status": "accepted"
+    }
+  ],
+  [
+    "#target/wrong-spoken-by",
+    {
+      "status": "accepted"
+    }
+  ],
+  [
+    "#target/bystander",
+    {
+      "status": "accepted"
+    }
+  ],
+  [
+    "#target/struck-claim",
+    {
+      "status": "accepted"
+    }
+  ],
+  [
+    "#tomb/operator",
+    {
+      "status": "accepted"
+    }
+  ],
+  [
+    "#tomb/forgiven",
+    {
+      "status": "accepted"
+    }
+  ],
+  [
+    "#strike/forgives-tomb",
+    {
+      "status": "accepted"
+    }
+  ],
+  [
+    "#tomb/re-forgotten",
+    {
+      "status": "accepted"
+    }
+  ],
+  [
+    "#strike/forgives-tomb3",
+    {
+      "status": "accepted"
+    }
+  ],
+  [
+    "#strike/unforgives",
+    {
+      "status": "accepted"
+    }
+  ],
+  [
+    "#tomb/by-stranger",
+    {
+      "status": "accepted"
+    }
+  ],
+  [
+    "#tomb/wrong-spoken-by",
+    {
+      "status": "accepted"
+    }
+  ],
+  [
+    "#strike/claim",
+    {
+      "status": "accepted"
+    }
+  ],
+  [
+    "#tomb/erases-a-strike",
+    {
+      "status": "accepted"
+    }
+  ]
+]

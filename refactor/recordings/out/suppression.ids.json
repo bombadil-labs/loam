@@ -1,6 +1,7 @@
 {
   "claim/by-operator-struck-by-writer": "1e2062a29344d9c62cfed1b7f0a0a67907713c6a486b206032e66de6c6f8f7c9986f",
   "claim/never-struck": "1e2028227db2b9c7746749013fb2e4bb1a0a19aa15bfac1984a0841e89e294a415b9",
+  "claim/own-strike-then-own-counterstrike": "1e2020aa24a6b4923244500a6112ed49d87c4f5a700e1431ed97fb6f0e938bc4f0f5",
   "claim/strike-then-counterstrike": "1e20cc2c80b8d9f681693b91469a3e40604d08a1ec30e9eb30116721688af198b456",
   "claim/struck-by-admin": "1e20a366092c1c584655aee94b8e1bd3b1ff8bd13365b0bb467f0d5b116415f30265",
   "claim/struck-by-its-own-author": "1e2006e0b856c98fe89ec8038a4affdf5aff0ddaf49e25c3b8bda88661a3c7255293",
@@ -19,5 +20,7 @@
   "strike/twice-a-by-operator": "1e20f3c3efe64cf2c9bf0cbafc9e60e3e6135c5807e7535e74593c0c5922e1742090",
   "strike/twice-b-by-operator": "1e20ea9cf1cd8a09c5f23bf9100e52fff1654b9bae631968cdf8f0e2aff564526810",
   "strike/writer-on-operator": "1e2058db543db911fe49190d8d97c8553f532afaccf643ae3bc1a778c97b26402c3a",
-  "strike/writer-own": "1e20fda0b5c7783826f9d3d81dc1e10f8771f120b1e9d5e43aa2510a3169644e3dbe"
+  "strike/writer-own": "1e20fda0b5c7783826f9d3d81dc1e10f8771f120b1e9d5e43aa2510a3169644e3dbe",
+  "strike/writer-own-counter": "1e209cc6fd54dabe8328d51e31d6b32cf7d992260aa3e856251f98d7d4199e5c9c36",
+  "strike/writer-own-on-revivable": "1e201ca52f07ae0e6b798e9c26d87eca07b93d3ce5767bb505f812b886d14eba79fd"
 }
