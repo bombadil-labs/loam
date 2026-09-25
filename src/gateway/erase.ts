@@ -200,9 +200,9 @@ export function eraseDefect(
 }
 
 // The targets of every STANDING erasure: surviving, not negated and operator-signed. Only the
-// operator's erasures bind, so an ungoverned store honors no erasure. A negated erasure is
-// a negated erasure: it leaves this set, but its id stays in `refusedIds`, which is what
-// the write and read paths consult.
+// operator's erasures bind, so an ungoverned store honors no erasure. A negated erasure
+// leaves this set, while its target id stays in `refusedIds`, which the write and read paths
+// consult.
 export function readTombstones(reactor: Reactor, operator: string | undefined): Set<string> {
   const dead = new Set<string>();
   for (const tomb of survivingTombstones(reactor, operator)) {
