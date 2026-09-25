@@ -61,7 +61,13 @@ import {
   type LawAdoption,
   type LawFromRow,
 } from "./adopt-law.js";
-import { eraseImpl, eraseReplicaImpl, healthImpl, type StoreHealth } from "./erase.js";
+import {
+  erasedFromReading,
+  eraseImpl,
+  eraseReplicaImpl,
+  healthImpl,
+  type StoreHealth,
+} from "./erase.js";
 import type { LiveStream } from "./channel.js";
 import { STORE_ENTITY, operatorMarkerClaims, type Genesis } from "./genesis.js";
 import {
@@ -1361,7 +1367,19 @@ export class Gateway {
     // consumer a withdrawn claim reading as live. The address is over whatever the members ARE, so
     // two stores freezing the same Term where only one holds a retraction get DIFFERENT addresses —
     // correct, not a wart: they are genuinely different sets, and the address says so.
-    return freezeMembers(withNegationClosure(this, selectImpl(this, term)));
+    const members = withNegationClosure(this, selectImpl(this, term));
+    // A version is a permanent name you ship, so it never commits to erased content, and it never
+    // quietly changes meaning by leaving that content out. It refuses instead. The erasure run
+    // re-freezes through `freezeMembers` directly, so this refusal never blocks it.
+    const hidden = erasedFromReading(this.reactor, this.operatorAuthor);
+    const erased = members.find((d) => hidden.has(d.id));
+    if (erased !== undefined) {
+      throw new Error(
+        `freeze refused: the Term selects ${erased.id}, which is erased or held down by an erased ` +
+          `negation. A version must never commit to erased content. Narrow the Term to exclude it.`,
+      );
+    }
+    return freezeMembers(members);
   }
 
   // Admit a batch of peer deltas (SPEC §8): the body lives in ingest.ts.
