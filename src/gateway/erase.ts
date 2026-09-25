@@ -188,10 +188,10 @@ export function eraseDefect(
   // The operator's tombstone must still tell the truth about whose record it forgot, whenever
   // the target can still be seen — an accurate compliance record.
   const target = reactor.get(targetId);
-  // A tombstone is never erased (§11): the refused set is derived from the held tombstones, so
+  // An erasure is never itself erased (§11): the refused set is derived from the held erasures, so
   // erasing one would undo an erasure. A target in the same batch is checked by `erasedInBatch`.
   if (target !== undefined && isTombstone(target.claims)) {
-    return "a tombstone cannot be erased: an erasure is permanent";
+    return "an erasure cannot itself be erased: an erasure is permanent";
   }
   if (target !== undefined && target.claims.author !== spokenBy) {
     return "a tombstone's spoken-by must be the erased delta's actual author";
@@ -199,9 +199,9 @@ export function eraseDefect(
   return undefined;
 }
 
-// The targets of every STANDING tombstone: surviving, unstruck and operator-signed. Only the
-// operator's tombstones bind, so an ungoverned store honors no erasure. A struck tombstone is
-// a withdrawn record: it leaves this set, but its id stays in `refusedIds`, which is what
+// The targets of every STANDING erasure: surviving, not negated and operator-signed. Only the
+// operator's erasures bind, so an ungoverned store honors no erasure. A negated erasure is
+// a negated erasure: it leaves this set, but its id stays in `refusedIds`, which is what
 // the write and read paths consult.
 export function readTombstones(reactor: Reactor, operator: string | undefined): Set<string> {
   const dead = new Set<string>();
@@ -211,26 +211,26 @@ export function readTombstones(reactor: Reactor, operator: string | undefined): 
   return dead;
 }
 
-// The ids this store refuses FOREVER: the target of every tombstone that ever bound here, whether
-// or not it was later struck. An erasure is eternal (Myk, 2026-09-25): striking a tombstone retracts
+// The ids this store refuses FOREVER: the target of every erasure that ever bound here, whether
+// or not it was later negated. An erasure is eternal (Myk, 2026-09-25): negating an erasure retracts
 // the record, and the id still never returns. Separate from `survivingTombstones`, which answers "is
-// this tombstone standing testimony now" for receipts, the ledger and as-of reads.
+// this erasure standing testimony now" for receipts, the ledger and as-of reads.
 //
-// DERIVED, NOT PERSISTED, and that rests on one premise: a tombstone can never be erased (§11).
+// DERIVED, NOT PERSISTED, and that rests on one premise: an erasure can never itself be erased (§11).
 // If that ever changes, this list must be kept in its own store, or an erasure can be undone.
-// A batch that carries a tombstone and its target is handled by `erasedInBatch`.
+// A batch that carries an erasure and its target is handled by `erasedInBatch`.
 export function refusedIds(reactor: Reactor, operator: string | undefined): Set<string> {
   const refused = new Set<string>();
-  for (const tomb of boundTombstones(reactor, operator, false)) {
+  for (const tomb of boundErasures(reactor, operator, false)) {
     refused.add(tombstoneParts(tomb.claims).targetId!);
   }
   return refused;
 }
 
-// The ids that tombstones inside one ingest batch refuse. The caller passes only members it has
-// ALREADY accepted (verified, lawful, admitted), so a forged or refused tombstone never counts,
+// The ids that erasures inside one ingest batch refuse. The caller passes only members it has
+// ALREADY accepted (verified, lawful, admitted), so a forged or refused erasure never counts,
 // and a member's id is the hash of its content, so no forged copy can stand in for the target.
-// A tombstone counts only if it names its target's real author when the target is in the batch.
+// An erasure counts only if it names its target's real author when the target is in the batch.
 export function erasedInBatch(
   accepted: readonly Delta[],
   operator: string | undefined,
@@ -238,10 +238,10 @@ export function erasedInBatch(
   const out = new Set<string>();
   if (operator === undefined) return out;
   const byId = new Map(accepted.map((d) => [d.id, d]));
-  const erasesTombstone = tombstonesOfTombstones(accepted);
+  const erasesErasure = erasuresOfErasures(accepted);
   for (const d of accepted) {
     if (!isTombstone(d.claims) || inLocalContext(d, LOCAL_CONTROL)) continue;
-    if (erasesTombstone.has(d.id)) continue;
+    if (erasesErasure.has(d.id)) continue;
     if (d.claims.author !== operator) continue;
     const { targetId, spokenBy, count } = tombstoneParts(d.claims);
     if (targetId === undefined || count.erases !== 1) continue;
@@ -252,10 +252,10 @@ export function erasedInBatch(
   return out;
 }
 
-// The accepted tombstones whose target is another tombstone in the same batch. A tombstone is never
+// The accepted erasures whose target is another erasure in the same batch. An erasure is never
 // erased (§11), so the write paths refuse these: append refuses its batch, federate drops them.
-// `eraseDefect` refuses the same thing when the target tombstone is already held.
-export function tombstonesOfTombstones(accepted: readonly Delta[]): Set<string> {
+// `eraseDefect` refuses the same thing when the target erasure is already held.
+export function erasuresOfErasures(accepted: readonly Delta[]): Set<string> {
   const tombs = new Set(accepted.filter((d) => isTombstone(d.claims)).map((d) => d.id));
   const out = new Set<string>();
   for (const d of accepted) {
@@ -271,18 +271,18 @@ export function tombstonesOfTombstones(accepted: readonly Delta[]): Set<string> 
 // dead ids) and forgottenSince (the as-of annotation) draw from, so the author-confirmation and
 // forgiveness rules cannot drift between them.
 export function survivingTombstones(reactor: Reactor, operator: string | undefined): Delta[] {
-  return boundTombstones(reactor, operator, true);
+  return boundErasures(reactor, operator, true);
 }
 
-// The operator's well-shaped tombstones. With `honorStrikes`, a struck ordinary tombstone is left
-// out; without it, every tombstone that ever bound is in.
-function boundTombstones(
+// The operator's well-shaped erasures. With `honorNegations`, a negated ordinary erasure is left
+// out; without it, every erasure that ever bound is in.
+function boundErasures(
   reactor: Reactor,
   operator: string | undefined,
-  honorStrikes: boolean,
+  honorNegations: boolean,
 ): Delta[] {
   if (operator === undefined) return []; // an ungoverned store honors no erasure at all
-  const negated = honorStrikes ? lawfulNegated(reactor, operator) : () => false;
+  const negated = honorNegations ? lawfulNegated(reactor, operator) : () => false;
   const out: Delta[] = [];
   for (const delta of reactor.snapshot()) {
     if (!isTombstone(delta.claims)) continue;
@@ -714,7 +714,7 @@ export interface TombstoneReceipt {
  * so no surface can print a receipt the admission door does not honour, or hide one it does.
  *
  * `inert` is the other half, and it is not decoration. A struck tombstone is FORGIVENESS: the
- * record is withdrawn (the id stays refused), so the receipt leaves the surviving set. On a
+ * erasure is negated (the id stays refused), so the receipt leaves the surviving set. On a
  * screen that merely drops the row, an omission and a revocation look identical — and this listing
  * is read on the morning that difference decides a case. So the count is disclosed.
  *
@@ -1001,7 +1001,7 @@ export async function eraseImpl(
   // Retry anchors on the TOMBSTONE, read before the `nothing to erase` guard: a partial attempt
   // can leave the target gone from the reactor while a tier still holds the bytes, and a re-run
   // must not mint a second tombstone (a fresh timestamp is a new content address).
-  // Anchor only on a tombstone that is SURVIVING (a struck one is a withdrawn record, and the
+  // Anchor only on an erasure that is SURVIVING (a negated one is a negated erasure, and the
   // id stays refused) and that ERASES this id (a pointer merely mentioning it is not an erasure of it).
   // `survivingTombstones` owns both rules, so the anchor and the dead set cannot drift.
   const already = survivingTombstones(gw.reactor, gw.operatorAuthor).find(

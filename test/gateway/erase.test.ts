@@ -134,7 +134,7 @@ describe("Gateway.erase: the manifest, the purge, the re-seat, the hole", () => 
     await gateway.close();
   });
 
-  it("striking the tombstone retracts the record, and the id still never returns", async () => {
+  it("negating the erasure retracts the record, and the id still never returns", async () => {
     const { gateway, fact } = await grove();
     await gateway.erase(fact.id);
     const tombstone = [...gateway.reactor.snapshot()].find((d) =>

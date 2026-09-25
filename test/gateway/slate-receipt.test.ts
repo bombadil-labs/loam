@@ -342,8 +342,8 @@ describe("T64 criterion 22 — the receipt's byte verdicts are RE-PROBED, never 
   });
 });
 
-describe("a tombstone withdrawn after a cut: the id stays refused", () => {
-  it("reports the withdrawal with its strike id, refuses the re-sent id, and health().forgiven counts it", async () => {
+describe("an erasure negated after a cut: the id stays refused", () => {
+  it("reports the negation with its negation id, refuses the re-sent id, and health().forgiven counts it", async () => {
     const gw = await bootSlateStore();
     const member = observed(FERN, "height", 30, 1000, OP_SEED);
     const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
@@ -366,7 +366,7 @@ describe("a tombstone withdrawn after a cut: the id stays refused", () => {
     });
 
     const health = await gw.health(BEFORE_DEADLINE);
-    // Striking the tombstone removed the id from `readTombstones`, so it left
+    // Negating the erasure removed the id from `readTombstones`, so it left
     // `health().erasure.promised` and the byte debt reads clean.
     expect(health.erasure.promised).toBe(0);
     expect(health.erasure.outstanding).toEqual([]);
@@ -383,7 +383,7 @@ describe("a tombstone withdrawn after a cut: the id stays refused", () => {
 
     const receipt = await gw.receipt(report.graveyard, { now: BEFORE_DEADLINE + 1 });
     const row = receipt.members[0]!;
-    // The receipt reports the withdrawal (field `forgiven`), and that the data is not there.
+    // The receipt reports the negation (field `forgiven`), and that the data is not there.
     expect(row.forgiven).toBe(forgiveness.id);
     expect(row.tombstone).toBeUndefined();
     expect(row.presentAgain).toBe(false);

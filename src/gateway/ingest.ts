@@ -48,7 +48,7 @@ import {
   erasedInBatch,
   isTombstone,
   refusedIds,
-  tombstonesOfTombstones,
+  erasuresOfErasures,
 } from "./erase.js";
 import { Channel } from "./channel.js";
 import type { AppendReceipt, FederationReport, Gateway } from "./gateway.js";
@@ -239,7 +239,7 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
   }
   const batch = [...deltas];
   // An erased id is refused re-entry forever (SPEC §11), through append as through federation, even
-  // after its tombstone is struck. A tombstone in this same batch is checked once the batch is valid.
+  // after its erasure is negated. An erasure in this same batch is checked once the batch is valid.
   const dead = refusedIds(gw.reactor, gw.operatorAuthor);
   // And the door remembers what is being STAGED for removal (SPEC §29.3): a slate closing `cite`
   // refuses a delta that names one of its frozen members, so the DEPENDENT set cannot grow and no
@@ -293,21 +293,21 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
       throw new Error(`append rejected: ${overBudget}`);
     }
   }
-  // Every member is valid now, so a tombstone in the batch binds, and its target in the same batch
+  // Every member is valid now, so an erasure in the batch binds, and its target in the same batch
   // is refused. Append is atomic, so the whole batch is refused.
-  const tombstoneErasers = tombstonesOfTombstones(batch);
-  const erasesTombstone = batch.find((d) => tombstoneErasers.has(d.id));
-  if (erasesTombstone !== undefined) {
+  const erasureErasers = erasuresOfErasures(batch);
+  const erasesErasure = batch.find((d) => erasureErasers.has(d.id));
+  if (erasesErasure !== undefined) {
     throw new Error(
-      `append rejected: tombstone ${erasesTombstone.id} erases another tombstone in the same ` +
-        `batch, and a tombstone cannot be erased`,
+      `append rejected: erasure ${erasesErasure.id} erases another erasure in the same ` +
+        `batch, and an erasure cannot itself be erased`,
     );
   }
   const erasedHere = erasedInBatch(batch, gw.operatorAuthor);
   const alsoErased = batch.find((d) => erasedHere.has(d.id));
   if (alsoErased !== undefined) {
     throw new Error(
-      `append rejected: delta ${alsoErased.id} is erased by a tombstone in the same batch, ` +
+      `append rejected: delta ${alsoErased.id} is erased by an erasure in the same batch, ` +
         `and an erasure is permanent`,
     );
   }
@@ -677,7 +677,7 @@ export async function federateImpl(
   const byPolicy = opts.admit === undefined; // whose boundary this is, and so who owns the closure
   const admit = opts.admit ?? admitForImpl(gw); // the store's trust policy, unless overridden
   // An erased id is refused re-entry forever (SPEC §11), even past an explicit admit override, even
-  // after its tombstone is struck. A tombstone in this same offer binds once it is admitted, below.
+  // after its erasure is negated. An erasure in this same offer binds once it is admitted, below.
   const dead = refusedIds(gw.reactor, gw.operatorAuthor);
   // The SAME cite predicate the append door runs (SPEC §29.3) — one rule, two sites, because all
   // seven findings of 2026-07-21 were one-rule-N-sites-one-drifts with the federation site as the
@@ -722,11 +722,11 @@ export async function federateImpl(
   if (byPolicy && admitted.length < lawful.length) {
     admitted = withBatchNegationClosure(lawful, admitted);
   }
-  // A tombstone admitted in this offer refuses its target in the same offer. Only ADMITTED
-  // tombstones count: one this path refused, or the caller's predicate turned away, never bound.
-  // A tombstone that erases another tombstone is dropped first: a tombstone is never erased.
-  const erasesTombstone = tombstonesOfTombstones(admitted);
-  if (erasesTombstone.size > 0) admitted = admitted.filter((d) => !erasesTombstone.has(d.id));
+  // An erasure admitted in this offer refuses its target in the same offer. Only ADMITTED
+  // erasures count: one this path refused, or the caller's predicate turned away, never bound.
+  // An erasure that erases another erasure is dropped first: an erasure is never erased.
+  const erasesErasure = erasuresOfErasures(admitted);
+  if (erasesErasure.size > 0) admitted = admitted.filter((d) => !erasesErasure.has(d.id));
   const erasedHere = erasedInBatch(admitted, gw.operatorAuthor);
   if (erasedHere.size > 0) admitted = admitted.filter((d) => !erasedHere.has(d.id));
   // Counted per offered delta rather than inferred from set sizes: the closure keys by id, so a peer

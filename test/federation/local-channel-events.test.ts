@@ -1620,7 +1620,7 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
       expect(localChannelEvidence(gw, ch.name).state).toBe("unavailable");
     },
   );
-  it("striking an ordinary data tombstone does not re-admit the id", async () => {
+  it("negating an ordinary data erasure does not re-admit the id", async () => {
     const { gw } = await home();
     const a = fact(1, SEED),
       b = fact(2, SEED);

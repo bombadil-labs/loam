@@ -344,8 +344,8 @@ describe("§11 — erased law stops being SERVED, not just stops being ground", 
   });
 });
 
-describe("§11 — a struck tombstone does not return a member to the live frame", () => {
-  it("the member stays withheld after its tombstone is struck", async () => {
+describe("§11 — a negated erasure does not return a member to the live frame", () => {
+  it("the member stays withheld after its erasure is negated", async () => {
     const { gw } = await keeperStore();
     const held = garden[1]!;
     const tombstone = signClaims(
@@ -358,7 +358,7 @@ describe("§11 — a struck tombstone does not return a member to the live frame
     const condemned = (await stream.next()).value as Delta[];
     expect(idsOf(condemned)).not.toContain(held.id); // the order binds while it stands
 
-    // An erasure is eternal: striking the tombstone retracts the record, and the id stays refused.
+    // An erasure is eternal: negating the erasure retracts the record, and the id stays refused.
     // The bytes are still held (no purge ran), so this checks the refusal, not byte absence.
     await gw.append([retraction(tombstone.id, KEEPER, KEEPER_SEED, 4100)]);
     expect(gw.reactor.get(held.id)).toBeDefined();

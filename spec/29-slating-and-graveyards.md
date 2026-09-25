@@ -419,8 +419,8 @@ complete, the receipt is a formatter; if it is not, no later work can reconstruc
 - **After the cut, forgiveness is §11's tombstone-strike, per id, and it does NOT un-purge.** Striking a
   tombstone permits the id's return; it cannot restore bytes nobody holds. The graveyard survives untouched
   — it records an event that happened, not a standing assertion about the present.
-- **Superseded by §11's 2026-09-25 amendment: an id whose tombstone is withdrawn never comes back.** The text below describes
-  the earlier design. `health().forgiven` still counts ids whose tombstone was withdrawn. Its `present` now counts only bytes a
+- **Superseded by §11's 2026-09-25 amendment: an id whose erasure is negated never comes back.** The text below describes
+  the earlier design. `health().forgiven` still counts ids whose erasure was negated. Its `present` now counts only bytes a
   purge left behind, because no path re-admits the id.
 - **A forgiven id can COME BACK, and the store must be able to see that it did.** The strike removes the id
   from the tombstone set, so it leaves the byte-debt instrument entirely and the store reads clean — and the

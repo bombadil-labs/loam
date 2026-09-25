@@ -223,9 +223,9 @@ describe("erase is complete only when every TIER is clean", () => {
   });
 });
 
-// The retry anchor is a SURVIVING tombstone. A struck tombstone is no longer standing testimony,
+// The retry anchor is a SURVIVING erasure. A negated erasure is no longer standing testimony,
 // and the id stays refused forever, so an erased id can never return through a write path.
-// NOT COVERED: an erase that anchors on a struck tombstone while the bytes are back. No door can
+// NOT COVERED: an erase that anchors on a negated erasure while the bytes are back. No door can
 // bring them back now; a tier that kept them unasked would reach it, and no test builds that.
 describe("the retry anchor honors forgiveness", () => {
   const strike = async (gateway: Gateway, targetId: string): Promise<void> => {
@@ -239,7 +239,7 @@ describe("the retry anchor honors forgiveness", () => {
     await gateway.append([signClaims(makeNegationClaims(OPERATOR, 9000, tomb!.id), OP_SEED)]);
   };
 
-  it("after its tombstone is withdrawn the id stays refused at append", async () => {
+  it("after its erasure is negated the id stays refused at append", async () => {
     const { gateway, fact } = await groveOn(
       new MirrorBackend(new MemoryBackend(), new MemoryBackend()),
     );
