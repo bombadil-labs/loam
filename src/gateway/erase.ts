@@ -251,9 +251,12 @@ export function erasedInDeltas(
   const hidden = new Set<string>();
   if (operator === undefined) return hidden;
   const byId = new Map(deltas.map((d) => [d.id, d]));
-  const localControls = deltas.filter(
-    (d) => isTombstone(d.claims) && inLocalContext(d, LOCAL_CONTROL),
-  );
+  // Only a local-control erasure whose target is in the list can hide anything here.
+  const localControls = deltas.filter((d) => {
+    if (!isTombstone(d.claims) || !inLocalContext(d, LOCAL_CONTROL)) return false;
+    const target = tombstoneTarget(d.claims);
+    return target !== undefined && byId.has(target);
+  });
   if (localControls.length > 0) {
     const probe = new Reactor();
     for (const d of deltas) probe.ingest(d);
