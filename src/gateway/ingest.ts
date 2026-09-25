@@ -463,6 +463,43 @@ function deadSet(gw: Gateway): ReadonlySet<string> {
   return NO_DEAD;
 }
 
+// Drops what the store has been ORDERED to forget (SPEC §11) from a set a door is about to serve:
+// every id a surviving tombstone names, whether or not its bytes are still held. A tombstone is
+// ground before its target is purged, and a purge fault leaves it standing over retained bytes, so
+// a door that trusted byte presence would serve a condemned delta for as long as that lasts.
+//
+// Dropping a condemned delta can revive what it was HOLDING DOWN: a retraction is a member like any
+// other, and once it is withheld, its target would read live in this set while the store still
+// holds the strike. So the target goes with it, transitively, since a target may be the strike that
+// was keeping something else down. The invariant: no delta is served whose strike the store holds
+// and this set does not carry. A purged strike is not one of those (it is gone, and the revival is
+// what erasing a retraction MEANS); a condemned one is. Withholding more can only disclose less,
+// which is the single direction a serving door may err in.
+//
+// For SERVING doors only. `select` and `freeze` stay raw: the erasure and container machinery
+// must see every byte it has to account for (see `readGround` in slate.ts for the same split).
+//
+// "Erased" means a STANDING tombstone names the id. A negated tombstone stops refusing its id here,
+// so a delta whose bytes survived could be served again. Closing that needs a store-level list of
+// refused ids that outlives negation.
+export function withoutErased(gw: Gateway, deltas: readonly Delta[]): Delta[] {
+  const dead = deadSet(gw);
+  if (dead.size === 0) return [...deltas];
+  const kept = new Map(deltas.filter((d) => !dead.has(d.id)).map((d) => [d.id, d]));
+  for (let moved = true; moved;) {
+    moved = false;
+    for (const id of [...kept.keys()]) {
+      const stranded = gw.reactor
+        .negationsOf(id)
+        .some((s) => !kept.has(s) && gw.reactor.get(s) !== undefined);
+      if (!stranded) continue;
+      kept.delete(id);
+      moved = true;
+    }
+  }
+  return [...kept.values()];
+}
+
 // The surviving deltas this store offers a peer — everything, or what the offered lens selects,
 // plus whatever struck it (above): offering a claim while withholding its retraction would
 // republish something the operator had struck.
@@ -493,7 +530,8 @@ export function offeredDeltasImpl(gw: Gateway): Delta[] {
           return withNegationClosure(gw, [...result.set]);
         })();
   const withheld = egressWithheld(gw, Date.now());
-  return withheld.size === 0 ? offered : offered.filter((d) => !withheld.has(d.id));
+  const served = withoutErased(gw, offered);
+  return withheld.size === 0 ? served : served.filter((d) => !withheld.has(d.id));
 }
 
 // Membership is a query, first-class (SPEC §27.6, the body of `Gateway.select`): evaluate a
@@ -503,8 +541,9 @@ export function offeredDeltasImpl(gw: Gateway): Delta[] {
 // else is refused loudly at the door. This is `offeredDeltas` parameterized IN ITS SCOPE — the same
 // Term evaluation under a scope the caller names — and NOT the same reading: `offeredDeltas` adds
 // the negation closure a peer must not be denied (H1), and `watch` additionally withholds what a
-// surviving tombstone has condemned (§11). A `select` caller gets neither. Aligning the three doors
-// is T90's business; until then this one hands back exactly what the Term selected, no more.
+// surviving tombstone has condemned (§11), as does the offer (`withoutErased`). A `select` caller
+// gets neither, by design: `select` is membership machinery, and the erasure cut reads through it,
+// so it hands back exactly what the Term selected, no more.
 export function selectImpl(gw: Gateway, term: unknown): Delta[] {
   const parsed = parseTerm(term);
   const result = evalTerm(parsed, gw.reactor.snapshot());
@@ -546,38 +585,10 @@ export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], v
   // ground will say once the purge lands. Closing last would instead re-admit a negation the
   // operator ordered erased, defeating the drop.
   //
-  // HONEST SCOPE OF THE DROP: it makes THIS door honor a removal order the point-read doors do not
-  // yet honor — `select`, `freeze` and `offeredDeltas` apply no dead-set filter (tracked as T90),
-  // and the inbound doors' `dead.has(d.id)` check is a different question (refusing re-entry, not
-  // withholding a reading). The states where the divergence shows are not only intra-erase, and not
-  // only transient: a tombstone appended directly never purges anything, and a purge fault is
-  // COLLECTED rather than unwound — the tombstone then stands over retained bytes indefinitely, so
-  // this door hides the delta for good while the point-read doors keep serving and republishing it.
-  const live = (members: readonly Delta[]): Delta[] => {
-    const withStrikes = withNegationClosure(gw, members);
-    const dead = deadSet(gw);
-    if (dead.size === 0) return withStrikes;
-    const kept = new Map(withStrikes.filter((d) => !dead.has(d.id)).map((d) => [d.id, d]));
-    // Dropping a condemned delta can revive what it was HOLDING DOWN: a retraction is a member like
-    // any other, and once §11 withholds it, its target would read live in this frame while the store
-    // still holds the strike. So the target goes with it — and transitively, since a target may be
-    // the strike that was keeping something else down. The invariant this settles on: no delta is
-    // served whose strike the store holds and this frame does not carry. A purged strike is not one
-    // of those (it is gone, and the revival is what erasing a retraction MEANS); a condemned one is.
-    // Withholding more can only disclose less, which is the single direction this door may err in.
-    for (let moved = true; moved;) {
-      moved = false;
-      for (const id of [...kept.keys()]) {
-        const stranded = gw.reactor
-          .negationsOf(id)
-          .some((s) => !kept.has(s) && gw.reactor.get(s) !== undefined);
-        if (!stranded) continue;
-        kept.delete(id);
-        moved = true;
-      }
-    }
-    return [...kept.values()];
-  };
+  // The federation offer applies the same drop. `select` and `freeze` do not, by design: they are
+  // the membership machinery, and the erasure cut reads through them.
+  const live = (members: readonly Delta[]): Delta[] =>
+    withoutErased(gw, withNegationClosure(gw, members));
   let closed = false;
   const initialMembers = live([...initial.set]);
   let lastIds = new Set(initialMembers.map((d) => d.id));
