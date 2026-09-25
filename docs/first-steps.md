@@ -81,7 +81,7 @@ and every other friend's channel is untouched.
 
 Whose word wins when two of you contradict each other? Yours to declare, per reading, and there
 are two knobs because there are two questions. The gather's **mask** decides whose *retractions*
-bind, so a stranger's strike cannot blank a friend's claim under a governed reading; the
+bind, so a stranger's negation cannot blank a friend's claim under a governed reading; the
 policy's **`byAuthorRank`** decides whose *claim* wins when two disagree. Trust is the reader's
 lens, not the store's verdict — and Claude can register such a reading for you, inside its
 namespace, once it has read the register grammar.

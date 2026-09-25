@@ -391,7 +391,7 @@ describe("an erasure negated after a cut: the id stays refused", () => {
     // The graveyard's arithmetic reports the negation rather than reading as an incomplete cut:
     // it records an event that HAPPENED, and negation is a later event.
     const check = graveyardCompleteness(gw.reactor, OP, report.graveyard);
-    expect(check.negated).toEqual([{ member: member.id, strike: negation.id }]);
+    expect(check.negated).toEqual([{ member: member.id, negation: negation.id }]);
     expect(check.missing).toEqual([]);
     // THE TWO VERDICTS COME APART HERE, and that is the point: §29.6's sentence read literally is now
     // FALSE (no surviving erasure covers this member), while the CUT still completed and nothing is

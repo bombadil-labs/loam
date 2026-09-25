@@ -429,7 +429,7 @@ function classify(src: Source, row: ManifestRow): Export {
   const struck = (what: string, id: string): never => {
     throw new Error(
       `adoption refused: "${row.alias}" names ${what} its own author RETRACTED inside the ` +
-        `module (${id} is struck in this version's members) — a blessing must not re-speak law ` +
+        `module (${id} is negated in this version's members) — a blessing must not re-speak law ` +
         `its author took back. Survival, not presence, at the source (§24.4).`,
     );
   };
@@ -552,7 +552,7 @@ function schemaExport(src: Source, row: ManifestRow, definitions: readonly Delta
   if (live.length === 0) {
     throw new Error(
       `adoption refused: "${row.alias}" names law whose registration its own author RETRACTED ` +
-        `inside the module (${bindings[0]!.id} is struck in this version's members) — a blessing ` +
+        `inside the module (${bindings[0]!.id} is negated in this version's members) — a blessing ` +
         `must not re-speak law its author took back`,
     );
   }

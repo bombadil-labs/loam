@@ -396,7 +396,7 @@ function containerDisagreement(
     `its container now declares membershipAt=${rec.membershipAt ?? "(absent)"} / ` +
     `version=${rec.version ?? "(absent)"}, while the standing record PINS ` +
     `membershipAt=${pinned.membershipAt} / version=${pinned.version}. A slate's condemned set is ` +
-    `fixed at identification and cannot be re-pointed underneath it — strike the record and file a ` +
+    `fixed at identification and cannot be re-pointed underneath it — negate the record and file a ` +
     `new one to condemn a different set (un-slating is free, §29.8).`
   );
 }
@@ -1322,7 +1322,7 @@ export async function cutImpl(
       refuse(
         `the frozen member ${other.membershipAt} is the PINNED membership Term of the standing slate ` +
           `over "${other.container}". Erasing it would leave that slate unable to read its own ` +
-          `condemned set, so its closures would silently stop enforcing. Cut or strike that slate ` +
+          `condemned set, so its closures would silently stop enforcing. Cut or negate that slate ` +
           `first, or narrow this one to exclude that id (un-slating is free, §29.8).`,
       );
     }
@@ -1686,7 +1686,7 @@ export interface CompletenessCheck {
   /** Members whose erasure neither cites this slate nor is named in `prior-erasure`. */
   readonly missing: readonly string[];
   /** Members whose erasure has since been lawfully STRUCK — reported, never subtracted. */
-  readonly negated: readonly { readonly member: string; readonly strike: string }[];
+  readonly negated: readonly { readonly member: string; readonly negation: string }[];
 }
 
 /**
@@ -1733,7 +1733,7 @@ export function graveyardCompleteness(
   );
   const isNegated = lawfulNegated(reactor, operator);
   const missing: string[] = [];
-  const negated: { member: string; strike: string }[] = [];
+  const negated: { member: string; negation: string }[] = [];
   for (const member of members) {
     const tomb = surviving.get(member);
     if (tomb !== undefined) {
@@ -1744,7 +1744,7 @@ export function graveyardCompleteness(
     }
     // No SURVIVING erasure. Struck (negated) is reported as itself; absent is a real hole.
     const strike = strikeOf(reactor, operator, isNegated, member);
-    if (strike !== undefined) negated.push({ member, strike });
+    if (strike !== undefined) negated.push({ member, negation: strike });
     else missing.push(member);
   }
   return {

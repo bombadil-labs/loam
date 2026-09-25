@@ -315,7 +315,7 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
           restored: [],
           stranded: [
             `the §25 pen could not be settled at all — ${err instanceof Error ? err.message : String(err)}. ` +
-              `Any corrupt row is still set aside, so a strike it carries may read LIVE (H1).`,
+              `Any corrupt row is still set aside, so a negation it carries may read LIVE (H1).`,
           ],
           replantWithheld: [],
         },
@@ -435,16 +435,16 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
       if (!offeredIds.has(id)) {
         return (
           `the primary still sets aside ${r.key} (${r.reason}) and the mirror offered no healthy copy ` +
-          `of it — nothing this heal can do will settle it, so any strike it carries reads LIVE (H1). ` +
+          `of it — nothing this heal can do will settle it, so any negation it carries reads LIVE (H1). ` +
           `Re-federate the delta, or settle the row with \`loam repair discard\`.`
         );
       }
       return primary.restoreQuarantined === undefined
         ? `the primary still sets aside ${r.key} and this driver cannot replace a corrupt row — the ` +
-            `mirror holds a healthy copy that nothing can plant over it, so any strike that row ` +
+            `mirror holds a healthy copy that nothing can plant over it, so any negation that row ` +
             `carries stays stranded (§25/H1). Settle it with \`loam repair discard\`, then heal again.`
         : `the primary still sets aside ${r.key} after the restore — the mirror's healthy copy did ` +
-            `not take, so any strike that row carries stays stranded (§25/H1).`;
+            `not take, so any negation that row carries stays stranded (§25/H1).`;
     });
     const unreadable = stillPenned.filter((r) => r.reason === "unparseable");
     if (unreadable.length > 0) {
@@ -473,8 +473,8 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
         stranded,
         replantWithheld: withheld.map(
           (d) =>
-            `${d.id} was NOT planted: a set-aside row in the primary claims to strike it, and that ` +
-            `row could not be settled — planting the target while its strike stays stranded would ` +
+            `${d.id} was NOT planted: a set-aside row in the primary claims to negate it, and that ` +
+            `row could not be settled — planting the target while its negation stays stranded would ` +
             `serve a retracted fact as live (H1).`,
         ),
       },

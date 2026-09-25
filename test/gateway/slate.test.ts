@@ -510,7 +510,7 @@ describe("T64 criterion 15 — negation, both sides of the cut", () => {
     await gw.close();
   });
 
-  it("AFTER the cut: striking an erasure permits the id's return but restores no bytes", async () => {
+  it("AFTER the cut: negating an erasure restores no bytes, and the id stays refused", async () => {
     const gw = await bootSlateStore();
     const condemned = observed(FERN, "height", 30, 1000, OP_SEED);
     const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
@@ -529,7 +529,7 @@ describe("T64 criterion 15 — negation, both sides of the cut", () => {
     // The DURABLE arithmetic reports it as negated WITH its strike id rather than as a missing
     // erasure: the graveyard records an event that happened, and negation is a later event.
     const check = graveyardCompleteness(gw.reactor, OP, report.graveyard);
-    expect(check.negated).toEqual([{ member: condemned.id, strike: strike(erasure, 70_000).id }]);
+    expect(check.negated).toEqual([{ member: condemned.id, negation: strike(erasure, 70_000).id }]);
     expect(check.missing).toEqual([]);
     expect(check.holds).toBe(false);
     expect(check.cutCompleted).toBe(true);
@@ -538,6 +538,8 @@ describe("T64 criterion 15 — negation, both sides of the cut", () => {
     const member = receipt.members.find((m) => m.member === condemned.id)!;
     expect(member.negated).toBe(strike(erasure, 70_000).id);
     expect(member.erasure).toBeUndefined();
+    // And the id stays refused: a negated erasure never lets it back in.
+    await expect(gw.append([condemned])).rejects.toThrow(/erased/);
     expect(member.presentAgain).toBe(false);
     // Two-sided: the bystander was never touched, on any tier or in any report.
     expect(await gw.backend.holds(bystander.id)).toBe(true);

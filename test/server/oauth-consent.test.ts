@@ -387,7 +387,7 @@ describe("§37 phase 14 — the consent page", () => {
     expect(code2.expiresAt).toBeLessThan(stillFirst.expiresAt);
   });
 
-  it("(7) the consent copy states a grant's real power: a lawful striker over the operator's claims", async () => {
+  it("(7) the consent copy states a grant's real power: a lawful negating author over the operator's claims", async () => {
     const { base } = await consentServer({ client: clientRecord() });
     const sessionId = await signIn(base);
     const res = await getAuthorize(
@@ -396,7 +396,7 @@ describe("§37 phase 14 — the consent page", () => {
       { cookie: `${SESSION_COOKIE}=${sessionId}` },
     );
     const body = await res.text();
-    expect(body).toContain("lawful striker");
+    expect(body).toContain("lawful negating author");
     expect(body).toContain("retract claims the operator wrote");
   });
 });

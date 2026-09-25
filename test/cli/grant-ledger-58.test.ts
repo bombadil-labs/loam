@@ -284,8 +284,8 @@ describe("§58 — the ledger reads the pool, because that is where the standing
   });
 });
 
-describe("§58 — revoke strikes the grant that IS the standing, and reports what it struck", () => {
-  it("the pool's write grant is struck, and the sentence names the inbox rather than the store", async () => {
+describe("§58 — revoke negates the grant that IS the standing, and reports what it negated", () => {
+  it("the pool's write grant is negated, and the sentence names the inbox rather than the store", async () => {
     const inbox = await bindInHome("ada", "ada:journal");
     writeOAuthFile(home, connectorRecord(inbox));
     expect(await poolGrantsWrite(inbox)).toBe(true);
@@ -297,18 +297,18 @@ describe("§58 — revoke strikes the grant that IS the standing, and reports wh
     // OBJECT LEVEL: the report names the inbox it struck, and claims no store-wide strike — this
     // store never landed one, and a sentence that said otherwise would be the H7 shape.
     const said = printed();
-    expect(said).toContain(`the connection's own grant struck in ${inbox}`);
+    expect(said).toContain(`the connection's own grant negated in ${inbox}`);
     expect(said).not.toContain("store-wide write grant");
     expect(said).toContain("authenticates nowhere");
   });
 
-  it("a connector with no reachable pool is told its grant still stands, and where to strike it", async () => {
+  it("a connector with no reachable pool is told its grant still stands, and where to negate it", async () => {
     writeOAuthFile(home, connectorRecord("inbox:ada:journal:never-stood"));
     expect(await run(["grant", "revoke", CLIENT, "--home", home], io())).toBe(0);
     const said = printed();
     expect(said).toContain("could not reach inbox:ada:journal:never-stood");
     expect(said).toContain("still stands");
     // And it does not claim a strike it did not make.
-    expect(said).not.toContain("the connection's own grant struck");
+    expect(said).not.toContain("the connection's own grant negated");
   });
 });

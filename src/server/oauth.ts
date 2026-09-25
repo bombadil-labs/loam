@@ -782,8 +782,8 @@ export interface ConsentDoor {
 
 /** The one warning the consent copy MUST carry — a grant's real power (SPEC §37 phase 14, criterion 7). */
 const STRIKER_WARNING =
-  "A granted connector signs under its own name. As a lawful striker it can retract claims the " +
-  "operator wrote — a strike it signs suppresses them for any reader.";
+  "A granted connector signs under its own name. As a lawful negating author it can retract claims the " +
+  "operator wrote — a negation it signs suppresses them for any reader.";
 
 export function makeConsentDoor(options: ConsentOptions): ConsentDoor {
   const gate = options.gate;
@@ -1903,7 +1903,7 @@ export async function revokeConnector(
       } catch (err) {
         onFault(
           `revoked ${clientId} in ${oauthPath(home)} (that key's tokens are dead) but could not ` +
-            `strike the ground write grant of ${struck.actor}: ${err instanceof Error ? err.message : String(err)}`,
+            `negate the ground write grant of ${struck.actor}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }

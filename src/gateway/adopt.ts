@@ -250,8 +250,8 @@ export async function promoteImpl(
       .negationsOf(src.id)
       .filter((n) => source.reactor.get(n) !== undefined && !struckAtSource(n) && !withdrawn(n));
     throw new Error(
-      `promotion refused: ${deltaId} — the source's own reading has it struck (${standing.join(", ")}), ` +
-        `and promotion must not re-speak what that store already retired. Strike the retraction ` +
+      `promotion refused: ${deltaId} — the source's own reading has it negated (${standing.join(", ")}), ` +
+        `and promotion must not re-speak what that store already retired. Negate the retraction ` +
         `there to restore it, or publish the claim as your own act.`,
     );
   }
@@ -337,7 +337,7 @@ export async function promoteImpl(
         .filter((n) => gw.reactor.get(n) !== undefined && !struckHere(n));
       throw new Error(
         `promotion refused: ${deltaId} was already adopted as ${adopted.id}, and that claim is ` +
-          `struck here (${standing.join(", ")}) — re-promoting would report a success no reader can ` +
+          `negated here (${standing.join(", ")}) — re-promoting would report a success no reader can ` +
           `see. Lift the retraction to stand behind it again; promotion will not undo it for you.`,
       );
     }

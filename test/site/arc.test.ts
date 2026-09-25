@@ -1333,7 +1333,7 @@ describe("the vocabulary is earned before it is used", () => {
       "signature",
       "ground",
       "view",
-      "strike",
+      "negation",
       "moment",
       "author",
       "policy",

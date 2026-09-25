@@ -468,7 +468,7 @@ async function doRevert(lesson) {
   if (restored.keptOrders.length > 0) {
     said.push(
       `${restored.keptOrders.length} record(s) of forgetting stayed — the receipts, and the ` +
-        `strikes that forgave them: an undo may take back your work, never a forgetting.`,
+        `negations that withdrew them: an undo may take back your work, never a forgetting.`,
     );
   }
   if (said.length > 0) {

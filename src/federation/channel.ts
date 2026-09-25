@@ -1696,7 +1696,7 @@ async function syncChannelCommit(
     // `await pull()` must refuse the sync's completion exactly as the stamp it replaced would
     // have — a stale handle never finishes quietly over a severed lineage.
     throw new Error(
-      `refused to stamp "${name}": it was severed and its channel record struck, so a ` +
+      `refused to stamp "${name}": it was severed and its channel record negated, so a ` +
         `stale handle cannot re-create it. Re-open it with \`loam federate open\` to receive on it ` +
         `again.`,
     );
@@ -2380,7 +2380,7 @@ async function stamp(
   // legitimately writes the first record while the old ones are struck, so it says so.
   if (!opening && channelLineageSevered(gw, status.name)) {
     throw new Error(
-      `refused to stamp "${status.name}": it was severed and its channel record struck, so a ` +
+      `refused to stamp "${status.name}": it was severed and its channel record negated, so a ` +
         `stale handle cannot re-create it. Re-open it with \`loam federate open\` to receive on it ` +
         `again.`,
     );
@@ -2662,7 +2662,7 @@ export async function curseChannelLawImpl(
   if (bindings.length === 0 && !alreadyCursed) {
     throw new Error(
       `curseChannelLaw refused: "${living}" is not served by this store, so there is nothing to ` +
-        `retire. Nothing was struck and nothing was recorded.`,
+        `retire. Nothing was negated and nothing was recorded.`,
     );
   }
 
@@ -2699,7 +2699,7 @@ export async function curseChannelLawImpl(
   }
   if (stillServes) {
     throw new Error(
-      `curseChannelLaw refused: struck ${bindings.length} binding(s) for "${living}" and the lens ` +
+      `curseChannelLaw refused: negated ${bindings.length} binding(s) for "${living}" and the lens ` +
         `is STILL SERVED. Something else binds that name — the curse is recorded, so the standing ` +
         `sync will not re-bless it, but this store is still answering the name now.`,
     );
