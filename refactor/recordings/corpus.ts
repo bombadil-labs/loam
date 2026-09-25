@@ -9,6 +9,7 @@ import {
   signClaims,
   type Claims,
   type Delta,
+  type IngestResult,
 } from "@bombadil/rhizomatic";
 
 const seed = (byte: string): string => byte.repeat(32);
@@ -68,11 +69,19 @@ export function strike(target: Delta, by: Who, timestamp: number): Delta {
   return signed(makeNegationClaims(KEY[by], timestamp, target.id), by);
 }
 
-/** A reactor holding `deltas`, ingested in list order. */
+/** A reactor holding `deltas`, ingested in list order. Raw ingest: no Loam door runs. */
 export function reactorOf(deltas: readonly Delta[]): Reactor {
+  return ingestTrace(deltas).reactor;
+}
+
+/** The substrate's verdict on each delta, in ingest order, with the reactor that results. */
+export function ingestTrace(deltas: readonly Delta[]): {
+  reactor: Reactor;
+  verdicts: [string, IngestResult][];
+} {
   const reactor = new Reactor();
-  for (const d of deltas) reactor.ingest(d);
-  return reactor;
+  const verdicts = deltas.map((d): [string, IngestResult] => [d.id, reactor.ingest(d)]);
+  return { reactor, verdicts };
 }
 
 /** Runs `read` over the corpus in forward and in reverse ingest order. A decision that depends on
@@ -86,12 +95,22 @@ export function bothOrders<T>(
   return canon(forward) === canon(reverse) ? forward : { forward, reverse };
 }
 
-/** Canonical JSON: sorted object keys, sets and maps as sorted arrays, keys replaced by names. */
+/** Canonical JSON: sorted object keys, sets and maps as sorted arrays, keys replaced by names.
+ * `undefined` prints as a tagged object, so it never reads the same as `null`. */
 export function canon(value: unknown): string {
   return JSON.stringify(normalize(value), null, 2) + "\n";
 }
 
+const UNDEFINED = { $: "undefined" };
+
 function normalize(value: unknown): unknown {
+  if (value === undefined) return UNDEFINED;
+  if (typeof value === "number" && !Number.isFinite(value)) {
+    throw new Error(`a recording cannot hold the non-finite number ${value}`);
+  }
+  if (typeof value === "bigint" || typeof value === "function" || typeof value === "symbol") {
+    throw new Error(`a recording cannot hold a ${typeof value}`);
+  }
   if (value instanceof Raw) return value.value;
   if (value instanceof Set) return [...value].map(normalize).sort(byCanon);
   if (value instanceof Map) {
@@ -106,7 +125,7 @@ function normalize(value: unknown): unknown {
         .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
     );
   }
-  return value === undefined ? null : value;
+  return value;
 }
 
 function byCanon(a: unknown, b: unknown): number {

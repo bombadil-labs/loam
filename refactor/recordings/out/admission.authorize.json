@@ -1,51 +1,95 @@
 {
   "shapes": {
     "data by admin": {
-      "constitutionalDefect": null,
-      "trustDefect": null
+      "constitutionalDefect": {
+        "$": "undefined"
+      },
+      "trustDefect": {
+        "$": "undefined"
+      }
     },
     "data by cycleA": {
-      "constitutionalDefect": null,
-      "trustDefect": null
+      "constitutionalDefect": {
+        "$": "undefined"
+      },
+      "trustDefect": {
+        "$": "undefined"
+      }
     },
     "data by cycleB": {
-      "constitutionalDefect": null,
-      "trustDefect": null
+      "constitutionalDefect": {
+        "$": "undefined"
+      },
+      "trustDefect": {
+        "$": "undefined"
+      }
     },
     "data by operator": {
-      "constitutionalDefect": null,
-      "trustDefect": null
+      "constitutionalDefect": {
+        "$": "undefined"
+      },
+      "trustDefect": {
+        "$": "undefined"
+      }
     },
     "data by peer": {
-      "constitutionalDefect": null,
-      "trustDefect": null
+      "constitutionalDefect": {
+        "$": "undefined"
+      },
+      "trustDefect": {
+        "$": "undefined"
+      }
     },
     "data by stranger": {
-      "constitutionalDefect": null,
-      "trustDefect": null
+      "constitutionalDefect": {
+        "$": "undefined"
+      },
+      "trustDefect": {
+        "$": "undefined"
+      }
     },
     "data by subadmin": {
-      "constitutionalDefect": null,
-      "trustDefect": null
+      "constitutionalDefect": {
+        "$": "undefined"
+      },
+      "trustDefect": {
+        "$": "undefined"
+      }
     },
     "data by writer": {
-      "constitutionalDefect": null,
-      "trustDefect": null
+      "constitutionalDefect": {
+        "$": "undefined"
+      },
+      "trustDefect": {
+        "$": "undefined"
+      }
     },
     "grant with unknown verb": {
       "constitutionalDefect": "a grant carries exactly one verb: \"write\", \"admin\", \"register\" or \"federate\"",
-      "trustDefect": null
+      "trustDefect": {
+        "$": "undefined"
+      }
     },
     "trust closed by stranger": {
-      "constitutionalDefect": null,
-      "trustDefect": null
+      "constitutionalDefect": {
+        "$": "undefined"
+      },
+      "trustDefect": {
+        "$": "undefined"
+      }
     },
     "trust roster by operator": {
-      "constitutionalDefect": null,
-      "trustDefect": null
+      "constitutionalDefect": {
+        "$": "undefined"
+      },
+      "trustDefect": {
+        "$": "undefined"
+      }
     },
     "trust with two modes": {
-      "constitutionalDefect": null,
+      "constitutionalDefect": {
+        "$": "undefined"
+      },
       "trustDefect": "a trust declaration carries exactly one mode: \"open\", \"roster\", or \"closed\""
     }
   },

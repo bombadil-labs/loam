@@ -1,5 +1,10 @@
 // Records Loam's grant, trust and admission decisions over one fixed corpus. A change in any
 // decision shows as a diff in `out/`. Re-record on purpose with `npx vitest run refactor -u`.
+//
+// Scope: the readers run over reactors built by RAW ingest, so no Loam door runs; malformed and
+// unauthorized grants sit in the ground on purpose. `admission.ingest` records the substrate's
+// verdict on each delta. This file is not an oracle for what a door admits: that needs a trace
+// through the gateway. Order dependence is checked for two permutations only, forward and reverse.
 
 import { describe, it } from "vitest";
 import type { Claims, Delta } from "@bombadil/rhizomatic";
@@ -22,7 +27,17 @@ import {
   type BindingCandidate,
   type BindingPolicyMode,
 } from "../../src/gateway/binding-policy.js";
-import { bothOrders, idsOf, KEY, record, signed, strike, WHO, type Who } from "./corpus.js";
+import {
+  bothOrders,
+  idsOf,
+  ingestTrace,
+  KEY,
+  record,
+  signed,
+  strike,
+  WHO,
+  type Who,
+} from "./corpus.js";
 
 const grant = (by: Who, subject: Who, verb: string, t: number, label: string, prefix?: string) =>
   signed(grantClaims(STORE_ENTITY, KEY[subject], verb as Verb, KEY[by], t, prefix), by, label);
@@ -78,6 +93,13 @@ const OPERATORS = { governed: KEY.operator, ungoverned: undefined } as const;
 describe("recordings: grants, trust and admission", () => {
   it("content addresses of the corpus", async () => {
     await record("admission.ids", idsOf(GRANTS));
+  });
+
+  it("the substrate's ingest verdicts, forward and reverse", async () => {
+    await record("admission.ingest", {
+      forward: ingestTrace(GRANTS).verdicts,
+      reverse: ingestTrace([...GRANTS].reverse()).verdicts,
+    });
   });
 
   it("holdsGrant for every author and verb", async () => {
