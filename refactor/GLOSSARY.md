@@ -26,7 +26,8 @@ that the refactor replaces them with plain words. This list is the one source.
 | the cut | erasure run | the second phase |
 | graveyard | erasure record | |
 | condemned | marked for erasure | |
-| forgiveness, forgiven | withdrawn | a struck tombstone; the id stays refused |
+| strike, struck, forgiveness, forgiven | negation, negated | a negated erasure: the id stays refused forever |
+| tombstone, tombstoned | erasure, erased | the erasure delta is "an erasure"; its target is "erased" |
 | leeway | permissions | what a container may do |
 | envelope | resource limits | Loam's pool limits; rhizomatic's storage-pack `envelope` is a different, literal name |
 | blessing, curse | approval, rejection | adoption of foreign rules |
