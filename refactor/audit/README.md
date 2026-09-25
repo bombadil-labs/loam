@@ -63,7 +63,7 @@ negation, and state lens fidelity modulo that closure.
 - It is the author's claim of time.
 
 No arrival time exists. As-of reads use author time, so a late, backdated delta rewrites the past.
-Two latest-wins readers leak arrival order on ties. No door checks for timestamps in the future.
+One latest-wins reader may leak arrival order on ties. No door checks for timestamps in the future.
 Loam imitates arrival with `loam.arrival` stamps, which are not atomic with ingest and need a
 crash-debt journal.
 
@@ -147,8 +147,8 @@ These are Loam bugs whatever vNext decides. Recordings pin the first two.
 
 - `holdsGrant` and `grantsHeldBy` disagree. `holdsGrant` lets an admin-minted `register` grant
   through, and it answers `federate` without looking at scope (`out/admission.holdsGrant.json`).
-- Two latest-wins readers keep the first record on a timestamp tie (`attention.ts:119`,
-  `channel.ts:529`).
+- The channel status reader keeps the first record on a timestamp tie (`channel.ts:529`). It is
+  not recorded yet.
 - `nextTimestamp` is not seeded from the store, so order can go backwards after a restart.
 - The federation door skips half the shape checks.
 - `trustRosterPred` ignores the mode, and nothing in `src/` calls it.

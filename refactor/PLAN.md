@@ -125,7 +125,7 @@ Loam changes only after a prerelease exists, except for these:
   shows the defect today (on #573).
 - **Census ratchet.** A CI check that fails when a coupling count rises: the large import cycle,
   `options.seed` reads, `reactor.snapshot()` calls, clock reads in core code.
-- **Defects.** Seven Loam bugs are listed in the audit (theme 10). Fix a bug now only if no step
+- **Defects.** The Loam bugs are listed in the audit (theme 10). Fix a bug now only if no step
   above replaces its code. Otherwise its recording pins it, and the step fixes it. One exception:
   the point reads that serve a tombstoned delta whose bytes survived. Loam's doors can serve
   those today, so Loam fences them now and does not wait for step 9.
