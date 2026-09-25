@@ -5172,7 +5172,7 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
   return 0;
 }
 
-// --- `loam erasures list | show <id>` ----------------------------------------------------------
+// --- `loam tombstones list | show <id>` ----------------------------------------------------------
 
 // WHAT A STANDING RECEIPT IS WORTH, in one cell. An erasure is a PROMISE: §11 lands it, then
 // purges, then reports a replica that refused — so a receipt can stand over bytes that are still on
@@ -5230,7 +5230,7 @@ function wantedRows(
  * Either address answers, and a PREFIX of either does too.
  *
  * The listing abbreviates every id to twelve characters, and its own closing line tells the
- * operator to run `loam erasures show <id>`. Matching only in full made that instruction
+ * operator to run `loam tombstones show <id>`. Matching only in full made that instruction
  * unfollowable from the screen that prints it — the same shape as a refusal naming a path its own
  * flag will not take. An ambiguous prefix is refused rather than guessed.
  */

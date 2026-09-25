@@ -140,7 +140,7 @@ export function erasureTarget(claims: Claims): string | undefined {
 }
 
 /** The slate an erasure was minted BY, when it was one member of a cut (SPEC §29.6's join). */
-export function tombstoneSlate(claims: Claims): string | undefined {
+export function erasureSlate(claims: Claims): string | undefined {
   return erasureParts(claims).slate;
 }
 

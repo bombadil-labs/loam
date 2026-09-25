@@ -18,7 +18,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import type { StoreBackend } from "../../src/store/backend.js";
 import { containerClaims } from "../../src/gateway/container.js";
-import { standingErasures, tombstoneSlate, erasureTarget } from "../../src/gateway/erase.js";
+import { standingErasures, erasureSlate, erasureTarget } from "../../src/gateway/erase.js";
 import { graveyardCompleteness } from "../../src/gateway/slate.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
@@ -293,7 +293,7 @@ describe("T64 criterion 19 — a member erased mid-window: the cut COMPLETES, th
     // The other three carry the `slate` join; the hand-erased one cannot (content addressing forbids
     // adding a pointer to an existing delta — H4), which is exactly why the exception is ENUMERATED.
     const joined = standingErasures(gw.reactor, OP)
-      .filter((t) => tombstoneSlate(t.claims) === stood.container)
+      .filter((t) => erasureSlate(t.claims) === stood.container)
       .map((t) => erasureTarget(t.claims))
       .sort();
     expect(joined).toEqual([members[0]!.id, members[2]!.id, members[3]!.id].sort());

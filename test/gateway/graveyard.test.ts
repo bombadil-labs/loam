@@ -18,7 +18,7 @@
 // exception cannot hide inside the clean case.
 
 import { describe, expect, it } from "vitest";
-import { standingErasures, tombstoneSlate, erasureTarget } from "../../src/gateway/erase.js";
+import { standingErasures, erasureSlate, erasureTarget } from "../../src/gateway/erase.js";
 import { graveyardCompleteness, readFrozenTerm } from "../../src/gateway/slate.js";
 import { FERN, observed } from "../spike/garden.js";
 import { BEFORE_DEADLINE, OP, OP_SEED, bootSlateStore, standSlate } from "./slating.js";
@@ -81,7 +81,7 @@ describe("T64 criterion 12 — the graveyard is durable, joinable, and its compl
 
     // Every erasure carries its `slate` join.
     const joined = standingErasures(gw.reactor, OP).filter(
-      (t) => tombstoneSlate(t.claims) === stood.container,
+      (t) => erasureSlate(t.claims) === stood.container,
     );
     expect(joined.map((t) => erasureTarget(t.claims)).sort()).toEqual(
       members.map((m) => m.id).sort(),

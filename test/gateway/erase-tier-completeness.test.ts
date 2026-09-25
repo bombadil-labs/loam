@@ -274,7 +274,7 @@ describe("the retry bypass is for an OUTSTANDING erasure, not for any tombstone"
     await expect(gateway.erase(fact.id, { reason: "the subject asked" })).resolves.toMatchObject({
       erased: fact.id,
     });
-    // Nothing is left anywhere: the erasure survives, but the erasure does not.
+    // Nothing is left anywhere: the erasure record stands, but the byte removal is complete.
     await expect(gateway.erase(fact.id)).rejects.toThrow(/nothing to erase/);
     await gateway.close();
   });
