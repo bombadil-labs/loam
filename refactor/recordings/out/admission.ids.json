@@ -1,0 +1,15 @@
+{
+  "admin→admin:register": "1e2006acb44e930c45679dab8cd9a924b2dd583303d5759c3261013ae1e85f35a0cc",
+  "admin→subadmin:admin": "1e2074452b45f1dfa41ba17a8f50d46fe19d72a4ccfefd2ec40cfa656bd33b3c3a16",
+  "cycleA→cycleB:admin": "1e20c5a3fcaeb98efece894d7f9c5abcfa64ee801df9b9bb40b3e9c35b27da483727",
+  "cycleB→cycleA:admin": "1e20b0d6df3da642ebcf2d25c14f5050ba26f0937a4c2eedd755d1350cd8e9ba8cf1",
+  "op→admin:admin": "1e20923e0cb982832dc3828aac0cee8848953d0950a11bde381a01247cda3b0b4061",
+  "op→cycleA:write": "1e209f497a2c3d6c8fae854e40328dc2147d66d99cd5e765a0ad4d250f0e223b6e55",
+  "op→peer:fly(malformed)": "1e203f38b777ddc3d11af4f69281b2bd36df5fa85e77c087be93e98df42d7dad1030",
+  "op→peer:write": "1e20f846aeb5b00a8fcaca7390f17eb24ea8e88b1cb1519fa0322298174056c49a76",
+  "op→writer:federate": "1e207f77f3146a7e04359d9bd5afe1519cc1c5ce73ae3bf600aa0f6c5e9cdcbc41eb",
+  "op→writer:register": "1e20cbcb7419412da10fdb4f0a716031926dbcbdbcced224c34c3fc70913593b3697",
+  "stranger→peer:write": "1e201958a79504dac064b3c850c5b6c23649a7b9e103a854464e2022cb068a67f842",
+  "stranger→stranger:admin": "1e20085a9b6e34f13fff8a80aa11f76dd313fe2dc1e830348f1cd4975fae903c740a",
+  "subadmin→writer:write": "1e20e90d45624377e717dea4741726f3306c477706e464ce59bfd46fe9a476155a92"
+}

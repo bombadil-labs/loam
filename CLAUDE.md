@@ -1,5 +1,15 @@
 # Loam — how we work
 
+## The refactor runs outside ADLC (Myk, 2026-09-25)
+
+**Read `refactor/README.md` first when you work on the refactor.** The refactor builds a new
+version of rhizomatic as a monorepo of tier libraries, with Loam as its testbed. Sol (GPT-6-Sol)
+owns the rhizomatic repo; Claude owns this one and never edits rhizomatic. For Loam's refactor
+work, Myk suspended ADLC: ignore its gates, the rail freeze, the gate ledger and the ticket
+ceremony. Frozen tests may change. The work is greenfield: wire changes ship no migration.
+`npm run check` stays the green bar. Everything below still describes how Loam worked before the
+refactor; where it conflicts with `refactor/README.md`, the README wins for refactor work.
+
 Loam is a general database built on [rhizomatic](https://github.com/bombadil-labs/rhizomatic); the
 design is in **[SPEC.md](SPEC.md)** and the usage in **[README.md](README.md)** — read them before
 writing code. **Get up to speed on what Loam is and how it works from SPEC.md.** This file is the

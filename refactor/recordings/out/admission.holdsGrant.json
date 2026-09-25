@@ -1,0 +1,102 @@
+{
+  "governed": {
+    "admin": {
+      "admin": true,
+      "federate": true,
+      "register": true,
+      "write": true
+    },
+    "cycleA": {
+      "admin": false,
+      "federate": false,
+      "register": false,
+      "write": true
+    },
+    "cycleB": {
+      "admin": false,
+      "federate": false,
+      "register": false,
+      "write": false
+    },
+    "operator": {
+      "admin": false,
+      "federate": false,
+      "register": false,
+      "write": false
+    },
+    "peer": {
+      "admin": false,
+      "federate": false,
+      "register": false,
+      "write": false
+    },
+    "stranger": {
+      "admin": false,
+      "federate": false,
+      "register": false,
+      "write": false
+    },
+    "subadmin": {
+      "admin": true,
+      "federate": true,
+      "register": false,
+      "write": true
+    },
+    "writer": {
+      "admin": false,
+      "federate": true,
+      "register": true,
+      "write": true
+    }
+  },
+  "ungoverned": {
+    "admin": {
+      "admin": false,
+      "federate": false,
+      "register": true,
+      "write": false
+    },
+    "cycleA": {
+      "admin": true,
+      "federate": true,
+      "register": false,
+      "write": true
+    },
+    "cycleB": {
+      "admin": true,
+      "federate": true,
+      "register": false,
+      "write": true
+    },
+    "operator": {
+      "admin": false,
+      "federate": false,
+      "register": false,
+      "write": false
+    },
+    "peer": {
+      "admin": false,
+      "federate": false,
+      "register": false,
+      "write": true
+    },
+    "stranger": {
+      "admin": true,
+      "federate": true,
+      "register": false,
+      "write": true
+    },
+    "subadmin": {
+      "admin": true,
+      "federate": true,
+      "register": false,
+      "write": true
+    },
+    "writer": {
+      "admin": false,
+      "federate": true,
+      "register": true,
+      "write": true
+    }
+  }
+}

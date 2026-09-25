@@ -1,0 +1,215 @@
+{
+  "governed": {
+    "#admin→admin:register": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "#admin→subadmin:admin": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "#cycleA→cycleB:admin": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "#cycleB→cycleA:admin": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "#op→admin:admin": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "#op→cycleA:write": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "#op→peer:fly(malformed)": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "#op→peer:write": {
+      "honoredStrike": {
+        "id": "1e203c9180ade8cf93197fc3063cdfdbb3d6dc25ebc510e56e2350a27fa47e0dc5bc",
+        "timestamp": 22
+      },
+      "struck": true
+    },
+    "#op→writer:federate": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "#op→writer:register": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "#stranger→peer:write": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "#stranger→stranger:admin": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "#subadmin→writer:write": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "1e20139b6c6046bb2373054e4e39658876b8935498e899a1287caa5fbaaa467f9abc": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "1e20290cfaec7b3d3f2c6b9a6faefb87b9b4703ec6d979f1e40f118a93a9789b6b26": {
+      "honoredStrike": {
+        "id": "1e20139b6c6046bb2373054e4e39658876b8935498e899a1287caa5fbaaa467f9abc",
+        "timestamp": 26
+      },
+      "struck": true
+    },
+    "1e203c9180ade8cf93197fc3063cdfdbb3d6dc25ebc510e56e2350a27fa47e0dc5bc": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "1e20fb0db143b7998f0b70228ecf924bd29201d2637b0d216a7e6a33917553a74415": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    }
+  },
+  "ungoverned": {
+    "#admin→admin:register": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "#admin→subadmin:admin": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "#cycleA→cycleB:admin": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "#cycleB→cycleA:admin": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "#op→admin:admin": {
+      "honoredStrike": {
+        "id": "1e20fb0db143b7998f0b70228ecf924bd29201d2637b0d216a7e6a33917553a74415",
+        "timestamp": 23
+      },
+      "struck": true
+    },
+    "#op→cycleA:write": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "#op→peer:fly(malformed)": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "#op→peer:write": {
+      "honoredStrike": {
+        "id": "1e203c9180ade8cf93197fc3063cdfdbb3d6dc25ebc510e56e2350a27fa47e0dc5bc",
+        "timestamp": 22
+      },
+      "struck": true
+    },
+    "#op→writer:federate": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "#op→writer:register": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "#stranger→peer:write": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "#stranger→stranger:admin": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "#subadmin→writer:write": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "1e20139b6c6046bb2373054e4e39658876b8935498e899a1287caa5fbaaa467f9abc": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "1e20290cfaec7b3d3f2c6b9a6faefb87b9b4703ec6d979f1e40f118a93a9789b6b26": {
+      "honoredStrike": {
+        "id": "1e20139b6c6046bb2373054e4e39658876b8935498e899a1287caa5fbaaa467f9abc",
+        "timestamp": 26
+      },
+      "struck": true
+    },
+    "1e203c9180ade8cf93197fc3063cdfdbb3d6dc25ebc510e56e2350a27fa47e0dc5bc": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "1e20fb0db143b7998f0b70228ecf924bd29201d2637b0d216a7e6a33917553a74415": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    }
+  }
+}

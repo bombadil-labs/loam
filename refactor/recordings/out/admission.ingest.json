@@ -1,0 +1,210 @@
+{
+  "forward": [
+    [
+      "#op→admin:admin",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#admin→subadmin:admin",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#subadmin→writer:write",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#stranger→stranger:admin",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#stranger→peer:write",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#cycleA→cycleB:admin",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#cycleB→cycleA:admin",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#admin→admin:register",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#op→writer:register",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#op→writer:federate",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#op→peer:fly(malformed)",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#op→peer:write",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "1e203c9180ade8cf93197fc3063cdfdbb3d6dc25ebc510e56e2350a27fa47e0dc5bc",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "1e20fb0db143b7998f0b70228ecf924bd29201d2637b0d216a7e6a33917553a74415",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#op→cycleA:write",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "1e20290cfaec7b3d3f2c6b9a6faefb87b9b4703ec6d979f1e40f118a93a9789b6b26",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "1e20139b6c6046bb2373054e4e39658876b8935498e899a1287caa5fbaaa467f9abc",
+      {
+        "status": "accepted"
+      }
+    ]
+  ],
+  "reverse": [
+    [
+      "1e20139b6c6046bb2373054e4e39658876b8935498e899a1287caa5fbaaa467f9abc",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "1e20290cfaec7b3d3f2c6b9a6faefb87b9b4703ec6d979f1e40f118a93a9789b6b26",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#op→cycleA:write",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "1e20fb0db143b7998f0b70228ecf924bd29201d2637b0d216a7e6a33917553a74415",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "1e203c9180ade8cf93197fc3063cdfdbb3d6dc25ebc510e56e2350a27fa47e0dc5bc",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#op→peer:write",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#op→peer:fly(malformed)",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#op→writer:federate",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#op→writer:register",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#admin→admin:register",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#cycleB→cycleA:admin",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#cycleA→cycleB:admin",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#stranger→peer:write",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#stranger→stranger:admin",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#subadmin→writer:write",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#admin→subadmin:admin",
+      {
+        "status": "accepted"
+      }
+    ],
+    [
+      "#op→admin:admin",
+      {
+        "status": "accepted"
+      }
+    ]
+  ]
+}

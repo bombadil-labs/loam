@@ -1,0 +1,99 @@
+{
+  "empty": {
+    "governed": {
+      "mode": "open",
+      "roster": []
+    },
+    "ungoverned": {
+      "mode": "open",
+      "roster": []
+    }
+  },
+  "latest closed": {
+    "governed": {
+      "mode": "closed",
+      "roster": [
+        "@peer",
+        "@writer"
+      ]
+    },
+    "ungoverned": {
+      "mode": "open",
+      "roster": []
+    }
+  },
+  "latest closed, struck": {
+    "governed": {
+      "mode": "roster",
+      "roster": [
+        "@peer",
+        "@writer"
+      ]
+    },
+    "ungoverned": {
+      "mode": "open",
+      "roster": []
+    }
+  },
+  "one roster": {
+    "governed": {
+      "mode": "roster",
+      "roster": [
+        "@peer"
+      ]
+    },
+    "ungoverned": {
+      "mode": "open",
+      "roster": []
+    }
+  },
+  "same-timestamp tie": {
+    "governed": {
+      "mode": "open",
+      "roster": [
+        "@peer"
+      ]
+    },
+    "ungoverned": {
+      "mode": "open",
+      "roster": []
+    }
+  },
+  "stranger declares closed": {
+    "governed": {
+      "mode": "roster",
+      "roster": [
+        "@peer"
+      ]
+    },
+    "ungoverned": {
+      "mode": "open",
+      "roster": []
+    }
+  },
+  "stranger strikes the roster": {
+    "governed": {
+      "mode": "roster",
+      "roster": [
+        "@peer"
+      ]
+    },
+    "ungoverned": {
+      "mode": "open",
+      "roster": []
+    }
+  },
+  "two rosters union": {
+    "governed": {
+      "mode": "roster",
+      "roster": [
+        "@peer",
+        "@writer"
+      ]
+    },
+    "ungoverned": {
+      "mode": "open",
+      "roster": []
+    }
+  }
+}

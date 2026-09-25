@@ -72,6 +72,11 @@ export default tseslint.config(
       },
     },
   },
+  // The refactor's census tools run under Node too: `node refactor/tools/<script>.mjs`.
+  {
+    files: ["refactor/**/*.mjs"],
+    languageOptions: { globals: { console: "readonly", process: "readonly" } },
+  },
   // Hazard H6 backstop. `lensOf`/`programOf` brand the two names so `LensName === ProgramName` is a
   // compile error — but rhizomatic types `hyperschema.name` as bare `string`, so a raw
   // `r.hyperschema.name === <aLensName>` slips past the checker (string vs a brand is allowed). This
