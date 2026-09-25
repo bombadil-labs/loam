@@ -32,9 +32,16 @@ for (const [name, now] of Object.entries(counts)) {
   else if (now < was) failures.push(`${name} fell from ${was} to ${now}. Lock it in: --write.`);
 }
 
+const git = (...argv) =>
+  execFileSync("git", argv, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+
 let baseRef = option(args, "--base");
+if (args.includes("--base") && (baseRef === undefined || baseRef.startsWith("--"))) {
+  failures.push("--base needs a git ref.");
+  baseRef = undefined;
+}
 const ciBase = process.env["GITHUB_BASE_REF"];
-if (baseRef === undefined && ciBase) {
+if (!args.includes("--base") && ciBase) {
   try {
     execFileSync("git", ["fetch", "--depth=1", "origin", ciBase], { stdio: "ignore" });
     baseRef = "FETCH_HEAD";
@@ -43,16 +50,30 @@ if (baseRef === undefined && ciBase) {
   }
 }
 if (baseRef !== undefined) {
+  // An unreadable base fails. Only a base commit that genuinely lacks the file passes, because
+  // that is the change that introduces the baseline.
   let base;
+  let commit;
   try {
-    base = JSON.parse(
-      execFileSync("git", ["show", `${baseRef}:${RELATIVE}`], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-      }),
-    );
+    commit = git("rev-parse", "--verify", `${baseRef}^{commit}`).trim();
   } catch {
-    console.log(`census: ${baseRef} has no ${RELATIVE}; this change introduces the baseline`);
+    failures.push(`the base ${baseRef} is not a commit.`);
+  }
+  if (commit !== undefined) {
+    let present = true;
+    try {
+      git("cat-file", "-e", `${commit}:${RELATIVE}`);
+    } catch {
+      present = false;
+      console.log(`census: ${baseRef} has no ${RELATIVE}; this change introduces the baseline`);
+    }
+    if (present) {
+      try {
+        base = JSON.parse(git("show", `${commit}:${RELATIVE}`));
+      } catch {
+        failures.push(`the base's ${RELATIVE} cannot be read.`);
+      }
+    }
   }
   for (const [name, limit] of Object.entries(base ?? {})) {
     if ((baseline[name] ?? 0) > limit) {
