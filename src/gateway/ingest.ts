@@ -295,7 +295,8 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
   }
   // Every member is valid now, so a tombstone in the batch binds, and its target in the same batch
   // is refused. Append is atomic, so the whole batch is refused.
-  const erasesTombstone = batch.find((d) => tombstonesOfTombstones(batch).has(d.id));
+  const tombstoneErasers = tombstonesOfTombstones(batch);
+  const erasesTombstone = batch.find((d) => tombstoneErasers.has(d.id));
   if (erasesTombstone !== undefined) {
     throw new Error(
       `append rejected: tombstone ${erasesTombstone.id} erases another tombstone in the same ` +
