@@ -20,6 +20,8 @@ Loam treats the author's `timestamp` as three different things. It is a claim of
 - **vNext candidate:** Expose a resolve-tier "latest record per key" primitive with the normative tiebreak, so the "standing record, superseded in place" pattern stops being re-implemented. Otherwise this is a Loam bug fix.
 - **Class:** Loam policy (a bug), with a candidate in the resolve tier. **Tier:** resolve. **Confidence:** CONFIRMED.
 
+- **Recording shows** (`recordings/out/time.latest-tie.json`): `latestByKey` reads through the reactor's by-target index, so its tie winner is the same in both ingest orders. It breaks ties by index order, not by `lexById`. The arrival-order claim above holds for the channel reader, which walks the snapshot, and is not recorded yet.
+
 ### 4. As-of reads use author time only, so they cannot answer "what did this store hold at T"
 - **Loam does:** `groundAsOfImpl` filters the whole snapshot with `claims.timestamp <= asOf` (`src/gateway/reads.ts:71-73`). `spec/26-as-of-reads.md` admits that timestamps are "testimony, gameable." Two effects follow. A backdated delta that arrives late rewrites past as-of answers, so the same as-of query gives different answers on different days. A future-dated delta is missing from every present-day as-of read. The filter is also an O(N) walk in JS, although rhizomatic has `match(timestamp, lte, T)` (SPEC-2 §79).
 - **Substrate gap:** SPEC-1 §6 gives only claimed time. Arrival time (c) exists only as an optional annotation, and no tier indexes it.
