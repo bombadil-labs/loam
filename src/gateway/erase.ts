@@ -194,15 +194,10 @@ export function eraseDefect(
   return undefined;
 }
 
-// The ids this ground refuses to hold: every surviving lawful tombstone's target. Binding
-// tombstones are the operator's, and self-erasures (author === spoken-by — the door verified
-// the claim while the target existed). A struck tombstone (lawful negation) is forgiveness:
-// the id may return.
-// The ids this ground refuses to hold: the target of every surviving, unstruck, OPERATOR-signed
-// tombstone. Only the operator's tombstones bind — the same authority the door enforces — so an
-// ungoverned store (no operator) honors no erasure, and a non-operator tombstone that somehow
-// sits in the ground binds nothing. A struck tombstone (lawful negation) is forgiveness: the id
-// may return.
+// The targets of every STANDING tombstone: surviving, unstruck and operator-signed. Only the
+// operator's tombstones bind, so an ungoverned store honors no erasure. A struck tombstone is
+// forgiveness of the record: it leaves this set, but its id stays in `refusedIds`, which is what
+// the write and read paths consult.
 export function readTombstones(reactor: Reactor, operator: string | undefined): Set<string> {
   const dead = new Set<string>();
   for (const tomb of survivingTombstones(reactor, operator)) {
@@ -211,13 +206,56 @@ export function readTombstones(reactor: Reactor, operator: string | undefined): 
   return dead;
 }
 
+// The ids this store refuses FOREVER: the target of every tombstone that ever bound here, whether
+// or not it was later struck. An erasure is eternal (Myk, 2026-09-25): striking a tombstone retracts
+// the record, and the id still never returns. Separate from `survivingTombstones`, which answers "is
+// this tombstone standing testimony now" for receipts, the ledger and as-of reads.
+//
+// DERIVED, NOT PERSISTED, and that rests on one premise: a tombstone can never be erased (§11).
+// If that ever changes, this list must be kept in its own store, or an erasure can be undone.
+//
+// `batch` adds the lawful tombstones arriving in the same ingest, so a batch that carries both an
+// order and its target cannot admit the target. A batch tombstone binds when the door would accept
+// it; its `spoken-by` is checked against the target in the batch when the store does not hold it.
+export function refusedIds(
+  reactor: Reactor,
+  operator: string | undefined,
+  batch: readonly Delta[] = [],
+): Set<string> {
+  const refused = new Set<string>();
+  for (const tomb of boundTombstones(reactor, operator, false)) {
+    refused.add(tombstoneParts(tomb.claims).targetId!);
+  }
+  if (operator === undefined) return refused;
+  const inBatch = new Map(batch.map((d) => [d.id, d]));
+  for (const d of batch) {
+    if (!isTombstone(d.claims) || inLocalContext(d, LOCAL_CONTROL)) continue;
+    if (eraseDefect(d, reactor, operator) !== undefined) continue;
+    const { targetId, spokenBy } = tombstoneParts(d.claims);
+    const target = inBatch.get(targetId!);
+    if (target !== undefined && target.claims.author !== spokenBy) continue;
+    refused.add(targetId!);
+  }
+  return refused;
+}
+
 // The surviving, lawful, operator-signed tombstones — the record of what this ground has
 // forgotten (that it forgot, never what). One place computes the set both readTombstones (the
 // dead ids) and forgottenSince (the as-of annotation) draw from, so the author-confirmation and
 // forgiveness rules cannot drift between them.
 export function survivingTombstones(reactor: Reactor, operator: string | undefined): Delta[] {
+  return boundTombstones(reactor, operator, true);
+}
+
+// The operator's well-shaped tombstones. With `honorStrikes`, a struck ordinary tombstone is left
+// out; without it, every tombstone that ever bound is in.
+function boundTombstones(
+  reactor: Reactor,
+  operator: string | undefined,
+  honorStrikes: boolean,
+): Delta[] {
   if (operator === undefined) return []; // an ungoverned store honors no erasure at all
-  const negated = lawfulNegated(reactor, operator);
+  const negated = honorStrikes ? lawfulNegated(reactor, operator) : () => false;
   const out: Delta[] = [];
   for (const delta of reactor.snapshot()) {
     if (!isTombstone(delta.claims)) continue;
@@ -649,7 +687,7 @@ export interface TombstoneReceipt {
  * so no surface can print a receipt the admission door does not honour, or hide one it does.
  *
  * `inert` is the other half, and it is not decoration. A struck tombstone is FORGIVENESS: the
- * erasure order is withdrawn and the id may return, so the receipt leaves the surviving set. On a
+ * record is withdrawn (the id stays refused), so the receipt leaves the surviving set. On a
  * screen that merely drops the row, an omission and a revocation look identical — and this listing
  * is read on the morning that difference decides a case. So the count is disclosed.
  *
@@ -936,8 +974,8 @@ export async function eraseImpl(
   // Retry anchors on the TOMBSTONE, read before the `nothing to erase` guard: a partial attempt
   // can leave the target gone from the reactor while a tier still holds the bytes, and a re-run
   // must not mint a second tombstone (a fresh timestamp is a new content address).
-  // Anchor only on a tombstone that is SURVIVING (a struck one is forgiveness — the id may
-  // return) and that ERASES this id (a pointer merely mentioning it is not an erasure of it).
+  // Anchor only on a tombstone that is SURVIVING (a struck one is a withdrawn record, and the
+  // id stays refused) and that ERASES this id (a pointer merely mentioning it is not an erasure of it).
   // `survivingTombstones` owns both rules, so the anchor and the dead set cannot drift.
   const already = survivingTombstones(gw.reactor, gw.operatorAuthor).find(
     (d) => tombstoneParts(d.claims).targetId === id,

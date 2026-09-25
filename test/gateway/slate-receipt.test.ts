@@ -342,8 +342,8 @@ describe("T64 criterion 22 — the receipt's byte verdicts are RE-PROBED, never 
   });
 });
 
-describe("T64 criterion 23 — forgiveness, re-federated: the store can still see the id came back", () => {
-  it("reports FORGIVEN with its strike id AND present again, and health().forgiven counts it", async () => {
+describe("forgiveness after a cut: the record is retracted and the id stays refused", () => {
+  it("reports FORGIVEN with its strike id, refuses the re-sent id, and health().forgiven counts it", async () => {
     const gw = await bootSlateStore();
     const member = observed(FERN, "height", 30, 1000, OP_SEED);
     const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
@@ -354,26 +354,27 @@ describe("T64 criterion 23 — forgiveness, re-federated: the store can still se
 
     const forgiveness = strike(tombstone, 80_000);
     await gw.append([forgiveness]);
-    // `federateImpl` now ADMITS the id, because it is no longer dead — that is lawful, and it is
-    // exactly what makes the third fact necessary.
+    // An erasure is eternal: the id stays refused even after the strike, past any admit override.
     const fed = await gw.federate([member], { admit: () => true });
-    expect(fed.accepted).toBe(1);
+    expect(fed.accepted).toBe(0);
 
-    // OBJECT LEVEL: the id resolves LIVE through a Schema again.
+    // OBJECT LEVEL: the id stays absent through a Schema; the bystander stays live.
     const res = await gw.query(`{ plant(entity: "${FERN}") { height tag } }`);
-    expect((res.data as { plant: { height: number } }).plant.height).toBe(30);
+    expect((res.data as { plant: { height: number | null; tag: string[] } }).plant).toEqual({
+      height: null,
+      tag: ["shade"],
+    });
 
     const health = await gw.health(BEFORE_DEADLINE);
-    // THE HOLE, STATED: striking the tombstone removed the id from `readTombstones`, so it left
-    // `health().erasure.promised` ENTIRELY and the byte debt reads clean. Nothing in §11's instrument
-    // can see a forgiven-and-returned id.
+    // Striking the tombstone removed the id from `readTombstones`, so it left
+    // `health().erasure.promised` and the byte debt reads clean.
     expect(health.erasure.promised).toBe(0);
     expect(health.erasure.outstanding).toEqual([]);
     // AND THE SECTION THAT CLOSES IT — sourced from the graveyard's frozen `version` rather than from
     // `readTombstones`, which is the only durable list of ids the store ever promised to forget.
     expect(health.forgiven).toEqual({
       count: 1,
-      present: 1,
+      present: 0,
       ids: [member.id],
       unreadable: [],
     });
@@ -382,13 +383,11 @@ describe("T64 criterion 23 — forgiveness, re-federated: the store can still se
 
     const receipt = await gw.receipt(report.graveyard, { now: BEFORE_DEADLINE + 1 });
     const row = receipt.members[0]!;
-    // "Forgiven at <strike id>, and present again as of <issue time>" is the sentence. A receipt that
-    // said only FORGIVEN would be technically true and communicate the opposite of what happened,
-    // because the reader wants to know whether the data is THERE.
+    // The receipt still says FORGIVEN, and that the data is not there.
     expect(row.forgiven).toBe(forgiveness.id);
     expect(row.tombstone).toBeUndefined();
-    expect(row.presentAgain).toBe(true);
-    expect(row.tiers.find((v) => v.tier === "primary")!.holds).toBe(true);
+    expect(row.presentAgain).toBe(false);
+    expect(row.tiers.find((v) => v.tier === "primary")!.holds).toBe(false);
     // The graveyard's arithmetic reports the forgiveness rather than reading as an incomplete cut:
     // it records an event that HAPPENED, and forgiveness is a later event.
     const check = graveyardCompleteness(gw.reactor, OP, report.graveyard);

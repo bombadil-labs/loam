@@ -223,9 +223,10 @@ describe("erase is complete only when every TIER is clean", () => {
   });
 });
 
-// The retry anchor is a SURVIVING tombstone, and "surviving" is the whole of the rule. A struck
-// tombstone is forgiveness — `readTombstones` drops it and the id may return — so reusing one as an
-// anchor would purge the bytes while the dead set says the record was pardoned.
+// The retry anchor is a SURVIVING tombstone. A struck tombstone is no longer standing testimony,
+// and the id stays refused forever, so a forgiven id can never return through a door.
+// NOT COVERED: an erase that anchors on a struck tombstone while the bytes are back. No door can
+// bring them back now; a tier that kept them unasked would reach it, and no test builds that.
 describe("the retry anchor honors forgiveness", () => {
   const strike = async (gateway: Gateway, targetId: string): Promise<void> => {
     const tomb = [...gateway.reactor.snapshot()].find(
@@ -238,25 +239,14 @@ describe("the retry anchor honors forgiveness", () => {
     await gateway.append([signClaims(makeNegationClaims(OPERATOR, 9000, tomb!.id), OP_SEED)]);
   };
 
-  it("erasing again AFTER forgiveness mints a SECOND tombstone rather than reusing the struck one", async () => {
-    const primary = new MemoryBackend();
-    const { gateway, fact, tombstones } = await groveOn(
-      new MirrorBackend(primary, new MemoryBackend()),
+  it("after forgiveness the id stays refused at append", async () => {
+    const { gateway, fact } = await groveOn(
+      new MirrorBackend(new MemoryBackend(), new MemoryBackend()),
     );
     await gateway.erase(fact.id, { reason: "the subject asked" });
-    expect(tombstones()).toBe(1);
-
-    await strike(gateway, fact.id); // forgiveness: the id may return
-    expect(readTombstones(gateway.reactor, OPERATOR).has(fact.id)).toBe(false);
-    await gateway.append([fact]); // ...and it does
-
-    // A second request. Anchoring on the STRUCK tombstone would purge the bytes and append
-    // nothing, leaving the dead set saying `fact` was pardoned while the data is in fact gone:
-    // admission would re-admit it and `forgottenSince` would confess nothing.
-    await gateway.erase(fact.id, { reason: "asked again, after the pardon" });
-    expect(tombstones()).toBe(2);
-    expect(readTombstones(gateway.reactor, OPERATOR).has(fact.id)).toBe(true);
-    expect(await primary.holds(fact.id)).toBe(false);
+    await strike(gateway, fact.id);
+    expect(readTombstones(gateway.reactor, OPERATOR).has(fact.id)).toBe(false); // not standing
+    await expect(gateway.append([fact])).rejects.toThrow(/erased/); // and still refused
     await gateway.close();
   });
 
@@ -329,28 +319,6 @@ describe("the retry bypass is for an OUTSTANDING erasure, not for any tombstone"
         ),
       ).toBe(false);
     }
-    await gateway.close();
-  });
-
-  it("...but a STRUCK tombstone from an earlier, forgiven erasure IS a citation", async () => {
-    // The exclusion is by IDENTITY (the one tombstone this cut mints or reuses), not by shape. A
-    // struck tombstone from a pardoned earlier erasure is a surviving delta dangling at the hole —
-    // exactly what the manifest exists to enumerate for a cascading caller — and a shape filter
-    // would silently drop it from the audit of what the cut leaves behind.
-    const { gateway, fact } = await groveOn(
-      new MirrorBackend(new MemoryBackend(), new MemoryBackend()),
-    );
-    await gateway.erase(fact.id, { reason: "first request" });
-    const struck = [...gateway.reactor.snapshot()].find((d) => isTombstone(d.claims))!;
-    await gateway.append([signClaims(makeNegationClaims(OPERATOR, 9000, struck.id), OP_SEED)]);
-    await gateway.append([fact]); // forgiven, and returned
-
-    const second = await gateway.erase(fact.id, { reason: "second request" });
-    expect(second.citations).toContain(struck.id); // the pardoned cut is a hole the new cut leaves
-    const fresh = [...gateway.reactor.snapshot()].find(
-      (d) => isTombstone(d.claims) && d.id !== struck.id,
-    )!;
-    expect(second.citations).not.toContain(fresh.id); // the cut itself never is
     await gateway.close();
   });
 });

@@ -344,8 +344,8 @@ describe("§11 — erased law stops being SERVED, not just stops being ground", 
   });
 });
 
-describe("§11 — forgiveness returns a member to the live frame", () => {
-  it("a struck tombstone restores what it condemned, on the very next pulse", async () => {
+describe("§11 — a struck tombstone does not return a member to the live frame", () => {
+  it("the member stays withheld after its tombstone is struck", async () => {
     const { gw } = await keeperStore();
     const held = garden[1]!;
     const tombstone = signClaims(
@@ -358,13 +358,12 @@ describe("§11 — forgiveness returns a member to the live frame", () => {
     const condemned = (await stream.next()).value as Delta[];
     expect(idsOf(condemned)).not.toContain(held.id); // the order binds while it stands
 
-    // Forgiveness is striking the tombstone, in the operator's own voice — never a lucky re-send.
-    // Recovery rides the dead set being RE-READ per pulse: a memo that outlived a pulse would leave
-    // this member condemned for the life of the process, which is what this rail is here to stop.
+    // An erasure is eternal: striking the tombstone retracts the record, and the id stays refused.
+    // The bytes are still held (no purge ran), so this checks the refusal, not byte absence.
     await gw.append([retraction(tombstone.id, KEEPER, KEEPER_SEED, 4100)]);
-    const forgiven = await promptly(stream.next());
-    expect(forgiven).not.toBe("still parked");
-    expect(idsOf(forgiven === "still parked" ? undefined : forgiven.value)).toContain(held.id);
+    expect(gw.reactor.get(held.id)).toBeDefined();
+    const after = await promptly(stream.next());
+    expect(after).toBe("still parked"); // the membership did not change
 
     await stream.return?.(undefined);
     await gw.close();

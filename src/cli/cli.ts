@@ -543,8 +543,8 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "spoken by, the moment, and the reason the operator gave. It holds none of the content, and",
       "retaining a content address retains zero content — which is what makes keeping it honest.",
       "",
-      "A STRUCK RECEIPT IS FORGIVENESS (§11): the erasure order is withdrawn and the id may return,",
-      "so the receipt leaves this listing. It is never dropped silently — the count of receipts that",
+      "A STRUCK RECEIPT IS FORGIVENESS (§11): the record is withdrawn, but the id stays refused",
+      "forever, so the data never returns. The receipt leaves this listing. It is never dropped silently — the count of receipts that",
       "no longer bind is disclosed, because an omission and a revocation look identical otherwise.",
     ],
   },
@@ -5377,7 +5377,7 @@ async function cmdTombstones(args: readonly string[], io: IO): Promise<number> {
     ledger.inert <= 0
       ? ""
       : `\n  ${ledger.inert} more receipt${ledger.inert === 1 ? "" : "s"} in the ground ` +
-        `${ledger.inert === 1 ? "does" : "do"} not bind — struck (forgiveness: the id may return, ` +
+        `${ledger.inert === 1 ? "does" : "do"} not bind — struck (forgiveness: the record is withdrawn; the id stays refused, ` +
         `§11) or malformed. Named here rather than dropped: an omission and a revocation look ` +
         `identical on a screen that only loses the row.`;
   if (ledger.receipts.length === 0) {

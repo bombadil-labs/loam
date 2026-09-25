@@ -73,6 +73,12 @@ its content.
   property of the content itself (timestamps correlate, style fingerprints). Rung 4 is the
   tool for content-side scrubbing; no substrate can do it for you.
 
+**AMENDED 2026-09-25 — an erasure is permanent.** Striking a tombstone withdraws the record, and the
+id is still refused forever, at the write paths and the read paths alike. The refused set is every
+tombstone that ever bound, derived from the held tombstones, which is sound because a tombstone can
+never be erased. A tombstone that arrives in the same batch as its target refuses that target too.
+Decided by Myk in chat on 2026-09-25; implemented as `refusedIds` in `src/gateway/erase.ts`.
+
 **AMENDED BY §29 — erasure is TWO PHASES now, not one act.** Everything above still describes what
 `erase(id)` does to a single delta, unchanged, refusal voice and all. What changed is that it is no longer
 the only shape: a removal that would invalidate data someone else relies on can be IDENTIFIED first, which
