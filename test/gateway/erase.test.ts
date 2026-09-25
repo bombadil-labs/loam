@@ -49,8 +49,8 @@ const heights = (gateway: Gateway): readonly unknown[] =>
     .materializedView(gateway.materializationFor("Plant"), FERN)
     ?.props.get("height") ?? [];
 
-describe("tombstones are law: validated at the door while the evidence exists", () => {
-  it("a tombstone lying about spoken-by is refused while the target is present", async () => {
+describe("erasures are law: validated at the door while the evidence exists", () => {
+  it("an erasure lying about spoken-by is refused while the target is present", async () => {
     const { gateway, fact } = await grove();
     const lying = signClaims(
       eraseClaims(fact.id, OPERATOR /* not the gardener */, OPERATOR, 2000),
@@ -71,7 +71,7 @@ describe("tombstones are law: validated at the door while the evidence exists", 
     await gateway.close();
   });
 
-  it("malformed tombstones are malformed law: shape refused for everyone", async () => {
+  it("malformed erasures are malformed law: shape refused for everyone", async () => {
     const { gateway, fact } = await grove();
     const noSpokenBy = makeDelta({
       timestamp: 2000,
@@ -137,12 +137,12 @@ describe("Gateway.erase: the manifest, the purge, the re-seat, the hole", () => 
   it("negating the erasure retracts the record, and the id still never returns", async () => {
     const { gateway, fact } = await grove();
     await gateway.erase(fact.id);
-    const tombstone = [...gateway.reactor.snapshot()].find((d) =>
+    const erasure = [...gateway.reactor.snapshot()].find((d) =>
       d.claims.pointers.some(
         (p) => p.target.kind === "delta" && p.target.deltaRef.delta === fact.id,
       ),
     );
-    await gateway.append([signClaims(makeNegationClaims(OPERATOR, 9000, tombstone!.id), OP_SEED)]);
+    await gateway.append([signClaims(makeNegationClaims(OPERATOR, 9000, erasure!.id), OP_SEED)]);
     expect(readErasures(gateway.reactor, OPERATOR).has(fact.id)).toBe(false); // not standing
     await expect(gateway.append([fact])).rejects.toThrow(/was erased/); // still refused
     expect(heights(gateway).length).toBe(0);
@@ -195,12 +195,12 @@ describe("erasure is per-instance: each operator governs their own ground", () =
     // the source operator erases on the source; that erasure is the SOURCE operator's, so it
     // is refused at the peer's door — a foreign removal-order cannot delete on the peer.
     await source.erase(fact.id);
-    const tombstone = [...source.reactor.snapshot()].find((d) =>
+    const erasure = [...source.reactor.snapshot()].find((d) =>
       d.claims.pointers.some(
         (p) => p.target.kind === "delta" && p.target.deltaRef.delta === fact.id,
       ),
     );
-    const crossed = await peer.federate([tombstone!]);
+    const crossed = await peer.federate([erasure!]);
     expect(crossed.rejected).toBe(1); // the peer does not honor another operator's order
     expect(peer.reactor.get(fact.id)).toBeDefined(); // the peer still remembers
 
@@ -215,7 +215,7 @@ describe("erasure is per-instance: each operator governs their own ground", () =
 });
 
 describe("the door admits only the operator's removal-orders", () => {
-  it("a federated tombstone by a non-operator is refused, whatever it claims", async () => {
+  it("a federated erasure by a non-operator is refused, whatever it claims", async () => {
     // An erasure arrives by federation authored by SURVEYOR (not this store's operator). It
     // does not matter what it claims — a removal-order the operator did not sign is refused at
     // the door and never stored.
@@ -229,7 +229,7 @@ describe("the door admits only the operator's removal-orders", () => {
     await gateway.close();
   });
 
-  it("a pre-emptive tombstone for an absent id (non-operator) is refused at the door", async () => {
+  it("a pre-emptive erasure for an absent id (non-operator) is refused at the door", async () => {
     const { gateway } = await grove();
     const ghostId = `1e20${"cd".repeat(32)}`;
     const preempt = signClaims(eraseClaims(ghostId, SURVEYOR, SURVEYOR, 2000), SURVEYOR_SEED);
@@ -266,20 +266,20 @@ describe("the door admits only the operator's removal-orders", () => {
 });
 
 describe("erasuresIn (pre-boot) matches the running store's verdict", () => {
-  it("a lawfully struck tombstone is NOT dead pre-boot — heal will not drop the forgiven record", async () => {
-    // The exact heal-vs-forgiveness interaction SPEC §11 says to pin first.
+  it("a lawfully struck erasure is NOT dead pre-boot — heal will not drop the negated record", async () => {
+    // The exact heal-vs-negation interaction SPEC §11 says to pin first.
     const { gateway, fact } = await grove();
-    await gateway.erase(fact.id); // operator tombstone
+    await gateway.erase(fact.id); // operator erasure
     const all1 = [...gateway.reactor.snapshot()];
-    expect(erasuresIn(all1, OPERATOR).has(fact.id)).toBe(true); // dead while the tombstone stands
-    const tombstone = all1.find((d) =>
+    expect(erasuresIn(all1, OPERATOR).has(fact.id)).toBe(true); // dead while the erasure stands
+    const erasure = all1.find((d) =>
       d.claims.pointers.some(
         (p) => p.target.kind === "delta" && p.target.deltaRef.delta === fact.id,
       ),
     );
-    await gateway.append([signClaims(makeNegationClaims(OPERATOR, 9000, tombstone!.id), OP_SEED)]);
+    await gateway.append([signClaims(makeNegationClaims(OPERATOR, 9000, erasure!.id), OP_SEED)]);
     const all2 = [...gateway.reactor.snapshot()];
-    // forgiven: the pre-boot reader agrees, so a boot heal would carry (not drop) the record
+    // negated: the pre-boot reader agrees, so a boot heal would carry (not drop) the record
     expect(erasuresIn(all2, OPERATOR).has(fact.id)).toBe(false);
     await gateway.close();
   });
@@ -295,15 +295,15 @@ describe("erasuresIn (pre-boot) matches the running store's verdict", () => {
 });
 
 describe("the erasure log stays append-only", () => {
-  it("a tombstone cannot itself be erased", async () => {
+  it("an erasure cannot itself be erased", async () => {
     const { gateway, fact } = await grove();
     await gateway.erase(fact.id);
-    const tombstone = [...gateway.reactor.snapshot()].find((d) =>
+    const erasure = [...gateway.reactor.snapshot()].find((d) =>
       d.claims.pointers.some(
         (p) => p.target.kind === "delta" && p.target.deltaRef.delta === fact.id,
       ),
     );
-    await expect(gateway.erase(tombstone!.id)).rejects.toThrow(/append-only/);
+    await expect(gateway.erase(erasure!.id)).rejects.toThrow(/append-only/);
     await gateway.close();
   });
 });
@@ -322,7 +322,7 @@ describe("erase refuses to report a completion it cannot evidence", () => {
     await gateway.close();
   });
 
-  it("a retry after a partial purge completes without minting a second tombstone", async () => {
+  it("a retry after a partial purge completes without minting a second erasure", async () => {
     const { gateway, backend, fact } = await grove();
     // The documented partial-success: sqlite's purge deletes the rows and may still throw when it
     // cannot truncate the WAL, leaving the caller "a partial erasure to retry, not a failed one to

@@ -38,9 +38,9 @@ const HISTORY = [
   "requestedAt",
   "deadline",
   "closes",
-  "tombstone",
+  "erasure",
   "spokenBy",
-  "priorTombstone",
+  "priorErasure",
   "citations",
   "duplicates",
   "affected",
@@ -48,7 +48,7 @@ const HISTORY = [
   "graveyard",
   "notReached",
 ] as const;
-const OBSERVATION = ["tiers", "presentAgain", "forgiven"] as const;
+const OBSERVATION = ["tiers", "presentAgain", "negated"] as const;
 
 describe("T64 criterion 16 — the CutReport carries every receipt HISTORY field", () => {
   it("the partition is asserted, and every byte verdict is on the OBSERVATION side", () => {
@@ -113,7 +113,7 @@ describe("T64 criterion 16 — the CutReport carries every receipt HISTORY field
     const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
     await gw.append([member, other, bystander]);
     // A watcher container so `affected` is non-empty; the member `other` is erased by hand mid-window
-    // so `priorTombstone` is non-empty; a retraction among the members so `resurfacing` is non-empty.
+    // so `priorErasure` is non-empty; a retraction among the members so `resurfacing` is non-empty.
     const target = observed(FERN, "tag", "moss", 1200, OP_SEED);
     await gw.append([target]);
     const retraction = strike(target.id, 1300);
@@ -147,12 +147,12 @@ describe("T64 criterion 16 — the CutReport carries every receipt HISTORY field
     expect(report.deadline).toBeGreaterThan(report.requestedAt);
     expect([...report.closes].sort()).toEqual(["cite", "egress"]);
     expect(report.graveyard).toBe(gw.graveyards()[0]!.id);
-    expect(report.priorTombstone).toEqual([{ member: other.id, tombstone: byHand.tombstone }]);
+    expect(report.priorErasure).toEqual([{ member: other.id, erasure: byHand.erasure }]);
     expect(report.resurfacing).toEqual([target.id]);
     expect(report.affected).toEqual(["container:tenant-view"]);
     expect(report.notReached).toEqual([]);
     for (const m of report.members) {
-      expect(m.tombstone).toBeTruthy();
+      expect(m.erasure).toBeTruthy();
       expect(m.spokenBy).toBe(OP);
       expect(Array.isArray(m.citations)).toBe(true);
     }
@@ -167,7 +167,7 @@ describe("T64 criterion 16 — the CutReport carries every receipt HISTORY field
     expect([...receipt.closes].sort()).toEqual([...report.closes].sort());
     expect(receipt.requestedBy).toBe(report.requestedBy);
     expect(receipt.requestedByForm).toBe(report.requestedByForm);
-    expect(receipt.priorTombstone).toEqual(report.priorTombstone);
+    expect(receipt.priorErasure).toEqual(report.priorErasure);
     expect(receipt.completeness.holds).toBe(true);
     expect(receipt.nonClaim.length).toBeGreaterThan(0);
     // Two-sided: the bystander and the revived target survived a three-member cut.
@@ -294,10 +294,10 @@ describe("T64 — the RE-ISSUE path must confess what the CUT was allowed to ref
     expect(check.holds).toBe(false);
     expect(check.cutCompleted).toBe(false);
     expect(check.members).toEqual([]);
-    // And the store's forgiveness instrument says the same rather than "nothing forgiven".
+    // And the store's negation instrument says the same rather than "nothing negated".
     const health = await gw.health(BEFORE_DEADLINE);
-    expect(health.forgiven.unreadable).toEqual([report.graveyard]);
-    expect(health.forgiven.count).toBe(0);
+    expect(health.negated.unreadable).toEqual([report.graveyard]);
+    expect(health.negated.count).toBe(0);
     await gw.close();
   });
 });
@@ -343,17 +343,17 @@ describe("T64 criterion 22 — the receipt's byte verdicts are RE-PROBED, never 
 });
 
 describe("an erasure negated after a cut: the id stays refused", () => {
-  it("reports the negation with its negation id, refuses the re-sent id, and health().forgiven counts it", async () => {
+  it("reports the negation with its negation id, refuses the re-sent id, and health().negated counts it", async () => {
     const gw = await bootSlateStore();
     const member = observed(FERN, "height", 30, 1000, OP_SEED);
     const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
     await gw.append([member, bystander]);
     const stood = await standSlate(gw, { members: [member], closes: ["egress"] });
     const report = await gw.cut(stood.container, { now: BEFORE_DEADLINE });
-    const tombstone = report.members[0]!.tombstone;
+    const erasure = report.members[0]!.erasure;
 
-    const forgiveness = strike(tombstone, 80_000);
-    await gw.append([forgiveness]);
+    const negation = strike(erasure, 80_000);
+    await gw.append([negation]);
     // An erasure is eternal: the id stays refused even after the strike, past any admit override.
     const fed = await gw.federate([member], { admit: () => true });
     expect(fed.accepted).toBe(0);
@@ -372,30 +372,30 @@ describe("an erasure negated after a cut: the id stays refused", () => {
     expect(health.erasure.outstanding).toEqual([]);
     // AND THE SECTION THAT CLOSES IT — sourced from the graveyard's frozen `version` rather than from
     // `readErasures`, which is the only durable list of ids the store ever promised to forget.
-    expect(health.forgiven).toEqual({
+    expect(health.negated).toEqual({
       count: 1,
       present: 0,
       ids: [member.id],
       unreadable: [],
     });
-    // Lawful, not debt: `status` is unmoved by a forgiveness, exactly as it is by a lapsed slate.
+    // Lawful, not debt: `status` is unmoved by a negation, exactly as it is by a lapsed slate.
     expect(health.status).toBe("ok");
 
     const receipt = await gw.receipt(report.graveyard, { now: BEFORE_DEADLINE + 1 });
     const row = receipt.members[0]!;
-    // The receipt reports the negation (field `forgiven`), and that the data is not there.
-    expect(row.forgiven).toBe(forgiveness.id);
-    expect(row.tombstone).toBeUndefined();
+    // The receipt reports the negation (field `negated`), and that the data is not there.
+    expect(row.negated).toBe(negation.id);
+    expect(row.erasure).toBeUndefined();
     expect(row.presentAgain).toBe(false);
     expect(row.tiers.find((v) => v.tier === "primary")!.holds).toBe(false);
-    // The graveyard's arithmetic reports the forgiveness rather than reading as an incomplete cut:
-    // it records an event that HAPPENED, and forgiveness is a later event.
+    // The graveyard's arithmetic reports the negation rather than reading as an incomplete cut:
+    // it records an event that HAPPENED, and negation is a later event.
     const check = graveyardCompleteness(gw.reactor, OP, report.graveyard);
-    expect(check.forgiven).toEqual([{ member: member.id, strike: forgiveness.id }]);
+    expect(check.negated).toEqual([{ member: member.id, strike: negation.id }]);
     expect(check.missing).toEqual([]);
     // THE TWO VERDICTS COME APART HERE, and that is the point: §29.6's sentence read literally is now
     // FALSE (no surviving erasure covers this member), while the CUT still completed and nothing is
-    // unexplained. One boolean holding both would make the first lawful forgiveness indistinguishable
+    // unexplained. One boolean holding both would make the first lawful negation indistinguishable
     // from an abandoned cut — the same collapse this file refuses for a byte verdict, one layer up.
     expect(check.holds).toBe(false);
     expect(check.cutCompleted).toBe(true);

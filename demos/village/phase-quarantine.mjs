@@ -7,7 +7,7 @@
 // and finally DROP the whole pool and show the primary unscathed (discard = erase-by-construction).
 //
 // Then the T16 correction (§24.8, PR #120): the fan-out RE-DERIVES ITS OWN REACH. The operator CLOSES the
-// almanac's trust door — the posture that used to swallow the tombstone silently — and nests a pool inside
+// almanac's trust door — the posture that used to swallow the erasure silently — and nests a pool inside
 // a pool (P → Q → R, a tree the old fan-out never walked). One erase in the primary, and the byte is gone
 // from every tier: trust policy is admission configuration, erasure is law, and depth is no shelter.
 
@@ -102,7 +102,7 @@ try {
   );
 
   // QUARANTINE.5 — the T16 correction (§24.8, PR #120). The operator CLOSES the trust door (the posture
-  // that used to swallow the tombstone silently) and nests a pool INSIDE a pool: P → Q → R. The scribes'
+  // that used to swallow the erasure silently) and nests a pool INSIDE a pool: P → Q → R. The scribes'
   // draft room has a draft room of its own, and both hold the primary's living ground.
   const FORGOTTEN = "a confidence that must not survive, at any depth";
   const secret2 = fact("note", FORGOTTEN, Date.now() + 10);

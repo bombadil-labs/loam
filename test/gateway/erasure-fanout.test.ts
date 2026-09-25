@@ -95,7 +95,7 @@ describe("§24.8 rail (a) — a closed-trust pool cannot evade erasure", () => {
 });
 
 describe("§24.8 rail (b) — failure is loud", () => {
-  it("a pool whose tombstone genuinely cannot land makes erase() REJECT", async () => {
+  it("a pool whose erasure genuinely cannot land makes erase() REJECT", async () => {
     const primary = await bootPrimary();
     const secret = observed(FERN, "message", "this erasure will not complete", 2000, OP_SEED);
     await primary.append([secret]);
@@ -253,7 +253,7 @@ describe("§24.8 rail (g) — a pool that retains makes the primary's erase REFU
     await primary.close();
   });
 
-  it("a pool that never HELD the id but never RECEIVED the tombstone is outstanding work: the retry completes it", async () => {
+  it("a pool that never HELD the id but never RECEIVED the erasure is outstanding work: the retry completes it", async () => {
     // The guard's fault model is the verdict's: the verdict rejects on failed erasure
     // delivery, so a guard asking only about BYTES would strand this erasure — the pool holds
     // nothing, yet still lacks the one delta that keeps it from re-admitting the id forever.
@@ -266,7 +266,7 @@ describe("§24.8 rail (g) — a pool that retains makes the primary's erase REFU
     const q = await primary.openQuarantine({ backend: poolBackend, admit: () => false });
     expect(holds(q.gateway, secret.id)).toBe(false);
 
-    poolBackend.fail = true; // the pool's store refuses the tombstone during the fan-out
+    poolBackend.fail = true; // the pool's store refuses the erasure during the fan-out
     await expect(primary.erase(secret.id, { reason: "the subject asked" })).rejects.toThrow();
 
     poolBackend.fail = false; // the operator repairs the pool and re-runs, as instructed

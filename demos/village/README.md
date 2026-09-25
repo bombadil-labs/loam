@@ -160,7 +160,7 @@ _(one entry per PR that grew the village; newest last)_
 - **PR #36 — THE UNSAYING (erasure, SPEC §11)** (phase12.mjs, 4/4 twice): Wren speaks in
   haste and asks the almanac to unsay it — and because **erasure is the instance operator's
   alone** (destructive, so maximally gated), the almanac's operator, as the controller, honors
-  the request. The bytes are cleared from every tier (the vault's heal is tombstone-guarded on
+  the request. The bytes are cleared from every tier (the vault's heal is erasure-guarded on
   every path), the dossier reverts, the **signed hole** remains (who asked, when, which id —
   never what), and the door refuses the id's return even though the commons still holds the
   original and offers it back on every pulse — sovereignty both ways, watched live: `🕳️ the
@@ -230,7 +230,7 @@ _(one entry per PR that grew the village; newest last)_
   the village's law binds NOTHING (no Person surface until the wanderer registers her own lens,
   and then the village answers through HER law); the tab closes and a second one on the same
   origin remembers everything — notes, pulled ground, both lenses, no register() call anywhere;
-  and erasure reaches the page — tombstone → purge → removeItem, the note's key physically gone
+  and erasure reaches the page — erasure → purge → removeItem, the note's key physically gone
   from the origin, the door refusing its return, the seed key (never a delta) untouched. The
   same Gateway the village runs on ports, on a different driver — a leaf or an aggregator,
   never a hub, exactly as §15 states proudly.

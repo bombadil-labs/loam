@@ -384,7 +384,7 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
   //      operator as a clean boot log.
   //   3. GIVEN what is still set aside, what must NOT be planted? Two ways a plant goes wrong, both
   //      of them H1/§11 and both invisible to `append`:
-  //        - An UNPARSEABLE row could be a lawful TOMBSTONE nobody can read. The condemned set heal is
+  //        - An UNPARSEABLE row could be a lawful ERASURE nobody can read. The condemned set heal is
   //          handed is derived from READABLE deltas, so it may be missing that row's target — and
   //          planting then resurrects an erased delta at every door, with no strike anywhere. Withhold
   //          the whole plant: withholding is recoverable on the next boot, resurrection is not.
@@ -455,7 +455,7 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
           replantWithheld: [
             `${replant.length} delta(s) the mirror offered were NOT planted: ${unreadable.length} ` +
               `row(s) in the primary's pen cannot be read at all, and the condemned set this heal was ` +
-              `given is derived from READABLE deltas — so one of them may be a tombstone nobody could ` +
+              `given is derived from READABLE deltas — so one of them may be an erasure nobody could ` +
               `see, and planting would resurrect what was erased (§11). Settle the unreadable row(s) ` +
               `(\`loam repair list\`, then discard or re-federate) and heal again.`,
           ],

@@ -156,7 +156,7 @@ describe("T66: heal WITHHOLDS a plant it cannot prove safe", () => {
     discardRow: () => Promise.resolve(false),
   });
 
-  it("an UNREADABLE pen row withholds the WHOLE plant — it may be a tombstone nobody can read", async () => {
+  it("an UNREADABLE pen row withholds the WHOLE plant — it may be an erasure nobody can read", async () => {
     const inner = new MemoryBackend();
     const primary = stuckPrimary(inner, [
       { key: strike.id, reason: "unparseable", preview: "{not json" },
@@ -170,7 +170,7 @@ describe("T66: heal WITHHOLDS a plant it cannot prove safe", () => {
     expect(report.toPrimary).toBe(0); // nothing planted
     expect(await inner.holds(arrival.id)).toBe(false); // ...at the bytes, not merely in the count
     expect(store.lastRestore?.replantWithheld.length).toBe(1);
-    expect(store.lastRestore?.replantWithheld[0]).toMatch(/tombstone|erased/i);
+    expect(store.lastRestore?.replantWithheld[0]).toMatch(/erasure|erased/i);
     await store.close();
   });
 

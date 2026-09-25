@@ -22,7 +22,7 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER_SEED, observed } from "../spike/garden.js";
 
 describe("physical custody without administrative authority", () => {
-  it("reports actual retained bytes without requiring a gateway or tombstone receipt", async () => {
+  it("reports actual retained bytes without requiring a gateway or erasure receipt", async () => {
     const backend = new MemoryBackend();
     const fact = observed(FERN, "height", 30, 1000, GARDENER_SEED);
     await backend.append([fact]);

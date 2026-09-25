@@ -107,7 +107,7 @@ describe("T216 (b) — a PRIMARY-resident citation still enumerates (no regressi
     // named, and the target's own erasure is excluded from the manifest by identity.
     expect(holdsInReactor(gw, cite.id)).toBe(true);
     expect(done.citations).not.toContain(bystander.id);
-    expect(done.citations).not.toContain(done.tombstone);
+    expect(done.citations).not.toContain(done.erasure);
 
     await gw.close();
   });

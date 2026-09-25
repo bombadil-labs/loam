@@ -24,7 +24,7 @@ import { FERN, observed } from "../spike/garden.js";
 import { BEFORE_DEADLINE, OP, OP_SEED, bootSlateStore, standSlate } from "./slating.js";
 
 describe("T64 criterion 12 — the graveyard is durable, joinable, and its completeness is arithmetic", () => {
-  it("carries every history field, joins its tombstones, and computes TRUE from the ground alone", async () => {
+  it("carries every history field, joins its erasures, and computes TRUE from the ground alone", async () => {
     const gw = await bootSlateStore();
     const members = [
       observed(FERN, "height", 30, 1000, OP_SEED),
@@ -77,7 +77,7 @@ describe("T64 criterion 12 — the graveyard is durable, joinable, and its compl
     expect([...grave.closes].sort()).toEqual(["cite", "egress"]);
     expect(grave.affected).toEqual([watcher.container]);
     // THE CLEAN CASE SAYS SO EXPLICITLY — otherwise criterion 19's exception could hide right here.
-    expect(grave.priorTombstone).toEqual([]);
+    expect(grave.priorErasure).toEqual([]);
 
     // Every erasure carries its `slate` join.
     const joined = standingErasures(gw.reactor, OP).filter(
@@ -91,7 +91,7 @@ describe("T64 criterion 12 — the graveyard is durable, joinable, and its compl
     const check = graveyardCompleteness(gw.reactor, OP, grave.id);
     expect([...check.members].sort()).toEqual(members.map((m) => m.id).sort()); // a walk returning nothing FAILS here
     expect(check.missing).toEqual([]);
-    expect(check.forgiven).toEqual([]);
+    expect(check.negated).toEqual([]);
     expect(check.holds).toBe(true);
 
     // And it is re-derivable from the STORE rather than from this process: the frozen version's ids

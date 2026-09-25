@@ -23,7 +23,7 @@ node demos/pachyderm/pachyderm.mjs   # Alice, Bob, Carol — 7 checks, three sov
 ## The honest parts (what other protocols theater around)
 
 - **Erasure without pretending.** Alice erases a post: her store forgets it byte-for-byte. Her
-  tombstone travels to Bob on his next pull — and *binds nothing there*, because erasure is each
+  erasure travels to Bob on his next pull — and *binds nothing there*, because erasure is each
   operator's alone (§11). Bob still remembers; sovereignty cuts both ways. Then Bob **honors**
   her request with his own operator's erasure. No delete-request pretending to be a guarantee —
   the protocol tells you exactly what forgetting means, and the demo asserts all three states.

@@ -185,7 +185,7 @@ describe("MirrorBackend", () => {
 
   it("heal(exclude) also refuses to archive an excluded straggler from the primary", async () => {
     const primary = new MemoryBackend();
-    await primary.append([d1, d2]); // d1 is tombstoned law-side but its purge missed this tier
+    await primary.append([d1, d2]); // d1 is erased law-side but its purge missed this tier
     const vault = new MemoryBackend();
     const store = new MirrorBackend(primary, vault);
     await store.heal(new Set([d1.id]));

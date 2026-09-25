@@ -79,7 +79,7 @@ const heightThrough = async (gw: Gateway): Promise<number | null> => {
 };
 
 describe("T64 criterion 9 — the pre-flight is all-or-refuse and leaves the ground byte-identical", () => {
-  it("a DANGLING membershipAt refuses before any tombstone lands", async () => {
+  it("a DANGLING membershipAt refuses before any erasure lands", async () => {
     const gw = await bootSlateStore();
     const member = observed(FERN, "height", 30, 1000, OP_SEED);
     const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
@@ -118,7 +118,7 @@ describe("T64 criterion 9 — the pre-flight is all-or-refuse and leaves the gro
     await gw.close();
   });
 
-  it("an UNREACHABLE wall in the table refuses before any tombstone lands", async () => {
+  it("an UNREACHABLE wall in the table refuses before any erasure lands", async () => {
     const gw = await bootSlateStore();
     const member = observed(FERN, "height", 30, 1000, OP_SEED);
     const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
@@ -182,7 +182,7 @@ describe("T64 criterion 10 — per-member, faults collected, the slate STANDS, t
     const report = await gw.cut(stood.container, { now: BEFORE_DEADLINE });
     expect(report.members.map((m) => m.member).sort()).toEqual([stubborn.id, willing.id].sort());
     expect(await backend.holds(stubborn.id)).toBe(false);
-    // EXACTLY ONE TOMBSTONE PER MEMBER — the re-run mints no second one (§11's anchor).
+    // EXACTLY ONE ERASURE PER MEMBER — the re-run mints no second one (§11's anchor).
     const targets = standingErasures(gw.reactor, OP).map((t) => erasureTarget(t.claims));
     expect(targets.filter((t) => t === willing.id)).toHaveLength(1);
     expect(targets.filter((t) => t === stubborn.id)).toHaveLength(1);
@@ -257,7 +257,7 @@ describe("T64 criterion 14 — resurrection is visible at review and REAL at the
 });
 
 describe("T64 criterion 19 — a member erased mid-window: the cut COMPLETES, the proof stays decidable", () => {
-  it("`prior-tombstone` accounts for it, no second tombstone, and the arithmetic holds", async () => {
+  it("`prior-erasure` accounts for it, no second erasure, and the arithmetic holds", async () => {
     const gw = await bootSlateStore();
     const members = [
       observed(FERN, "height", 30, 1000, OP_SEED),
@@ -271,20 +271,18 @@ describe("T64 criterion 19 — a member erased mid-window: the cut COMPLETES, th
 
     // The mundane move the exception exists for: the operator erases one member BY HAND mid-window.
     const byHand = await gw.erase(members[1]!.id);
-    expect(byHand.tombstone).toBeDefined();
+    expect(byHand.erasure).toBeDefined();
 
     // It must NOT throw. Refusing without an exception would only DETECT a jam nothing can repair —
     // nothing can un-erase, so the slate would stand with `read` closing forever.
     const report = await gw.cut(stood.container, { now: BEFORE_DEADLINE });
-    expect(report.priorTombstone).toEqual([
-      { member: members[1]!.id, tombstone: byHand.tombstone },
-    ]);
+    expect(report.priorErasure).toEqual([{ member: members[1]!.id, erasure: byHand.erasure }]);
     // Exactly ONE erasure for that member, and it is the PRE-CUT one.
     const forHand = standingErasures(gw.reactor, OP).filter(
       (t) => erasureTarget(t.claims) === members[1]!.id,
     );
     expect(forHand).toHaveLength(1);
-    expect(forHand[0]!.id).toBe(byHand.tombstone);
+    expect(forHand[0]!.id).toBe(byHand.erasure);
     // §29.6's arithmetic computes TRUE from DURABLE GROUND ALONE — no probe, no CutReport.
     const check = graveyardCompleteness(gw.reactor, OP, report.graveyard);
     expect(check.members).toHaveLength(4);
@@ -303,7 +301,7 @@ describe("T64 criterion 19 — a member erased mid-window: the cut COMPLETES, th
     await gw.close();
   });
 
-  it("THE FAIL-CLOSED LEG: a frozen id resolving to nothing with NO tombstone refuses the cut", async () => {
+  it("THE FAIL-CLOSED LEG: a frozen id resolving to nothing with NO erasure refuses the cut", async () => {
     const gw = await bootSlateStore();
     const real = observed(FERN, "height", 30, 1000, OP_SEED);
     const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
@@ -316,7 +314,7 @@ describe("T64 criterion 19 — a member erased mid-window: the cut COMPLETES, th
     const stood = await standSlate(gw, { members: [real, phantom], closes: ["egress"] });
     const before = groundIds(gw);
     await expect(gw.cut(stood.container, { now: BEFORE_DEADLINE })).rejects.toThrow(
-      new RegExp(`${phantom.id}[\\s\\S]*NO surviving lawful tombstone`),
+      new RegExp(`${phantom.id}[\\s\\S]*NO surviving lawful erasure`),
     );
     expect(groundIds(gw)).toEqual(before);
     // Two-sided, both levels: nothing was erased on the way to the refusal, and a reader agrees.

@@ -285,7 +285,7 @@ describe("quota reaches the gateway (SPEC §15): the degradation latch", () => {
   });
 });
 
-describe("erasure reaches the page (SPEC §15): tombstone → purge → removeItem", () => {
+describe("erasure reaches the page (SPEC §15): erasure → purge → removeItem", () => {
   it("the bytes leave the origin's storage and the door refuses the id's return", async () => {
     const origin = new MemStorage();
     const gateway = await Gateway.open(new LocalStorageBackend("tab", origin), {
@@ -301,7 +301,7 @@ describe("erasure reaches the page (SPEC §15): tombstone → purge → removeIt
     // the store remembers THAT it forgot: the erasure rides the same origin
     const survivors = await new LocalStorageBackend("tab", origin).deltasSince(new Set());
     expect(survivors.some((d) => d.id === fact.id)).toBe(false);
-    expect(survivors.length).toBeGreaterThan(0); // the tombstone itself
+    expect(survivors.length).toBeGreaterThan(0); // the erasure itself
     // and the door refuses the id's return
     await expect(gateway.append([fact])).rejects.toThrow(/was erased/);
     await gateway.close();

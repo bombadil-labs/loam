@@ -71,11 +71,11 @@ describe("classifyDelta: every badge earns its name", () => {
     expect(kindOf(sign(publicClaims(["Plant"], ME, 8)))).toBe("public");
   });
 
-  it("recognizes a tombstone", () => {
-    expect(kindOf(sign(eraseClaims("1e20" + "ab".repeat(34), GARDENER, ME, 9)))).toBe("tombstone");
+  it("recognizes an erasure", () => {
+    expect(kindOf(sign(eraseClaims("1e20" + "ab".repeat(34), GARDENER, ME, 9)))).toBe("erasure");
   });
 
-  it("recognizes a negation (and a tombstone is NOT merely a negation)", () => {
+  it("recognizes a negation (and an erasure is NOT merely a negation)", () => {
     const target = observed(FERN, "height", 30, 1000, SEED);
     expect(kindOf(sign(makeNegationClaims(ME, 10, target.id, "retracted")))).toBe("negation");
   });

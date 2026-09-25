@@ -44,7 +44,7 @@ export function classifyDelta(delta, selfAuthor) {
       ? "another store's founding record — it arrived as data and binds nothing here"
       : "the store's founding record: it names the operator — the one key whose word is law here";
   } else if (hasEntityCtx("loam.erasure")) {
-    kind = "tombstone";
+    kind = "erasure";
     note = foreign
       ? "another operator's erasure order — inert here; only your operator's word removes"
       : "an erasure order: who asked, when, which id — never what it said";
@@ -119,7 +119,7 @@ const BADGE_LABELS = {
   schema: "schema",
   fact: "fact",
   negation: "negation",
-  tombstone: "tombstone",
+  erasure: "erasure",
   public: "public",
   trust: "trust",
   grant: "grant",

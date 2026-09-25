@@ -151,7 +151,7 @@ export const groundIds = (gw: Gateway): string[] => {
   return ids;
 };
 
-/** Strike a delta in the operator's own voice (un-slating, forgiveness, an ordinary retraction). */
+/** Strike a delta in the operator's own voice (un-slating, negation, an ordinary retraction). */
 export const strike = (targetId: string, ts: number): Delta =>
   signClaims(
     {

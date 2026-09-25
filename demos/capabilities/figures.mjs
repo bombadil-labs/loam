@@ -8,7 +8,7 @@
 //
 // The grammar, in one paragraph. A figure is nodes and edges. A node is a `delta` (a signed claim),
 // an `entity` (an object — an id somebody used), a `prim` (a value at the tip), a `dead` (a claim
-// struck or a tombstone), or a `ghost` (bytes that are gone). An edge always runs from the delta
+// struck or an erasure), or a `ghost` (bytes that are gone). An edge always runs from the delta
 // that authored the pointer to the thing pointed at, whatever the layout puts on top. An edge grips
 // each end at a PORT — a small solid dot. A port on a delta is one of its pointers; a port on an
 // object is one of its properties; hovering says which. Two deltas that bind the SAME property

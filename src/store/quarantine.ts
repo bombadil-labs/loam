@@ -84,7 +84,7 @@ export function strandedStrikeWarnings(rows: readonly QuarantinedRow[]): string[
     for (const target of r.negates ?? []) {
       out.push(
         `quarantined row ${r.key} CLAIMS TO STRIKE delta ${target} (unverified); if that strike ` +
-          `was real — a retraction, revoked grant, or tombstone — ${target} reads LIVE again until ` +
+          `was real — a retraction, revoked grant, or erasure — ${target} reads LIVE again until ` +
           `this row is settled (repair discard + re-federate the healthy copy).`,
       );
     }
@@ -93,7 +93,7 @@ export function strandedStrikeWarnings(rows: readonly QuarantinedRow[]): string[
   if (opaque > 0) {
     out.push(
       `${opaque} quarantined row(s) could not be parsed — a retraction, revoked grant, or ` +
-        `tombstone MAY be missing from the ground. Verify strikes after settling.`,
+        `erasure MAY be missing from the ground. Verify strikes after settling.`,
     );
   }
   return out;

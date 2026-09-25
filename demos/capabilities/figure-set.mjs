@@ -380,7 +380,7 @@ export const FIGURES = {
   forgotten: () => ({
     w: 740,
     h: 300,
-    alt: "A tombstone signed by the operator pointing at an empty circle where a delta's bytes used to be.",
+    alt: "An erasure signed by the operator pointing at an empty circle where a delta's bytes used to be.",
     nodes: {
       g: { kind: "ghost", x: 230, y: 125, tip: "the bytes are not here — on any tier" },
       dt: {
@@ -388,7 +388,7 @@ export const FIGURES = {
         x: 560,
         y: 125,
         r: 30,
-        meta: ["Δ operator", "tombstone", "who · when · why"],
+        meta: ["Δ operator", "erasure", "who · when · why"],
         tip: "append-only, and itself unerasable",
       },
     },

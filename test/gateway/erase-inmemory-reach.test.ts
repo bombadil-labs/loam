@@ -73,7 +73,7 @@ const HEIGHTS = {
   in: "input",
 };
 // Every tag-bearing delta, UNION the operator's own. The erased delta is a member of the left side
-// and the TOMBSTONE joins the right, so landing the removal-order moves this membership — which is
+// and the ERASURE joins the right, so landing the removal-order moves this membership — which is
 // what wakes a parked reader mid-cut. A tag-only Term would leave the pulse unfired and the leak
 // unobserved (the freeze would still show; the erased frame would not).
 const WATCHED = {
@@ -348,11 +348,11 @@ describe("§11 — a negated erasure does not return a member to the live frame"
   it("the member stays withheld after its erasure is negated", async () => {
     const { gw } = await keeperStore();
     const held = garden[1]!;
-    const tombstone = signClaims(
-      eraseClaims(held.id, SURVEYOR, KEEPER, 4000, "condemned, then forgiven"),
+    const erasure = signClaims(
+      eraseClaims(held.id, SURVEYOR, KEEPER, 4000, "condemned, then negated"),
       KEEPER_SEED,
     );
-    await gw.append([tombstone]);
+    await gw.append([erasure]);
 
     const stream = gw.watch(HEIGHTS);
     const condemned = (await stream.next()).value as Delta[];
@@ -360,7 +360,7 @@ describe("§11 — a negated erasure does not return a member to the live frame"
 
     // An erasure is eternal: negating the erasure retracts the record, and the id stays refused.
     // The bytes are still held (no purge ran), so this checks the refusal, not byte absence.
-    await gw.append([retraction(tombstone.id, KEEPER, KEEPER_SEED, 4100)]);
+    await gw.append([retraction(erasure.id, KEEPER, KEEPER_SEED, 4100)]);
     expect(gw.reactor.get(held.id)).toBeDefined();
     const after = await promptly(stream.next());
     expect(after).toBe("still parked"); // the membership did not change

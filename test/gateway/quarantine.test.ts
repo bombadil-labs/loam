@@ -112,7 +112,7 @@ describe("§24.8 erasure reaches the quarantine — the law, no evasion", () => 
     await primary.close();
   });
 
-  it("a FORGED tombstone cannot drive a purge in the pool (a purge is the operator's alone)", async () => {
+  it("a FORGED erasure cannot drive a purge in the pool (a purge is the operator's alone)", async () => {
     const primary = await bootPrimary();
     const fact = observed(FERN, "message", "not yours to forget", 2100, OP_SEED);
     await primary.append([fact]);

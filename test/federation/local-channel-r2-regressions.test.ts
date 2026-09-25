@@ -64,7 +64,7 @@ describe("T288 R2 regression controls", () => {
     },
   );
 
-  it("reserved forgiveness corrupts otherwise usable receipt-erasure history", async () => {
+  it("reserved negation corrupts otherwise usable receipt-erasure history", async () => {
     const gw = await Gateway.boot(
       new MemoryBackend(),
       assembleGenesis({ operatorSeed: SEED, registrations: [] }),
@@ -93,7 +93,7 @@ describe("T288 R2 regression controls", () => {
       const baseline = localChannelEvidence(gw, ch.name);
       expect(baseline.state).toBe("open");
       if (baseline.state === "open") expect(baseline.received).toEqual([]);
-      const claims = makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), erased.tombstone);
+      const claims = makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), erased.erasure);
       const unsupported = signClaims(
         {
           ...claims,
@@ -107,7 +107,7 @@ describe("T288 R2 regression controls", () => {
               },
             },
             { role: "local-control-version", target: { kind: "primitive", value: 1 } },
-            { role: "local-control-kind", target: { kind: "primitive", value: "forgive" } },
+            { role: "local-control-kind", target: { kind: "primitive", value: "negate" } },
           ],
         },
         SEED,

@@ -8,7 +8,7 @@
 // on the source (§11 rung 2's inherited timestamp), so a carried negation would kill the adopted id
 // FOREVER — forgiving the output in the pool could never re-land it, and the idempotence
 // short-circuit would report success over a delta no reader can see. Refusal leaves nothing behind:
-// forgive in the pool, promote again, and the value lands (the `revives` rail below is that claim).
+// negate in the pool, promote again, and the value lands (the `revives` rail below is that claim).
 //
 // WHOSE STRIKE BINDS — two grounds, both railed, and the rails distinguish this algebra from the
 // near-misses. (1) The SOURCE'S OWN GOVERNED READING, `dataStruck`: the operator's reject-this-output

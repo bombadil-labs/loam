@@ -42,7 +42,7 @@ simply not pulling; what was already pulled remains (their store, their claims â
 
 ## Erasure, honestly
 
-If the user erases their own post, their store forgets it byte-for-byte and the tombstone travels
+If the user erases their own post, their store forgets it byte-for-byte and the erasure travels
 on others' next pulls â€” but it binds nothing in a follower's store: erasure is each operator's
 alone. If someone asks the user to forget a post they pulled, honor it with the user's OWN
 erasure (their store, their call). Never present federated deletion as guaranteed; this protocol

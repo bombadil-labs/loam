@@ -24,36 +24,36 @@
         {
           "at": 20,
           "erased": "#target/erased",
+          "erasure": "#tomb/operator",
           "orderedBy": "@operator",
           "reasons": [
             "asked by the subject"
           ],
-          "spokenBy": "@writer",
-          "tombstone": "#tomb/operator"
+          "spokenBy": "@writer"
         },
         {
           "at": 23,
           "erased": "#target/forgiven-then-unforgiven",
+          "erasure": "#tomb/re-forgotten",
           "orderedBy": "@operator",
           "reasons": [],
-          "spokenBy": "@writer",
-          "tombstone": "#tomb/re-forgotten"
+          "spokenBy": "@writer"
         },
         {
           "at": 27,
           "erased": "#target/wrong-spoken-by",
+          "erasure": "#tomb/wrong-spoken-by",
           "orderedBy": "@operator",
           "reasons": [],
-          "spokenBy": "@stranger",
-          "tombstone": "#tomb/wrong-spoken-by"
+          "spokenBy": "@stranger"
         },
         {
           "at": 29,
           "erased": "#strike/claim",
+          "erasure": "#tomb/erases-a-strike",
           "orderedBy": "@operator",
           "reasons": [],
-          "spokenBy": "@operator",
-          "tombstone": "#tomb/erases-a-strike"
+          "spokenBy": "@operator"
         }
       ]
     },

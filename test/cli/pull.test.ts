@@ -119,7 +119,7 @@ describe("loam pull <file>: the store walks out of the browser", () => {
     await hers.close();
   });
 
-  it("a tombstoned id is refused at the door — even from a file", async () => {
+  it("an erased id is refused at the door — even from a file", async () => {
     const home = join(dir, "home");
     await run(["init", "--home", home, "--seed", TAB_SEED], io());
     // The operator lands a fact, then unsays it.
@@ -143,7 +143,7 @@ describe("loam pull <file>: the store walks out of the browser", () => {
     const backend = new SqliteBackend(storePath(home));
     const held = (await backend.deltasSince(new Set())).map((d) => d.id);
     await backend.close();
-    expect(held).not.toContain(fact.id); // erased stays erased; re-pulling is not forgiveness
+    expect(held).not.toContain(fact.id); // erased stays erased; re-pulling is not negation
   });
 
   it("refuses what is not an offer, without wrecking anything", async () => {

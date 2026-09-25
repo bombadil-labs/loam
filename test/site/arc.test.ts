@@ -977,7 +977,7 @@ describe("checkpoints, revert, and the sweep", () => {
     await ctx.gateway.close();
   });
 
-  it("a revert keeps a forgiveness whose tombstone is INSIDE the checkpoint too", async () => {
+  it("a revert keeps a negation whose erasure is INSIDE the checkpoint too", async () => {
     const storage = new MemStorage();
     const ctx = await makeCtx(storage);
     const arc = buildArc(loam);
@@ -987,9 +987,9 @@ describe("checkpoints, revert, and the sweep", () => {
       if (lesson.id === finale.id) break;
     }
     // The checkpoint is taken AFTER the erasure, so the erasure is in the BLOB rather than
-    // only in the store. The forgiveness comes later still, and lives nowhere but the store.
+    // only in the store. The negation comes later still, and lives nowhere but the store.
     expect((await bankCheckpoint(loam, ctx, finale.id)).ok).toBe(true);
-    const tombstone = ctx.gateway
+    const erasure = ctx.gateway
       .offeredDeltas()
       .find((d) =>
         d.claims.pointers.some(
@@ -997,17 +997,17 @@ describe("checkpoints, revert, and the sweep", () => {
         ),
       )!;
     expect(Object.keys(readCheckpoint(storage, finale.id)!.rows)).toContain(
-      `${STORE_PREFIX}${tombstone.id}`,
+      `${STORE_PREFIX}${erasure.id}`,
     );
-    const forgiveness = loam.signClaims(
-      loam.makeNegationClaims(ctx.author, ctx.ts(), tombstone.id, "on reflection"),
+    const negation = loam.signClaims(
+      loam.makeNegationClaims(ctx.author, ctx.ts(), erasure.id, "on reflection"),
       ctx.seed,
     );
-    await ctx.gateway.append([forgiveness]);
+    await ctx.gateway.append([negation]);
     expect(loam.readErasures(ctx.gateway.reactor, ctx.author).size).toBe(0);
     await ctx.gateway.close();
 
-    // Reverting to that boundary restores the erasure from the blob. The forgiveness is not
+    // Reverting to that boundary restores the erasure from the blob. The negation is not
     // in the blob — so a guard that only looked at what SURVIVES outside it would delete the
     // strike and re-assert a forgetting the operator had withdrawn.
     const restored = restoreCheckpoint(storage, finale.id, { erasedIds: [] });
@@ -1074,33 +1074,33 @@ describe("checkpoints, revert, and the sweep", () => {
       if (lesson.id === finale.id) break;
     }
 
-    // The operator forgives: striking an erasure withdraws the erasure order (the gateway's
-    // own reader treats a struck erasure as forgiven).
-    const tombstone = ctx.gateway
+    // The operator negates: striking an erasure withdraws the erasure order (the gateway's
+    // own reader treats a struck erasure as negated).
+    const erasure = ctx.gateway
       .offeredDeltas()
       .find((d) =>
         d.claims.pointers.some(
           (p) => p.target.kind === "entity" && p.target.entity.context === "loam.erasure",
         ),
       )!;
-    const forgiveness = loam.signClaims(
-      loam.makeNegationClaims(ctx.author, ctx.ts(), tombstone.id, "on reflection"),
+    const negation = loam.signClaims(
+      loam.makeNegationClaims(ctx.author, ctx.ts(), erasure.id, "on reflection"),
       ctx.seed,
     );
-    await ctx.gateway.append([forgiveness]);
+    await ctx.gateway.append([negation]);
     expect(loam.readErasures(ctx.gateway.reactor, ctx.author).size).toBe(0);
     await ctx.gateway.close();
 
-    // Revert past both. The receipt stays — and so must its forgiveness, or the store
+    // Revert past both. The receipt stays — and so must its negation, or the store
     // re-asserts a forgetting the operator took back.
     const restored = restoreCheckpoint(storage, arc[0]!.id, { erasedIds: [] });
     expect(restored.ok).toBe(true);
     if (!restored.ok) return;
     expect(restored.keptOrders, "the erasure receipt was deleted by a revert").toContain(
-      tombstone.id,
+      erasure.id,
     );
-    expect(restored.keptOrders, "the forgiveness was deleted while its receipt stayed").toContain(
-      forgiveness.id,
+    expect(restored.keptOrders, "the negation was deleted while its receipt stayed").toContain(
+      negation.id,
     );
 
     const back = await makeCtx(storage);

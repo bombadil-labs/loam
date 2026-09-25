@@ -167,7 +167,7 @@ export interface GraveyardSpec {
   readonly cutAt: number;
   readonly closes: readonly SlateClosure[];
   readonly affected: readonly string[];
-  readonly priorTombstone: readonly { readonly member: string; readonly tombstone: string }[];
+  readonly priorErasure: readonly { readonly member: string; readonly erasure: string }[];
 }
 
 // The erasure EVENT, not a second copy of the per-id law: it CITES erasures and never replaces
@@ -193,8 +193,8 @@ export function graveyardClaims(spec: GraveyardSpec, author: string, timestamp: 
       ...spec.affected.map((c) => entityPtr("affected", c, CTX_CONTAINER)),
       // JSON-encoded pairs: no separator can be ambiguous inside a content address, and the
       // enumeration must stay a CLOSED list a later checker reads rather than a heuristic.
-      ...spec.priorTombstone.map((p) =>
-        primPtr("prior-tombstone", JSON.stringify([p.member, p.tombstone])),
+      ...spec.priorErasure.map((p) =>
+        primPtr("prior-erasure", JSON.stringify([p.member, p.erasure])),
       ),
     ],
   };
@@ -420,21 +420,21 @@ function graveyardDefect(claims: Claims, operator: string | undefined): string |
       return `a graveyard carries exactly one numeric \`${role}\``;
     }
   }
-  for (const pair of primitives(claims, "prior-tombstone")) {
+  for (const pair of primitives(claims, "prior-erasure")) {
     if (typeof pair !== "string" || parsePriorPair(pair) === undefined) {
-      return "a graveyard's prior-tombstone entries are JSON [memberId, tombstoneId] pairs";
+      return "a graveyard's prior-erasure entries are JSON [memberId, erasureId] pairs";
     }
   }
   return undefined;
 }
 
-const parsePriorPair = (raw: string): { member: string; tombstone: string } | undefined => {
+const parsePriorPair = (raw: string): { member: string; erasure: string } | undefined => {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed) || parsed.length !== 2) return undefined;
-    const [member, tombstone] = parsed as unknown[];
-    if (typeof member !== "string" || typeof tombstone !== "string") return undefined;
-    return { member, tombstone };
+    const [member, erasure] = parsed as unknown[];
+    if (typeof member !== "string" || typeof erasure !== "string") return undefined;
+    return { member, erasure };
   } catch {
     return undefined;
   }
@@ -903,7 +903,7 @@ export interface SlateHealth {
   readonly disagreeing: readonly string[];
 }
 
-export interface ForgivenHealth {
+export interface NegatedHealth {
   /** Ids in some graveyard's frozen `version` whose erasure no longer survives. */
   readonly count: number;
   /** Of those, how many are PRESENT in the ground again. */
@@ -911,8 +911,8 @@ export interface ForgivenHealth {
   readonly ids: readonly string[];
   /**
    * Graveyards whose frozen set could NOT be read. Without this, `count: 0` means both "nothing has
-   * been forgiven" and "the one durable list of ids this store promised to forget is unreadable" —
-   * H9 in the instrument that exists to make a forgiven-and-returned id visible at all.
+   * been negated" and "the one durable list of ids this store promised to forget is unreadable" —
+   * H9 in the instrument that exists to make an id whose erasure was negated visible at all.
    */
   readonly unreadable: readonly string[];
 }
@@ -1134,7 +1134,7 @@ export interface CitationTier {
 
 export interface CutMemberReport {
   readonly member: string;
-  readonly tombstone: string;
+  readonly erasure: string;
   readonly spokenBy: string;
   /** OBSERVATION, at `window.cutAt`. Non-authoritative for a re-issue — see RECEIPT_FIELDS. */
   readonly tiers: readonly TierVerdict[];
@@ -1161,7 +1161,7 @@ export interface CutReport {
   readonly window: { readonly opened: number; readonly cutAt: number };
   readonly members: readonly CutMemberReport[];
   /** Members a surviving lawful erasure ALREADY covered (§29.5's one lawful exception). */
-  readonly priorTombstone: readonly { readonly member: string; readonly tombstone: string }[];
+  readonly priorErasure: readonly { readonly member: string; readonly erasure: string }[];
   /** Tiers deliberately NOT reached, each with the declaration that permitted it. */
   readonly notReached: readonly { readonly wall: string; readonly acceptsIncomplete: string }[];
   readonly affected: readonly string[];
@@ -1189,9 +1189,9 @@ export const RECEIPT_FIELDS: readonly {
   { field: "requestedAt", side: "history" },
   { field: "deadline", side: "history" },
   { field: "closes", side: "history" },
-  { field: "tombstone", side: "history" },
+  { field: "erasure", side: "history" },
   { field: "spokenBy", side: "history" },
-  { field: "priorTombstone", side: "history" },
+  { field: "priorErasure", side: "history" },
   { field: "citations", side: "history" },
   { field: "duplicates", side: "history" },
   { field: "affected", side: "history" },
@@ -1200,7 +1200,7 @@ export const RECEIPT_FIELDS: readonly {
   { field: "notReached", side: "history" },
   { field: "tiers", side: "observation" },
   { field: "presentAgain", side: "observation" },
-  { field: "forgiven", side: "observation" },
+  { field: "negated", side: "observation" },
 ];
 
 const OBSERVATION_FIELDS = RECEIPT_FIELDS.filter((f) => f.side === "observation").map(
@@ -1237,7 +1237,7 @@ export async function cutImpl(
   requireMoment(now, "cut");
   const refuse = (why: string): never => {
     throw new Error(
-      `cut ${container} refused before any tombstone landed: ${why}\n` +
+      `cut ${container} refused before any erasure landed: ${why}\n` +
         `The slate STANDS — every closed door stays closed, the declaration still resolves, and ` +
         `the cut is resumable once this is repaired.`,
     );
@@ -1339,19 +1339,19 @@ export async function cutImpl(
   const pinnedTerm = (frozen as { term: unknown }).term;
   const reFrozen = freezeAgreement(gw.reactor, pinnedTerm, slate.version);
   const present = new Set(evalMembership(gw.reactor, pinnedTerm).map((d) => d.id));
-  const priorTombstone: { member: string; tombstone: string }[] = [];
+  const priorErasure: { member: string; erasure: string }[] = [];
   const tombs = standingErasures(gw.reactor, operator);
   for (const id of [...slate.members].sort()) {
     if (present.has(id)) continue;
     const already = tombs.find((t) => erasureTarget(t.claims) === id);
     if (already === undefined) {
       refuse(
-        `the frozen member ${id} resolves to nothing and carries NO surviving lawful tombstone, so ` +
+        `the frozen member ${id} resolves to nothing and carries NO surviving lawful erasure, so ` +
           `the re-freeze disagreement is not accounted for (${reFrozen ?? "the address still agrees"}). ` +
           `A cut must not stand over an unreported gap.`,
       );
     }
-    priorTombstone.push({ member: id, tombstone: already!.id });
+    priorErasure.push({ member: id, erasure: already!.id });
   }
   // The GROW leg. Content addressing makes it unreachable THROUGH THE TERM — the pinned address names
   // immutable bytes, so `evalMembership` over it can only ever return a subset of the ids read out of
@@ -1384,7 +1384,7 @@ export async function cutImpl(
   // Per member, the ORDINARY erase — the cut mints no new fan-out. Erasure, purge, attached
   // pool/wall fan-out and the byte verdict all come from §11 unchanged; the only addition is one
   // optional `slate` pointer on each newly-minted erasure.
-  const priorIds = new Set(priorTombstone.map((p) => p.member));
+  const priorIds = new Set(priorErasure.map((p) => p.member));
   const members: CutMemberReport[] = [];
   const faults: string[] = [];
   for (const id of [...slate.members].sort()) {
@@ -1397,7 +1397,7 @@ export async function cutImpl(
         });
         members.push({
           member: id,
-          tombstone: result.tombstone,
+          erasure: result.erasure,
           // The reused-erasure path can carry none; the sibling branch below already reads it the
           // same way, so a cut report cannot disagree with itself about the same receipt.
           spokenBy: result.spokenBy ?? "",
@@ -1409,7 +1409,7 @@ export async function cutImpl(
         const tomb = tombs.find((t) => erasureTarget(t.claims) === id)!;
         members.push({
           member: id,
-          tombstone: tomb.id,
+          erasure: tomb.id,
           spokenBy: spokenByOf(tomb.claims) ?? "",
           tiers: await tierVerdicts(gw, id, notReached),
           citations: [],
@@ -1429,7 +1429,7 @@ export async function cutImpl(
       `cut ${container} did not complete: ${faults.length} member(s) could not be erased, so the ` +
         `slate STANDS — its doors stay closed, its declaration still resolves, and the cut is ` +
         `RESUMABLE. No graveyard was recorded.\n  ${faults.join("\n  ")}\n` +
-        `Resolve them and re-run; the re-run mints no second tombstone.`,
+        `Resolve them and re-run; the re-run mints no second erasure.`,
     );
   }
 
@@ -1452,7 +1452,7 @@ export async function cutImpl(
           cutAt,
           closes,
           affected,
-          priorTombstone,
+          priorErasure,
         },
         operator,
         gw.nextTimestamp(),
@@ -1489,7 +1489,7 @@ export async function cutImpl(
     closes,
     window: { opened: slate.requestedAt, cutAt },
     members,
-    priorTombstone,
+    priorErasure,
     notReached,
     affected,
     resurfacing,
@@ -1629,7 +1629,7 @@ export interface GraveyardRecord {
   readonly cutAt: number;
   readonly closes: readonly SlateClosure[];
   readonly affected: readonly string[];
-  readonly priorTombstone: readonly { readonly member: string; readonly tombstone: string }[];
+  readonly priorErasure: readonly { readonly member: string; readonly erasure: string }[];
 }
 
 export function readGraveyards(reactor: Reactor, operator: string | undefined): GraveyardRecord[] {
@@ -1655,9 +1655,9 @@ export function readGraveyards(reactor: Reactor, operator: string | undefined): 
         (c): c is SlateClosure => typeof c === "string" && CLOSURES.has(c),
       ),
       affected: entitiesAt(d.claims, "affected", CTX_CONTAINER),
-      priorTombstone: primitives(d.claims, "prior-tombstone")
+      priorErasure: primitives(d.claims, "prior-erasure")
         .map((p) => (typeof p === "string" ? parsePriorPair(p) : undefined))
-        .filter((p): p is { member: string; tombstone: string } => p !== undefined),
+        .filter((p): p is { member: string; erasure: string } => p !== undefined),
     });
   }
   out.sort((a, b) => a.cutAt - b.cutAt || (a.id < b.id ? -1 : 1));
@@ -1667,14 +1667,14 @@ export function readGraveyards(reactor: Reactor, operator: string | undefined): 
 export interface CompletenessCheck {
   /**
    * §29.6's sentence, UNQUALIFIED: every member has a SURVIVING covering erasure. A later
-   * forgiveness makes this false, because a struck erasure stops surviving — that is the sentence
+   * negation makes this false, because a struck erasure stops surviving — that is the sentence
    * being read honestly, not a defect.
    */
   readonly holds: boolean;
   /**
    * Did the CUT complete? Every member accounted for as either a surviving covering erasure or an
-   * ENUMERATED forgiveness. This is the question a receipt asks, and it is a different one from
-   * `holds`: collapsing the two would make the first lawful forgiveness indistinguishable from an
+   * ENUMERATED negation. This is the question a receipt asks, and it is a different one from
+   * `holds`: collapsing the two would make the first lawful negation indistinguishable from an
    * abandoned cut — the same boolean collapse this file refuses for `ByteVerdict`, one layer up.
    */
   readonly cutCompleted: boolean;
@@ -1686,7 +1686,7 @@ export interface CompletenessCheck {
   /** Members whose erasure neither cites this slate nor is named in `prior-erasure`. */
   readonly missing: readonly string[];
   /** Members whose erasure has since been lawfully STRUCK — reported, never subtracted. */
-  readonly forgiven: readonly { readonly member: string; readonly strike: string }[];
+  readonly negated: readonly { readonly member: string; readonly strike: string }[];
 }
 
 /**
@@ -1701,17 +1701,17 @@ export interface CompletenessCheck {
  * A proof that cannot tell success from abandonment proves nothing, so the exception is ENUMERATED
  * in the graveyard rather than inferred at check time.
  *
- * And a FORGIVEN member does not falsify it either: §29.8 makes forgiveness an erasure strike, so
- * the first lawful forgiveness would flip a naive reading to FALSE. A member whose erasure has
- * been struck is reported as forgiven WITH its strike id. The graveyard records an event that
- * happened; forgiveness is a later event, and the check reports both rather than subtracting one.
+ * And a NEGATED member does not falsify it either: §29.8 makes negation an erasure strike, so
+ * the first lawful negation would flip a naive reading to FALSE. A member whose erasure has
+ * been struck is reported as negated WITH its strike id. The graveyard records an event that
+ * happened; negation is a later event, and the check reports both rather than subtracting one.
  */
 export function graveyardCompleteness(
   reactor: Reactor,
   operator: string | undefined,
   graveyardId: string,
 ): CompletenessCheck {
-  const blank = { holds: false, cutCompleted: false, members: [], missing: [], forgiven: [] };
+  const blank = { holds: false, cutCompleted: false, members: [], missing: [], negated: [] };
   const grave = readGraveyards(reactor, operator).find((g) => g.id === graveyardId);
   if (grave === undefined || operator === undefined) {
     return {
@@ -1727,13 +1727,13 @@ export function graveyardCompleteness(
   const frozen = readFrozenTerm(reactor, grave.membershipAt);
   if (!frozen.ok) return { ...blank, readable: false, unreadable: frozen.why };
   const members = [...frozen.ids].sort();
-  const prior = new Map(grave.priorTombstone.map((p) => [p.member, p.tombstone]));
+  const prior = new Map(grave.priorErasure.map((p) => [p.member, p.erasure]));
   const surviving = new Map(
     standingErasures(reactor, operator).map((t) => [erasureTarget(t.claims)!, t]),
   );
-  const negated = lawfulNegated(reactor, operator);
+  const isNegated = lawfulNegated(reactor, operator);
   const missing: string[] = [];
-  const forgiven: { member: string; strike: string }[] = [];
+  const negated: { member: string; strike: string }[] = [];
   for (const member of members) {
     const tomb = surviving.get(member);
     if (tomb !== undefined) {
@@ -1742,25 +1742,25 @@ export function graveyardCompleteness(
       missing.push(member);
       continue;
     }
-    // No SURVIVING erasure. Struck (forgiven) is reported as itself; absent is a real hole.
-    const strike = strikeOf(reactor, operator, negated, member);
-    if (strike !== undefined) forgiven.push({ member, strike });
+    // No SURVIVING erasure. Struck (negated) is reported as itself; absent is a real hole.
+    const strike = strikeOf(reactor, operator, isNegated, member);
+    if (strike !== undefined) negated.push({ member, strike });
     else missing.push(member);
   }
   return {
     // Two verdicts, because one boolean cannot hold both facts. `holds` is §29.6's sentence read
-    // literally (a forgiveness makes it false); `cutCompleted` is what a receipt asks (nothing
+    // literally (a negation makes it false); `cutCompleted` is what a receipt asks (nothing
     // unexplained). An empty member set answers NEITHER affirmatively — `readable` decides that.
-    holds: missing.length === 0 && forgiven.length === 0,
+    holds: missing.length === 0 && negated.length === 0,
     cutCompleted: missing.length === 0,
     readable: true,
     members,
     missing,
-    forgiven,
+    negated,
   };
 }
 
-// The lawful strike that forgave a member's erasure — the id a receipt reports beside FORGIVEN.
+// The lawful strike that forgave a member's erasure — the id a receipt reports beside NEGATED.
 function strikeOf(
   reactor: Reactor,
   operator: string,
@@ -1790,13 +1790,12 @@ const unreachedTiers = (walls: {
 export interface ReceiptMember {
   readonly member: string;
   /** The SURVIVING erasure, when one stands. */
-  readonly tombstone?: string;
-  /** The strike that forgave it (§29.8) — present instead of `erasure` after a forgiveness. */
-  readonly forgiven?: string;
+  readonly erasure?: string;
+  /** The strike that forgave it (§29.8) — present instead of `erasure` after a negation. */
+  readonly negated?: string;
   /**
-   * Is the id PRESENT in the ground again? One `get(id)` answers it, and it is the fact the obvious
-   * design loses: striking an erasure permits the id's return and `federateImpl` then admits it,
-   * so a receipt saying only FORGIVEN is technically true and communicates the opposite.
+   * Is the id PRESENT in the ground again? One `get(id)` answers it. A negated erasure never lets
+   * the id back in (§11), so this is true only while a purge has left the bytes behind.
    */
   readonly presentAgain: boolean;
   /** RE-PROBED at `issuedAt`, never reprinted from the CutReport. */
@@ -1818,7 +1817,7 @@ export interface Receipt {
   readonly window: { readonly opened: number; readonly cutAt: number };
   readonly closes: readonly SlateClosure[];
   readonly members: readonly ReceiptMember[];
-  readonly priorTombstone: readonly { readonly member: string; readonly tombstone: string }[];
+  readonly priorErasure: readonly { readonly member: string; readonly erasure: string }[];
   readonly completeness: CompletenessCheck;
   /** What this document does NOT claim. Printed beside the verdicts, never as a footnote. */
   readonly nonClaim: readonly string[];
@@ -1860,8 +1859,8 @@ export async function deriveReceiptImpl(
     const dangling = danglingCitations(gw, member);
     members.push({
       member,
-      ...(tomb === undefined ? {} : { tombstone: tomb.id }),
-      ...(strike === undefined ? {} : { forgiven: strike }),
+      ...(tomb === undefined ? {} : { erasure: tomb.id }),
+      ...(strike === undefined ? {} : { negated: strike }),
       presentAgain: gw.reactor.get(member) !== undefined,
       // BOTH halves of the wall report, and the sets are DISJOINT: `kept` is covered by a detach
       // record, `faults` is neither attached nor covered — a wall nobody re-attached after a restart.
@@ -1890,7 +1889,7 @@ export async function deriveReceiptImpl(
     window: { opened: grave.opened, cutAt: grave.cutAt },
     closes: grave.closes,
     members,
-    priorTombstone: grave.priorTombstone,
+    priorErasure: grave.priorErasure,
     completeness,
     nonClaim: [
       // The ESM registry is a tier the byte probes cannot ask — the standing R1 violation's
@@ -1922,15 +1921,15 @@ export async function deriveReceiptImpl(
   };
 }
 
-// --- forgiveness reporting (§29.8): what a graveyard's frozen set says about the present -----
+// --- negation reporting (§29.8): what a graveyard's frozen set says about the present -----
 
 /**
- * Forgiveness is LAWFUL, not debt — so this moves `status` no more than a slate does. But without it
- * a forgiven-and-returned id is invisible to every instrument the store has: striking an erasure
- * removes the id from `readErasures` and therefore from `promised` entirely, and the one durable
- * list of ids the store ever promised to forget is a graveyard's frozen `version`.
+ * Negation is LAWFUL, not debt — so this moves `status` no more than a slate does. But without it
+ * an id whose erasure was negated is invisible to every instrument the store has: negating an
+ * erasure removes the id from `readErasures` and therefore from `promised`, although the id stays
+ * refused forever. A graveyard's frozen `version` still lists it.
  */
-export function forgivenHealth(gw: Gateway): ForgivenHealth {
+export function negatedHealth(gw: Gateway): NegatedHealth {
   const operator = gw.operatorAuthor;
   const empty = { count: 0, present: 0, ids: [], unreadable: [] };
   if (operator === undefined) return empty;
@@ -1944,7 +1943,7 @@ export function forgivenHealth(gw: Gateway): ForgivenHealth {
   for (const grave of graves) {
     const frozen = readFrozenTerm(gw.reactor, grave.membershipAt);
     if (!frozen.ok) {
-      unreadable.push(grave.id); // never folded into "nothing forgiven" (H9)
+      unreadable.push(grave.id); // never folded into "nothing negated" (H9)
       continue;
     }
     for (const id of frozen.ids) if (!surviving.has(id)) ids.add(id);

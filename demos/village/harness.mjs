@@ -92,7 +92,7 @@ export async function openStore(name, opts = {}) {
     backend = new MirrorBackend(backend, archive, {
       onLag: (err) => console.log(`  ${name}'s vault is lagging: ${err}`),
     });
-    // the law reaches the vault: tombstoned ids are never replanted by a heal (SPEC §11)
+    // the law reaches the vault: erased ids are never replanted by a heal (SPEC §11)
     const dead = erasuresIn(
       [...(await backend.deltasSince(new Set())), ...(await archive.deltasSince(new Set()))],
       authorForSeed(seed),

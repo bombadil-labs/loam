@@ -551,7 +551,7 @@ button:disabled {
   color: var(--amber);
 }
 .badge-negation,
-.badge-tombstone {
+.badge-erasure {
   border-color: var(--danger);
   color: var(--danger);
 }

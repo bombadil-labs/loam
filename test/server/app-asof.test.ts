@@ -488,7 +488,7 @@ describe("(c) an as-of window spanning an erasure confesses it, in the served by
     expect(body).toContain("bystander-leaf");
   });
 
-  it("the confession names WHEN, never WHAT — a tombstone keeps no content to leak", async () => {
+  it("the confession names WHEN, never WHAT — an erasure keeps no content to leak", async () => {
     const body = await bodyOf(await app(world, "public", "?asOf=1600"));
     expect(body).not.toContain("condemned-leaf");
     expect(body).not.toContain(GARDENER); // nor whose fact it was
