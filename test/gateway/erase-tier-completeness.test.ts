@@ -224,7 +224,7 @@ describe("erase is complete only when every TIER is clean", () => {
 });
 
 // The retry anchor is a SURVIVING tombstone. A struck tombstone is no longer standing testimony,
-// and the id stays refused forever, so a forgiven id can never return through a door.
+// and the id stays refused forever, so an erased id can never return through a write path.
 // NOT COVERED: an erase that anchors on a struck tombstone while the bytes are back. No door can
 // bring them back now; a tier that kept them unasked would reach it, and no test builds that.
 describe("the retry anchor honors forgiveness", () => {
@@ -239,7 +239,7 @@ describe("the retry anchor honors forgiveness", () => {
     await gateway.append([signClaims(makeNegationClaims(OPERATOR, 9000, tomb!.id), OP_SEED)]);
   };
 
-  it("after forgiveness the id stays refused at append", async () => {
+  it("after its tombstone is withdrawn the id stays refused at append", async () => {
     const { gateway, fact } = await groveOn(
       new MirrorBackend(new MemoryBackend(), new MemoryBackend()),
     );

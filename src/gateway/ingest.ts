@@ -42,7 +42,7 @@ import {
 } from "@bombadil/rhizomatic";
 import { authorize } from "./accounts.js";
 import { budgetRefusal } from "./budget.js";
-import { ERASE_ENTITY, eraseDefect, isTombstone, refusedIds } from "./erase.js";
+import { ERASE_ENTITY, eraseDefect, erasedInBatch, isTombstone, refusedIds } from "./erase.js";
 import { Channel } from "./channel.js";
 import type { AppendReceipt, FederationReport, Gateway } from "./gateway.js";
 import { publicDefect } from "./public.js";
@@ -232,8 +232,8 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
   }
   const batch = [...deltas];
   // An erased id is refused re-entry forever (SPEC §11), through append as through federation, even
-  // after its tombstone is struck, and even when the tombstone arrives in this same batch.
-  const dead = refusedIds(gw.reactor, gw.operatorAuthor, batch);
+  // after its tombstone is struck. A tombstone in this same batch is checked once the batch is valid.
+  const dead = refusedIds(gw.reactor, gw.operatorAuthor);
   // And the door remembers what is being STAGED for removal (SPEC §29.3): a slate closing `cite`
   // refuses a delta that names one of its frozen members, so the DEPENDENT set cannot grow and no
   // new orphans exist at cut time. Here the refusal is INFORMATIVE and names the container — the
@@ -285,6 +285,16 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
     if (overBudget !== undefined) {
       throw new Error(`append rejected: ${overBudget}`);
     }
+  }
+  // Every member is valid now, so a tombstone in the batch binds, and its target in the same batch
+  // is refused. Append is atomic, so the whole batch is refused.
+  const erasedHere = erasedInBatch(batch, gw.operatorAuthor);
+  const alsoErased = batch.find((d) => erasedHere.has(d.id));
+  if (alsoErased !== undefined) {
+    throw new Error(
+      `append rejected: delta ${alsoErased.id} is erased by a tombstone in the same batch, ` +
+        `and an erasure is permanent`,
+    );
   }
   await gw.backend.append(batch); // a throw here means NOTHING was ingested or served
   let accepted = 0;
@@ -652,8 +662,8 @@ export async function federateImpl(
   const byPolicy = opts.admit === undefined; // whose boundary this is, and so who owns the closure
   const admit = opts.admit ?? admitForImpl(gw); // the store's trust policy, unless overridden
   // An erased id is refused re-entry forever (SPEC §11), even past an explicit admit override, even
-  // after its tombstone is struck, and even when the tombstone arrives in this same offer.
-  const dead = refusedIds(gw.reactor, gw.operatorAuthor, all);
+  // after its tombstone is struck. A tombstone in this same offer binds once it is admitted, below.
+  const dead = refusedIds(gw.reactor, gw.operatorAuthor);
   // The SAME cite predicate the append door runs (SPEC §29.3) — one rule, two sites, because all
   // seven findings of 2026-07-21 were one-rule-N-sites-one-drifts with the federation site as the
   // one that drifted. Here the disclosure discipline INVERTS: a peer pushing a citation may have no
@@ -697,6 +707,10 @@ export async function federateImpl(
   if (byPolicy && admitted.length < lawful.length) {
     admitted = withBatchNegationClosure(lawful, admitted);
   }
+  // A tombstone admitted in this offer refuses its target in the same offer. Only ADMITTED
+  // tombstones count: one this path refused, or the caller's predicate turned away, never bound.
+  const erasedHere = erasedInBatch(admitted, gw.operatorAuthor);
+  if (erasedHere.size > 0) admitted = admitted.filter((d) => !erasedHere.has(d.id));
   // Counted per offered delta rather than inferred from set sizes: the closure keys by id, so a peer
   // that offers the same delta twice would otherwise be reported as one refusal that never happened.
   const crossed = new Set(admitted.map((d) => d.id));

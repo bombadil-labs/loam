@@ -196,7 +196,7 @@ export function eraseDefect(
 
 // The targets of every STANDING tombstone: surviving, unstruck and operator-signed. Only the
 // operator's tombstones bind, so an ungoverned store honors no erasure. A struck tombstone is
-// forgiveness of the record: it leaves this set, but its id stays in `refusedIds`, which is what
+// a withdrawn record: it leaves this set, but its id stays in `refusedIds`, which is what
 // the write and read paths consult.
 export function readTombstones(reactor: Reactor, operator: string | undefined): Set<string> {
   const dead = new Set<string>();
@@ -213,30 +213,36 @@ export function readTombstones(reactor: Reactor, operator: string | undefined): 
 //
 // DERIVED, NOT PERSISTED, and that rests on one premise: a tombstone can never be erased (§11).
 // If that ever changes, this list must be kept in its own store, or an erasure can be undone.
-//
-// `batch` adds the lawful tombstones arriving in the same ingest, so a batch that carries both an
-// order and its target cannot admit the target. A batch tombstone binds when the door would accept
-// it; its `spoken-by` is checked against the target in the batch when the store does not hold it.
-export function refusedIds(
-  reactor: Reactor,
-  operator: string | undefined,
-  batch: readonly Delta[] = [],
-): Set<string> {
+// A batch that carries a tombstone and its target is handled by `erasedInBatch`.
+export function refusedIds(reactor: Reactor, operator: string | undefined): Set<string> {
   const refused = new Set<string>();
   for (const tomb of boundTombstones(reactor, operator, false)) {
     refused.add(tombstoneParts(tomb.claims).targetId!);
   }
-  if (operator === undefined) return refused;
-  const inBatch = new Map(batch.map((d) => [d.id, d]));
-  for (const d of batch) {
-    if (!isTombstone(d.claims) || inLocalContext(d, LOCAL_CONTROL)) continue;
-    if (eraseDefect(d, reactor, operator) !== undefined) continue;
-    const { targetId, spokenBy } = tombstoneParts(d.claims);
-    const target = inBatch.get(targetId!);
-    if (target !== undefined && target.claims.author !== spokenBy) continue;
-    refused.add(targetId!);
-  }
   return refused;
+}
+
+// The ids that tombstones inside one ingest batch refuse. The caller passes only members it has
+// ALREADY accepted (verified, lawful, admitted), so a forged or refused tombstone never counts,
+// and a member's id is the hash of its content, so no forged copy can stand in for the target.
+// A tombstone counts only if it names its target's real author when the target is in the batch.
+export function erasedInBatch(
+  accepted: readonly Delta[],
+  operator: string | undefined,
+): Set<string> {
+  const out = new Set<string>();
+  if (operator === undefined) return out;
+  const byId = new Map(accepted.map((d) => [d.id, d]));
+  for (const d of accepted) {
+    if (!isTombstone(d.claims) || inLocalContext(d, LOCAL_CONTROL)) continue;
+    if (d.claims.author !== operator) continue;
+    const { targetId, spokenBy, count } = tombstoneParts(d.claims);
+    if (targetId === undefined || count.erases !== 1) continue;
+    const target = byId.get(targetId);
+    if (target !== undefined && target.claims.author !== spokenBy) continue;
+    out.add(targetId);
+  }
+  return out;
 }
 
 // The surviving, lawful, operator-signed tombstones — the record of what this ground has

@@ -10,7 +10,12 @@
 
 import { describe, expect, it } from "vitest";
 import { makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
-import { eraseClaims, refusedIds, survivingTombstones } from "../../src/gateway/erase.js";
+import {
+  eraseClaims,
+  erasedInBatch,
+  refusedIds,
+  survivingTombstones,
+} from "../../src/gateway/erase.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -89,7 +94,49 @@ describe("an erased id is refused forever", () => {
       eraseClaims(target.id, "ed25519:" + "00".repeat(32), gw.operatorAuthor!, 2000),
       OP_SEED,
     );
-    expect(refusedIds(gw.reactor, gw.operatorAuthor, [wrong, target]).has(target.id)).toBe(false);
+    expect(erasedInBatch([wrong, target], gw.operatorAuthor).has(target.id)).toBe(false);
+    await gw.close();
+  });
+
+  // Only a tombstone the federate path actually admits can refuse its target in the same offer.
+  it("a forged tombstone in the offer does not suppress its target", async () => {
+    const gw = await boot();
+    const target = observed(FERN, "height", 30, 1000, OP_SEED);
+    // A real tombstone carrying another delta's signature: operator-shaped, and not verified.
+    const genuine = tombstoneFor(gw, target, 2000);
+    const forged: Delta = { ...genuine, sig: tombstoneFor(gw, target, 2001).sig! };
+    await gw.federate([forged, target]);
+    expect(held(gw, forged)).toBe(false);
+    expect(held(gw, target)).toBe(true);
+    await gw.close();
+  });
+
+  it("a tombstone the caller's admit rule turns away does not suppress its target", async () => {
+    const gw = await boot();
+    const target = observed(FERN, "height", 30, 1000, OP_SEED);
+    const tomb = tombstoneFor(gw, target, 2000);
+    await gw.federate([tomb, target], { admit: (d) => d.id !== tomb.id });
+    expect(held(gw, tomb)).toBe(false);
+    expect(held(gw, target)).toBe(true);
+    await gw.close();
+  });
+
+  it.each([
+    ["tombstone, target, forged copy", [0, 1, 2]],
+    ["forged copy, tombstone, target", [2, 0, 1]],
+    ["target, forged copy, tombstone", [1, 2, 0]],
+  ])("a forged copy under the target's id cannot let the target in (%s)", async (_, order) => {
+    const gw = await boot();
+    const target = observed(FERN, "height", 30, 1000, OP_SEED);
+    const forgedCopy: Delta = {
+      ...target,
+      claims: { ...target.claims, author: "ed25519:" + "11".repeat(32) },
+    };
+    const tomb = tombstoneFor(gw, target, 2000);
+    const members = [tomb, target, forgedCopy];
+    await gw.federate(order.map((k) => members[k]!));
+    expect(held(gw, target)).toBe(false);
+    expect(held(gw, tomb)).toBe(true);
     await gw.close();
   });
 });
