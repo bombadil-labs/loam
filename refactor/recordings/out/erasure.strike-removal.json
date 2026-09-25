@@ -1,0 +1,12 @@
+{
+  "after": {
+    "dataStruck": false,
+    "lawfulNegated": false,
+    "refused": true
+  },
+  "before": {
+    "dataStruck": true,
+    "lawfulNegated": true,
+    "refused": true
+  }
+}

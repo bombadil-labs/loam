@@ -14,11 +14,11 @@ Loam treats the author's `timestamp` as three different things. It is a claim of
 - **vNext candidate:** With valid-from separated from creation time, adoption could carry the source's valid-from and a fresh creation time. That changes identity, so the erasure idempotence that relies on "same id" needs another anchor, for example a key on (content, valid-from) or on the source id.
 - **Class:** decision for Myk. **Tier:** delta / forgetting. **Confidence:** CONFIRMED.
 
-### 3. Hand-written latest-wins readers keep the first record they see on a tie
-- **Loam does:** `latestByKey` has `if (prior.at >= d.claims.timestamp) continue` over `byTarget` order (`src/gateway/attention.ts:119`). The channel status reader does the same over `snapshot()` order (`src/federation/channel.ts:529`). Both hand-roll `pick byTimestamp desc` without `lexById`. In contrast, `binding-policy.ts:156-158`, `registration.ts:1056-1058` and `accounts.ts:275,386` do break ties by `(timestamp, id)`.
-- **Substrate gap:** SPEC-5 §2 says every order must end in `lexById`. SPEC-4 §114 says arrival order must not reach content. These two readers leak arrival order on ties. Ties can happen across restarts (entry 1) or between two processes that share a seed.
+### 3. One hand-written latest-wins reader keeps the first record it sees on a tie
+- **Loam does:** The channel status reader keeps the first record on a timestamp tie, over `snapshot()` order (`src/federation/channel.ts:529`). `latestByKey` (`src/gateway/attention.ts:119`) looks similar, but it iterates `byTarget`, which returns ids sorted ascending. So its first record on a tie is the lowest delta id: the same ascending-id tiebreak as the resolve comparator. `binding-policy.ts:156-158`, `registration.ts:1056-1058` and `accounts.ts:275,386` break ties by `(timestamp, id)` explicitly.
+- **Substrate gap:** SPEC-5 §2 says every order must end in `lexById`. SPEC-4 §114 says arrival order must not reach content. The channel reader leaks arrival order on ties, because `snapshot()` iterates in arrival order. Ties can happen across restarts (entry 1) or between two processes that share a seed.
 - **vNext candidate:** Expose a resolve-tier "latest record per key" primitive with the normative tiebreak, so the "standing record, superseded in place" pattern stops being re-implemented. Otherwise this is a Loam bug fix.
-- **Class:** Loam policy (a bug), with a candidate in the resolve tier. **Tier:** resolve. **Confidence:** CONFIRMED.
+- **Class:** a Loam bug in the channel reader only, with a candidate in the resolve tier. `latestByKey` is correct. **Tier:** resolve. **Confidence:** CONFIRMED that `latestByKey` is correct, by recording (`recordings/out/time.latest-tie.json`: same winner in both orders). CONFIRMED that the channel reader leaks arrival order, by recording (`recordings/out/time.channel-tie.json`: `receiving` is true in forward order and false in reverse).
 
 ### 4. As-of reads use author time only, so they cannot answer "what did this store hold at T"
 - **Loam does:** `groundAsOfImpl` filters the whole snapshot with `claims.timestamp <= asOf` (`src/gateway/reads.ts:71-73`). `spec/26-as-of-reads.md` admits that timestamps are "testimony, gameable." Two effects follow. A backdated delta that arrives late rewrites past as-of answers, so the same as-of query gives different answers on different days. A future-dated delta is missing from every present-day as-of read. The filter is also an O(N) walk in JS, although rhizomatic has `match(timestamp, lte, T)` (SPEC-2 §79).
@@ -84,8 +84,8 @@ These functions decide things from time or order. Their current outputs should b
 
 - **`readSlates(reactor, operator, now)`** (`src/gateway/slate.ts`). Needs an explicit `now`. The callers pass `Date.now()` implicitly: `ingest.ts:243,653`, `erase.ts:963`. Record each slate before and after its deadline.
 - **`groundAsOfImpl(gw, asOf)`** and **`annotateImpl`** (`src/gateway/reads.ts:71,86`). Also record **`forgottenSince(reactor, operator, since)`** (`src/gateway/erase.ts:704`). Include a negation dated after `asOf`, and a tombstone.
-- **`latestByKey`, `quietContainersImpl`, `readLookedImpl`, `attentionSummaryImpl`** (`src/gateway/attention.ts`). These have the first-seen tie problem. Record under two different ingest orders of the same set to show the order dependence.
-- **The channel status reader** around `src/federation/channel.ts:505-570`. Same tie problem. Use two ingest orders.
+- **`latestByKey`, `quietContainersImpl`, `readLookedImpl`, `attentionSummaryImpl`** (`src/gateway/attention.ts`). Their tie winner is the lowest delta id, because `byTarget` sorts. `readLookedImpl` is recorded (`time.latest-tie`).
+- **The channel status reader** around `src/federation/channel.ts:505-570`. It leaks arrival order on a tie; recorded (`time.channel-tie`).
 - **`interpretBindingPolicy(candidates, mode, operator)`** (`src/gateway/binding-policy.ts`). Pure, with a `(timestamp, id)` tiebreak.
 - **`readRegistrations` / `survivingCandidates`** (`src/gateway/registration.ts:1056,1134`). This is ground order, including the "first claimed" moment. Also record the REST `vN` aliasing (`src/surface/rest.ts:69`).
 - **The earliest-revocation and tenant-winner pickers** (`src/gateway/accounts.ts:263-277, 363-390`).

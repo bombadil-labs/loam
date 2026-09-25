@@ -1,0 +1,12 @@
+{
+  "after": [
+    5000,
+    5001
+  ],
+  "afterSortsBeforeBefore": true,
+  "before": [
+    10000,
+    10001,
+    10002
+  ]
+}

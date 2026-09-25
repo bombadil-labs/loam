@@ -69,9 +69,17 @@ export function strike(target: Delta, by: Who, timestamp: number): Delta {
   return signed(makeNegationClaims(KEY[by], timestamp, target.id), by);
 }
 
-/** A reactor holding `deltas`, ingested in list order. Raw ingest: no Loam door runs. */
+/** A reactor holding `deltas`, ingested in list order. Raw ingest: no Loam door runs. Throws if
+ * the substrate refuses any delta, so a corpus cannot shrink while its recordings stay green. */
 export function reactorOf(deltas: readonly Delta[]): Reactor {
-  return ingestTrace(deltas).reactor;
+  const { reactor, verdicts } = ingestTrace(deltas);
+  const refused = verdicts.filter(([, v]) => v.status === "rejected");
+  if (refused.length > 0) {
+    throw new Error(
+      `the substrate refused corpus deltas: ${refused.map(([id]) => nameOf(id)).join(", ")}`,
+    );
+  }
+  return reactor;
 }
 
 /** The substrate's verdict on each delta, in ingest order, with the reactor that results. */

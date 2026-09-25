@@ -1,0 +1,87 @@
+{
+  "governed": {
+    "forgottenSince": {
+      "since 0": [
+        20,
+        23,
+        27,
+        29
+      ],
+      "since 20": [
+        23,
+        27,
+        29
+      ],
+      "since 23": [
+        27,
+        29
+      ],
+      "since 29": []
+    },
+    "ledger": {
+      "inert": 1,
+      "receipts": [
+        {
+          "at": 20,
+          "erased": "#target/erased",
+          "orderedBy": "@operator",
+          "reasons": [
+            "asked by the subject"
+          ],
+          "spokenBy": "@writer",
+          "tombstone": "#tomb/operator"
+        },
+        {
+          "at": 23,
+          "erased": "#target/forgiven-then-unforgiven",
+          "orderedBy": "@operator",
+          "reasons": [],
+          "spokenBy": "@writer",
+          "tombstone": "#tomb/re-forgotten"
+        },
+        {
+          "at": 27,
+          "erased": "#target/wrong-spoken-by",
+          "orderedBy": "@operator",
+          "reasons": [],
+          "spokenBy": "@stranger",
+          "tombstone": "#tomb/wrong-spoken-by"
+        },
+        {
+          "at": 29,
+          "erased": "#strike/claim",
+          "orderedBy": "@operator",
+          "reasons": [],
+          "spokenBy": "@operator",
+          "tombstone": "#tomb/erases-a-strike"
+        }
+      ]
+    },
+    "refused": [
+      "#strike/claim",
+      "#target/erased",
+      "#target/forgiven-then-unforgiven",
+      "#target/wrong-spoken-by"
+    ],
+    "refusedBeforeBoot": [
+      "#strike/claim",
+      "#target/erased",
+      "#target/forgiven-then-unforgiven",
+      "#target/wrong-spoken-by"
+    ]
+  },
+  "ungoverned": {
+    "forgottenSince": {
+      "since 0": [],
+      "since 20": [],
+      "since 23": [],
+      "since 29": []
+    },
+    "ledger": {
+      "inert": 0,
+      "receipts": []
+    },
+    "refused": [],
+    "refusedBeforeBoot": []
+  }
+}

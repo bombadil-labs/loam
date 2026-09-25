@@ -1,0 +1,14 @@
+{
+  "forward": [
+    {
+      "name": "garden",
+      "receiving": true
+    }
+  ],
+  "reverse": [
+    {
+      "name": "garden",
+      "receiving": false
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "now = deadline +0": [
+    {
+      "acceptsIncomplete": [],
+      "closes": [
+        "egress"
+      ],
+      "container": "slate:one",
+      "deadline": 1000000,
+      "declared": [
+        "egress"
+      ],
+      "lapsed": false,
+      "members": [],
+      "membershipAt": "term:frozen",
+      "record": "#slate/one",
+      "requestedAt": 900000,
+      "requestedBy": "subject-1",
+      "requestedByForm": "plain",
+      "unresolved": "the membership address term:frozen resolves to nothing here — partial federation, a missing publish, or an erased Term",
+      "version": "version:one"
+    }
+  ],
+  "now = deadline +1": [
+    {
+      "acceptsIncomplete": [],
+      "closes": [
+        "egress",
+        "read"
+      ],
+      "container": "slate:one",
+      "deadline": 1000000,
+      "declared": [
+        "egress"
+      ],
+      "lapsed": true,
+      "members": [],
+      "membershipAt": "term:frozen",
+      "record": "#slate/one",
+      "requestedAt": 900000,
+      "requestedBy": "subject-1",
+      "requestedByForm": "plain",
+      "unresolved": "the membership address term:frozen resolves to nothing here — partial federation, a missing publish, or an erased Term",
+      "version": "version:one"
+    }
+  ],
+  "now = deadline -1": [
+    {
+      "acceptsIncomplete": [],
+      "closes": [
+        "egress"
+      ],
+      "container": "slate:one",
+      "deadline": 1000000,
+      "declared": [
+        "egress"
+      ],
+      "lapsed": false,
+      "members": [],
+      "membershipAt": "term:frozen",
+      "record": "#slate/one",
+      "requestedAt": 900000,
+      "requestedBy": "subject-1",
+      "requestedByForm": "plain",
+      "unresolved": "the membership address term:frozen resolves to nothing here — partial federation, a missing publish, or an erased Term",
+      "version": "version:one"
+    }
+  ]
+}

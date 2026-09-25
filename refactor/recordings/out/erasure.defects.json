@@ -1,0 +1,73 @@
+{
+  "governed": {
+    "#tomb/by-stranger": {
+      "targetAbsent": "erasure is the instance operator's alone: only the operator may order a record removed",
+      "targetPresent": "erasure is the instance operator's alone: only the operator may order a record removed"
+    },
+    "#tomb/erases-a-strike": {
+      "targetAbsent": {
+        "$": "undefined"
+      },
+      "targetPresent": {
+        "$": "undefined"
+      }
+    },
+    "#tomb/forgiven": {
+      "targetAbsent": {
+        "$": "undefined"
+      },
+      "targetPresent": {
+        "$": "undefined"
+      }
+    },
+    "#tomb/operator": {
+      "targetAbsent": {
+        "$": "undefined"
+      },
+      "targetPresent": {
+        "$": "undefined"
+      }
+    },
+    "#tomb/re-forgotten": {
+      "targetAbsent": {
+        "$": "undefined"
+      },
+      "targetPresent": {
+        "$": "undefined"
+      }
+    },
+    "#tomb/wrong-spoken-by": {
+      "targetAbsent": {
+        "$": "undefined"
+      },
+      "targetPresent": "a tombstone's spoken-by must be the erased delta's actual author"
+    }
+  },
+  "two erases pointers": "a tombstone erases exactly one delta (one delta-kind `erases` pointer)",
+  "ungoverned": {
+    "#tomb/by-stranger": {
+      "targetAbsent": "erasure is the instance operator's alone: only the operator may order a record removed",
+      "targetPresent": "erasure is the instance operator's alone: only the operator may order a record removed"
+    },
+    "#tomb/erases-a-strike": {
+      "targetAbsent": "erasure is the instance operator's alone: only the operator may order a record removed",
+      "targetPresent": "erasure is the instance operator's alone: only the operator may order a record removed"
+    },
+    "#tomb/forgiven": {
+      "targetAbsent": "erasure is the instance operator's alone: only the operator may order a record removed",
+      "targetPresent": "erasure is the instance operator's alone: only the operator may order a record removed"
+    },
+    "#tomb/operator": {
+      "targetAbsent": "erasure is the instance operator's alone: only the operator may order a record removed",
+      "targetPresent": "erasure is the instance operator's alone: only the operator may order a record removed"
+    },
+    "#tomb/re-forgotten": {
+      "targetAbsent": "erasure is the instance operator's alone: only the operator may order a record removed",
+      "targetPresent": "erasure is the instance operator's alone: only the operator may order a record removed"
+    },
+    "#tomb/wrong-spoken-by": {
+      "targetAbsent": "erasure is the instance operator's alone: only the operator may order a record removed",
+      "targetPresent": "erasure is the instance operator's alone: only the operator may order a record removed"
+    }
+  }
+}
