@@ -348,3 +348,80 @@ export function stronglyConnected(edges, withTypes) {
   for (const v of edges.keys()) if (!idx.has(v)) visit(v);
   return found.sort((a, b) => b.length - a.length);
 }
+
+// Code that decides; the doors, the CLI and the clients may read the clock.
+const CORE = /^src\/(gateway|federation|store|runner|surface|migrate|stock)\//;
+
+// The last name in a receiver chain: `gw.options` → "options", `x["reactor"]` → "reactor",
+// `globalThis.Date` → "Date". Anything else has no name.
+function lastName(node) {
+  if (ts.isIdentifier(node)) return node.text;
+  if (ts.isPropertyAccessExpression(node)) return node.name.text;
+  if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)) {
+    return node.argumentExpression.text;
+  }
+  if (ts.isParenthesizedExpression(node)) return lastName(node.expression);
+  return undefined;
+}
+
+// A member reference `recv.name` or `recv["name"]`: [receiver, name], or undefined.
+function member(node) {
+  if (ts.isPropertyAccessExpression(node)) return [node.expression, node.name.text];
+  if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)) {
+    return [node.expression, node.argumentExpression.text];
+  }
+  return undefined;
+}
+
+// The ratchet's per-file counts. They are syntactic: a read through an alias the syntax tree
+// cannot see (a variable holding `options`, a computed key) is not counted.
+export function couplingCountsOf(file, text) {
+  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+  const core = CORE.test(file.replace(/\\/g, "/"));
+  const counts = { seedReads: 0, snapshotRefs: 0, coreClockReads: 0 };
+  const isClock = (recv) => ["Date", "performance"].includes(lastName(recv));
+  const visit = (n) => {
+    const m = member(n);
+    if (m !== undefined) {
+      const [recv, name] = m;
+      if (name === "seed" && lastName(recv) === "options") counts.seedReads++;
+      if (name === "snapshot" && /reactor$/i.test(lastName(recv) ?? "")) counts.snapshotRefs++;
+      if (core && name === "now" && isClock(recv)) counts.coreClockReads++;
+    }
+    // `const { seed } = options`, `const { now } = Date`
+    if (ts.isVariableDeclaration(n) && ts.isObjectBindingPattern(n.name) && n.initializer) {
+      const from = lastName(n.initializer);
+      for (const el of n.name.elements) {
+        const key = (el.propertyName ?? el.name).getText(sf).replace(/^["']|["']$/g, "");
+        if (key === "seed" && from === "options") counts.seedReads++;
+        if (core && key === "now" && ["Date", "performance"].includes(from)) {
+          counts.coreClockReads++;
+        }
+      }
+    }
+    if (core && ts.isNewExpression(n) && lastName(n.expression) === "Date") {
+      if ((n.arguments?.length ?? 0) === 0) counts.coreClockReads++;
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return counts;
+}
+
+// Every ratchet count over `files`.
+export function couplingCounts(files) {
+  const cycles = stronglyConnected(importGraph(files).edges, false);
+  const totals = {
+    largestImportCycle: Math.max(0, ...cycles.map((c) => c.length)),
+    importCycles: cycles.length,
+    cyclicFiles: cycles.reduce((n, c) => n + c.length, 0),
+    seedReads: 0,
+    snapshotRefs: 0,
+    coreClockReads: 0,
+  };
+  for (const file of files) {
+    const per = couplingCountsOf(file, fs.readFileSync(file, "utf8"));
+    for (const [k, v] of Object.entries(per)) totals[k] += v;
+  }
+  return totals;
+}
