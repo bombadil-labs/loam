@@ -1692,8 +1692,9 @@ export async function healthImpl(gw: Gateway, now = Date.now()): Promise<StoreHe
     status,
     erasure,
     // Both sections are LAWFUL facts rather than debt, so neither moves `status` — but without them
-    // a lapsed compliance window and a negated-and-returned id are invisible to every instrument
-    // the store has (a struck erasure leaves `readErasures`, and therefore `promised`, entirely).
+    // a lapsed compliance window and an id whose erasure was negated are invisible to every
+    // instrument the store has (a negated erasure leaves `readErasures`, and therefore `promised`,
+    // though its id stays refused forever).
     slates: slateHealth(gw, now),
     negated: negatedHealth(gw),
     ...(typeof lagging === "boolean" && { lagging }),

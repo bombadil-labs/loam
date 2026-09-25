@@ -933,7 +933,7 @@ export const CHAPTERS = [
       },
       {
         kind: "prose",
-        text: "A [[erasure]] cannot itself be erased: a store that could forget its own forgetting would be unauditable. It can, however, be struck — which is negation, and lets an id return. And erasing here never compels anyone else: a peer's [[operator]] decides for themselves whether to honor a foreign order, so a forged erasure cannot cascade a deletion across a network.",
+        text: "A [[erasure]] cannot itself be erased: a store that could forget its own forgetting would be unauditable. It can, however, be negated — which withdraws the record, while the id stays refused forever. And erasing here never compels anyone else: a peer's [[operator]] decides for themselves whether to honor a foreign order, so a forged erasure cannot cascade a deletion across a network.",
       },
       {
         kind: "heading",
@@ -981,7 +981,7 @@ export const CHAPTERS = [
             door: "SqliteBackend",
           },
           {
-            says: "A [[erasure]] can never itself be erased; striking one is negation, and the id may then return.",
+            says: "A [[erasure]] can never itself be erased; negating one withdraws the record, and the id stays refused forever.",
             spec: "spec/11-erasure.md",
             proof: "test/gateway/erase.test.ts",
             door: "eraseClaims",

@@ -422,7 +422,7 @@ function graveyardDefect(claims: Claims, operator: string | undefined): string |
   }
   for (const pair of primitives(claims, "prior-erasure")) {
     if (typeof pair !== "string" || parsePriorPair(pair) === undefined) {
-      return "a graveyard's prior-erasure entries are JSON [memberId, tombstoneId] pairs";
+      return "a graveyard's prior-erasure entries are JSON [memberId, erasureId] pairs";
     }
   }
   return undefined;
@@ -912,7 +912,7 @@ export interface NegatedHealth {
   /**
    * Graveyards whose frozen set could NOT be read. Without this, `count: 0` means both "nothing has
    * been negated" and "the one durable list of ids this store promised to forget is unreadable" —
-   * H9 in the instrument that exists to make a negated-and-returned id visible at all.
+   * H9 in the instrument that exists to make an id whose erasure was negated visible at all.
    */
   readonly unreadable: readonly string[];
 }
@@ -1794,9 +1794,8 @@ export interface ReceiptMember {
   /** The strike that forgave it (§29.8) — present instead of `erasure` after a negation. */
   readonly negated?: string;
   /**
-   * Is the id PRESENT in the ground again? One `get(id)` answers it, and it is the fact the obvious
-   * design loses: striking an erasure permits the id's return and `federateImpl` then admits it,
-   * so a receipt saying only NEGATED is technically true and communicates the opposite.
+   * Is the id PRESENT in the ground again? One `get(id)` answers it. A negated erasure never lets
+   * the id back in (§11), so this is true only while a purge has left the bytes behind.
    */
   readonly presentAgain: boolean;
   /** RE-PROBED at `issuedAt`, never reprinted from the CutReport. */
@@ -1926,9 +1925,9 @@ export async function deriveReceiptImpl(
 
 /**
  * Negation is LAWFUL, not debt — so this moves `status` no more than a slate does. But without it
- * a negated-and-returned id is invisible to every instrument the store has: striking an erasure
- * removes the id from `readErasures` and therefore from `promised` entirely, and the one durable
- * list of ids the store ever promised to forget is a graveyard's frozen `version`.
+ * an id whose erasure was negated is invisible to every instrument the store has: negating an
+ * erasure removes the id from `readErasures` and therefore from `promised`, although the id stays
+ * refused forever. A graveyard's frozen `version` still lists it.
  */
 export function negatedHealth(gw: Gateway): NegatedHealth {
   const operator = gw.operatorAuthor;

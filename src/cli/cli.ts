@@ -5063,7 +5063,7 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
       (done.minted || done.reasons.includes(reason)
         ? ""
         : `  YOUR --reason IS NOT ON THE RECEIPT: this run reused the one an earlier run minted, and\n` +
-          `  a receipt is immutable. To say something else, strike it (negation, §11) and erase again.\n`) +
+          `  a receipt is immutable. Negating it withdraws the record; the id stays refused forever (§11).\n`) +
       `  the bytes are gone, asked tier by tier: ${swept.join(", ")}\n` +
       `  \`loam erasures show ${done.erasure}\` reads the receipt back` +
       // The count now spans every WALKABLE tier the byte verdict walks (T216) — a pool-resident
@@ -5361,8 +5361,8 @@ async function cmdErasures(args: readonly string[], io: IO): Promise<number> {
             ? ""
             : `\n  ${ledger.inert} receipt${ledger.inert === 1 ? "" : "s"} here ` +
               `${ledger.inert === 1 ? "does" : "do"} not bind — struck (negation, §11) or ` +
-              `malformed. If ${wanted} was negated, it was forgotten once and is not now, and ` +
-              `this screen cannot tell that apart from an id never held.`),
+              `malformed. If ${wanted}'s erasure was negated, the id is still refused forever, but no ` +
+              `receipt stands for it, so this screen cannot tell it apart from an id never held.`),
       );
       // 1, not 2. The id is well formed and the invocation is correct — what is missing is a receipt
       // in THIS store, which is a state rather than a typo. Two lines up, `erase` draws the same
