@@ -1,0 +1,355 @@
+{
+  "governed": {
+    "#claim/by-operator-struck-by-writer": {
+      "dataStruck": true,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#claim/never-struck": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#claim/strike-then-counterstrike": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": false
+    },
+    "#claim/struck-by-admin": {
+      "dataStruck": true,
+      "honoredStrikeOn": {
+        "id": "#strike/admin",
+        "timestamp": 21
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#claim/struck-by-its-own-author": {
+      "dataStruck": true,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": false
+    },
+    "#claim/struck-by-operator": {
+      "dataStruck": true,
+      "honoredStrikeOn": {
+        "id": "#strike/operator",
+        "timestamp": 20
+      },
+      "lawfulNegated": true,
+      "survivalOver": true
+    },
+    "#claim/struck-by-stranger": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#claim/two-strikes-one-struck": {
+      "dataStruck": true,
+      "honoredStrikeOn": {
+        "id": "#strike/twice-a-by-operator",
+        "timestamp": 27
+      },
+      "lawfulNegated": true,
+      "survivalOver": true
+    },
+    "#op→admin:admin": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#op→writer:write": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#strike/admin": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#strike/counter-by-operator": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#strike/on-revived": {
+      "dataStruck": true,
+      "honoredStrikeOn": {
+        "id": "#strike/counter-by-operator",
+        "timestamp": 26
+      },
+      "lawfulNegated": true,
+      "survivalOver": true
+    },
+    "#strike/operator": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#strike/stranger": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#strike/stranger-counter-on-operator-strike": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#strike/strikes-twice-b": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#strike/twice-a-by-operator": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#strike/twice-b-by-operator": {
+      "dataStruck": true,
+      "honoredStrikeOn": {
+        "id": "#strike/strikes-twice-b",
+        "timestamp": 29
+      },
+      "lawfulNegated": true,
+      "survivalOver": false
+    },
+    "#strike/writer-on-operator": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#strike/writer-own": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    }
+  },
+  "ungoverned": {
+    "#claim/by-operator-struck-by-writer": {
+      "dataStruck": true,
+      "honoredStrikeOn": {
+        "id": "#strike/writer-on-operator",
+        "timestamp": 24
+      },
+      "lawfulNegated": true,
+      "survivalOver": true
+    },
+    "#claim/never-struck": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#claim/strike-then-counterstrike": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": false
+    },
+    "#claim/struck-by-admin": {
+      "dataStruck": true,
+      "honoredStrikeOn": {
+        "id": "#strike/admin",
+        "timestamp": 21
+      },
+      "lawfulNegated": true,
+      "survivalOver": true
+    },
+    "#claim/struck-by-its-own-author": {
+      "dataStruck": true,
+      "honoredStrikeOn": {
+        "id": "#strike/writer-own",
+        "timestamp": 22
+      },
+      "lawfulNegated": true,
+      "survivalOver": false
+    },
+    "#claim/struck-by-operator": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#claim/struck-by-stranger": {
+      "dataStruck": true,
+      "honoredStrikeOn": {
+        "id": "#strike/stranger",
+        "timestamp": 23
+      },
+      "lawfulNegated": true,
+      "survivalOver": true
+    },
+    "#claim/two-strikes-one-struck": {
+      "dataStruck": true,
+      "honoredStrikeOn": {
+        "id": "#strike/twice-a-by-operator",
+        "timestamp": 27
+      },
+      "lawfulNegated": true,
+      "survivalOver": true
+    },
+    "#op→admin:admin": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#op→writer:write": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#strike/admin": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#strike/counter-by-operator": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#strike/on-revived": {
+      "dataStruck": true,
+      "honoredStrikeOn": {
+        "id": "#strike/counter-by-operator",
+        "timestamp": 26
+      },
+      "lawfulNegated": true,
+      "survivalOver": true
+    },
+    "#strike/operator": {
+      "dataStruck": true,
+      "honoredStrikeOn": {
+        "id": "#strike/stranger-counter-on-operator-strike",
+        "timestamp": 30
+      },
+      "lawfulNegated": true,
+      "survivalOver": true
+    },
+    "#strike/stranger": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#strike/stranger-counter-on-operator-strike": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#strike/strikes-twice-b": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#strike/twice-a-by-operator": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#strike/twice-b-by-operator": {
+      "dataStruck": true,
+      "honoredStrikeOn": {
+        "id": "#strike/strikes-twice-b",
+        "timestamp": 29
+      },
+      "lawfulNegated": true,
+      "survivalOver": false
+    },
+    "#strike/writer-on-operator": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    },
+    "#strike/writer-own": {
+      "dataStruck": false,
+      "honoredStrikeOn": {
+        "$": "undefined"
+      },
+      "lawfulNegated": false,
+      "survivalOver": true
+    }
+  }
+}

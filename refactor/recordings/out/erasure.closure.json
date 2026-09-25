@@ -1,0 +1,14 @@
+{
+  "a bystander": [
+    "#target/bystander"
+  ],
+  "a chain of three": [
+    "#tomb/re-forgotten"
+  ],
+  "a claim with one strike": [
+    "#target/struck-claim"
+  ],
+  "a forgiven tombstone": [
+    "#tomb/forgiven"
+  ]
+}

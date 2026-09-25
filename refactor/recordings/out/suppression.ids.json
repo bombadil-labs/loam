@@ -1,0 +1,23 @@
+{
+  "claim/by-operator-struck-by-writer": "1e2062a29344d9c62cfed1b7f0a0a67907713c6a486b206032e66de6c6f8f7c9986f",
+  "claim/never-struck": "1e2028227db2b9c7746749013fb2e4bb1a0a19aa15bfac1984a0841e89e294a415b9",
+  "claim/strike-then-counterstrike": "1e20cc2c80b8d9f681693b91469a3e40604d08a1ec30e9eb30116721688af198b456",
+  "claim/struck-by-admin": "1e20a366092c1c584655aee94b8e1bd3b1ff8bd13365b0bb467f0d5b116415f30265",
+  "claim/struck-by-its-own-author": "1e2006e0b856c98fe89ec8038a4affdf5aff0ddaf49e25c3b8bda88661a3c7255293",
+  "claim/struck-by-operator": "1e20cee88da04f424609a935a5c9f46c43f8c184164d2fc02788fa0d1a891c3bc185",
+  "claim/struck-by-stranger": "1e20b595014fd7f7c1d2096db176601bd53c49fe61779fc05fa4c865d69889ed224d",
+  "claim/two-strikes-one-struck": "1e2092099abc7cc29d09556d0fd7748f5df08a658b866d17131a78205c7a0ddfdafd",
+  "op→admin:admin": "1e20f375146719d75b80f799e9ac20445697e23f231ab93ec0feed561ac40a55f5b9",
+  "op→writer:write": "1e207b4cc02b641231a28cc49484722eefc810e5621934868ec1921853dd369fbe68",
+  "strike/admin": "1e20eec4ff4e653ced4869c066305d0921aa5c2fa9d35e40b97caf2fc0eacf8c0207",
+  "strike/counter-by-operator": "1e206beb2c1d4e38e91f336f6734193ad705c45a2afc7dd10d12c36eff1e9965cb93",
+  "strike/on-revived": "1e2076a48aff53dcb2a618d5b53b9bfb647d50fc8b29786489e53980f3ff6079bf2e",
+  "strike/operator": "1e2011e3eefafe5005a84e13e18de522c34314a451f8abb81e4bbaacbda64ea9e82d",
+  "strike/stranger": "1e204b217ba5bb6c69d6879418cacf1558981d6bfcdd443c220527e9ae591cd3400b",
+  "strike/stranger-counter-on-operator-strike": "1e20bd11d1269682ed9a2931744f52e7aa9d86ff10b76fd2c4ef67e94bde500c8f89",
+  "strike/strikes-twice-b": "1e2025f2a5b5d1793b25501c0e2ed58be8e7d6cc269b2749ba8153e405b3cf0dd152",
+  "strike/twice-a-by-operator": "1e20f3c3efe64cf2c9bf0cbafc9e60e3e6135c5807e7535e74593c0c5922e1742090",
+  "strike/twice-b-by-operator": "1e20ea9cf1cd8a09c5f23bf9100e52fff1654b9bae631968cdf8f0e2aff564526810",
+  "strike/writer-on-operator": "1e2058db543db911fe49190d8d97c8553f532afaccf643ae3bc1a778c97b26402c3a",
+  "strike/writer-own": "1e20fda0b5c7783826f9d3d81dc1e10f8771f120b1e9d5e43aa2510a3169644e3dbe"
+}
