@@ -155,7 +155,7 @@ Each item gives both positions where Claude and Sol differ.
 ### For your information, no decision needed
 
 - A shared-posture container stays a peer. Its set is a view over the host's log, with its own
-  key, admission, lens and arrival records. Counterexample 12 tests this model. If it breaks the model, we bring it to
-  you.
+  key, admission, lens and arrival records. Counterexample 12 tests this model. If the model
+  fails, we bring it to you.
 - Every container gets its own key. That follows from "a container is a peer".
 - Loam's unused tenancy code will be removed as a Loam-local cleanup.
