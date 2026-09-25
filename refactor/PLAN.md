@@ -117,6 +117,12 @@ that an open step is changing.
 Loam changes only after a prerelease exists, except for these:
 
 - **Recordings.** Extend the harness to every target in the audit reports, before step 3.
+- **Monotonic author time, at step 3.** Step 3 adds no ordering rule: latest-wins trusts the
+  author's signed creation time, with ascending id on ties (Sol's answer to CE11). So Loam must
+  keep each author's timestamps from going backwards across a restart. Seeding from the operator's
+  deltas is not enough, because mutations are signed with each user's key. Loam keeps a per-author
+  maximum, seeded from the store and updated on every append. `recordings/out/time.restart.json`
+  shows the defect today (on #573).
 - **Census ratchet.** A CI check that fails when a coupling count rises: the large import cycle,
   `options.seed` reads, `reactor.snapshot()` calls, clock reads in core code.
 - **Defects.** Seven Loam bugs are listed in the audit (theme 10). Fix a bug now only if no step
