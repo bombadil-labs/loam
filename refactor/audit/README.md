@@ -143,13 +143,15 @@ Candidates:
 
 ### 10. Loam defects found on the way
 
-These are Loam bugs whatever vNext decides. Recordings pin the first two.
+These are Loam bugs whatever vNext decides, except where marked PLAUSIBLE. A recording that pins one
+is named.
 
 - `holdsGrant` and `grantsHeldBy` disagree. `holdsGrant` lets an admin-minted `register` grant
   through, and it answers `federate` without looking at scope (`out/admission.holdsGrant.json`).
-- The channel status reader keeps the first record on a timestamp tie (`channel.ts:529`). It is
-  not recorded yet.
-- `nextTimestamp` is not seeded from the store, so order can go backwards after a restart.
+- PLAUSIBLE: the channel status reader may keep the first record it sees on a timestamp tie
+  (`channel.ts:529`). It is not recorded yet.
+- `nextTimestamp` is not seeded from the store, so order can go backwards after a restart
+  (`out/time.restart.json`).
 - The federation door skips half the shape checks.
 - `trustRosterPred` ignores the mode, and nothing in `src/` calls it.
 - `containerAdmission` has no caller.
