@@ -409,7 +409,7 @@ ${listing}`;
       })
       .join("\n");
     return `<h2>Orphaned channels.</h2>
-<p>Each channel below feeds a container that no longer exists. The container was struck, so its pool
+<p>Each channel below feeds a container that no longer exists. The container was negated, so its pool
 sits outside every subtree and no other panel shows it — yet the channel still receives, and a
 resumed sync still writes the peer's bytes to disk. Release each one: drop it to forget its pool
 whole, or set it to stop receiving.</p>
@@ -756,18 +756,18 @@ ${members.map((m) => memberHtml(gw, name, m, formToken)).join("\n")}
         : `It holds ${count} delta${count === 1 ? "" : "s"}.`;
     const consequence =
       rec.posture === "shared"
-        ? `<p>Dropping it strikes the declaration: the container forgets its shape, and the name
+        ? `<p>Dropping it negates the declaration: the container forgets its shape, and the name
 stops resolving. The deltas it gathered remain in the store — none of them is forgotten.</p>`
         : gw.channelPools.has(name)
           ? `<p>This is the pool of a federation channel receiving into
 <code>${escapeHtml(rec.inboxOf ?? "")}</code>. Dropping it severs that channel whole: the
 peer's deltas are purged at the bytes and verified gone, the law the channel blessed is
-retired with them, and its record is struck. Every other channel, and everything outside the
+retired with them, and its record is negated. Every other channel, and everything outside the
 pool, remains. To stop receiving and KEEP what arrived, set the channel to not receiving
 instead — that is reversible, and this is not.</p>`
           : `<p>This is the inbox pool of one connection writing into
 <code>${escapeHtml(rec.inboxOf ?? "")}</code>. Dropping it ends that connection whole: its pool
-is purged at the bytes and verified gone, and its declaration is struck. Everything outside the
+is purged at the bytes and verified gone, and its declaration is negated. Everything outside the
 pool remains.</p>`;
     return page(
       "confirm the drop",
@@ -820,10 +820,10 @@ ${hiddenPair(formToken, name)}
         ? ""
         : `<p>This key also writes into ${plan.siblings
             .map((s) => `<code>${escapeHtml(s)}</code>`)
-            .join(", ")}; that inbox is struck with this one, since a revoke is the key's.</p>\n`;
+            .join(", ")}; that inbox is negated with this one, since a revoke is the key's.</p>\n`;
     const othersLine =
       plan.othersPair === true
-        ? `<p>This key's connector binding is another person's. Revoking here strikes its grant in ` +
+        ? `<p>This key's connector binding is another person's. Revoking here negates its grant in ` +
           `this inbox; that binding stands.</p>\n`
         : "";
     return page(

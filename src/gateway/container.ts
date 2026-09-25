@@ -1457,7 +1457,7 @@ function openShared(
       const rec = table.containers.get(spec.entity);
       if (rec === undefined) {
         throw new Error(
-          `container "${spec.entity}" no longer resolves — its declaration was struck`,
+          `container "${spec.entity}" no longer resolves — its declaration was negated`,
         );
       }
       if (rec.membership !== undefined) return rec.membership;
@@ -1911,7 +1911,7 @@ async function openSeparate(
         } catch (err) {
           throw new Error(
             `drop discarded "${spec.entity}" at the bytes — every store in its subtree is ` +
-              `proven empty and closed — but the declaration could not be struck, so the ` +
+              `proven empty and closed — but the declaration could not be negated, so the ` +
               `LISTING still names it. When the primary recovers, openContainer({ name }) and ` +
               `drop() again to settle the listing; the re-run is safe over the empty store. ` +
               `${err instanceof Error ? err.message : String(err)}`,
@@ -2288,7 +2288,7 @@ export function unreachableStoreReport(gw: Gateway): {
         ? `the declared separate container "${entity}" is neither attached nor covered by a detach ` +
             `record — its store may hold bytes outside this sweep. Attach it (openContainer) and ` +
             `re-run, or detach() it on the record to keep it deliberately.`
-        : `container "${entity}" resolves posture "${rec.posture}", but a struck declaration in ` +
+        : `container "${entity}" resolves posture "${rec.posture}", but a negated declaration in ` +
             `its lineage gave it a store of its OWN — which may still hold bytes outside this ` +
             `sweep (§28.4: the knobs do not flip through the survival algebra). Cover it with a ` +
             `detach record, or forget the container whole and declare a new name.`,

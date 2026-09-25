@@ -251,7 +251,7 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "negation binds, whoever signed it, AND the gather names no author, so any peer's claim binds",
       "too. Single-value props are latest-wins — a peer's later timestamp takes the field and",
       "keeps it — and the list props (tags, attending, follows) hold every author's entries, which",
-      "no later claim of yours displaces. A trust mask alone answers only the strikes — a store",
+      "no later claim of yours displaces. A trust mask alone answers only the negations — a store",
       "that federates wants `authoredBy` in its gather, or `byAuthorRank` in its schema. Outgrow",
       "the shelf and write one.",
     ],
@@ -366,7 +366,7 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
     booleans: new Set(["acknowledge-pen", "acknowledge-writable"]),
     notes: [
       "A THIN CLIENT of the gateway's own door, deliberately: the verdict is re-derived from surviving",
-      "law on every call, so striking the declaration or the binding darkens it live. A CLI that read a",
+      "law on every call, so negating the declaration or the binding darkens it live. A CLI that read a",
       "file and decided for itself would keep approving a route whose law had been withdrawn.",
       "",
       "The door is OPERATOR-ONLY and to any other identity it does not exist — what it describes is a",
@@ -401,14 +401,14 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "                                     the user and role deltas; --operator also mints a key",
       "  assign-role <name> --role=<role>  grant a role (operator | actor); operator additionally",
       "                                     mints a signing key and trusts it with a grant",
-      "  remove-role <name> --role=<role>  strike a role (and, for operator, its signing grant)",
+      "  remove-role <name> --role=<role>  negate a role (and, for operator, its signing grant)",
       "",
       "PROOF OF OPERATORSHIP IS HOME ACCESS, ALONE. Every one of these commands signs with",
       "<home>/operator.seed — the same file `loam init`/`loam serve` read. There is no remote path",
       "that mints or changes a role; a browser session, however privileged, cannot call these.",
       "",
       "RECOVERY. Losing a user's own signing key is not losing the role: run `remove-role <name>",
-      "--role=operator` (it strikes the grant too, when the key file can still name it — a fault",
+      "--role=operator` (it negates the grant too, when the key file can still name it — a fault",
       "reading that file refuses the whole command rather than guessing) then `assign-role <name>",
       "--role=operator` again, which mints a fresh key and files a fresh grant. Even the LAST",
       "operator may remove their own role this way and reassign it — both commands need only home",
@@ -427,7 +427,7 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       'A write-enabled renderer binding names a pen (`pen: "<name>"`), and the pen needs BOTH keys',
       "(§6): the seed file is CUSTODY — `loam serve` reads every pen.<name>.seed at boot and signs",
       "that pen's form writes with it — and the grant is AUTHORIZATION. This command provides both.",
-      "The seed never enters the ground and is never printed; revocation is striking the grant",
+      "The seed never enters the ground and is never printed; revocation is negating the grant",
       "(past writes stay attributed to the pen). Like every role command, this signs with",
       "<home>/operator.seed and needs only home access, never a live session.",
     ],
@@ -440,8 +440,8 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
     notes: [
       "subcommands:",
       "  list                  every author with standing — users, pens, connectors, and any key",
-      "                        this home cannot name; struck grants shown struck, never omitted",
-      "  revoke <client_id>    bump the connector's generation and strike its write grant",
+      "                        this home cannot name; negated grants shown negated, never omitted",
+      "  revoke <client_id>    bump the connector's generation and negate its write grant",
       "  <client_id> --verb=register --prefix=<p>",
       "                        record a register grant for the connector key under <p>",
       "",
@@ -455,7 +455,7 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "",
       "REVOKE BINDS AT ONCE. Bumping the generation makes every live token and in-flight code stop",
       "matching, so a running server refuses that connector on its next request with no restart. It",
-      "also strikes the operator-signed write grant in the ground. It NEVER erases the connector's",
+      "also negates the operator-signed write grant in the ground. It NEVER erases the connector's",
       "past deltas — those keep naming their author and keep resolving. Like every role command, this",
       "signs with <home>/operator.seed and needs only home access, never a live session.",
     ],
@@ -468,7 +468,7 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "subcommands:",
       "  mint <name>      a key, its grants, and a bearer, in one motion — for a script, a bot,",
       "                    or another agent that will write to this store as itself",
-      "  revoke <name>    refuse the bearer on the very next request and strike the key's grants",
+      "  revoke <name>    refuse the bearer on the very next request and negate the key's grants",
       "",
       "mint prints the bearer ONCE and records only its sha-256 digest (clients.json); the signing",
       "seed is written to client.<name>.seed (0600) and never printed. WRITE STANDING IS",
@@ -1213,14 +1213,14 @@ async function cmdServe(
     if (restore === undefined) {
       io.err(
         `loam: the heal did not reach the store's §25 pen, so nothing is known about corrupt rows — ` +
-          "a strike may be stranded and this boot cannot tell you. `loam repair list` can.",
+          "a negation may be stranded and this boot cannot tell you. `loam repair list` can.",
       );
     }
     // A restore CHANGED the ground the gateway is about to boot on, so it is named per id rather than
     // counted — a restored negation un-strands a strike, and the operator should see what came back.
     for (const id of restore?.restored ?? []) {
       io.out(
-        `loam: restored ${id} from the archive — a corrupt row was squatting on that id; any strike ` +
+        `loam: restored ${id} from the archive — a corrupt row was squatting on that id; any negation ` +
           `it carries suppresses again`,
       );
     }
@@ -2319,7 +2319,7 @@ async function cmdRepair(args: readonly string[], io: IO): Promise<number> {
             io.out(`      reason:  ${r.reason}`);
             io.out(`      preview: ${r.preview}`);
             for (const target of r.negates ?? []) {
-              io.out(`      claims to strike: ${target} (unverified; LIVE until settled)`);
+              io.out(`      claims to negate: ${target} (unverified; LIVE until settled)`);
             }
           }
         }
@@ -2328,7 +2328,7 @@ async function cmdRepair(args: readonly string[], io: IO): Promise<number> {
         const stranded = strandedStrikeWarnings(pen);
         if (stranded.length > 0) {
           io.out(
-            `  ${stranded.length} STRANDED STRIKE warning${stranded.length === 1 ? "" : "s"}:`,
+            `  ${stranded.length} STRANDED NEGATION warning${stranded.length === 1 ? "" : "s"}:`,
           );
           for (const w of stranded) io.out(`    ${w}`);
         }
@@ -2944,7 +2944,7 @@ async function cmdUserRole(
         io.err(
           `user remove-role: ${userSeedPath(home, name)} could not be read ` +
             `(${seedRead.detail}) — this command will not guess whether that key is still live, ` +
-            `so nothing was struck. Fix the fault and retry.`,
+            `so nothing was negated. Fix the fault and retry.`,
         );
         return 1;
       }
@@ -2956,9 +2956,9 @@ async function cmdUserRole(
         // report a partial success (H9); the whole command refuses instead.
         io.err(
           `user remove-role: ${userSeedPath(home, name)} exists but does not hold a 64-hex seed, ` +
-            `so this command cannot derive which key's grants to strike — nothing was struck, and ` +
+            `so this command cannot derive which key's grants to negate — nothing was negated, and ` +
             `the file's contents are not printed here. If the key is lost, move the file aside ` +
-            `and run this again: the role is struck and the orphaned grant is named in the report.`,
+            `and run this again: the role is negated and the orphaned grant is named in the report.`,
         );
         return 1;
       }
@@ -3083,10 +3083,10 @@ async function cmdPen(args: readonly string[], io: IO): Promise<number> {
       if (standing.surviving.length > 0) {
         io.err(
           `pen create: ${name} is already provisioned — ${penSeedPath(home, name)} exists and its ` +
-            `author holds a write grant. Nothing was written. To retire the pen, strike its ` +
+            `author holds a write grant. Nothing was written. To retire the pen, negate its ` +
             `grant; to RE-KEY it — the answer to a leaked seed — remove ` +
             `${penSeedPath(home, name)} and run this again: the next run mints a fresh key AND ` +
-            `strikes the old author's standing, so the leaked key can no longer write. Past ` +
+            `negates the old author's standing, so the leaked key can no longer write. Past ` +
             `writes stay attributed to the old key either way.`,
         );
         return 2;
@@ -3094,7 +3094,7 @@ async function cmdPen(args: readonly string[], io: IO): Promise<number> {
       if (standing.struck.length > 0) {
         io.err(
           `pen create: ${name} was RETIRED — ${penSeedPath(home, name)} still holds a key, but ` +
-            `its author's write grant was struck on the ground, and this command will not ` +
+            `its author's write grant was negated on the ground, and this command will not ` +
             `resurrect a standing somebody revoked. Nothing was written. To provision ${name} ` +
             `again under a FRESH key, remove ${penSeedPath(home, name)} and run this again.`,
         );
@@ -3146,7 +3146,7 @@ async function cmdPen(args: readonly string[], io: IO): Promise<number> {
   const struckLines = retired.map(({ author, grants }) =>
     grants === 0
       ? `  the previous key ${author} held no live grant — its record is retired`
-      : `  the previous key ${author} is struck: ${grants} grant${grants === 1 ? "" : "s"} it held no longer bind${grants === 1 ? "s" : ""}`,
+      : `  the previous key ${author} is negated: ${grants} grant${grants === 1 ? "" : "s"} it held no longer bind${grants === 1 ? "s" : ""}`,
   );
   io.out(
     outcome === "repaired"
@@ -3339,7 +3339,7 @@ async function cmdGrantMint(
       `loam: granted ${clientId} register standing under "${prefix}"\n` +
         `  it may register schemas whose name starts with "${prefix}" and nothing else — not the ` +
         `root, not a neighbouring namespace\n` +
-        `  the grant is in ${path}; \`loam grant revoke ${clientId}\` strikes it, and the next ` +
+        `  the grant is in ${path}; \`loam grant revoke ${clientId}\` negates it, and the next ` +
         `request refuses`,
     );
   }
@@ -3659,11 +3659,11 @@ async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<numbe
       // "struck" is the word an operator scans this column for, so it appears in exactly ONE answer
       // here: the one where a strike WITH STANDING actually retired the grant. Every other phrasing
       // says "strike", never "struck", or a reader grepping the ledger lands on a row that is not.
-      const inert = g.inertStrike ? " · a strike names it and binds nothing" : "";
+      const inert = g.inertStrike ? " · a negation names it and binds nothing" : "";
       const standing = live
         ? `live${inert}`
         : g.struckAt !== undefined
-          ? `struck ${new Date(g.struckAt).toISOString()}`
+          ? `negated ${new Date(g.struckAt).toISOString()}`
           : `does not bind — ${whyNotBinding(g, operator)}${inert}`;
       const common = {
         author: shortAuthor(g.subject),
@@ -3836,17 +3836,17 @@ async function cmdGrantRevoke(
         const struck = [
           ...(struckGround.length === 0
             ? []
-            : [`${struckGround.length} store-wide write grant(s) struck in ${path}`]),
+            : [`${struckGround.length} store-wide write grant(s) negated in ${path}`]),
           ...(struckPools.length === 0
             ? []
-            : [`the connection's own grant struck in ${struckPools.join(", ")}`]),
+            : [`the connection's own grant negated in ${struckPools.join(", ")}`]),
         ];
         io.out(
           `loam: revoked ${clientId}\n` +
             `  its tokens and codes no longer match (generation ${outcome.generation}), so it ` +
             `authenticates nowhere\n` +
             (struck.length === 0
-              ? `  no grant needed striking — this connector held none this store could reach\n`
+              ? `  no grant needed negating — this connector held none this store could reach\n`
               : `  ${struck.join("; ")}\n`) +
             `  its past deltas are untouched — they keep naming their author`,
         );
@@ -4120,7 +4120,7 @@ async function cmdClientRevoke(
     }
   } catch (err) {
     io.err(
-      `client revoke: the ground refused the strike — the bearer still opens, rerun this: ` +
+      `client revoke: the ground refused the negation — the bearer still opens, rerun this: ` +
         `${err instanceof Error ? err.message : String(err)}`,
     );
     return 1;
@@ -4133,10 +4133,10 @@ async function cmdClientRevoke(
     `loam: revoked client "${name}"\n` +
       `  its bearer is refused on the very next request\n` +
       (struckCount > 0
-        ? `  its ${struckCount} surviving grant${struckCount === 1 ? " is" : "s are"} struck in ${path}\n`
-        : `  no standing held by this key in ${path} — nothing needed striking\n`) +
+        ? `  its ${struckCount} surviving grant${struckCount === 1 ? " is" : "s are"} negated in ${path}\n`
+        : `  no standing held by this key in ${path} — nothing needed negating\n`) +
       `  its past deltas are untouched — they keep naming their author\n` +
-      `  a server already running honors the struck GRANTS until a restart; the bearer needs none`,
+      `  a server already running honors the negated GRANTS until a restart; the bearer needs none`,
   );
   const staleness = servingWarning(home, path);
   if (staleness !== undefined) io.err(`loam: ${staleness}`);
@@ -4274,7 +4274,7 @@ async function setAsideWarning(gw: Gateway): Promise<PenReading> {
       `everything printed here — the reader never saw them` +
       (stranded === 0
         ? ""
-        : `, and ${stranded} of them claim(s) to strike something, so a withdrawal may be ` +
+        : `, and ${stranded} of them claim(s) to negate something, so a withdrawal may be ` +
           `reading LIVE`) +
       ". `loam repair list` names what the pen holds.",
   };
@@ -4673,7 +4673,7 @@ function reportRevived(
   if (report.remasked.length > 0) {
     say(
       `loam: ${report.remasked.length} READING(S) NOW MASK DIFFERENTLY: ${at(report.remasked)}. ` +
-        `The door was not withdrawn — its rule for whose strikes bind moved, which can un-suppress ` +
+        `The door was not withdrawn — its rule for whose negations bind moved, which can un-suppress ` +
         `claims wholesale. Their before no longer describes them, so this run did not compare them.`,
     );
   }
@@ -4691,7 +4691,7 @@ function reportRevived(
   if (channels > 0) {
     say(
       `loam: ${channels} channel read door(s) were not modelled. A channel lens serves the POOL's ` +
-        `deltas filtered by THIS store's surviving strikes, and the check above diffs each ground ` +
+        `deltas filtered by THIS store's surviving negations, and the check above diffs each ground ` +
         `on its own — so a claim that lives in a pool and was withdrawn from here can come back ` +
         `at that door with nothing said. Read \`loam federate list\` and check those lenses.`,
     );
@@ -4710,7 +4710,7 @@ function reportRevived(
   if (removedNegation) {
     say(
       `loam: and §26's AS-OF door was not read. It reconstructs the ground at a timestamp, so a ` +
-        `claim still withdrawn today can read live there once the strike is destroyed — the two ` +
+        `claim still withdrawn today can read live there once the negation is destroyed — the two ` +
         `readings this run took are of the PRESENT ground and cannot see it.`,
     );
   }
@@ -4747,7 +4747,7 @@ function reportRevived(
         ? `  This is DONE and re-running the erase does not undo it: what was removed is gone, and ` +
           `the next run will see nothing come back.\n`
         : "") +
-      `  Read them. If any should stay withdrawn, strike it again — a fresh negation is free, and ` +
+      `  Read them. If any should stay withdrawn, negate it again — a fresh negation is free, and ` +
       `reversible in a way an erasure is not.`,
   );
 }
@@ -5103,7 +5103,7 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
         revived.revived.length === 0
           ? `, and nothing came back in the stores this run did read`
           : ` — the claims listed above are the ones it FOUND, in the stores it read`
-      }${looked ? "" : ", and the boundaries above name readings it could not compare"}. A strike ` +
+      }${looked ? "" : ", and the boundaries above name readings it could not compare"}. A negation ` +
         `removed from a kept store would revive there unseen.`,
     );
   }
@@ -5360,7 +5360,7 @@ async function cmdErasures(args: readonly string[], io: IO): Promise<number> {
           (ledger.inert <= 0
             ? ""
             : `\n  ${ledger.inert} receipt${ledger.inert === 1 ? "" : "s"} here ` +
-              `${ledger.inert === 1 ? "does" : "do"} not bind — struck (negation, §11) or ` +
+              `${ledger.inert === 1 ? "does" : "do"} not bind — negated (§11) or ` +
               `malformed. If ${wanted}'s erasure was negated, the id is still refused forever, but no ` +
               `receipt stands for it, so this screen cannot tell it apart from an id never held.`),
       );

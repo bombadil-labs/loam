@@ -422,9 +422,9 @@ export const TERMS = [
     meaning: "the answer a lens gives right now, worked out from the ground when you ask.",
   },
   {
-    term: "strike",
+    term: "negation",
     lesson: 5,
-    forms: ["strike", "strikes", "struck", "striking"],
+    forms: ["negation", "negations", "negated", "negating"],
     meaning: "a record that says 'I take that back'. It hides the old one; it removes nothing.",
   },
   {
@@ -839,9 +839,9 @@ else lets you.`,
       title: "Unsaying",
       copy: `Some things you write down are wrong in a way a later rating cannot fix. Your Tenet
 entry carries a note claiming you understood it completely. You did not. Nobody does. Taking it
-back does not reach into the past and tidy it. You write one more claim — a strike, which says
+back does not reach into the past and tidy it. You write one more claim — a negation, which says
 "I take that back" and names what it takes back — and from then on no view repeats the line. The
-claim it struck stays exactly where it was, in the ground, dimmed. Your diary gets to show that
+claim it negated stays exactly where it was, in the ground, dimmed. Your diary gets to show that
 you outgrew something, which is more than most of them can do.
 
 Look down the side while you are here. Every lesson you finish leaves a checkpoint: a whole copy
@@ -856,7 +856,7 @@ act is going to send you a bill for it.`,
           label: "Take the note back",
           have: "A line in your diary that was never true.",
           want: "It gone from every reading, and still on the record that you once said it.",
-          how: "Press the button. The note leaves the entry; a strike appears naming what it undoes.",
+          how: "Press the button. The note leaves the entry; a negation appears naming what it undoes.",
           run: async (ctx) => {
             const note = rowSaying(ctx, TENET, "note", REGRET);
             if (note === undefined) return;
@@ -903,7 +903,7 @@ act is going to send you a bill for it.`,
       copy: `Here is a question worth asking a diary: not what you think of Arrival now, and not
 what you REMEMBER thinking — what did you actually say at the time? It is the same question with
 a moment pinned to it: as of the evening you wrote it all down. The 9 comes back. So does the
-Tenet note you struck, because that evening you still believed it. Nothing is restored, because
+Tenet note you negated, because that evening you still believed it. Nothing is restored, because
 nothing was ever lost; the ground is all still there, and the moment only decides how much of it
 to read.`,
       terms: termsEntering(6),
@@ -913,8 +913,8 @@ to read.`,
           {
             ask: "Reading as of that evening brings back the note you took back. Why?",
             choices: [
-              "The strike was undone",
-              "Because on that evening you had not taken it back yet, and the strike is dated too",
+              "The negation was undone",
+              "Because on that evening you had not taken it back yet, and the negation is dated too",
               "The store keeps a second copy of everything",
             ],
             answer: 1,
@@ -1699,8 +1699,8 @@ change it twice in a minute without losing a single line of anything.`,
       role: "erasure-finale",
       title: "What never should have landed",
       copy: `Read that first line again. Jamie sent it to Rae at eleven at night, to Rae only,
-and now it is in your film diary. A strike is not enough this time. A struck claim stays exactly
-where it was — that is the whole point of a strike — and these particular words should not be
+and now it is in your film diary. A negation is not enough this time. A negated claim stays exactly
+where it was — that is the whole point of a negation — and these particular words should not be
 anywhere in your store at all. So erase it: the one order only the operator can give. The words
 themselves go, everywhere this browser wrote them down, and a receipt stays behind saying that
 something went.
@@ -1734,11 +1734,11 @@ not a right to be forgotten, and Jamie is owed the real one.`,
             teaches: "14.3",
           },
           {
-            ask: "Striking and erasing — what is the difference?",
+            ask: "Negating and erasing — what is the difference?",
             choices: [
               "None; erasing is just a stronger word",
-              "A strike hides a record and keeps it; erasing removes the words, and only the operator may",
-              "A strike needs a receipt too",
+              "A negation hides a record and keeps it; erasing removes the words, and only the operator may",
+              "A negation needs a receipt too",
             ],
             answer: 1,
             teaches: "14.1",

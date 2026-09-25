@@ -1001,7 +1001,7 @@ async function liveOpening(
       // partial purge left. A store that cannot answer is not proven empty.
       if (await storeHoldsAny(backend))
         return (
-          "its pool's store still holds bytes although its declaration was struck, and no " +
+          "its pool's store still holds bytes although its declaration was negated, and no " +
           "declaration names that store for a drop to reach: " +
           // With its status standing, an open RESUMES and needs the declaration; only a fresh
           // open (status gone) attaches a store no declaration names.
@@ -1121,7 +1121,7 @@ export async function eraseImpl(
       `erase ${id} refused: it is the PINNED membership Term of the standing slate over ` +
         `"${pinning.container}", and the slate's closures are all seeded from the ids it names. ` +
         `Erasing it would reopen every door that slate closed while it still read as standing. ` +
-        `Cut the slate (which removes its members and drops the container), or strike its record and ` +
+        `Cut the slate (which removes its members and drops the container), or negate its record and ` +
         `its declaration first — un-slating is free (§29.8).`,
     );
   }
@@ -1579,7 +1579,7 @@ export const UNSWEPT_AUTH_SURFACES: readonly string[] = [
   "user.<name>.seed IS NOT SWEPT: each operator-role user's OWN signing key lives in the home, in " +
     "user.<name>.seed, OUTSIDE the delta store. Erasure purges deltas, so forgetting a user's record " +
     "delta shuts their login door, but the seed file itself stays — and its signature keeps resolving " +
-    "for a governed reader until its grant is struck. Removing the seed file, and striking its " +
+    "for a governed reader until its grant is negated. Removing the seed file, and negating its " +
     "signing grant (`loam user remove-role`), is a separate operation, out of erasure's scope.",
 ];
 

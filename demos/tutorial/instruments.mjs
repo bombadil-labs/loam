@@ -80,7 +80,7 @@ export function classifyDelta(delta, selfAuthor) {
     note = "a derived record: a blessed function ground this out of the store, signed by a runner";
   } else if (hasDeltaRef) {
     kind = "negation";
-    note = "a taking-back: it strikes another record by id, and stays on the record itself";
+    note = "a taking-back: it negates another record by id, and stays on the record itself";
   } else if (isOnlyTutorial(delta)) {
     // The tutorial's OWN bookkeeping — progress, quiz answers, glossary entries. It is data like
     // everything else and it is signed like everything else, which is the reveal; but badging it

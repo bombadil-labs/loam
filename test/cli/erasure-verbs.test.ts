@@ -912,7 +912,7 @@ describe("T206 (d) — `loam erasures` reads the receipt, never the record", () 
     expect(printed()).not.toContain("kit-erased-marker");
   });
 
-  it("a struck receipt leaves the listing and is COUNTED, while a named live one stays", async () => {
+  it("a negated receipt leaves the listing and is COUNTED, while a named live one stays", async () => {
     // The home name is deliberately not a word this screen prints. A `toMatch` over the whole blob
     // reads the STORE PATH too, and the first draft of this rail was satisfied by a temp directory
     // called "negated" rather than by the sentence it meant to pin.
@@ -1547,7 +1547,7 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     expect(printed()).toContain(world.strike);
   });
 
-  it("names a revival when the strike lived in a channel's pool as well", async () => {
+  it("names a revival when the negation lived in a channel's pool as well", async () => {
     // §11 fans the purge into every attached pool, so a strike inside one is removed by the same
     // order and revives the same way. The reading walks the pools for exactly that reason.
     //
@@ -1593,7 +1593,7 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     clear();
     expect(
       await run(
-        ["erase", world.strike, "--reason", "the strike was filed in error", "--home", home],
+        ["erase", world.strike, "--reason", "the negation was filed in error", "--home", home],
         io(),
       ),
       printed(),
@@ -2138,11 +2138,11 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     expect(printed()).toMatch(/channel read door\(s\) were not modelled/);
   });
 
-  it("names every claim an erased STRIKE brings back to life, and the claim really returns", async () => {
+  it("names every claim an erased NEGATION brings back to life, and the claim really returns", async () => {
     // The home name is deliberately not a word this screen prints — see the header. A first draft
     // called it "revives", and both halves of this pair then read the temp path instead of the
     // sentence: the positive matched it, and the negative could never pass.
-    const home = await noteHome("struck-then-erased");
+    const home = await noteHome("negated-then-erased");
     // Alice says something; the operator strikes it. Erasing the STRIKE is §11 pointed at a
     // negation, and a purged strike retires nothing — so the claim it withdrew is live again at
     // every reader. H1's headline outcome, reachable in one command.
@@ -2159,7 +2159,7 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
 
     expect(
       await run(
-        ["erase", world.strike, "--reason", "the strike was filed in error", "--home", home],
+        ["erase", world.strike, "--reason", "the negation was filed in error", "--home", home],
         io(),
       ),
       printed(),
@@ -2174,7 +2174,7 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     );
   });
 
-  it("names a claim revived THREE strikes down the chain, which one hop cannot see", async () => {
+  it("names a claim revived THREE negations down the chain, which one hop cannot see", async () => {
     const home = await noteHome("deep-chain");
     // C is withdrawn by S1; S1 is withdrawn by S2; S2 is withdrawn by S3. So S1 binds again and C
     // is suppressed. Erasing S3 lets S2 bind, which unbinds S1, which frees C — the root claim
@@ -2199,7 +2199,7 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
 
     expect(
       await run(
-        ["erase", chain.s3, "--reason", "the third strike was filed in error", "--home", home],
+        ["erase", chain.s3, "--reason", "the third negation was filed in error", "--home", home],
         io(),
       ),
       printed(),
@@ -2290,7 +2290,7 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
           "erase",
           world.byOperator,
           "--reason",
-          "the operator's strike was filed in error",
+          "the operator's negation was filed in error",
           "--home",
           home,
         ],
@@ -2520,7 +2520,7 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     const said = printed();
     expect(said).toMatch(/READING\(S\) NOW MASK DIFFERENTLY/);
     expect(said).toContain("Ledger");
-    expect(said).toMatch(/its rule for whose strikes bind moved/);
+    expect(said).toMatch(/its rule for whose negations bind moved/);
     // THE REVIVAL IS REAL, AND IT IS ALMANAC'S. mask-b saw the struck definition as suppressed and
     // now sees it live, so a row exists however the boundary behaves — which is what makes the
     // negative half below an assertion rather than an empty loop.
@@ -2951,8 +2951,8 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     expect(printed()).toMatch(/had no BEFORE|did not look/);
   });
 
-  it("sees a revival a GRANTEE's strike caused, which the trust mask alone cannot", async () => {
-    const home = await noteHome("grantee-strike");
+  it("sees a revival a GRANTEE's negation caused, which the trust mask alone cannot", async () => {
+    const home = await noteHome("grantee-negation");
     // EVERY OTHER STRIKE IN THIS FILE IS THE OPERATOR'S, and that is the fixture blind spot this
     // rail exists to remove: the operator's own strike binds identically under both masks, so a
     // corpus made only of them cannot tell the two derivations apart. A stock store registers no
@@ -3003,8 +3003,8 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     );
   });
 
-  it("claims no revival when a second strike still withdraws the claim", async () => {
-    const home = await noteHome("two-strikes");
+  it("claims no revival when a second negation still withdraws the claim", async () => {
+    const home = await noteHome("two-negations");
     // TWO independent strikes withdraw one claim. Removing either leaves the other binding, so
     // nothing comes back. A one-hop walk would announce the claim as revived and send an operator
     // to destroy a record that was never exposed — the false alarm costs what a missed one does.
@@ -3018,7 +3018,7 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
 
     expect(
       await run(
-        ["erase", world.first, "--reason", "one strike was a duplicate", "--home", home],
+        ["erase", world.first, "--reason", "one negation was a duplicate", "--home", home],
         io(),
       ),
       printed(),

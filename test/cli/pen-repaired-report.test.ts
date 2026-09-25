@@ -39,7 +39,7 @@ afterEach(() => {
 });
 
 describe("loam pen create — the repaired arm's report", () => {
-  it("a repair that struck a previous key SAYS it struck the key", async () => {
+  it("a repair that negated a previous key SAYS it negated the key", async () => {
     await run(["init", "--home", home], io());
     await run(["pen", "create", "guest-pen", "--home", home], io());
     const oldAuthor = authorForSeed(readFileSync(penSeedPath(home, "guest-pen"), "utf8").trim());
@@ -56,11 +56,11 @@ describe("loam pen create — the repaired arm's report", () => {
     const printed = out.join("\n");
     expect(printed).toContain("repaired pen guest-pen");
     // The report names the struck key and the count, same voice as the re-keyed arm.
-    expect(printed).toContain(`the previous key ${oldAuthor} is struck`);
+    expect(printed).toContain(`the previous key ${oldAuthor} is negated`);
     expect(printed).not.toContain(replacement); // the secret still never prints
   });
 
-  it("a grant-only repair does NOT claim a strike it never made", async () => {
+  it("a grant-only repair does NOT claim a negation it never made", async () => {
     await run(["init", "--home", home], io());
     // Custody present, authorization missing, and NO prior record to strike.
     writePenSeed(home, "hand-pen", "5c".repeat(32));
@@ -72,7 +72,7 @@ describe("loam pen create — the repaired arm's report", () => {
     expect(printed).toContain("repaired pen hand-pen");
     expect(printed).toContain("write grant for its author");
     expect(printed).not.toContain("previous key");
-    expect(printed).not.toContain("struck");
+    expect(printed).not.toContain("negated");
   });
 });
 
@@ -120,7 +120,7 @@ describe("loam pen create — the promises beyond the report text", () => {
     }
   });
 
-  it("a struck key loses EVERY verb it held, not only write", async () => {
+  it("a negated key loses EVERY verb it held, not only write", async () => {
     // The strike loop reads standing with the verb deliberately omitted — a key being replaced
     // because it leaked must not keep signing anything at all. Every other rail stages a single
     // write grant, where a verb-narrowed strike is indistinguishable; this one hands the old

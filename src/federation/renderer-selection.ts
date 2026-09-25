@@ -201,7 +201,7 @@ export function selectRendererForActivation(
       if (n === undefined || n.claims.author !== d.claims.author || receivedIds.has(id)) continue;
       throw refusal(
         "source_unavailable",
-        `the pool of ${input.channel} holds ${id}, a strike of received ${d.id} by its own ` +
+        `the pool of ${input.channel} holds ${id}, a negation of received ${d.id} by its own ` +
           `author, that no surviving receipt of the current opening names`,
       );
     }

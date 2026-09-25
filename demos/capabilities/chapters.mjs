@@ -83,7 +83,7 @@ export const TERMS = [
     where: { kind: "export", name: "entityGatherBody" },
   },
   {
-    word: "strike",
+    word: "negation",
     gloss:
       "To take back a claim by making another one: a delta whose subject is a delta. Nothing is edited and nothing is removed — the record simply gets more honest, and every reading recomputes.",
     where: { kind: "prose" },
@@ -91,7 +91,7 @@ export const TERMS = [
   {
     word: "erasure",
     gloss:
-      "Actually removing a delta's bytes, on every tier that holds them, and proving it — and the signed record that says so: who ordered it, when, and why, never what. The record is append-only and cannot itself be erased, because a store that could forget its own forgetting could not be audited. Distinct from a strike, which leaves the claim legible and merely uncounted.",
+      "Actually removing a delta's bytes, on every tier that holds them, and proving it — and the signed record that says so: who ordered it, when, and why, never what. The record is append-only and cannot itself be erased, because a store that could forget its own forgetting could not be audited. Distinct from a negation, which leaves the claim legible and merely uncounted.",
     where: { kind: "export", name: "eraseClaims" },
   },
   {
@@ -126,7 +126,7 @@ export const TERMS = [
   {
     word: "registration",
     gloss:
-      "The published pairing of a gather program with a resolution program under a name, which is what makes a door answer for it. Publishing one is an append; withdrawing one is a strike.",
+      "The published pairing of a gather program with a resolution program under a name, which is what makes a door answer for it. Publishing one is an append; withdrawing one is a negation.",
     where: { kind: "export", name: "readRegistrations" },
   },
   {
@@ -168,7 +168,7 @@ export const TERMS = [
   {
     word: "roster",
     gloss:
-      "The live list of authors a store admits facts from. It is data, so widening it is an append and narrowing it is a strike — and either way the next request already knows.",
+      "The live list of authors a store admits facts from. It is data, so widening it is an append and narrowing it is a negation — and either way the next request already knows.",
     where: { kind: "export", name: "trustRosterPred" },
   },
   {
@@ -440,7 +440,7 @@ export const CHAPTERS = [
     body: [
       {
         kind: "prose",
-        text: "If nothing is ever edited, how do you change your mind? You say something else. A [[strike]] is a claim whose subject is another claim: *disregard that*. The struck claim stays exactly where it was, still signed, still legible in the record — and stops counting toward every reading, immediately.",
+        text: "If nothing is ever edited, how do you change your mind? You say something else. A [[negation]] is a claim whose subject is another claim: *disregard that*. The negated claim stays exactly where it was, still signed, still legible in the record — and stops counting toward every reading, immediately.",
       },
       {
         kind: "figure",
@@ -449,7 +449,7 @@ export const CHAPTERS = [
       },
       {
         kind: "prose",
-        text: "That makes writing the mirror image of reading. Reading takes many claims and produces one answer; writing takes an intended answer and produces the claims that would resolve to it. Clearing a field means striking the claims that put a value there — and here is the load-bearing detail: only *your* claims. You cannot clear away somebody else's contribution to a shared field, and the guarantee holds all the way down to a single value, not just to the field as a whole.",
+        text: "That makes writing the mirror image of reading. Reading takes many claims and produces one answer; writing takes an intended answer and produces the claims that would resolve to it. Clearing a field means negating the claims that put a value there — and here is the load-bearing detail: only *your* claims. You cannot clear away somebody else's contribution to a shared field, and the guarantee holds all the way down to a single value, not just to the field as a whole.",
       },
       {
         kind: "prose",
@@ -463,7 +463,7 @@ export const CHAPTERS = [
         kind: "claims",
         claims: [
           {
-            says: "Clearing a field strikes only the caller's own claims; another author's claim to the same field is untouched and still resolves.",
+            says: "Clearing a field negates only the caller's own claims; another author's claim to the same field is untouched and still resolves.",
             spec: "spec/14-write-semantics.md",
             proof: "test/gateway/clear.test.ts",
             door: "buildGqlSchema",
@@ -534,7 +534,7 @@ export const CHAPTERS = [
       { kind: "heading", text: "Changing your mind in public" },
       {
         kind: "prose",
-        text: "A published reading evolves by republishing at the same name, and the running store rebinds without a restart. Old versions do not vanish: they keep answering at their own address, so somebody's client from last quarter is not collateral damage. Withdrawing a version is a [[strike]] on its [[registration]] — the door stops serving it and the record remembers it existed, which is the difference between retiring an API and pretending it never shipped.",
+        text: "A published reading evolves by republishing at the same name, and the running store rebinds without a restart. Old versions do not vanish: they keep answering at their own address, so somebody's client from last quarter is not collateral damage. Withdrawing a version is a [[negation]] on its [[registration]] — the door stops serving it and the record remembers it existed, which is the difference between retiring an API and pretending it never shipped.",
       },
       {
         kind: "claims",
@@ -558,7 +558,7 @@ export const CHAPTERS = [
             door: "run",
           },
           {
-            says: "An authed caller lists a kind's entities one bounded page at a time — the candidate set is a governed [[container]] the door itself maintains, so excluding that container empties the listing and a struck claim de-lists its entity at both levels.",
+            says: "An authed caller lists a kind's entities one bounded page at a time — the candidate set is a governed [[container]] the door itself maintains, so excluding that container empties the listing and a negated claim de-lists its entity at both levels.",
             spec: "spec/43-listing-door.md",
             proof: "test/gateway/listing.test.ts",
             door: "Gateway",
@@ -637,7 +637,7 @@ export const CHAPTERS = [
           "Generating a typed client from a published reading is designed and not queued. You write your own client today.",
           "Only the REST door is versioned by path; asking GraphQL for a specific past generation is additive and queued, not silently present.",
           "A hosted, replicated storage driver is a one-file addition when a deployment needs one, and is not vendored here.",
-          "When two published definitions collide on a name, the winner is decided by law you declare — spec 47: one operator-signed declaration picks the mode (latest wins, mine outranks a peer, or serve neither and name both), it is data you can change or strike, and a store that declares nothing keeps its old loud collision. The gap this admission once named closed when law learned to resolve like data.",
+          "When two published definitions collide on a name, the winner is decided by law you declare — spec 47: one operator-signed declaration picks the mode (latest wins, mine outranks a peer, or serve neither and name both), it is data you can change or negate, and a store that declares nothing keeps its old loud collision. The gap this admission once named closed when law learned to resolve like data.",
         ],
       },
     ],
@@ -658,21 +658,21 @@ export const CHAPTERS = [
       },
       {
         kind: "prose",
-        text: "Revoking is a [[strike]] on a [[grant]], and it is transitive: revoke an administrator and every [[grant]] they minted falls with them, on the next check, with nothing to invalidate and no cache to wait for.",
+        text: "Revoking is a [[negation]] on a [[grant]], and it is transitive: revoke an administrator and every [[grant]] they minted falls with them, on the next check, with nothing to invalidate and no cache to wait for.",
       },
       {
         kind: "figure",
         figure: "standing",
-        caption: "One struck [[grant]], and everything standing on it goes quiet.",
+        caption: "One negated [[grant]], and everything standing on it goes quiet.",
       },
       {
         kind: "prose",
-        text: "There is a subtler thing available here, and it is the reason [[standing]] and reading are in the same chapter — but it is opt-in, and the default is the other way, so read this paragraph carefully. A store admits facts from strangers all the time; that is what [[federation]] is. An ordinary reading counts *every* [[strike]] it can see, which means a stranger can veto a value you rely on simply by contradicting it. A reading registered as GOVERNED counts strikes only from voices holding [[standing]], and then the trusted set is a live view rather than a list copied at startup: revoke a contributor and their strikes stop shaping what you see on the next read. If you want the heckler ignored, you have to say so.",
+        text: "There is a subtler thing available here, and it is the reason [[standing]] and reading are in the same chapter — but it is opt-in, and the default is the other way, so read this paragraph carefully. A store admits facts from strangers all the time; that is what [[federation]] is. An ordinary reading counts *every* [[negation]] it can see, which means a stranger can veto a value you rely on simply by contradicting it. A reading registered as GOVERNED counts negations only from voices holding [[standing]], and then the trusted set is a live view rather than a list copied at startup: revoke a contributor and their negations stop shaping what you see on the next read. If you want the heckler ignored, you have to say so.",
       },
       { kind: "heading", text: "The door with no permission at all" },
       {
         kind: "prose",
-        text: "Publishing to the world is a signed declaration naming exactly which readings are public. A stranger with no account and no token can then query them and subscribe to them, straight from a browser. Two properties make this safe rather than merely convenient: the anonymous interface has no mutation type at all — a tokenless write is structurally impossible, not policed — and revocation is one [[strike]] that the very next request already honors.",
+        text: "Publishing to the world is a signed declaration naming exactly which readings are public. A stranger with no account and no token can then query them and subscribe to them, straight from a browser. Two properties make this safe rather than merely convenient: the anonymous interface has no mutation type at all — a tokenless write is structurally impossible, not policed — and revocation is one [[negation]] that the very next request already honors.",
       },
       {
         kind: "prose",
@@ -688,17 +688,17 @@ export const CHAPTERS = [
             door: "authorize",
           },
           {
-            says: "Revocation is a [[strike]], it is transitive, and the door closes on the next check — revoking an administrator fells every [[grant]] they minted.",
+            says: "Revocation is a [[negation]], it is transitive, and the door closes on the next check — revoking an administrator fells every [[grant]] they minted.",
             spec: "spec/07-capabilities-accounts.md",
             proof: "test/gateway/auth.test.ts",
             door: "holdsGrant",
           },
           {
-            says: "A stranger's [[strike]] cannot reshape a governed reading, while the strike of somebody the [[operator]] granted directly does — and stops the instant the operator revokes that [[grant]], because the trusted set is resolved live rather than copied at startup.",
+            says: "A stranger's [[negation]] cannot reshape a governed reading, while the negation of somebody the [[operator]] granted directly does — and stops the instant the operator revokes that [[grant]], because the trusted set is resolved live rather than copied at startup.",
             spec: "spec/07-capabilities-accounts.md",
             proof: "test/gateway/lenses.test.ts",
             door: "governedGatherBody",
-            gap: "Scoped to the first link on purpose. Standing minted one link further down — an administrator granting somebody — binds the DOOR immediately and does not yet enter the trusted set a reading resolves through, so an administrator's revocation shuts the door while the revoked author's strikes still shape the reading. That divergence is §7's known residual, and `test/gateway/auth.test.ts` pins it rather than papering over it.",
+            gap: "Scoped to the first link on purpose. Standing minted one link further down — an administrator granting somebody — binds the DOOR immediately and does not yet enter the trusted set a reading resolves through, so an administrator's revocation shuts the door while the revoked author's negations still shape the reading. That divergence is §7's known residual, and `test/gateway/auth.test.ts` pins it rather than papering over it.",
           },
           {
             says: "Who currently holds permission is answerable by an ordinary query, so an audit needs no special tooling.",
@@ -719,7 +719,7 @@ export const CHAPTERS = [
             door: "NothingPublic",
           },
           {
-            says: "Closing the public door is one [[strike]], and the next request over the wire already refuses.",
+            says: "Closing the public door is one [[negation]], and the next request over the wire already refuses.",
             spec: "spec/12-open-door.md",
             proof: "test/server/public-http.test.ts",
             door: "publicDefect",
@@ -915,7 +915,7 @@ export const CHAPTERS = [
       },
       {
         kind: "prose",
-        text: "So Loam separates two things most systems conflate. A [[strike]] means *this is no longer true* — the claim stays legible and stops counting. [[erasure]] means *these bytes are gone* — and it is a different operation, with a different authority, a different cost, and a different proof.",
+        text: "So Loam separates two things most systems conflate. A [[negation]] means *this is no longer true* — the claim stays legible and stops counting. [[erasure]] means *these bytes are gone* — and it is a different operation, with a different authority, a different cost, and a different proof.",
       },
       {
         kind: "figure",
@@ -1044,11 +1044,11 @@ export const CHAPTERS = [
       {
         kind: "figure",
         figure: "twoGrounds",
-        caption: "The same bytes in two stores — and a [[strike]] that stops at the [[roster]].",
+        caption: "The same bytes in two stores — and a [[negation]] that stops at the [[roster]].",
       },
       {
         kind: "prose",
-        text: "That question is answered by a [[roster]], and the [[roster]] is data. Widening it is an append; narrowing it is a [[strike]]; either way the very next pull behaves differently, with no restart and no deploy. This is also where the subtlety lives: admitting somebody's facts is not the same as letting them shape your readings. A stranger's [[strike]] against a claim you rely on travels no further than your own [[roster]] lets it.",
+        text: "That question is answered by a [[roster]], and the [[roster]] is data. Widening it is an append; narrowing it is a [[negation]]; either way the very next pull behaves differently, with no restart and no deploy. This is also where the subtlety lives: admitting somebody's facts is not the same as letting them shape your readings. A stranger's [[negation]] against a claim you rely on travels no further than your own [[roster]] lets it.",
       },
       {
         kind: "prose",
@@ -1076,7 +1076,7 @@ export const CHAPTERS = [
             door: "pullFrom",
           },
           {
-            says: "A stranger's [[strike]] is refused at the door of a store that never admitted them, before any reading has to compensate for it.",
+            says: "A stranger's [[negation]] is refused at the door of a store that never admitted them, before any reading has to compensate for it.",
             spec: "spec/08-persistence-federation.md",
             proof: "test/federation/trust.test.ts",
             door: "trustClaims",
@@ -1154,7 +1154,7 @@ export const CHAPTERS = [
             door: "run",
           },
           {
-            says: "Replacing a leaked [[pen]] key retires the old one completely — every grant it held falls, whatever the verb, and the run that struck a key always says so, on the repaired arm as on the re-keyed one.",
+            says: "Replacing a leaked [[pen]] key retires the old one completely — every grant it held falls, whatever the verb, and the run that negated a key always says so, on the repaired arm as on the re-keyed one.",
             spec: "spec/45-pens.md",
             proof: "test/cli/pen-repaired-report.test.ts",
             door: "run",
@@ -1178,7 +1178,7 @@ export const CHAPTERS = [
             door: "Gateway",
           },
           {
-            says: "A retracted claim vanishes from the app's public page and its collection view — striking one item's status or membership never touches a live neighbor.",
+            says: "A retracted claim vanishes from the app's public page and its collection view — negating one item's status or membership never touches a live neighbor.",
             spec: "spec/34-the-board.md",
             proof: "test/board/board-render.test.ts",
             door: "publicClaims",
@@ -1233,7 +1233,7 @@ export const CHAPTERS = [
       { kind: "heading", text: "When the format changes underneath old facts" },
       {
         kind: "prose",
-        text: "Formats change. When one does, migration carries old facts forward without ever rewriting one: it re-signs the content into the new form at the original timestamp and strikes the old claim with a pointer to its replacement and a stated reason. So the history of the retirement is legible, and re-running the migration on an already-current store does nothing at all. It is also not a signing oracle: it can only re-sign what the running key itself authored, and a claim it cannot verify is left exactly as it is.",
+        text: "Formats change. When one does, migration carries old facts forward without ever rewriting one: it re-signs the content into the new form at the original timestamp and negates the old claim with a pointer to its replacement and a stated reason. So the history of the retirement is legible, and re-running the migration on an already-current store does nothing at all. It is also not a signing oracle: it can only re-sign what the running key itself authored, and a claim it cannot verify is left exactly as it is.",
       },
       { kind: "heading", text: "What did this look like on Tuesday" },
       {
@@ -1293,7 +1293,7 @@ export const CHAPTERS = [
             door: "Gateway",
           },
           {
-            says: "Migration re-signs each changed fact at its original timestamp and strikes the old one with a pointer to its replacement and a reason — never a silent rewrite.",
+            says: "Migration re-signs each changed fact at its original timestamp and negates the old one with a pointer to its replacement and a reason — never a silent rewrite.",
             spec: "spec/20-migration.md",
             proof: "test/migrate/migrate.test.ts",
             door: "migrate",
@@ -1467,7 +1467,7 @@ export const CHAPTERS = [
             door: null,
           },
           {
-            says: "Removing a role strikes EVERY surviving claim of it, not just the latest one — a role granted twice, once through the CLI and once by a hand-appended claim standing in for a federated pull, still comes off in one `remove-role` call. For the operator role, the same call strikes the signing grant it minted, and a fresh delta signed by that user's old key stops resolving for a governed reader while a different operator's key still does.",
+            says: "Removing a role negates EVERY surviving claim of it, not just the latest one — a role granted twice, once through the CLI and once by a hand-appended claim standing in for a federated pull, still comes off in one `remove-role` call. For the operator role, the same call negations the signing grant it minted, and a fresh delta signed by that user's old key stops resolving for a governed reader while a different operator's key still does.",
             spec: "spec/36-users-and-sessions.md",
             proof: "test/cli/user-roles.test.ts",
             door: null,
@@ -1544,7 +1544,7 @@ export const CHAPTERS = [
       },
       {
         kind: "prose",
-        text: "Once it is in, a connection binds to exactly one [[container]]: reads GATHER that container — everything in it, wherever a delta came from — and writes LAND in it, through a per-connection INBOX pool the connection signs with its own key. The key is the owner's, so the operator never appears on the read or write path; it appears once, to provision the owner's authority over the owner's own inbox. Revoking strikes the connection's grant; dropping the inbox is a total forget of everything that connection wrote.",
+        text: "Once it is in, a connection binds to exactly one [[container]]: reads GATHER that container — everything in it, wherever a delta came from — and writes LAND in it, through a per-connection INBOX pool the connection signs with its own key. The key is the owner's, so the operator never appears on the read or write path; it appears once, to provision the owner's authority over the owner's own inbox. Revoking negates the connection's grant; dropping the inbox is a total forget of everything that connection wrote.",
       },
       {
         kind: "prose",
@@ -1584,7 +1584,7 @@ export const CHAPTERS = [
             door: null,
           },
           {
-            says: "A connection binds to one container: it reads that container's whole membership and its writes land in a per-connection inbox pool the connection signs with its own key. A strike admitted to the gather suppresses its target whoever wrote it and wherever in the container's grounds it sits — negation binds by MEMBERSHIP, closed across every ground at once, so a retraction written into an inbox cannot be stranded away from the primary claim it strikes. Revoking the connection strikes its grant and the door refuses the next write while past writes keep their author; dropping the inbox purges every byte it wrote, and a named live bystander survives both.",
+            says: "A connection binds to one container: it reads that container's whole membership and its writes land in a per-connection inbox pool the connection signs with its own key. A negation admitted to the gather suppresses its target whoever wrote it and wherever in the container's grounds it sits — negation binds by MEMBERSHIP, closed across every ground at once, so a retraction written into an inbox cannot be stranded away from the primary claim it negates. Revoking the connection negates its grant and the door refuses the next write while past writes keep their author; dropping the inbox purges every byte it wrote, and a named live bystander survives both.",
             spec: "spec/39-connection-container.md",
             proof: "test/server/connection-container.test.ts",
             door: null,
@@ -1658,7 +1658,7 @@ export const CHAPTERS = [
             door: null,
           },
           {
-            says: "How a contested name resolves is a declared, strikeable delta — latest-wins, mine-outranks-a-peer's, or serve-neither-and-name-both — and a store that declares nothing keeps its old loud collision unchanged.",
+            says: "How a contested name resolves is a declared, negatable delta — latest-wins, mine-outranks-a-peer's, or serve-neither-and-name-both — and a store that declares nothing keeps its old loud collision unchanged.",
             spec: "spec/47-law-resolves-like-data.md",
             proof: "test/gateway/binding-policy-is-data.test.ts",
             door: null,
@@ -1900,7 +1900,7 @@ export const CHAPTERS = [
           {
             says:
               "loam.looked is one standing row per user and container, superseded in place and " +
-              "never struck; two keys of one user share one looked-moment, another user's looks " +
+              "never negated; two keys of one user share one looked-moment, another user's looks " +
               "do not disturb it, and an author outside the accepted set cannot move it.",
             spec: "spec/49-legibility.md",
             proof: "test/gateway/attention.test.ts",
@@ -1969,8 +1969,8 @@ export const CHAPTERS = [
           },
           {
             says:
-              "The ground buckets count strikes and struck alike, while lit and dark count " +
-              "only surviving data members: a retracted stray alarms nobody, and its strike " +
+              "The ground buckets count negations and negated alike, while lit and dark count " +
+              "only surviving data members: a retracted stray alarms nobody, and its negation " +
               "lands in the vocabulary bucket with the rest of the constitution.",
             spec: "spec/55-container-census.md",
             proof: "test/gateway/container-census.test.ts",
@@ -2022,7 +2022,7 @@ export const CHAPTERS = [
           },
           {
             says:
-              "The answer reads the ground per request: striking a grant flips the very next " +
+              "The answer reads the ground per request: negating a grant flips the very next " +
               "call's answer while a sibling's standing survives, with no restart.",
             spec: "spec/56-whoami.md",
             proof: "test/server/whoami.test.ts",
@@ -2074,7 +2074,7 @@ export const CHAPTERS = [
           },
           {
             says:
-              "Revoke strikes the key's grants at the delta level and retires its record " +
+              "Revoke negates the key's grants at the delta level and retires its record " +
               "while a sibling client's key and standing survive; the mint prints the bearer " +
               "once with the store-wide-write warning and never prints the seed.",
             spec: "spec/57-client-mint.md",
@@ -2236,7 +2236,7 @@ export const CHAPTERS = [
         kind: "claims",
         claims: [
           {
-            says: "A fresh open, a sync and a drop write open, received and close events the receiver signs; the append and federate doors refuse the whole family and every strike of it, whatever the signer.",
+            says: "A fresh open, a sync and a drop write open, received and close events the receiver signs; the append and federate doors refuse the whole family and every negation of it, whatever the signer.",
             spec: "spec/59-local-channel-incarnations.md",
             proof: "test/federation/local-channel-events.test.ts",
             door: null,

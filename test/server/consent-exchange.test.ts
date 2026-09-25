@@ -625,7 +625,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(reopened.connectionInboxes.has(grant.inbox!)).toBe(false);
   });
 
-  it("a re-consent after the inbox was dropped binds a fresh pool, never the struck one", async () => {
+  it("a re-consent after the inbox was dropped binds a fresh pool, never the negated one", async () => {
     const { base, connectorsHome, gateway } = await exchangeServer();
     await connect(base, "ada", "journal");
     const first = readOAuthFile(connectorsHome).grants[0]!;
@@ -644,7 +644,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect((await whoami(base, token)).status).toBe(200);
   });
 
-  it("revoking one inbox from the admin page strikes every pool the same key holds, and only that person's", async () => {
+  it("revoking one inbox from the admin page negates every pool the same key holds, and only that person's", async () => {
     const { base, connectorsHome, gateway } = await exchangeServer();
     const beaToken = await connect(base, "bea", "notes");
     await connect(base, "ada", "journal");
@@ -669,7 +669,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
     // The confirm page names the person and the sibling pool before anything happens.
     expect(confirmHtml).toContain("for <code>ada</code>");
     expect(confirmHtml).toContain(`<code>${otherInbox}</code>`);
-    expect(confirmHtml).toContain("struck with this one");
+    expect(confirmHtml).toContain("negated with this one");
     expect(done.status).toBe(200);
     const doneHtml = await done.text();
     expect(doneHtml).toContain("for <code>ada</code>");
@@ -776,7 +776,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(JSON.stringify(readOAuthFile(connectorsHome))).toBe(before);
   });
 
-  it("a sibling pool of the same key under ANOTHER person is neither named nor struck from this page", async () => {
+  it("a sibling pool of the same key under ANOTHER person is neither named nor negated from this page", async () => {
     // Reachable only through the library door — one key per (client, user) rules it out for a
     // connector — but the page's fence is the person's reach, and it must hold here too.
     const { base, connectorsHome, gateway, usersHome } = await exchangeServer();
@@ -831,7 +831,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect((await whoami(base, adaToken)).status).toBe(200);
   });
 
-  it("a row that loses its pool between the confirm page and the act refuses at the act, striking nothing", async () => {
+  it("a row that loses its pool between the confirm page and the act refuses at the act, negating nothing", async () => {
     const { base, connectorsHome, gateway } = await exchangeServer();
     const adaToken = await connect(base, "ada", "journal");
     await connect(base, "ada", "other");
@@ -864,7 +864,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect((await whoami(base, adaToken)).status).toBe(200);
   });
 
-  it("a sibling whose store refuses the strike turns the answer into a 503 that names it", async () => {
+  it("a sibling whose store refuses the negation turns the answer into a 503 that names it", async () => {
     const pools = new Map<string, MemoryBackend>();
     const { base, connectorsHome, gateway, faults } = await exchangeServer({ pools });
     const adaToken = await connect(base, "ada", "journal");
@@ -908,7 +908,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(gateway.connectionInboxes.get(grant.inbox!)).toBe(handle);
   });
 
-  it("a person revoking a foreign key's inbox in their own reach strikes that pool alone: the other person's pair stands", async () => {
+  it("a person revoking a foreign key's inbox in their own reach negates that pool alone: the other person's pair stands", async () => {
     // The mirror of the foreign-owner case: ada's connector key bound into bea:notes through the
     // library door; BEA revokes from that row. The pool half is hers; the connector pair is ada's.
     const { base, connectorsHome, gateway, usersHome } = await exchangeServer();

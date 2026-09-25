@@ -441,8 +441,8 @@ describe("T205 (a) — one screen holds the user, the pen, and the connector", (
   });
 });
 
-describe("T205 (b) — a struck grant is shown struck, never omitted", () => {
-  it("marks the struck row and leaves a live bystander unmarked", async () => {
+describe("T205 (b) — a negated grant is shown negated, never omitted", () => {
+  it("marks the negated row and leaves a live bystander unmarked", async () => {
     for (const name of ["ivy", "kit"]) {
       expect(
         await run(["user", "create", name, "--operator", "--home", home], io(), password("pw")),
@@ -479,13 +479,13 @@ describe("T205 (b) — a struck grant is shown struck, never omitted", () => {
     // demands the timestamp that only a real strike can produce.
     const ivyRow = rowFor(listing, "ivy");
     expect(ivyRow, listing).not.toBe("");
-    expect(ivyRow).toMatch(/struck \d{4}-\d{2}-\d{2}T/);
+    expect(ivyRow).toMatch(/negated \d{4}-\d{2}-\d{2}T/);
     expect(ivyRow).toContain("admin"); // the verb it held stays legible
     expect(ivyRow).toContain(shown(ivy));
 
     const kitRow = rowFor(listing, "kit");
     expect(kitRow, listing).not.toBe("");
-    expect(kitRow).not.toMatch(/struck/);
+    expect(kitRow).not.toMatch(/negated/);
     expect(kitRow).toContain("admin");
     expect(kitRow).toContain(shown(kit));
     // A grant nothing has struck reads exactly `live` — not "live" with a caveat about a strike,
@@ -497,8 +497,8 @@ describe("T205 (b) — a struck grant is shown struck, never omitted", () => {
 // A strike is a fact about STANDING, not about shape. These rails exist because reading `negationsOf`
 // raw cannot tell the two apart, and every wrong answer it produces is a wrong answer about the one
 // number the key-leak morning turns on: when did this key stop being able to write.
-describe("T205 (b2) — only a strike with standing is reported as one", () => {
-  it("an inert strike leaves a live grant live, and never says struck", async () => {
+describe("T205 (b2) — only a negation with standing is reported as one", () => {
+  it("an inert negation leaves a live grant live, and never says negated", async () => {
     // `quill` holds WRITE. `standsFor` admits the operator and effective store admins, so quill's
     // negation lands in the ground and retires nothing.
     expect(await run(["pen", "create", "quill", "--home", home], io()), printed()).toBe(0);
@@ -520,13 +520,13 @@ describe("T205 (b2) — only a strike with standing is reported as one", () => {
     const listing = printed();
     const row = rowFor(listing, "nib");
     expect(row, listing).not.toBe("");
-    expect(row).not.toMatch(/struck/);
+    expect(row).not.toMatch(/negated/);
     expect(row).toContain("live");
     // The strike is not hidden either — it is reported as what it is.
     expect(row).toContain("binds nothing");
   });
 
-  it("reports the LAWFUL strike's time, not an earlier inert one", async () => {
+  it("reports the LAWFUL negation's time, not an earlier inert one", async () => {
     // The whole hazard in one fixture: an inert strike at t1, the operator's lawful strike at t2.
     // A ledger taking the minimum over every negation reports t1 and UNDER-REPORTS the window in
     // which the key could still write — by exactly the distance between them.
@@ -540,19 +540,19 @@ describe("T205 (b2) — only a strike with standing is reported as one", () => {
     await plantStrike(readSeed(home), grant, t2);
     clear();
 
-    expect(await heldVerbs(nib), "the operator's strike binds").toEqual([]);
+    expect(await heldVerbs(nib), "the operator's negation binds").toEqual([]);
     expect(await run(["grant", "list", "--home", home], io()), printed()).toBe(0);
     const row = rowFor(printed(), "nib");
     expect(row, printed()).not.toBe("");
-    expect(row).toContain(`struck ${new Date(t2).toISOString()}`);
-    expect(row, "the inert strike's time must not be the caption").not.toContain(
+    expect(row).toContain(`negated ${new Date(t2).toISOString()}`);
+    expect(row, "the inert negation's time must not be the caption").not.toContain(
       new Date(t1).toISOString(),
     );
     // Two-sided: the pen that struck nothing is untouched.
-    expect(rowFor(printed(), "quill")).not.toMatch(/struck/);
+    expect(rowFor(printed(), "quill")).not.toMatch(/negated/);
   });
 
-  it("reports the FIRST binding strike when two of them bind", async () => {
+  it("reports the FIRST binding negation when two of them bind", async () => {
     // Standing ended at the first lawful strike. A second one changes nothing about when, so a
     // ledger reporting the LATEST would over-report how long the key could write — the same number
     // as the inert case above, wrong in the opposite direction. Both strikes here bind, so nothing
@@ -575,8 +575,8 @@ describe("T205 (b2) — only a strike with standing is reported as one", () => {
     expect(await run(["grant", "list", "--home", home], io()), printed()).toBe(0);
     const row = rowFor(printed(), "nib");
     expect(row, printed()).not.toBe("");
-    expect(row).toContain(`struck ${new Date(first).toISOString()}`);
-    expect(row, "the later strike did not move when standing ended").not.toContain(
+    expect(row).toContain(`negated ${new Date(first).toISOString()}`);
+    expect(row, "the later negation did not move when standing ended").not.toContain(
       new Date(second).toISOString(),
     );
   });
@@ -596,7 +596,7 @@ describe("T205 (b2) — only a strike with standing is reported as one", () => {
     expect(await run(["grant", "list", "--home", home], io()), printed()).toBe(0);
     const row = rowFor(printed(), shown(STRANGER));
     expect(row, printed()).not.toBe("");
-    expect(row).not.toMatch(/struck/);
+    expect(row).not.toMatch(/negated/);
     expect(row).toContain("does not bind");
     expect(row).toContain("no chain of admin standing reaches the operator");
   });
@@ -891,7 +891,7 @@ describe("T205 — the screen is grouped, and every column tells the truth", () 
     // The struck grant is ATTRIBUTED — the connector's name, not `unattributed`.
     expect(groove).toContain("connector");
     expect(groove).toContain(shown(CONNECTOR));
-    expect(groove).toMatch(/struck \d{4}-\d{2}-\d{2}T/);
+    expect(groove).toMatch(/negated \d{4}-\d{2}-\d{2}T/);
     expect(groove).toContain("revoked ");
     expect(listing).not.toContain("unattributed");
     expect(groove).not.toContain("no acting identity yet");
@@ -949,7 +949,7 @@ describe("T205 — the screen is grouped, and every column tells the truth", () 
       expect(row, `${key} is missing from ${listing}`).not.toBe("");
       expect(row).toContain("connector");
       expect(row).toContain("cli-groove");
-      expect(row).toMatch(/struck \d{4}-\d{2}-\d{2}T/);
+      expect(row).toMatch(/negated \d{4}-\d{2}-\d{2}T/);
     }
     expect(listing).not.toContain("unattributed");
   });

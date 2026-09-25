@@ -57,7 +57,7 @@ async function groundRoles(name: string): Promise<ReadonlySet<string>> {
 }
 
 describe("T166: loam user remove-role on a malformed operator seed", () => {
-  it("refuses without echoing a single byte of the file, and strikes nothing", async () => {
+  it("refuses without echoing a single byte of the file, and negates nothing", async () => {
     await run(["init", "--home", home], io());
     await run(["user", "create", "alice", "--operator", "--home", home], io(), password("pw"));
     expect(await groundRoles("alice")).toContain("operator");
@@ -77,7 +77,7 @@ describe("T166: loam user remove-role on a malformed operator seed", () => {
     expect(code).toBe(1);
     expect(all).toContain(userSeedPath(home, "alice")); // the path, so the operator can act
     expect(all).toContain("does not hold a 64-hex seed"); // the rule, in the crafted voice
-    expect(all).toContain("nothing was struck");
+    expect(all).toContain("nothing was negated");
     for (const fragment of ["GARBLE_MARKER_9Q7", "not-a-key", "hex string expected"]) {
       expect(all).not.toContain(fragment);
     }
@@ -86,7 +86,7 @@ describe("T166: loam user remove-role on a malformed operator seed", () => {
     expect(await groundRoles("alice")).toContain("operator");
   });
 
-  it("CONTROL: a well-formed seed still strikes the role as before", async () => {
+  it("CONTROL: a well-formed seed still negates the role as before", async () => {
     await run(["init", "--home", home], io());
     await run(["user", "create", "bob", "--operator", "--home", home], io(), password("pw"));
     const code = await run(["user", "remove-role", "bob", "--role=operator", "--home", home], io());

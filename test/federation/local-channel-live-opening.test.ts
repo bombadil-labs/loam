@@ -284,7 +284,7 @@ describe("spec 64: a live opening cannot be erased", () => {
     expect(events(gw, ch.name, "close")).toHaveLength(1);
     expect(bytes(siblingPool)).toEqual(before.sibling);
   });
-  it("a declaration struck through the append door with the pool's bytes still held refuses and names the orphaned pool, attached or not", async () => {
+  it("a declaration negated through the append door with the pool's bytes still held refuses and names the orphaned pool, attached or not", async () => {
     const { gw, holds, files } = await home();
     const { ch, offering, pool, source } = await channel(gw);
     offering.push(fact(1));
@@ -304,7 +304,7 @@ describe("spec 64: a live opening cannot be erased", () => {
     expect(holds(ch.name, fact(1).id)).toBe(true);
     const unattached = await gw.erase(opening.id).catch((e: Error) => e.message);
     expect(unattached).toContain(
-      "its pool's store still holds bytes although its declaration was struck",
+      "its pool's store still holds bytes although its declaration was negated",
     );
     expect(gw.reactor.get(opening.id)).toBeDefined();
     // ONE byte is enough. The seed never leaves a store this small; a hand-written one can be.
@@ -312,7 +312,7 @@ describe("spec 64: a live opening cannot be erased", () => {
     file.splice(0, file.length, ...file.filter((d) => d.id === fact(1).id));
     expect(file).toHaveLength(1);
     const oneByte = await gw.erase(opening.id).catch((e: Error) => e.message);
-    expect(oneByte).toContain("still holds bytes although its declaration was struck");
+    expect(oneByte).toContain("still holds bytes although its declaration was negated");
     // With the status standing, an open would RESUME and needs the declaration: the road is a
     // declaration by hand, then the drop. The fresh-open road belongs to the status-struck state.
     expect(oneByte).toContain("re-declare the name by hand, then drop the channel");
@@ -344,7 +344,7 @@ describe("spec 64: a live opening cannot be erased", () => {
     await gw.erase(opening.id);
     expect(gw.reactor.get(opening.id)).toBeUndefined();
   });
-  it("a second declaration under the channel's name by hand orphans the pool: sync and erase refuse, the drop purges it and strikes both, then the erase proceeds", async () => {
+  it("a second declaration under the channel's name by hand orphans the pool: sync and erase refuse, the drop purges it and negates both, then the erase proceeds", async () => {
     const { gw, holds } = await home();
     const { ch, offering } = await channel(gw);
     offering.push(fact(1));
@@ -819,7 +819,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     expect(gw.reactor.get(opening.id)).toBeUndefined();
     expect(gw.channelStatus(ch.name)).toHaveLength(0);
   });
-  it("status stamps struck by hand while the declaration stands: the drop is not refused as severed, purges the pool, and the name opens fresh afterwards", async () => {
+  it("status stamps negated by hand while the declaration stands: the drop is not refused as severed, purges the pool, and the name opens fresh afterwards", async () => {
     const { gw, holds } = await home();
     const { ch, offering } = await channel(gw);
     offering.push(fact(1));
@@ -937,7 +937,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     await expect(gw.dropChannel(ch.name)).rejects.toThrow(/already severed/);
     expect(survivingDeclarationIds(gw.reactor, OP, ch.name)).toHaveLength(1);
   });
-  it("status and declaration both struck by hand in this process: the drop names the attached pool it cannot reach and the road out; the road works", async () => {
+  it("status and declaration both negated by hand in this process: the drop names the attached pool it cannot reach and the road out; the road works", async () => {
     const first = await home();
     const { ch, offering } = await channel(first.gw);
     offering.push(fact(1));
@@ -993,7 +993,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     expect(gw.channelPools.get(ch.name)).toBeUndefined();
     const refusal = await gw.erase(opening.id).catch((e: Error) => e.message);
     expect(refusal).toContain(
-      "its pool's store still holds bytes although its declaration was struck",
+      "its pool's store still holds bytes although its declaration was negated",
     );
     expect(gw.reactor.get(opening.id)).toBeDefined();
     expect(first.mirrors.get(ch.name)!.some((d) => d.id === fact(1).id)).toBe(true);
@@ -1086,7 +1086,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     first.blind.add(ch.name);
     const gw = await first.restart();
     await expect(gw.erase(opening.id)).rejects.toThrow(
-      /still holds bytes although its declaration was struck/,
+      /still holds bytes although its declaration was negated/,
     );
     expect(gw.reactor.get(opening.id)).toBeDefined();
     first.blind.delete(ch.name);
@@ -1114,7 +1114,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     await gw.erase(opening.id);
     expect(gw.reactor.get(opening.id)).toBeUndefined();
   });
-  it("status stamps and declaration struck by hand, no handle: the refusal names a fresh open, which attaches the store; the drop then purges it and the erase proceeds", async () => {
+  it("status stamps and declaration negated by hand, no handle: the refusal names a fresh open, which attaches the store; the drop then purges it and the erase proceeds", async () => {
     const first = await home();
     const { ch, offering } = await channel(first.gw);
     offering.push(fact(1));
@@ -1147,7 +1147,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     await gw.erase(opening.id);
     expect(gw.reactor.get(opening.id)).toBeUndefined();
   });
-  it("a drop whose declaration strike failed after the purge completes on re-run, and then the opening can be erased", async () => {
+  it("a drop whose declaration negation failed after the purge completes on re-run, and then the opening can be erased", async () => {
     const { gw, primary, holds } = await home();
     const { ch, offering } = await channel(gw);
     offering.push(fact(1));
@@ -1157,7 +1157,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     primary.failNextRetraction = true;
     // The purge ran and the store closed; only the strike failed, so the declaration stands.
     await expect(gw.dropChannel(ch.name)).rejects.toThrow(
-      /discarded .* at the bytes .* could not be struck/,
+      /discarded .* at the bytes .* could not be negated/,
     );
     expect(holds(ch.name, fact(1).id)).toBe(false);
     expect(survivingDeclarationIds(gw.reactor, OP, ch.name)).not.toEqual([]);

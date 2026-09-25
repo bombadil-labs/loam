@@ -589,7 +589,7 @@ ${flowNote}`;
         act: "refuse",
         status: 409,
         message:
-          "This connection's inbox pool is not attached here, so its grant cannot be struck from " +
+          "This connection's inbox pool is not attached here, so its grant cannot be negated from " +
           `this row. The same key also writes into ${siblings.join(", ")}; revoke from one of ` +
           "those rows, or re-attach this inbox and revoke again. Nothing was revoked.",
       };
@@ -617,7 +617,7 @@ ${flowNote}`;
           status: 409,
           message:
             "This connection's inbox is attached but not bound as a live connection on this " +
-            "server, so this page cannot strike its grant. Bind it again, then revoke. " +
+            "server, so this page cannot negate its grant. Bind it again, then revoke. " +
             "Nothing was revoked.",
         };
       }
@@ -769,7 +769,7 @@ ${flowNote}`;
         });
       } catch (err) {
         onFault(
-          `the admin revoke could not strike the inbox grant of "${name}": ` +
+          `the admin revoke could not negate the inbox grant of "${name}": ` +
             `${err instanceof Error ? err.message : String(err)}`,
         );
         refuse(
@@ -777,7 +777,7 @@ ${flowNote}`;
           503,
           plan.client !== undefined
             ? "The connector's tokens are retired, but the write grant in its inbox could not " +
-                "be struck — this revoke is incomplete. Retry it."
+                "be negated — this revoke is incomplete. Retry it."
             : "The revocation could not land, so nothing was revoked.",
         );
         return;
@@ -812,7 +812,7 @@ ${flowNote}`;
         } catch (err) {
           failedSiblings.push(sibling);
           onFault(
-            `the admin revoke struck "${name}" but could not strike the same key's sibling inbox ` +
+            `the admin revoke negated "${name}" but could not negate the same key's sibling inbox ` +
               `"${sibling}": ${err instanceof Error ? err.message : String(err)}`,
           );
         }
@@ -822,7 +822,7 @@ ${flowNote}`;
       refuse(
         res,
         503,
-        `This inbox is struck, but the same key's ${failedSiblings.join(", ")} could not be — the ` +
+        `This inbox is negated, but the same key's ${failedSiblings.join(", ")} could not be — the ` +
           "key still writes there. This revoke is incomplete; retry it from that row.",
       );
       return;
@@ -842,7 +842,7 @@ next request. Other people's bindings of this connector stand.`;
         ? ""
         : ` This key also wrote into ${struckSiblings
             .map((s) => `<code>${escapeHtml(s)}</code>`)
-            .join(", ")}; that inbox is struck with this one.`;
+            .join(", ")}; that inbox is negated with this one.`;
     const othersDone =
       plan.othersPair === true
         ? " This key's connector binding is another person's, and it stands."

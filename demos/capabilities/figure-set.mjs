@@ -276,7 +276,7 @@ export const FIGURES = {
   struck: () => ({
     w: 740,
     h: 330,
-    alt: "A later delta from Bob striking his own earlier delta, which is crossed out but still present.",
+    alt: "A later delta from Bob negating his own earlier delta, which is crossed out but still present.",
     nodes: {
       db: {
         kind: "delta",
@@ -330,7 +330,7 @@ export const FIGURES = {
   standing: () => ({
     w: 800,
     h: 400,
-    alt: "The operator grants an admin, who grants a writer; striking the admin's grant also fells the writer's.",
+    alt: "The operator grants an admin, who grants a writer; negating the admin's grant also fells the writer's.",
     nodes: {
       op: { kind: "entity", x: 400, y: 60, r: 22, label: ["the operator"] },
       g1: {
@@ -339,7 +339,7 @@ export const FIGURES = {
         y: 210,
         r: 26,
         meta: ["Δ grant", "operator → admin"],
-        tip: "struck — and everything standing on it falls with it",
+        tip: "negated — and everything standing on it falls with it",
       },
       admin: { kind: "entity", x: 250, y: 340, r: 17, dim: 0.5, label: ["admin"] },
       g2: {
@@ -469,7 +469,7 @@ export const FIGURES = {
   twoGrounds: () => ({
     w: 860,
     h: 340,
-    alt: "Two stores exchanging signed deltas, each keeping its own readings, with a strike that does not cross.",
+    alt: "Two stores exchanging signed deltas, each keeping its own readings, with a negation that does not cross.",
     nodes: {
       a: { kind: "entity", x: 160, y: 160, r: 30, label: ["your store"] },
       b: { kind: "entity", x: 700, y: 160, r: 30, label: ["their store"] },
@@ -489,7 +489,7 @@ export const FIGURES = {
         y: 265,
         r: 22,
         color: "#9c8f7a",
-        meta: ["Δ a third party", "struck it — over there"],
+        meta: ["Δ a third party", "negated it — over there"],
         tip: "your roster never admitted this author, so nothing here moved",
       },
     },
@@ -499,6 +499,6 @@ export const FIGURES = {
       { from: "strike", to: "b", fromPort: "admitted", toPort: "holds" },
       { from: "strike", to: "shared", fromPort: "negates", color: "#c05a3f", dash: "5 4" },
     ],
-    extra: (svg) => note(svg, 430, 320, "a strike travels only as far as a roster lets it"),
+    extra: (svg) => note(svg, 430, 320, "a negation travels only as far as a roster lets it"),
   }),
 };

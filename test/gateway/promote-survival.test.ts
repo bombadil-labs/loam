@@ -94,7 +94,7 @@ const refusalOf = async (gw: Gateway, from: Gateway, id: string): Promise<string
 };
 
 describe("§24.3 promotion asks SURVIVAL at the source (T39)", () => {
-  it("refuses an output its own author retracted in the pool, naming the strike", async () => {
+  it("refuses an output its own author retracted in the pool, naming the negation", async () => {
     const primary = await bootPrimary();
     const pool = await primary.openQuarantine();
     const fact = output("the app said this, then took it back", 2000);
@@ -117,7 +117,7 @@ describe("§24.3 promotion asks SURVIVAL at the source (T39)", () => {
     await primary.close();
   });
 
-  it("refuses an output the OPERATOR struck inside their own pool — the §27 review gesture binds", async () => {
+  it("refuses an output the OPERATOR negated inside their own pool — the §27 review gesture binds", async () => {
     const primary = await bootPrimary();
     const pool = await primary.openQuarantine();
     const fact = output("the reviewer said no to this", 2500);
@@ -133,7 +133,7 @@ describe("§24.3 promotion asks SURVIVAL at the source (T39)", () => {
     expect(await messageOf(pool.gateway)).toBeNull();
 
     const refusal = await refusalOf(primary, pool.gateway, fact.id);
-    expect(refusal).toContain("the source's own reading has it struck");
+    expect(refusal).toContain("the source's own reading has it negated");
     expect(refusal).toContain(reject.id);
     expect(refusal).not.toContain(heckle.id);
     expect(primary.reactor.get(wouldAdopt(fact))).toBeUndefined();
@@ -144,7 +144,7 @@ describe("§24.3 promotion asks SURVIVAL at the source (T39)", () => {
     await primary.close();
   });
 
-  it("refuses an output a GRANTEE struck — the data mask's community, not the operator alone", async () => {
+  it("refuses an output a GRANTEE negated — the data mask's community, not the operator alone", async () => {
     const primary = await bootPrimary();
     // SURVEYOR holds write standing from the operator, so their strike binds as DATA (the same masked
     // ground the governed gather resolves through). This is what makes the rule `dataStruck` rather
@@ -158,7 +158,7 @@ describe("§24.3 promotion asks SURVIVAL at the source (T39)", () => {
     await pool.gateway.federate([fact, reject]);
 
     const refusal = await refusalOf(primary, pool.gateway, fact.id);
-    expect(refusal).toContain("the source's own reading has it struck");
+    expect(refusal).toContain("the source's own reading has it negated");
     expect(refusal).toContain(reject.id);
     expect(primary.reactor.get(wouldAdopt(fact))).toBeUndefined();
     expect(await messageOf(primary)).toBeNull();
@@ -167,7 +167,7 @@ describe("§24.3 promotion asks SURVIVAL at the source (T39)", () => {
     await primary.close();
   });
 
-  it("names the AUTHOR's strike, not a bystander's, when both struck the same output", async () => {
+  it("names the AUTHOR's negation, not a bystander's, when both negated the same output", async () => {
     const primary = await bootPrimary();
     const pool = await primary.openQuarantine();
     const fact = output("withdrawn, and heckled too", 3200);
@@ -186,7 +186,7 @@ describe("§24.3 promotion asks SURVIVAL at the source (T39)", () => {
     await primary.close();
   });
 
-  it("still promotes an output a THIRD PARTY struck — a stranger holds no veto", async () => {
+  it("still promotes an output a THIRD PARTY negated — a stranger holds no veto", async () => {
     const primary = await bootPrimary();
     const pool = await primary.openQuarantine();
     const fact = output("the app stands by this", 3000);
@@ -204,7 +204,7 @@ describe("§24.3 promotion asks SURVIVAL at the source (T39)", () => {
     await primary.close();
   });
 
-  it("refuses still when a third party strikes the author's own retraction — no foreign revival", async () => {
+  it("refuses still when a third party negates the author's own retraction — no foreign revival", async () => {
     const primary = await bootPrimary();
     const pool = await primary.openQuarantine();
     const fact = output("withdrawn, and a stranger objects", 4000);
@@ -224,7 +224,7 @@ describe("§24.3 promotion asks SURVIVAL at the source (T39)", () => {
     await primary.close();
   });
 
-  it("revives: the author's own counter-strike lets the same output promote again", async () => {
+  it("revives: the author's own counter-negation lets the same output promote again", async () => {
     const primary = await bootPrimary();
     const pool = await primary.openQuarantine();
     const fact = output("taken back, then stood behind again", 5000);
@@ -244,7 +244,7 @@ describe("§24.3 promotion asks SURVIVAL at the source (T39)", () => {
     await primary.close();
   });
 
-  it("asks survival BEFORE the kind — a struck law-shaped delta is refused as struck", async () => {
+  it("asks survival BEFORE the kind — a negated law-shaped delta is refused as negated", async () => {
     const primary = await bootPrimary();
     const pool = await primary.openQuarantine();
     const target = output("something the app later argued about", 5500);
@@ -269,7 +269,7 @@ describe("§24.3 promotion asks SURVIVAL at the source (T39)", () => {
     await primary.close();
   });
 
-  it("refuses to re-promote over an adoption the OPERATOR later struck here", async () => {
+  it("refuses to re-promote over an adoption the OPERATOR later negated here", async () => {
     const primary = await bootPrimary();
     const pool = await primary.openQuarantine();
     const fact = output("adopted, then thought better of", 5800);

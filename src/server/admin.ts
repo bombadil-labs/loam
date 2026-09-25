@@ -820,7 +820,7 @@ this lens does not gather; the lens may read ground this container does not hold
   // What a drop of this container would truthfully be — resolved fresh at BOTH steps, because the
   // state can move between the confirm page and its return.
   type DropPlan =
-    | { readonly act: "strike" }
+    | { readonly act: "negation" }
     | { readonly act: "inbox"; readonly handle: Container }
     | { readonly act: "channel"; readonly handle: Container }
     | { readonly act: "refuse"; readonly status: number; readonly message: string };
@@ -831,7 +831,7 @@ this lens does not gather; the lens may read ground this container does not hold
     name: string,
     rec: ResolvedContainer,
   ): DropPlan => {
-    if (rec.posture === "shared") return { act: "strike" };
+    if (rec.posture === "shared") return { act: "negation" };
     if (table.detached.has(name)) {
       return {
         act: "refuse",
@@ -998,7 +998,7 @@ this lens does not gather; the lens may read ground this container does not hold
           res,
           503,
           "The sever did not complete. Whatever was verified gone is gone; whatever could not " +
-            "be struck still stands, and the server log says which. Retry from the command line " +
+            "be negated still stands, and the server log says which. Retry from the command line " +
             "with `loam federate drop`.",
         );
         return;
@@ -1016,10 +1016,10 @@ this lens does not gather; the lens may read ground this container does not hold
       );
     } catch (err) {
       onFault(
-        `the admin page could not strike the declaration of "${name}": ` +
+        `the admin page could not negate the declaration of "${name}": ` +
           `${err instanceof Error ? err.message : String(err)}`,
       );
-      refuse(res, 503, "The declaration could not be struck, so nothing was forgotten.");
+      refuse(res, 503, "The declaration could not be negated, so nothing was forgotten.");
       return;
     }
     seeOther(res);

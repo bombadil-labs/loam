@@ -189,7 +189,7 @@ async function ensureListingContainer(
     throw new Error(
       `list ${lens}: "${name}" stands declared ${standing.trust}/${standing.posture}, and the ` +
         `listing reads only through the curated/shared container it declares itself — trust and ` +
-        `posture are immutable (§28.4), so this name is taken. Strike that declaration, or leave ` +
+        `posture are immutable (§28.4), so this name is taken. Negate that declaration, or leave ` +
         `this lens unlisted.`,
     );
   }
