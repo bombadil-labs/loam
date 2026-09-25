@@ -11,6 +11,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { containerClaims } from "../../src/gateway/container.js";
 import { readSlates, slateClaims } from "../../src/gateway/slate.js";
 import { MemoryBackend } from "../../src/store/memory.js";
+import { channelRecordClaims, channelStatusImpl } from "../../src/federation/channel.js";
 import { bothOrders, KEY, reactorOf, record, SEEDS, signed } from "./corpus.js";
 
 afterEach(() => {
@@ -41,6 +42,42 @@ describe("recordings: time", () => {
       "tie only": read([a, b]),
       "tie then a later marker": read([a, b, later]),
     });
+  });
+
+  it("the channel status reader on a timestamp tie, in both ingest orders", async () => {
+    // Two records for one channel at the same timestamp. The reader walks `snapshot()`, which
+    // iterates in arrival order, and keeps the first record on a tie.
+    const status = (receiving: boolean) => ({
+      name: "garden",
+      into: "home",
+      prefix: "garden",
+      receiving,
+      blessing: true,
+      lastSyncedAt: 0,
+      consecutiveFailures: 0,
+      from: "",
+      unattested: [],
+      unreadable: [],
+    });
+    const on = signed(
+      channelRecordClaims(status(true), KEY.operator, 70),
+      "operator",
+      "channel/on",
+    );
+    const off = signed(
+      channelRecordClaims(status(false), KEY.operator, 70),
+      "operator",
+      "channel/off",
+    );
+    await record(
+      "time.channel-tie",
+      bothOrders([on, off], (reactor) =>
+        channelStatusImpl(
+          { reactor, operatorAuthor: KEY.operator } as unknown as Gateway,
+          "garden",
+        ).map((c) => ({ name: c.name, receiving: c.receiving })),
+      ),
+    );
   });
 
   it("a slate's deadline at T-1, T and T+1", async () => {

@@ -63,7 +63,7 @@ negation, and state lens fidelity modulo that closure.
 - It is the author's claim of time.
 
 No arrival time exists. As-of reads use author time, so a late, backdated delta rewrites the past.
-One latest-wins reader may leak arrival order on ties. No door checks for timestamps in the future.
+One latest-wins reader leaks arrival order on ties. No door checks for timestamps in the future.
 Loam imitates arrival with `loam.arrival` stamps, which are not atomic with ingest and need a
 crash-debt journal.
 
@@ -148,8 +148,8 @@ is named.
 
 - `holdsGrant` and `grantsHeldBy` disagree. `holdsGrant` lets an admin-minted `register` grant
   through, and it answers `federate` without looking at scope (`out/admission.holdsGrant.json`).
-- PLAUSIBLE: the channel status reader may keep the first record it sees on a timestamp tie
-  (`channel.ts:529`). It is not recorded yet.
+- The channel status reader keeps the first record it sees on a timestamp tie, in arrival order
+  (`channel.ts:529`, `out/time.channel-tie.json`).
 - `nextTimestamp` is not seeded from the store, so order can go backwards after a restart
   (`out/time.restart.json`).
 - The federation door skips half the shape checks.
