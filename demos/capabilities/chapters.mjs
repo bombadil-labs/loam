@@ -1154,7 +1154,7 @@ export const CHAPTERS = [
             door: "run",
           },
           {
-            says: "Replacing a leaked [[pen]] key retires the old one completely — every grant it held falls, whatever the verb, and the run that negated a key always says so, on the repaired arm as on the re-keyed one.",
+            says: "Replacing a leaked [[pen]] key retires the old one completely — every grant it held falls, whatever the verb, and the run that negated a key's grants always says so, on the repaired arm as on the re-keyed one.",
             spec: "spec/45-pens.md",
             proof: "test/cli/pen-repaired-report.test.ts",
             door: "run",
@@ -1467,7 +1467,7 @@ export const CHAPTERS = [
             door: null,
           },
           {
-            says: "Removing a role negates EVERY surviving claim of it, not just the latest one — a role granted twice, once through the CLI and once by a hand-appended claim standing in for a federated pull, still comes off in one `remove-role` call. For the operator role, the same call negations the signing grant it minted, and a fresh delta signed by that user's old key stops resolving for a governed reader while a different operator's key still does.",
+            says: "Removing a role negates EVERY surviving claim of it, not just the latest one — a role granted twice, once through the CLI and once by a hand-appended claim standing in for a federated pull, still comes off in one `remove-role` call. For the operator role, the same call negates the signing grant it minted, and a fresh delta signed by that user's old key stops resolving for a governed reader while a different operator's key still does.",
             spec: "spec/36-users-and-sessions.md",
             proof: "test/cli/user-roles.test.ts",
             door: null,
@@ -1969,7 +1969,7 @@ export const CHAPTERS = [
           },
           {
             says:
-              "The ground buckets count negations and negated alike, while lit and dark count " +
+              "The ground buckets count negations, including negated ones, while lit and dark count " +
               "only surviving data members: a retracted stray alarms nobody, and its negation " +
               "lands in the vocabulary bucket with the rest of the constitution.",
             spec: "spec/55-container-census.md",

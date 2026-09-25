@@ -3146,7 +3146,7 @@ async function cmdPen(args: readonly string[], io: IO): Promise<number> {
   const struckLines = retired.map(({ author, grants }) =>
     grants === 0
       ? `  the previous key ${author} held no live grant — its record is retired`
-      : `  the previous key ${author} is negated: ${grants} grant${grants === 1 ? "" : "s"} it held no longer bind${grants === 1 ? "s" : ""}`,
+      : `  the previous key ${author}: its ${grants} grant${grants === 1 ? " is" : "s are"} negated and no longer bind${grants === 1 ? "s" : ""}`,
   );
   io.out(
     outcome === "repaired"
@@ -3656,9 +3656,9 @@ async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<numbe
 
     for (const g of grants) {
       const live = binding.has(g.id);
-      // "struck" is the word an operator scans this column for, so it appears in exactly ONE answer
-      // here: the one where a strike WITH STANDING actually retired the grant. Every other phrasing
-      // says "strike", never "struck", or a reader grepping the ledger lands on a row that is not.
+      // "negated" is the word an operator scans this column for, so it appears in exactly ONE answer
+      // here: the one where a negation WITH STANDING actually retired the grant. Every other phrasing
+      // says "negation", never "negated", or a reader grepping the ledger lands on a row that is not.
       const inert = g.inertStrike ? " · a negation names it and binds nothing" : "";
       const standing = live
         ? `live${inert}`

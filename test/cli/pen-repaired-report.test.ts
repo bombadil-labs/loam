@@ -56,7 +56,8 @@ describe("loam pen create — the repaired arm's report", () => {
     const printed = out.join("\n");
     expect(printed).toContain("repaired pen guest-pen");
     // The report names the struck key and the count, same voice as the re-keyed arm.
-    expect(printed).toContain(`the previous key ${oldAuthor} is negated`);
+    expect(printed).toContain(`the previous key ${oldAuthor}: its`);
+    expect(printed).toMatch(/grants? (is|are) negated and no longer bind/);
     expect(printed).not.toContain(replacement); // the secret still never prints
   });
 
@@ -146,7 +147,7 @@ describe("loam pen create — the promises beyond the report text", () => {
     out.length = 0;
     const code = await run(["pen", "create", "guest-pen", "--home", home], io());
     expect(code).toBe(0);
-    expect(out.join("\n")).toContain("2 grants it held no longer bind");
+    expect(out.join("\n")).toContain("2 grants are negated and no longer bind");
 
     // Object level: no surviving grant of ANY verb names the old author.
     const gw = await ground();

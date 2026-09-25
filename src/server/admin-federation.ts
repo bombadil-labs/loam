@@ -822,7 +822,7 @@ ${flowNote}`;
       refuse(
         res,
         503,
-        `This inbox is negated, but the same key's ${failedSiblings.join(", ")} could not be — the ` +
+        `This inbox's grant is negated, but the same key's ${failedSiblings.join(", ")} could not be — the ` +
           "key still writes there. This revoke is incomplete; retry it from that row.",
       );
       return;
@@ -842,7 +842,7 @@ next request. Other people's bindings of this connector stand.`;
         ? ""
         : ` This key also wrote into ${struckSiblings
             .map((s) => `<code>${escapeHtml(s)}</code>`)
-            .join(", ")}; that inbox is negated with this one.`;
+            .join(", ")}; that inbox's grant is negated with this one.`;
     const othersDone =
       plan.othersPair === true
         ? " This key's connector binding is another person's, and it stands."
