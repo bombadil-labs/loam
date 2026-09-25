@@ -59,12 +59,13 @@
   "scripts": {
     "build": "node scripts/build-docs.mjs --check && tsc -p tsconfig.build.json && node scripts/build-bundles.mjs",
     "test": "vitest run",
+    "census": "node refactor/tools/ratchet.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm run build && npm test",
+    "check": "npm run format:check && npm run lint && npm run census && npm run typecheck && npm run build && npm test",
     "release": "node scripts/release.mjs",
     "version": "node scripts/sync-version.mjs",
     "prepublishOnly": "npm run check"

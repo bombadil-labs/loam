@@ -224,3 +224,204 @@ export function option(args, name, fallback) {
   const i = args.indexOf(name);
   return i >= 0 && i + 1 < args.length ? args[i + 1] : fallback;
 }
+
+// The import graph over `files`: file -> Map(target -> { value, names }), plus external modules
+// and the rhizomatic names each file imports. A type-only import has `value: false`.
+export function importGraph(files) {
+  const known = new Set(files);
+
+  // file -> Map(target -> { value: boolean, names: Set<string> })
+  const edges = new Map();
+  const external = new Map();
+  const rhizomatic = new Map();
+
+  const resolve = (from, spec) => {
+    if (!spec.startsWith(".")) return null;
+    const base = path.join(path.dirname(from), spec);
+    for (const c of [
+      base,
+      base.replace(/\.js$/, ".ts"),
+      `${base}.ts`,
+      path.join(base, "index.ts"),
+    ]) {
+      if (known.has(c)) return c;
+    }
+    return `unresolved:${base}`;
+  };
+
+  for (const file of files) {
+    const { sf } = parse(file);
+    const out = new Map();
+    edges.set(file, out);
+    const add = (spec, typeOnly, names) => {
+      const target = resolve(file, spec);
+      if (target === null) {
+        external.set(spec, (external.get(spec) ?? 0) + 1);
+        if (spec === "@bombadil/rhizomatic") {
+          for (const n of names) rhizomatic.set(n, (rhizomatic.get(n) ?? 0) + 1);
+        }
+        return;
+      }
+      const e = out.get(target) ?? { value: false, names: new Set() };
+      if (!typeOnly) e.value = true;
+      names.forEach((n) => e.names.add(n));
+      out.set(target, e);
+    };
+    for (const st of sf.statements) {
+      if (ts.isImportDeclaration(st) && ts.isStringLiteral(st.moduleSpecifier)) {
+        const c = st.importClause;
+        const names = [];
+        let value = !c; // a bare `import "x"` runs the module
+        if (c?.name) {
+          names.push(c.name.text);
+          value = true;
+        }
+        if (c?.namedBindings && ts.isNamespaceImport(c.namedBindings)) {
+          names.push(`* as ${c.namedBindings.name.text}`);
+          value = true;
+        } else if (c?.namedBindings) {
+          for (const el of c.namedBindings.elements) {
+            names.push((el.propertyName ?? el.name).text);
+            if (!el.isTypeOnly) value = true;
+          }
+        }
+        add(st.moduleSpecifier.text, Boolean(c?.isTypeOnly) || !value, names);
+      } else if (
+        ts.isExportDeclaration(st) &&
+        st.moduleSpecifier &&
+        ts.isStringLiteral(st.moduleSpecifier)
+      ) {
+        const names =
+          st.exportClause && ts.isNamedExports(st.exportClause)
+            ? st.exportClause.elements.map((e) => (e.propertyName ?? e.name).text)
+            : ["*"];
+        add(st.moduleSpecifier.text, st.isTypeOnly, names);
+      }
+    }
+    const dynamic = (n) => {
+      if (
+        ts.isCallExpression(n) &&
+        n.expression.kind === ts.SyntaxKind.ImportKeyword &&
+        n.arguments[0] &&
+        ts.isStringLiteral(n.arguments[0])
+      ) {
+        add(n.arguments[0].text, false, ["(dynamic)"]);
+      }
+      ts.forEachChild(n, dynamic);
+    };
+    dynamic(sf);
+  }
+  return { edges, external, rhizomatic };
+}
+
+// Strongly connected components (Tarjan). With `withTypes` false, type-only imports are ignored.
+export function stronglyConnected(edges, withTypes) {
+  let index = 0;
+  const stack = [];
+  const onStack = new Set();
+  const idx = new Map();
+  const low = new Map();
+  const found = [];
+  const visit = (v) => {
+    idx.set(v, index);
+    low.set(v, index++);
+    stack.push(v);
+    onStack.add(v);
+    for (const [w, e] of edges.get(v) ?? []) {
+      if ((!withTypes && !e.value) || !edges.has(w)) continue;
+      if (!idx.has(w)) {
+        visit(w);
+        low.set(v, Math.min(low.get(v), low.get(w)));
+      } else if (onStack.has(w)) low.set(v, Math.min(low.get(v), idx.get(w)));
+    }
+    if (low.get(v) === idx.get(v)) {
+      const comp = [];
+      let w;
+      do {
+        w = stack.pop();
+        onStack.delete(w);
+        comp.push(w);
+      } while (w !== v);
+      if (comp.length > 1) found.push(comp.sort());
+    }
+  };
+  for (const v of edges.keys()) if (!idx.has(v)) visit(v);
+  return found.sort((a, b) => b.length - a.length);
+}
+
+// Code that decides; the doors, the CLI and the clients may read the clock.
+const CORE = /^src\/(gateway|federation|store|runner|surface|migrate|stock)\//;
+
+// The last name in a receiver chain: `gw.options` → "options", `x["reactor"]` → "reactor",
+// `globalThis.Date` → "Date". Anything else has no name.
+function lastName(node) {
+  if (ts.isIdentifier(node)) return node.text;
+  if (ts.isPropertyAccessExpression(node)) return node.name.text;
+  if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)) {
+    return node.argumentExpression.text;
+  }
+  if (ts.isParenthesizedExpression(node)) return lastName(node.expression);
+  return undefined;
+}
+
+// A member reference `recv.name` or `recv["name"]`: [receiver, name], or undefined.
+function member(node) {
+  if (ts.isPropertyAccessExpression(node)) return [node.expression, node.name.text];
+  if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)) {
+    return [node.expression, node.argumentExpression.text];
+  }
+  return undefined;
+}
+
+// The ratchet's per-file counts. They are syntactic: a read through an alias the syntax tree
+// cannot see (a variable holding `options`, a computed key) is not counted.
+export function couplingCountsOf(file, text) {
+  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+  const core = CORE.test(file.replace(/\\/g, "/"));
+  const counts = { seedReads: 0, snapshotRefs: 0, coreClockReads: 0 };
+  const isClock = (recv) => ["Date", "performance"].includes(lastName(recv));
+  const visit = (n) => {
+    const m = member(n);
+    if (m !== undefined) {
+      const [recv, name] = m;
+      if (name === "seed" && lastName(recv) === "options") counts.seedReads++;
+      if (name === "snapshot" && /reactor$/i.test(lastName(recv) ?? "")) counts.snapshotRefs++;
+      if (core && name === "now" && isClock(recv)) counts.coreClockReads++;
+    }
+    // `const { seed } = options`, `const { now } = Date`
+    if (ts.isVariableDeclaration(n) && ts.isObjectBindingPattern(n.name) && n.initializer) {
+      const from = lastName(n.initializer);
+      for (const el of n.name.elements) {
+        const key = (el.propertyName ?? el.name).getText(sf).replace(/^["']|["']$/g, "");
+        if (key === "seed" && from === "options") counts.seedReads++;
+        if (core && key === "now" && ["Date", "performance"].includes(from)) {
+          counts.coreClockReads++;
+        }
+      }
+    }
+    if (core && ts.isNewExpression(n) && lastName(n.expression) === "Date") {
+      if ((n.arguments?.length ?? 0) === 0) counts.coreClockReads++;
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return counts;
+}
+
+// Every ratchet count over `files`.
+export function couplingCounts(files) {
+  const cycles = stronglyConnected(importGraph(files).edges, false);
+  const totals = {
+    largestImportCycle: Math.max(0, ...cycles.map((c) => c.length)),
+    importCycles: cycles.length,
+    cyclicFiles: cycles.reduce((n, c) => n + c.length, 0),
+    seedReads: 0,
+    snapshotRefs: 0,
+    coreClockReads: 0,
+  };
+  for (const file of files) {
+    const per = couplingCountsOf(file, fs.readFileSync(file, "utf8"));
+    for (const [k, v] of Object.entries(per)) totals[k] += v;
+  }
+  return totals;
+}
