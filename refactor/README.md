@@ -31,6 +31,10 @@ Process:
 - **Greenfield.** No production data exists. Backward compatibility is not required. Wire changes
   ship no migration.
 - **Hermetic is a check, not a codemod.** Do not lift the codebase automatically.
+- **Hermetic is not ready yet** (Myk, 2026-09-25). It is under active development. Do not depend on
+  it; ask Myk before you use it. Meanwhile, write functions to be hermetic-friendly: pure, with
+  explicit inputs, and with no clock, randomness, environment, files or network. The census tools
+  use it only to measure.
 - **Cadence:** probably one tier at a time. Be pragmatic.
 
 Design:
