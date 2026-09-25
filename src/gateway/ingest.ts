@@ -42,7 +42,14 @@ import {
 } from "@bombadil/rhizomatic";
 import { authorize } from "./accounts.js";
 import { budgetRefusal } from "./budget.js";
-import { ERASE_ENTITY, eraseDefect, erasedInBatch, isTombstone, refusedIds } from "./erase.js";
+import {
+  ERASE_ENTITY,
+  eraseDefect,
+  erasedInBatch,
+  isTombstone,
+  refusedIds,
+  tombstonesOfTombstones,
+} from "./erase.js";
 import { Channel } from "./channel.js";
 import type { AppendReceipt, FederationReport, Gateway } from "./gateway.js";
 import { publicDefect } from "./public.js";
@@ -288,6 +295,13 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
   }
   // Every member is valid now, so a tombstone in the batch binds, and its target in the same batch
   // is refused. Append is atomic, so the whole batch is refused.
+  const erasesTombstone = batch.find((d) => tombstonesOfTombstones(batch).has(d.id));
+  if (erasesTombstone !== undefined) {
+    throw new Error(
+      `append rejected: tombstone ${erasesTombstone.id} erases another tombstone in the same ` +
+        `batch, and a tombstone cannot be erased`,
+    );
+  }
   const erasedHere = erasedInBatch(batch, gw.operatorAuthor);
   const alsoErased = batch.find((d) => erasedHere.has(d.id));
   if (alsoErased !== undefined) {
@@ -709,6 +723,9 @@ export async function federateImpl(
   }
   // A tombstone admitted in this offer refuses its target in the same offer. Only ADMITTED
   // tombstones count: one this path refused, or the caller's predicate turned away, never bound.
+  // A tombstone that erases another tombstone is dropped first: a tombstone is never erased.
+  const erasesTombstone = tombstonesOfTombstones(admitted);
+  if (erasesTombstone.size > 0) admitted = admitted.filter((d) => !erasesTombstone.has(d.id));
   const erasedHere = erasedInBatch(admitted, gw.operatorAuthor);
   if (erasedHere.size > 0) admitted = admitted.filter((d) => !erasedHere.has(d.id));
   // Counted per offered delta rather than inferred from set sizes: the closure keys by id, so a peer

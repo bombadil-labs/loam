@@ -139,4 +139,34 @@ describe("an erased id is refused forever", () => {
     expect(held(gw, tomb)).toBe(true);
     await gw.close();
   });
+
+  // A tombstone is never erased (§11). Otherwise a chain in one offer could drop the tombstone that
+  // refuses D, and D could come back later.
+  it("a tombstone that erases a tombstone cannot undo the erasure, in one offer or later", async () => {
+    const gw = await boot();
+    const d = observed(FERN, "height", 30, 1000, OP_SEED);
+    const t1 = tombstoneFor(gw, d, 2000);
+    const t2 = tombstoneFor(gw, t1, 3000);
+    await gw.federate([d, t1, t2]);
+    expect(held(gw, t1)).toBe(true);
+    expect(held(gw, t2)).toBe(false);
+    expect(held(gw, d)).toBe(false);
+    await gw.federate([d]);
+    await expect(gw.append([d])).rejects.toThrow(/erased/);
+    expect(held(gw, d)).toBe(false);
+
+    await expect(gw.append([tombstoneFor(gw, t1, 4000)])).rejects.toThrow(/cannot be erased/);
+    await gw.close();
+  });
+
+  it("append refuses a batch in which a tombstone erases another tombstone", async () => {
+    const gw = await boot();
+    const d = observed(FERN, "height", 30, 1000, OP_SEED);
+    const t1 = tombstoneFor(gw, d, 2000);
+    const t2 = tombstoneFor(gw, t1, 3000);
+    await expect(gw.append([t1, t2])).rejects.toThrow(/cannot be erased/);
+    expect(held(gw, t1)).toBe(false);
+    expect(held(gw, t2)).toBe(false);
+    await gw.close();
+  });
 });

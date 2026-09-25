@@ -188,6 +188,11 @@ export function eraseDefect(
   // The operator's tombstone must still tell the truth about whose record it forgot, whenever
   // the target can still be seen — an accurate compliance record.
   const target = reactor.get(targetId);
+  // A tombstone is never erased (§11): the refused set is derived from the held tombstones, so
+  // erasing one would undo an erasure. A target in the same batch is checked by `erasedInBatch`.
+  if (target !== undefined && isTombstone(target.claims)) {
+    return "a tombstone cannot be erased: an erasure is permanent";
+  }
   if (target !== undefined && target.claims.author !== spokenBy) {
     return "a tombstone's spoken-by must be the erased delta's actual author";
   }
@@ -233,14 +238,30 @@ export function erasedInBatch(
   const out = new Set<string>();
   if (operator === undefined) return out;
   const byId = new Map(accepted.map((d) => [d.id, d]));
+  const erasesTombstone = tombstonesOfTombstones(accepted);
   for (const d of accepted) {
     if (!isTombstone(d.claims) || inLocalContext(d, LOCAL_CONTROL)) continue;
+    if (erasesTombstone.has(d.id)) continue;
     if (d.claims.author !== operator) continue;
     const { targetId, spokenBy, count } = tombstoneParts(d.claims);
     if (targetId === undefined || count.erases !== 1) continue;
     const target = byId.get(targetId);
     if (target !== undefined && target.claims.author !== spokenBy) continue;
     out.add(targetId);
+  }
+  return out;
+}
+
+// The accepted tombstones whose target is another tombstone in the same batch. A tombstone is never
+// erased (§11), so the write paths refuse these: append refuses its batch, federate drops them.
+// `eraseDefect` refuses the same thing when the target tombstone is already held.
+export function tombstonesOfTombstones(accepted: readonly Delta[]): Set<string> {
+  const tombs = new Set(accepted.filter((d) => isTombstone(d.claims)).map((d) => d.id));
+  const out = new Set<string>();
+  for (const d of accepted) {
+    if (!isTombstone(d.claims)) continue;
+    const { targetId } = tombstoneParts(d.claims);
+    if (targetId !== undefined && tombs.has(targetId)) out.add(d.id);
   }
   return out;
 }
