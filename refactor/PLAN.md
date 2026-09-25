@@ -77,6 +77,9 @@ Each one becomes a normative vector, a Loam regression recording, or a decision 
 12. A shared container's membership changes and admits an old parent delta, with no new parent
     ingest. Its arrival testimony must say when the delta entered that peer, not copy the parent's
     earlier arrival. This test confirms or refutes the shared container as a peer.
+13. An erasure held in one peer, and its target held in a sibling peer, read through one composed
+    scope. Loam's pools share the operator's key today, so one erasure governs the whole scope.
+    Once each peer has its own governing key (step 6), whose erasure governs a composed reading?
 
 ## 4. Landing order
 
