@@ -24,31 +24,35 @@ imports:
 | `hview`, `schema → term-io` hashes | codec work lives in the wrong package | a shared syntax package below them |
 | `term-json → eval` | the parser imports execution | move structural validation to syntax |
 
-The target build order: delta and codec; storage and syntax above delta; evaluation; schema and
-resolve; reactor; principal; federation; forgetting; derivation. Sol draws the exact graph and
-adds a mechanical check before any file moves. One aggregate `@bombadil/rhizomatic` barrel stays.
+A hypothesis for the build order: delta and codec; storage and syntax above delta; evaluation;
+schema and resolve; reactor; principal; federation; forgetting; derivation. It stays a hypothesis
+until step 1 gives a concrete acyclic graph over runtime and TypeScript declaration imports. Two
+owners must be named explicitly: the `resolve` term carries a Schema and `evalTerm` calls
+`resolveView`, so the terminal resolve composition needs an owner; and a generic registry
+interface needs an adapter above schema. Sol draws the graph and adds a mechanical check before
+any file moves. One aggregate `@bombadil/rhizomatic` barrel stays.
 Loam imports only from it.
 
 ## 2. The semantic changes, by package
 
 | Package | Change | Source |
 | --- | --- | --- |
-| delta | Signed times: (a) created, (b) valid from, optional valid until. Rules for absent and invalid intervals. Every id changes. | ruling; both audits |
-| delta | The author's timestamp stops doing the job of a process counter. Order and causality come from `txn.prior` or an explicit clock, not from `max(now, last+1)`. | Loam time #1 |
+| delta | Signed times: (a) created, (b) valid from, optional valid until (see T1). Each is the author's signed claim, not an objective clock. Rules for absent and invalid intervals. Every id changes. | ruling; both audits |
+| delta | Ordering is a separate question from the time fields. `txn.prior` gives claimed causal links for manifests only; it does not replace Loam's per-process counter for ordinary deltas. vNext decides whether it needs an author sequence or another ordering signal. It does not assume an HLC. | Loam time #1; Sol |
 | syntax, evaluation | Every read that depends on validity takes `now` as an explicit input. A view can change at T with no new delta. | ruling; Sol CE2 |
 | algebra | Suppression trust gets a name: whose strikes bind. It is separate from admission and from claim ranking. It also gets a relative form: "the striker is the target's author". | Loam theme 2 |
 | reactor | An indexed query "negated under Pred", so that a masked read does not scan the store (H8). A `forget(id)` that updates materializations the way a negation does. | Loam themes 2, 8 |
-| schema | A governed read: `loadHyperSchema` and `loadSchema` take a trust input. A named lens binding: name → (HyperSchema pin, Schema pin). One Schema hash API. | Loam themes 1, 9 |
-| resolve | `applyPolicy(policy, candidates)`. A value ABI for resolvers: bucket in, value out. The pure-module profile for resolvers comes later, once its bytes are specified and two hosts run it. | Loam theme 9; Sol |
-| storage | `forget(ids)` and a three-state probe: gone, held, unproven. The probe proves absence only on the surfaces it checked. Repair and rehydrate take an exclusion set. | Loam theme 8; Sol |
+| schema | A governed read: `loadHyperSchema` and `loadSchema` take a trust input, an explicit author predicate or key set, which the principal package can supply later. Raw key equality is not the only future form. A named lens binding: name → (HyperSchema pin, Schema pin). One Schema hash API. | Loam themes 1, 9 |
+| resolve | `applyPolicy(policy, candidates)`. A value ABI for resolvers: bucket in, value out. A pure-module profile comes later. Zero imports is not enough: it also needs fuel, memory limits, a canonical resolver-result ABI and vectors. The SPEC-7 proposal returns pointer lists, not Views. | Loam theme 9; Sol |
+| storage | `forget(ids)` and a three-state probe: gone, held, unproven. The probe certifies only the declared storage surfaces, and the result and any receipt name those surfaces. It cannot prove that a backup or a peer forgot. Repair and rehydrate take an exclusion set. | Loam theme 8; Sol |
 | principal | Self-certifying root, key binding, succession, delegation chains, locator claims, optional registries. A read of the governing key is anchored by a peer id, a pinned root or an explicit trust choice, never by the untrusted set alone. | ruling; Sol |
-| federation | Peer = bounded set, governing key, admission, offered lenses, arrival testimony. Admission is an ordered list of injected guards; a local append is a degenerate admission. Arrival testimony is written atomically at admission. Per-subscriber lenses. Publish declares its negation closure and its manifest dependencies, and a closure audit lists the exact ids sent. Signed protocol messages. A normative set digest. | both audits |
-| forgetting | Local forget orders, a separate request vocabulary, receipts as testimony, a published posture, sealed payloads. A foreign order is kept inert as testimony or rejected; it never becomes a request by reinterpretation. | ruling; both audits |
+| federation | Peer = bounded set, governing key, admission, offered lenses, arrival testimony. Admission is an ordered list of injected guards; a local append is a degenerate admission. Arrival testimony is written atomically at admission. Per-subscriber lenses. A publish contract declares a closure rule, covering negations and manifests. Its audit lists the ids exposed now and makes future scope inspectable. Nothing expands after consent. Signed protocol messages. A normative set digest. | both audits |
+| forgetting | Local forget orders, a separate request vocabulary, receipts as testimony, a published posture, sealed payloads (see F5). A receiving peer keeps a foreign order as testimony or rejects it under local admission; it never becomes a request by reinterpretation. | ruling; both audits |
 | derivation | A binding-definition vocabulary with content-addressed artifacts. The effectful module ABI, with host imports granted by consent. | Loam law #6; Sol |
 
 ## 3. Counterexamples to settle before any spec text
 
-Each one becomes a vector, or a decision for Myk.
+Each one becomes a normative vector, a Loam regression recording, or a decision for Myk.
 
 1. Two governing keys file law at one anchor (`loam:erasure`). A read under each key, and under
    none. (A TS probe returned two distinct ids at one anchor.)
@@ -67,31 +71,40 @@ Each one becomes a vector, or a decision for Myk.
 9. Admit A, change the roster, receive B. Batch and incremental ingest may admit different sets.
    Evaluation over the admitted set must stay order-free.
 10. A strike is forgotten. Does its target come back? (See decision F1.)
-11. A process restarts with the clock behind its last timestamp. Latest-wins must not flip.
+11. A process restarts with the clock behind its last timestamp, then writes. Splitting the three
+    times does not answer this. Question: does a later write sort earlier, unless an author
+    sequence or another causal rule is declared?
 12. A shared container's membership changes and admits an old parent delta, with no new parent
     ingest. Its arrival testimony must say when the delta entered that peer, not copy the parent's
     earlier arrival. This test confirms or refutes the shared container as a peer.
 
 ## 4. Landing order
 
-Each step lands in rhizomatic with spec text and shared vectors before code. The witnesses are
-built independently. Sol publishes a prerelease when parity holds at each witness's declared
+Steps 1 and 2 change no semantics. They are checked against the existing vectors and the green
+gates. Steps 3 to 10 each land in rhizomatic with spec text and shared vectors before code. The
+witnesses are built independently. Sol publishes a prerelease when parity holds at each witness's declared
 level. Loam then consumes it through the barrel and compares its recordings.
 
 1. **Graph.** The package graph and the mechanical dependency check. No change in behavior.
 2. **Boundaries.** Move files into packages. No change in bytes. Every witness stays green.
-   Add the missing shared vector families for L2, L3 and L4.
+   `l1-eval` already covers the semantic layers L2, L3 and L5. Shared vectors for conformance
+   levels 2 to 4 (reactor, federation, derivation) are added step by step, as each behavior
+   becomes normative. They are not a gate for the package move.
 3. **Time.** The signed time fields and explicit read time. Every id changes, so every vector is
    regenerated on purpose. Loam switches, and its recordings show exactly which decisions moved.
 4. **Suppression and governed reads.** Suppression trust, "negated under Pred", the governed
-   schema read, `applyPolicy`. Loam deletes most of its hand-written strike walks and law loops.
+   schema read with an explicit key-set or author-predicate input, `applyPolicy`, and the named
+   lens binding. Loam replaces hand-written strike walks and law loops where its recordings show
+   equal answers. How many go is measured, not promised.
 5. **Principal.** Roots, key binding, succession, delegation, locators. Loam moves user,
    connection and container keys into signed data.
 6. **Peer and admission.** The peer model, the guard pipeline, arrival testimony. Loam's
    containers become peers, and the import cycle breaks.
-7. **Publish and subscribe.** Per-subscriber lenses, declared closure, the closure audit, signed
-   messages, the set digest, the revised HTTP binding. Loam then adopts that binding.
-8. **Resolve.** The resolver value ABI and the named lens binding. Loam's resolvers move out.
+7. **Publish and subscribe.** Per-subscriber lenses, the declared closure rule, a closure audit
+   of the exact transferable set and its future additions, signed peer messages, the set digest,
+   and a revised HTTP binding. The current HTTP helper does not meet SPEC-6 §4. Loam adopts the
+   revised binding.
+8. **Resolve.** The resolver value ABI. Loam's resolvers move out.
 9. **Forgetting.** Storage and reactor `forget`, the probe, orders, requests, receipts, the
    posture. Sealed payloads last.
 10. **Derivation.** Artifact identity and the module ABI, pure first, then effectful.
@@ -107,7 +120,9 @@ Loam changes only after a prerelease exists, except for these:
 - **Census ratchet.** A CI check that fails when a coupling count rises: the large import cycle,
   `options.seed` reads, `reactor.snapshot()` calls, clock reads in core code.
 - **Defects.** Seven Loam bugs are listed in the audit (theme 10). Fix a bug now only if no step
-  above replaces its code. Otherwise its recording pins it, and the step fixes it.
+  above replaces its code. Otherwise its recording pins it, and the step fixes it. One exception:
+  the point reads that serve a tombstoned delta whose bytes survived. Loam's doors can serve
+  those today, so Loam fences them now and does not wait for step 9.
 
 ## 6. Decisions for Myk
 
@@ -118,30 +133,44 @@ Each item gives both positions where Claude and Sol differ.
 - **F1. Forgetting a strike.** Today the target comes back. It is honest, but sometimes unwanted.
   The alternative is a surviving signed suppression claim. Its cost: the claim may reveal the
   target id or relationship that the erasure meant to hide. Which do you want as the default?
-- **F2. A foreign forget order.** Keep it inert as testimony, or reject it? Either way, asking a
-  peer to act uses a separate request vocabulary. We both recommend keeping it inert.
+- **F2. A foreign forget order.** It never becomes a request silently. Asking a peer to act uses
+  a separate request vocabulary. The protocol lets a receiving peer keep the order as testimony
+  or reject it. Which is Loam's default? Claude recommends keeping it as testimony.
 - **F3. Unforget stays local.** If the peer published a receipt earlier, it publishes a
   superseding testimony. We both agree.
 - **F4. P2.** Proposed text: a delta's identity and meaning are immutable; a peer's holdings can
   change; forgetting is an explicit exclusion that the peer records. The earlier wording,
   "meaning is append-only, bytes may be forgotten", was too loose.
+- **F5. Sealed payloads and the scope of proof.** Does sealing need a new target kind, or a
+  vocabulary over the current bytes and blob references? Before the public forgetting promise is
+  made, it must say exactly what a peer can prove: about its own storage, about key destruction,
+  and about copies downstream.
+
+### Time
+
+- **T1. Signed valid-until.** Does a claim stop counting at `validUntil` automatically, with no new
+  delta? If yes, the spec defines whether each end of the interval is included, and every
+  evaluation takes its time as an explicit input.
 
 ### Identity and naming
 
-- **N1. Ids that travel.** Equal strings merge today. That is right for names meant to be shared,
-  such as a film. NOTE-12 proposes non-merge for ids that are local to one instance. How does an
-  author mark which kind an id is? Claude: by a naming convention in the id itself. Sol: this is
-  your choice, and ids must never be rewritten in flight.
+- **N1. Ids that travel.** Equal strings merge in the current algebra, and they should keep
+  merging for ids meant to be shared, such as a film. NOTE-12 proposes non-merge for ids that are
+  local to one instance. That cannot follow from the same rule without an explicit distinction.
+  Two mechanisms exist: an author mints a qualified id before signing, or a receiver reads with
+  provenance qualification. No peer may rewrite a signed entity id in flight. You choose the
+  marker, or the boundary rule. Claude leans toward a qualified id minted by the author, because
+  it keeps reads simple.
 - **N2. Key custody.** Loam's server holds every user's seed today. The principal tier will support
   delegation without saying where seeds live. Should Loam move the root key to the person?
   Claude recommends yes.
 
-### Federation
+### Sharing
 
-- **P1. Declared closure.** A publish states which strikes and manifests travel with it, and the
-  closure audit shows the exact ids. Nothing leaves by an automatic post-filter. We both recommend
-  this.
-- **P2. Time bounds.** Admission may refuse timestamps far from arrival, as a configurable guard,
+- **S1. Declared closure.** A publish contract declares a closure rule for strikes and manifests.
+  It is not a one-time list. Its audit shows the ids exposed now and makes future scope
+  inspectable. Nothing leaves by an automatic post-filter. We both recommend this.
+- **S2. Time bounds.** Admission may refuse timestamps far from arrival, as a configurable guard,
   not a universal rule. Grants may expire through valid-until. We both recommend this.
 
 ### Law
