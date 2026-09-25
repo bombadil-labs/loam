@@ -1,0 +1,102 @@
+{
+  "governed": {
+    "admin": [
+      {
+        "id": "#op→admin:admin",
+        "verb": "admin"
+      }
+    ],
+    "cycleA": [
+      {
+        "id": "#op→cycleA:write",
+        "verb": "write"
+      }
+    ],
+    "cycleB": [],
+    "operator": [],
+    "peer": [],
+    "stranger": [],
+    "subadmin": [
+      {
+        "id": "#admin→subadmin:admin",
+        "verb": "admin"
+      }
+    ],
+    "writer": [
+      {
+        "id": "#op→writer:federate",
+        "prefix": "friends",
+        "verb": "federate"
+      },
+      {
+        "id": "#op→writer:register",
+        "prefix": "w:",
+        "verb": "register"
+      },
+      {
+        "id": "#subadmin→writer:write",
+        "verb": "write"
+      }
+    ]
+  },
+  "ungoverned": {
+    "admin": [
+      {
+        "id": "#admin→admin:register",
+        "prefix": "adm:",
+        "verb": "register"
+      }
+    ],
+    "cycleA": [
+      {
+        "id": "#op→cycleA:write",
+        "verb": "write"
+      },
+      {
+        "id": "#cycleB→cycleA:admin",
+        "verb": "admin"
+      }
+    ],
+    "cycleB": [
+      {
+        "id": "#cycleA→cycleB:admin",
+        "verb": "admin"
+      }
+    ],
+    "operator": [],
+    "peer": [
+      {
+        "id": "#stranger→peer:write",
+        "verb": "write"
+      }
+    ],
+    "stranger": [
+      {
+        "id": "#stranger→stranger:admin",
+        "verb": "admin"
+      }
+    ],
+    "subadmin": [
+      {
+        "id": "#admin→subadmin:admin",
+        "verb": "admin"
+      }
+    ],
+    "writer": [
+      {
+        "id": "#op→writer:federate",
+        "prefix": "friends",
+        "verb": "federate"
+      },
+      {
+        "id": "#op→writer:register",
+        "prefix": "w:",
+        "verb": "register"
+      },
+      {
+        "id": "#subadmin→writer:write",
+        "verb": "write"
+      }
+    ]
+  }
+}

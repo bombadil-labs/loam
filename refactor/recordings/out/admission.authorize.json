@@ -1,0 +1,138 @@
+{
+  "shapes": {
+    "data by admin": {
+      "constitutionalDefect": null,
+      "trustDefect": null
+    },
+    "data by cycleA": {
+      "constitutionalDefect": null,
+      "trustDefect": null
+    },
+    "data by cycleB": {
+      "constitutionalDefect": null,
+      "trustDefect": null
+    },
+    "data by operator": {
+      "constitutionalDefect": null,
+      "trustDefect": null
+    },
+    "data by peer": {
+      "constitutionalDefect": null,
+      "trustDefect": null
+    },
+    "data by stranger": {
+      "constitutionalDefect": null,
+      "trustDefect": null
+    },
+    "data by subadmin": {
+      "constitutionalDefect": null,
+      "trustDefect": null
+    },
+    "data by writer": {
+      "constitutionalDefect": null,
+      "trustDefect": null
+    },
+    "grant with unknown verb": {
+      "constitutionalDefect": "a grant carries exactly one verb: \"write\", \"admin\", \"register\" or \"federate\"",
+      "trustDefect": null
+    },
+    "trust closed by stranger": {
+      "constitutionalDefect": null,
+      "trustDefect": null
+    },
+    "trust roster by operator": {
+      "constitutionalDefect": null,
+      "trustDefect": null
+    },
+    "trust with two modes": {
+      "constitutionalDefect": null,
+      "trustDefect": "a trust declaration carries exactly one mode: \"open\", \"roster\", or \"closed\""
+    }
+  },
+  "verdicts": {
+    "governed": {
+      "data by admin": {
+        "ok": true
+      },
+      "data by cycleA": {
+        "ok": true
+      },
+      "data by cycleB": {
+        "ok": false,
+        "refusal": "@cycleB is not permitted: publishing through this store requires write standing (a surviving grant at loam:store), and no surviving grant says so"
+      },
+      "data by operator": {
+        "ok": true
+      },
+      "data by peer": {
+        "ok": false,
+        "refusal": "@peer is not permitted: publishing through this store requires write standing (a surviving grant at loam:store), and no surviving grant says so"
+      },
+      "data by stranger": {
+        "ok": false,
+        "refusal": "@stranger is not permitted: publishing through this store requires write standing (a surviving grant at loam:store), and no surviving grant says so"
+      },
+      "data by subadmin": {
+        "ok": true
+      },
+      "data by writer": {
+        "ok": true
+      },
+      "grant with unknown verb": {
+        "ok": false,
+        "refusal": "delta 1e2036433ffe3266656791bec90c08a63deb9e6ccc6113bd72544f61eb61d7548988 is malformed law: a grant carries exactly one verb: \"write\", \"admin\", \"register\" or \"federate\""
+      },
+      "trust closed by stranger": {
+        "ok": false,
+        "refusal": "@stranger is not permitted: publishing through this store requires write standing (a surviving grant at loam:store), and no surviving grant says so"
+      },
+      "trust roster by operator": {
+        "ok": true
+      },
+      "trust with two modes": {
+        "ok": false,
+        "refusal": "delta 1e20695ec28e718c9013b23a6947183619b306859bd8f3d4370101ee30a677dff62a is malformed law: a trust declaration carries exactly one mode: \"open\", \"roster\", or \"closed\""
+      }
+    },
+    "ungoverned": {
+      "data by admin": {
+        "ok": true
+      },
+      "data by cycleA": {
+        "ok": true
+      },
+      "data by cycleB": {
+        "ok": true
+      },
+      "data by operator": {
+        "ok": true
+      },
+      "data by peer": {
+        "ok": true
+      },
+      "data by stranger": {
+        "ok": true
+      },
+      "data by subadmin": {
+        "ok": true
+      },
+      "data by writer": {
+        "ok": true
+      },
+      "grant with unknown verb": {
+        "ok": false,
+        "refusal": "delta 1e2036433ffe3266656791bec90c08a63deb9e6ccc6113bd72544f61eb61d7548988 is malformed law: a grant carries exactly one verb: \"write\", \"admin\", \"register\" or \"federate\""
+      },
+      "trust closed by stranger": {
+        "ok": true
+      },
+      "trust roster by operator": {
+        "ok": true
+      },
+      "trust with two modes": {
+        "ok": false,
+        "refusal": "delta 1e20695ec28e718c9013b23a6947183619b306859bd8f3d4370101ee30a677dff62a is malformed law: a trust declaration carries exactly one mode: \"open\", \"roster\", or \"closed\""
+      }
+    }
+  }
+}

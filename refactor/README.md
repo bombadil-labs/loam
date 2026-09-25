@@ -1,150 +1,108 @@
-# The refactor: Loam graduates into rhizomatic layer libraries
+# The refactor: rhizomatic vNext, with Loam as its testbed
 
-Read this file first. Then read `journal/2026-09-25-loam-is-the-testbed.md` for the measurements
-behind it.
+Read this file first. The measurements behind it are in `journal/2026-09-25-loam-is-the-testbed.md`.
+That entry predates the rulings of 2026-09-25 afternoon. Where the two conflict, this file wins.
 
-Loam is the testbed for rhizomatic. A model proven in Loam graduates into a `rhizomatic-*`
-library, one layer at a time. This folder holds that work until the libraries move to their own
-repos.
+Loam is the testbed for rhizomatic. Models proven in Loam move into rhizomatic, and rhizomatic
+itself gets a new version of its algorithm. Rhizomatic becomes a monorepo of tier libraries.
+
+## Who owns what
+
+- **Sol (GPT-6-Sol) owns the `rhizomatic` repo**: spec, vectors, and the TypeScript, Rust, Elixir
+  and Haskell witnesses. Sol publishes rhizomatic releases and prereleases.
+- **Claude owns the `loam` repo.** Claude never edits rhizomatic. Sol never edits Loam.
+- **Myk decides** every change to what the system promises.
+- Durable requests to Sol go as GitHub issues on `bombadil-labs/rhizomatic`. Conversation goes
+  through the T3 thread "Coordinate Loam Refactor Workflow" in the rhizomatic project.
+- Before a Loam PR that needs new rhizomatic code, ask Sol for a prerelease. Loam pins it, so CI
+  resolves it.
+- `bombadil-labs/kyber-ng` is an Elixir app. It will consume the Elixir witness later, as Loam
+  consumes the TypeScript one.
 
 ## Rulings (Myk, 2026-09-25, in chat)
 
-- **ADLC is suspended for the refactor.** Ignore its gates, the rail freeze, the gate ledger and
-  the ticket ceremony. Frozen tests may change. Leave `.adlc/` in the tree, untouched.
+Process:
+
+- **ADLC is suspended for the refactor, in Loam and in rhizomatic.** Ignore its gates, the rail
+  freeze, the gate ledger and the ticket ceremony. Frozen tests may change. Leave `.adlc/` in the
+  tree, untouched. Rhizomatic keeps its spec, shared vectors, witness parity and green gates.
 - **The CI job `rails-guard` enforces the rail freeze.** Remove it from
   `.github/workflows/ci.yml` in the first change that edits a frozen test. Cite this ruling.
-- **This repo is a monorepo for now.** New libraries live under `refactor/`. Building them here
-  does not edit rhizomatic; its repo stays as it is until a library moves there.
-- **One library per rhizomatic layer.** Each library depends only on the layers below it. The
-  ladder sets the order of work.
-- **The loop below is the method.** A rewrite is cheap now. Finding the abstraction is the work.
+- **Greenfield.** No production data exists. Backward compatibility is not required. Wire changes
+  ship no migration.
 - **Hermetic is a check, not a codemod.** Do not lift the codebase automatically.
+- **Cadence:** probably one tier at a time. Be pragmatic.
+
+Design:
+
+1. **Rhizomatic becomes a monorepo of tier libraries**, each depending only on tiers below it, with
+   one barrel package over them. The current layers (L0 to L7) are a template, not a cage.
+2. **Naming by owner.** Libraries are named `rhizomatic-*`. A `rhizomatic.*` vocabulary means a
+   rhizomatic spec and its vectors fix the meaning. `loam.*` means only Loam gives it meaning. A
+   vocabulary gets its new prefix when it graduates.
+3. **A Loam container is a peer.** A peer is a bounded delta set with an admission rule, an offered
+   lens, a governing key pair and arrival records. Nesting, the root container and tenants are
+   Loam's. A local and a remote peer differ only in the transport binding.
+4. **"Operator" is a Loam role, like sudo.** The user of the root container holds it. It may reach
+   into child containers. That must be possible, and rare, and visible to the child's owner.
+5. **Three times.** (a) when the author created the delta; (b) from when the claim holds; (c) when
+   the delta arrived in the peer it is read from. (a) and (b) are signed and inside the content
+   address. (c) is testimony by the receiving peer, outside the delta. A delta may also carry its
+   own expiry; then every read takes `now` as an explicit input.
+6. **Identity is resolvable, optionally and by grade.** A key is unique already; the gap is key to
+   "who". A root identity is self-certifying and may be unreachable. Registries are optional, and
+   hold locator claims that the identity signs. A delta without a resolvable chain is weaker
+   evidence, not an error. Principal identity is probably its own tier.
+7. **Forgetting is graded testimony.** A peer publishes which degrees of forgetting it honors. A
+   receipt is testimony: it can be proven false, never true. The public promise: this instance
+   forgets provably, it tells its peers, and it cannot make a peer forget unless the data was
+   sealed before it left.
+8. **Resolvers become a rhizomatic library.**
 
 ## What stays in force
 
 - `npm run check` is the green bar: format, lint, typecheck, build and every test. Read the counts.
-- A breaking on-wire change ships a migration step in `src/migrate/`, in the same change.
 - Every erasure test proves two things: the target is gone, and a named bystander survives. Never
   erase data outside a test's own temp dir.
 - Text for Myk uses STE style: commit messages, PR bodies and journal entries. One idea per
   sentence, and 20 words or fewer.
-- New code under `refactor/` looks like rhizomatic's TypeScript. Comments explain the code, and
-  they stay short. History goes in the commit message or the journal. No ticket ids in comments.
+- Comments explain the code, and they stay short. History goes in the commit message or the
+  journal. No ticket ids in comments.
 - Keep each change readable. A change that Myk must review carries a few hundred lines of
   decisions at most; mechanical bulk goes in its own commit.
 
-## The loop, for one model
+## The plan
 
-1. **Record.** Run Loam's current decision functions over fixed corpora: the relevant test
-   fixtures, plus generated delta sets with fixed seeds and fixed timestamps. Save the outputs as
-   canonical JSON under `refactor/recordings/`. Loam's tests mostly compare one door's answer
-   with another door's answer, so they can stay green while a decision changes. Recordings
-   cannot.
-2. **Write the TypeScript library.** Make it deterministic by design. Pass `now` in. Break every
-   tie by delta id. Allow no ambient globals: no clock, randomness, environment, files or network.
-   Its decision functions should pass `hermetic/sealed`.
-3. **Switch Loam to the library.** The tests and the recordings must both pass. Then delete
-   Loam's copy, and update the imports in every test that used it.
-4. **Write vectors** from the library, starting with the recordings. Keep them beside the
-   library, in rhizomatic's vector format.
-5. **Build a second witness** in another language, from the spec text and the vectors only. The
-   TypeScript version has no special authority (rhizomatic SPEC-0 §5). When the two disagree,
-   check the spec first. A vector is settled when two independent implementations agree.
+1. **Audit, in parallel and independently.** Sol builds a matrix of rhizomatic's promises against
+   Loam's behavior, with counterexamples, and a real dependency graph of rhizomatic's code. Claude
+   inventories every place Loam built around rhizomatic, and records Loam's decision functions.
+   Neither sees the other's results until both are done.
+2. **Reconcile** into one plan: the tier graph, the vNext semantic changes and the landing order.
+3. **Myk approves** the plan. No library code is written before that.
+4. **Sol lands the package boundaries** with no change in behavior. Then the time fields, which
+   change canonical bytes at the base. Then one tier at a time: spec, vectors, independent
+   witnesses, parity, prerelease.
+5. **Loam consumes each prerelease.** Loam's recordings are compared against it. A recording is
+   evidence and a candidate vector, not normative truth. Then Loam deletes its own copy.
 
-## The graduation checklist
+## Recordings
 
-A model graduates when all four hold:
-
-- It has stopped changing.
-- Its decisions are pure functions with explicit inputs.
-- Its current outputs are recorded.
-- Two hosts must agree on it. Policy inside one instance stays in Loam.
-
-## Milestones, in ladder order
-
-L1 to L5 already exist in `@bombadil/rhizomatic`, at full depth in TypeScript and Rust. Loam
-consumes them. The new work starts at L6.
-
-- **M0: record and measure.** Build the recording harness for M2 and M3 first:
-  `src/gateway/accounts.ts` (grants and the `authorize` chain) and `src/gateway/trust.ts`
-  (rosters). Add a census to CI that fails when a coupling count rises; `tools/` has the measuring
-  code. M0 changes no behavior.
-- **M1: upgrade rhizomatic from 0.8.0 to 0.10.0.** In 0.9.0, every object in the term, schema and
-  claims profiles became a closed record: an unknown key is an error, and so is an ambiguous
-  one-of node. Anything Loam wrote with a stray key now fails to parse, and that includes stored
-  deltas. For each failure, fix the writer or add a migration. 0.10.0 only adds vectors. The
-  unreleased byte-honest strings change moves no canonical bytes. Run M0's recordings before and
-  after.
-- **M2: L6 trust.** Grants, membership, rosters and trust policy move to
-  `rhizomatic-federation/`. Loam's readers here are already pure: `grantClaims`, `holdsGrant`,
-  `grantsHeldBy`, `readTrustPolicy` and `trustRosterPred`.
-- **M3: L6 admission.** The validation chain at the append door: `authorize` and the ten defect
-  checks it calls. `interpretBindingPolicy` already has an equivalence test
-  (`test/gateway/binding-equivalence.test.ts`). Copy that pattern.
-- **M4: L6 subscriptions and scopes.** Channels, against rhizomatic SPEC-6 §4 and NOTE-11. Test
-  the idea that a container is a local peer. Rhizomatic's `Peer` is a reactor, a key pair, an
-  offered lens and an admission rule.
-- **M5: L6 law across peers.** Registration, versioning, adoption and manifests, against SPEC-6
-  §6 and the open supersession question in SPEC-3.
-- **M6: L6 forgetting.** Tombstones, slates, graveyards and receipts, against SPEC-6 §7. Purging
-  bytes at rest stays in Loam, as instance policy.
-- **M7: L7 derivation.** Loam becomes the working host that rhizomatic's
-  `spec/07-derivation-abi.PROPOSAL.md` waits for. The library is `rhizomatic-derivation/`.
-
-Inside L6, the order follows SPEC-6's sections: trust, admission, protocol, federating semantics,
-lifecycle. Forgetting comes last because it depends on the others. The doors refuse tombstoned
-ids, and tombstones cross the seeding edge into every container.
-
-## Working with a second model
-
-Use `t3-threads` to spawn a thread on a second model family. It acts as your conscience and your
-reviewer. Give it this file and the journal entry. Do not give it your reasoning; an independent
-reader is the point. It helps most in four places:
-
-- It reads each spec section cold and asks: could I implement this from the text alone?
-- It writes the second witness in step 5, clean-room.
-- It reviews decisions that change what Loam promises, such as forgetting and admission.
-- It reviews each diff for correctness before you push.
-
-Three rules come from this repo's own history:
-
-- **One owner per set of files.** Two models on one ticket store once drifted into two field names
-  (journal, 2026-09-11).
-- **A finding is a bug report.** Verify it, then fix it or refute it with evidence.
-- **When fixes keep causing new defects, stop.** Fix the model at that seam, not the code. On one
-  PR, 11 of 12 review rounds found something, mostly in the previous fix (journal, 2026-09-04).
+Loam's tests mostly compare one door's answer with another door's answer, so they can stay green
+while a decision changes on both sides. Recordings cannot. `recordings/` holds canonical JSON of
+Loam's decision functions over fixed corpora: fixed seeds, fixed timestamps, fixed keys. Where the
+vNext algorithm changes a decision on purpose, the recording shows exactly what moved.
 
 ## Environment
 
-Get a fully green baseline before M0. A red baseline teaches you to ignore red. On 2026-09-24,
-3,364 tests passed, and 15 files failed for environment reasons only:
+Get a fully green baseline first. A red baseline teaches you to ignore red.
 
-- Node 24 is required. Node 22 breaks the renderer-globals golden in
-  `test/gateway/render-ocap.test.ts`. The two memory-bound render tests failed too, probably from
-  Node 22 or the container's memory limit.
-- The six browser test files need Chrome. Set `LOAM_CHROME` to a Chrome or Chromium binary.
-- Run `npm run build` before the tests. Five files need `dist/`.
-- Run as a non-root user. Two permission tests in `test/cli/user-roles.test.ts` fail under root.
-
-Verified on 2026-09-25: after `npm run build`, and with `LOAM_CHROME` set to Playwright's
-Chromium, 3,414 tests passed. Only four files still failed: `render-ocap`, the two memory-bound
-render tests (`quarantine-envelope-memory`, `render-sandbox`) and `user-roles`. They need Node 24
-and a non-root user.
-
-## Open decisions for Myk
-
-1. **Vocabulary names.** Every Loam vocabulary is named `loam.*` or `loam:*`. A graduated library
-   keeps those bytes by default. A rename to `rhizomatic.*` changes the wire format. It needs a
-   migration, which can re-sign only what the operator signed, or an alias mapping (rhizomatic's
-   SPEC-9 proposal: "matching, never renaming").
-2. **Resolvers.** A read-side ABI in L5, or fold them into L7 derived authors?
-3. **Forgetting tiers.** How do these compose: "you cannot un-send" (NOTE-11), tombstones honored
-   by conformant peers (Loam), and key destruction (SPEC-6 §7)?
-4. **Cadence.** Must each milestone graduate one model before the next expansion starts?
+- Node 24 is required.
+- The browser test files need Chrome. Set `LOAM_CHROME` to a Chrome or Chromium binary.
+- Run `npm run build` before the tests. Some files need `dist/`.
+- Run as a non-root user.
 
 ## Where things are
 
-- `tools/`: the measuring code behind the journal's numbers. See `tools/README.md`.
-- `rhizomatic-federation/`: the L6 library. Empty until M2.
-- `rhizomatic-derivation/`: the L7 library. Empty until M7.
-- `recordings/`: created in M0.
+- `tools/`: the census scripts behind the journal's numbers. See `tools/README.md`.
+- `audit/`: Loam's side of the audit.
+- `recordings/`: the recording harness and its outputs.

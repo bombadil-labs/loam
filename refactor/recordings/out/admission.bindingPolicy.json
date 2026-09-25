@@ -1,0 +1,452 @@
+{
+  "operator older than stranger": {
+    "byAuthorRank/governed": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d1"
+        ]
+      ]
+    },
+    "byAuthorRank/ungoverned": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d2"
+        ]
+      ]
+    },
+    "byTimestamp/governed": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d2"
+        ]
+      ]
+    },
+    "byTimestamp/ungoverned": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d2"
+        ]
+      ]
+    },
+    "conflicts/governed": {
+      "contested": [
+        [
+          "Film",
+          [
+            {
+              "author": "@operator",
+              "deltaId": "d1",
+              "entity": "hyperschema:Film",
+              "lens": "Film",
+              "timestamp": 1
+            },
+            {
+              "author": "@stranger",
+              "deltaId": "d2",
+              "entity": "hyperschema:Movie",
+              "lens": "Film",
+              "timestamp": 5
+            }
+          ]
+        ]
+      ],
+      "winners": []
+    },
+    "conflicts/ungoverned": {
+      "contested": [
+        [
+          "Film",
+          [
+            {
+              "author": "@operator",
+              "deltaId": "d1",
+              "entity": "hyperschema:Film",
+              "lens": "Film",
+              "timestamp": 1
+            },
+            {
+              "author": "@stranger",
+              "deltaId": "d2",
+              "entity": "hyperschema:Movie",
+              "lens": "Film",
+              "timestamp": 5
+            }
+          ]
+        ]
+      ],
+      "winners": []
+    }
+  },
+  "single binding": {
+    "byAuthorRank/governed": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d1"
+        ]
+      ]
+    },
+    "byAuthorRank/ungoverned": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d1"
+        ]
+      ]
+    },
+    "byTimestamp/governed": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d1"
+        ]
+      ]
+    },
+    "byTimestamp/ungoverned": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d1"
+        ]
+      ]
+    },
+    "conflicts/governed": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d1"
+        ]
+      ]
+    },
+    "conflicts/ungoverned": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d1"
+        ]
+      ]
+    }
+  },
+  "space inside an entity name": {
+    "byAuthorRank/governed": {
+      "contested": [],
+      "winners": [
+        [
+          "B C",
+          "d1"
+        ],
+        [
+          "C",
+          "d2"
+        ]
+      ]
+    },
+    "byAuthorRank/ungoverned": {
+      "contested": [],
+      "winners": [
+        [
+          "B C",
+          "d1"
+        ],
+        [
+          "C",
+          "d2"
+        ]
+      ]
+    },
+    "byTimestamp/governed": {
+      "contested": [],
+      "winners": [
+        [
+          "B C",
+          "d1"
+        ],
+        [
+          "C",
+          "d2"
+        ]
+      ]
+    },
+    "byTimestamp/ungoverned": {
+      "contested": [],
+      "winners": [
+        [
+          "B C",
+          "d1"
+        ],
+        [
+          "C",
+          "d2"
+        ]
+      ]
+    },
+    "conflicts/governed": {
+      "contested": [],
+      "winners": [
+        [
+          "B C",
+          "d1"
+        ],
+        [
+          "C",
+          "d2"
+        ]
+      ]
+    },
+    "conflicts/ungoverned": {
+      "contested": [],
+      "winners": [
+        [
+          "B C",
+          "d1"
+        ],
+        [
+          "C",
+          "d2"
+        ]
+      ]
+    }
+  },
+  "timestamp tie broken by id": {
+    "byAuthorRank/governed": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d9"
+        ]
+      ]
+    },
+    "byAuthorRank/ungoverned": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d9"
+        ]
+      ]
+    },
+    "byTimestamp/governed": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d9"
+        ]
+      ]
+    },
+    "byTimestamp/ungoverned": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d9"
+        ]
+      ]
+    },
+    "conflicts/governed": {
+      "contested": [
+        [
+          "Film",
+          [
+            {
+              "author": "@writer",
+              "deltaId": "d1",
+              "entity": "hyperschema:B",
+              "lens": "Film",
+              "timestamp": 3
+            },
+            {
+              "author": "@writer",
+              "deltaId": "d9",
+              "entity": "hyperschema:A",
+              "lens": "Film",
+              "timestamp": 3
+            }
+          ]
+        ]
+      ],
+      "winners": []
+    },
+    "conflicts/ungoverned": {
+      "contested": [
+        [
+          "Film",
+          [
+            {
+              "author": "@writer",
+              "deltaId": "d1",
+              "entity": "hyperschema:B",
+              "lens": "Film",
+              "timestamp": 3
+            },
+            {
+              "author": "@writer",
+              "deltaId": "d9",
+              "entity": "hyperschema:A",
+              "lens": "Film",
+              "timestamp": 3
+            }
+          ]
+        ]
+      ],
+      "winners": []
+    }
+  },
+  "two entities contest one lens": {
+    "byAuthorRank/governed": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d2"
+        ]
+      ]
+    },
+    "byAuthorRank/ungoverned": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d2"
+        ]
+      ]
+    },
+    "byTimestamp/governed": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d2"
+        ]
+      ]
+    },
+    "byTimestamp/ungoverned": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d2"
+        ]
+      ]
+    },
+    "conflicts/governed": {
+      "contested": [
+        [
+          "Film",
+          [
+            {
+              "author": "@writer",
+              "deltaId": "d1",
+              "entity": "hyperschema:Film",
+              "lens": "Film",
+              "timestamp": 1
+            },
+            {
+              "author": "@operator",
+              "deltaId": "d2",
+              "entity": "hyperschema:Movie",
+              "lens": "Film",
+              "timestamp": 2
+            }
+          ]
+        ]
+      ],
+      "winners": []
+    },
+    "conflicts/ungoverned": {
+      "contested": [
+        [
+          "Film",
+          [
+            {
+              "author": "@writer",
+              "deltaId": "d1",
+              "entity": "hyperschema:Film",
+              "lens": "Film",
+              "timestamp": 1
+            },
+            {
+              "author": "@operator",
+              "deltaId": "d2",
+              "entity": "hyperschema:Movie",
+              "lens": "Film",
+              "timestamp": 2
+            }
+          ]
+        ]
+      ],
+      "winners": []
+    }
+  },
+  "two versions of one entity": {
+    "byAuthorRank/governed": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d2"
+        ]
+      ]
+    },
+    "byAuthorRank/ungoverned": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d2"
+        ]
+      ]
+    },
+    "byTimestamp/governed": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d2"
+        ]
+      ]
+    },
+    "byTimestamp/ungoverned": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d2"
+        ]
+      ]
+    },
+    "conflicts/governed": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d2"
+        ]
+      ]
+    },
+    "conflicts/ungoverned": {
+      "contested": [],
+      "winners": [
+        [
+          "Film",
+          "d2"
+        ]
+      ]
+    }
+  }
+}

@@ -11,3 +11,6 @@ demos/tutorial/packets/
 # Vendored bundler output (T97): real esbuild-over-React fixtures the reference-scan rail reads as
 # text. A formatter pass would rewrite the very dialect being tested.
 test/gateway/fixtures/*.bundle.mjs
+
+# Recordings are canonical bytes written by the harness, never reformatted.
+refactor/recordings/out/

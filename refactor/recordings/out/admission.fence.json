@@ -1,0 +1,32 @@
+[
+  {
+    "admits": false,
+    "name": "anything",
+    "prefix": ""
+  },
+  {
+    "admits": true,
+    "name": "w:film",
+    "prefix": "w:"
+  },
+  {
+    "admits": false,
+    "name": "W:film",
+    "prefix": "w:"
+  },
+  {
+    "admits": false,
+    "name": "w",
+    "prefix": "w:"
+  },
+  {
+    "admits": false,
+    "name": "ｗ:film",
+    "prefix": "w:"
+  },
+  {
+    "admits": true,
+    "name": "friends-archive",
+    "prefix": "friends"
+  }
+]
