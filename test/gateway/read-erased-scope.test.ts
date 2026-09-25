@@ -10,6 +10,7 @@ import { containerClaims } from "../../src/gateway/container.js";
 import { eraseClaims } from "../../src/gateway/erase.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
+import { listingPageImpl } from "../../src/gateway/listing.js";
 import { boundGroundFor } from "../../src/gateway/reads.js";
 import { roleClaims, rolesOf, userClaims } from "../../src/server/users.js";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -29,6 +30,53 @@ const boot = (): Promise<Gateway> =>
       ],
     }),
   );
+
+/** A store with one shared container `home:ada`, and `n` bound connection pools inside it. */
+async function homeWithPools(n: number): Promise<{
+  gw: Gateway;
+  pools: { gw: Gateway; binding: { container: string; inbox: string } }[];
+}> {
+  const gw = await boot();
+  await gw.append([signClaims(grantClaims(STORE_ENTITY, GARDENER, "write", OP, 500), OP_SEED)]);
+  await gw.append([
+    signClaims(
+      containerClaims(
+        {
+          container: "home:ada",
+          trust: "curated",
+          posture: "shared",
+          membership: {
+            op: "select",
+            pred: { match: { field: "author", cmp: "eq", const: GARDENER } },
+            in: "input",
+          },
+        },
+        OP,
+        600,
+      ),
+      OP_SEED,
+    ),
+  ]);
+  const pools = [];
+  for (let i = 0; i < n; i++) {
+    const inbox = (
+      await gw.bindConnection({
+        container: "home:ada",
+        connectionKey: authorForSeed(
+          String(i + 1)
+            .padStart(2, "d")
+            .repeat(32),
+        ),
+        ownerSeed: GARDENER_SEED,
+      })
+    ).entity!;
+    pools.push({
+      gw: gw.connectionInboxes.get(inbox)!.gateway!,
+      binding: { container: "home:ada", inbox },
+    });
+  }
+  return { gw, pools };
+}
 
 describe("serving reads outside the gathers never show an erased delta", () => {
   it("an erased role record stops counting at once; the bystander role still counts", () => {
@@ -87,6 +135,41 @@ describe("serving reads outside the gathers never show an erased delta", () => {
     const after = boundGroundFor(gw, binding, Date.now());
     expect(after.has(claim.id)).toBe(false);
     expect(after.has(bystander.id)).toBe(true);
+    await gw.close();
+  });
+
+  it("a bound scope drops a claim only a pool holds when the PARENT erased it", async () => {
+    const { gw, pools } = await homeWithPools(1);
+    const pool = pools[0]!;
+    const claim = observed(FERN, "height", 30, 1000, GARDENER_SEED);
+    const bystander = observed(FERN, "tag", "shade", 1100, GARDENER_SEED);
+    await pool.gw.append([claim, bystander]);
+    await gw.append([signClaims(eraseClaims(claim.id, GARDENER, OP, 2000), OP_SEED)]);
+    expect(gw.reactor.get(claim.id)).toBeUndefined(); // the parent never held the claim
+    expect(pool.gw.reactor.get(claim.id)).toBeDefined(); // the pool still does
+
+    const ground = boundGroundFor(gw, pool.binding, Date.now());
+    expect(ground.has(claim.id)).toBe(false);
+    expect(ground.has(bystander.id)).toBe(true);
+
+    // The bound listing enumerates the same composed scope.
+    const ROSE = "plant:rose";
+    const rose = observed(ROSE, "height", 12, 1200, GARDENER_SEED);
+    await pool.gw.append([rose]);
+    await gw.append([signClaims(eraseClaims(rose.id, GARDENER, OP, 2100), OP_SEED)]);
+    const page = await listingPageImpl(gw, "Plant", {}, pool.binding);
+    expect(page).not.toContain(ROSE);
+    expect(page).toContain(FERN);
+    await gw.close();
+  });
+
+  it("a pool's erasure naming the wrong author does not hide a sibling pool's claim (a control: passes on the base; fails without the author check)", async () => {
+    const { gw, pools } = await homeWithPools(2);
+    const claim = observed(FERN, "height", 30, 1000, GARDENER_SEED);
+    // Lawful at the first pool's door, because the target is absent there.
+    await pools[0]!.gw.append([signClaims(eraseClaims(claim.id, OP, OP, 2000), OP_SEED)]);
+    await pools[1]!.gw.append([claim]);
+    expect(boundGroundFor(gw, pools[1]!.binding, Date.now()).has(claim.id)).toBe(true);
     await gw.close();
   });
 

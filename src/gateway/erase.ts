@@ -253,12 +253,27 @@ export function erasedInDeltas(
   for (const d of deltas) {
     if (!isTombstone(d.claims) || inLocalContext(d, LOCAL_CONTROL)) continue;
     if (d.claims.author !== operator) continue;
-    const { targetId, count } = tombstoneParts(d.claims);
-    if (targetId === undefined || count.erases !== 1) continue;
+    const { targetId, spokenBy, count } = tombstoneParts(d.claims);
+    if (targetId === undefined || count.erases !== 1 || count.spokenBy !== 1) continue;
     const target = byId.get(targetId);
     if (target === undefined || isTombstone(target.claims)) continue; // an erasure is never erased
+    if (target.claims.author !== spokenBy) continue; // the order must name its target's real author
     hidden.add(targetId);
   }
+  return withHeldDownTargets(hidden, (id) => byId.get(id));
+}
+
+// What a reading over a COMPOSED scope (a container over its pools) must not show: every id this
+// store refuses that appears anywhere in the scope, even when this store does not hold those bytes
+// itself; the scope's own lawful erasures; and the targets their held negations hold down.
+export function erasedInScope(
+  reactor: Reactor,
+  operator: string | undefined,
+  scope: readonly Delta[],
+): Set<string> {
+  const byId = new Map(scope.map((d) => [d.id, d]));
+  const hidden = erasedInDeltas(scope, operator);
+  for (const id of refusedIds(reactor, operator)) if (byId.has(id)) hidden.add(id);
   return withHeldDownTargets(hidden, (id) => byId.get(id));
 }
 

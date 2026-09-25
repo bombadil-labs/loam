@@ -33,7 +33,7 @@ import {
   readContainerTable,
   type ContainerTable,
 } from "./container.js";
-import { erasedFromReading, erasedInDeltas } from "./erase.js";
+import { erasedFromReading, erasedInScope } from "./erase.js";
 import type { ConnectionBinding, Gateway } from "./gateway.js";
 import {} from "./leeway.js";
 import { groupPrograms } from "./lifecycle.js";
@@ -557,8 +557,9 @@ export async function listingPageImpl(
   const inContexts = new Set(contexts);
   const table = readContainerTable(gw.reactor, gw.operatorAuthor);
   const after = opts.after;
-  // The maintained index cannot drop an entity whose only evidence is erased. So while any erased
-  // delta is still held (until its purge completes), the page is read from the scope instead.
+  // The maintained index cannot drop an entity whose only evidence is erased. A plain container
+  // reads only this store's delta set, so this store's held erasures decide: while any is held
+  // (until its purge completes), the page is read from the filtered scope instead.
   if (
     !algebraIsPlain(table, container) ||
     erasedFromReading(gw.reactor, gw.operatorAuthor).size > 0
@@ -577,10 +578,9 @@ export async function listingPageImpl(
   return idx.entities.slice(from, from + limit);
 }
 
-// A scope with its erased deltas removed: this store's, and any a pool in the scope holds.
+// A composed scope with its erased deltas removed (see `erasedInScope`).
 function withoutErasedScope(gw: Gateway, scope: readonly Delta[]): Delta[] {
-  const hidden = erasedFromReading(gw.reactor, gw.operatorAuthor);
-  for (const id of erasedInDeltas(scope, gw.operatorAuthor)) hidden.add(id);
+  const hidden = erasedInScope(gw.reactor, gw.operatorAuthor, scope);
   return hidden.size === 0 ? [...scope] : scope.filter((d) => !hidden.has(d.id));
 }
 
