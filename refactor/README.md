@@ -126,6 +126,11 @@ Get a fully green baseline before M0. A red baseline teaches you to ignore red. 
 - Run `npm run build` before the tests. Five files need `dist/`.
 - Run as a non-root user. Two permission tests in `test/cli/user-roles.test.ts` fail under root.
 
+Verified on 2026-09-25: after `npm run build`, and with `LOAM_CHROME` set to Playwright's
+Chromium, 3,414 tests passed. Only four files still failed: `render-ocap`, the two memory-bound
+render tests (`quarantine-envelope-memory`, `render-sandbox`) and `user-roles`. They need Node 24
+and a non-root user.
+
 ## Open decisions for Myk
 
 1. **Vocabulary names.** Every Loam vocabulary is named `loam.*` or `loam:*`. A graduated library
