@@ -231,16 +231,50 @@ export function refusedIds(reactor: Reactor, operator: string | undefined): Set<
 // that is itself refused. Showing that target while hiding its negation would show a retracted claim
 // as live. A negation whose bytes are purged is gone, and its target revives: that is what erasing
 // a negation means.
+//
+// Only ids whose bytes are still HELD are returned: a purged id cannot be read anyway. So once every
+// purge completes, this set is empty again, and reads use warm materializations again.
 export function erasedFromReading(reactor: Reactor, operator: string | undefined): Set<string> {
-  const hidden = refusedIds(reactor, operator);
+  const held = [...refusedIds(reactor, operator)].filter((id) => reactor.get(id) !== undefined);
+  return withHeldDownTargets(new Set(held), (id) => reactor.get(id));
+}
+
+// The same answer for a delta list assembled across several peers (a container scope over its
+// pools): the ids the list's own lawful erasures hide, and the targets their held negations hold
+// down. A pool can hold an erasure its parent has not seen yet. Local-control erasures bind only
+// against their own store's records, so they are left to `erasedFromReading` on that store.
+export function erasedInDeltas(
+  deltas: readonly Delta[],
+  operator: string | undefined,
+): Set<string> {
+  const hidden = new Set<string>();
+  if (operator === undefined) return hidden;
+  const byId = new Map(deltas.map((d) => [d.id, d]));
+  for (const d of deltas) {
+    if (!isTombstone(d.claims) || inLocalContext(d, LOCAL_CONTROL)) continue;
+    if (d.claims.author !== operator) continue;
+    const { targetId, count } = tombstoneParts(d.claims);
+    if (targetId === undefined || count.erases !== 1) continue;
+    const target = byId.get(targetId);
+    if (target === undefined || isTombstone(target.claims)) continue; // an erasure is never erased
+    hidden.add(targetId);
+  }
+  return withHeldDownTargets(hidden, (id) => byId.get(id));
+}
+
+// Adds, transitively, the target of every hidden negation that `get` can still find.
+function withHeldDownTargets(
+  hidden: Set<string>,
+  get: (id: string) => Delta | undefined,
+): Set<string> {
   const pending = [...hidden];
   while (pending.length > 0) {
-    const negation = reactor.get(pending.pop()!);
+    const negation = get(pending.pop()!);
     if (negation === undefined) continue;
     for (const p of negation.claims.pointers) {
       if (p.role !== "negates" || p.target.kind !== "delta") continue;
       const target = p.target.deltaRef.delta;
-      if (hidden.has(target) || reactor.get(target) === undefined) continue;
+      if (hidden.has(target) || get(target) === undefined) continue;
       hidden.add(target);
       pending.push(target);
     }

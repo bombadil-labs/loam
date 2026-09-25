@@ -33,6 +33,7 @@ import {
   readContainerTable,
   type ContainerTable,
 } from "./container.js";
+import { erasedFromReading, erasedInDeltas } from "./erase.js";
 import type { ConnectionBinding, Gateway } from "./gateway.js";
 import {} from "./leeway.js";
 import { groupPrograms } from "./lifecycle.js";
@@ -529,7 +530,10 @@ export async function listingPageImpl(
   if (binding !== undefined) {
     const inContexts = new Set(listingContexts(gw, program, binding));
     const after = opts.after;
-    return projectListingEntities(gw.connectionScope({ bound: binding.container }), inContexts)
+    return projectListingEntities(
+      withoutErasedScope(gw, gw.connectionScope({ bound: binding.container })),
+      inContexts,
+    )
       .filter((id) => after === undefined || id > after)
       .slice(0, limit);
   }
@@ -553,9 +557,17 @@ export async function listingPageImpl(
   const inContexts = new Set(contexts);
   const table = readContainerTable(gw.reactor, gw.operatorAuthor);
   const after = opts.after;
-  if (!algebraIsPlain(table, container)) {
+  // The maintained index cannot drop an entity whose only evidence is erased. So while any erased
+  // delta is still held (until its purge completes), the page is read from the scope instead.
+  if (
+    !algebraIsPlain(table, container) ||
+    erasedFromReading(gw.reactor, gw.operatorAuthor).size > 0
+  ) {
     // The scope read owns exclusion and inbox composition; it is O(ground), and correct.
-    return projectListingEntities(gw.containerScope({ containers: [container] }), inContexts)
+    return projectListingEntities(
+      withoutErasedScope(gw, gw.containerScope({ containers: [container] })),
+      inContexts,
+    )
       .filter((id) => after === undefined || id > after)
       .slice(0, limit);
   }
@@ -563,6 +575,13 @@ export async function listingPageImpl(
   // `after` is EXCLUSIVE: the page starts at the first entity strictly greater than it.
   const from = after === undefined ? 0 : seek(idx.entities, after, true);
   return idx.entities.slice(from, from + limit);
+}
+
+// A scope with its erased deltas removed: this store's, and any a pool in the scope holds.
+function withoutErasedScope(gw: Gateway, scope: readonly Delta[]): Delta[] {
+  const hidden = erasedFromReading(gw.reactor, gw.operatorAuthor);
+  for (const id of erasedInDeltas(scope, gw.operatorAuthor)) hidden.add(id);
+  return hidden.size === 0 ? [...scope] : scope.filter((d) => !hidden.has(d.id));
 }
 
 // The listing itself (the body of `Gateway.list`): one page of entity ids from the maintained

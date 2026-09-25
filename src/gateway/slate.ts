@@ -1094,9 +1094,15 @@ const groundWithout = (ground: DeltaSet, closed: ReadonlySet<string>): DeltaSet 
  * materialization, so the sink never fires and the narrowing never takes effect. Asked cheaply —
  * a batch with no slate record in it pays nothing.
  */
-export function landsReadClosure(gw: Gateway, batch: readonly Delta[], now: number): boolean {
-  if (!batch.some((d) => isSlateRecord(d.claims) || isTombstone(d.claims))) return false;
-  return readClosedIds(gw, now).size > 0;
+export function landsReadClosure(gw: Gateway, fresh: readonly Delta[], now: number): boolean {
+  // `fresh` is only what this batch NEWLY ingested: a duplicate changes nothing, and must not end
+  // anyone's stream. An erasure narrows a reading only when its target's bytes are held here.
+  if (fresh.some((d) => isSlateRecord(d.claims))) return readClosedIds(gw, now).size > 0;
+  return fresh.some((d) => {
+    if (!isTombstone(d.claims)) return false;
+    const target = tombstoneTarget(d.claims);
+    return target !== undefined && gw.reactor.get(target) !== undefined;
+  });
 }
 
 // --- the cut -------------------------------------------------------------------------------------

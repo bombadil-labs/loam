@@ -26,7 +26,8 @@ import {
   type Schema,
   type View,
 } from "@bombadil/rhizomatic";
-import { evalTerm } from "@bombadil/rhizomatic";
+import { DeltaSet, evalTerm } from "@bombadil/rhizomatic";
+import { erasedFromReading } from "../gateway/erase.js";
 import { entityGatherBody } from "../gateway/gather.js";
 
 const CTX_USER = "loam.user";
@@ -195,7 +196,12 @@ export function resolveUserView(
 ): View | undefined {
   if (operator === undefined) return undefined; // no operator, no constitution, no users
   if (userNameDefect(name) !== undefined) return undefined;
-  const result = evalTerm(userHyperSchema(operator).body, reactor.snapshot(), userEntity(name));
+  // An erased user or role record stops counting at once, even before its bytes are purged.
+  const hidden = erasedFromReading(reactor, operator);
+  const snapshot = reactor.snapshot();
+  const ground =
+    hidden.size === 0 ? snapshot : DeltaSet.from([...snapshot].filter((d) => !hidden.has(d.id)));
+  const result = evalTerm(userHyperSchema(operator).body, ground, userEntity(name));
   if (result.sort !== "hview") return undefined;
   const view = resolveView(USER_SCHEMA, result.hview);
   if (view === null || typeof view !== "object" || Array.isArray(view)) return undefined;
