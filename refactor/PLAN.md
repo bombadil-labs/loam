@@ -68,6 +68,9 @@ Each one becomes a vector, or a decision for Myk.
    Evaluation over the admitted set must stay order-free.
 10. A strike is forgotten. Does its target come back? (See decision F1.)
 11. A process restarts with the clock behind its last timestamp. Latest-wins must not flip.
+12. A shared container's membership changes and admits an old parent delta, with no new parent
+    ingest. Its arrival testimony must say when the delta entered that peer, not copy the parent's
+    earlier arrival. This test confirms or refutes the shared container as a peer.
 
 ## 4. Landing order
 
@@ -152,7 +155,7 @@ Each item gives both positions where Claude and Sol differ.
 ### For your information, no decision needed
 
 - A shared-posture container stays a peer. Its set is a view over the host's log, with its own
-  key, admission, lens and arrival records. If a counterexample breaks that model, we bring it to
+  key, admission, lens and arrival records. Counterexample 12 tests this model. If it breaks the model, we bring it to
   you.
 - Every container gets its own key. That follows from "a container is a peer".
 - Loam's unused tenancy code will be removed as a Loam-local cleanup.
