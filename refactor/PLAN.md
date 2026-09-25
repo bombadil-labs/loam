@@ -1,6 +1,6 @@
 # The vNext plan (joint draft: Claude and Sol)
 
-Status: a draft for Myk. No library code exists yet. Claude owns the Loam statements, and Sol owns
+Status: approved by Myk on 2026-09-25. His answers to the decisions are in §6. Claude owns the Loam statements, and Sol owns
 the rhizomatic statements. Each of us audited on our own first, then compared the audits:
 
 - Loam's audit: [audit/README.md](audit/README.md), with six area reports beside it.
@@ -126,7 +126,37 @@ Loam changes only after a prerelease exists, except for these:
 
 ## 6. Decisions for Myk
 
-Each item gives both positions where Claude and Sol differ.
+### Myk's answers (2026-09-25, in chat)
+
+Words: **negation** is a new delta that retracts another delta; its bytes stay. **Erasure**
+removes a delta's bytes from one peer and leaves a signed tombstone that refuses the id's return.
+The draft said "forgetting" for erasure. Use "erasure".
+
+- **F1.** Erasing a strike brings its target back. Erasure rewrites state as if the erased delta
+  never existed. To end a strike's effect as of a time, negate the strike instead.
+- **F2.** A foreign erasure order is kept as testimony, at a minimum.
+- **F3.** A negation is undone only by another delta (negate the negation) or by erasure. An
+  erasure's bytes cannot come back by any act. Open: may the tombstone itself be negated, so the id
+  may re-enter from a peer that still holds it? Claude reads Myk's rule ("just another delta") as
+  yes.
+- **F4.** Waiting on the clarified wording (see chat).
+- **F5.** Waiting on the explanation of encrypted payloads (see chat).
+- **T1.** Yes. A delta may negate itself at a signed time. No new delta is needed. A surface that
+  shows it, such as a renderer, must update itself at that time. Proposed interval: valid from is
+  included, valid until is excluded.
+- **N1.** Ids carry no sharing marker. Equal strings merge. What travels is a property of each
+  peer's sharing model (its lenses and admission), never of the delta. This also keeps deltas free
+  to move between a store's own containers. The law-anchor problem is solved by governed reads with
+  an explicit key set.
+- **N2.** Probably yes. Define what it means during step 5.
+- **S1, S2.** Yes.
+- **L1.** Yes: a lens binding is general, and belongs in a rhizomatic library.
+- **L2.** Yes: adoption is a local delta that points to the foreign delta. Negating the adoption
+  keeps the foreign delta and its provenance.
+- **L3.** A user may negate law, including an adoption, in any peer where the user can write. The
+  negation changes only that peer's reading. It does not change the rule in the store.
+
+### The questions as asked
 
 ### Forgetting
 
