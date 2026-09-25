@@ -22,7 +22,7 @@
 //     serves (pinned byte-for-byte in offer.test.ts), so the door adds no third behavior to pin.
 //   * An ERASED (§11-purged) source. A rendering whose source's bytes are gone is an
 //     erasure-completeness question, and `dataStruck` answers only for deltas the store still holds.
-//     The rail that would close it — a tombstone on a source must reach the renderings that cite
+//     The rail that would close it — an erasure on a source must reach the renderings that cite
 //     it — belongs with erasure, and NO TICKET YET COVERS IT: T45 is the nearest neighbour (in-memory
 //     retention of erased bytes) and says nothing about translated copies.
 //   * The `drop`-masked reader's divergence from the pass. Suppression is materialized here under ONE

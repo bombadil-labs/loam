@@ -16,7 +16,7 @@
 // word for a different mechanism — unreadable bytes set aside for repair, not a federation sandbox).
 //
 // SAME OPERATOR, by design (§24.1 / §24.8). The pool shares the primary's operator seed: it is the
-// operator's OWN staging store, so the operator's ERASURE stays authoritative here — a tombstone that fans
+// operator's OWN staging store, so the operator's ERASURE stays authoritative here — an erasure that fans
 // in passes `eraseDefect` and the forgotten byte is purged from the pool too, so §11 reaches through the
 // glass unconditionally and the pool can never become an erasure-evasion channel. This is the ONE sanctioned
 // shared-operator-seed case; §8's "distinct operator seeds across instances" rule guards mutually-distrustful
@@ -30,7 +30,7 @@ import type { FederationReport, Gateway } from "./gateway.js";
 
 // A live quarantine pool (returned by `Gateway.openQuarantine`). `gateway` is the pool's own gateway — its
 // own backend, the operator's seed, seeded one-way from the primary. `reseed` re-pulses the one-way inbound
-// edge (the primary's ground is live: a fresh pull sees new facts and, crucially, new tombstones). `drop`
+// edge (the primary's ground is live: a fresh pull sees new facts and, crucially, new erasures). `drop`
 // DISCARDS: purges everything the pool can name (readable surface + session memory + the §25 pen),
 // verifies at the bytes, and only then detaches and closes — refusing, still attached, when it cannot
 // prove the discard. A straggler bearing an id no read ever named is heal's domain, not drop's.
@@ -42,7 +42,7 @@ export interface QuarantinePool {
   // it, then reattach by opening a pool over the surviving store. Until then the bytes are outside
   // the fan-out: that is the point, and the caller's named responsibility. Reattachment restores
   // reach going FORWARD and settles the debt of the window — openQuarantine sweeps any id the
-  // primary tombstoned while the store was away, before the pool's reader exists, refusing to
+  // primary erased while the store was away, before the pool's reader exists, refusing to
   // attach a store it cannot prove clean. (An anonymous pool detaches recordless; the at-rest
   // record is a NAMED container's, SPEC §27.)
   detach(): Promise<void>;

@@ -3,22 +3,22 @@
 //
 // Criteria 12 and 13. The sentence under test:
 //
-//   > Every member of the frozen `version` has a surviving tombstone, and that tombstone either cites
-//   > this slate or is named for that member in the graveyard's `prior-tombstone` list.
+//   > Every member of the frozen `version` has a surviving erasure, and that erasure either cites
+//   > this slate or is named for that member in the graveyard's `prior-erasure` list.
 //
 // It is checkable at any later date FROM DURABLE GROUND ALONE — no observation of the tiers, no memory
 // of the cut. That is the difference between a narrative and a proof, and it is why the graveyard cites
-// tombstones rather than replacing them: `readTombstones` stays the single per-id law, and "which
-// tombstones belong to this graveyard" is a JOIN, so the record is one small delta whether the cut had
+// erasures rather than replacing them: `readErasures` stays the single per-id law, and "which
+// erasures belong to this graveyard" is a JOIN, so the record is one small delta whether the cut had
 // four members or forty thousand.
 //
 // THE HOLLOW-RAIL QUESTION, asked of this file: a completeness walk that returned NOTHING would satisfy
 // "no missing members" vacuously, so every rail here asserts the member COUNT before it asserts the
-// verdict, and the criterion-12 rail asserts an EMPTY `prior-tombstone` explicitly so criterion 19's
+// verdict, and the criterion-12 rail asserts an EMPTY `prior-erasure` explicitly so criterion 19's
 // exception cannot hide inside the clean case.
 
 import { describe, expect, it } from "vitest";
-import { survivingTombstones, tombstoneSlate, tombstoneTarget } from "../../src/gateway/erase.js";
+import { standingErasures, tombstoneSlate, erasureTarget } from "../../src/gateway/erase.js";
 import { graveyardCompleteness, readFrozenTerm } from "../../src/gateway/slate.js";
 import { FERN, observed } from "../spike/garden.js";
 import { BEFORE_DEADLINE, OP, OP_SEED, bootSlateStore, standSlate } from "./slating.js";
@@ -79,11 +79,11 @@ describe("T64 criterion 12 — the graveyard is durable, joinable, and its compl
     // THE CLEAN CASE SAYS SO EXPLICITLY — otherwise criterion 19's exception could hide right here.
     expect(grave.priorTombstone).toEqual([]);
 
-    // Every tombstone carries its `slate` join.
-    const joined = survivingTombstones(gw.reactor, OP).filter(
+    // Every erasure carries its `slate` join.
+    const joined = standingErasures(gw.reactor, OP).filter(
       (t) => tombstoneSlate(t.claims) === stood.container,
     );
-    expect(joined.map((t) => tombstoneTarget(t.claims)).sort()).toEqual(
+    expect(joined.map((t) => erasureTarget(t.claims)).sort()).toEqual(
       members.map((m) => m.id).sort(),
     );
 

@@ -11,9 +11,9 @@
 // EDGE (inward — what a pool sees) and the OFFERED LENS (outward — what a federation peer pulls).
 // The second is the same bug pointed at a stranger's store.
 //
-// §24.8 erasure was always handled — tombstones cross the seeding edge unconditionally
+// §24.8 erasure was always handled — erasures cross the seeding edge unconditionally
 // (quarantine-pool.ts) and `test/gateway/quarantine.test.ts` pins that byte-for-byte. This file is
-// about ORDINARY negation: retraction, revocation, any non-tombstone `negates`.
+// about ORDINARY negation: retraction, revocation, any non-erasure `negates`.
 
 import { describe, expect, it } from "vitest";
 import {

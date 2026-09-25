@@ -159,7 +159,7 @@ describe("T64 criterion 16 — the CutReport carries every receipt HISTORY field
     expect(report.observationOnly).toEqual([...OBSERVATION]);
 
     // DERIVABLE FROM DURABLE GROUND, with the CutReport thrown away: a re-derived receipt reaches the
-    // same history from the graveyard + the tombstones + the frozen version alone.
+    // same history from the graveyard + the erasures + the frozen version alone.
     const receipt = await gw.receipt(report.graveyard, { now: BEFORE_DEADLINE });
     expect(receipt.version).toBe(report.version);
     expect(receipt.memberCount).toBe(report.memberCount);
@@ -318,7 +318,7 @@ describe("T64 criterion 22 — the receipt's byte verdicts are RE-PROBED, never 
     expect(clean.members[0]!.tiers.find((v) => v.tier === "primary")!.holds).toBe(false);
 
     // THE RESTORED-BACKUP SHAPE: the bytes come back on one tier, underneath the reactor, exactly as a
-    // restore would put them there. The tombstone still stands, so nothing about the PROMISE changed —
+    // restore would put them there. The erasure still stands, so nothing about the PROMISE changed —
     // only the world did.
     await backend.append([member]);
     expect(await backend.holds(member.id)).toBe(true);
@@ -366,12 +366,12 @@ describe("an erasure negated after a cut: the id stays refused", () => {
     });
 
     const health = await gw.health(BEFORE_DEADLINE);
-    // Negating the erasure removed the id from `readTombstones`, so it left
+    // Negating the erasure removed the id from `readErasures`, so it left
     // `health().erasure.promised` and the byte debt reads clean.
     expect(health.erasure.promised).toBe(0);
     expect(health.erasure.outstanding).toEqual([]);
     // AND THE SECTION THAT CLOSES IT — sourced from the graveyard's frozen `version` rather than from
-    // `readTombstones`, which is the only durable list of ids the store ever promised to forget.
+    // `readErasures`, which is the only durable list of ids the store ever promised to forget.
     expect(health.forgiven).toEqual({
       count: 1,
       present: 0,
@@ -394,7 +394,7 @@ describe("an erasure negated after a cut: the id stays refused", () => {
     expect(check.forgiven).toEqual([{ member: member.id, strike: forgiveness.id }]);
     expect(check.missing).toEqual([]);
     // THE TWO VERDICTS COME APART HERE, and that is the point: §29.6's sentence read literally is now
-    // FALSE (no surviving tombstone covers this member), while the CUT still completed and nothing is
+    // FALSE (no surviving erasure covers this member), while the CUT still completed and nothing is
     // unexplained. One boolean holding both would make the first lawful forgiveness indistinguishable
     // from an abandoned cut — the same collapse this file refuses for a byte verdict, one layer up.
     expect(check.holds).toBe(false);

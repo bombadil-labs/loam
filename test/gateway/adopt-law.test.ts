@@ -7,7 +7,7 @@
 // never trusted). The operator blesses per export: `adoptLaw(version, alias)` routes the row to
 // its kind's ORDINARY publish path under operator authorship with the SOURCE's timestamps
 // (criterion 2: same content + same author + same timestamp → same id, so re-blessing re-mints
-// the id a tombstone refuses and idempotence rides identity), plus an adoption/witness record.
+// the id an erasure refuses and idempotence rides identity), plus an adoption/witness record.
 //
 // What this file deliberately does not assert: promote-outputs' own behavior (frozen,
 // test/gateway/promotion.test.ts) beyond criterion 23's it-still-refuses-law leg; the container
@@ -397,7 +397,7 @@ describe("T33 criterion 2 — the ordinary publish path, with the source's times
     await mirror.close();
 
     // Erasure holds by identity: erase one blessed law delta, re-bless — the door refuses the
-    // re-minted id rather than minting a stranger to the tombstone.
+    // re-minted id rather than minting a stranger to the erasure.
     const target = blessed.find((d) => d.claims.timestamp === parts.definition.claims.timestamp)!;
     await gw.erase(target.id, { reason: "the operator withdrew the blessing" });
     await expect(gw.adoptLaw(version, "Post")).rejects.toThrow(/erased|tombstone/);

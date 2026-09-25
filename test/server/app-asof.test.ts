@@ -20,7 +20,7 @@
 // BOTH LEVELS, as P3 requires. The object level is what the DOOR SERVES — the rendered bytes a
 // browser receives, which is the only level a person ever meets. The delta level is asserted where
 // it can disagree: (c) reads the sqlite file AND its `-wal` sidecar for the purged plaintext, and
-// reads the surviving tombstone's timestamp to pin the annotation's window.
+// reads the surviving erasure's timestamp to pin the annotation's window.
 //
 // (a) IS THE WIDEST CRITERION HERE, because a render has more than one read in it. The route's own
 // node, the floor's mediated `?read=` gestures (§30), and a version-pinned route's frozen lens are

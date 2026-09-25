@@ -1195,7 +1195,7 @@ export async function publishRegistrationImpl(
   const author = authorForSeed(seed);
   // The clock is a seam, not a decision: an ordinary publish stamps NOW, and a T33 blessing threads
   // the SOURCE's timestamps through so its twins re-mint the source's ids (see adopt-law.ts's H4
-  // note — the tombstone refusal and idempotence both ride that identity).
+  // note — the erasure refusal and idempotence both ride that identity).
   const tick = internals?.clock ?? ((): number => gw.nextTimestamp());
   const definition = signClaims(
     publishHyperSchemaClaims(hyperschema, schemaEntity, author, tick()),

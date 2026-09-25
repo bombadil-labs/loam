@@ -13,7 +13,7 @@ import { authorForSeed, evalTerm, parseTerm, type Policy, type Schema } from "@b
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { readTombstones } from "../../src/gateway/erase.js";
+import { readErasures } from "../../src/gateway/erase.js";
 import { PLANT } from "./fixtures.js";
 import { FERN, GARDENER_SEED, observed } from "../spike/garden.js";
 
@@ -131,7 +131,7 @@ describe("§24.10 the seeding edge takes a membership Term (admit is the degener
       reason: "the scope narrows what a pool sees, never what it forgets",
     });
 
-    expect(readTombstones(q.gateway.reactor, OP).has(secret.id)).toBe(true);
+    expect(readErasures(q.gateway.reactor, OP).has(secret.id)).toBe(true);
     expect(holds(q.gateway, secret.id)).toBe(false);
     const atRest = await poolBackend.deltasSince(new Set());
     expect(atRest.some((d) => d.id === secret.id)).toBe(false);

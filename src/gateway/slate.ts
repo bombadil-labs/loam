@@ -58,9 +58,9 @@ import {
   eraseImpl,
   erasedFromReading,
   erasureOutstanding,
-  isTombstone,
-  survivingTombstones,
-  tombstoneTarget,
+  isErasure,
+  standingErasures,
+  erasureTarget,
 } from "./erase.js";
 import { withNegationClosure } from "./ingest.js";
 import { lawfulNegated, lawfulSnapshot } from "./registration.js";
@@ -69,9 +69,9 @@ import type { Gateway } from "./gateway.js";
 /**
  * The entity both new records DECLARE — the marker that tells a slate record and a graveyard apart
  * from anything else wearing a `slate` pointer. It has to be a declaration and not the role alone:
- * every tombstone a cut mints carries `{role: "slate", …}` as §29.6's JOIN, so a reader keyed on
- * that role would read each of its own tombstones as a malformed slate record and jam the cut at its
- * second member. The same shape `isTombstone` uses, for the same reason.
+ * every erasure a cut mints carries `{role: "slate", …}` as §29.6's JOIN, so a reader keyed on
+ * that role would read each of its own erasures as a malformed slate record and jam the cut at its
+ * second member. The same shape `isErasure` uses, for the same reason.
  */
 export const SLATE_ENTITY = "loam:erasure";
 export const CTX_SLATE = "loam.erasure.slate";
@@ -170,8 +170,8 @@ export interface GraveyardSpec {
   readonly priorTombstone: readonly { readonly member: string; readonly tombstone: string }[];
 }
 
-// The erasure EVENT, not a second copy of the per-id law: it CITES tombstones and never replaces
-// them (`readTombstones` stays the single per-id law), so it is one small delta whether the cut had
+// The erasure EVENT, not a second copy of the per-id law: it CITES erasures and never replaces
+// them (`readErasures` stays the single per-id law), so it is one small delta whether the cut had
 // four members or forty thousand. It holds content addresses; retaining a hash retains zero content.
 export function graveyardClaims(spec: GraveyardSpec, author: string, timestamp: number): Claims {
   return {
@@ -200,7 +200,7 @@ export function graveyardClaims(spec: GraveyardSpec, author: string, timestamp: 
   };
 }
 
-/** The pointer a cut's tombstone carries so "which tombstones belong to this graveyard" is a JOIN. */
+/** The pointer a cut's erasure carries so "which erasures belong to this graveyard" is a JOIN. */
 export function slatePointer(container: string): Claims["pointers"][number] {
   return entityPtr("slate", container, CTX_SLATE);
 }
@@ -446,7 +446,7 @@ const parsePriorPair = (raw: string): { member: string; tombstone: string } | un
  * The published Term at a `membershipAt` address, plus the ids it names EXTENSIONALLY. The door
  * predicate needs NO SCAN: a frozen membership is `match{field: id, cmp: inSet}`, so the condemned
  * ids are literally the values in the published Term's JSON and a slated-id lookup is a `Set.has` —
- * the same cost class as the `readTombstones` check that already runs at both doors (H8, answered).
+ * the same cost class as the `readErasures` check that already runs at both doors (H8, answered).
  *
  * A NON-EXTENSIONAL TERM IS A FAILURE, never an empty set. `author eq X` freezes to a perfectly
  * honest address, so `freezeAgreement` alone certifies it — and if that certification stood while the
@@ -864,7 +864,7 @@ function duplicatesFor(gw: Gateway, slates: readonly ReadonlySet<string>[]): Dup
   for (const members of slates) for (const id of members) wanted.add(id);
   if (wanted.size === 0) return out;
   for (const d of gw.reactor.snapshot()) {
-    if (wanted.has(d.id) || isTombstone(d.claims) || isGraveyard(d.claims)) continue;
+    if (wanted.has(d.id) || isErasure(d.claims) || isGraveyard(d.claims)) continue;
     for (const p of d.claims.pointers) {
       const named =
         p.target.kind === "delta"
@@ -904,7 +904,7 @@ export interface SlateHealth {
 }
 
 export interface ForgivenHealth {
-  /** Ids in some graveyard's frozen `version` whose tombstone no longer survives. */
+  /** Ids in some graveyard's frozen `version` whose erasure no longer survives. */
   readonly count: number;
   /** Of those, how many are PRESENT in the ground again. */
   readonly present: number;
@@ -971,9 +971,9 @@ export function slateRefusal(
 ): { container: string; member: string } | undefined {
   const claims = delta.claims;
   // The erasure vocabulary itself is not a citation that grows the dependent set — it IS the
-  // removal. A tombstone names its target under `erases`, and the cut mints one per member; a
+  // removal. An erasure names its target under `erases`, and the cut mints one per member; a
   // graveyard names the slate it closed. Refusing those would make a slate refuse its own cut.
-  if (isTombstone(claims) || isGraveyard(claims)) return undefined;
+  if (isErasure(claims) || isGraveyard(claims)) return undefined;
   for (const slate of slates) {
     if (!slate.closes.has("cite") || slate.members.size === 0) continue;
     for (const p of claims.pointers) {
@@ -1099,8 +1099,8 @@ export function landsReadClosure(gw: Gateway, fresh: readonly Delta[], now: numb
   // anyone's stream. An erasure narrows a reading only when its target's bytes are held here.
   if (fresh.some((d) => isSlateRecord(d.claims))) return readClosedIds(gw, now).size > 0;
   return fresh.some((d) => {
-    if (!isTombstone(d.claims)) return false;
-    const target = tombstoneTarget(d.claims);
+    if (!isErasure(d.claims)) return false;
+    const target = erasureTarget(d.claims);
     return target !== undefined && gw.reactor.get(target) !== undefined;
   });
 }
@@ -1160,7 +1160,7 @@ export interface CutReport {
   readonly closes: readonly SlateClosure[];
   readonly window: { readonly opened: number; readonly cutAt: number };
   readonly members: readonly CutMemberReport[];
-  /** Members a surviving lawful tombstone ALREADY covered (§29.5's one lawful exception). */
+  /** Members a surviving lawful erasure ALREADY covered (§29.5's one lawful exception). */
   readonly priorTombstone: readonly { readonly member: string; readonly tombstone: string }[];
   /** Tiers deliberately NOT reached, each with the declaration that permitted it. */
   readonly notReached: readonly { readonly wall: string; readonly acceptsIncomplete: string }[];
@@ -1220,7 +1220,7 @@ const retractionOf = (targetId: string, author: string, timestamp: number): Clai
  *
  * Order is load-bearing: the graveyard lands and only THEN is the declaration struck. Strike first
  * and a crash loses the record, because the struck declaration no longer resolves the set. A crash
- * between the two leaves a graveyard beside a standing slate whose members are all tombstoned, so
+ * between the two leaves a graveyard beside a standing slate whose members are all erased, so
  * the re-run finds nothing outstanding and simply strikes — idempotent by construction.
  */
 export async function cutImpl(
@@ -1340,10 +1340,10 @@ export async function cutImpl(
   const reFrozen = freezeAgreement(gw.reactor, pinnedTerm, slate.version);
   const present = new Set(evalMembership(gw.reactor, pinnedTerm).map((d) => d.id));
   const priorTombstone: { member: string; tombstone: string }[] = [];
-  const tombs = survivingTombstones(gw.reactor, operator);
+  const tombs = standingErasures(gw.reactor, operator);
   for (const id of [...slate.members].sort()) {
     if (present.has(id)) continue;
-    const already = tombs.find((t) => tombstoneTarget(t.claims) === id);
+    const already = tombs.find((t) => erasureTarget(t.claims) === id);
     if (already === undefined) {
       refuse(
         `the frozen member ${id} resolves to nothing and carries NO surviving lawful tombstone, so ` +
@@ -1381,9 +1381,9 @@ export async function cutImpl(
   const resurfacing = resurfacingOf(gw.reactor, slate.members);
   const duplicates = duplicatesOf(gw, slate.members);
 
-  // Per member, the ORDINARY erase — the cut mints no new fan-out. Tombstone, purge, attached
+  // Per member, the ORDINARY erase — the cut mints no new fan-out. Erasure, purge, attached
   // pool/wall fan-out and the byte verdict all come from §11 unchanged; the only addition is one
-  // optional `slate` pointer on each newly-minted tombstone.
+  // optional `slate` pointer on each newly-minted erasure.
   const priorIds = new Set(priorTombstone.map((p) => p.member));
   const members: CutMemberReport[] = [];
   const faults: string[] = [];
@@ -1398,7 +1398,7 @@ export async function cutImpl(
         members.push({
           member: id,
           tombstone: result.tombstone,
-          // The reused-tombstone path can carry none; the sibling branch below already reads it the
+          // The reused-erasure path can carry none; the sibling branch below already reads it the
           // same way, so a cut report cannot disagree with itself about the same receipt.
           spokenBy: result.spokenBy ?? "",
           tiers: await tierVerdicts(gw, id, notReached),
@@ -1406,7 +1406,7 @@ export async function cutImpl(
           citationTiers: result.citationTiers,
         });
       } else {
-        const tomb = tombs.find((t) => tombstoneTarget(t.claims) === id)!;
+        const tomb = tombs.find((t) => erasureTarget(t.claims) === id)!;
         members.push({
           member: id,
           tombstone: tomb.id,
@@ -1424,7 +1424,7 @@ export async function cutImpl(
     // ANY fault: throw, and the slate STANDS. No graveyard lands, the declaration survives, every
     // closed door stays closed — so a partially-cut slate is still slated, still reviewable, and
     // RESUMABLE. T32's `drop refused: … the pool remains ATTACHED` discipline. A re-run mints no
-    // second tombstone (§11's anchor).
+    // second erasure (§11's anchor).
     throw new Error(
       `cut ${container} did not complete: ${faults.length} member(s) could not be erased, so the ` +
         `slate STANDS — its doors stay closed, its declaration still resolves, and the cut is ` +
@@ -1557,7 +1557,7 @@ export function reachableTiers(gw: Gateway): { tier: string; gw: Gateway }[] {
 // empty ones included. It is NOT the verdict's whole tier set: the verdict additionally names any WALL
 // (`notReached`) as `unproven`, and a wall cannot be walked for citations, so `citationTiers` covers
 // the walkable tiers and the verdict's `tiers` is a superset by tier name whenever a wall stands.
-// `exclude` drops a delta by identity on every tier (erase.ts excludes the tombstone it mints from its
+// `exclude` drops a delta by identity on every tier (erase.ts excludes the erasure it mints from its
 // own manifest); a re-issue passes none.
 export function danglingCitations(
   gw: Gateway,
@@ -1666,13 +1666,13 @@ export function readGraveyards(reactor: Reactor, operator: string | undefined): 
 
 export interface CompletenessCheck {
   /**
-   * §29.6's sentence, UNQUALIFIED: every member has a SURVIVING covering tombstone. A later
-   * forgiveness makes this false, because a struck tombstone stops surviving — that is the sentence
+   * §29.6's sentence, UNQUALIFIED: every member has a SURVIVING covering erasure. A later
+   * forgiveness makes this false, because a struck erasure stops surviving — that is the sentence
    * being read honestly, not a defect.
    */
   readonly holds: boolean;
   /**
-   * Did the CUT complete? Every member accounted for as either a surviving covering tombstone or an
+   * Did the CUT complete? Every member accounted for as either a surviving covering erasure or an
    * ENUMERATED forgiveness. This is the question a receipt asks, and it is a different one from
    * `holds`: collapsing the two would make the first lawful forgiveness indistinguishable from an
    * abandoned cut — the same boolean collapse this file refuses for `ByteVerdict`, one layer up.
@@ -1683,26 +1683,26 @@ export interface CompletenessCheck {
   /** Why not, when `readable` is false — never silence (H9). */
   readonly unreadable?: string;
   readonly members: readonly string[];
-  /** Members whose tombstone neither cites this slate nor is named in `prior-tombstone`. */
+  /** Members whose erasure neither cites this slate nor is named in `prior-erasure`. */
   readonly missing: readonly string[];
-  /** Members whose tombstone has since been lawfully STRUCK — reported, never subtracted. */
+  /** Members whose erasure has since been lawfully STRUCK — reported, never subtracted. */
   readonly forgiven: readonly { readonly member: string; readonly strike: string }[];
 }
 
 /**
  * §29.6's arithmetic, read AT A NAMED MOMENT from DURABLE GROUND ALONE — no probe, no CutReport:
  *
- * > Every member of the frozen `version` has a surviving tombstone, and that tombstone either cites
- * > this slate or is named for that member in the graveyard's `prior-tombstone` list.
+ * > Every member of the frozen `version` has a surviving erasure, and that erasure either cites
+ * > this slate or is named for that member in the graveyard's `prior-erasure` list.
  *
  * The clause after the comma is not a weakening: without it the proof is FALSE on cuts that
- * SUCCEEDED (a member erased by hand mid-window; a re-run anchoring on a tombstone minted before
+ * SUCCEEDED (a member erased by hand mid-window; a re-run anchoring on an erasure minted before
  * the `slate` pointer had a value to carry, which content addressing forbids adding later — H4).
  * A proof that cannot tell success from abandonment proves nothing, so the exception is ENUMERATED
  * in the graveyard rather than inferred at check time.
  *
- * And a FORGIVEN member does not falsify it either: §29.8 makes forgiveness a tombstone strike, so
- * the first lawful forgiveness would flip a naive reading to FALSE. A member whose tombstone has
+ * And a FORGIVEN member does not falsify it either: §29.8 makes forgiveness an erasure strike, so
+ * the first lawful forgiveness would flip a naive reading to FALSE. A member whose erasure has
  * been struck is reported as forgiven WITH its strike id. The graveyard records an event that
  * happened; forgiveness is a later event, and the check reports both rather than subtracting one.
  */
@@ -1729,7 +1729,7 @@ export function graveyardCompleteness(
   const members = [...frozen.ids].sort();
   const prior = new Map(grave.priorTombstone.map((p) => [p.member, p.tombstone]));
   const surviving = new Map(
-    survivingTombstones(reactor, operator).map((t) => [tombstoneTarget(t.claims)!, t]),
+    standingErasures(reactor, operator).map((t) => [erasureTarget(t.claims)!, t]),
   );
   const negated = lawfulNegated(reactor, operator);
   const missing: string[] = [];
@@ -1742,7 +1742,7 @@ export function graveyardCompleteness(
       missing.push(member);
       continue;
     }
-    // No SURVIVING tombstone. Struck (forgiven) is reported as itself; absent is a real hole.
+    // No SURVIVING erasure. Struck (forgiven) is reported as itself; absent is a real hole.
     const strike = strikeOf(reactor, operator, negated, member);
     if (strike !== undefined) forgiven.push({ member, strike });
     else missing.push(member);
@@ -1760,7 +1760,7 @@ export function graveyardCompleteness(
   };
 }
 
-// The lawful strike that forgave a member's tombstone — the id a receipt reports beside FORGIVEN.
+// The lawful strike that forgave a member's erasure — the id a receipt reports beside FORGIVEN.
 function strikeOf(
   reactor: Reactor,
   operator: string,
@@ -1768,7 +1768,7 @@ function strikeOf(
   member: string,
 ): string | undefined {
   for (const d of lawfulSnapshot(reactor, operator)) {
-    if (!isTombstone(d.claims) || tombstoneTarget(d.claims) !== member) continue;
+    if (!isErasure(d.claims) || erasureTarget(d.claims) !== member) continue;
     if (!negated(d.id)) continue;
     for (const strike of reactor.negationsOf(d.id)) {
       const s = reactor.get(strike);
@@ -1789,13 +1789,13 @@ const unreachedTiers = (walls: {
 
 export interface ReceiptMember {
   readonly member: string;
-  /** The SURVIVING tombstone, when one stands. */
+  /** The SURVIVING erasure, when one stands. */
   readonly tombstone?: string;
-  /** The strike that forgave it (§29.8) — present instead of `tombstone` after a forgiveness. */
+  /** The strike that forgave it (§29.8) — present instead of `erasure` after a forgiveness. */
   readonly forgiven?: string;
   /**
    * Is the id PRESENT in the ground again? One `get(id)` answers it, and it is the fact the obvious
-   * design loses: striking a tombstone permits the id's return and `federateImpl` then admits it,
+   * design loses: striking an erasure permits the id's return and `federateImpl` then admits it,
    * so a receipt saying only FORGIVEN is technically true and communicates the opposite.
    */
   readonly presentAgain: boolean;
@@ -1825,7 +1825,7 @@ export interface Receipt {
 }
 
 /**
- * Re-derive a receipt from the graveyard + the tombstones + the frozen version, plus a LIVE PROBE
+ * Re-derive a receipt from the graveyard + the erasures + the frozen version, plus a LIVE PROBE
  * at the moment of issue. Re-issuable at any time, which is exactly §11's testable-compliance
  * promise. The byte verdicts are RE-PROBED here every time: reading them from a CutReport would be
  * the dry-run mistake this whole design rejects, wearing a letterhead.
@@ -1845,7 +1845,7 @@ export async function deriveReceiptImpl(
   const completeness = graveyardCompleteness(gw.reactor, operator, graveyardId);
   const negated = lawfulNegated(gw.reactor, operator);
   const surviving = new Map(
-    survivingTombstones(gw.reactor, operator).map((t) => [tombstoneTarget(t.claims)!, t]),
+    standingErasures(gw.reactor, operator).map((t) => [erasureTarget(t.claims)!, t]),
   );
   const walls = unreachableStoreReport(gw);
   const members: ReceiptMember[] = [];
@@ -1855,7 +1855,7 @@ export async function deriveReceiptImpl(
       tomb === undefined ? strikeOf(gw.reactor, operator!, negated, member) : undefined;
     // The manifest walks the SAME tier set the byte verdict does (T216) — primary plus every attached
     // pool — so a surviving pool-resident dangler (a T207 arrival stamp echoing the erased member) is
-    // named rather than omitted. No exclusion: at re-issue the tombstone genuinely dangles at the hole
+    // named rather than omitted. No exclusion: at re-issue the erasure genuinely dangles at the hole
     // and belongs in the manifest, exactly as before this widened past the primary.
     const dangling = danglingCitations(gw, member);
     members.push({
@@ -1926,8 +1926,8 @@ export async function deriveReceiptImpl(
 
 /**
  * Forgiveness is LAWFUL, not debt — so this moves `status` no more than a slate does. But without it
- * a forgiven-and-returned id is invisible to every instrument the store has: striking a tombstone
- * removes the id from `readTombstones` and therefore from `promised` entirely, and the one durable
+ * a forgiven-and-returned id is invisible to every instrument the store has: striking an erasure
+ * removes the id from `readErasures` and therefore from `promised` entirely, and the one durable
  * list of ids the store ever promised to forget is a graveyard's frozen `version`.
  */
 export function forgivenHealth(gw: Gateway): ForgivenHealth {
@@ -1937,7 +1937,7 @@ export function forgivenHealth(gw: Gateway): ForgivenHealth {
   const graves = readGraveyards(gw.reactor, operator);
   if (graves.length === 0) return empty;
   const surviving = new Set(
-    survivingTombstones(gw.reactor, operator).map((t) => tombstoneTarget(t.claims)!),
+    standingErasures(gw.reactor, operator).map((t) => erasureTarget(t.claims)!),
   );
   const ids = new Set<string>();
   const unreadable: string[] = [];

@@ -339,7 +339,7 @@ describe("§11 through heal — the cold tier", () => {
     expect(anyFileContains(vault, MARKER)).toBeDefined(); // the bytes really are still there
     expect((await mirror.deltasSince(new Set())).some((d) => d.id === target.id)).toBe(false);
 
-    // The gateway hands heal the tombstoned ids. This is where the forgetting must finish.
+    // The gateway hands heal the erased ids. This is where the forgetting must finish.
     await pair.heal(new Set([target.id]));
 
     // BYTE LEVEL — no file under the vault may still carry the erased content.

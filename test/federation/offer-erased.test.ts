@@ -1,5 +1,5 @@
 // The federation offer never serves an erased delta, even while its bytes are still held. A
-// tombstone is ground before the purge, and a tombstone appended directly purges nothing, so the
+// erasure is ground before the purge, and an erasure appended directly purges nothing, so the
 // store can hold both the order and the bytes for as long as that lasts. Asked at both levels: what
 // the offer carries (delta), and what a peer that federates it resolves (object). Every case names
 // a bystander that must still arrive.

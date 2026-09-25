@@ -241,9 +241,9 @@ describe("T72: detach() keeps the bytes deliberately, and reattachment restores 
   });
 
   it("an erasure issued DURING the window is settled AT reattach — before the pool's reader exists", async () => {
-    // The suppression lens's finding: the seeding edge delivers a tombstone as data and executes
+    // The suppression lens's finding: the seeding edge delivers an erasure as data and executes
     // nothing, so a naive reattach boots a reader that resolves the forgotten byte LIVE while the
-    // tombstone sits beside it. Settle runs before Gateway.open, so both levels come back clean.
+    // erasure sits beside it. Settle runs before Gateway.open, so both levels come back clean.
     const gw = await boot();
     const secret = observed(FERN, "note", MARKER, 1000, OP_SEED);
     await gw.append([secret]);

@@ -829,11 +829,11 @@ export class Gateway {
 
   // --- erasure (SPEC §11) ------------------------------------------------------------------------
 
-  // Erase one delta (SPEC §11): the body lives beside the tombstone vocabulary in erase.ts.
+  // Erase one delta (SPEC §11): the body lives beside the erasure vocabulary in erase.ts.
   // `kept` lists the declared container stores a surviving detach record deliberately holds outside
   // this sweep (SPEC §27.7's completeness guard) — on the record, never silent.
-  // `slate` is the §29.6 JOIN a cut stamps on each tombstone it mints; an ordinary erase leaves it
-  // absent, forever, and `tombstone`/`spokenBy` ride out so a cut can collect them per member rather
+  // `slate` is the §29.6 JOIN a cut stamps on each erasure it mints; an ordinary erase leaves it
+  // absent, forever, and `erasure`/`spokenBy` ride out so a cut can collect them per member rather
   // than re-derive them from a ground the purge just moved.
   async erase(
     id: string,
@@ -845,19 +845,19 @@ export class Gateway {
     citationTiers: CitationTier[];
     kept: string[];
     tombstone: string;
-    /** False when a standing tombstone was REUSED — a retry after a fault records no new reason. */
+    /** False when a standing erasure was REUSED — a retry after a fault records no new reason. */
     minted: boolean;
     /** The reasons on the receipt itself, which on a retry are the FIRST run’s, not this call’s. */
     reasons: string[];
-    /** Absent when the reused tombstone carries no `spoken-by` — the door requires one, replay does not. */
+    /** Absent when the reused erasure carries no `spoken-by` — the door requires one, replay does not. */
     spokenBy?: string;
   }> {
     return eraseImpl(this, id, opts);
   }
 
   // The settling report (T70): does every erasure this ground has promised hold at the bytes,
-  // NOW? Live — the reactor's surviving tombstones against the backend's own byte probe — because
-  // this store is eventually consistent about forgetting, and the gap between a tombstone landing
+  // NOW? Live — the reactor's surviving erasures against the backend's own byte probe — because
+  // this store is eventually consistent about forgetting, and the gap between an erasure landing
   // and the bytes leaving every tier is a health state to watch, not a fault to boot past.
   async health(now?: number): Promise<StoreHealth> {
     return healthImpl(this, now ?? Date.now());
@@ -892,7 +892,7 @@ export class Gateway {
     return cutImpl(this, slate, opts);
   }
   /**
-   * Re-derive a compliance receipt from the graveyard + the tombstones + the frozen version, plus a
+   * Re-derive a compliance receipt from the graveyard + the erasures + the frozen version, plus a
    * LIVE probe at the moment of issue (SPEC §29.7). Re-issuable at any time — which IS §11's
    * testable-compliance promise. Every per-tier byte verdict is RE-PROBED here, never reprinted from
    * a CutReport: a formatter that reprinted last month's snapshot would be the dry-run mistake this

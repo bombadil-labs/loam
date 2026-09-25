@@ -50,7 +50,7 @@ async function readGql(
   };
 }
 
-// The tombstone the erase left, so a test can read its timestamp (when the ground forgot).
+// The erasure the erase left, so a test can read its timestamp (when the ground forgot).
 function tombstoneFor(gateway: Gateway, id: string): Delta {
   const tomb = [...gateway.reactor.snapshot()].find((d) =>
     d.claims.pointers.some((p) => p.target.kind === "delta" && p.target.deltaRef.delta === id),

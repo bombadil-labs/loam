@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
-import { isTombstone, readTombstones } from "../../src/gateway/erase.js";
+import { isErasure, readErasures } from "../../src/gateway/erase.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import type { StoreBackend } from "../../src/store/backend.js";
@@ -50,7 +50,7 @@ async function groveOn(
   return {
     gateway,
     fact,
-    tombstones: () => [...gateway.reactor.snapshot()].filter((d) => isTombstone(d.claims)).length,
+    tombstones: () => [...gateway.reactor.snapshot()].filter((d) => isErasure(d.claims)).length,
   };
 }
 
@@ -195,7 +195,7 @@ describe("erase is complete only when every TIER is clean", () => {
   });
 
   it("a refused erase still records the tombstone, and the re-run after repair mints no second one", async () => {
-    // The erasure log is append-only: a failed sweep leaves exactly one tombstone behind, and
+    // The erasure log is append-only: a failed sweep leaves exactly one erasure behind, and
     // the operator's re-run finishes the job without growing the log.
     const primary = new MemoryBackend();
     const mirrorInner = new MemoryBackend();
@@ -231,7 +231,7 @@ describe("the retry anchor honors forgiveness", () => {
   const strike = async (gateway: Gateway, targetId: string): Promise<void> => {
     const tomb = [...gateway.reactor.snapshot()].find(
       (d) =>
-        isTombstone(d.claims) &&
+        isErasure(d.claims) &&
         d.claims.pointers.some(
           (p) => p.target.kind === "delta" && p.target.deltaRef.delta === targetId,
         ),
@@ -245,7 +245,7 @@ describe("the retry anchor honors forgiveness", () => {
     );
     await gateway.erase(fact.id, { reason: "the subject asked" });
     await strike(gateway, fact.id);
-    expect(readTombstones(gateway.reactor, OPERATOR).has(fact.id)).toBe(false); // not standing
+    expect(readErasures(gateway.reactor, OPERATOR).has(fact.id)).toBe(false); // not standing
     await expect(gateway.append([fact])).rejects.toThrow(/erased/); // and still refused
     await gateway.close();
   });
@@ -257,13 +257,13 @@ describe("the retry anchor honors forgiveness", () => {
     await gateway.erase(fact.id, { reason: "the subject asked" });
     await strike(gateway, fact.id); // forgiven, and NOT re-admitted — the store holds nothing
 
-    // Without the surviving-tombstone rule this returns `{ erased }` for work never done (H7).
+    // Without the surviving-erasure rule this returns `{ erased }` for work never done (H7).
     await expect(gateway.erase(fact.id)).rejects.toThrow(/nothing to erase/);
     await gateway.close();
   });
 });
 
-// The retry bypass is bounded by "is there anything left to sweep": a surviving tombstone from a
+// The retry bypass is bounded by "is there anything left to sweep": a surviving erasure from a
 // completed erasure months ago must not suppress the existence guard forever — that would return
 // `{ erased }` for work never done (H7). So these two cases must differ.
 describe("the retry bypass is for an OUTSTANDING erasure, not for any tombstone", () => {
@@ -274,7 +274,7 @@ describe("the retry bypass is for an OUTSTANDING erasure, not for any tombstone"
     await expect(gateway.erase(fact.id, { reason: "the subject asked" })).resolves.toMatchObject({
       erased: fact.id,
     });
-    // Nothing is left anywhere: the tombstone survives, but the erasure does not.
+    // Nothing is left anywhere: the erasure survives, but the erasure does not.
     await expect(gateway.erase(fact.id)).rejects.toThrow(/nothing to erase/);
     await gateway.close();
   });
@@ -309,14 +309,12 @@ describe("the retry bypass is for an OUTSTANDING erasure, not for any tombstone"
       new MirrorBackend(new MemoryBackend(), new MemoryBackend()),
     );
     const first = await gateway.erase(fact.id, { reason: "the subject asked" });
-    // The tombstone names the id in an `erases` pointer, so a naive citation filter picks it up on
+    // The erasure names the id in an `erases` pointer, so a naive citation filter picks it up on
     // any call where it is already in the ground — and a caller cascading on citations would then
     // try to erase the cut itself and be refused by the append-only guard.
     for (const cited of first.citations) {
       expect(
-        isTombstone(
-          gateway.reactor.get(cited)?.claims ?? { timestamp: 0, author: "", pointers: [] },
-        ),
+        isErasure(gateway.reactor.get(cited)?.claims ?? { timestamp: 0, author: "", pointers: [] }),
       ).toBe(false);
     }
     await gateway.close();

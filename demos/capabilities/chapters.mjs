@@ -92,7 +92,7 @@ export const TERMS = [
     word: "tombstone",
     gloss:
       "The signed record that bytes were removed: who ordered it, when, and why — never what. It is append-only and it cannot itself be erased, because a store that could forget its own forgetting could not be audited.",
-    where: { kind: "export", name: "isTombstone" },
+    where: { kind: "export", name: "isErasure" },
   },
   {
     word: "erasure",
@@ -996,7 +996,7 @@ export const CHAPTERS = [
             says: "One store's erasure never compels a peer — each store's [[operator]] decides whether to honor a foreign order, so a forged order cannot cascade.",
             spec: "spec/11-erasure.md",
             proof: "test/gateway/erase.test.ts",
-            door: "readTombstones",
+            door: "readErasures",
           },
           {
             says: "What was identified is what gets destroyed: a [[slate]]'s set is fixed by content address the moment it is named, and re-pointing it afterwards binds nothing — so the impact list cannot quietly widen between the warning and the deletion.",
@@ -1392,7 +1392,7 @@ export const CHAPTERS = [
             says: "Erasure never propagates across [[federation]]: a peer's own [[operator]] decides whether to honor a foreign order to forget.",
             spec: "spec/13-boundaries-posture.md",
             proof: "test/gateway/erase.test.ts",
-            door: "readTombstones",
+            door: "readErasures",
           },
           {
             says: "There is no scarcity primitive and no global order — a store may sign sequence claims for its own narrow context, and peers may believe it or not.",

@@ -4,7 +4,7 @@
 // Criteria 9, 10, 11, 14, 19, 20, 21. Atomicity is claimed only where it is real: erasure is not
 // transactional across tiers, so the pre-flight is all-or-nothing and the per-member sweep is
 // per-member. Every refusal rail compares the ground DELTA-FOR-DELTA across the refusal — a pre-flight
-// that "refused" after minting one tombstone would pass a weaker assertion.
+// that "refused" after minting one erasure would pass a weaker assertion.
 //
 // TWO-SIDEDNESS, which matters more here than anywhere else in T64: a rail that only proves the target
 // is gone cannot see OVER-PURGING, and over-purging is the failure with no way back. So every cut rail
@@ -18,7 +18,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import type { StoreBackend } from "../../src/store/backend.js";
 import { containerClaims } from "../../src/gateway/container.js";
-import { survivingTombstones, tombstoneSlate, tombstoneTarget } from "../../src/gateway/erase.js";
+import { standingErasures, tombstoneSlate, erasureTarget } from "../../src/gateway/erase.js";
 import { graveyardCompleteness } from "../../src/gateway/slate.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
@@ -106,7 +106,7 @@ describe("T64 criterion 9 — the pre-flight is all-or-refuse and leaves the gro
       /resolves to nothing here/,
     );
     expect(groundIds(gw)).toEqual(before);
-    expect(survivingTombstones(gw.reactor, OP).map((t) => tombstoneTarget(t.claims))).not.toContain(
+    expect(standingErasures(gw.reactor, OP).map((t) => erasureTarget(t.claims))).not.toContain(
       member.id,
     );
     // TWO-SIDED at BOTH levels: the bytes are there AND a reader still resolves the bystander through
@@ -177,19 +177,19 @@ describe("T64 criterion 10 — per-member, faults collected, the slate STANDS, t
     const tagsMid = await gw.query(`{ plant(entity: "${FERN}") { tag } }`);
     expect((tagsMid.data as { plant: { tag: string[] } }).plant.tag).toEqual(["shade"]);
 
-    const tombstonesAfterFault = survivingTombstones(gw.reactor, OP).length;
+    const tombstonesAfterFault = standingErasures(gw.reactor, OP).length;
     backend.refuse.clear();
     const report = await gw.cut(stood.container, { now: BEFORE_DEADLINE });
     expect(report.members.map((m) => m.member).sort()).toEqual([stubborn.id, willing.id].sort());
     expect(await backend.holds(stubborn.id)).toBe(false);
     // EXACTLY ONE TOMBSTONE PER MEMBER — the re-run mints no second one (§11's anchor).
-    const targets = survivingTombstones(gw.reactor, OP).map((t) => tombstoneTarget(t.claims));
+    const targets = standingErasures(gw.reactor, OP).map((t) => erasureTarget(t.claims));
     expect(targets.filter((t) => t === willing.id)).toHaveLength(1);
     expect(targets.filter((t) => t === stubborn.id)).toHaveLength(1);
-    // The failed attempt had ALREADY landed the stubborn member's tombstone — `eraseImpl` grounds it
-    // before the purge on purpose — so the re-run mints not one new tombstone anywhere.
+    // The failed attempt had ALREADY landed the stubborn member's erasure — `eraseImpl` grounds it
+    // before the purge on purpose — so the re-run mints not one new erasure anywhere.
     expect(tombstonesAfterFault).toBe(2);
-    expect(survivingTombstones(gw.reactor, OP).length).toBe(tombstonesAfterFault);
+    expect(standingErasures(gw.reactor, OP).length).toBe(tombstonesAfterFault);
     expect(await backend.holds(bystander.id)).toBe(true);
     await gw.close();
   });
@@ -279,9 +279,9 @@ describe("T64 criterion 19 — a member erased mid-window: the cut COMPLETES, th
     expect(report.priorTombstone).toEqual([
       { member: members[1]!.id, tombstone: byHand.tombstone },
     ]);
-    // Exactly ONE tombstone for that member, and it is the PRE-CUT one.
-    const forHand = survivingTombstones(gw.reactor, OP).filter(
-      (t) => tombstoneTarget(t.claims) === members[1]!.id,
+    // Exactly ONE erasure for that member, and it is the PRE-CUT one.
+    const forHand = standingErasures(gw.reactor, OP).filter(
+      (t) => erasureTarget(t.claims) === members[1]!.id,
     );
     expect(forHand).toHaveLength(1);
     expect(forHand[0]!.id).toBe(byHand.tombstone);
@@ -292,9 +292,9 @@ describe("T64 criterion 19 — a member erased mid-window: the cut COMPLETES, th
     expect(check.holds).toBe(true);
     // The other three carry the `slate` join; the hand-erased one cannot (content addressing forbids
     // adding a pointer to an existing delta — H4), which is exactly why the exception is ENUMERATED.
-    const joined = survivingTombstones(gw.reactor, OP)
+    const joined = standingErasures(gw.reactor, OP)
       .filter((t) => tombstoneSlate(t.claims) === stood.container)
-      .map((t) => tombstoneTarget(t.claims))
+      .map((t) => erasureTarget(t.claims))
       .sort();
     expect(joined).toEqual([members[0]!.id, members[2]!.id, members[3]!.id].sort());
     // Two-sided, both levels: the bystander survived a four-member cut, at the bytes and at the reader.
@@ -309,7 +309,7 @@ describe("T64 criterion 19 — a member erased mid-window: the cut COMPLETES, th
     const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
     const phantom = observed(FERN, "height", 99, 1200, OP_SEED); // NEVER appended
     await gw.append([real, bystander]);
-    // The frozen set names an id this ground does not hold and never tombstoned. Both sides of the
+    // The frozen set names an id this ground does not hold and never erased. Both sides of the
     // door's agreement check evaluate it away identically, so the slate stands lawfully — and the cut
     // must then refuse rather than stand over an unreported gap. It should be unreachable today,
     // which is exactly why it is written down.

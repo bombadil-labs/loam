@@ -298,7 +298,7 @@ describe("erasure reaches the page (SPEC §15): tombstone → purge → removeIt
 
     await gateway.erase(fact.id, { reason: "asked and honored" });
     expect(origin.getItem(`loam:tab:${fact.id}`)).toBeNull(); // physically gone
-    // the store remembers THAT it forgot: the tombstone rides the same origin
+    // the store remembers THAT it forgot: the erasure rides the same origin
     const survivors = await new LocalStorageBackend("tab", origin).deltasSince(new Set());
     expect(survivors.some((d) => d.id === fact.id)).toBe(false);
     expect(survivors.length).toBeGreaterThan(0); // the tombstone itself

@@ -212,7 +212,7 @@ describe("spec 64: lifecycle events name their parent container", () => {
     pool.purge = purge;
     await gw.dropChannel(ch.name);
     expect(localChannelsInContainer(gw, "friends")).toEqual([]);
-    // Now erase the dropped opening with the close's purge faulting: the close is tombstoned and
+    // Now erase the dropped opening with the close's purge faulting: the close is erased and
     // gone from the reactor, the opening stays; the channel must still read as dropped.
     const opening = eventsOf(gw, ch.name).find(
       (d) =>

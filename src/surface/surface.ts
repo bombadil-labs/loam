@@ -6,7 +6,7 @@
 // is an interchangeable witness to the registrations.
 //
 // Doors share one law. The hooks are the only way through — resolve/mutate/watch/claim all
-// run the gateway's own authorization, admission, and tombstone discipline — so a generator
+// run the gateway's own authorization, admission, and erasure discipline — so a generator
 // CANNOT invent authority or widen a projection; it can only narrow one (a read-only door
 // passes "read"). Two doors that disagree about lawful data are a bug by definition; the
 // contract test for any new generator is agreement with the doors that already exist — one
@@ -53,7 +53,7 @@ export interface ResolvedNode {
   // The erasure annotation (SPEC §26/§11): on an as-of read, the sorted timestamps at which this
   // ground lawfully forgot something SINCE the moment T — an erasure spoken after T may have
   // redacted a fact that stood at T, so the read confesses each discontinuity's moment (never the
-  // content: a tombstone remembers THAT it forgot and WHEN, not what; the count is their length).
+  // content: an erasure remembers THAT it forgot and WHEN, not what; the count is their length).
   // Absent on a present read (the present already reflects every erasure as ordinary absence).
   readonly forgotten?: number[];
   // The SLATE-SUPPRESSION confession (SPEC §29.3): how many ids a standing slate withheld from the

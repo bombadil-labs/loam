@@ -14,7 +14,7 @@ import {
   eraseClaims,
   erasedInBatch,
   refusedIds,
-  survivingTombstones,
+  standingErasures,
 } from "../../src/gateway/erase.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -39,10 +39,10 @@ describe("an erased id is refused forever", () => {
     const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
     await gw.append([fact]);
     await gw.erase(fact.id);
-    const [tomb] = survivingTombstones(gw.reactor, gw.operatorAuthor);
+    const [tomb] = standingErasures(gw.reactor, gw.operatorAuthor);
     await gw.append([signClaims(makeNegationClaims(gw.operatorAuthor!, 5000, tomb!.id), OP_SEED)]);
 
-    expect(survivingTombstones(gw.reactor, gw.operatorAuthor)).toEqual([]); // no longer standing
+    expect(standingErasures(gw.reactor, gw.operatorAuthor)).toEqual([]); // no longer standing
     expect(refusedIds(gw.reactor, gw.operatorAuthor).has(fact.id)).toBe(true); // still refused
 
     await expect(gw.append([fact])).rejects.toThrow(/erased/);

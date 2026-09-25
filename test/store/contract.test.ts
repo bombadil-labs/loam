@@ -323,7 +323,7 @@ for (const makeHarness of harnesses) {
     });
 
     it("purge is mechanical, not law: the purged delta may be appended again", async () => {
-      // Refusal-of-return is the GATEWAY's job (tombstones at admission); a backend keeps
+      // Refusal-of-return is the GATEWAY's job (erasures at admission); a backend keeps
       // "a set of deltas" and no memory of grudges.
       const h = makeHarness();
       const store = h.open();

@@ -61,7 +61,7 @@ export interface RestoreReport {
   readonly stranded: readonly string[];
   // Deltas the mirror offered that heal DECLINED to plant, and why. A withheld plant is a deliberate
   // refusal, never a silent skip: the condemned set heal is handed was derived from READABLE deltas,
-  // so an unreadable row may be a tombstone nobody could see — and planting under that uncertainty
+  // so an unreadable row may be an erasure nobody could see — and planting under that uncertainty
   // resurrects what an operator erased. Withholding is recoverable; resurrection is not.
   readonly replantWithheld: readonly string[];
 }
@@ -138,7 +138,7 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
   }
 
   // The batch probe, forwarded so its single-pass economy survives this combinator: a health poll
-  // hands the WHOLE live tombstone set to the store the gateway actually holds — which is this —
+  // hands the WHOLE live erasure set to the store the gateway actually holds — which is this —
   // and falling back to the composite per-id `holds` would pay one archive sweep per absent id,
   // the exact cliff `heldAmong` exists to avoid. Same composition as `holds`: both tiers asked
   // (each by its own batch probe if it offers one, else its cheap per-id `holds`), answers
@@ -246,7 +246,7 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
   // `lagging` only when no append lagged WHILE it ran — a delta that landed after heal's
   // snapshot may still be missing from the mirror, and the flag must not say otherwise.
   //
-  // `exclude` is the law reaching down (SPEC §11): ids the gateway has tombstoned are never
+  // `exclude` is the law reaching down (SPEC §11): ids the gateway has erased are never
   // carried in EITHER direction, and a straggler found on either side is purged — heal
   // finishes the forgetting on whatever tier the purge originally missed.
   //
@@ -269,7 +269,7 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
     // the work is outstanding conflates readability with byte-presence, which is the one conflation
     // §11 forbids, and it made the straggler sweep unreachable on every tier.
     // A purge failure here must NOT abort the heal. Heal runs on the boot path with the whole
-    // accumulated tombstone set, so a single file held by a backup agent or a WAL a concurrent
+    // accumulated erasure set, so a single file held by a backup agent or a WAL a concurrent
     // reader will not release would otherwise make the store refuse to start — trading a leak for
     // an outage. Best-effort-and-loud: the sweep continues, and the report carries what failed so
     // the operator is told rather than the error being swallowed.
@@ -339,7 +339,7 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
     const verify = async (tier: StoreBackend, label: string): Promise<void> => {
       if (ids.length === 0) return;
       // Prefer the batch probe where a tier offers one: the archive's per-id `holds` is a full sweep
-      // on absence, so asking one id at a time over the whole tombstone set is O(dead × files). A tier
+      // on absence, so asking one id at a time over the whole erasure set is O(dead × files). A tier
       // without it (memory, sqlite) has a cheap `holds`, so the per-id fallback below costs nothing.
       if (tier.heldAmong) {
         try {

@@ -111,7 +111,7 @@ The past is not a copy Loam hoards; it is a reading the present ground can still
 `resolveView` over `groundAsOf`, bypassing the warm materialization; the `annotate` helper and
 `resolvePinned(asOf)` compose the schema-pin × time-pin square). Erasure wins even in the past (a
 required test purges a genuine delta and asserts its absence, in both doors), and the annotation
-**enumerates** the discontinuity timestamps in the window — `forgottenSince` / `survivingTombstones`
+**enumerates** the discontinuity timestamps in the window — `forgottenSince` / `standingErasures`
 in `src/gateway/erase.ts`, a read-only reading that changes no erasure semantics — surfaced as the
 `_asOf` / `_forgotten` door meta-fields (`metaFields` in `src/gateway/gql.ts`, the REST node body),
 never inside the resolved data. Non-breaking (an optional param, no migration); subscription replay

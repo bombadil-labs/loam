@@ -34,7 +34,7 @@ import { MemoryBackend } from "../store/memory.js";
 import { isRepairable } from "../store/quarantine.js";
 import { CTX_GRANTS, grantClaims, holdsGrant, revocationClaims } from "./accounts.js";
 import { STORE_ENTITY } from "./genesis.js";
-import { isTombstone, readTombstones } from "./erase.js";
+import { isErasure, readErasures } from "./erase.js";
 import {
   canonicalLeewayJson,
   parseLeeway,
@@ -1552,7 +1552,7 @@ async function openSeparate(
   // "sequestered" write lands in canonical ground while every surface says it did not — and since
   // drop()'s fan-out walks the WHOLE tree (poolsBeneath), a nested pool handed ANY ancestor's or
   // sibling's backend would have that store purged wholesale by a drop above it: parent ground,
-  // bystanders, tombstones. Identity only — two handles onto one file are not decidable here —
+  // bystanders, erasures. Identity only — two handles onto one file are not decidable here —
   // but the obvious mistake is, at every level.
   if (spec.backend !== undefined) {
     if (spec.backend === gw.backend) {
@@ -1576,13 +1576,13 @@ async function openSeparate(
   }
   const backend: StoreBackend = spec.backend ?? new MemoryBackend();
   // SETTLE ERASURE DEBT BEFORE THE CONTAINER OPENS (T72). A durable store being (re)opened may hold
-  // bytes whose tombstones landed at the primary while it was detached — the seeding edge
-  // DELIVERS a tombstone as data and executes nothing, so attaching first would boot a reader
-  // that resolves the forgotten byte LIVE beside its own tombstone. The primary's surviving
-  // tombstones are authoritative here (the container shares its operator), so the debt is swept at
+  // bytes whose erasures landed at the primary while it was detached — the seeding edge
+  // DELIVERS an erasure as data and executes nothing, so attaching first would boot a reader
+  // that resolves the forgotten byte LIVE beside its own erasure. The primary's surviving
+  // erasures are authoritative here (the container shares its operator), so the debt is swept at
   // the bytes NOW — before any reactor replays the store — and a store that cannot be proven
   // clean of it refuses to attach at all (H9: unproven bytes do not come back inside the walls).
-  const dead = [...readTombstones(gw.reactor, gw.operatorAuthor)];
+  const dead = [...readErasures(gw.reactor, gw.operatorAuthor)];
   if (dead.length > 0) {
     let owed: Set<string>;
     try {
@@ -1721,8 +1721,8 @@ async function openSeparate(
     return pool.federate(
       offer,
       // A scope narrows what the container SEES, never what it must FORGET (§24.8): the operator's
-      // tombstones pass the seeding edge unconditionally, membership and predicate alike.
-      admit === undefined ? {} : { admit: (d) => isTombstone(d.claims) || admit(d) },
+      // erasures pass the seeding edge unconditionally, membership and predicate alike.
+      admit === undefined ? {} : { admit: (d) => isErasure(d.claims) || admit(d) },
     );
   };
   await reseed(); // one-way INBOUND seeding; the reverse leg is never wired

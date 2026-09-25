@@ -27,7 +27,7 @@ export interface Adoption {
 }
 
 // Build the ADOPTION RECORD's claims — a SEPARATE delta from the re-signed content, citing it. Keeping the
-// provenance off the content delta is deliberate and idiomatic (a tombstone is separate from what it erases,
+// provenance off the content delta is deliberate and idiomatic (an erasure is separate from what it erases,
 // §11): if the provenance pointers rode ON the content delta, the content's own gather would pick them up as
 // part of the value and a `pick` field would resolve to a compound object instead of the value. So promotion
 // lands TWO deltas — the clean re-signed content, and this record pointing at it with the loam.adoption trail.
@@ -59,7 +59,7 @@ export function adoptionRecordClaims(
 
 // Promote-outputs adopts DOMAIN FACTS; it never adopts LAW, because operator authorship is exactly
 // what gives a delta force here. A quarantined app's "output" that is shaped like law — a grant, a
-// trust edge, a registration, a tombstone, a schema definition, an adoption record (the trail must
+// trust edge, a registration, an erasure, a schema definition, an adoption record (the trail must
 // not be forgeable through its own door) — is refused: law crosses only by §24.4's own ceremony
 // (promote-law via the ordinary publish path), never blind by id. Likewise a NEGATION: re-signed by
 // the operator it would strike a canonical claim, and a retraction is the operator's own deliberate
@@ -177,7 +177,7 @@ export function readAdoptions(
 // content as their OWN claim, carrying `loam.adoption` provenance back to the pool. The re-assertion
 // INHERITS the source timestamp (§11 rung 2's translation trick), so promotion is content-addressed and
 // idempotent: promoting the same output twice converges on one adopted delta, and an adopted delta the
-// operator later ERASED stays dead — its tombstone refuses the very id a re-promotion would mint. The
+// operator later ERASED stays dead — its erasure refuses the very id a re-promotion would mint. The
 // value crosses by re-assertion, never federation — so the pool can be dropped wholesale and the adopted
 // value survives in the operator's voice. This is MERGE-load with kept provenance: where an
 // interpretation in a sandbox becomes a claim in your canonical history, and always remembers where it
@@ -256,7 +256,7 @@ export async function promoteImpl(
     );
   }
   // Promote-OUTPUTS adopts domain facts only. Law-shaped deltas — grants, trust, registrations,
-  // tombstones, schema definitions, adoption records, negations — are refused here; operator
+  // erasures, schema definitions, adoption records, negations — are refused here; operator
   // authorship is force, and law crosses only by §24.4's own ceremony.
   const refusal = promotionRefusal(src.claims);
   if (refusal !== undefined) {
@@ -309,7 +309,7 @@ export async function promoteImpl(
   });
   // Land TWO deltas: the source's content RE-SPOKEN by the operator (clean, so it resolves as itself),
   // and a separate loam.adoption RECORD citing it with the provenance trail (kept off the content so it
-  // never pollutes the value's own gather — §11's tombstone-is-separate discipline, applied to adoption).
+  // never pollutes the value's own gather — §11's erasure-is-separate discipline, applied to adoption).
   const adopted = signClaims(
     {
       timestamp: src.claims.timestamp, // inherited — content-addressed, idempotent, honest ordering
@@ -327,7 +327,7 @@ export async function promoteImpl(
   // undo it — but it must not report `promoted` over a delta no reader can resolve either (H7: the
   // caller cannot tell success from a dead id). So it refuses and names the strike. An ERASED adoption
   // is a different rung and needs no branch: the delta is absent, so the append below meets its own
-  // tombstone and the promise "an erased adoption stays dead" is unchanged.
+  // erasure and the promise "an erased adoption stays dead" is unchanged.
   const live = new Map(gw.adoptions().map((a) => [a.sourceDelta, a.adoptedDelta]));
   if (live.get(deltaId) === adopted.id && gw.reactor.get(adopted.id) !== undefined) {
     const struckHere = dataStruck(gw.reactor, gw.operatorAuthor);

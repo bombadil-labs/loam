@@ -39,7 +39,7 @@ export interface StoreBackend {
 
   // Physically remove the named ids — the deliberate, loud exception to grow-only (SPEC §11:
   // erasure). MECHANICAL, not law: a purged delta may be appended again; refusing its return
-  // is the gateway's job (tombstones at admission), never a backend grudge. Unknown ids are
+  // is the gateway's job (erasures at admission), never a backend grudge. Unknown ids are
   // no-ops. Resolves to the count actually removed.
   purge(ids: Iterable<string>): Promise<number>;
 
@@ -54,7 +54,7 @@ export interface StoreBackend {
 
   // OPTIONAL batch companion to `holds`: of `ids`, which does this backend still hold — answered
   // in ONE pass, not one `holds` sweep per id. It exists for the tier where per-id is a cliff:
-  // `heal` hands the whole accumulated tombstone set to its byte verdict, and an archive whose
+  // `heal` hands the whole accumulated erasure set to its byte verdict, and an archive whose
   // `holds` pays a full directory sweep on every ABSENT id turns that verdict into O(dead × files).
   // A driver implements this only when its `holds` is not already cheap (the archive does; sqlite's
   // indexed lookup and memory's Set do not need to). Callers MUST fall back to per-id `holds` when

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   ArchiveBackend,
   Gateway,
-  tombstonesIn,
+  erasuresIn,
   MirrorBackend,
   SqliteBackend,
   assembleGenesis,
@@ -93,7 +93,7 @@ export async function openStore(name, opts = {}) {
       onLag: (err) => console.log(`  ${name}'s vault is lagging: ${err}`),
     });
     // the law reaches the vault: tombstoned ids are never replanted by a heal (SPEC §11)
-    const dead = tombstonesIn(
+    const dead = erasuresIn(
       [...(await backend.deltasSince(new Set())), ...(await archive.deltasSince(new Set()))],
       authorForSeed(seed),
     );

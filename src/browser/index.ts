@@ -44,7 +44,7 @@ export {
   type Verb,
 } from "../gateway/accounts.js";
 export { publicClaims } from "../gateway/public.js";
-export { eraseClaims, readTombstones } from "../gateway/erase.js";
+export { eraseClaims, readErasures } from "../gateway/erase.js";
 export {
   readTrustPolicy,
   trustClaims,

@@ -191,7 +191,7 @@ describe("T109 — the slate surface is reachable from the package barrel", () =
     expect(isGraveyard(grave)).toBe(true);
     expect(isSlateRecord(grave)).toBe(false);
 
-    // The §29.6 JOIN a cut stamps on each tombstone, and the extensional Term `termClaims`
+    // The §29.6 JOIN a cut stamps on each erasure, and the extensional Term `termClaims`
     // publishes — the two builders a consumer needs to stand a slate over their own ids.
     expect(slatePointer(CONTAINER)).toEqual({
       role: "slate",
@@ -314,8 +314,8 @@ describe("T109 — the slate surface is reachable from the package barrel", () =
     expect(cut.members.map((m) => m.member).sort()).toEqual(condemned);
     const perMember: readonly CutMemberReport[] = cut.members;
     for (const m of perMember) {
-      // The minted tombstone RESOLVES in the ground and is one — not just a plausible-looking id.
-      expect(loam.isTombstone(gw.reactor.get(m.tombstone)!.claims)).toBe(true);
+      // The minted erasure RESOLVES in the ground and is one — not just a plausible-looking id.
+      expect(loam.isErasure(gw.reactor.get(m.tombstone)!.claims)).toBe(true);
       const tiers: readonly TierVerdict[] = m.tiers;
       const verdicts: ByteVerdict[] = tiers.map((t) => t.holds);
       expect(verdicts).not.toContain(true); // no tier still holds the bytes

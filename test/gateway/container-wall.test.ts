@@ -4,14 +4,14 @@
 // wall's members live in a genuinely separate store, asserted for both the untrusted wall (the
 // quarantine's shape) and the curated wall (tenant isolation's default shape, §28.4). And §24.8's
 // erasure law reaches the GENERALIZED wall: a container opened through the Container surface —
-// not the quarantine preset — receives the tombstone + purge fan-out, byte-verified.
+// not the quarantine preset — receives the erasure + purge fan-out, byte-verified.
 
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
-import { readTombstones } from "../../src/gateway/erase.js";
+import { readErasures } from "../../src/gateway/erase.js";
 import { containerClaims } from "../../src/gateway/container.js";
 import { retraction } from "./narrowing.js";
 import { FERN, observed } from "../spike/garden.js";
@@ -134,10 +134,10 @@ describe("T32 criterion 14 — erasure reaches the generalized wall", () => {
 
     await gw.erase(secret.id, { reason: "the fan-out crosses the generalized wall" });
 
-    // Byte-verified on the wall's own tier, and the tombstone landed there (the wall remembers
+    // Byte-verified on the wall's own tier, and the erasure landed there (the wall remembers
     // the hole and refuses re-entry, exactly as the preset always has).
     expect(await wallStore.holds(secret.id)).toBe(false);
-    expect(readTombstones(c.gateway!.reactor, OP).has(secret.id)).toBe(true);
+    expect(readErasures(c.gateway!.reactor, OP).has(secret.id)).toBe(true);
     await c.drop();
     await gw.close();
   });

@@ -52,7 +52,7 @@ export interface QuarantinedRow {
   readonly preview: string;
   // If this row's claims PARSED (id-mismatch / invalid-signature) and carry `negates` refs: the ids
   // it strikes. A quarantined negation silently REVIVES its target(s) (a retracted value, a revoked
-  // grant, a tombstone), so naming them turns that silent revival into one the operator can act on
+  // grant, an erasure), so naming them turns that silent revival into one the operator can act on
   // (§25/H1). ALL targets, not the first — the substrate honors every `negates` pointer, so a
   // foreign delta may strike several at once. Absent when unparseable or not a negation.
   readonly negates?: readonly string[];
