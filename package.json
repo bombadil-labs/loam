@@ -78,6 +78,7 @@
     "graphql": "^17.0.2"
   },
   "devDependencies": {
+    "@bombadil/hermetic": "^0.2.0",
     "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/language": "^6.12.4",
     "@codemirror/lint": "^6.9.7",

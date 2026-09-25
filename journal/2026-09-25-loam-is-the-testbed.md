@@ -19,6 +19,8 @@ The aim behind the plan: apps exchange deltas, so data does not stay inside wall
 
 ## What we measured (main at aeeea24)
 
+`refactor/tools/` reproduces every number in this section.
+
 - `src/` has 53.5k lines. Comments are 49% of its non-whitespace bytes. Rhizomatic's TypeScript
   has 4.5k lines, with 19%.
 - 306 comment blocks name a ticket, a PR, a person or a date.
@@ -28,10 +30,10 @@ The aim behind the plan: apps exchange deltas, so data does not stay inside wall
   tests compare one door's answer with another door's answer.
 - Loam runs rhizomatic 0.8.0. The substrate is at 0.10.0. Loam uses no L0 packs, and no L6
   `Peer` or sync.
-- Hazard citations per 1,000 code lines: storage 22, erasure 12, containers 12, federation 8. The
-  doors, the CLI and the query surface have 3 to 5.
-- About 11.5k of Loam's 39.7k code lines sit in areas that SPEC-6 claims: trust (§3), protocol
-  (§4), admission (§5), federating semantics (§6) and data lifecycle (§7).
+- Hazard citations per 1,000 code lines: storage 22, erasure 15, containers 14, federation 10.
+  The HTTP doors, the query surface and the CLI have 3.6 to 5.5.
+- About 10k of Loam's 36k code lines sit in areas that SPEC-6 claims: trust (§3), protocol (§4),
+  admission (§5), federating semantics (§6) and data lifecycle (§7).
 - Hermetic: 24% of Loam's functions are already hermetic, but they hold only 8% of the code lines.
   A full lift typechecks and gives the same test results. In rhizomatic's TypeScript, only
   `http.ts` reaches ambient authority.
