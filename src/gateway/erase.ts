@@ -227,6 +227,91 @@ export function refusedIds(reactor: Reactor, operator: string | undefined): Set<
   return refused;
 }
 
+// What a reading must not show: every refused id, and, transitively, the target of a held negation
+// that is itself refused. Showing that target while hiding its negation would show a retracted claim
+// as live. A negation whose bytes are purged is gone, and its target revives: that is what erasing
+// a negation means.
+//
+// Only ids whose bytes are still HELD are returned: a purged id cannot be read anyway. So once every
+// purge completes, this set is empty again, and reads use warm materializations again.
+export function erasedFromReading(reactor: Reactor, operator: string | undefined): Set<string> {
+  const held = [...refusedIds(reactor, operator)].filter((id) => reactor.get(id) !== undefined);
+  return withHeldDownTargets(new Set(held), (id) => reactor.get(id));
+}
+
+// The same answer for a delta list assembled across several peers (a container scope over its
+// pools): the ids the list's own lawful erasures hide, and the targets their held negations hold
+// down. A pool can hold an erasure its parent has not seen yet. A pool can also own a channel, and
+// so hold its own local-control erasures; binding one needs a reactor, so when the list holds any,
+// a throwaway reactor over the list decides it. That cost is paid only in that case.
+export function erasedInDeltas(
+  deltas: readonly Delta[],
+  operator: string | undefined,
+): Set<string> {
+  const hidden = new Set<string>();
+  if (operator === undefined) return hidden;
+  const byId = new Map(deltas.map((d) => [d.id, d]));
+  // Only a local-control erasure whose target is in the list can hide anything here.
+  const localControls = deltas.filter((d) => {
+    if (!isTombstone(d.claims) || !inLocalContext(d, LOCAL_CONTROL)) return false;
+    const target = tombstoneTarget(d.claims);
+    return target !== undefined && byId.has(target);
+  });
+  if (localControls.length > 0) {
+    const probe = new Reactor();
+    for (const d of deltas) probe.ingest(d);
+    for (const d of localControls) {
+      const target = localEraseTarget(d, probe, operator);
+      if (target !== undefined && byId.has(target)) hidden.add(target);
+    }
+  }
+  for (const d of deltas) {
+    if (!isTombstone(d.claims) || inLocalContext(d, LOCAL_CONTROL)) continue;
+    if (d.claims.author !== operator) continue;
+    const { targetId, spokenBy, count } = tombstoneParts(d.claims);
+    if (targetId === undefined || count.erases !== 1 || count.spokenBy !== 1) continue;
+    const target = byId.get(targetId);
+    if (target === undefined || isTombstone(target.claims)) continue; // an erasure is never erased
+    if (target.claims.author !== spokenBy) continue; // the order must name its target's real author
+    hidden.add(targetId);
+  }
+  return withHeldDownTargets(hidden, (id) => byId.get(id));
+}
+
+// What a reading over a COMPOSED scope (a container over its pools) must not show: every id this
+// store refuses that appears anywhere in the scope, even when this store does not hold those bytes
+// itself; the scope's own lawful erasures; and the targets their held negations hold down.
+export function erasedInScope(
+  reactor: Reactor,
+  operator: string | undefined,
+  scope: readonly Delta[],
+): Set<string> {
+  const byId = new Map(scope.map((d) => [d.id, d]));
+  const hidden = erasedInDeltas(scope, operator);
+  for (const id of refusedIds(reactor, operator)) if (byId.has(id)) hidden.add(id);
+  return withHeldDownTargets(hidden, (id) => byId.get(id));
+}
+
+// Adds, transitively, the target of every hidden negation that `get` can still find.
+function withHeldDownTargets(
+  hidden: Set<string>,
+  get: (id: string) => Delta | undefined,
+): Set<string> {
+  const pending = [...hidden];
+  while (pending.length > 0) {
+    const negation = get(pending.pop()!);
+    if (negation === undefined) continue;
+    for (const p of negation.claims.pointers) {
+      if (p.role !== "negates" || p.target.kind !== "delta") continue;
+      const target = p.target.deltaRef.delta;
+      if (hidden.has(target) || get(target) === undefined) continue;
+      hidden.add(target);
+      pending.push(target);
+    }
+  }
+  return hidden;
+}
+
 // The ids that erasures inside one ingest batch refuse. The caller passes only members it has
 // ALREADY accepted (verified, lawful, admitted), so a forged or refused erasure never counts,
 // and a member's id is the hash of its content, so no forged copy can stand in for the target.
@@ -284,8 +369,11 @@ function boundErasures(
   if (operator === undefined) return []; // an ungoverned store honors no erasure at all
   const negated = honorNegations ? lawfulNegated(reactor, operator) : () => false;
   const out: Delta[] = [];
-  for (const delta of reactor.snapshot()) {
-    if (!isTombstone(delta.claims)) continue;
+  // Every erasure points at ERASE_ENTITY, so the by-target index finds them all without a full
+  // walk of the delta set (H8). The index is written with the set, so it cannot lag it.
+  for (const id of reactor.byTarget(ERASE_ENTITY)) {
+    const delta = reactor.get(id);
+    if (delta === undefined || !isTombstone(delta.claims)) continue;
     if (inLocalContext(delta, LOCAL_CONTROL)) {
       // Generic preplanted strikes never become local forgiveness when a marked order lands.
       if (localEraseTarget(delta, reactor, operator) === undefined) continue;

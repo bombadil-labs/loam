@@ -314,12 +314,15 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
   await gw.backend.append(batch); // a throw here means NOTHING was ingested or served
   let accepted = 0;
   let duplicates = 0;
+  const fresh: Delta[] = [];
   for (const d of batch) gw.justPersisted.add(d.id);
   try {
     for (const d of batch) {
       const result = gw.ingestVia(d);
-      if (result.status === "accepted") accepted += 1;
-      else duplicates += 1; // "rejected" is unreachable: the batch was validated above
+      if (result.status === "accepted") {
+        accepted += 1;
+        fresh.push(d);
+      } else duplicates += 1; // "rejected" is unreachable: the batch was validated above
     }
   } finally {
     // Always cleared — duplicates never hit the raw stream, and a mid-ingest throw must not
@@ -332,7 +335,7 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
   // own deltas moves the watched entity's materialization, so no sink fires and no open stream would
   // ever narrow. Readers wake with `done` and resubscribe into the narrowed gather. Already-delivered
   // frames are not recalled; nothing can recall them, and §29.3's asymmetry already says so.
-  if (landsReadClosure(gw, batch, Date.now())) {
+  if (landsReadClosure(gw, fresh, Date.now())) {
     for (const channel of [...gw.channels]) await channel.return();
   }
   return { accepted, duplicates };
@@ -685,7 +688,8 @@ export async function federateImpl(
   // read access to the target, so a distinguishable refusal would announce that something exists and
   // is on its way out. It costs nothing to be uniform — this door already returns counts and no
   // message, so a slate refusal is indistinguishable from any other rejection.
-  const slates = readSlates(gw.reactor, gw.operatorAuthor, Date.now());
+  const now = Date.now(); // one moment for the slate check and the stream closure below
+  const slates = readSlates(gw.reactor, gw.operatorAuthor, now);
   const lawful: Delta[] = [];
   let admitted: Delta[] = [];
   for (const d of all) {
@@ -753,6 +757,19 @@ export async function federateImpl(
     } finally {
       for (const d of admitted) gw.justPersisted.delete(d.id);
     }
+  }
+  // As at append: a batch that closes reads (a slate record or an erasure) touches no watched
+  // entity, so open streams end and readers resubscribe into the narrowed reading.
+  const freshIds = new Set(acceptedIds);
+  if (
+    freshIds.size > 0 &&
+    landsReadClosure(
+      gw,
+      admitted.filter((d) => freshIds.has(d.id)),
+      now,
+    )
+  ) {
+    for (const channel of [...gw.channels]) await channel.return();
   }
   const accepted = acceptedIds.length;
   // "accepted" counts deltas NEWLY ingested — a duplicate verified but merged into what was

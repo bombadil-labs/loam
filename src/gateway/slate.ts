@@ -56,6 +56,7 @@ import { ESM_RESIDENCY_DISCLOSURE, ERASURE_NON_CLAIMS } from "./erase.js";
 import {
   UNSWEPT_AUTH_SURFACES,
   eraseImpl,
+  erasedFromReading,
   erasureOutstanding,
   isTombstone,
   survivingTombstones,
@@ -1049,7 +1050,10 @@ export function egressWithheld(gw: Gateway, now: number): Set<string> {
 /** What READ closure withholds from every gather that answers a read DOOR. */
 export function readClosedIds(gw: Gateway, now: number): Set<string> {
   requireMoment(now, "a read door");
-  return closureIds(gw.reactor, readSlates(gw.reactor, gw.operatorAuthor, now), "read");
+  const closed = closureIds(gw.reactor, readSlates(gw.reactor, gw.operatorAuthor, now), "read");
+  // Erased ids are never read, even while a purge has not yet removed their bytes.
+  for (const id of erasedFromReading(gw.reactor, gw.operatorAuthor)) closed.add(id);
+  return closed;
 }
 
 /**
@@ -1090,9 +1094,15 @@ const groundWithout = (ground: DeltaSet, closed: ReadonlySet<string>): DeltaSet 
  * materialization, so the sink never fires and the narrowing never takes effect. Asked cheaply —
  * a batch with no slate record in it pays nothing.
  */
-export function landsReadClosure(gw: Gateway, batch: readonly Delta[], now: number): boolean {
-  if (!batch.some((d) => isSlateRecord(d.claims))) return false;
-  return readClosedIds(gw, now).size > 0;
+export function landsReadClosure(gw: Gateway, fresh: readonly Delta[], now: number): boolean {
+  // `fresh` is only what this batch NEWLY ingested: a duplicate changes nothing, and must not end
+  // anyone's stream. An erasure narrows a reading only when its target's bytes are held here.
+  if (fresh.some((d) => isSlateRecord(d.claims))) return readClosedIds(gw, now).size > 0;
+  return fresh.some((d) => {
+    if (!isTombstone(d.claims)) return false;
+    const target = tombstoneTarget(d.claims);
+    return target !== undefined && gw.reactor.get(target) !== undefined;
+  });
 }
 
 // --- the cut -------------------------------------------------------------------------------------
