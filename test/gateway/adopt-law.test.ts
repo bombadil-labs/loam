@@ -400,7 +400,7 @@ describe("T33 criterion 2 — the ordinary publish path, with the source's times
     // re-minted id rather than minting a stranger to the erasure.
     const target = blessed.find((d) => d.claims.timestamp === parts.definition.claims.timestamp)!;
     await gw.erase(target.id, { reason: "the operator withdrew the blessing" });
-    await expect(gw.adoptLaw(version, "Post")).rejects.toThrow(/erased|tombstone/);
+    await expect(gw.adoptLaw(version, "Post")).rejects.toThrow(/erased|erasure/);
     await wall.drop();
     await gw.close();
   });

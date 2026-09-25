@@ -568,7 +568,7 @@ describe("T207 — a sync that accepts deltas stamps its own custody", () => {
   it("a quiet poll against a door that will not name its arrivals does not refuse", async () => {
     // The refusal below says "the peer's deltas landed". On a poll that accepted nothing that
     // sentence is false, and a false refusal on every quiet poll of a faulty channel would bury the
-    // one that is true. The fault is not forgiven — it is caught on the first poll that accepts.
+    // one that is true. The fault is not negated — it is caught on the first poll that accepts.
     const alice = await store(ALICE_SEED);
     const me = await store(ME_SEED);
     try {

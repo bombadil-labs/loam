@@ -226,11 +226,11 @@ export async function receiveChannelOfferInCommit(
 }
 
 /** Marked erasures reach this only from the operated erase service or verified attached fan-out. */
-export async function appendLocalErasure(gw: Gateway, tombstone: Delta): Promise<void> {
-  if (localEraseTarget(tombstone, gw.reactor, gw.operatorAuthor) === undefined)
+export async function appendLocalErasure(gw: Gateway, erasure: Delta): Promise<void> {
+  if (localEraseTarget(erasure, gw.reactor, gw.operatorAuthor) === undefined)
     throw new Error("invalid local erasure control");
-  await appendValidated(gw, [tombstone]);
-  if (!sameVerifiedDelta(gw.reactor.get(tombstone.id), tombstone))
+  await appendValidated(gw, [erasure]);
+  if (!sameVerifiedDelta(gw.reactor.get(erasure.id), erasure))
     throw new Error("local erasure did not ingest");
 }
 async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<AppendReceipt> {
@@ -257,7 +257,7 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
     }
     if (dead.has(d.id)) {
       throw new Error(
-        `append rejected: delta ${d.id} was erased — a tombstone at ${ERASE_ENTITY} refuses ` +
+        `append rejected: delta ${d.id} was erased — an erasure at ${ERASE_ENTITY} refuses ` +
           `its return, and an erasure is permanent`,
       );
     }

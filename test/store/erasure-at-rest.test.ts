@@ -205,7 +205,7 @@ describe("§11 at rest — sqlite", () => {
     await reopened.close();
   });
 
-  it("an UNREADABLE debt row owes for everyone, and a landed checkpoint forgives it", async () => {
+  it("an UNREADABLE debt row owes for everyone, and a landed checkpoint negates it", async () => {
     // The debt row exists but cannot name its ids: every id is unprovable, not none of them (H9).
     const dir = scratch();
     const file = join(dir, "store.db");
@@ -221,7 +221,7 @@ describe("§11 at rest — sqlite", () => {
 
     const reopened = new SqliteBackend(file);
     expect(await reopened.holds(canary(MARKER, 9999).id)).toBe(true); // unknown debt: all unprovable
-    // The next successful checkpoint forgives it — any purge drives one.
+    // The next successful checkpoint negates it — any purge drives one.
     await reopened.purge([canary(MARKER, 9999).id]);
     expect(await reopened.holds(canary(MARKER, 9999).id)).toBe(false);
     await reopened.close();

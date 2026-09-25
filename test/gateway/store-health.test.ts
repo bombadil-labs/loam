@@ -154,8 +154,8 @@ describe("T70: gateway.health() — the live byte verdict over every erasure pro
     // behind its gateway, as a crash or a partial purge would leave them.
     const poolBackend = new MemoryBackend();
     const pool = await boot(poolBackend);
-    const tombstone = (await backend.deltasSince(new Set())).find((d) => isErasure(d.claims))!;
-    await pool.append([tombstone]); // the promise arrived...
+    const erasure = (await backend.deltasSince(new Set())).find((d) => isErasure(d.claims))!;
+    await pool.append([erasure]); // the promise arrived...
     // ...and provably LANDED (else this phase silently degrades into a second delivery-owed
     // test and the pool-level BYTE probe goes unpinned) — then the bytes are still at rest.
     expect((await pool.health()).erasure.promised).toBe(1);
@@ -178,7 +178,7 @@ describe("T70: gateway.health() — the live byte verdict over every erasure pro
     gw.quarantinePools.clear();
     const muteBackend = new MemoryBackend();
     const mute = await boot(muteBackend);
-    await mute.append([tombstone]);
+    await mute.append([erasure]);
     muteBackend.holds = () => Promise.reject(new Error("pool offline"));
     gw.quarantinePools.add(mute);
     const unproven = await gw.health();

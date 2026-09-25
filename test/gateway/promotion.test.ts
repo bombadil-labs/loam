@@ -183,7 +183,7 @@ describe("§24.3 promote-outputs — adopt a quarantine's output as the operator
     await primary.close();
   });
 
-  it("an ERASED adoption stays dead: re-promoting the same output mints the same id, and the tombstone refuses it", async () => {
+  it("an ERASED adoption stays dead: re-promoting the same output mints the same id, and the erasure refuses it", async () => {
     const primary = await bootPrimary();
     const q = await primary.openQuarantine();
     const fact = foreignFact("adopted, regretted, erased", 3600);
@@ -193,7 +193,7 @@ describe("§24.3 promote-outputs — adopt a quarantine's output as the operator
     // The pool's source delta survives the fan-out (only the adopted id was erased) — and that is not a
     // door back in: the inherited timestamp makes re-promotion re-mint the SAME id, which the erasure
     // refuses. Without inheritance a fresh timestamp would mint a fresh id and walk the content past §11.
-    await expect(primary.promote(q.gateway, fact.id)).rejects.toThrow(/erased|tombstone/);
+    await expect(primary.promote(q.gateway, fact.id)).rejects.toThrow(/erased|erasure/);
     await q.drop();
     await primary.close();
   });
@@ -365,7 +365,7 @@ describe("§24.3/§27 — a STRUCK adoption record leaves the trail and lets pro
     const reactor = new Reactor();
     reactor.ingest(record);
     reactor.ingest(signClaims(makeNegationClaims(GUEST, 2000, record.id, "not yours"), GUEST_SEED));
-    // The stranger's negation is inert — only the record author's own strike forgives (H1 doctrine).
+    // The stranger's negation is inert — only the record author's own strike negates (H1 doctrine).
     expect(readAdoptions(reactor).some((a) => a.adoptedDelta === "adopted-id")).toBe(true);
     reactor.ingest(signClaims(makeNegationClaims(OP, 3000, record.id, "mine"), OP_SEED));
     expect(readAdoptions(reactor).some((a) => a.adoptedDelta === "adopted-id")).toBe(false);

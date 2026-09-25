@@ -533,8 +533,8 @@ export function restoreCheckpoint(storage, lesson, opts = {}) {
 
   // A NAMED GAP, and the same one twice. If the refused row is itself a STRIKE, the claim it
   // struck comes back without it and reads live again — the store lying upward at a restore edge
-  // (H1). And the `forgives` test below follows exactly ONE link: a strike of a strike of a
-  // receipt is not recognized as forgiveness and would be deleted with everything else.
+  // (H1). And the `negates` test below follows exactly ONE link: a strike of a strike of a
+  // receipt is not recognized as negation and would be deleted with everything else.
   //
   // Nothing in the arc reaches either: both need an erasure of a strike, or a chain three deep,
   // which no lesson performs and no door but the console offers. Neither is closed here because
@@ -562,7 +562,7 @@ export function restoreCheckpoint(storage, lesson, opts = {}) {
         `space and try again.`,
     };
   }
-  // AND THE ERASURE ORDERS STAY. A tombstone written after this checkpoint is not in it, so a
+  // AND THE ERASURE ORDERS STAY. An erasure written after this checkpoint is not in it, so a
   // plain "remove what the checkpoint did not have" deletes the store's record THAT it forgot —
   // and with it the standing order that refuses those bytes at the door. The undo may take back
   // the student's work; it may not take back a forgetting.
@@ -571,7 +571,7 @@ export function restoreCheckpoint(storage, lesson, opts = {}) {
   const present = rowKeys(storage).filter((key) => !wanted.has(key));
   // Every erasure order that will be STANDING when this is over — the ones already outside the
   // checkpoint, AND the ones the blob is putting back. A guard that looked only outside would
-  // keep a tombstone restored from the blob while deleting the strike that forgave it, which
+  // keep an erasure restored from the blob while deleting the strike that forgave it, which
   // re-asserts a forgetting the operator had withdrawn: the same law, broken on the other side.
   for (const [key, value] of wanted) {
     if (isErasureOrder(value)) orders.add(key.slice(STORE_PREFIX.length));
@@ -581,13 +581,13 @@ export function restoreCheckpoint(storage, lesson, opts = {}) {
   }
   for (const key of present) {
     const id = key.slice(STORE_PREFIX.length);
-    // A receipt stays — AND so does anything that strikes one. Striking a tombstone is how an
-    // operator FORGIVES an erasure, so keeping the order while deleting its forgiveness would
+    // A receipt stays — AND so does anything that strikes one. Striking an erasure is how an
+    // operator FORGIVES an erasure, so keeping the order while deleting its negation would
     // re-assert a forgetting that had been withdrawn: the mirror of the bug this repairs.
-    const forgives = wirePointers(storage.getItem(key)).some(
+    const negates = wirePointers(storage.getItem(key)).some(
       (p) => typeof p?.target?.delta === "string" && orders.has(p.target.delta),
     );
-    if (orders.has(id) || forgives) {
+    if (orders.has(id) || negates) {
       keptOrders.push(id);
       continue;
     }

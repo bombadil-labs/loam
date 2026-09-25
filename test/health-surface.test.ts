@@ -2,7 +2,7 @@
 // the barrel IS the package, so a name absent from `src/index.ts` is a name no consumer can import
 // except by a deep `dist/gateway/*.js` path that carries no semver promise. `Gateway.health()` is
 // the DOOR; this rail pins that the report it answers — `StoreHealth` and the component shapes it
-// is made of (`ErasureHealth`, `SlateHealth`, `ForgivenHealth`) — is public vocabulary, and that
+// is made of (`ErasureHealth`, `SlateHealth`, `NegatedHealth`) — is public vocabulary, and that
 // the plumbing computing it is not.
 //
 // A NEW file rather than an extension of `test/index-surface.test.ts` or `test/slate-surface.test.ts`,
@@ -30,7 +30,7 @@ import {
   assembleGenesis,
   entityGatherBody,
   type ErasureHealth,
-  type ForgivenHealth,
+  type NegatedHealth,
   type SlateHealth,
   type StoreHealth,
 } from "../src/index.js";
@@ -51,7 +51,7 @@ const healthDoor: (gw: Gateway, now?: number) => Promise<StoreHealth> = (gw, now
 // exported `StoreHealth` alone would leave `report.slates` a shape no consumer can annotate.
 const erasureOf: (report: StoreHealth) => ErasureHealth = (report) => report.erasure;
 const slatesOf: (report: StoreHealth) => SlateHealth = (report) => report.slates;
-const forgivenOf: (report: StoreHealth) => ForgivenHealth = (report) => report.forgiven;
+const forgivenOf: (report: StoreHealth) => NegatedHealth = (report) => report.negated;
 
 // --- the world, built from the barrel alone ------------------------------------------------------
 
@@ -85,11 +85,11 @@ describe("T111 — the health report is nameable from the package barrel", () =>
       "healthImpl",
       "outstandingAmong",
       "slateHealth",
-      "forgivenHealth",
+      "negatedHealth",
       "StoreHealth",
       "ErasureHealth",
       "SlateHealth",
-      "ForgivenHealth",
+      "NegatedHealth",
     ]) {
       expect(names).not.toContain(internal);
     }
@@ -132,9 +132,9 @@ describe("T111 — the health report is nameable from the package barrel", () =>
     const slates: SlateHealth = slatesOf(after);
     expect(slates.lapsed).toBe(0);
     expect(slates.lapsedIds).toEqual([]);
-    const forgiven: ForgivenHealth = forgivenOf(after);
-    expect(forgiven.present).toBe(0);
-    expect(forgiven.unreadable).toEqual([]);
+    const negated: NegatedHealth = forgivenOf(after);
+    expect(negated.present).toBe(0);
+    expect(negated.unreadable).toEqual([]);
     expect(after.status).toBe("ok");
 
     await gw.close();

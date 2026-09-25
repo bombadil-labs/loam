@@ -11,7 +11,7 @@ export interface DeltaClass {
     | "schema"
     | "fact"
     | "negation"
-    | "tombstone"
+    | "erasure"
     | "public"
     | "trust"
     | "grant"

@@ -356,7 +356,7 @@ describe("§30 criterion 14: withdrawal darkens the emission and the route toget
     await gw.close();
   });
 
-  it("erasing the binding does the same, and the tombstone refuses its re-entry", async () => {
+  it("erasing the binding does the same, and the erasure refuses its re-entry", async () => {
     const gw = await ready();
     const binding = gw.renderers()[0]!;
     const delta = [...gw.reactor.snapshot()].find((d) => d.id === binding.deltaId)!;
@@ -367,7 +367,7 @@ describe("§30 criterion 14: withdrawal darkens the emission and the route toget
     // of the very bytes is refused rather than quietly re-admitted.
     expect([...gw.reactor.snapshot()].some((d) => d.id === binding.deltaId)).toBe(false);
     await expect(gw.append([delta])).rejects.toThrow(
-      /a tombstone at loam:erasure refuses its return/,
+      /an erasure at loam:erasure refuses its return/,
     );
     // …and a named live bystander survives: the fact the renderer read is untouched.
     expect(

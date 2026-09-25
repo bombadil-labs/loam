@@ -1,5 +1,5 @@
 // T64 (SPEC §29) — what a SLATE IS, at both levels: the two deltas, the knobs the door enforces,
-// the membership frozen by ENFORCEMENT rather than by promise, the required window, and forgiveness
+// the membership frozen by ENFORCEMENT rather than by promise, the required window, and negation
 // on both sides of the cut.
 //
 // Criteria 1, 2, 3, 15, 17. The door rails here are the ones that must hold before any closure
@@ -481,7 +481,7 @@ describe("T64 criterion 3 — `closes` and `deadline` are required, and `none` i
   });
 });
 
-describe("T64 criterion 15 — forgiveness, both sides of the cut", () => {
+describe("T64 criterion 15 — negation, both sides of the cut", () => {
   it("BEFORE the cut: striking the declaration reopens every door, and no byte moved", async () => {
     const gw = await bootSlateStore();
     const condemned = observed(FERN, "height", 30, 1000, OP_SEED);
@@ -510,36 +510,34 @@ describe("T64 criterion 15 — forgiveness, both sides of the cut", () => {
     await gw.close();
   });
 
-  it("AFTER the cut: striking a tombstone permits the id's return but restores no bytes", async () => {
+  it("AFTER the cut: striking an erasure permits the id's return but restores no bytes", async () => {
     const gw = await bootSlateStore();
     const condemned = observed(FERN, "height", 30, 1000, OP_SEED);
     const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
     await gw.append([condemned, bystander]);
     const stood = await standSlate(gw, { members: [condemned], closes: ["egress", "cite"] });
     const report = await gw.cut(stood.container, { now: BEFORE_DEADLINE });
-    const tombstone = report.members[0]!.tombstone;
+    const erasure = report.members[0]!.erasure;
     expect(await gw.backend.holds(condemned.id)).toBe(false);
 
-    await gw.append([strike(tombstone, 70_000)]);
+    await gw.append([strike(erasure, 70_000)]);
 
     // The graveyard is UNTOUCHED — it records an event that happened, not a standing assertion
-    // about the present — and the bytes are still gone: forgiveness cannot restore what nobody holds.
+    // about the present — and the bytes are still gone: negation cannot restore what nobody holds.
     expect(gw.graveyards().map((g) => g.id)).toEqual([report.graveyard]);
     expect(await gw.backend.holds(condemned.id)).toBe(false);
-    // The DURABLE arithmetic reports it as forgiven WITH its strike id rather than as a missing
-    // erasure: the graveyard records an event that happened, and forgiveness is a later event.
+    // The DURABLE arithmetic reports it as negated WITH its strike id rather than as a missing
+    // erasure: the graveyard records an event that happened, and negation is a later event.
     const check = graveyardCompleteness(gw.reactor, OP, report.graveyard);
-    expect(check.forgiven).toEqual([
-      { member: condemned.id, strike: strike(tombstone, 70_000).id },
-    ]);
+    expect(check.negated).toEqual([{ member: condemned.id, strike: strike(erasure, 70_000).id }]);
     expect(check.missing).toEqual([]);
     expect(check.holds).toBe(false);
     expect(check.cutCompleted).toBe(true);
-    // And the re-derived receipt reports FORGIVEN with its strike id, not still-forgotten.
+    // And the re-derived receipt reports NEGATED with its strike id, not still-forgotten.
     const receipt = await gw.receipt(report.graveyard, { now: AFTER_DEADLINE });
     const member = receipt.members.find((m) => m.member === condemned.id)!;
-    expect(member.forgiven).toBe(strike(tombstone, 70_000).id);
-    expect(member.tombstone).toBeUndefined();
+    expect(member.negated).toBe(strike(erasure, 70_000).id);
+    expect(member.erasure).toBeUndefined();
     expect(member.presentAgain).toBe(false);
     // Two-sided: the bystander was never touched, on any tier or in any report.
     expect(await gw.backend.holds(bystander.id)).toBe(true);
@@ -570,7 +568,7 @@ describe("T64 criterion 17 — the mint is new vocabulary only, so no §20 step 
     await second.close();
   });
 
-  it("a tombstone with NO slate pointer still binds at both doors and in readErasures", async () => {
+  it("an erasure with NO slate pointer still binds at both doors and in readErasures", async () => {
     const gw = await bootSlateStore();
     const target = observed(FERN, "height", 30, 1000, OP_SEED);
     await gw.append([target]);
@@ -594,7 +592,7 @@ describe("T64 criterion 17 — the mint is new vocabulary only, so no §20 step 
       unresolved: [],
       disagreeing: [],
     });
-    expect(health.forgiven).toEqual({ count: 0, present: 0, ids: [], unreadable: [] });
+    expect(health.negated).toEqual({ count: 0, present: 0, ids: [], unreadable: [] });
     // Two-sided: a MALFORMED slate pointer is refused, so the optionality is not a hole.
     const bad = signClaims(
       {

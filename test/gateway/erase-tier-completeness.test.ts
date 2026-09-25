@@ -39,7 +39,7 @@ afterAll(() => {
 // `grove`, opened over a mirror so the tiers are addressable from the test.
 async function groveOn(
   backend: StoreBackend,
-): Promise<{ gateway: Gateway; fact: Delta; tombstones: () => number }> {
+): Promise<{ gateway: Gateway; fact: Delta; erasures: () => number }> {
   const gateway = await Gateway.open(backend, { seed: OP_SEED });
   gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
   await gateway.append([
@@ -50,7 +50,7 @@ async function groveOn(
   return {
     gateway,
     fact,
-    tombstones: () => [...gateway.reactor.snapshot()].filter((d) => isErasure(d.claims)).length,
+    erasures: () => [...gateway.reactor.snapshot()].filter((d) => isErasure(d.claims)).length,
   };
 }
 
@@ -194,7 +194,7 @@ describe("erase is complete only when every TIER is clean", () => {
     await gateway.close();
   });
 
-  it("a refused erase still records the tombstone, and the re-run after repair mints no second one", async () => {
+  it("a refused erase still records the erasure, and the re-run after repair mints no second one", async () => {
     // The erasure log is append-only: a failed sweep leaves exactly one erasure behind, and
     // the operator's re-run finishes the job without growing the log.
     const primary = new MemoryBackend();
@@ -207,18 +207,18 @@ describe("erase is complete only when every TIER is clean", () => {
       close: () => mirrorInner.close(),
       purge: (ids) => (retain ? Promise.resolve(0) : mirrorInner.purge(ids)),
     };
-    const { gateway, fact, tombstones } = await groveOn(new MirrorBackend(primary, flakyMirror));
+    const { gateway, fact, erasures } = await groveOn(new MirrorBackend(primary, flakyMirror));
 
     await expect(gateway.erase(fact.id, { reason: "the subject asked" })).rejects.toThrow(
       /STILL HELD|not complete/i,
     );
-    expect(tombstones()).toBe(1);
+    expect(erasures()).toBe(1);
 
     retain = false; // the operator fixed the mount and re-ran, exactly as the error instructs
     await expect(gateway.erase(fact.id, { reason: "the subject asked" })).resolves.toMatchObject({
       erased: fact.id,
     });
-    expect(tombstones()).toBe(1); // still ONE — a fresh timestamp would have minted a second
+    expect(erasures()).toBe(1); // still ONE — a fresh timestamp would have minted a second
     await gateway.close();
   });
 });
@@ -227,7 +227,7 @@ describe("erase is complete only when every TIER is clean", () => {
 // and the id stays refused forever, so an erased id can never return through a write path.
 // NOT COVERED: an erase that anchors on a negated erasure while the bytes are back. No door can
 // bring them back now; a tier that kept them unasked would reach it, and no test builds that.
-describe("the retry anchor honors forgiveness", () => {
+describe("the retry anchor honors negation", () => {
   const strike = async (gateway: Gateway, targetId: string): Promise<void> => {
     const tomb = [...gateway.reactor.snapshot()].find(
       (d) =>
@@ -250,12 +250,12 @@ describe("the retry anchor honors forgiveness", () => {
     await gateway.close();
   });
 
-  it("a struck tombstone is not a licence to report a completion: erase with no target REFUSES", async () => {
+  it("a struck erasure is not a licence to report a completion: erase with no target REFUSES", async () => {
     const { gateway, fact } = await groveOn(
       new MirrorBackend(new MemoryBackend(), new MemoryBackend()),
     );
     await gateway.erase(fact.id, { reason: "the subject asked" });
-    await strike(gateway, fact.id); // forgiven, and NOT re-admitted — the store holds nothing
+    await strike(gateway, fact.id); // negated, and NOT re-admitted — the store holds nothing
 
     // Without the surviving-erasure rule this returns `{ erased }` for work never done (H7).
     await expect(gateway.erase(fact.id)).rejects.toThrow(/nothing to erase/);
@@ -266,7 +266,7 @@ describe("the retry anchor honors forgiveness", () => {
 // The retry bypass is bounded by "is there anything left to sweep": a surviving erasure from a
 // completed erasure months ago must not suppress the existence guard forever — that would return
 // `{ erased }` for work never done (H7). So these two cases must differ.
-describe("the retry bypass is for an OUTSTANDING erasure, not for any tombstone", () => {
+describe("the retry bypass is for an OUTSTANDING erasure, not for any erasure", () => {
   it("a second erase of a CLEANLY erased id still refuses", async () => {
     const { gateway, fact } = await groveOn(
       new MirrorBackend(new MemoryBackend(), new MemoryBackend()),
@@ -292,7 +292,7 @@ describe("the retry bypass is for an OUTSTANDING erasure, not for any tombstone"
       close: () => mirrorInner.close(),
       purge: (ids) => (retain ? Promise.resolve(0) : mirrorInner.purge(ids)),
     };
-    const { gateway, fact, tombstones } = await groveOn(new MirrorBackend(primary, flaky));
+    const { gateway, fact, erasures } = await groveOn(new MirrorBackend(primary, flaky));
 
     await expect(gateway.erase(fact.id)).rejects.toThrow(/STILL HELD/);
     expect(await primary.holds(fact.id)).toBe(false); // the reactor has lost the target...
@@ -300,11 +300,11 @@ describe("the retry bypass is for an OUTSTANDING erasure, not for any tombstone"
 
     retain = false;
     await expect(gateway.erase(fact.id)).resolves.toMatchObject({ erased: fact.id });
-    expect(tombstones()).toBe(1);
+    expect(erasures()).toBe(1);
     await gateway.close();
   });
 
-  it("the manifest never cites the erasure's own tombstone, on the first call or a retry", async () => {
+  it("the manifest never cites the erasure's own erasure, on the first call or a retry", async () => {
     const { gateway, fact } = await groveOn(
       new MirrorBackend(new MemoryBackend(), new MemoryBackend()),
     );

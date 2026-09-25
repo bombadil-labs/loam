@@ -1251,7 +1251,7 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     expect(hidden.has(bystander.id)).toBe(false);
   });
 
-  it("erase(received) forgets that operand contribution, preserves bystanders and marks the exact tombstone", async () => {
+  it("erase(received) forgets that operand contribution, preserves bystanders and marks the exact erasure", async () => {
     const { gw } = await home();
     const { ch, pool, offering } = await channel(gw);
     const a = fact(),
@@ -1269,32 +1269,32 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     expect(gw.reactor.get(bystander.id)).toBeDefined();
     expect(ids(opened(gw, ch.name).received)).toEqual([b.id]);
     expect(pool.reactor.get(a.id)).toBeDefined();
-    const tombstone = gw.reactor.get(report.tombstone)!;
-    expect(ref(tombstone, "erases")).toBe(target.id);
+    const erasure = gw.reactor.get(report.erasure)!;
+    expect(ref(erasure, "erases")).toBe(target.id);
     expect(
-      tombstone.claims.pointers.filter(
+      erasure.claims.pointers.filter(
         (pt) => pt.target.kind === "entity" && pt.target.entity.context === CONTROL,
       ),
     ).toEqual([e("local-control", target.id, CONTROL)]);
-    expect(value(tombstone, "local-control-version")).toBe(1);
-    expect(value(tombstone, "local-control-kind")).toBe("erase");
-    expect(verifyDelta(tombstone)).toBe("verified");
-    expect(ref(tombstone, "erases")).not.toBe(bystander.id);
+    expect(value(erasure, "local-control-version")).toBe(1);
+    expect(value(erasure, "local-control-kind")).toBe("erase");
+    expect(verifyDelta(erasure)).toBe("verified");
+    expect(ref(erasure, "erases")).not.toBe(bystander.id);
     // Legitimate host fan-out must retain the same marked signed control in its attached pool.
-    expect(pool.reactor.get(tombstone.id)).toEqual(tombstone);
-    const forgiveness = strike(tombstone),
-      forgivenessAgain = strike(forgiveness);
-    await expect(gw.append([forgiveness])).rejects.toThrow();
+    expect(pool.reactor.get(erasure.id)).toEqual(erasure);
+    const negation = strike(erasure),
+      forgivenessAgain = strike(negation);
+    await expect(gw.append([negation])).rejects.toThrow();
     expect(
       (
-        await gw.federate([forgivenessAgain, forgiveness], {
+        await gw.federate([forgivenessAgain, negation], {
           ids: true,
           admittedIds: true,
           admit: () => true,
         })
       ).admittedIds,
     ).toEqual([]);
-    await expect(gw.append([signed(eraseClaims(tombstone.id, OP, OP, 11000))])).rejects.toThrow();
+    await expect(gw.append([signed(eraseClaims(erasure.id, OP, OP, 11000))])).rejects.toThrow();
     expect(ids(opened(gw, ch.name).received)).toEqual([b.id]);
   });
   it("erasing a received-strike event deliberately exposes earlier received source support", async () => {
@@ -1456,7 +1456,7 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     expect(localChannelEvidence(gw, ch.name).state).toBe("unavailable");
     expect(gw.channelPools.has(ch.name)).toBe(false);
   });
-  it("failed purge's effective marked tombstone suppresses held event bytes; generic forgiveness still refuses", async () => {
+  it("failed purge's effective marked erasure suppresses held event bytes; generic negation still refuses", async () => {
     const { gw, primary } = await home();
     const { ch, offering } = await channel(gw);
     offering.push(fact());
@@ -1467,13 +1467,13 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     expect(gw.reactor.get(receipt.id)).toBeDefined();
     expect(await primary.holds(receipt.id)).toBe(true);
     expect(opened(gw, ch.name).received).toEqual([]);
-    const tombstone = [...gw.reactor.snapshot()].find(
+    const erasure = [...gw.reactor.snapshot()].find(
       (d) => inContext(d, CONTROL) && ref(d, "erases") === receipt.id,
     )!;
-    expect(tombstone).toBeDefined();
-    await expect(gw.append([strike(tombstone)])).rejects.toThrow();
+    expect(erasure).toBeDefined();
+    await expect(gw.append([strike(erasure)])).rejects.toThrow();
     expect(
-      (await gw.federate([strike(tombstone)], { ids: true, admittedIds: true, admit: () => true }))
+      (await gw.federate([strike(erasure)], { ids: true, admittedIds: true, admit: () => true }))
         .admittedIds,
     ).toEqual([]);
     expect(opened(gw, ch.name).received).toEqual([]);
@@ -1481,13 +1481,13 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     await gw.erase(receipt.id);
     expect(gw.reactor.get(receipt.id)).toBeUndefined();
   });
-  it("direct unattached eraseReplica cannot mint event deletion authority from a same-key fresh tombstone", async () => {
+  it("direct unattached eraseReplica cannot mint event deletion authority from a same-key fresh erasure", async () => {
     const { gw } = await home();
     const { ch, pool } = await channel(gw);
     const target = gw.reactor.get(opened(gw, ch.name).opening.id)!;
-    const tombstone = markedErase(target);
-    expect(gw.reactor.get(tombstone.id)).toBeUndefined();
-    await expect(gw.eraseReplica(tombstone, target.id)).rejects.toThrow();
+    const erasure = markedErase(target);
+    expect(gw.reactor.get(erasure.id)).toBeUndefined();
+    await expect(gw.eraseReplica(erasure, target.id)).rejects.toThrow();
     // An ATTACHED pool has no authority of its own either: a real marked erasure from another
     // home, valid in shape and signed by the same operator key, is refused until THIS parent holds it.
     const { gw: elsewhere } = await home();
@@ -1510,13 +1510,13 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     );
     expect(pool.reactor.get(farTombstone.id)).toBeUndefined();
     expect(gw.reactor.get(target.id)).toBeDefined();
-    expect(gw.reactor.get(tombstone.id)).toBeUndefined();
+    expect(gw.reactor.get(erasure.id)).toBeUndefined();
     expect(localChannelEvidence(gw, ch.name).state).toBe("open");
     // An independent replica with copied trusted fixture bytes still has no attached authority.
     const standalone = await Gateway.open(new MemoryBackend(), { seed: SEED });
     homes.push(standalone);
     await raw(standalone, [target]);
-    await expect(standalone.eraseReplica(tombstone, target.id)).rejects.toThrow();
+    await expect(standalone.eraseReplica(erasure, target.id)).rejects.toThrow();
     expect(standalone.reactor.get(target.id)).toBeDefined();
   });
   it("preplanted unknown-target strike never acquires local retirement power when a receipt is minted", async () => {
@@ -1538,7 +1538,7 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     await expect(gw.append([strike(preplant, SEED, 50001)])).rejects.toThrow();
     expect(ids(opened(gw, ch.name).received)).toEqual([a.id]);
   });
-  it("a preplanted unknown-target tombstone prevents later issuance of that exact protected receipt ID", async () => {
+  it("a preplanted unknown-target erasure prevents later issuance of that exact protected receipt ID", async () => {
     const { gw } = await home();
     const { ch, offering, pool } = await channel(gw);
     const a = fact();
@@ -1556,14 +1556,14 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     expect(gw.reactor.get(predicted.id)).toBeUndefined();
     expect(opened(gw, ch.name).received).toEqual([]);
   });
-  it("a preplanted strike of a future marked tombstone cannot forgive it after failed purge or trusted reopen", async () => {
+  it("a preplanted strike of a future marked erasure cannot negate it after failed purge or trusted reopen", async () => {
     const { gw, primary } = await home();
     const { ch, pool, offering } = await channel(gw);
     offering.push(fact());
     await ch.sync();
     const firstReceipt = events(gw, "received")[0]!;
     const firstErase = await gw.erase(firstReceipt.id);
-    const template = gw.reactor.get(firstErase.tombstone)!;
+    const template = gw.reactor.get(firstErase.erasure)!;
     // Learn only the supported writer's pointer placement, not its authority decision. The v1
     // marker's semantic shape is independently asserted in the exact-ID erase rail above.
     offering.length = 0;
@@ -1608,34 +1608,34 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     expect(await root.holds(target.id)).toBe(false);
     expect(readErasures(restored.reactor, OP).has(target.id)).toBe(true);
   });
-  it.each(["mismatched-marker", "duplicate-marker", "unsupported-kind", "unsupported-forgiveness"])(
+  it.each(["mismatched-marker", "duplicate-marker", "unsupported-kind", "unsupported-negation"])(
     "corrupted restored protected control %s yields unavailable",
     async (defect) => {
       const { gw } = await home();
       const { ch } = await channel(gw);
       const target = gw.reactor.get(opened(gw, ch.name).opening.id)!;
-      let tombstone = markedErase(target);
+      let erasure = markedErase(target);
       if (defect === "mismatched-marker")
-        tombstone = signed({
-          ...tombstone.claims,
-          pointers: tombstone.claims.pointers.map((pt) =>
+        erasure = signed({
+          ...erasure.claims,
+          pointers: erasure.claims.pointers.map((pt) =>
             pt.role === "local-control" ? e("local-control", fact().id, CONTROL) : pt,
           ),
         });
       if (defect === "duplicate-marker")
-        tombstone = signed({
-          ...tombstone.claims,
-          pointers: [...tombstone.claims.pointers, e("local-control", target.id, CONTROL)],
+        erasure = signed({
+          ...erasure.claims,
+          pointers: [...erasure.claims.pointers, e("local-control", target.id, CONTROL)],
         });
       if (defect === "unsupported-kind")
-        tombstone = signed({
-          ...tombstone.claims,
-          pointers: tombstone.claims.pointers.map((pt) =>
-            pt.role === "local-control-kind" ? p("local-control-kind", "forgive") : pt,
+        erasure = signed({
+          ...erasure.claims,
+          pointers: erasure.claims.pointers.map((pt) =>
+            pt.role === "local-control-kind" ? p("local-control-kind", "negate") : pt,
           ),
         });
-      await raw(gw, [tombstone]);
-      if (defect === "unsupported-forgiveness") await raw(gw, [strike(tombstone)]);
+      await raw(gw, [erasure]);
+      if (defect === "unsupported-negation") await raw(gw, [strike(erasure)]);
       expect(localChannelEvidence(gw, ch.name).state).toBe("unavailable");
     },
   );
@@ -1645,7 +1645,7 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
       b = fact(2, SEED);
     await gw.append([a, b]);
     const erased = await gw.erase(a.id);
-    await gw.append([strike(gw.reactor.get(erased.tombstone)!)]);
+    await gw.append([strike(gw.reactor.get(erased.erasure)!)]);
     await expect(gw.append([a])).rejects.toThrow(/erased/);
     expect(gw.reactor.get(a.id)).toBeUndefined();
     expect(gw.reactor.get(b.id)).toEqual(b);
@@ -1695,7 +1695,7 @@ describe("T288 durable trusted history, distinct from content import", () => {
     // This explicitly does NOT claim to detect dishonest prepopulation: preserving guarded
     // whole-history bytes is trusted restoration of one logical authority, not creating a new home.
   });
-  it("supported pending local erasure can finish after reopen without generic forgiveness or recovery changes", async () => {
+  it("supported pending local erasure can finish after reopen without generic negation or recovery changes", async () => {
     const original = await home();
     const { ch, offering } = await channel(original.gw);
     offering.push(fact());

@@ -575,7 +575,7 @@ describe("spec 64: a live opening cannot be erased", () => {
 });
 
 describe("spec 64: after the drop, the erase takes the incarnation's lineage", () => {
-  it("erases receipts and close first and the opening last; a fault before the opening's tombstone leaves the history readable and a re-run finishes", async () => {
+  it("erases receipts and close first and the opening last; a fault before the opening's erasure leaves the history readable and a re-run finishes", async () => {
     const { gw, primary } = await home();
     const { ch, offering } = await channel(gw);
     const { ch: sibling, offering: siblingOffering } = await channel(gw, "other");
@@ -623,7 +623,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     expect(gw.reactor.get(opening.statusAtOpen)).toBeDefined();
     expect(opened(gw, sibling.name).received.map((d) => d.id)).toEqual([fact(2).id]);
   });
-  it("a member whose purge faulted is erased again on the re-run, never skipped for its tombstone", async () => {
+  it("a member whose purge faulted is erased again on the re-run, never skipped for its erasure", async () => {
     const { gw, primary } = await home();
     const { ch, offering } = await channel(gw);
     offering.push(fact(1));

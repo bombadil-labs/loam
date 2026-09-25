@@ -282,7 +282,7 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
     await expect(gateway.loadHyperSchema([stray], "schema:Nope")).rejects.toThrow(
       /no surviving schema definition/,
     );
-    expect(await backend.deltasSince(new Set())).toEqual([]); // append-only stores forgive nothing
+    expect(await backend.deltasSince(new Set())).toEqual([]); // append-only stores negate nothing
     await gateway.close();
   });
 

@@ -5,7 +5,7 @@
 // resolves it is YOURS to swap. The algorithm is a lens you own.
 //
 // The erasure act tells the TRUTH about federated forgetting, which most social protocols
-// theater around: Alice's erasure purges HER store byte-for-byte, but her tombstone is FOREIGN
+// theater around: Alice's erasure purges HER store byte-for-byte, but her erasure is FOREIGN
 // law in Bob's store — it binds nothing there (§11: erasure is each operator's alone). Bob still
 // remembers, because sovereignty cuts both ways; and then Bob HONORS her request with his own
 // operator's erasure. No delete-request pretending to be a guarantee: real semantics, said aloud.
@@ -178,7 +178,7 @@ try {
     `render: ${page.status}, ${page.body.length} bytes`,
   );
 
-  // ERASURE, TOLD HONESTLY. Alice erases a1: HER store forgets byte-for-byte. Her tombstone is
+  // ERASURE, TOLD HONESTLY. Alice erases a1: HER store forgets byte-for-byte. Her erasure is
   // FOREIGN law in Bob's store — it binds nothing there; Bob still remembers, because sovereignty
   // cuts both ways. Then Bob HONORS the request with his own operator's erasure. No theater.
   const FORGOTTEN = "the mycelium is humming today";
@@ -189,7 +189,7 @@ try {
   const aliceForgot = !JSON.stringify(await alice.backend.deltasSince(new Set())).includes(
     FORGOTTEN,
   );
-  await pullFrom(bob.gateway, alice.base, "op-alice"); // the tombstone travels, but it is foreign law
+  await pullFrom(bob.gateway, alice.base, "op-alice"); // the erasure travels, but it is foreign law
   const bobRemembers = JSON.stringify(await bob.backend.deltasSince(new Set())).includes(FORGOTTEN);
   const bobsCopy = [...bob.gateway.reactor.snapshot()].find((d) =>
     JSON.stringify(d).includes(FORGOTTEN),
@@ -200,7 +200,7 @@ try {
   const bobHonored = !JSON.stringify(await bob.backend.deltasSince(new Set())).includes(FORGOTTEN);
   check(
     "pachy.7",
-    "erasure without theater: Alice's store forgets byte-for-byte; Bob's store REMEMBERS (her tombstone is foreign law); Bob honors her request with his own erasure",
+    "erasure without theater: Alice's store forgets byte-for-byte; Bob's store REMEMBERS (her erasure is foreign law); Bob honors her request with his own erasure",
     aliceForgot && bobRemembers && bobHonored,
     `alice forgot: ${aliceForgot}, bob remembered: ${bobRemembers}, bob honored: ${bobHonored}`,
   );

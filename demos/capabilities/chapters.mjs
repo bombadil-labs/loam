@@ -89,15 +89,9 @@ export const TERMS = [
     where: { kind: "prose" },
   },
   {
-    word: "tombstone",
-    gloss:
-      "The signed record that bytes were removed: who ordered it, when, and why — never what. It is append-only and it cannot itself be erased, because a store that could forget its own forgetting could not be audited.",
-    where: { kind: "export", name: "isErasure" },
-  },
-  {
     word: "erasure",
     gloss:
-      "Actually removing the bytes, on every tier that holds them, and proving it. Distinct from a strike, which leaves the claim legible and merely uncounted.",
+      "Actually removing a delta's bytes, on every tier that holds them, and proving it — and the signed record that says so: who ordered it, when, and why, never what. The record is append-only and cannot itself be erased, because a store that could forget its own forgetting could not be audited. Distinct from a strike, which leaves the claim legible and merely uncounted.",
     where: { kind: "export", name: "eraseClaims" },
   },
   {
@@ -927,7 +921,7 @@ export const CHAPTERS = [
         kind: "figure",
         figure: "forgotten",
         caption:
-          "What remains: a [[tombstone]] naming who ordered the forgetting and when, and an empty place.",
+          "What remains: a [[erasure]] naming who ordered the forgetting and when, and an empty place.",
       },
       {
         kind: "prose",
@@ -939,7 +933,7 @@ export const CHAPTERS = [
       },
       {
         kind: "prose",
-        text: "A [[tombstone]] cannot itself be erased: a store that could forget its own forgetting would be unauditable. It can, however, be struck — which is forgiveness, and lets an id return. And erasing here never compels anyone else: a peer's [[operator]] decides for themselves whether to honor a foreign order, so a forged tombstone cannot cascade a deletion across a network.",
+        text: "A [[erasure]] cannot itself be erased: a store that could forget its own forgetting would be unauditable. It can, however, be struck — which is negation, and lets an id return. And erasing here never compels anyone else: a peer's [[operator]] decides for themselves whether to honor a foreign order, so a forged erasure cannot cascade a deletion across a network.",
       },
       {
         kind: "heading",
@@ -959,11 +953,11 @@ export const CHAPTERS = [
       },
       {
         kind: "prose",
-        text: "What survives the cut is a [[graveyard]]: one small record that this batch of forgetting happened, holding addresses rather than content. It is deliberately not a second copy of the per-fact law — the [[tombstone]]s stay the single answer to *is this id refused* — so what the [[graveyard]] buys is arithmetic. Every id in the frozen set has a surviving [[tombstone]] that points back at this event, and that sentence is checkable years later from the store alone, with no memory of the cut and nothing to probe. That is the difference between a narrative and a proof.",
+        text: "What survives the cut is a [[graveyard]]: one small record that this batch of forgetting happened, holding addresses rather than content. It is deliberately not a second copy of the per-fact law — the [[erasure]]s stay the single answer to *is this id refused* — so what the [[graveyard]] buys is arithmetic. Every id in the frozen set has a surviving [[erasure]] that points back at this event, and that sentence is checkable years later from the store alone, with no memory of the cut and nothing to probe. That is the difference between a narrative and a proof.",
       },
       {
         kind: "prose",
-        text: "A receipt is then DERIVED rather than stored, and re-issuable at any time — which matters more than it sounds. A byte verdict is a claim about the world at a moment, not a fact about the store, so a document that reprinted last month's verdict as today's would be the dry run all over again, wearing a letterhead. Every re-issue asks the tiers again. And it reports three things per fact rather than one, because \"forgiven\" alone is the wrong sentence: whether the order still stands, whether the bytes are gone now, and whether the id has come BACK — which it can, lawfully, once forgiveness lets it.",
+        text: "A receipt is then DERIVED rather than stored, and re-issuable at any time — which matters more than it sounds. A byte verdict is a claim about the world at a moment, not a fact about the store, so a document that reprinted last month's verdict as today's would be the dry run all over again, wearing a letterhead. Every re-issue asks the tiers again. And it reports three things per fact rather than one, because \"negated\" alone is the wrong sentence: whether the order still stands, whether the bytes are gone now, and whether the id has come BACK — which it can, lawfully, once negation lets it.",
       },
       {
         kind: "claims",
@@ -987,7 +981,7 @@ export const CHAPTERS = [
             door: "SqliteBackend",
           },
           {
-            says: "A [[tombstone]] can never itself be erased; striking one is forgiveness, and the id may then return.",
+            says: "A [[erasure]] can never itself be erased; striking one is negation, and the id may then return.",
             spec: "spec/11-erasure.md",
             proof: "test/gateway/erase.test.ts",
             door: "eraseClaims",
@@ -1017,7 +1011,7 @@ export const CHAPTERS = [
             door: "Gateway",
           },
           {
-            says: "A compliance receipt re-asks every tier each time it is issued, so it reports what is true now rather than reprinting an old answer — and it says whether a forgiven fact has come back.",
+            says: "A compliance receipt re-asks every tier each time it is issued, so it reports what is true now rather than reprinting an old answer — and it says whether a negated fact has come back.",
             spec: "spec/29-slating-and-graveyards.md",
             proof: "test/gateway/slate-receipt.test.ts",
             door: "Gateway",

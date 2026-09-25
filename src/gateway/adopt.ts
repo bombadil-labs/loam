@@ -122,10 +122,10 @@ export function readAdoptions(
   // algebra, and `adopt.ts` was the one that did not (H1 at the audit surface). Without this, a
   // withdrawn provenance keeps appearing in the trail, and `promoteImpl`'s presence short-circuit
   // rides that stale trail — re-promoting a value whose record was struck reports success and lands
-  // nothing. Forgiveness (striking the record) must let promotion re-establish it.
+  // nothing. Negation (striking the record) must let promotion re-establish it.
   //
   // Scoped to each record's OWN author: an adoption record is operator-authored, and only its
-  // author's lawful strike forgives it — a federated stranger's negation retires nothing the
+  // author's lawful strike negates it — a federated stranger's negation retires nothing the
   // operator planted (the same doctrine `lawfulNegated` itself keeps). Memoized so the common
   // single-operator case is one build. `includeStruck` is the internal escape for the citation
   // BRIDGE (promoteImpl): a withdrawn provenance record does not un-adopt the value, so a delta
@@ -201,7 +201,7 @@ export async function promoteImpl(
   // back, in canonical history, where §11 erasure is the only way back out.
   //
   // REFUSE rather than carry the strike across. Promotion is content-addressed on the source, so a
-  // copy landed already-struck would kill that id forever: forgiveness in the pool could never
+  // copy landed already-struck would kill that id forever: negation in the pool could never
   // re-land it — the idempotence short-circuit below would report success over a delta no reader can
   // see (H7). Refusal leaves nothing behind. The translate door carries instead because its rendering
   // has already LANDED and its audience runs none of Loam's reader rules; a door that can still say

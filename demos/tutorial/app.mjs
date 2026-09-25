@@ -626,7 +626,7 @@ function renderGlossary() {
 /**
  * The sweep, run and reported IN THE RENDER — never latched into a field.
  *
- * It is a reading of two durable things: the tombstones the store holds, and the checkpoint
+ * It is a reading of two durable things: the erasures the store holds, and the checkpoint
  * blobs beside it. Enforcing while reading is the point — the invariant is that no blob may
  * hold forgotten bytes, and asking on every render is the strongest form of it. It is also
  * idempotent, so a second pass destroys nothing and says so.

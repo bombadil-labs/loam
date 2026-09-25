@@ -844,7 +844,7 @@ export class Gateway {
     /** The citations manifest attributed to the tier each dangler lives on (T216, `CitationTier`). */
     citationTiers: CitationTier[];
     kept: string[];
-    tombstone: string;
+    erasure: string;
     /** False when a standing erasure was REUSED — a retry after a fault records no new reason. */
     minted: boolean;
     /** The reasons on the receipt itself, which on a retry are the FIRST run’s, not this call’s. */
@@ -1249,8 +1249,8 @@ export class Gateway {
 
   // Honor an erasure DECIDED by the primary operator (SPEC §24.8), called on a pool by the primary's
   // fan-out: the body — and the fan-out's re-derive-its-own-reach doctrine — lives in erase.ts.
-  async eraseReplica(tombstone: Delta, id: string, seen: Set<Gateway> = new Set()): Promise<void> {
-    return eraseReplicaImpl(this, tombstone, id, seen);
+  async eraseReplica(erasure: Delta, id: string, seen: Set<Gateway> = new Set()): Promise<void> {
+    return eraseReplicaImpl(this, erasure, id, seen);
   }
 
   // A fresh reactor replayed from the backend as it stands NOW — how open() built the first

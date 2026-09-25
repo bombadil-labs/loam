@@ -11,7 +11,7 @@ import {
   sameVerifiedDelta,
 } from "../federation/local-channel-events.js";
 // Erasure — degrees of forgetting (SPEC §11). The store remembers THAT it forgot — who asked,
-// when, which id — never what. A TOMBSTONE is an append-only claim at `loam:erasure` naming
+// when, which id — never what. A ERASURE is an append-only claim at `loam:erasure` naming
 // the erased delta; the bytes themselves are purged from every tier (the seam's purge, PR
 // #34); and admission composes the erasure set so the id is refused re-entry forever.
 // Content addressing is what makes this honest: retaining a hash retains zero content.
@@ -42,13 +42,13 @@ import { currentContainerDeclarationId, unreachableStoreReport } from "./contain
 import {
   CTX_SLATE,
   danglingCitations,
-  forgivenHealth,
+  negatedHealth,
   readClosedIds,
   readSlates,
   slateHealth,
   slatePointer,
   type CitationTier,
-  type ForgivenHealth,
+  type NegatedHealth,
   type SlateHealth,
 } from "./slate.js";
 import type { Gateway } from "./gateway.js";
@@ -171,16 +171,16 @@ export function eraseDefect(
   if (!isErasure(delta.claims)) return undefined;
   const { targetId, spokenBy, slate, count } = erasureParts(delta.claims);
   if (count.erases !== 1 || targetId === undefined) {
-    return "a tombstone erases exactly one delta (one delta-kind `erases` pointer)";
+    return "an erasure erases exactly one delta (one delta-kind `erases` pointer)";
   }
   if (count.spokenBy !== 1 || spokenBy === undefined) {
-    return "a tombstone carries exactly one string `spoken-by` (the erased delta's author)";
+    return "an erasure carries exactly one string `spoken-by` (the erased delta's author)";
   }
   // The §29.6 join is OPTIONAL forever — every erasure any store already holds carries none, so
   // no §20 step is engaged — but a PRESENT one is validated: a malformed join would make the
   // graveyard's arithmetic unreadable while looking like law.
   if (count.slate > 1 || (count.slate === 1 && slate === undefined)) {
-    return `a tombstone carries at most one \`slate\` pointer, an entity reference at ${CTX_SLATE}`;
+    return `an erasure carries at most one \`slate\` pointer, an entity reference at ${CTX_SLATE}`;
   }
   if (operator === undefined || delta.claims.author !== operator) {
     return "erasure is the instance operator's alone: only the operator may order a record removed";
@@ -194,7 +194,7 @@ export function eraseDefect(
     return "an erasure cannot itself be erased: an erasure is permanent";
   }
   if (target !== undefined && target.claims.author !== spokenBy) {
-    return "a tombstone's spoken-by must be the erased delta's actual author";
+    return "an erasure's spoken-by must be the erased delta's actual author";
   }
   return undefined;
 }
@@ -354,7 +354,7 @@ export function erasuresOfErasures(accepted: readonly Delta[]): Set<string> {
 // The surviving, lawful, operator-signed erasures — the record of what this ground has
 // forgotten (that it forgot, never what). One place computes the set both readErasures (the
 // dead ids) and forgottenSince (the as-of annotation) draw from, so the author-confirmation and
-// forgiveness rules cannot drift between them.
+// negation rules cannot drift between them.
 export function standingErasures(reactor: Reactor, operator: string | undefined): Delta[] {
   return boundErasures(reactor, operator, true);
 }
@@ -375,9 +375,9 @@ function boundErasures(
     const delta = reactor.get(id);
     if (delta === undefined || !isErasure(delta.claims)) continue;
     if (inLocalContext(delta, LOCAL_CONTROL)) {
-      // Generic preplanted strikes never become local forgiveness when a marked order lands.
+      // Generic preplanted strikes never become local negation when a marked order lands.
       if (localEraseTarget(delta, reactor, operator) === undefined) continue;
-    } else if (negated(delta.id)) continue; // ordinary struck tombstone = forgiven
+    } else if (negated(delta.id)) continue; // ordinary struck erasure = negated
     if (delta.claims.author !== operator) continue; // erasure is the operator's alone
     const { targetId, count } = erasureParts(delta.claims);
     if (targetId === undefined || count.erases !== 1) continue; // shape the door enforces
@@ -645,7 +645,7 @@ export function readGrounds(
  * store — a sentence assembled from two places, true nowhere.
  *
  * All three conditions on a revival carry weight. "Now live" alone would report the erasure's own
- * TOMBSTONE, a delta this order added, live the moment it lands and back from nowhere. Requiring it
+ * ERASURE, a delta this order added, live the moment it lands and back from nowhere. Requiring it
  * to have been PRESENT in that same ground before is what separates a claim returning from the
  * ordinary arrival of new law.
  */
@@ -778,7 +778,7 @@ export function revivedAcross(
 /** One receipt, as a reader sees it: THAT an id was forgotten, by whose order, when, and why. */
 export interface ErasureReceipt {
   /** The receipt's own content address — what an erase prints and what a reader can look up. */
-  readonly tombstone: string;
+  readonly erasure: string;
   /** The id it forgot. Retaining a hash retains zero content, which is what makes this honest. */
   readonly erased: string;
   /**
@@ -801,7 +801,7 @@ export interface ErasureReceipt {
  * The receipts this ground still stands behind, oldest first — read through `standingErasures`,
  * so no surface can print a receipt the admission door does not honour, or hide one it does.
  *
- * `inert` is the other half, and it is not decoration. A struck erasure is FORGIVENESS: the
+ * `inert` is the other half, and it is not decoration. A struck erasure is NEGATION: the
  * erasure is negated (the id stays refused), so the receipt leaves the surviving set. On a
  * screen that merely drops the row, an omission and a revocation look identical — and this listing
  * is read on the morning that difference decides a case. So the count is disclosed.
@@ -833,7 +833,7 @@ export function receiptLedger(
     .map((d) => {
       const parts = erasureParts(d.claims);
       return {
-        tombstone: d.id,
+        erasure: d.id,
         erased: parts.targetId!, // standingErasures proved it well-shaped
         ...(parts.spokenBy === undefined ? {} : { spokenBy: parts.spokenBy }),
         orderedBy: d.claims.author,
@@ -842,7 +842,7 @@ export function receiptLedger(
         ...(parts.slate === undefined ? {} : { slate: parts.slate }),
       };
     })
-    .sort((a, b) => a.at - b.at || (a.tombstone < b.tombstone ? -1 : 1));
+    .sort((a, b) => a.at - b.at || (a.erasure < b.erasure ? -1 : 1));
   return { receipts, inert: shaped - receipts.length };
 }
 
@@ -869,9 +869,9 @@ export function forgottenSince(
 // gateway or reactor exists), report the SAME dead set the running store would — so
 // heal(exclude) is guarded with full fidelity from the first moment. It builds a throwaway
 // reactor from the deltas and defers to readErasures, so the author-confirmation and the
-// lawful-negation (forgiveness) rules are computed in exactly one place and cannot drift
+// lawful-negation (negation) rules are computed in exactly one place and cannot drift
 // between boot and run. (A lawfully struck erasure is therefore NOT in the set — heal will
-// not drop a forgiven record — and a self-erasure that disagrees with its target's author
+// not drop a negated record — and a self-erasure that disagrees with its target's author
 // binds nothing here too.)
 export function erasuresIn(deltas: Iterable<Delta>, operator: string | undefined): Set<string> {
   const probe = new Reactor();
@@ -1058,7 +1058,7 @@ export async function eraseImpl(
   citations: string[];
   citationTiers: CitationTier[];
   kept: string[];
-  tombstone: string;
+  erasure: string;
   minted: boolean;
   reasons: string[];
   spokenBy?: string;
@@ -1086,7 +1086,7 @@ export async function eraseImpl(
         `Attach the container(s) (openContainer), or detach() them onto the record, then re-run.`,
     );
   }
-  // Retry anchors on the TOMBSTONE, read before the `nothing to erase` guard: a partial attempt
+  // Retry anchors on the ERASURE, read before the `nothing to erase` guard: a partial attempt
   // can leave the target gone from the reactor while a tier still holds the bytes, and a re-run
   // must not mint a second erasure (a fresh timestamp is a new content address).
   // Anchor only on an erasure that is SURVIVING (a negated one is a negated erasure, and the
@@ -1099,15 +1099,15 @@ export async function eraseImpl(
   // Bypass the guard only for an OUTSTANDING erasure — an id erased cleanly long ago also has a
   // surviving erasure, and resolving `{ erased }` for it would report work never done.
   // Outstanding is asked of this ground AND its pools; the local backend alone would strand the
-  // pool-retention retry. (A struck erasure lands here too, correctly: forgiveness withdraws
+  // pool-retention retry. (A struck erasure lands here too, correctly: negation withdraws
   // the erasure, so a fresh one must be spoken rather than the old one silently reused.)
   if (target === undefined && (already === undefined || !(await erasureOutstanding(gw, id)))) {
     throw new Error(`nothing to erase: ${id} is not held here`);
   }
   if (target !== undefined && isErasure(target.claims)) {
     // The erasure log is the record of what was forgotten; it stays append-only. Un-erasure
-    // is striking the erasure (forgiveness), never erasing it.
-    throw new Error("the erasure log is append-only: a tombstone cannot itself be erased");
+    // is striking the erasure (negation), never erasing it.
+    throw new Error("the erasure log is append-only: an erasure cannot itself be erased");
   }
   // A STANDING SLATE'S PINNED MEMBERSHIP TERM is not an ordinary delta (SPEC §29.2): erasing it leaves
   // that slate unable to read its own condemned set, so every door it closed silently stops enforcing
@@ -1152,10 +1152,10 @@ export async function eraseImpl(
     if (opts.cascade !== false)
       await withChannelCommit(gw, o.channel, async () => {
         for (const member of incarnationMembers(gw, id)) {
-          const tombstoned = standingErasures(gw.reactor, gw.operatorAuthor).some(
+          const erased = standingErasures(gw.reactor, gw.operatorAuthor).some(
             (d) => erasureParts(d.claims).targetId === member,
           );
-          if (tombstoned && !(await erasureOutstanding(gw, member))) continue;
+          if (erased && !(await erasureOutstanding(gw, member))) continue;
           await eraseImpl(gw, member, { ...opts, cascade: false });
         }
       });
@@ -1186,7 +1186,7 @@ export async function eraseImpl(
           ],
         }
       : claims;
-  const tombstone =
+  const erasure =
     already ??
     signClaims(
       localClaims(
@@ -1208,13 +1208,13 @@ export async function eraseImpl(
   // `unproven` cannot be reached to enumerate, so it carries no entry. Cascade is the caller's choice.
   // Excluded BY IDENTITY: only the erasure this erasure mints or reuses. A shape filter would
   // both catch it on retry (a manifest that varies between attempts, a cascading caller sent to
-  // erase the cut itself) and wrongly drop a struck erasure from a forgiven earlier erasure —
+  // erase the cut itself) and wrongly drop a struck erasure from a negated earlier erasure —
   // a surviving delta dangling at the hole, which the manifest exists to enumerate.
-  const { citations, citationTiers } = danglingCitations(gw, id, (dId) => dId === tombstone.id);
+  const { citations, citationTiers } = danglingCitations(gw, id, (dId) => dId === erasure.id);
   if (already === undefined) {
-    if (inLocalContext(tombstone, LOCAL_CONTROL)) await appendLocalErasure(gw, tombstone);
-    else await gw.append([tombstone]);
-    await gw.flush(); // the tombstone must be ground before the target stops being ground
+    if (inLocalContext(erasure, LOCAL_CONTROL)) await appendLocalErasure(gw, erasure);
+    else await gw.append([erasure]);
+    await gw.flush(); // the erasure must be ground before the target stops being ground
   }
   // The purge count is evidence of work, never the verdict: 0 means "never held" as often as
   // "refused to remove", and a mirror returns the max of its two sides, hiding a retaining tier.
@@ -1247,7 +1247,7 @@ export async function eraseImpl(
   const targets = [...gw.quarantinePools].filter((pool) => !seen.has(pool));
   for (const pool of targets) seen.add(pool);
   const fanned = await Promise.allSettled(
-    targets.map((pool) => pool.eraseReplica(tombstone, id, seen)),
+    targets.map((pool) => pool.eraseReplica(erasure, id, seen)),
   );
   // The verdict is asked of the BYTES, unconditionally — a purge count proves some tier removed
   // something, never that every tier did. Every fault lands in ONE report: the remedy is
@@ -1261,10 +1261,10 @@ export async function eraseImpl(
   }
   if (faults.length > 0) {
     throw new Error(
-      `erase ${id}: the tombstone is recorded, but the content is STILL ` +
+      `erase ${id}: the erasure is recorded, but the content is STILL ` +
         `HELD by the store — erasure is not complete. ${faults.length} fault(s):\n  ` +
         `${faults.map((f) => f.what).join("\n  ")}\n` +
-        `Resolve them and re-run; the re-run is safe and will not mint a second tombstone.`,
+        `Resolve them and re-run; the re-run is safe and will not mint a second erasure.`,
       { cause: faults[0]?.cause },
     );
   }
@@ -1277,13 +1277,13 @@ export async function eraseImpl(
   // sentence records nothing, so a caller that echoed its own argument would print one reason while
   // `erasures show` printed another. `minted` says which of the two runs this was, because
   // "safe to re-run" and "your new reason was kept" are different promises.
-  const parts = erasureParts(tombstone.claims);
+  const parts = erasureParts(erasure.claims);
   return {
     erased: id,
     citations,
     citationTiers,
     kept: stores.kept,
-    tombstone: tombstone.id,
+    erasure: erasure.id,
     minted: already === undefined,
     reasons: parts.reasons,
     ...(parts.spokenBy === undefined ? {} : { spokenBy: parts.spokenBy }),
@@ -1444,22 +1444,22 @@ async function incompleteErasureFaults(
 // THROWS, and the primary's `erase` rejects. Best-effort-and-loud, never a silent success.
 export async function eraseReplicaImpl(
   gw: Gateway,
-  tombstone: Delta,
+  erasure: Delta,
   id: string,
   seen: Set<Gateway>,
 ): Promise<void> {
   // Authorization first, on its own: a forged or foreign removal-order is refused WITHOUT purging
   // — loudly, since only a hostile direct caller can reach this branch (the primary's fan-out only
   // ever hands over the erasure its own erase door just validated).
-  const defect = eraseDefect(tombstone, gw.reactor, gw.operatorAuthor);
+  const defect = eraseDefect(erasure, gw.reactor, gw.operatorAuthor);
   if (defect !== undefined) {
     throw new Error(`a replica purge is the operator's alone: ${defect}`);
   }
   if (
-    inLocalContext(tombstone, LOCAL_CONTROL) ||
+    inLocalContext(erasure, LOCAL_CONTROL) ||
     (gw.reactor.get(id) !== undefined && inLocalContext(gw.reactor.get(id)!, LOCAL_EVENT))
   ) {
-    if (localEraseTarget(tombstone, gw.reactor, gw.operatorAuthor) !== id)
+    if (localEraseTarget(erasure, gw.reactor, gw.operatorAuthor) !== id)
       throw new Error("replica requires exact marked local erasure");
     let cursor = gw;
     const chain = new Set<Gateway>();
@@ -1468,16 +1468,16 @@ export async function eraseReplicaImpl(
       chain.add(cursor);
       const parent = cursor.attachedTo;
       if (!parent.quarantinePools.has(cursor)) break;
-      if (sameVerifiedDelta(parent.reactor.get(tombstone.id), tombstone)) authorized = true;
+      if (sameVerifiedDelta(parent.reactor.get(erasure.id), erasure)) authorized = true;
       cursor = parent;
     }
     if (!authorized) throw new Error("replica has no attached held local erasure authority");
-    await appendLocalErasure(gw, tombstone);
-  } else await gw.federate([tombstone], { admit: () => true });
+    await appendLocalErasure(gw, erasure);
+  } else await gw.federate([erasure], { admit: () => true });
   await gw.flush();
   if (!readErasures(gw.reactor, gw.operatorAuthor).has(id)) {
     throw new Error(
-      `the erasure did not complete: the operator's tombstone for ${id} could not land in an attached pool`,
+      `the erasure did not complete: the operator's erasure for ${id} could not land in an attached pool`,
     );
   }
   let localPurge: unknown;
@@ -1500,7 +1500,7 @@ export async function eraseReplicaImpl(
   const nested = [...gw.quarantinePools].filter((pool) => !seen.has(pool));
   for (const pool of nested) seen.add(pool); // claimed at dispatch — see the eraseImpl note
   const walked = await Promise.allSettled(
-    nested.map((pool) => pool.eraseReplica(tombstone, id, seen)),
+    nested.map((pool) => pool.eraseReplica(erasure, id, seen)),
   );
   // This tier's own bytes AND every nested refusal, in ONE report, via the collector shared with
   // `eraseImpl`. A pool is where §11 is easiest to evade — a silently-retaining replica must not
@@ -1518,7 +1518,7 @@ export async function eraseReplicaImpl(
       `the erasure did not complete in an attached quarantine pool: a forgotten record must not ` +
         `survive inside the operator's own replica. ${faults.length} fault(s):\n  ` +
         `${faults.map((f) => f.what).join("\n  ")}\n` +
-        `Resolve them and re-run the erasure; the re-run is safe and mints no second tombstone.`,
+        `Resolve them and re-run the erasure; the re-run is safe and mints no second erasure.`,
       { cause: faults[0]?.cause },
     );
   }
@@ -1538,7 +1538,7 @@ export async function eraseReplicaImpl(
 
 export interface ErasureHealth {
   readonly settled: boolean; // every promise is bytes-gone on every tier owned AND every attached pool
-  readonly promised: number; // ids promised forgotten (targets of surviving operator tombstones)
+  readonly promised: number; // ids promised forgotten (targets of surviving operator erasures)
   readonly pending: number; // of those, ids not yet settled everywhere in reach
   readonly outstanding: readonly string[]; // the ids themselves — operator-only surface
   readonly unproven: boolean; // some tier could not be examined: not settled, not failed (H9)
@@ -1635,7 +1635,7 @@ export interface StoreHealth {
   readonly status: "ok" | "settling" | "unproven";
   readonly erasure: ErasureHealth;
   readonly slates: SlateHealth;
-  readonly forgiven: ForgivenHealth;
+  readonly negated: NegatedHealth;
   readonly lagging?: boolean; // present when the backend exposes mirror lag (MirrorBackend)
   // The surfaces erasure does NOT reach, disclosed unconditionally: the two §36 home files
   // (T131, out of scope by design) and the ESM registry (T105 a, in scope but unprovable) — so
@@ -1692,10 +1692,10 @@ export async function healthImpl(gw: Gateway, now = Date.now()): Promise<StoreHe
     status,
     erasure,
     // Both sections are LAWFUL facts rather than debt, so neither moves `status` — but without them
-    // a lapsed compliance window and a forgiven-and-returned id are invisible to every instrument
+    // a lapsed compliance window and a negated-and-returned id are invisible to every instrument
     // the store has (a struck erasure leaves `readErasures`, and therefore `promised`, entirely).
     slates: slateHealth(gw, now),
-    forgiven: forgivenHealth(gw),
+    negated: negatedHealth(gw),
     ...(typeof lagging === "boolean" && { lagging }),
     // The unswept-surface disclosures, unconditional: the home files (T131) are outside erasure's
     // reach by design, and the ESM registry (T105 a) is in scope but unprovable to the tier probes.

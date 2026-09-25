@@ -803,7 +803,7 @@ function lawAdoptionRecordClaims(spec: RecordSpec, operator: string, timestamp: 
 
 /**
  * The law-adoption trail, read live. A struck record is not a record — the same per-record-author
- * negation scoping `readAdoptions` runs, so only the operator's own strike forgives their own
+ * negation scoping `readAdoptions` runs, so only the operator's own strike negates their own
  * provenance. Fact adoptions (promote-outputs) carry no `record-kind` and are not returned here,
  * so `adoptions()` and `lawAdoptions()` each answer their own question over one shared context.
  */

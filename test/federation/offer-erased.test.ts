@@ -39,7 +39,7 @@ async function fern(gw: Gateway): Promise<{ height: number | null; tag: string[]
 const ids = (deltas: readonly Delta[]): Set<string> => new Set(deltas.map((d) => d.id));
 
 describe("the federation offer drops erased ids", () => {
-  it("a tombstoned claim whose bytes remain is not offered; the bystander is", async () => {
+  it("an erased claim whose bytes remain is not offered; the bystander is", async () => {
     const gw = await boot(OP_SEED);
     const op = gw.operatorAuthor!;
     const claim = observed(FERN, "height", 30, 1000, OP_SEED);

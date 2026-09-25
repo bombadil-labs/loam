@@ -53,9 +53,9 @@ export { pullFrom, type PullOptions, type PullReport } from "./federation/pull.j
 export { exportOffer, parseOffer } from "./federation/offer.js";
 export { toWire, fromWire, type WireDelta } from "./federation/wire.js";
 // The health DOOR is `Gateway.health()` (SPEC §11, T70); `StoreHealth` and its component shapes
-// (`ErasureHealth` here, `SlateHealth` / `ForgivenHealth` in the slate block below) are what a
+// (`ErasureHealth` here, `SlateHealth` / `NegatedHealth` in the slate block below) are what a
 // caller needs to READ what it answers. The bodies computing them (`healthImpl`, `slateHealth`,
-// `forgivenHealth`) take a `Gateway` seam and stay out.
+// `negatedHealth`) take a `Gateway` seam and stay out.
 export {
   CTX_ERASE,
   ERASE_ENTITY,
@@ -108,7 +108,7 @@ export {
   type CutMemberReport,
   type CutReport,
   type Duplicate,
-  type ForgivenHealth,
+  type NegatedHealth,
   type GraveyardRecord,
   type GraveyardSpec,
   type Receipt,

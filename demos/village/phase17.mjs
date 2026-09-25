@@ -156,7 +156,7 @@ try {
     "no register() call anywhere: the surface is a function of the store",
   );
 
-  // ---- erasure reaches the page: tombstone → purge → removeItem, and the door holds
+  // ---- erasure reaches the page: erasure → purge → removeItem, and the door holds
   await reopened.erase(note.id, { reason: "the wanderer travels light" });
   let refused = "";
   try {

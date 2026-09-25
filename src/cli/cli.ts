@@ -177,7 +177,7 @@ type CommandName =
   | "client"
   | "slate"
   | "erase"
-  | "tombstones";
+  | "erasures";
 
 interface CommandSpec {
   readonly summary: string; // the line the top-level help shows
@@ -512,7 +512,7 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "--reason IS REQUIRED and has no default. The receipt is the only thing that survives the",
       "record it forgets, and a receipt that cannot say why is a receipt made less honest.",
       "",
-      "WHAT IT DOES. It lands the operator-signed tombstone, purges the delta from this store, from",
+      "WHAT IT DOES. It lands the operator-signed erasure, purges the delta from this store, from",
       "the archive when one is named, and from every attached channel pool — then asks the BYTES,",
       "tier by tier, whether they are gone. A tier that cannot be asked has proven nothing, so the",
       "command FAILS rather than reporting a completeness it never verified. Re-running after a",
@@ -530,16 +530,16 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "single --archive and opens one mirror; this sweeps every tier it can be told about.)",
     ],
   },
-  tombstones: {
+  erasures: {
     summary: "read the receipts: which ids this store forgot, for whom, and why (SPEC §11)",
-    usage: "loam tombstones list | show <id> [options]",
+    usage: "loam erasures list | show <id> [options]",
     flags: new Set(["home", "store"]),
     notes: [
       "subcommands:",
       "  list          every receipt this ground still stands behind, oldest first",
       "  show <id>     one receipt in full — by its own address, or by the id it erased",
       "",
-      "A RECEIPT REMEMBERS THAT, NEVER WHAT. A tombstone holds the erased id, the author it was",
+      "A RECEIPT REMEMBERS THAT, NEVER WHAT. An erasure holds the erased id, the author it was",
       "spoken by, the moment, and the reason the operator gave. It holds none of the content, and",
       "retaining a content address retains zero content — which is what makes keeping it honest.",
       "",
@@ -4427,7 +4427,7 @@ async function cmdSlate(args: readonly string[], io: IO): Promise<number> {
       `loam: no slate signed by ${shortAuthor(authorForSeed(seed))} stands over ${path} — ` +
         `nothing is staged for erasure\n` +
         `  a slate names a condemned set, freezes it at one address so it cannot grow, and starts ` +
-        `the clock\n  \`loam tombstones list\` reads what this store has already forgotten`,
+        `the clock\n  \`loam erasures list\` reads what this store has already forgotten`,
     );
     return 0;
   }
@@ -4768,7 +4768,7 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
   if (id === undefined) {
     io.err(
       'erase wants the id of one delta: `loam erase <deltaId> --reason "<why>"` — ' +
-        "`loam tombstones list` reads the receipts it leaves",
+        "`loam erasures list` reads the receipts it leaves",
     );
     return 2;
   }
@@ -4961,7 +4961,7 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
         const standing = await erasureStanding(gateway, id).catch((): ErasureStanding => "unasked");
         const outstanding = standing === "held" || standing === "owed";
         const recorded = new Date(already.claims.timestamp).toISOString();
-        const reader = `\`loam tombstones show ${already.id}\``;
+        const reader = `\`loam erasures show ${already.id}\``;
         // THREE STATES, because two of them are not the same fact. The sweep is measurably
         // unfinished; or it is unfinished-or-not and this run cannot tell; or it settled. Only the
         // last may name a date and call the record forgotten.
@@ -5054,7 +5054,7 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
   ];
   io.out(
     `loam: erased ${done.erased}\n` +
-      `  receipt      ${done.tombstone}${done.minted ? "" : "  (REUSED, not minted by this run)"}\n` +
+      `  receipt      ${done.erasure}${done.minted ? "" : "  (REUSED, not minted by this run)"}\n` +
       `  spoken by    ${done.spokenBy ?? `${LEDGER_NONE} this receipt does not record whose record it forgot`}\n` +
       // THE RECEIPT'S OWN SENTENCE, never the flag's. A retry after a fault REUSES the standing
       // erasure and drops `--reason` on the floor, so echoing the argument would print one reason
@@ -5063,9 +5063,9 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
       (done.minted || done.reasons.includes(reason)
         ? ""
         : `  YOUR --reason IS NOT ON THE RECEIPT: this run reused the one an earlier run minted, and\n` +
-          `  a receipt is immutable. To say something else, strike it (forgiveness, §11) and erase again.\n`) +
+          `  a receipt is immutable. To say something else, strike it (negation, §11) and erase again.\n`) +
       `  the bytes are gone, asked tier by tier: ${swept.join(", ")}\n` +
-      `  \`loam tombstones show ${done.tombstone}\` reads the receipt back` +
+      `  \`loam erasures show ${done.erasure}\` reads the receipt back` +
       // The count now spans every WALKABLE tier the byte verdict walks (T216) — a pool-resident
       // dangler is counted here, not just the primary's. It does not span a WALL: a tier the verdict
       // names `unproven` cannot be reached to enumerate its danglers, so the count omits it, as it must.
@@ -5172,7 +5172,7 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
   return 0;
 }
 
-// --- `loam tombstones list | show <id>` ----------------------------------------------------------
+// --- `loam erasures list | show <id>` ----------------------------------------------------------
 
 // WHAT A STANDING RECEIPT IS WORTH, in one cell. An erasure is a PROMISE: §11 lands it, then
 // purges, then reports a replica that refused — so a receipt can stand over bytes that are still on
@@ -5186,7 +5186,7 @@ const SWEEP_CELL: Record<ErasureStanding, string> = {
 };
 
 function receiptDetail(r: ErasureReceipt, standing: ErasureStanding): string {
-  const lines = [`loam: receipt ${r.tombstone}`];
+  const lines = [`loam: receipt ${r.erasure}`];
   const say = (label: string, text: string): void => {
     lines.push(`  ${label.padEnd(14)}${text}`);
   };
@@ -5230,46 +5230,46 @@ function wantedRows(
  * Either address answers, and a PREFIX of either does too.
  *
  * The listing abbreviates every id to twelve characters, and its own closing line tells the
- * operator to run `loam tombstones show <id>`. Matching only in full made that instruction
+ * operator to run `loam erasures show <id>`. Matching only in full made that instruction
  * unfollowable from the screen that prints it — the same shape as a refusal naming a path its own
  * flag will not take. An ambiguous prefix is refused rather than guessed.
  */
 function matchesReceipt(r: ErasureReceipt, wanted: string): boolean {
-  if (wanted.length < 8) return r.tombstone === wanted || r.erased === wanted;
-  return r.tombstone.startsWith(wanted) || r.erased.startsWith(wanted);
+  if (wanted.length < 8) return r.erasure === wanted || r.erased === wanted;
+  return r.erasure.startsWith(wanted) || r.erased.startsWith(wanted);
 }
 
-async function cmdTombstones(args: readonly string[], io: IO): Promise<number> {
-  const parsed = parseFor("tombstones", args);
+async function cmdErasures(args: readonly string[], io: IO): Promise<number> {
+  const parsed = parseFor("erasures", args);
   const sub = parsed.positionals[0];
   if (sub !== "list" && sub !== "show") {
     io.err(
       sub === undefined
-        ? "tombstones wants a subcommand: `loam tombstones list`, or `loam tombstones show <id>`"
-        : `tombstones: there is no \`tombstones ${sub}\` — the reader is ` +
-            "`loam tombstones list` and `loam tombstones show <id>`",
+        ? "erasures wants a subcommand: `loam erasures list`, or `loam erasures show <id>`"
+        : `erasures: there is no \`erasures ${sub}\` — the reader is ` +
+            "`loam erasures list` and `loam erasures show <id>`",
     );
     return 2;
   }
   const wanted = parsed.positionals[1];
   if (sub === "show" && wanted === undefined) {
     io.err(
-      "tombstones show wants an id: `loam tombstones show <id>` — the receipt's own address, or " +
+      "erasures show wants an id: `loam erasures show <id>` — the receipt's own address, or " +
         "the id it erased",
     );
     return 2;
   }
   if (parsed.positionals.length > (sub === "show" ? 2 : 1)) {
-    io.err(`tombstones ${sub} takes ${sub === "show" ? "exactly one id" : "no arguments"}`);
+    io.err(`erasures ${sub} takes ${sub === "show" ? "exactly one id" : "no arguments"}`);
     return 2;
   }
   const home = parsed.flags.get("home") ?? defaultHome();
   const unusable = homeDefect(home, { allowMissing: false });
   if (unusable !== undefined) {
-    io.err(`tombstones ${sub}: ${unusable}`);
+    io.err(`erasures ${sub}: ${unusable}`);
     return 1;
   }
-  const seed = operatorSeed(home, `tombstones ${sub}`, io);
+  const seed = operatorSeed(home, `erasures ${sub}`, io);
   if (typeof seed !== "string") return seed.code;
   // THE COLD TIER IS OPENED HERE, unlike in the slate reader, because this screen makes a claim
   // ABOUT THE BYTES. The archive stays shut where a verb only READS the ground — a mirror is a
@@ -5341,27 +5341,27 @@ async function cmdTombstones(args: readonly string[], io: IO): Promise<number> {
     // AN AMBIGUOUS PREFIX IS NOT A CHOICE THIS COMMAND MAY MAKE. Two receipts under one prefix is
     // an operator asking about a row this screen cannot identify, and picking either would answer
     // a question nobody asked.
-    if (found.length > 1 && !found.some((r) => r.tombstone === wanted || r.erased === wanted)) {
+    if (found.length > 1 && !found.some((r) => r.erasure === wanted || r.erased === wanted)) {
       io.err(
-        `tombstones show: ${wanted} names ${found.length} receipts here — ` +
-          `${capped(found.map((r) => shortId(r.tombstone)))}. Give more of the address.`,
+        `erasures show: ${wanted} names ${found.length} receipts here — ` +
+          `${capped(found.map((r) => shortId(r.erasure)))}. Give more of the address.`,
       );
       return 2;
     }
     if (found.length === 0) {
-      // "NOT AN ID THIS STORE FORGOT" WOULD CONTRADICT THE GROUND for a forgiven id. Striking a
+      // "NOT AN ID THIS STORE FORGOT" WOULD CONTRADICT THE GROUND for a negated id. Striking a
       // erasure withdraws the erasure, and the receipt leaves the surviving set — so an id this
       // store really did forget, and then forgave, reads here exactly like one it never held. The
       // count of receipts that do not bind is already in hand; the listing discloses it, and so
       // must this, or the two screens disagree about the same store.
       io.err(
-        `tombstones show: no receipt STANDS for ${wanted} — not as a receipt, and not as an id ` +
-          `this store is currently forgetting. \`loam tombstones list\` shows what stands.` +
+        `erasures show: no receipt STANDS for ${wanted} — not as a receipt, and not as an id ` +
+          `this store is currently forgetting. \`loam erasures list\` shows what stands.` +
           (ledger.inert <= 0
             ? ""
             : `\n  ${ledger.inert} receipt${ledger.inert === 1 ? "" : "s"} here ` +
-              `${ledger.inert === 1 ? "does" : "do"} not bind — struck (forgiveness, §11) or ` +
-              `malformed. If ${wanted} was forgiven, it was forgotten once and is not now, and ` +
+              `${ledger.inert === 1 ? "does" : "do"} not bind — struck (negation, §11) or ` +
+              `malformed. If ${wanted} was negated, it was forgotten once and is not now, and ` +
               `this screen cannot tell that apart from an id never held.`),
       );
       // 1, not 2. The id is well formed and the invocation is correct — what is missing is a receipt
@@ -5399,7 +5399,7 @@ async function cmdTombstones(args: readonly string[], io: IO): Promise<number> {
     ["erased", "receipt", "ordered at", "sweep", "spoken by", "reason"],
     ledger.receipts.map((r) => [
       shortId(r.erased),
-      shortId(r.tombstone),
+      shortId(r.erasure),
       new Date(r.at).toISOString(),
       // NOT "forgotten at". The timestamp is when the ORDER was signed; whether the sweep it
       // promised finished is a separate question, and it is asked per row rather than assumed.
@@ -5424,9 +5424,9 @@ async function cmdTombstones(args: readonly string[], io: IO): Promise<number> {
   if (unswept.length > 0) {
     io.out(
       `loam: ${unswept.length} of these receipt(s) stand over an UNFINISHED sweep: ` +
-        `${capped(unswept.map((r) => shortId(r.erased)))}. A tombstone is a promise — §11 lands it, ` +
+        `${capped(unswept.map((r) => shortId(r.erased)))}. An erasure is a promise — §11 lands it, ` +
         `purges, and only then reports a tier that refused — so a receipt can stand while the bytes ` +
-        `do not. \`loam erase <id> --reason "…"\` re-runs the sweep; \`loam tombstones show <id>\` ` +
+        `do not. \`loam erase <id> --reason "…"\` re-runs the sweep; \`loam erasures show <id>\` ` +
         `reads one row in full.`,
     );
   }
@@ -5452,7 +5452,9 @@ export async function run(
   io: IO,
   options: RunOptions = {},
 ): Promise<number | ServerHandle> {
-  const [command, ...rest] = argv;
+  const [typed, ...rest] = argv;
+  // `tombstones` was this command's name before `erasures`; it still works.
+  const command = typed === "tombstones" ? "erasures" : typed;
   if (command === undefined || command === "--help" || command === "help") {
     io.out(topHelp());
     return 0;
@@ -5500,8 +5502,8 @@ export async function run(
         return await cmdSlate(rest, io);
       case "erase":
         return await cmdErase(rest, io);
-      case "tombstones":
-        return await cmdTombstones(rest, io);
+      case "erasures":
+        return await cmdErasures(rest, io);
       default:
         io.err(`loam: unknown command "${command}" — run \`loam --help\``);
         return 2;

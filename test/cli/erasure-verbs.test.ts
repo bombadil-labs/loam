@@ -822,7 +822,7 @@ describe("T206 (a) — `loam slate list` prints §29.1's record", () => {
   });
 });
 
-describe("T206 (d) — `loam tombstones` reads the receipt, never the record", () => {
+describe("T206 (d) — `loam erasures` reads the receipt, never the record", () => {
   it("shows who ordered it, whose record it was, when, and why — and none of the content", async () => {
     const home = await noteHome("receipt");
     const forgotten = await ground(home, async (gw) => {
@@ -845,32 +845,37 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
     const tombs = await ground(home, (gw) => standingErasures(gw.reactor, OP));
     expect(tombs).toHaveLength(1);
     expect(erasureTarget(tombs[0]!.claims)).toBe(forgotten.target);
-    expect(tombs[0]!.id).toBe(forgotten.tombstone);
+    expect(tombs[0]!.id).toBe(forgotten.erasure);
 
     // OBJECT LEVEL, the listing: the receipt is on the screen, abbreviated for scanning.
     clear();
-    expect(await run(["tombstones", "list", "--home", home], io()), printed()).toBe(0);
+    expect(await run(["erasures", "list", "--home", home], io()), printed()).toBe(0);
     const listing = printed();
     expect(listing).toContain(short(forgotten.target));
-    expect(listing).toContain(short(forgotten.tombstone));
+    expect(listing).toContain(short(forgotten.erasure));
     expect(listing).toContain("kit asked, under article 17");
     expect(listing).not.toContain("kit-erased-marker");
     expect(listing).toMatch(/remembers THAT it forgot these ids, never what they said/);
     expect(listing).toMatch(/1 receipt in/);
     // The PRESENT forms of the two columns whose absent forms are railed elsewhere. Hard-coding
     // either cell to the absent marker would otherwise pass every assertion in this file.
-    const listedRow = listing.split("\n").find((l) => l.includes(short(forgotten.tombstone)));
+    const listedRow = listing.split("\n").find((l) => l.includes(short(forgotten.erasure)));
     expect(listedRow, listing).toContain(SUBJECT.slice(0, 20));
     expect(listedRow).toContain("kit asked, under article 17");
+
+    // The command's former name, `tombstones`, is an alias: it prints the same listing.
+    clear();
+    expect(await run(["tombstones", "list", "--home", home], io()), printed()).toBe(0);
+    expect(printed()).toBe(listing);
 
     // OBJECT LEVEL, the receipt in full — by the erasure's own id.
     clear();
     expect(
-      await run(["tombstones", "show", forgotten.tombstone, "--home", home], io()),
+      await run(["erasures", "show", forgotten.erasure, "--home", home], io()),
       printed(),
     ).toBe(0);
     const shown = printed();
-    expect(shown).toContain(forgotten.tombstone); // the receipt's own id, in full
+    expect(shown).toContain(forgotten.erasure); // the receipt's own id, in full
     expect(shown).toContain(forgotten.target); // the id it forgot, in full
     expect(shown).toContain(new Date(tombs[0]!.claims.timestamp).toISOString()); // when
     // TWO DIFFERENT PEOPLE, on two lines, each asserted to carry ONE of them. A receipt that
@@ -900,41 +905,40 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
 
     // The same receipt, found by the id the operator actually has: the one that was erased.
     clear();
-    expect(
-      await run(["tombstones", "show", forgotten.target, "--home", home], io()),
-      printed(),
-    ).toBe(0);
-    expect(printed()).toContain(forgotten.tombstone);
+    expect(await run(["erasures", "show", forgotten.target, "--home", home], io()), printed()).toBe(
+      0,
+    );
+    expect(printed()).toContain(forgotten.erasure);
     expect(printed()).not.toContain("kit-erased-marker");
   });
 
   it("a struck receipt leaves the listing and is COUNTED, while a named live one stays", async () => {
     // The home name is deliberately not a word this screen prints. A `toMatch` over the whole blob
     // reads the STORE PATH too, and the first draft of this rail was satisfied by a temp directory
-    // called "forgiven" rather than by the sentence it meant to pin.
+    // called "negated" rather than by the sentence it meant to pin.
     const home = await noteHome("home-b");
     const both = await ground(home, async (gw) => {
       const kit = await note(gw, "note:kit", "title", "kit-erased-marker");
       const vera = await note(gw, "note:vera", "title", "vera-erased-marker");
       const kept = await gw.erase(kit.id, { reason: "kit asked" });
-      const forgiven = await gw.erase(vera.id, { reason: "vera asked" });
-      // Forgiveness (§11): striking the erasure withdraws the erasure order, so the id may
+      const negated = await gw.erase(vera.id, { reason: "vera asked" });
+      // Negation (§11): striking the erasure withdraws the erasure order, so the id may
       // return. The receipt stops binding and leaves the surviving set.
       await gw.append([
-        signClaims(makeNegationClaims(OP, gw.nextTimestamp(), forgiven.tombstone), OP_SEED),
+        signClaims(makeNegationClaims(OP, gw.nextTimestamp(), negated.erasure), OP_SEED),
       ]);
-      return { kept, forgiven };
+      return { kept, negated };
     });
 
     // DELTA LEVEL: the ground holds two erasures and exactly one of them still binds.
     const surviving = await ground(home, (gw) => standingErasures(gw.reactor, OP).map((d) => d.id));
-    expect(surviving).toEqual([both.kept.tombstone]);
+    expect(surviving).toEqual([both.kept.erasure]);
 
     clear();
-    expect(await run(["tombstones", "list", "--home", home], io()), printed()).toBe(0);
+    expect(await run(["erasures", "list", "--home", home], io()), printed()).toBe(0);
     const listing = printed();
-    expect(listing).toContain(short(both.kept.tombstone)); // the live receipt is there...
-    expect(listing).not.toContain(short(both.forgiven.tombstone)); // ...the forgiven one is not...
+    expect(listing).toContain(short(both.kept.erasure)); // the live receipt is there...
+    expect(listing).not.toContain(short(both.negated.erasure)); // ...the negated one is not...
     // ...and the omission is DECLARED, with the COUNT. An omission and a revocation look identical
     // on a screen that only drops the row, and this listing is read on the morning that difference
     // decides a case.
@@ -954,11 +958,11 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
       };
     });
 
-    expect(await run(["tombstones", "show", both.cut.tombstone, "--home", home], io())).toBe(0);
+    expect(await run(["erasures", "show", both.cut.erasure, "--home", home], io())).toBe(0);
     expect(printed()).toContain("container:slate:kit");
     expect(printed()).toMatch(/one member of that cut/);
     clear();
-    expect(await run(["tombstones", "show", both.lone.tombstone, "--home", home], io())).toBe(0);
+    expect(await run(["erasures", "show", both.lone.erasure, "--home", home], io())).toBe(0);
     expect(printed()).not.toContain("container:slate:");
   });
 
@@ -987,7 +991,7 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
       return ascending.map((t) => t.id);
     });
 
-    expect(await run(["tombstones", "list", "--home", home], io()), printed()).toBe(0);
+    expect(await run(["erasures", "list", "--home", home], io()), printed()).toBe(0);
     const listing = printed();
     const first = listing.indexOf(short(pair[0]!));
     const second = listing.indexOf(short(pair[1]!));
@@ -1025,19 +1029,19 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
 
     // DELTA LEVEL: the ground really does hold one receipt with two reasons and one with none.
     const held = await ground(home, (gw) => receiptLedger(gw.reactor, OP).receipts);
-    expect(held.find((r) => r.tombstone === both.many)!.reasons).toEqual([
+    expect(held.find((r) => r.erasure === both.many)!.reasons).toEqual([
       "kit asked in March",
       "and again in April",
     ]);
-    expect(held.find((r) => r.tombstone === both.none)!.reasons).toEqual([]);
+    expect(held.find((r) => r.erasure === both.none)!.reasons).toEqual([]);
 
     // OBJECT LEVEL: both reasons reach the screen, and the receipt with none SAYS so rather than
     // printing an empty space a reader would take for an oversight.
-    expect(await run(["tombstones", "show", both.many, "--home", home], io()), printed()).toBe(0);
+    expect(await run(["erasures", "show", both.many, "--home", home], io()), printed()).toBe(0);
     expect(printed()).toContain("kit asked in March");
     expect(printed()).toContain("and again in April");
     clear();
-    expect(await run(["tombstones", "show", both.none, "--home", home], io()), printed()).toBe(0);
+    expect(await run(["erasures", "show", both.none, "--home", home], io()), printed()).toBe(0);
     expect(printed()).toMatch(/none recorded/i);
   });
 
@@ -1047,33 +1051,33 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
     // 1, not 2: the id is well formed and the invocation is right. What is absent is a receipt in
     // this store, which is a STATE — and the whole file separates those two codes deliberately, so
     // a script can retry one and fix the other.
-    expect(await run(["tombstones", "show", stranger, "--home", home], io())).toBe(1);
+    expect(await run(["erasures", "show", stranger, "--home", home], io())).toBe(1);
     expect(printed()).toContain(stranger);
-    expect(printed()).toContain("tombstones list");
-    // Nothing here does not bind, so the refusal says nothing about forgiveness. The other side of
+    expect(printed()).toContain("erasures list");
+    // Nothing here does not bind, so the refusal says nothing about negation. The other side of
     // that sentence is the next rail.
     expect(printed()).not.toMatch(/do not bind|does not bind/);
   });
 
-  it("does not tell a forgiven id it was never forgotten", async () => {
+  it("does not tell a negated id it was never forgotten", async () => {
     const home = await noteHome("pardoned");
-    // Forgiveness withdraws the erasure order, so the receipt leaves the surviving set — and an id
+    // Negation withdraws the erasure order, so the receipt leaves the surviving set — and an id
     // this store really did forget, and then forgave, reads exactly like one it never held. The
     // listing already discloses the count that does not bind; the lookup must too, or the two
     // screens contradict each other about the same store.
-    const forgiven = await ground(home, async (gw) => {
+    const negated = await ground(home, async (gw) => {
       const target = await note(gw, "note:kit", "title", "kit-erased-marker");
       const receipt = await gw.erase(target.id, { reason: "kit asked" });
       await gw.append([
-        signClaims(makeNegationClaims(OP, gw.nextTimestamp(), receipt.tombstone), OP_SEED),
+        signClaims(makeNegationClaims(OP, gw.nextTimestamp(), receipt.erasure), OP_SEED),
       ]);
-      return { erased: target.id, tombstone: receipt.tombstone };
+      return { erased: target.id, erasure: receipt.erasure };
     });
 
-    expect(await run(["tombstones", "show", forgiven.erased, "--home", home], io())).toBe(1);
+    expect(await run(["erasures", "show", negated.erased, "--home", home], io())).toBe(1);
     const said = printed();
     expect(said).toMatch(/1 receipt here does not bind/);
-    expect(said).toMatch(/forgiv/i);
+    expect(said).toMatch(/negated/i);
     // AND IT DOES NOT ASSERT THE ABSENCE the ground contradicts: the screen may say no receipt
     // STANDS, and must not say the store never forgot the id. "currently" is the word that keeps
     // the sentence true, so its loss is what this pins — the previous needle forbade a phrase no
@@ -1096,10 +1100,10 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
     const at = await ground(home, (gw) => receiptLedger(gw.reactor, OP).receipts.map((r) => r.at));
     expect(at[0]!, "the fixture must span two moments").toBeLessThan(at[1]!);
 
-    expect(await run(["tombstones", "list", "--home", home], io()), printed()).toBe(0);
+    expect(await run(["erasures", "list", "--home", home], io()), printed()).toBe(0);
     const listing = printed();
-    expect(listing.indexOf(short(both.first.tombstone))).toBeLessThan(
-      listing.indexOf(short(both.second.tombstone)),
+    expect(listing.indexOf(short(both.first.erasure))).toBeLessThan(
+      listing.indexOf(short(both.second.erasure)),
     );
   });
 
@@ -1132,7 +1136,7 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
     await backend.append([bare]);
     await backend.close();
 
-    expect(await run(["tombstones", "list", "--home", home], io()), printed()).toBe(0);
+    expect(await run(["erasures", "list", "--home", home], io()), printed()).toBe(0);
     // SCOPED TO THE ROW. The header line carries an em dash of its own, so a bare search for the
     // absent-cell marker passes over any listing at all — including one printing a blank cell.
     const row = printed()
@@ -1140,7 +1144,7 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
       .find((l) => l.includes(short(bare.id)));
     expect(row, printed()).toContain(ABSENT);
     clear();
-    expect(await run(["tombstones", "show", bare.id, "--home", home], io()), printed()).toBe(0);
+    expect(await run(["erasures", "show", bare.id, "--home", home], io()), printed()).toBe(0);
     expect(printed()).toMatch(/does not record whose record it forgot/);
     expect(printed()).toContain("an older store wrote this"); // and the rest of it still reads
   });
@@ -1159,7 +1163,7 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
     corrupt(home, world.vera, JSON.stringify({ not: "claims at all" }));
 
     for (const verb of [
-      ["tombstones", "list"],
+      ["erasures", "list"],
       ["slate", "list"],
     ]) {
       clear();
@@ -1176,7 +1180,7 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
     // unconditionally is a hedge nobody reads, and the disclosure is wired per verb.
     const clean = await noteHome("clean-pen");
     for (const verb of [
-      ["tombstones", "list"],
+      ["erasures", "list"],
       ["slate", "list"],
     ]) {
       clear();
@@ -1187,7 +1191,7 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
 
   it("asks the tiers before calling a receipt swept, on both readers", async () => {
     const home = await noteHome("promise");
-    // A TOMBSTONE IS A PROMISE, NOT A REPORT. §11 lands the receipt, purges, and only then reports a
+    // A ERASURE IS A PROMISE, NOT A REPORT. §11 lands the receipt, purges, and only then reports a
     // tier that refused — so a receipt stands over bytes that are still on this disk whenever a
     // sweep faults mid-flight. Read from the receipt alone, both screens print a completed
     // forgetting, with a date, that nothing asked about. The erase screens in this same file refuse
@@ -1206,12 +1210,12 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
     // THE PREMISE, at the bytes: the receipt stands and the record is still here.
     expect(homeHolds(home, "kit-erased-marker")).toBe(true);
 
-    expect(await run(["tombstones", "show", world.tomb, "--home", home], io()), printed()).toBe(0);
+    expect(await run(["erasures", "show", world.tomb, "--home", home], io()), printed()).toBe(0);
     expect(printed(), "the show screen states the sweep, not just the order").toMatch(/NOT SWEPT/);
     expect(printed()).toContain("STILL HOLDS");
 
     clear();
-    expect(await run(["tombstones", "list", "--home", home], io()), printed()).toBe(0);
+    expect(await run(["erasures", "list", "--home", home], io()), printed()).toBe(0);
     expect(printed()).toMatch(/stand over an UNFINISHED sweep/);
 
     // TWO-SIDED, and it is the whole rail: a store whose sweep really did run says SWEPT on both
@@ -1231,7 +1235,7 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
       printed(),
     ).toBe(0);
     clear();
-    expect(await run(["tombstones", "list", "--home", done], io()), printed()).toBe(0);
+    expect(await run(["erasures", "list", "--home", done], io()), printed()).toBe(0);
     const row = printed()
       .split("\n")
       .find((l) => l.includes(short(other)));
@@ -1241,7 +1245,7 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
     // AND THE SHOW SCREEN, on the settled side too — "on both readers" was true of the held arm
     // only, and the settled cell's own sentence was asserted nowhere in the tree.
     clear();
-    expect(await run(["tombstones", "show", other, "--home", done], io()), printed()).toBe(0);
+    expect(await run(["erasures", "show", other, "--home", done], io()), printed()).toBe(0);
     expect(printed()).toContain("swept — no tier this run opened still holds it");
     expect(printed()).not.toMatch(/NOT SWEPT|UNPROVEN|NOT SETTLED/);
 
@@ -1279,7 +1283,7 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
     );
 
     clear();
-    expect(await run(["tombstones", "list", "--home", home], io()), printed()).toBe(0);
+    expect(await run(["erasures", "list", "--home", home], io()), printed()).toBe(0);
     expect(printed(), "the cold copy is not swept").toMatch(/stand over an UNFINISHED sweep/);
     expect(printed()).toContain(join(home, VAULT));
 
@@ -1289,7 +1293,7 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
       if (readFileSync(file).includes("kit-erased-marker")) rmSync(file);
     }
     clear();
-    expect(await run(["tombstones", "list", "--home", home], io()), printed()).toBe(0);
+    expect(await run(["erasures", "list", "--home", home], io()), printed()).toBe(0);
     expect(printed()).not.toMatch(/UNFINISHED sweep/);
     // And the bystander is still in the vault, untouched by any of this.
     expect(vaultHolds(home, "vera-bystander-marker")).toBe(true);
@@ -1300,7 +1304,7 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
     // operator's alone, and the reader asks about this home's key. Over a store governed by another
     // key the unqualified sentence would be an absence the command never verified.
     const home = await noteHome("scoped");
-    expect(await run(["tombstones", "list", "--home", home], io()), printed()).toBe(0);
+    expect(await run(["erasures", "list", "--home", home], io()), printed()).toBe(0);
     expect(printed()).toContain(OP.slice(0, 20));
     clear();
     expect(await run(["slate", "list", "--home", home], io()), printed()).toBe(0);
@@ -1316,14 +1320,14 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
       [["slate"], /wants a subcommand/],
       [["slate", "cut"], /there is no `slate cut`/],
       [["slate", "list", "extra"], /takes no arguments/],
-      [["tombstones"], /wants a subcommand/],
-      [["tombstones", "purge"], /there is no `tombstones purge`/],
-      [["tombstones", "show"], /wants an id/],
-      [["tombstones", "show", "a", "b"], /exactly one id/],
+      [["erasures"], /wants a subcommand/],
+      [["erasures", "purge"], /there is no `erasures purge`/],
+      [["erasures", "show"], /wants an id/],
+      [["erasures", "show", "a", "b"], /exactly one id/],
       [["erase"], /wants the id of one delta/],
       [["erase", "a", "b", "--reason", "x"], /exactly one delta id/],
       [["slate", "list", "--frobnicate", "x"], /--frobnicate/],
-      [["tombstones", "list", "--frobnicate", "x"], /--frobnicate/],
+      [["erasures", "list", "--frobnicate", "x"], /--frobnicate/],
       [["erase", "a", "--reason", "x", "--frobnicate", "y"], /--frobnicate/],
     ] as const) {
       clear();
@@ -1336,7 +1340,7 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
     const bare = join(root, "bare");
     mkdirSync(bare);
     for (const verb of [
-      ["tombstones", "list"],
+      ["erasures", "list"],
       ["slate", "list"],
     ]) {
       clear();
@@ -1354,7 +1358,7 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
   it("says plainly that nothing has been forgotten, and the same store speaks after one erasure", async () => {
     const home = await noteHome("nothing");
 
-    expect(await run(["tombstones", "list", "--home", home], io()), printed()).toBe(0);
+    expect(await run(["erasures", "list", "--home", home], io()), printed()).toBe(0);
     const empty = printed();
     expect(empty).toMatch(/forgotten nothing|no .*receipt/i);
     expect(empty).not.toMatch(/reason/i);
@@ -1364,18 +1368,18 @@ describe("T206 (d) — `loam tombstones` reads the receipt, never the record", (
       return gw.erase(target.id, { reason: "quill asked" });
     });
     clear();
-    expect(await run(["tombstones", "list", "--home", home], io()), printed()).toBe(0);
-    expect(printed()).toContain(short(receipt.tombstone));
+    expect(await run(["erasures", "list", "--home", home], io()), printed()).toBe(0);
+    expect(printed()).toContain(short(receipt.erasure));
     expect(printed()).toContain("quill asked");
 
     // And --store names WHICH store is answering here too. Pointed at a file this home has never
     // written, the same verb reports nothing forgotten — the flag routes the read.
     clear();
     expect(
-      await run(["tombstones", "list", "--home", home, "--store", "elsewhere.sqlite"], io()),
+      await run(["erasures", "list", "--home", home, "--store", "elsewhere.sqlite"], io()),
       printed(),
     ).toBe(0);
-    expect(printed()).not.toContain(short(receipt.tombstone));
+    expect(printed()).not.toContain(short(receipt.erasure));
     expect(printed()).toMatch(/forgotten nothing|no .*receipt/i);
   });
 });
@@ -1427,7 +1431,7 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     const receipts = await ground(home, (gw) => receiptLedger(gw.reactor, OP).receipts);
     expect(receipts).toHaveLength(1);
     expect(receipts[0]!.erased).toBe(target);
-    expect(said).toContain(receipts[0]!.tombstone);
+    expect(said).toContain(receipts[0]!.erasure);
     expect(said).toContain("kit asked, under article 17");
     // The swept line NAMES the tiers it asked, and the archive branch is one of them — without this
     // the vault can drop out of the sentence while the sweep still reaches it, so an operator
@@ -1901,7 +1905,7 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
       1,
     );
     const receipt = await ground(home, (gw) => receiptLedger(gw.reactor, OP).receipts[0]!);
-    expect(printed()).toContain(receipt.tombstone);
+    expect(printed()).toContain(receipt.erasure);
     expect(printed()).toContain(new Date(receipt.at).toISOString());
     // WHICH ARM. The id and the moment appear in both branches, so asserting them pins that a line
     // was printed and not WHICH ONE — and the two say opposite things about whether the record is
@@ -1966,7 +1970,7 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     // DELTA LEVEL: one receipt, still carrying the first sentence, and no second was minted.
     const receipts = await ground(home, (gw) => receiptLedger(gw.reactor, OP).receipts);
     expect(receipts).toHaveLength(1);
-    expect(receipts[0]!.tombstone).toBe(world.tomb);
+    expect(receipts[0]!.erasure).toBe(world.tomb);
     expect(receipts[0]!.reasons).toEqual(["the first sentence, art. 17"]);
     // And the retry did the work it exists to do, two-sided as every sweep here is.
     expect(homeHolds(home, "kit-erased-marker")).toBe(false);
@@ -2435,7 +2439,7 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     // cannot tell the pool arm of the loop from the host arm it already had: a disclosure printed
     // for the wrong reason reads identically to one printed for the right one.
     clear();
-    expect(await run(["tombstones", "list", "--home", home], io()), printed()).toBe(0);
+    expect(await run(["erasures", "list", "--home", home], io()), printed()).toBe(0);
     expect(printed(), "the host pen is empty before the pool row is damaged").not.toMatch(
       /quarantine/i,
     );
@@ -2450,7 +2454,7 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     db.close();
 
     clear();
-    expect(await run(["tombstones", "list", "--home", home], io()), printed()).toBe(0);
+    expect(await run(["erasures", "list", "--home", home], io()), printed()).toBe(0);
     expect(printed()).toMatch(/quarantine/i);
     expect(printed()).toContain("repair list");
   });

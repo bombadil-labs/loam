@@ -40,10 +40,10 @@
       "targetAbsent": {
         "$": "undefined"
       },
-      "targetPresent": "a tombstone's spoken-by must be the erased delta's actual author"
+      "targetPresent": "an erasure's spoken-by must be the erased delta's actual author"
     }
   },
-  "two erases pointers": "a tombstone erases exactly one delta (one delta-kind `erases` pointer)",
+  "two erases pointers": "an erasure erases exactly one delta (one delta-kind `erases` pointer)",
   "ungoverned": {
     "#tomb/by-stranger": {
       "targetAbsent": "erasure is the instance operator's alone: only the operator may order a record removed",

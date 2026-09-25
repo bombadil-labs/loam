@@ -370,7 +370,7 @@ A villager erases her own words. Checks: (12.1) the regret federates in and tops
 the bytes, the dossier reverts, the signed hole remains; (12.3) sovereignty both ways — the
 commons still holds the original and offers it every pulse, the almanac's door refuses it
 (accepted 0, id not held); (12.4) the vault cannot replant the unsaid — heal is
-tombstone-guarded, reopen stays clean. Field note: village act pacing has slowed (~25s/act:
+erasure-guarded, reopen stays clean. Field note: village act pacing has slowed (~25s/act:
 the mill re-grinds a 400+-delta ground per ingest; the pulse presence query hauls the
 derived.from evidence hex) — SPEC §13's vertical-scale honesty in miniature; candidates
 recorded in CURRENT_WORK.

@@ -112,7 +112,7 @@ const GRAVE_SPEC: GraveyardSpec = {
   cutAt: NOW,
   closes: ["egress", "cite"],
   affected: [],
-  priorTombstone: [],
+  priorErasure: [],
 };
 
 // --- the world, built from the barrel alone ------------------------------------------------------
@@ -209,7 +209,7 @@ describe("T109 — the slate surface is reachable from the package barrel", () =
       RECEIPT_FIELDS.filter((f) => f.side === "observation")
         .map((f) => f.field)
         .sort(),
-    ).toEqual(["forgiven", "presentAgain", "tiers"]);
+    ).toEqual(["negated", "presentAgain", "tiers"]);
   });
 
   it("does NOT export the plumbing behind the doors", () => {
@@ -223,7 +223,7 @@ describe("T109 — the slate surface is reachable from the package barrel", () =
       "deriveReceiptImpl",
       "slateReportsImpl",
       "slateHealth",
-      "forgivenHealth",
+      "negatedHealth",
       "slateRefusal",
       "egressWithheld",
       "readClosedIds",
@@ -315,7 +315,7 @@ describe("T109 — the slate surface is reachable from the package barrel", () =
     const perMember: readonly CutMemberReport[] = cut.members;
     for (const m of perMember) {
       // The minted erasure RESOLVES in the ground and is one — not just a plausible-looking id.
-      expect(loam.isErasure(gw.reactor.get(m.tombstone)!.claims)).toBe(true);
+      expect(loam.isErasure(gw.reactor.get(m.erasure)!.claims)).toBe(true);
       const tiers: readonly TierVerdict[] = m.tiers;
       const verdicts: ByteVerdict[] = tiers.map((t) => t.holds);
       expect(verdicts).not.toContain(true); // no tier still holds the bytes
@@ -348,7 +348,7 @@ describe("T109 — the slate surface is reachable from the package barrel", () =
     const members: readonly ReceiptMember[] = receipt.members;
     expect(members.map((m) => m.member).sort()).toEqual(condemned);
     for (const m of members) {
-      expect(m.tombstone).toBeDefined();
+      expect(m.erasure).toBeDefined();
       expect(m.presentAgain).toBe(false);
     }
     expect(receipt.nonClaim.length).toBeGreaterThan(0);
