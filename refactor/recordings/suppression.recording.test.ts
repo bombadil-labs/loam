@@ -106,7 +106,7 @@ const revokeWriter = signed(
 
 describe("recordings: suppression, four readers side by side", () => {
   it("content addresses of the corpus", async () => {
-    await record("suppression.ids", idsOf(CORPUS));
+    await record("suppression.ids", idsOf([...CORPUS, revokeWriter]));
   });
 
   const verdicts = (corpus: readonly Delta[]) => {
