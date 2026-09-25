@@ -133,7 +133,7 @@ Candidates:
 The trust, binding-policy, public and budget readers are SPEC-5 Policies written as loops.
 Resolvers ship code inside a binding and run it after the Policy, which SPEC-0 P4 forbids. Derived
 authors use a Loam vocabulary with a free-string function id. A lens has no substrate identity,
-which is the root of hazard H6. The Schema hash is computed two ways.
+which is the root of hazard H6. The Schema hash is computed two ways (Sol showed that both give the same bytes).
 
 Candidates:
 - `applyPolicy(policy, candidates)` in the resolve tier.
@@ -157,7 +157,8 @@ These are Loam bugs whatever vNext decides. Recordings pin the first two.
 
 ## Decisions for Myk
 
-Each item has a recommendation. None is decided.
+Superseded by [../PLAN.md](../PLAN.md) §6, which merges these with Sol's audit. Kept as the
+record of this audit.
 
 1. **Forgetting a strike.** Today, erasing a negation revives its target. Recommendation: a forget
    record keeps the strike's suppression in force, so forgetting never revives anything.
