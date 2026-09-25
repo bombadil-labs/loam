@@ -67,9 +67,7 @@
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run build && npm test",
     "release": "node scripts/release.mjs",
     "version": "node scripts/sync-version.mjs",
-    "prepublishOnly": "npm run check",
-    "adlc:patch": "node scripts/patch-adlc-npx.mjs && node scripts/patch-adlc-init.mjs && node scripts/patch-adlc-hollow-ts.mjs",
-    "p5": "node scripts/p5-triage.mjs"
+    "prepublishOnly": "npm run check"
   },
   "dependencies": {
     "@bombadil/rhizomatic": "^0.8.0",
