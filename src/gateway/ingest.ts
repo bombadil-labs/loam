@@ -685,7 +685,8 @@ export async function federateImpl(
   // read access to the target, so a distinguishable refusal would announce that something exists and
   // is on its way out. It costs nothing to be uniform — this door already returns counts and no
   // message, so a slate refusal is indistinguishable from any other rejection.
-  const slates = readSlates(gw.reactor, gw.operatorAuthor, Date.now());
+  const now = Date.now(); // one moment for the slate check and the stream closure below
+  const slates = readSlates(gw.reactor, gw.operatorAuthor, now);
   const lawful: Delta[] = [];
   let admitted: Delta[] = [];
   for (const d of all) {
@@ -753,6 +754,11 @@ export async function federateImpl(
     } finally {
       for (const d of admitted) gw.justPersisted.delete(d.id);
     }
+  }
+  // As at append: a batch that closes reads (a slate record or an erasure) touches no watched
+  // entity, so open streams end and readers resubscribe into the narrowed reading.
+  if (admitted.length > 0 && landsReadClosure(gw, admitted, now)) {
+    for (const channel of [...gw.channels]) await channel.return();
   }
   const accepted = acceptedIds.length;
   // "accepted" counts deltas NEWLY ingested — a duplicate verified but merged into what was

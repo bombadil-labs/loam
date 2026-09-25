@@ -56,6 +56,7 @@ import { ESM_RESIDENCY_DISCLOSURE, ERASURE_NON_CLAIMS } from "./erase.js";
 import {
   UNSWEPT_AUTH_SURFACES,
   eraseImpl,
+  erasedFromReading,
   erasureOutstanding,
   isTombstone,
   survivingTombstones,
@@ -1049,7 +1050,10 @@ export function egressWithheld(gw: Gateway, now: number): Set<string> {
 /** What READ closure withholds from every gather that answers a read DOOR. */
 export function readClosedIds(gw: Gateway, now: number): Set<string> {
   requireMoment(now, "a read door");
-  return closureIds(gw.reactor, readSlates(gw.reactor, gw.operatorAuthor, now), "read");
+  const closed = closureIds(gw.reactor, readSlates(gw.reactor, gw.operatorAuthor, now), "read");
+  // Erased ids are never read, even while a purge has not yet removed their bytes.
+  for (const id of erasedFromReading(gw.reactor, gw.operatorAuthor)) closed.add(id);
+  return closed;
 }
 
 /**
@@ -1091,7 +1095,7 @@ const groundWithout = (ground: DeltaSet, closed: ReadonlySet<string>): DeltaSet 
  * a batch with no slate record in it pays nothing.
  */
 export function landsReadClosure(gw: Gateway, batch: readonly Delta[], now: number): boolean {
-  if (!batch.some((d) => isSlateRecord(d.claims))) return false;
+  if (!batch.some((d) => isSlateRecord(d.claims) || isTombstone(d.claims))) return false;
   return readClosedIds(gw, now).size > 0;
 }
 

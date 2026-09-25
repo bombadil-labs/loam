@@ -227,6 +227,27 @@ export function refusedIds(reactor: Reactor, operator: string | undefined): Set<
   return refused;
 }
 
+// What a reading must not show: every refused id, and, transitively, the target of a held negation
+// that is itself refused. Showing that target while hiding its negation would show a retracted claim
+// as live. A negation whose bytes are purged is gone, and its target revives: that is what erasing
+// a negation means.
+export function erasedFromReading(reactor: Reactor, operator: string | undefined): Set<string> {
+  const hidden = refusedIds(reactor, operator);
+  const pending = [...hidden];
+  while (pending.length > 0) {
+    const negation = reactor.get(pending.pop()!);
+    if (negation === undefined) continue;
+    for (const p of negation.claims.pointers) {
+      if (p.role !== "negates" || p.target.kind !== "delta") continue;
+      const target = p.target.deltaRef.delta;
+      if (hidden.has(target) || reactor.get(target) === undefined) continue;
+      hidden.add(target);
+      pending.push(target);
+    }
+  }
+  return hidden;
+}
+
 // The ids that erasures inside one ingest batch refuse. The caller passes only members it has
 // ALREADY accepted (verified, lawful, admitted), so a forged or refused erasure never counts,
 // and a member's id is the hash of its content, so no forged copy can stand in for the target.
@@ -284,8 +305,11 @@ function boundErasures(
   if (operator === undefined) return []; // an ungoverned store honors no erasure at all
   const negated = honorNegations ? lawfulNegated(reactor, operator) : () => false;
   const out: Delta[] = [];
-  for (const delta of reactor.snapshot()) {
-    if (!isTombstone(delta.claims)) continue;
+  // Every erasure points at ERASE_ENTITY, so the by-target index finds them all without a full
+  // walk of the delta set (H8). The index is written with the set, so it cannot lag it.
+  for (const id of reactor.byTarget(ERASE_ENTITY)) {
+    const delta = reactor.get(id);
+    if (delta === undefined || !isTombstone(delta.claims)) continue;
     if (inLocalContext(delta, LOCAL_CONTROL)) {
       // Generic preplanted strikes never become local forgiveness when a marked order lands.
       if (localEraseTarget(delta, reactor, operator) === undefined) continue;
