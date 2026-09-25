@@ -136,14 +136,20 @@ The draft said "forgetting" for erasure. Use "erasure".
   never existed. To end a strike's effect as of a time, negate the strike instead.
 - **F2.** A foreign erasure order is kept as testimony, at a minimum.
 - **F3.** A negation is undone only by another delta (negate the negation) or by erasure. An
-  erasure's bytes cannot come back by any act. Open: may the tombstone itself be negated, so the id
-  may re-enter from a peer that still holds it? Claude reads Myk's rule ("just another delta") as
-  yes.
-- **F4.** Waiting on the clarified wording (see chat).
-- **F5.** Waiting on the explanation of encrypted payloads (see chat).
+  erasure is eternal and provable: its bytes never come back, and the id is never re-admitted. The
+  tombstone is a delta and can be negated, but a store keeps its own list of refused ids. Tombstones
+  add to the list, and negating a tombstone does not remove an id from it. That list is store
+  policy (Loam), not rhizomatic. Loam today lets a negated tombstone re-admit its id; that changes.
+- **F4.** Accepted: "A delta never changes: its id and its content are fixed. Retraction is a
+  negation, which is a new delta. A peer may erase a delta from its own holdings. Erasure is local
+  to that peer, and the peer records it in a signed tombstone that refuses the id's return."
+- **F5.** Encrypted payloads (the draft said "sealed") are an optional second safety for erasure,
+  for the deltas that use them. Specify them in the erasure step. Build them eventually: the plan
+  must not drop them.
 - **T1.** Yes. A delta may negate itself at a signed time. No new delta is needed. A surface that
-  shows it, such as a renderer, must update itself at that time. Proposed interval: valid from is
-  included, valid until is excluded.
+  shows it, such as a renderer, must update itself at that time. Without `validUntil`, only another
+  delta can negate it. Every view reports the next time at which it will change, so a surface
+  schedules one wake-up. Open: at the exact instant `validUntil`, is the delta already negated?
 - **N1.** Ids carry no sharing marker. Equal strings merge. What travels is a property of each
   peer's sharing model (its lenses and admission), never of the delta. This also keeps deltas free
   to move between a store's own containers. The law-anchor problem is solved by governed reads with
