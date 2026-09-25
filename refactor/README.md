@@ -107,6 +107,8 @@ Get a fully green baseline first. A red baseline teaches you to ignore red.
 
 ## Where things are
 
+- `GLOSSARY.md`: the plain words that replace Loam's idiolect. Apply them as you go.
+
 - `tools/`: the census scripts behind the journal's numbers. See `tools/README.md`.
 - `audit/`: Loam's side of the audit.
 - `recordings/`: the recording harness and its outputs.
