@@ -149,7 +149,8 @@ The draft said "forgetting" for erasure. Use "erasure".
 - **T1.** Yes. A delta may negate itself at a signed time. No new delta is needed. A surface that
   shows it, such as a renderer, must update itself at that time. Without `validUntil`, only another
   delta can negate it. Every view reports the next time at which it will change, so a surface
-  schedules one wake-up. Open: at the exact instant `validUntil`, is the delta already negated?
+  schedules one wake-up. `validUntil` is the first moment the claim no longer holds: at that
+  exact instant, the delta is already negated.
 - **N1.** Ids carry no sharing marker. Equal strings merge. What travels is a property of each
   peer's sharing model (its lenses and admission), never of the delta. This also keeps deltas free
   to move between a store's own containers. The law-anchor problem is solved by governed reads with
