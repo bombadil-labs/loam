@@ -661,8 +661,9 @@ archive vault if one is configured (a later heal will not replant it) — then r
 on what remains. What stays is a **receipt**: a signed, append-only claim recording _that_ the
 id was forgotten, by whom, and when — never the content. The store remembers that it forgot. The
 door refuses the id's return thereafter, and forever: negating a receipt withdraws the record, but
-the id stays refused, so the data never returns (§11). There is no un-erasure. Content addressing
-is what makes this honest: retaining a hash retains zero bytes.
+the id stays refused, so the store never admits it again (§11). There is no un-erasure. The
+refusal is about admission: a purge that fails can leave bytes held on disk. Content addressing is
+what makes this honest: retaining a hash retains zero bytes.
 
 The same machinery has a terminal surface, so a compliance officer needs no script:
 
