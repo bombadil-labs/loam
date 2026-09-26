@@ -208,7 +208,9 @@ level. Loam then consumes it through the barrel and compares its recordings.
      To recover a lost key, the operator re-points the record to a new root. The new root is a
      new principal. To keep the old key's history, the new root first signs a `binding` for the
      old key; only then does `associatedKeys` of the new root include it. A `succession` from the
-     old key to the new one is optional after the binding.
+     old key to the new one is optional after the binding. Connection keys the old root delegated do not
+     carry over: a recovered user re-authorizes any connection they want to keep. The recovery
+     rails pin this.
    - **Connection keys.** Each is a delegation signed by the user's root with
      `delegable: false` and `scope` set to the container name. The `prefix` policy lets a
      container scope cover its children (`ada:journal` covers `ada:journal:notes`).
