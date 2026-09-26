@@ -5,7 +5,7 @@
 //
 // Asserted at both levels where the reader has a door: what the store holds (the strike is there)
 // and what a door or command answers. Named gaps:
-//   - `survivingOperatorGrantIds` is asserted at the reader only. The panel that calls it needs the
+//   - `unnegatedOperatorGrantIds` is asserted at the reader only. The panel that calls it needs the
 //     whole connector consent flow (`test/server/admin-connections.test.ts` has that fixture); a
 //     served rail there would drive `/admin/revoke-confirm` with a strike planted first.
 //   - Grant survival at the door (`struck` in accounts.ts) is railed in
@@ -33,7 +33,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { boundGroundFor } from "../../src/gateway/reads.js";
 import { graveyardCompleteness } from "../../src/gateway/slate.js";
 import type { ScryptParams } from "../../src/server/credentials.js";
-import { survivingOperatorGrantIds } from "../../src/server/admin-federation.js";
+import { unnegatedOperatorGrantIds } from "../../src/server/admin-federation.js";
 import { roleClaims, rolesOf } from "../../src/server/users.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
@@ -294,7 +294,7 @@ describe("a bound connection's ground counts the primary's strike only inside it
 
 // --- admin-federation.ts: which grants a connector revoke strikes -------------------------------
 
-describe("the revoke panel strikes every grant the operator's strikes do not hold down now", () => {
+describe("the revoke selection: every unnegated operator grant, which the panel strikes", () => {
   const SUBJECT_SEED = "e7".repeat(32);
   const SUBJECT = authorForSeed(SUBJECT_SEED);
 
@@ -310,8 +310,8 @@ describe("the revoke panel strikes every grant the operator's strikes do not hol
     const { gw, grant } = await withGrant();
     await gw.append([signClaims(makeNegationClaims(GARDENER, 9100, grant.id), GARDENER_SEED)]);
     expect(gw.reactor.negationsOf(grant.id)).toHaveLength(1);
-    expect(survivingOperatorGrantIds(gw.reactor, Date.now(), OP, SUBJECT)).toEqual([grant.id]);
-    expect(survivingOperatorGrantIds(gw.reactor, Date.now(), OP, GARDENER)).toHaveLength(1);
+    expect(unnegatedOperatorGrantIds(gw.reactor, Date.now(), OP, SUBJECT)).toEqual([grant.id]);
+    expect(unnegatedOperatorGrantIds(gw.reactor, Date.now(), OP, GARDENER)).toHaveLength(1);
     await gw.close();
   });
 
@@ -319,15 +319,15 @@ describe("the revoke panel strikes every grant the operator's strikes do not hol
     const { gw, grant } = await withGrant();
     const starts = 5_000_000_000_000;
     await gw.append([timedStrike(OP_SEED, grant.id, 9100, { validFrom: starts })]);
-    expect(survivingOperatorGrantIds(gw.reactor, starts - 1, OP, SUBJECT)).toEqual([grant.id]);
-    expect(survivingOperatorGrantIds(gw.reactor, starts, OP, SUBJECT)).toEqual([]);
+    expect(unnegatedOperatorGrantIds(gw.reactor, starts - 1, OP, SUBJECT)).toEqual([grant.id]);
+    expect(unnegatedOperatorGrantIds(gw.reactor, starts, OP, SUBJECT)).toEqual([]);
 
     const { gw: gw2, grant: grant2 } = await withGrant();
     await gw2.append([
       timedStrike(OP_SEED, grant2.id, 9100, { validFrom: 9100, validUntil: 9200 }),
     ]);
-    expect(survivingOperatorGrantIds(gw2.reactor, 9199, OP, SUBJECT)).toEqual([]);
-    expect(survivingOperatorGrantIds(gw2.reactor, 9200, OP, SUBJECT)).toEqual([grant2.id]);
+    expect(unnegatedOperatorGrantIds(gw2.reactor, 9199, OP, SUBJECT)).toEqual([]);
+    expect(unnegatedOperatorGrantIds(gw2.reactor, 9200, OP, SUBJECT)).toEqual([grant2.id]);
     await gw.close();
     await gw2.close();
   });

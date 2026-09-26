@@ -758,7 +758,9 @@ describe("T209 — a peer may not choose what the operator blesses", () => {
       );
       // …and it really does WIN the alias when the manifest is read unscoped, which is the whole
       // premise: the operator-scoped read is what makes the blessing ignore it.
-      expect(readManifest(members).find((r) => r.alias === "app:hello")?.target).toBe(decoy);
+      expect(readManifest(members, Date.now()).find((r) => r.alias === "app:hello")?.target).toBe(
+        decoy,
+      );
 
       const listed = bob.channelApps(CHANNEL);
       expect(listed).toHaveLength(1);
@@ -799,7 +801,7 @@ describe("T209 — a peer may not choose what the operator blesses", () => {
       const members = [...channel.pool.gateway!.reactor.snapshot()];
 
       // The plant is live and it WINS the alias unscoped — the premise, asserted.
-      expect(readManifest(members).find((r) => r.alias === "Plant")?.target).toBe(
+      expect(readManifest(members, Date.now()).find((r) => r.alias === "Plant")?.target).toBe(
         bindingOf(alice, "hello"),
       );
       // The lens still binds under the receiver's own name — the pass did its job…
@@ -834,7 +836,7 @@ describe("T209 — a peer may not choose what the operator blesses", () => {
       const channel = await link(bob, alice, "alice");
       await channel.sync();
       const members = [...channel.pool.gateway!.reactor.snapshot()];
-      expect(readManifest(members).find((r) => r.alias === "app:hello")?.author).toBe(
+      expect(readManifest(members, Date.now()).find((r) => r.alias === "app:hello")?.author).toBe(
         authorForSeed(ALICE_SEED),
       );
 

@@ -1110,7 +1110,10 @@ export async function blessChannelAppImpl(
   // forever while the listing keeps recommending the command that refuses. Presence is not
   // survival, and it is not victory either. (Operator-scoped for the other half: unscoped, a peer
   // who plants a decoy row naming the right target would suppress the receiver's own mint.)
-  const mine = readManifest(members.filter((d) => d.claims.author === operator));
+  const mine = readManifest(
+    members.filter((d) => d.claims.author === operator),
+    gw.validityNow(),
+  );
   if (mine.find((r) => r.alias === alias)?.target !== app.deltaId) {
     await ground.federate([
       signClaims(
@@ -1131,9 +1134,10 @@ export async function blessChannelAppImpl(
   // members the version froze, exactly as `adoptLaw` will read it, and confirm it still resolves to
   // the binding the operator asked about. `manifest: "operator"` should already make this true; a
   // guard that only holds when another guard holds is not a guard, and the cost is one lookup.
-  const resolved = readManifest(frozen.filter((d) => d.claims.author === operator)).find(
-    (r) => r.alias === alias,
-  );
+  const resolved = readManifest(
+    frozen.filter((d) => d.claims.author === operator),
+    gw.validityNow(),
+  ).find((r) => r.alias === alias);
   if (resolved?.target !== app.deltaId) {
     throw new Error(
       `bless-app refused: this pool's manifest no longer names "${route}" as the binding the ` +
@@ -2335,7 +2339,23 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
     // here would strand exactly the records the reader still believes: a stranger's negation of a
     // real record satisfies "already struck" while the reader goes on serving it.
     const operator = gw.operatorAuthor!;
-    const negated = negatedAt(gw.reactor, gw.validityNow(), operator);
+    const now = gw.validityNow();
+    // A SEVER IS FOR GOOD. A record counts as already severed only when the operator holds an
+    // untimed negation of it that has begun and that nothing negates. A negation with a
+    // `validUntil`, or one that starts later, lets the record come back at its boundary, so such a
+    // record gets a new untimed strike too. A strike on a strike may lapse or begin later, so a
+    // negation that anything negates is not trusted as final.
+    const severedForGood = (id: string): boolean =>
+      gw.reactor.negationsOf(id).some((negId) => {
+        const n = gw.reactor.get(negId);
+        return (
+          n !== undefined &&
+          n.claims.author === operator &&
+          n.claims.validUntil === undefined &&
+          n.claims.validFrom <= now &&
+          gw.reactor.negationsOf(negId).length === 0
+        );
+      });
     // HISTORY: a record valid only later must be struck too, or it comes back at its start.
     for (const d of [...lawfulHistory(gw.reactor, operator)]) {
       const marker = d.claims.pointers.find(
@@ -2343,7 +2363,7 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
       );
       if (marker === undefined || marker.target.kind !== "entity") continue;
       if (marker.target.entity.id !== `channel:${name}`) continue;
-      if (negated(d.id)) continue;
+      if (severedForGood(d.id)) continue;
       await gw.append([
         signClaims(
           withStamp(gw.stamp(operator), (t) => makeNegationClaims(operator, t, d.id)),

@@ -63,7 +63,7 @@ import {
   erasureTarget,
 } from "./erase.js";
 import { withNegationClosure } from "./ingest.js";
-import { lawfulDeltasAt, lawfulSnapshot } from "./registration.js";
+import { lawfulDeltasAt, lawfulHistory } from "./registration.js";
 import { negatedAt } from "./negation.js";
 import type { Gateway } from "./gateway.js";
 import { withStamp } from "./stamp.js";
@@ -1643,7 +1643,9 @@ function findGraveyard(
   record: string,
 ): Delta | undefined {
   const negated = negatedAt(reactor, now, operator);
-  for (const d of lawfulSnapshot(reactor, now, operator)) {
+  // A HISTORY read: a graveyard records an erasure event, and erasure is eternal. Its own validity
+  // window never retires it; only the operator's negation does.
+  for (const d of lawfulHistory(reactor, operator)) {
     if (negated(d.id) || !isGraveyard(d.claims)) continue;
     const cited = d.claims.pointers.find(
       (p) => p.role === "slate-record" && p.target.kind === "delta",
@@ -1677,7 +1679,8 @@ export function readGraveyards(
   if (operator === undefined) return [];
   const negated = negatedAt(reactor, now, operator);
   const out: GraveyardRecord[] = [];
-  for (const d of lawfulSnapshot(reactor, now, operator)) {
+  // A HISTORY read, as in `findGraveyard`: the record's own validity window never retires it.
+  for (const d of lawfulHistory(reactor, operator)) {
     if (negated(d.id) || !isGraveyard(d.claims)) continue;
     if (graveyardDefect(d.claims, operator) !== undefined) continue;
     const cited = d.claims.pointers.find(
@@ -1813,7 +1816,9 @@ function strikeOf(
   witnesses: (id: string) => readonly Delta[],
   member: string,
 ): string | undefined {
-  for (const d of lawfulSnapshot(reactor, now, operator)) {
+  // A HISTORY read: an erasure keeps counting after its own validity window, as `boundErasures`
+  // reads it. Only the strike must hold at `now`.
+  for (const d of lawfulHistory(reactor, operator)) {
     if (!isErasure(d.claims) || erasureTarget(d.claims) !== member) continue;
     const strike = witnesses(d.id)[0];
     if (strike !== undefined) return strike.id;

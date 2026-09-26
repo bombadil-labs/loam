@@ -133,24 +133,41 @@ level. Loam then consumes it through the barrel and compares its recordings.
      time, and `survivingAt` counts a grant or membership only inside its own window. Every entry
      point (`authorize`, `holdsGrant`, `grantsHeldBy`, `tenantOf`, `honoredStrikeOn`) takes the
      read time. The CLI's grant survival (`grantStanding`) reads the operator's strikes at the
-     read time too, so `pen create` and `user remove-role` agree with the door. Pen records stay
-     raw: nothing else reads them. `test/refactor/grant-strike-window.test.ts` pins the door, the
-     readers and the revoke panel on both sides of each boundary.
-   - **Hand-written filters.** The channel, curse and law-adoption readers read `lawfulSnapshot`.
-     `receive-policy.ts` still filters by the receiver's key over a private reactor. It asks a
-     different question, and moves to the governed read with the receiver as its author set.
+     read time. It is not the door's reading: it ignores an admin's strike and the grant's own
+     window, so it names what the operator has not struck, which is what a revoke strikes. Its
+     comment says so. `pen create` still reads "holds a write grant" from it; an expired grant can
+     make that sentence false. Pen records stay raw: nothing else reads them.
+     `test/refactor/grant-strike-window.test.ts` pins the door, the readers and the revoke
+     selection on both sides of each boundary.
+   - **Accuracy (done, PR C).** The revoke selection is named for what it is:
+     `unnegatedOperatorGrantIds` selects every unnegated operator grant, timed or not. The
+     connections panel's label (`connectionGrantState`) reads "expired" and "not yet valid" where
+     it read "revoked". "Revoked" now needs an in-window grant struck by a negation the door honours
+     (`struckAt` in `accounts.ts`).
+   - **Hand-written filters (done, PR C).** The channel, curse and law-adoption readers read
+     `lawfulSnapshot`. `receive-policy.ts` reads the receiver's decisions through
+     `governedDeltas(input, now, {receiver})`. A decision counts only inside its own window at
+     `input.now`. A pause on a binding outside its window is inert, like a pause on a struck one.
+     `survivalOver` (adopt-law) reads a shipper's strike only inside its window at an explicit
+     `now`. Every caller asks a present question, so each passes its read time; `readManifest`
+     takes `now` too.
    - **History reads.** Some reads ask about the past and must never filter by validity. They use
      `lawfulHistory` or `lawfulHistoryAt`, not `governedDeltas`.
      - `everDeclared`: a name whose declaration expired still cannot be minted again.
      - `unreachableStoreReport`: an expired separate declaration still named a store. Its negation
-       test is a present-time read. Decide whether an expired negation still counts as "struck".
-     - Channel listings with severed channels, law-adoption reads with struck records, and
-       `dropChannelCommit` read history already. A drop skips a record that is negated now. If
-       that negation has a `validUntil`, the record revives when it expires. Pin this once timed
-       negations take effect.
-     - Erasure is eternal (decision F3). Erasure and graveyard records (`slate.ts` `findGraveyard`,
-       `readGraveyards`, `strikeOf`) must keep counting after any validity end. Move them to a
-       history read.
+       test is a present-time read. Open: decide whether an expired negation still counts as
+       "struck".
+     - Channel listings with severed channels and law-adoption reads with struck records read
+       history already.
+     - `dropChannelCommit` (done, PR C) reads history, and a drop severs for good. It skips only a
+       record the operator struck with an untimed negation that has begun and that nothing
+       negates. Any other record gets a new untimed strike, so a record negated only for a window
+       stays severed after it.
+     - Erasure is eternal (decision F3; done, PR C). `findGraveyard`, `readGraveyards` and the
+       erasure scan in `strikeOf` read `lawfulHistory`. A graveyard or erasure with a `validUntil`
+       keeps counting after it; only an operator strike holding at the read time retires it.
+       `refusedIds` and `standingErasures` never read an erasure's own window.
+     `test/refactor/step4-last-readers.test.ts` pins PR C, each on both sides of its boundary.
    - **Caches (done).** Four broke when negation depends on time. The registration boundary is
      fixed in PR A: it now includes the validity boundaries of each negation in a registration's
      chain, and `noteRegistrationTime` notes a negation that reaches a registration. PR B fixed
@@ -159,6 +176,11 @@ level. Loam then consumes it through the barrel and compares its recordings.
      answers only until the reactor's next validity boundary. A predicate held across an `await`
      is safe: the substrate's reader clears its memo after an accepted ingest.
      `test/refactor/step4-caches.test.ts` pins all three, at the table and at the door.
+   - **What remains of step 4.** (a) The test fixtures move from `nextTimestamp` to `stamp()` (a
+     separate PR, in flight). (b) Loam's latest-wins picks (registrations, attention) still pick by
+     hand; moving them onto `latestByKey` or `applyPolicy` is measured, not promised. (c) The
+     `unreachableStoreReport` decision above. (d) `pen create`'s "holds a write grant" sentence
+     reads `grantStanding`, which ignores the grant's window.
 5. **Principal.** Roots, key binding, succession, delegation, locators. Loam moves user,
    connection and container keys into signed data.
    Settled inputs (Myk, 2026-09-26; `README.md` rulings 2 to 4): succession records continuity
