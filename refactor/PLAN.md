@@ -73,7 +73,8 @@ Each one becomes a normative vector, a Loam regression recording, or a decision 
 10. A strike is forgotten. Does its target come back? (See decision F1.)
 11. A process restarts with the clock behind its last timestamp, then writes. Splitting the three
     times does not answer this. Question: does a later write sort earlier, unless an author
-    sequence or another causal rule is declared?
+    sequence or another causal rule is declared? Answer (step 3): no ordering rule is declared. Under the
+    `byTimestamp` order a later write can sort earlier, so Loam keeps its authors' clocks monotonic.
 12. A shared container's membership changes and admits an old parent delta, with no new parent
     ingest. Its arrival testimony must say when the delta entered that peer, not copy the parent's
     earlier arrival. This test confirms or refutes the shared container as a peer.
@@ -120,9 +121,12 @@ that an open step is changing.
 Loam changes only after a prerelease exists, except for these:
 
 - **Recordings.** Extend the harness to every target in the audit reports, before step 3.
-- **Monotonic author time, at step 3.** Step 3 adds no ordering rule: latest-wins trusts the
-  author's signed creation time, with ascending id on ties (Sol's answer to CE11). So Loam must
-  keep each author's timestamps from going backwards across a restart. Seeding from the operator's
+- **Monotonic author time, at step 3.** No claim "wins" in the substrate: claims stay in
+  superposition, and each Schema's Policies decide how a View renders (Myk, 2026-09-25). Step 3
+  adds no ordering rule of its own. The `byTimestamp` order sorts by the author's signed creation
+  time, ties broken by ascending id; a separate `byValidFrom` order sorts by valid-from. So a
+  Schema that orders `byTimestamp` needs Loam to keep each author's timestamps from going
+  backwards across a restart. Seeding from the operator's
   deltas is not enough, because mutations are signed with each user's key. Loam keeps a per-author
   maximum, seeded from the store and updated on every append. `recordings/out/time.restart.json`
   shows the defect today (on #573).
