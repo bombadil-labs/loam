@@ -129,7 +129,7 @@ describe("a reader resolves the algebra version back", () => {
   it("hands TENANT's alg back through loadHyperSchema over the lawful slice", async () => {
     const gw = await boot(TENANT);
     const held = loadHyperSchema(
-      lawfulSnapshot(gw.reactor, gw.operator),
+      lawfulSnapshot(gw.reactor, gw.validityNow(), gw.operator),
       TENANT_ENTITY,
       Date.now(),
     );
@@ -147,7 +147,7 @@ describe("a reader resolves the algebra version back", () => {
   it("hands tenantSchemaFor's alg back the same way", async () => {
     const gw = await boot(tenantSchemaFor(OP));
     const held = loadHyperSchema(
-      lawfulSnapshot(gw.reactor, gw.operator),
+      lawfulSnapshot(gw.reactor, gw.validityNow(), gw.operator),
       TENANT_ENTITY,
       Date.now(),
     );

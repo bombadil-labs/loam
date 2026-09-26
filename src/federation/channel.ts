@@ -1883,7 +1883,7 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
       // branch, and re-declaring a name a person dropped reattaches every surviving descendant to
       // it — worse here, because this declaration carries no parent, so the restored name is not
       // in the person's reach either. They cannot see it and cannot drop it again.
-      if (everDeclared(gw.reactor, gw.operatorAuthor, opts.into)) {
+      if (everDeclared(gw.reactor, gw.validityNow(), gw.operatorAuthor, opts.into)) {
         throw new Error(
           `${opts.into} was declared and then dropped, so a channel cannot be opened into it — ` +
             `declaring it again would restore what the drop removed`,
@@ -1918,7 +1918,7 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
       // dropped — their own top-level one — because that name is never in the mint list when the
       // target is two or more levels below it.
       const struckHere = [...missingHere, ...(table.containers.has(up) ? [] : [up])].find(
-        (container) => everDeclared(gw.reactor, gw.operatorAuthor, container),
+        (container) => everDeclared(gw.reactor, gw.validityNow(), gw.operatorAuthor, container),
       );
       if (struckHere !== undefined) {
         throw new Error(
@@ -1975,7 +1975,7 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
         at = at.slice(0, at.lastIndexOf(":"));
       }
       const struck = missing.find((container) =>
-        everDeclared(gw.reactor, gw.operatorAuthor, container),
+        everDeclared(gw.reactor, gw.validityNow(), gw.operatorAuthor, container),
       );
       if (struck !== undefined) {
         throw new Error(

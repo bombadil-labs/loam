@@ -84,6 +84,7 @@ export function readPublicSchemas(
   const negated = negatedAt(reactor, now, operator);
   for (const delta of lawfulDeltasAt(
     reactor,
+    now,
     { entity: PUBLIC_ENTITY, context: CTX_PUBLIC },
     operator,
   )) {

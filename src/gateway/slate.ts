@@ -634,7 +634,7 @@ export function readSlates(
   const negated = negatedAt(reactor, validityNow, operator);
   const table = readContainerTable(reactor, validityNow, operator);
   const out: Slate[] = [];
-  for (const delta of lawfulSnapshot(reactor, operator)) {
+  for (const delta of lawfulSnapshot(reactor, now, operator)) {
     if (negated(delta.id) || !isSlateRecord(delta.claims)) continue;
     // SHAPE only. A malformed record binds nothing, at the reader as at the door; but a record whose
     // CONTAINER has moved is reported below rather than dropped, because dropping it would silently
@@ -1636,7 +1636,7 @@ function findGraveyard(
   record: string,
 ): Delta | undefined {
   const negated = negatedAt(reactor, now, operator);
-  for (const d of lawfulSnapshot(reactor, operator)) {
+  for (const d of lawfulSnapshot(reactor, now, operator)) {
     if (negated(d.id) || !isGraveyard(d.claims)) continue;
     const cited = d.claims.pointers.find(
       (p) => p.role === "slate-record" && p.target.kind === "delta",
@@ -1670,7 +1670,7 @@ export function readGraveyards(
   if (operator === undefined) return [];
   const negated = negatedAt(reactor, now, operator);
   const out: GraveyardRecord[] = [];
-  for (const d of lawfulSnapshot(reactor, operator)) {
+  for (const d of lawfulSnapshot(reactor, now, operator)) {
     if (negated(d.id) || !isGraveyard(d.claims)) continue;
     if (graveyardDefect(d.claims, operator) !== undefined) continue;
     const cited = d.claims.pointers.find(
@@ -1778,7 +1778,7 @@ export function graveyardCompleteness(
       continue;
     }
     // No SURVIVING erasure. Struck (negated) is reported as itself; absent is a real hole.
-    const strike = strikeOf(reactor, operator, isNegated, member);
+    const strike = strikeOf(reactor, now, operator, isNegated, member);
     if (strike !== undefined) negated.push({ member, negation: strike });
     else missing.push(member);
   }
@@ -1798,11 +1798,12 @@ export function graveyardCompleteness(
 // The lawful strike that forgave a member's erasure — the id a receipt reports beside NEGATED.
 function strikeOf(
   reactor: Reactor,
+  now: number,
   operator: string,
   negated: (id: string) => boolean,
   member: string,
 ): string | undefined {
-  for (const d of lawfulSnapshot(reactor, operator)) {
+  for (const d of lawfulSnapshot(reactor, now, operator)) {
     if (!isErasure(d.claims) || erasureTarget(d.claims) !== member) continue;
     if (!negated(d.id)) continue;
     for (const strike of reactor.negationsOf(d.id)) {
@@ -1891,7 +1892,9 @@ export async function deriveReceiptImpl(
   for (const member of completeness.members) {
     const tomb = surviving.get(member);
     const strike =
-      tomb === undefined ? strikeOf(gw.reactor, operator!, negated, member) : undefined;
+      tomb === undefined
+        ? strikeOf(gw.reactor, gw.validityNow(), operator!, negated, member)
+        : undefined;
     // The manifest walks the SAME tier set the byte verdict does (T216) — primary plus every attached
     // pool — so a surviving pool-resident dangler (a T207 arrival stamp echoing the erased member) is
     // named rather than omitted. No exclusion: at re-issue the erasure genuinely dangles at the hole

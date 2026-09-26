@@ -107,7 +107,11 @@ level. Loam then consumes it through the barrel and compares its recordings.
    governed read must answer at an explicit read time, and Loam's recordings must pin a timed
    negation of a registration before this step lands.
    Every negation reader already calls `negatedAt(reactor, now, author)` in
-   `src/gateway/negation.ts`, so the swap edits that body. `dataStruck` and `honoredStrikeOn` take
+   `src/gateway/negation.ts`, so the swap edits that body. The law readers `lawfulSnapshot` and
+   `lawfulDeltasAt` take `now` too, so `governedDeltas` replaces their bodies. Five readers still
+   filter the snapshot by author by hand (`channel.ts` `readChannels`, `dropChannelCommit`,
+   `cursesOf`; `adopt-law.ts` `readLawAdoptions`; `receive-policy.ts`), and move to the governed read
+   one by one. `dataStruck` and `honoredStrikeOn` take
    `now` too, and each needs its own new body. Three caches break when negation depends on time.
    `readContainerTable` is memoized by a count of container law. `Gateway.publicOpen` is cleared on
    ingest and reseat, not at a validity boundary. Several readers keep one predicate across an

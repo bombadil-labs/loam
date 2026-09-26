@@ -297,7 +297,7 @@ const isRoute = (id: string): boolean => id.startsWith("renderer:");
 // binds nothing — unmounted, never a crash.
 export function readRenderers(reactor: Reactor, now: number, operator?: string): RendererBinding[] {
   const negated = negatedAt(reactor, now, operator);
-  return latestPerRoute(lawfulSnapshot(reactor, operator), (d) => !negated(d.id));
+  return latestPerRoute(lawfulSnapshot(reactor, now, operator), (d) => !negated(d.id));
 }
 
 /**
@@ -395,7 +395,7 @@ export function readPoolRenderers(pool: Gateway, host: Gateway): RendererBinding
   if (pool.operatorAuthor === undefined) return [];
   const negated = negatedAt(pool.reactor, pool.validityNow(), pool.operatorAuthor);
   return latestPerRoute(
-    lawfulSnapshot(pool.reactor, pool.operatorAuthor),
+    lawfulSnapshot(pool.reactor, pool.validityNow(), pool.operatorAuthor),
     (d) => !negated(d.id) && host.reactor.get(d.id) === undefined,
   );
 }

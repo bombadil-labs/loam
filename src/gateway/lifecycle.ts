@@ -1043,7 +1043,7 @@ export async function loadHyperSchemaImpl(
   entity: string,
 ): Promise<HyperSchema> {
   const batch = [...deltas];
-  const trial = lawfulSnapshot(gw.reactor, gw.operatorAuthor);
+  const trial = lawfulSnapshot(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   for (const d of batch) trial.add(d);
   const schema = loadHyperSchema(trial, entity, gw.validityNow()); // throws here → nothing was persisted
   await gw.append(batch);

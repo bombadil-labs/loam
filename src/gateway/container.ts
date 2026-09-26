@@ -566,7 +566,7 @@ function computeContainerTable(
   const detached = new Map<string, DetachRecord[]>();
   const defects: string[] = [];
 
-  for (const delta of lawfulSnapshot(reactor, operator)) {
+  for (const delta of lawfulSnapshot(reactor, now, operator)) {
     if (negated(delta.id)) continue;
     const claims = delta.claims;
     const excludedName = containerRef(claims, CTX_CONTAINER_EXCLUDED);
@@ -810,7 +810,7 @@ export function currentContainerDeclarationId(
   // Filed AT the container's entity, so the target index answers it (H8); `lawfulDeltasAt` already
   // keeps only the operator's deltas and carries no negation closure, so the strike filter is here.
   const negated = negatedAt(reactor, now, operator);
-  return lawfulDeltasAt(reactor, { entity, context: CTX_CONTAINER }, operator)
+  return lawfulDeltasAt(reactor, now, { entity, context: CTX_CONTAINER }, operator)
     .filter((delta) => !negated(delta.id) && containerDeclarationName(delta.claims) === entity)
     .sort((a, b) => b.claims.timestamp - a.claims.timestamp || b.id.localeCompare(a.id))[0]?.id;
 }
@@ -826,7 +826,7 @@ export function survivingDeclarationIds(
   // `everDeclared` below, on the road that drops a container. `lawfulDeltasAt` carries no negation
   // closure of its own, so the strike filter stays here.
   const negated = negatedAt(reactor, now, operator);
-  return lawfulDeltasAt(reactor, { entity, context: CTX_CONTAINER }, operator)
+  return lawfulDeltasAt(reactor, now, { entity, context: CTX_CONTAINER }, operator)
     .filter((delta) => !negated(delta.id))
     .filter((delta) => containerRef(delta.claims, CTX_CONTAINER) === entity)
     .map((delta) => delta.id);
@@ -843,6 +843,7 @@ export function survivingDeclarationIds(
  */
 export function everDeclared(
   reactor: Reactor,
+  now: number,
   operator: string | undefined,
   entity: string,
 ): boolean {
@@ -865,7 +866,7 @@ export function everDeclared(
   // WELL-FORMED ONLY. Malformed law binds nothing — `computeContainerTable` skips a declaration
   // whose trust or posture the law refuses — so a name that only ever carried one never stood, and
   // reporting it as dropped would refuse a road forever over a container nobody ever had.
-  return lawfulDeltasAt(reactor, { entity, context: CTX_CONTAINER }, operator).some(
+  return lawfulDeltasAt(reactor, now, { entity, context: CTX_CONTAINER }, operator).some(
     (delta) => boundContainer(delta.claims)?.name === entity,
   );
 }
@@ -2303,7 +2304,7 @@ export function unreachableStoreReport(gw: Gateway): {
   const struckSeparate = new Set<string>();
   if (gw.operatorAuthor !== undefined) {
     const negated = negatedAt(gw.reactor, gw.validityNow(), gw.operatorAuthor);
-    for (const delta of lawfulSnapshot(gw.reactor, gw.operatorAuthor)) {
+    for (const delta of lawfulSnapshot(gw.reactor, gw.validityNow(), gw.operatorAuthor)) {
       if (!negated(delta.id)) continue;
       const name = containerRef(delta.claims, CTX_CONTAINER);
       if (name !== undefined && asPosture(primitives(delta.claims, "posture")[0]) === "separate") {

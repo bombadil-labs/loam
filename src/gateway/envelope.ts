@@ -167,6 +167,7 @@ export function readEnvelopePolicy(
   >();
   for (const delta of lawfulDeltasAt(
     reactor,
+    now,
     { entity: ENVELOPE_ENTITY, context: CTX_ENVELOPE },
     operator,
   )) {

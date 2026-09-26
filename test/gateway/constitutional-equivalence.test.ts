@@ -86,7 +86,7 @@ const OP = authorForSeed(OP_SEED);
 // ---------------------------------------------------------------------------------------------
 
 function scannedNegated(reactor: Reactor, operator?: string): (id: string) => boolean {
-  const lawfulIds = new Set([...lawfulSnapshot(reactor, operator)].map((d) => d.id));
+  const lawfulIds = new Set([...lawfulSnapshot(reactor, Date.now(), operator)].map((d) => d.id));
   const memo = new Map<string, boolean>();
   const negated = (id: string): boolean => {
     const memoed = memo.get(id);
@@ -108,7 +108,7 @@ function scannedDeltasAt(
   operator?: string,
 ): Delta[] {
   const out: Delta[] = [];
-  for (const delta of lawfulSnapshot(reactor, operator)) {
+  for (const delta of lawfulSnapshot(reactor, Date.now(), operator)) {
     const filedHere = delta.claims.pointers.some(
       (p) =>
         p.target.kind === "entity" &&
@@ -230,7 +230,7 @@ function assertIdentical(reactor: Reactor, where: string, operator?: string): vo
     [ARTIFACT_ENTITY, CTX_ARTIFACT],
   ] as const) {
     expect(
-      ids(lawfulDeltasAt(reactor, { entity, context }, operator)),
+      ids(lawfulDeltasAt(reactor, Date.now(), { entity, context }, operator)),
       `${where}: the indexed candidate set at ${entity} differs from the scanned one`,
     ).toEqual(ids(scannedDeltasAt(reactor, entity, context, operator)));
   }
@@ -391,7 +391,7 @@ describe("T37 — the indexed answer equals the scanned answer, through every mu
     await gw.append([decoy]);
     for (const at of [TRUST_ENTITY, CAGE]) {
       expect(
-        ids(lawfulDeltasAt(gw.reactor, { entity: at, context: CTX_TRUST }, OP)),
+        ids(lawfulDeltasAt(gw.reactor, gw.validityNow(), { entity: at, context: CTX_TRUST }, OP)),
         `one entity, two contexts: the indexed candidates at ${at} differ from the scanned ones`,
       ).toEqual(ids(scannedDeltasAt(gw.reactor, at, CTX_TRUST, OP)));
       const shipped = readTrustPolicyAt(gw.reactor, gw.validityNow(), at, OP);
@@ -405,7 +405,7 @@ describe("T37 — the indexed answer equals the scanned answer, through every mu
       SURVEYOR,
     ]);
     expect(gw.reactor.byTarget(CAGE).length).toBeGreaterThan(
-      lawfulDeltasAt(gw.reactor, { entity: CAGE, context: CTX_TRUST }, OP).length,
+      lawfulDeltasAt(gw.reactor, gw.validityNow(), { entity: CAGE, context: CTX_TRUST }, OP).length,
     ); // the index really does hold more at this id than the trust reader may see
     assertIdentical(gw.reactor, "one entity carries two kinds of law", OP);
 
@@ -467,9 +467,9 @@ describe("T37 — the indexed answer equals the scanned answer, through every mu
       byTarget: () => [trust.id],
     } as unknown as Reactor;
 
-    expect(() => lawfulDeltasAt(stub, { entity: TRUST_ENTITY, context: CTX_TRUST }, OP)).toThrow(
-      /cannot resolve it/,
-    );
+    expect(() =>
+      lawfulDeltasAt(stub, Date.now(), { entity: TRUST_ENTITY, context: CTX_TRUST }, OP),
+    ).toThrow(/cannot resolve it/);
     // And the refusal reaches the reader — the door does not quietly open.
     expect(() => readTrustPolicy(stub, Date.now(), OP)).toThrow(/cannot resolve it/);
   });
@@ -498,13 +498,24 @@ describe("T37 — the indexed answer equals the scanned answer, through every mu
     // Floors: the ungoverned store really is holding the strangers' declarations, at two entities
     // and from two different authors — so the delta-level halves above ran over a non-empty set.
     expect(
-      lawfulDeltasAt(gw.reactor, { entity: TRUST_ENTITY, context: CTX_TRUST }, undefined).length,
+      lawfulDeltasAt(
+        gw.reactor,
+        gw.validityNow(),
+        { entity: TRUST_ENTITY, context: CTX_TRUST },
+        undefined,
+      ).length,
     ).toBe(1);
     expect(
-      lawfulDeltasAt(gw.reactor, { entity: PUBLIC_ENTITY, context: CTX_PUBLIC }, undefined).length,
+      lawfulDeltasAt(
+        gw.reactor,
+        gw.validityNow(),
+        { entity: PUBLIC_ENTITY, context: CTX_PUBLIC },
+        undefined,
+      ).length,
     ).toBe(1);
     expect(
-      lawfulDeltasAt(gw.reactor, { entity: TRUST_ENTITY, context: CTX_TRUST }, OP).length,
+      lawfulDeltasAt(gw.reactor, gw.validityNow(), { entity: TRUST_ENTITY, context: CTX_TRUST }, OP)
+        .length,
     ).toBe(0); // and none is the operator's
     await gw.close();
   });
