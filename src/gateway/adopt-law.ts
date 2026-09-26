@@ -49,6 +49,7 @@ import {
   SCHEMA_SCHEMA,
   contentAddress,
   evalTerm,
+  evalTermRaw,
   loadHyperSchema,
   loadSchema,
   signClaims,
@@ -1958,8 +1959,28 @@ function definitionWinner(
     if (dt !== 0) return dt;
     return a.delta.id < b.delta.id ? -1 : 1;
   })[0];
-  if (latest === undefined) throw new Error(`no surviving schema definition for ${entity}`);
+  if (latest === undefined) throw new Error(explainMissingDefinition(dset, entity, now));
   return latest.delta;
+}
+
+/**
+ * Why no schema definition holds for `entity` at `now`: none exists, or the earliest one starts
+ * later. A definition from a peer whose clock runs ahead is valid only from its own `validFrom`.
+ */
+export function explainMissingDefinition(dset: DeltaSet, entity: string, now: number): string {
+  const starts: number[] = [];
+  for (const bootstrap of [HYPER_SCHEMA_SCHEMA, SCHEMA_SCHEMA]) {
+    const raw = evalTermRaw(bootstrap.body, dset, entity);
+    if (raw.sort !== "hview") continue;
+    for (const e of raw.hview.props.get("definition") ?? []) {
+      if (e.delta.claims.validFrom > now) starts.push(e.delta.claims.validFrom);
+    }
+  }
+  if (starts.length === 0) return `no surviving schema definition for ${entity}`;
+  return (
+    `the schema definition for ${entity} is valid only from ${Math.min(...starts)}, ` +
+    `and this store reads at ${now}`
+  );
 }
 
 /**

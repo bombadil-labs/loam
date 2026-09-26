@@ -24,7 +24,7 @@ import {
 
 import type { Delta } from "@bombadil/rhizomatic";
 import type { Claims } from "@bombadil/rhizomatic";
-import { contentAddress, makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
+import { contentAddress, DeltaSet, makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
 import type { Container } from "../gateway/container.js";
 import {
   containerClaims,
@@ -39,6 +39,7 @@ import { legalNameFor } from "../gateway/gql.js";
 import { parseOffer } from "./offer.js";
 import {
   CTX_MANIFEST,
+  explainMissingDefinition,
   isRegistrationBinding,
   isWithheldResolver,
   manifestExportClaims,
@@ -753,7 +754,16 @@ async function bindArrived(
     } catch (err) {
       // A refusal here is information, not a fault: the common one is that `name` is already
       // answered by different-content law, which is the parked case a person resolves.
-      parked.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
+      const message = err instanceof Error ? err.message : String(err);
+      // The loader cannot tell "no definition" from "a definition that starts later".
+      const missing = /^no surviving schema definition for (\S+)$/.exec(message);
+      parked.push(
+        `${name}: ${
+          missing === null
+            ? message
+            : explainMissingDefinition(DeltaSet.from(members), missing[1]!, ground.validityNow())
+        }`,
+      );
     }
   }
   // Fold the receiver's surface: the blessing landed in the pool, and the aggregation in
