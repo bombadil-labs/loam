@@ -11,12 +11,21 @@ in code. Line numbers are after the seam change on this branch.
 ## The seam
 
 `src/gateway/principal.ts` holds one reference type and two readers. Both return exactly the one
-key today. Step 5 edits their bodies and nothing else.
+root key today. Step 5 edits their bodies, and also the callers named below that must pass a user's
+root in place of a connection key.
 
-- `PrincipalRef = { key }`. Today a bare key. After step 5 a Loam user, resolved to its pinned
-  root at the read time, or the operator.
-- `keysActingFor(reactor, now, who)`: the present question. Step 5: `authorsForPrincipal` at `now`.
-- `keysEverOf(reactor, who)`: the history question. Step 5: `associatedKeys`.
+- `PrincipalRef = { root }`. A user's root is their own key (README ruling 5), so today a user
+  reference and a bare key coincide. A connection's signing key is not a root: a caller holding
+  one must pass the user's root. After step 5, Loam resolves a user to its current root through
+  the governed operator read.
+- `keysActingFor(reactor, now, who, scope)`: the present question. Step 5: `authorsForPrincipal`
+  at `now` with `scope` under the prefix policy. `grantHeld` passes its tenant; the dashboard
+  passes `"*"`.
+- `keysEverOf(reactor, now, who)`: the history question. Step 5: `associatedKeys` at `now`, reading
+  negations of the evidence under `rootOrSameAuthor`.
+
+Not one body alone: the grant subjects and membership terms that name a key today become user
+references in step 5 (PLAN step 5, "Grants and memberships name the Loam user").
 
 ## Rows
 

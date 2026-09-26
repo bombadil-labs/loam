@@ -481,7 +481,10 @@ function grantHeld(
       if (p.role === "subject" && typeof p.target.value === "string") subject = p.target.value;
       if (p.role === "verb" && typeof p.target.value === "string") granted = p.target.value;
     }
-    if (subject === undefined || !keysActingFor(ctx.reactor, ctx.now, { key: subject }).has(author))
+    if (
+      subject === undefined ||
+      !keysActingFor(ctx.reactor, ctx.now, { root: subject }, tenant).has(author)
+    )
       continue;
     // `admin` covers `write`, and NEVER `register`. An admin grant carries no prefix, so "admin
     // covers register" could only ever mean register AT ROOT — the one authority that is not
