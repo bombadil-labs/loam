@@ -1,0 +1,80 @@
+{
+  "now = T": {
+    "#claim/counterstruck-from-T": {
+      "dataStruck": false,
+      "honoredStrikeOn": false,
+      "lawfulNegated": false,
+      "substrateStruck": false
+    },
+    "#claim/never-struck": {
+      "dataStruck": false,
+      "honoredStrikeOn": false,
+      "lawfulNegated": false,
+      "substrateStruck": false
+    },
+    "#claim/struck-from-T": {
+      "dataStruck": true,
+      "honoredStrikeOn": true,
+      "lawfulNegated": true,
+      "substrateStruck": true
+    },
+    "#claim/struck-until-T": {
+      "dataStruck": true,
+      "honoredStrikeOn": true,
+      "lawfulNegated": true,
+      "substrateStruck": false
+    }
+  },
+  "now = T+1": {
+    "#claim/counterstruck-from-T": {
+      "dataStruck": false,
+      "honoredStrikeOn": false,
+      "lawfulNegated": false,
+      "substrateStruck": false
+    },
+    "#claim/never-struck": {
+      "dataStruck": false,
+      "honoredStrikeOn": false,
+      "lawfulNegated": false,
+      "substrateStruck": false
+    },
+    "#claim/struck-from-T": {
+      "dataStruck": true,
+      "honoredStrikeOn": true,
+      "lawfulNegated": true,
+      "substrateStruck": true
+    },
+    "#claim/struck-until-T": {
+      "dataStruck": true,
+      "honoredStrikeOn": true,
+      "lawfulNegated": true,
+      "substrateStruck": false
+    }
+  },
+  "now = T-1": {
+    "#claim/counterstruck-from-T": {
+      "dataStruck": false,
+      "honoredStrikeOn": false,
+      "lawfulNegated": false,
+      "substrateStruck": true
+    },
+    "#claim/never-struck": {
+      "dataStruck": false,
+      "honoredStrikeOn": false,
+      "lawfulNegated": false,
+      "substrateStruck": false
+    },
+    "#claim/struck-from-T": {
+      "dataStruck": true,
+      "honoredStrikeOn": true,
+      "lawfulNegated": true,
+      "substrateStruck": false
+    },
+    "#claim/struck-until-T": {
+      "dataStruck": true,
+      "honoredStrikeOn": true,
+      "lawfulNegated": true,
+      "substrateStruck": true
+    }
+  }
+}

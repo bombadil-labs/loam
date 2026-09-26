@@ -1,0 +1,14 @@
+{
+  "now = T": [
+    "Plant",
+    "Shrub"
+  ],
+  "now = T+1": [
+    "Plant",
+    "Shrub"
+  ],
+  "now = T-1": [
+    "Plant",
+    "Shrub"
+  ]
+}
