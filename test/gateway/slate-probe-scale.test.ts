@@ -1,6 +1,7 @@
-// Reading slates never copies the whole store. A store with no slate record answers from the target
-// index at SLATE_ENTITY, and so does one that holds slates. `reactor.snapshot()` re-addresses every
-// delta it copies, so a probe that used it cost a full pass on every read and every write (H8).
+// A store with no slate record answers from the target index at SLATE_ENTITY, with no pass over the
+// whole store, on every read and every write (H8). A probe through `reactor.snapshot()` copied and
+// walked the whole store each time. Deliberately not asserted: a store that holds slates. Past the
+// probe, a cold container table or a membership evaluation can still take a snapshot.
 
 import { describe, expect, it, vi } from "vitest";
 import { authorForSeed } from "@bombadil/rhizomatic";
@@ -13,7 +14,7 @@ import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 
 const OP_SEED = "d3".repeat(32);
 
-describe("reading slates takes no snapshot of the store", () => {
+describe("reading slates in a store with none takes no snapshot of the store", () => {
   it("a store with no slate record answers empty without a snapshot, on a read and on a write", async () => {
     const gw = await Gateway.boot(
       new MemoryBackend(),

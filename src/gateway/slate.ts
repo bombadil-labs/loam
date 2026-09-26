@@ -625,7 +625,7 @@ export function readSlates(
   // at all answers without paying for the negation materialization or the container table. It
   // decides nothing else — which records SURVIVE stays the one place below that owns the rule. A
   // slate record is filed at SLATE_ENTITY, so the target index answers it; `reactor.snapshot()`
-  // would re-address every delta in the store, on every read and every write.
+  // would copy and walk the whole store on every read and every write.
   const records = lawfulDeltasAt(reactor, validityNow, SLATE_AT, operator).filter((d) =>
     isSlateRecord(d.claims),
   );
