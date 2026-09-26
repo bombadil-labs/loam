@@ -106,6 +106,11 @@ level. Loam then consumes it through the barrel and compares its recordings.
    does not change the served surface at its boundary. Loam writes no timed negation today. The
    governed read must answer at an explicit read time, and Loam's recordings must pin a timed
    negation of a registration before this step lands.
+   Every negation reader already calls `negatedAt(reactor, now, author)` in
+   `src/gateway/negation.ts`, so the swap edits one body. Two things break when negation depends on
+   time. `readContainerTable` is memoized by a count of container law, not by time. Several readers
+   keep one predicate across an `await` (`refactor/audit/negation-readers.md`, defect 1). Both must
+   rebuild per read time.
 5. **Principal.** Roots, key binding, succession, delegation, locators. Loam moves user,
    connection and container keys into signed data.
 6. **Peer and admission.** The peer model, the guard pipeline, arrival testimony. Loam's
