@@ -547,6 +547,36 @@ describe("T64 criterion 15 — negation, both sides of the cut", () => {
     expect(receipt.members.map((m) => m.member)).toEqual([condemned.id]);
     await gw.close();
   });
+
+  it("AFTER the cut: the receipt names the strike that holds, not a countered one", async () => {
+    const gw = await bootSlateStore();
+    const condemned = observed(FERN, "height", 30, 1000, OP_SEED);
+    const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
+    await gw.append([condemned, bystander]);
+    const stood = await standSlate(gw, { members: [condemned], closes: ["egress", "cite"] });
+    const report = await gw.cut(stood.container, { now: BEFORE_DEADLINE });
+    const erasure = report.members[0]!.erasure;
+
+    // Two strikes on the erasure. The first is itself struck, so only the second holds. The index
+    // answers in id order, so the countered strike must sort first, or a reader that takes the
+    // first strike would pass by luck.
+    const countered = strike(erasure, 70_000);
+    let at = 72_000;
+    while (strike(erasure, at).id < countered.id) at += 1;
+    const holding = strike(erasure, at);
+    expect(countered.id < holding.id).toBe(true);
+    await gw.append([countered, strike(countered.id, 71_000), holding]);
+
+    const check = graveyardCompleteness(gw.reactor, gw.validityNow(), OP, report.graveyard);
+    expect(check.negated).toEqual([{ member: condemned.id, negation: holding.id }]);
+    const receipt = await gw.receipt(report.graveyard, { now: AFTER_DEADLINE });
+    const member = receipt.members.find((m) => m.member === condemned.id)!;
+    expect(member.negated).toBe(holding.id);
+    // Two-sided: the bystander is in no report.
+    expect(await gw.backend.holds(bystander.id)).toBe(true);
+    expect(receipt.members.map((m) => m.member)).toEqual([condemned.id]);
+    await gw.close();
+  });
 });
 
 describe("T64 criterion 17 — the mint is new vocabulary only, so no §20 step is engaged", () => {
