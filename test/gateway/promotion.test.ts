@@ -261,8 +261,8 @@ describe("§24.3 promote-outputs adopts FACTS, never LAW — operator authorship
     const fact = foreignFact("read by anyone auditing", 3900);
     await q.gateway.federate([fact]);
     await primary.promote(q.gateway, fact.id);
-    expect(readAdoptions(primary.reactor)).toHaveLength(1);
-    expect(readAdoptions(primary.reactor, GUEST)).toHaveLength(0); // the filter still filters
+    expect(readAdoptions(primary.reactor, primary.validityNow())).toHaveLength(1);
+    expect(readAdoptions(primary.reactor, primary.validityNow(), GUEST)).toHaveLength(0); // the filter still filters
     await q.drop();
     await primary.close();
   });
@@ -374,9 +374,13 @@ describe("§24.3/§27 — a STRUCK adoption record leaves the trail and lets pro
     reactor.ingest(record);
     reactor.ingest(signClaims(makeNegationClaims(GUEST, 2000, record.id, "not yours"), GUEST_SEED));
     // The stranger's negation is inert — only the record author's own strike negates (H1 doctrine).
-    expect(readAdoptions(reactor).some((a) => a.adoptedDelta === "adopted-id")).toBe(true);
+    expect(readAdoptions(reactor, Date.now()).some((a) => a.adoptedDelta === "adopted-id")).toBe(
+      true,
+    );
     reactor.ingest(signClaims(makeNegationClaims(OP, 3000, record.id, "mine"), OP_SEED));
-    expect(readAdoptions(reactor).some((a) => a.adoptedDelta === "adopted-id")).toBe(false);
+    expect(readAdoptions(reactor, Date.now()).some((a) => a.adoptedDelta === "adopted-id")).toBe(
+      false,
+    );
   });
 });
 

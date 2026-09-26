@@ -93,7 +93,7 @@ export function annotateImpl(
   return {
     ...node,
     asOf,
-    forgotten: forgottenSince(gw.reactor, gw.operatorAuthor, asOf),
+    forgotten: forgottenSince(gw.reactor, gw.validityNow(), gw.operatorAuthor, asOf),
     ...(suppressed > 0 ? { suppressed } : {}),
   };
 }

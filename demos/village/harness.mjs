@@ -95,6 +95,7 @@ export async function openStore(name, opts = {}) {
     // the law reaches the vault: erased ids are never replanted by a heal (SPEC §11)
     const dead = erasuresIn(
       [...(await backend.deltasSince(new Set())), ...(await archive.deltasSince(new Set()))],
+      Date.now(),
       authorForSeed(seed),
     );
     healed = await backend.heal(dead);

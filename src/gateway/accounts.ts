@@ -234,7 +234,13 @@ export function governedGatherBody(operator: string): Term {
 //
 // It counts every held negation, whether or not its validity interval has ended: filtering by
 // validity would read a not-yet-valid delta as retired. Loam writes no expiring negations today.
-export function dataStruck(reactor: Reactor, operator?: string): (id: string) => boolean {
+export function dataStruck(
+  reactor: Reactor,
+  now: number,
+  operator?: string,
+): (id: string) => boolean {
+  // Step-3 limit (refactor/PLAN.md step 4): negation validity is not read yet, so `now` is unused.
+  void now;
   const masked = evalTermRaw(
     parseTerm({
       op: "mask",
@@ -264,9 +270,12 @@ export function dataStruck(reactor: Reactor, operator?: string): (id: string) =>
 // `grantsHeldBy` separately.
 export function honoredStrikeOn(
   reactor: Reactor,
+  now: number,
   id: string,
   operator?: string,
 ): { readonly id: string; readonly timestamp: number } | undefined {
+  // Step-3 limit (refactor/PLAN.md step 4): negation validity is not read yet, so `now` is unused.
+  void now;
   const ctx: Ctx = { reactor, operator };
   let earliest: { id: string; timestamp: number } | undefined;
   for (const negId of reactor.negationsOf(id)) {
@@ -616,6 +625,7 @@ export function constitutionalDefect(delta: Delta): string | undefined {
 // store welcomes any verified author, and everyone else holds standing — or is refused.
 export function authorize(
   reactor: Reactor,
+  now: number,
   delta: Delta,
   operator: string | undefined,
 ): { ok: true } | { ok: false; refusal: string } {
@@ -627,9 +637,9 @@ export function authorize(
     artifactDefect(delta.claims) ??
     budgetDefect(delta.claims) ??
     envelopeDefect(delta.claims) ??
-    containerDefect(delta, reactor, operator) ??
+    containerDefect(delta, reactor, now, operator) ??
     eraseDefect(delta, reactor, operator) ??
-    slateDefect(delta, reactor, operator);
+    slateDefect(delta, reactor, now, operator);
   if (defect !== undefined) {
     return { ok: false, refusal: `delta ${delta.id} is malformed law: ${defect}` };
   }

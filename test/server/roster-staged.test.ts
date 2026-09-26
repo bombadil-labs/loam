@@ -96,7 +96,11 @@ const closePeers = async (): Promise<void> => {
 };
 
 const declareAs = (gw: Gateway, container: string, leeway: Leeway): Promise<unknown> => {
-  const standing = readContainerTable(gw.reactor, gw.operatorAuthor).containers.get(container);
+  const standing = readContainerTable(
+    gw.reactor,
+    gw.validityNow(),
+    gw.operatorAuthor,
+  ).containers.get(container);
   return gw.append([
     signClaims(
       containerClaims(

@@ -134,11 +134,11 @@ describe("recordings: grants, trust and admission", () => {
     const out: Record<string, unknown> = {};
     for (const [mode, op] of Object.entries(OPERATORS)) {
       out[mode] = bothOrders(GRANTS, (r) => {
-        const struck = dataStruck(r, op);
+        const struck = dataStruck(r, Date.now(), op);
         return Object.fromEntries(
           GRANTS.map((d) => [
             d.id,
-            { honoredStrike: honoredStrikeOn(r, d.id, op), struck: struck(d.id) },
+            { honoredStrike: honoredStrikeOn(r, Date.now(), d.id, op), struck: struck(d.id) },
           ]),
         );
       });
@@ -178,7 +178,7 @@ describe("recordings: grants, trust and admission", () => {
     const out: Record<string, unknown> = {};
     for (const [mode, op] of Object.entries(OPERATORS)) {
       out[mode] = bothOrders(GRANTS, (r) =>
-        Object.fromEntries(candidates.map(([name, d]) => [name, authorize(r, d, op)])),
+        Object.fromEntries(candidates.map(([name, d]) => [name, authorize(r, Date.now(), d, op)])),
       );
     }
     const shapes = Object.fromEntries(
@@ -233,7 +233,7 @@ describe("recordings: grants, trust and admission", () => {
       out[name] = Object.fromEntries(
         Object.entries(OPERATORS).map(([mode, op]) => [
           mode,
-          bothOrders(deltas, (r) => readTrustPolicy(r, op)),
+          bothOrders(deltas, (r) => readTrustPolicy(r, Date.now(), op)),
         ]),
       );
     }

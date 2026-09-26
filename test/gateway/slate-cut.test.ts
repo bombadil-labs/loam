@@ -106,9 +106,9 @@ describe("T64 criterion 9 — the pre-flight is all-or-refuse and leaves the gro
       /resolves to nothing here/,
     );
     expect(groundIds(gw)).toEqual(before);
-    expect(standingErasures(gw.reactor, OP).map((t) => erasureTarget(t.claims))).not.toContain(
-      member.id,
-    );
+    expect(
+      standingErasures(gw.reactor, gw.validityNow(), OP).map((t) => erasureTarget(t.claims)),
+    ).not.toContain(member.id);
     // TWO-SIDED at BOTH levels: the bytes are there AND a reader still resolves the bystander through
     // a Schema. Bytes-intact-reader-blind is the T15/T38 direction, and this file ships two set-valued
     // narrowings where it lives.
@@ -177,19 +177,21 @@ describe("T64 criterion 10 — per-member, faults collected, the slate STANDS, t
     const tagsMid = await gw.query(`{ plant(entity: "${FERN}") { tag } }`);
     expect((tagsMid.data as { plant: { tag: string[] } }).plant.tag).toEqual(["shade"]);
 
-    const tombstonesAfterFault = standingErasures(gw.reactor, OP).length;
+    const tombstonesAfterFault = standingErasures(gw.reactor, gw.validityNow(), OP).length;
     backend.refuse.clear();
     const report = await gw.cut(stood.container, { now: BEFORE_DEADLINE });
     expect(report.members.map((m) => m.member).sort()).toEqual([stubborn.id, willing.id].sort());
     expect(await backend.holds(stubborn.id)).toBe(false);
     // EXACTLY ONE ERASURE PER MEMBER — the re-run mints no second one (§11's anchor).
-    const targets = standingErasures(gw.reactor, OP).map((t) => erasureTarget(t.claims));
+    const targets = standingErasures(gw.reactor, gw.validityNow(), OP).map((t) =>
+      erasureTarget(t.claims),
+    );
     expect(targets.filter((t) => t === willing.id)).toHaveLength(1);
     expect(targets.filter((t) => t === stubborn.id)).toHaveLength(1);
     // The failed attempt had ALREADY landed the stubborn member's erasure — `eraseImpl` grounds it
     // before the purge on purpose — so the re-run mints not one new erasure anywhere.
     expect(tombstonesAfterFault).toBe(2);
-    expect(standingErasures(gw.reactor, OP).length).toBe(tombstonesAfterFault);
+    expect(standingErasures(gw.reactor, gw.validityNow(), OP).length).toBe(tombstonesAfterFault);
     expect(await backend.holds(bystander.id)).toBe(true);
     await gw.close();
   });
@@ -278,19 +280,19 @@ describe("T64 criterion 19 — a member erased mid-window: the cut COMPLETES, th
     const report = await gw.cut(stood.container, { now: BEFORE_DEADLINE });
     expect(report.priorErasure).toEqual([{ member: members[1]!.id, erasure: byHand.erasure }]);
     // Exactly ONE erasure for that member, and it is the PRE-CUT one.
-    const forHand = standingErasures(gw.reactor, OP).filter(
+    const forHand = standingErasures(gw.reactor, gw.validityNow(), OP).filter(
       (t) => erasureTarget(t.claims) === members[1]!.id,
     );
     expect(forHand).toHaveLength(1);
     expect(forHand[0]!.id).toBe(byHand.erasure);
     // §29.6's arithmetic computes TRUE from DURABLE GROUND ALONE — no probe, no CutReport.
-    const check = graveyardCompleteness(gw.reactor, OP, report.graveyard);
+    const check = graveyardCompleteness(gw.reactor, gw.validityNow(), OP, report.graveyard);
     expect(check.members).toHaveLength(4);
     expect(check.missing).toEqual([]);
     expect(check.holds).toBe(true);
     // The other three carry the `slate` join; the hand-erased one cannot (content addressing forbids
     // adding a pointer to an existing delta — H4), which is exactly why the exception is ENUMERATED.
-    const joined = standingErasures(gw.reactor, OP)
+    const joined = standingErasures(gw.reactor, gw.validityNow(), OP)
       .filter((t) => erasureSlate(t.claims) === stood.container)
       .map((t) => erasureTarget(t.claims))
       .sort();

@@ -14,7 +14,7 @@ import {
   type Reactor,
 } from "@bombadil/rhizomatic";
 import { NUL, type Gateway } from "../gateway/gateway.js";
-import { lawfulNegated } from "../gateway/registration.js";
+import { negatedAt } from "../gateway/negation.js";
 
 export const CTX_BINDING = "loam.binding";
 
@@ -122,6 +122,7 @@ const keyedContexts = (parsed: unknown): string[] | undefined => {
 // reported, and neither is counted in the accounting Runner.attach documents.
 export function readBindingDefinitions(
   reactor: Reactor,
+  now: number,
   operator?: string,
   sinks: BindingDropSinks = {},
 ): BindingSpec[] {
@@ -133,7 +134,7 @@ export function readBindingDefinitions(
   // Retirement follows the same lawful negation algebra as registrations: only the operator's
   // strikes retire the operator's definitions (a write-granted author's negation — or a
   // federated stranger's — lands as data and unbinds nothing), and a struck strike revives.
-  const negated = lawfulNegated(reactor, operator);
+  const negated = negatedAt(reactor, now, operator);
   for (const delta of reactor.snapshot()) {
     const files = delta.claims.pointers.some(
       (p) => p.target.kind === "entity" && p.target.entity.context === CTX_BINDING,
@@ -285,10 +286,15 @@ export const Runner = {
       );
     }
     const provided = [...gateway.materializationNames(), ...declared];
-    for (const spec of readBindingDefinitions(gateway.reactor, gateway.operator, {
-      onMalformed: (m) => malformed.push(m),
-      onSuperseded: (s) => superseded.push(s),
-    })) {
+    for (const spec of readBindingDefinitions(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operator,
+      {
+        onMalformed: (m) => malformed.push(m),
+        onSuperseded: (s) => superseded.push(s),
+      },
+    )) {
       // The materialization is checked BEFORE the implementation on purpose: a missing fnId is a
       // fact about THIS runner ("another one may hold it"), while a materialization no schema
       // provides is damage in the store that no runner could honor. Report the damage.

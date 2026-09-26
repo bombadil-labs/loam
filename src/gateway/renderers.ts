@@ -35,7 +35,8 @@ import {
   type RenderWorkerOptions,
 } from "./render-worker.js";
 import { workerLimitsOf } from "./envelope.js";
-import { lawfulNegated, lawfulSnapshot, lensOf, type LensName } from "./registration.js";
+import { lawfulSnapshot, lensOf, type LensName } from "./registration.js";
+import { negatedAt } from "./negation.js";
 import {
   createRootRendererContext,
   rendererContextStands,
@@ -294,8 +295,8 @@ const isRoute = (id: string): boolean => id.startsWith("renderer:");
 // latest registration per schema entity). Lawful slice only: in a governed store a foreign renderer
 // merges as data and mounts nothing (§8/§12 inert-by-default). A binding missing route/schema/bundle
 // binds nothing — unmounted, never a crash.
-export function readRenderers(reactor: Reactor, operator?: string): RendererBinding[] {
-  const negated = lawfulNegated(reactor, operator);
+export function readRenderers(reactor: Reactor, now: number, operator?: string): RendererBinding[] {
+  const negated = negatedAt(reactor, now, operator);
   return latestPerRoute(lawfulSnapshot(reactor, operator), (d) => !negated(d.id));
 }
 
@@ -392,7 +393,7 @@ export function readPoolRenderers(pool: Gateway, host: Gateway): RendererBinding
   // No operator is no answer, not every answer: unscoped, `lawfulSnapshot` returns the whole pool
   // and a peer's own binding would count as something this store had mounted.
   if (pool.operatorAuthor === undefined) return [];
-  const negated = lawfulNegated(pool.reactor, pool.operatorAuthor);
+  const negated = negatedAt(pool.reactor, pool.validityNow(), pool.operatorAuthor);
   return latestPerRoute(
     lawfulSnapshot(pool.reactor, pool.operatorAuthor),
     (d) => !negated(d.id) && host.reactor.get(d.id) === undefined,
@@ -411,13 +412,17 @@ export function readPoolRenderers(pool: Gateway, host: Gateway): RendererBinding
  * Survival is scoped to each binding's OWN author — a shipper takes back their own word and nobody
  * takes it back for them, the same algebra the blessing door keeps over a module's members.
  */
-export function readForeignRenderers(reactor: Reactor, operator: string): RendererBinding[] {
+export function readForeignRenderers(
+  reactor: Reactor,
+  now: number,
+  operator: string,
+): RendererBinding[] {
   const negated = new Map<string, (id: string) => boolean>();
   const survives = (d: Delta): boolean => {
     if (d.claims.author === operator) return false;
     let owned = negated.get(d.claims.author);
     if (owned === undefined) {
-      owned = lawfulNegated(reactor, d.claims.author);
+      owned = negatedAt(reactor, now, d.claims.author);
       negated.set(d.claims.author, owned);
     }
     return !owned(d.id);

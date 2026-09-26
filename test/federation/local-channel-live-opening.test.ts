@@ -290,7 +290,7 @@ describe("spec 64: a live opening cannot be erased", () => {
     offering.push(fact(1));
     await ch.sync();
     const opening = opened(gw, ch.name).opening;
-    for (const id of survivingDeclarationIds(gw.reactor, OP, ch.name))
+    for (const id of survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, ch.name))
       await gw.append([signClaims(makeNegationClaims(OP, gw.nextTimestamp(), id), SEED)]);
     const attached = await gw.erase(opening.id).catch((e: Error) => e.message);
     expect(attached).toContain("its pool is still attached and holds bytes");
@@ -360,11 +360,11 @@ describe("spec 64: a live opening cannot be erased", () => {
         SEED,
       ),
     ]);
-    expect(survivingDeclarationIds(gw.reactor, OP, ch.name)).toHaveLength(2);
+    expect(survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, ch.name)).toHaveLength(2);
     await expect(ch.sync()).rejects.toThrow();
     await expect(gw.erase(opening.id)).rejects.toThrow(/Drop the channel first/);
     await gw.dropChannel(ch.name);
-    expect(survivingDeclarationIds(gw.reactor, OP, ch.name)).toEqual([]);
+    expect(survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, ch.name)).toEqual([]);
     expect(holds(ch.name, fact(1).id)).toBe(false);
     expect(events(gw, ch.name, "close")).toEqual([]); // nothing was open, so nothing is closed
     await gw.erase(opening.id);
@@ -378,7 +378,7 @@ describe("spec 64: a live opening cannot be erased", () => {
     const opening = opened(first.gw, a.ch.name).opening;
     // Strike the declaration AND the status records by hand, no drop: the store keeps its bytes.
     const struck = [
-      ...survivingDeclarationIds(first.gw.reactor, OP, a.ch.name),
+      ...survivingDeclarationIds(first.gw.reactor, first.gw.validityNow(), OP, a.ch.name),
       ...[...first.gw.reactor.snapshot()]
         .filter((d) =>
           d.claims.pointers.some(
@@ -525,7 +525,12 @@ describe("spec 64: a live opening cannot be erased", () => {
     a.offering.push(fact(1));
     await a.ch.sync();
     const aOpening = opened(first.gw, a.ch.name).opening;
-    for (const id of survivingDeclarationIds(first.gw.reactor, OP, a.ch.name))
+    for (const id of survivingDeclarationIds(
+      first.gw.reactor,
+      first.gw.validityNow(),
+      OP,
+      a.ch.name,
+    ))
       await first.gw.append([
         signClaims(makeNegationClaims(OP, first.gw.nextTimestamp(), id), SEED),
       ]);
@@ -546,7 +551,7 @@ describe("spec 64: a live opening cannot be erased", () => {
     expect(first.holds(a.ch.name, fact(1).id)).toBe(true);
     await gw.dropChannel(a.ch.name);
     expect(first.holds(a.ch.name, fact(1).id)).toBe(false);
-    expect(survivingDeclarationIds(gw.reactor, OP, a.ch.name)).toEqual([]);
+    expect(survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, a.ch.name)).toEqual([]);
     await gw.erase(aOpening.id);
     expect(gw.reactor.get(aOpening.id)).toBeUndefined();
     // A second declaration by hand, then a restart.
@@ -637,7 +642,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     primary.purges = 0;
     primary.failPurgeAfter = 0;
     await expect(gw.erase(opening.id)).rejects.toThrow(/STILL HELD/);
-    const dead = readErasures(gw.reactor, OP);
+    const dead = readErasures(gw.reactor, gw.validityNow(), OP);
     const held = [receipt, close].filter((m) => dead.has(m.id));
     expect(held).toHaveLength(1);
     expect(await primary.holds(held[0]!.id)).toBe(true);
@@ -721,7 +726,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     offering.push(fact(1));
     await ch.sync();
     const opening = opened(gw, ch.name).opening;
-    for (const id of survivingDeclarationIds(gw.reactor, OP, ch.name))
+    for (const id of survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, ch.name))
       await gw.append([signClaims(makeNegationClaims(OP, gw.nextTimestamp(), id), SEED)]);
     await gw.append([
       signClaims(
@@ -787,7 +792,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     offering.push(fact(1));
     await ch.sync();
     const opening = opened(gw, ch.name).opening;
-    for (const id of survivingDeclarationIds(gw.reactor, OP, ch.name))
+    for (const id of survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, ch.name))
       await gw.append([signClaims(makeNegationClaims(OP, gw.nextTimestamp(), id), SEED)]);
     await gw.append([
       signClaims(
@@ -880,7 +885,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
       ]);
       await expect(gw.dropChannel(name)).rejects.toThrow(/no channel named/);
       expect(files.has(name)).toBe(false);
-      expect(survivingDeclarationIds(gw.reactor, OP, name)).toHaveLength(1);
+      expect(survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, name)).toHaveLength(1);
     }
   });
   it("a declaration by hand under a name that once was a channel is not the drop door's: separate with its own store, detached or not, and shared", async () => {
@@ -909,10 +914,10 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     await hand.detach("kept for extraction");
     await expect(gw.dropChannel(ch.name)).rejects.toThrow(/already severed/);
     expect(own.some((d) => d.id === fact(7).id)).toBe(true);
-    expect(survivingDeclarationIds(gw.reactor, OP, ch.name)).toHaveLength(1);
+    expect(survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, ch.name)).toHaveLength(1);
     expect(files.size).toBe(factoryOpens);
     // A SHARED container by hand under the name: no pool exists to purge, so no purge is reported.
-    for (const id of survivingDeclarationIds(gw.reactor, OP, ch.name))
+    for (const id of survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, ch.name))
       await gw.append([signClaims(makeNegationClaims(OP, gw.nextTimestamp(), id), SEED)]);
     await gw.append([
       signClaims(
@@ -935,7 +940,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
       ),
     ]);
     await expect(gw.dropChannel(ch.name)).rejects.toThrow(/already severed/);
-    expect(survivingDeclarationIds(gw.reactor, OP, ch.name)).toHaveLength(1);
+    expect(survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, ch.name)).toHaveLength(1);
   });
   it("status and declaration both negated by hand in this process: the drop names the attached pool it cannot reach and the road out; the road works", async () => {
     const first = await home();
@@ -944,7 +949,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     await ch.sync();
     const opening = opened(first.gw, ch.name).opening;
     for (const id of [
-      ...survivingDeclarationIds(first.gw.reactor, OP, ch.name),
+      ...survivingDeclarationIds(first.gw.reactor, first.gw.validityNow(), OP, ch.name),
       ...statusIds(first.gw, ch.name),
     ])
       await first.gw.append([
@@ -979,7 +984,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     const opening = opened(first.gw, ch.name).opening;
     const receipt = events(first.gw, ch.name, "received")[0]!;
     for (const id of [
-      ...survivingDeclarationIds(first.gw.reactor, OP, ch.name),
+      ...survivingDeclarationIds(first.gw.reactor, first.gw.validityNow(), OP, ch.name),
       ...statusIds(first.gw, ch.name),
     ])
       await first.gw.append([
@@ -1076,7 +1081,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     await ch.sync();
     const opening = opened(first.gw, ch.name).opening;
     for (const id of [
-      ...survivingDeclarationIds(first.gw.reactor, OP, ch.name),
+      ...survivingDeclarationIds(first.gw.reactor, first.gw.validityNow(), OP, ch.name),
       ...statusIds(first.gw, ch.name),
     ])
       await first.gw.append([
@@ -1121,7 +1126,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     await ch.sync();
     const opening = opened(first.gw, ch.name).opening;
     const struck = [
-      ...survivingDeclarationIds(first.gw.reactor, OP, ch.name),
+      ...survivingDeclarationIds(first.gw.reactor, first.gw.validityNow(), OP, ch.name),
       ...statusIds(first.gw, ch.name),
     ];
     for (const id of struck)
@@ -1160,7 +1165,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
       /discarded .* at the bytes .* could not be negated/,
     );
     expect(holds(ch.name, fact(1).id)).toBe(false);
-    expect(survivingDeclarationIds(gw.reactor, OP, ch.name)).not.toEqual([]);
+    expect(survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, ch.name)).not.toEqual([]);
     // Still live: the declaration stands over a store the sweep cannot reach, so the erase refuses
     // up front (§27.7's completeness guard) and removes nothing.
     const refusal = await gw.erase(opening.id).catch((e: Error) => e.message);
@@ -1168,7 +1173,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     expect(refusal).toContain(ch.name);
     expect(gw.reactor.get(opening.id)).toBeDefined();
     await gw.dropChannel(ch.name);
-    expect(survivingDeclarationIds(gw.reactor, OP, ch.name)).toEqual([]);
+    expect(survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, ch.name)).toEqual([]);
     await gw.erase(opening.id);
     expect(gw.reactor.get(opening.id)).toBeUndefined();
   });

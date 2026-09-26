@@ -72,7 +72,7 @@ const holds = (gateway: Gateway, author: string): boolean =>
 describe("the trust policy: one delta at loam:trust, latest lawful word wins", () => {
   it("no surviving policy means OPEN — union is the substrate's nature", async () => {
     const b = await puller();
-    expect(readTrustPolicy(b.reactor, OPERATOR_B).mode).toBe("open");
+    expect(readTrustPolicy(b.reactor, b.validityNow(), OPERATOR_B).mode).toBe("open");
     const a = await mixedSource();
     const report = await pullFrom(b, a.url, a.token);
     expect(report.accepted).toBeGreaterThan(0);
@@ -136,7 +136,7 @@ describe("the trust policy: one delta at loam:trust, latest lawful word wins", (
     // not bind (lawful reads). Prove the stronger half by injecting past the door:
     const forged = signClaims(trustClaims("open", [], MALLORY, Date.now() + 1), MALLORY_SEED);
     await b.federate([forged], { admit: () => true }); // force it into the store
-    const policy = readTrustPolicy(b.reactor, OPERATOR_B);
+    const policy = readTrustPolicy(b.reactor, b.validityNow(), OPERATOR_B);
     expect(policy.mode).toBe("roster"); // the operator's word stands
     expect(policy.roster.has(MALLORY)).toBe(false);
   });
@@ -179,7 +179,7 @@ describe("the trust policy: one delta at loam:trust, latest lawful word wins", (
       OP_B,
     );
     await expect(b.append([twoModes])).rejects.toThrow(/malformed law/);
-    const policy = readTrustPolicy(b.reactor, OPERATOR_B);
+    const policy = readTrustPolicy(b.reactor, b.validityNow(), OPERATOR_B);
     expect(policy.mode).toBe("roster"); // the lawful word survives
     expect(policy.roster.has(MALLORY)).toBe(false); // and the smuggle never reached the roster
   });
@@ -201,7 +201,7 @@ describe("the trust policy: one delta at loam:trust, latest lawful word wins", (
       signClaims(makeNegationClaims(OPERATOR_B, Date.now() + 1, admitting.id), OP_B),
       signClaims(trustClaims("roster", [GARDENER], OPERATOR_B, Date.now() + 2), OP_B),
     ]);
-    const policy = readTrustPolicy(b.reactor, OPERATOR_B);
+    const policy = readTrustPolicy(b.reactor, b.validityNow(), OPERATOR_B);
     expect(policy.roster.has(MALLORY)).toBe(false); // the door agrees
     expect(policy.roster.has(GARDENER)).toBe(true);
     // her already-landed deltas remain (nothing is deleted) — but the door refuses NEW ones
@@ -226,7 +226,7 @@ describe("the trust policy: one delta at loam:trust, latest lawful word wins", (
     await free.federate([
       signClaims(trustClaims("closed", [], MALLORY, Number.MAX_SAFE_INTEGER), MALLORY_SEED),
     ]);
-    expect(readTrustPolicy(free.reactor).mode).toBe("open");
+    expect(readTrustPolicy(free.reactor, free.validityNow()).mode).toBe("open");
     const report = await free.federate([observed(FERN, "height", 7, 1000, GARDENER_SEED)]);
     expect(report.accepted).toBe(1); // the door never closed
   });

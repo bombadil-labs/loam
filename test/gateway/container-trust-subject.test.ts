@@ -64,12 +64,12 @@ describe("T32 criterion 10 — admission and effectiveness are independent axes"
     ]);
     await gw.append([signClaims(trustAt("container:w", "roster", [GARDENER], 25_100), OP_SEED)]);
 
-    const atContainer = containerAdmission(gw.reactor, OP, "container:w");
+    const atContainer = containerAdmission(gw.reactor, gw.validityNow(), OP, "container:w");
     expect(atContainer.mode).toBe("roster");
     expect(atContainer.roster.has(GARDENER)).toBe(true);
     // The root's policy is untouched: no declaration at loam:trust itself survives, so the store
     // stays open — a container's roster is not the store's.
-    expect(readTrustPolicy(gw.reactor, OP).mode).toBe("open");
+    expect(readTrustPolicy(gw.reactor, gw.validityNow(), OP).mode).toBe("open");
     await gw.close();
   });
 
@@ -82,7 +82,7 @@ describe("T32 criterion 10 — admission and effectiveness are independent axes"
     const before = gw.containers().containers.get("container:w");
 
     await gw.append([signClaims(trustAt("container:w", "closed", [], 26_200), OP_SEED)]);
-    expect(containerAdmission(gw.reactor, OP, "container:w").mode).toBe("closed");
+    expect(containerAdmission(gw.reactor, gw.validityNow(), OP, "container:w").mode).toBe("closed");
     // Effectiveness held fixed: trust and posture exactly as declared, the whole time.
     const after = gw.containers().containers.get("container:w");
     expect(after?.trust).toBe(before?.trust);
@@ -134,8 +134,8 @@ describe("T32 criterion 10 — admission and effectiveness are independent axes"
       signClaims(trustAt("container:c1", "roster", [GARDENER], 27_100), OP_SEED),
       signClaims(trustAt("container:c2", "roster", [GARDENER], 27_101), OP_SEED),
     ]);
-    const a1 = containerAdmission(gw.reactor, OP, "container:c1");
-    const a2 = containerAdmission(gw.reactor, OP, "container:c2");
+    const a1 = containerAdmission(gw.reactor, gw.validityNow(), OP, "container:c1");
+    const a2 = containerAdmission(gw.reactor, gw.validityNow(), OP, "container:c2");
     expect(a1.mode).toBe(a2.mode);
     expect([...a1.roster].sort()).toEqual([...a2.roster].sort());
     await gw.close();

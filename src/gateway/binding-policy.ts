@@ -13,7 +13,8 @@
 // names stay a build-time collision, and no reader's surface changes shape by upgrading.
 
 import type { Claims, Reactor } from "@bombadil/rhizomatic";
-import { lawfulDeltasAt, lawfulNegated } from "./registration.js";
+import { lawfulDeltasAt } from "./registration.js";
+import { negatedAt } from "./negation.js";
 
 export const BINDING_POLICY_ENTITY = "loam:binding-policy";
 export const CTX_BINDING_POLICY = "loam.binding-policy";
@@ -95,6 +96,7 @@ export function bindingPolicyDefect(claims: Claims): string | undefined {
  */
 export function readBindingPolicy(
   reactor: Reactor,
+  now: number,
   operator?: string,
   container?: string,
 ): BindingPolicyMode | undefined {
@@ -105,7 +107,7 @@ export function readBindingPolicy(
   // kept evicting contest losers from every door, and striking the latest declaration left the
   // corpse shadowing the earlier live one instead of reviving it. Latest-SURVIVING, as the doc
   // comment always claimed (H1 — the suppression lens's finding, reproduced red before this line).
-  const negated = lawfulNegated(reactor, operator);
+  const negated = negatedAt(reactor, now, operator);
   for (const d of lawfulDeltasAt(
     reactor,
     { entity: BINDING_POLICY_ENTITY, context: CTX_BINDING_POLICY },

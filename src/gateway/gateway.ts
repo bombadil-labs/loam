@@ -774,7 +774,7 @@ export class Gateway {
 
   // Every surviving renderer binding, latest per route, read live under this store's law.
   renderers(): RendererBinding[] {
-    return readRenderers(this.reactor, this.operatorAuthor);
+    return readRenderers(this.reactor, this.validityNow(), this.operatorAuthor);
   }
 
   // Declare lenses public (SPEC §12/§17/§23.8): the body — bare names pass, `Name@vN` freezes to the
@@ -791,7 +791,7 @@ export class Gateway {
 
   // Every route the operator has declared artifact-publishable, read live under this store's law.
   artifactRoutes(): ReadonlySet<string> {
-    return readArtifactRoutes(this.reactor, this.operatorAuthor);
+    return readArtifactRoutes(this.reactor, this.validityNow(), this.operatorAuthor);
   }
 
   // Assess a route for artifact publication (SPEC §30): every refusal, the derived capability
@@ -902,7 +902,7 @@ export class Gateway {
 
   /** Every surviving lawful graveyard — the durable record of each erasure EVENT (SPEC §29.6). */
   graveyards(): GraveyardRecord[] {
-    return readGraveyards(this.reactor, this.operatorAuthor);
+    return readGraveyards(this.reactor, this.validityNow(), this.operatorAuthor);
   }
 
   /**
@@ -1023,7 +1023,7 @@ export class Gateway {
   // The resolved container table: declarations, exclusions, detach records, and the reader-level
   // defects (immutable-knob flips, restored cycles) — live from the ground, like trust.
   containers(): ContainerTable {
-    return readContainerTable(this.reactor, this.operatorAuthor);
+    return readContainerTable(this.reactor, this.validityNow(), this.operatorAuthor);
   }
 
   // Open a container over this store (SPEC §27): a declared one by name, or an anonymous one
@@ -1218,7 +1218,7 @@ export class Gateway {
   // An unoperated store has no operator and therefore no adoptions of its own.
   adoptions(): Adoption[] {
     if (this.operatorAuthor === undefined) return [];
-    return readAdoptions(this.reactor, this.operatorAuthor);
+    return readAdoptions(this.reactor, this.validityNow(), this.operatorAuthor);
   }
 
   // --- promote-law (SPEC §24.4 × §27.8, ticket T33) ------------------------------------------------
@@ -1250,7 +1250,7 @@ export class Gateway {
   // question over it — `adoptions()` reads the FACT trail, this one the LAW trail.
   lawAdoptions(): LawAdoption[] {
     if (this.operatorAuthor === undefined) return [];
-    return readLawAdoptions(this.reactor, this.operatorAuthor);
+    return readLawAdoptions(this.reactor, this.validityNow(), this.operatorAuthor);
   }
 
   /**
@@ -1824,7 +1824,7 @@ export class Gateway {
    */
   private openNames(): ReadonlySet<string> {
     if (this.channelPool === true) return EMPTY_PUBLIC;
-    this.publicOpen ??= readPublicSchemas(this.reactor, this.operatorAuthor);
+    this.publicOpen ??= readPublicSchemas(this.reactor, this.validityNow(), this.operatorAuthor);
     return this.publicOpen;
   }
   private publicSurface(): GraphQLSchema | undefined {

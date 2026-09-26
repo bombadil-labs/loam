@@ -208,7 +208,7 @@ describe("attach accounts for every binding delta in the ground", () => {
     const { gateway, oldGoodId } = await storeWithFive();
     const heard: MalformedBinding[] = [];
     const replaced: SupersededBinding[] = [];
-    const specs = readBindingDefinitions(gateway.reactor, undefined, {
+    const specs = readBindingDefinitions(gateway.reactor, gateway.validityNow(), undefined, {
       onMalformed: (m) => heard.push(m),
       onSuperseded: (s) => replaced.push(s),
     });

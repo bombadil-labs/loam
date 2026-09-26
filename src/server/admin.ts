@@ -1011,7 +1011,7 @@ this lens does not gather; the lens may read ground this container does not hold
     }
     // Shared: the drop is striking every surviving declaration — the deltas it gathered remain.
     try {
-      const ids = survivingDeclarationIds(gw.reactor, gw.operatorAuthor!, name);
+      const ids = survivingDeclarationIds(gw.reactor, gw.validityNow(), gw.operatorAuthor!, name);
       await gw.append(
         ids.map((id) =>
           signClaims(negationOf(id, gw.operatorAuthor!, gw.nextTimestamp()), gw.options.seed!),

@@ -27,7 +27,8 @@
 // next request; a fresh declaration for the same author supersedes (latest lawful wins).
 
 import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
-import { lawfulDeltasAt, lawfulNegated } from "./registration.js";
+import { lawfulDeltasAt } from "./registration.js";
+import { negatedAt } from "./negation.js";
 
 export const BUDGET_ENTITY = "loam:budget";
 export const CTX_BUDGET = "loam.budget";
@@ -121,11 +122,12 @@ export function budgetDefect(claims: Claims): string | undefined {
 // and reader cannot disagree on any store whose law arrived through the door.
 export function readBudgetPolicy(
   reactor: Reactor,
+  now: number,
   operator?: string,
 ): ReadonlyMap<string, BudgetPolicy> {
   const budgets = new Map<string, BudgetPolicy>();
   if (operator === undefined) return budgets;
-  const negated = lawfulNegated(reactor, operator);
+  const negated = negatedAt(reactor, now, operator);
   const latest = new Map<string, { policy: BudgetPolicy; timestamp: number; id: string }>();
   for (const delta of lawfulDeltasAt(
     reactor,
@@ -188,10 +190,11 @@ function countHeldBy(reactor: Reactor, author: string): number {
 // undefined; a metered batch is refused whole, as every batch here is.
 export function budgetRefusal(
   reactor: Reactor,
+  now: number,
   operator: string,
   batch: readonly Delta[],
 ): string | undefined {
-  const budgets = readBudgetPolicy(reactor, operator);
+  const budgets = readBudgetPolicy(reactor, now, operator);
   if (budgets.size === 0) return undefined;
   const additions = new Map<string, number>();
   for (const d of batch) {

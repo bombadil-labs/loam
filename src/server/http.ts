@@ -703,7 +703,7 @@ function receiveRefusal(
   // no longer holds; those children keep passing every test made of the NAME. Reach is walked by
   // parent edges, so a peer's bytes must not be able to land under one of them — invisible to
   // every door the person has, and un-droppable because their pages cannot see it.
-  const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+  const table = readContainerTable(gateway.reactor, gateway.validityNow(), gateway.operatorAuthor);
   let root = into;
   while (root !== binding.container && !table.containers.has(root) && root.includes(":")) {
     root = root.slice(0, root.lastIndexOf(":"));
@@ -2161,7 +2161,11 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
               reply({ content: [{ type: "text", text: defect! }], isError: true });
               return;
             }
-            const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+            const table = readContainerTable(
+              gateway.reactor,
+              gateway.validityNow(),
+              gateway.operatorAuthor,
+            );
             if (table.containers.has(target)) {
               reply({
                 content: [{ type: "text", text: `${target} already stands.` }],
@@ -2262,7 +2266,11 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
               });
               return;
             }
-            const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+            const table = readContainerTable(
+              gateway.reactor,
+              gateway.validityNow(),
+              gateway.operatorAuthor,
+            );
             const rec = table.containers.get(target);
             if (rec === undefined) {
               reply({

@@ -62,7 +62,7 @@ try {
     "erase clears the bytes and the dossier reverts; the signed hole remains",
     report.erased === regret.id &&
       after !== `regrettable-${ts}` &&
-      readErasures(almanac.gateway.reactor, almanac.operator).has(regret.id),
+      readErasures(almanac.gateway.reactor, almanac.gateway.validityNow(), almanac.operator).has(regret.id),
     `bio now: ${JSON.stringify(after)}`,
   );
 
@@ -84,7 +84,7 @@ try {
     "12.4",
     "the vault cannot replant the unsaid: heal is erasure-guarded, reopen stays clean",
     almanac.gateway.reactor.get(regret.id) === undefined &&
-      erasuresIn(ground, almanac.operator).has(regret.id),
+      erasuresIn(ground, Date.now(), almanac.operator).has(regret.id),
     `${ground.length} deltas on reopen`,
   );
 } finally {

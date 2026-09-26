@@ -19,7 +19,8 @@
 // source of truth for the door and the lenses.
 
 import type { Claims, Reactor } from "@bombadil/rhizomatic";
-import { lawfulDeltasAt, lawfulNegated } from "./registration.js";
+import { lawfulDeltasAt } from "./registration.js";
+import { negatedAt } from "./negation.js";
 
 export const TRUST_ENTITY = "loam:trust";
 export const CTX_TRUST = "loam.trust";
@@ -101,8 +102,8 @@ export function trustDefect(claims: Claims): string | undefined {
 // UNGOVERNED stores ignore trust declarations entirely and stay OPEN: with no operator there
 // is no lawful voice to declare with, and honoring anyone's would let one federated stranger's
 // "closed" delta brick a pull-only aggregator. Govern the store to govern the door.
-export function readTrustPolicy(reactor: Reactor, operator?: string): TrustPolicy {
-  return readTrustPolicyAt(reactor, TRUST_ENTITY, operator);
+export function readTrustPolicy(reactor: Reactor, now: number, operator?: string): TrustPolicy {
+  return readTrustPolicyAt(reactor, now, TRUST_ENTITY, operator);
 }
 
 // The same shape, filed at any SUBJECT entity (SPEC §28.6): the root's policy is the
@@ -111,11 +112,12 @@ export function readTrustPolicy(reactor: Reactor, operator?: string): TrustPolic
 // drift between the store's door and a container's.
 export function readTrustPolicyAt(
   reactor: Reactor,
+  now: number,
   subject: string,
   operator?: string,
 ): TrustPolicy {
   if (operator === undefined) return { mode: "open", roster: new Set() };
-  const negated = lawfulNegated(reactor, operator);
+  const negated = negatedAt(reactor, now, operator);
   const roster = new Set<string>();
   let latest: { mode: TrustMode; timestamp: number; id: string } | undefined;
   for (const delta of lawfulDeltasAt(reactor, { entity: subject, context: CTX_TRUST }, operator)) {

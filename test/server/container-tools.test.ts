@@ -233,7 +233,11 @@ const closePeers = async (): Promise<void> => {
 
 /** Declare a container's leeway as the operator — the road the person's own page takes. */
 const declareAs = (gw: Gateway, container: string, leeway: Leeway): Promise<unknown> => {
-  const standing = readContainerTable(gw.reactor, gw.operatorAuthor).containers.get(container);
+  const standing = readContainerTable(
+    gw.reactor,
+    gw.validityNow(),
+    gw.operatorAuthor,
+  ).containers.get(container);
   const spec = {
     container,
     trust: standing?.trust ?? ("curated" as const),
@@ -254,7 +258,7 @@ const nest = (depth: number): Record<string, unknown> =>
   depth <= 0 ? { envelope: "small" } : { envelope: "small", delegate: nest(depth - 1) };
 
 const recOf = (gw: Gateway, name: string) =>
-  readContainerTable(gw.reactor, gw.operatorAuthor).containers.get(name);
+  readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor).containers.get(name);
 
 async function callTool(
   base: string,
@@ -746,7 +750,11 @@ describe("§58 — the container roster", () => {
       token: PEER_TOKEN,
     });
     expect(opened.isError, opened.text).toBe(false);
-    const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+    const table = readContainerTable(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor,
+    );
     const pool = [...table.containers.entries()].find(([, r]) => r.inboxOf !== undefined)?.[0];
     expect(pool, "premise: a pool stands").toBeDefined();
     expect(pool!.startsWith("ada:journal:"), "premise: it is not inside the fence").toBe(false);
@@ -808,7 +816,12 @@ describe("§58 — the container roster", () => {
     // Strike the container's declarations and leave the pool alone. This is the SHIPPED shape:
     // `survivingDeclarationIds` is what the admin page's drop-confirm road gathers for a shared
     // container, and negating them is what it appends.
-    const ids = survivingDeclarationIds(gateway.reactor, gateway.operatorAuthor!, "ada:journal");
+    const ids = survivingDeclarationIds(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor!,
+      "ada:journal",
+    );
     expect(ids.length, "premise: ada:journal was declared").toBeGreaterThan(0);
     await gateway.append(
       ids.map((id) =>
@@ -849,6 +862,7 @@ describe("§58 — the container roster", () => {
     // Drop the MIDDLE, the shipped way, leaving the grandchild's own declaration standing.
     const ids = survivingDeclarationIds(
       gateway.reactor,
+      gateway.validityNow(),
       gateway.operatorAuthor!,
       "ada:journal:work",
     );
@@ -890,7 +904,12 @@ describe("§58 — the container roster", () => {
     // Delta level: the struck middle has no surviving declaration. Object level: its subtree is
     // still out of the person's reach, which is what the drop bought them.
     expect(
-      survivingDeclarationIds(gateway.reactor, gateway.operatorAuthor!, "ada:journal:work"),
+      survivingDeclarationIds(
+        gateway.reactor,
+        gateway.validityNow(),
+        gateway.operatorAuthor!,
+        "ada:journal:work",
+      ),
       "the drop stands",
     ).toEqual([]);
     expect(subtreeOf(gateway.containers(), "ada").has("ada:journal:work:notes")).toBe(false);
@@ -930,6 +949,7 @@ describe("§58 — the container roster", () => {
 
     const ids = survivingDeclarationIds(
       gateway.reactor,
+      gateway.validityNow(),
       gateway.operatorAuthor!,
       "ada:journal:work",
     );
@@ -991,7 +1011,12 @@ describe("§58 — the container roster", () => {
     expect(wrote.isError, `premise: it can write: ${wrote.text}`).toBe(false);
 
     // Drop the person's HOME, one level above the bound container, the shipped way.
-    const ids = survivingDeclarationIds(gateway.reactor, gateway.operatorAuthor!, "ada");
+    const ids = survivingDeclarationIds(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor!,
+      "ada",
+    );
     await gateway.append(
       ids.map((id) =>
         signClaims(
@@ -1383,7 +1408,12 @@ describe("§58 — the container roster", () => {
       ),
     ]);
     expect(recOf(gateway, "zed"), "premise: it stood").toBeDefined();
-    const ids = survivingDeclarationIds(gateway.reactor, gateway.operatorAuthor!, "zed");
+    const ids = survivingDeclarationIds(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor!,
+      "zed",
+    );
     await gateway.append(
       ids.map((id) =>
         signClaims(
@@ -1421,7 +1451,12 @@ describe("§58 — the container roster", () => {
     await declareAs(gateway, "ada", OPEN);
     await declareAs(gateway, "ada:journal", OPEN);
     expect((await declareTool(base, ada, "ada:journal:room")).isError, "premise").toBe(false);
-    const ids = survivingDeclarationIds(gateway.reactor, gateway.operatorAuthor!, "ada:journal");
+    const ids = survivingDeclarationIds(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor!,
+      "ada:journal",
+    );
     await gateway.append(
       ids.map((id) =>
         signClaims(
@@ -1465,6 +1500,7 @@ describe("§58 — the container roster", () => {
     expect((await declareTool(base, ada, "ada:journal:work:notes")).isError, "premise").toBe(false);
     const ids = survivingDeclarationIds(
       gateway.reactor,
+      gateway.validityNow(),
       gateway.operatorAuthor!,
       "ada:journal:work",
     );
@@ -1537,7 +1573,12 @@ describe("§58 — the container roster", () => {
     expect((await declareTool(base, ada, "ada:journal:notes")).isError, "premise").toBe(false);
 
     // Drop the person's home, one level ABOVE the container this connection is bound to.
-    const ids = survivingDeclarationIds(gateway.reactor, gateway.operatorAuthor!, "ada");
+    const ids = survivingDeclarationIds(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor!,
+      "ada",
+    );
     await gateway.append(
       ids.map((id) =>
         signClaims(
@@ -1652,7 +1693,12 @@ describe("§58 — the container roster", () => {
     });
     expect(off.isError, `premise: it can set its own channel: ${off.text}`).toBe(false);
 
-    const ids = survivingDeclarationIds(gateway.reactor, gateway.operatorAuthor!, "ada:journal");
+    const ids = survivingDeclarationIds(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor!,
+      "ada:journal",
+    );
     await gateway.append(
       ids.map((id) =>
         signClaims(
@@ -1713,7 +1759,12 @@ describe("§58 — the container roster", () => {
     );
 
     // Struck, and still true: that is the whole point — the table forgets it, this does not.
-    const ids = survivingDeclarationIds(gateway.reactor, op, "ada:journal:notes");
+    const ids = survivingDeclarationIds(
+      gateway.reactor,
+      gateway.validityNow(),
+      op,
+      "ada:journal:notes",
+    );
     await gateway.append(
       ids.map((id) =>
         signClaims(
@@ -1778,6 +1829,7 @@ describe("§58 — the container roster", () => {
           (d) => JSON.stringify(d.claims).includes("ada:legacy") === true,
         )!,
         gw.reactor,
+        gw.validityNow(),
         op,
       ),
       "the door refuses what the reader binds",

@@ -116,7 +116,7 @@ describe("§20 × §27.1 — the posture rename is carried forward, not assumed"
     // something a person RUNS, and a container that vanished until they ran it would empty every
     // scope and blind the erasure guard without a word (H9).
     const before = await openWith([fact, legacySeparate, legacyShared]);
-    const beforeTable = readContainerTable(before.reactor, OP);
+    const beforeTable = readContainerTable(before.reactor, before.validityNow(), OP);
     expect(beforeTable.containers.get("container:arena")).toMatchObject({
       trust: "untrusted",
       posture: "separate",
@@ -135,7 +135,7 @@ describe("§20 × §27.1 — the posture rename is carried forward, not assumed"
     // rename that shifted meaning cannot pass this.
     const { deltas, report } = migrate(legacyStore, { seed: OP_SEED });
     const after = await openWith(deltas);
-    const afterTable = readContainerTable(after.reactor, OP);
+    const afterTable = readContainerTable(after.reactor, after.validityNow(), OP);
     expect([...afterTable.containers.keys()].sort()).toEqual(
       [...beforeTable.containers.keys()].sort(),
     );
@@ -236,7 +236,7 @@ describe("§20 × §27.1 — the posture rename is carried forward, not assumed"
     // manufactured. This is the level that would catch a revival wearing a shape the filter above
     // did not anticipate.
     const gw = await openWith(deltas);
-    const table = readContainerTable(gw.reactor, OP);
+    const table = readContainerTable(gw.reactor, gw.validityNow(), OP);
     expect(table.containers.has("container:arena")).toBe(false);
     expect(table.containers.get("container:view")?.posture).toBe("shared");
     expect(table.defects).toEqual([]);

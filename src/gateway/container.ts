@@ -54,7 +54,8 @@ import {
   SIZE_ENVELOPES,
 } from "./envelope.js";
 import { withNegationClosure, withNegationClosureAcross } from "./ingest.js";
-import { lawfulDeltasAt, lawfulNegated, lawfulSnapshot } from "./registration.js";
+import { lawfulDeltasAt, lawfulSnapshot } from "./registration.js";
+import { negatedAt } from "./negation.js";
 import { readTrustPolicyAt, type TrustPolicy } from "./trust.js";
 import { Gateway, type ConnectionBinding, type FederationReport } from "./gateway.js";
 
@@ -224,6 +225,7 @@ const noteBytes = (note: string): number => new TextEncoder().encode(note).lengt
 export function containerDefect(
   delta: Delta,
   reactor: Reactor,
+  now: number,
   operator: string | undefined,
 ): string | undefined {
   const claims = delta.claims;
@@ -337,7 +339,7 @@ export function containerDefect(
     // set at the top. Fit is weighed against a parent below the first colon.
     const parent = name.includes(":") ? name.slice(0, name.lastIndexOf(":")) : undefined;
     if (parent !== undefined && parent.includes(":")) {
-      const governing = governingLeeway(readContainerTable(reactor, operator), parent);
+      const governing = governingLeeway(readContainerTable(reactor, now, operator), parent);
       // A child that declares SEALED asks for nothing anyone could exceed: admitted under any
       // terms, since the read narrows and never widens, and a room may name its annex closed.
       if (governing !== undefined && !isSealed(read.leeway)) {
@@ -372,7 +374,7 @@ export function containerDefect(
 
   // The state-dependent rules bind only law that would bind: the operator's own word.
   if (operator === undefined || claims.author !== operator) return undefined;
-  const table = readContainerTable(reactor, operator);
+  const table = readContainerTable(reactor, now, operator);
   const standing = table.containers.get(name);
   if (standing !== undefined) {
     if (standing.trust !== trust || standing.posture !== posture) {
@@ -524,7 +526,11 @@ export function isContainerLaw(d: Delta, operator: string | undefined): boolean 
   );
 }
 
-export function readContainerTable(reactor: Reactor, operator: string | undefined): ContainerTable {
+export function readContainerTable(
+  reactor: Reactor,
+  now: number,
+  operator: string | undefined,
+): ContainerTable {
   let memo = tableMemo.get(reactor);
   if (memo === undefined || memo.operator !== operator) {
     memo = { operator, swept: 0, lawCount: 0, builtAt: -1, table: EMPTY_TABLE };
@@ -535,7 +541,7 @@ export function readContainerTable(reactor: Reactor, operator: string | undefine
     if (isContainerLaw(log[memo.swept]!, operator)) memo.lawCount += 1;
   }
   if (memo.builtAt !== memo.lawCount) {
-    memo.table = computeContainerTable(reactor, operator);
+    memo.table = computeContainerTable(reactor, now, operator);
     memo.builtAt = memo.lawCount;
   }
   return memo.table;
@@ -548,9 +554,13 @@ const EMPTY_TABLE: ContainerTable = {
   defects: [],
 };
 
-function computeContainerTable(reactor: Reactor, operator: string | undefined): ContainerTable {
+function computeContainerTable(
+  reactor: Reactor,
+  now: number,
+  operator: string | undefined,
+): ContainerTable {
   if (operator === undefined) return EMPTY_TABLE;
-  const negated = lawfulNegated(reactor, operator);
+  const negated = negatedAt(reactor, now, operator);
   const decls = new Map<string, Decl[]>();
   const excluded = new Set<string>();
   const detached = new Map<string, DetachRecord[]>();
@@ -737,10 +747,11 @@ function computeContainerTable(reactor: Reactor, operator: string | undefined): 
 // per subject; the root's policy is untouched by it, and it never reads the container's knob.
 export function containerAdmission(
   reactor: Reactor,
+  now: number,
   operator: string | undefined,
   container: string,
 ): TrustPolicy {
-  return readTrustPolicyAt(reactor, container, operator);
+  return readTrustPolicyAt(reactor, now, container, operator);
 }
 
 /**
@@ -791,13 +802,14 @@ export function containerDeclarationName(claims: Claims): string | undefined {
 /** Latest surviving declaration for one container, under the reader's own binding rules. */
 export function currentContainerDeclarationId(
   reactor: Reactor,
+  now: number,
   operator: string | undefined,
   entity: string,
 ): string | undefined {
   if (operator === undefined) return undefined;
   // Filed AT the container's entity, so the target index answers it (H8); `lawfulDeltasAt` already
   // keeps only the operator's deltas and carries no negation closure, so the strike filter is here.
-  const negated = lawfulNegated(reactor, operator);
+  const negated = negatedAt(reactor, now, operator);
   return lawfulDeltasAt(reactor, { entity, context: CTX_CONTAINER }, operator)
     .filter((delta) => !negated(delta.id) && containerDeclarationName(delta.claims) === entity)
     .sort((a, b) => b.claims.timestamp - a.claims.timestamp || b.id.localeCompare(a.id))[0]?.id;
@@ -806,13 +818,14 @@ export function currentContainerDeclarationId(
 // The surviving lawful declaration ids for one entity — what a strike-the-declaration act negates.
 export function survivingDeclarationIds(
   reactor: Reactor,
+  now: number,
   operator: string,
   entity: string,
 ): string[] {
   // Filed AT the container's entity, so the target index answers it — the same H8 rule as
   // `everDeclared` below, on the road that drops a container. `lawfulDeltasAt` carries no negation
   // closure of its own, so the strike filter stays here.
-  const negated = lawfulNegated(reactor, operator);
+  const negated = negatedAt(reactor, now, operator);
   return lawfulDeltasAt(reactor, { entity, context: CTX_CONTAINER }, operator)
     .filter((delta) => !negated(delta.id))
     .filter((delta) => containerRef(delta.claims, CTX_CONTAINER) === entity)
@@ -879,7 +892,7 @@ export function containerScopeImpl(
   gw: Gateway,
   opts: { containers?: readonly string[] } = {},
 ): Delta[] {
-  const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+  const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   const requested = opts.containers ?? [...table.containers.keys()].sort();
   for (const name of requested) {
     if (!table.containers.has(name)) {
@@ -1273,7 +1286,7 @@ export function connectionScopeImpl(
   gw: Gateway,
   opts: { bound: string; containers?: readonly string[] },
 ): Delta[] {
-  const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+  const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   if (!table.containers.has(opts.bound)) {
     throw new Error(
       `connectionScope refused: no surviving declaration names the bound container "${opts.bound}"`,
@@ -1372,7 +1385,7 @@ export async function openContainerImpl(
   let membershipAt: string | undefined;
 
   if (opts.name !== undefined) {
-    const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+    const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
     const rec = table.containers.get(opts.name);
     if (rec === undefined) {
       throw new Error(
@@ -1458,7 +1471,7 @@ function openShared(
   const resolveTerm = (): unknown => {
     if (spec.entity !== undefined) {
       // Live: the declaration owns the knob, so every read re-resolves it from the table.
-      const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+      const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
       const rec = table.containers.get(spec.entity);
       if (rec === undefined) {
         throw new Error(
@@ -1505,7 +1518,12 @@ function openShared(
     drop: async () => {
       // A shared container holds no bytes of its own; dropping it is striking its declaration.
       if (spec.entity === undefined || gw.options.seed === undefined) return;
-      const ids = survivingDeclarationIds(gw.reactor, gw.operatorAuthor!, spec.entity);
+      const ids = survivingDeclarationIds(
+        gw.reactor,
+        gw.validityNow(),
+        gw.operatorAuthor!,
+        spec.entity,
+      );
       for (const id of ids) {
         await gw.append([
           signClaims(retractionOf(id, gw.operatorAuthor!, gw.nextTimestamp()), gw.options.seed),
@@ -1587,7 +1605,7 @@ async function openSeparate(
   // erasures are authoritative here (the container shares its operator), so the debt is swept at
   // the bytes NOW — before any reactor replays the store — and a store that cannot be proven
   // clean of it refuses to attach at all (H9: unproven bytes do not come back inside the walls).
-  const dead = [...readErasures(gw.reactor, gw.operatorAuthor)];
+  const dead = [...readErasures(gw.reactor, gw.validityNow(), gw.operatorAuthor)];
   if (dead.length > 0) {
     let owed: Set<string>;
     try {
@@ -1655,7 +1673,7 @@ async function openSeparate(
   const ground =
     gw.envelopeGround ??
     ((subject?: string): QuarantineEnvelope =>
-      resolveEnvelope(gw.reactor, gw.operatorAuthor, subject));
+      resolveEnvelope(gw.reactor, gw.validityNow(), gw.operatorAuthor, subject));
   pool.envelopeGround = ground;
   const ownEnvelope = (): QuarantineEnvelope => ground(spec.entity);
   const outerCeiling = gw.envelopeCeiling;
@@ -1678,7 +1696,11 @@ async function openSeparate(
       ? operatorsCeiling
       : clampedTo(() => {
           const now = governingLeeway(
-            readContainerTable(rootGateway.reactor, rootGateway.operatorAuthor),
+            readContainerTable(
+              rootGateway.reactor,
+              rootGateway.validityNow(),
+              rootGateway.operatorAuthor,
+            ),
             spec.entity!,
           );
           return now === undefined ? operatorsCeiling() : SIZE_ENVELOPES[now.leeway.envelope];
@@ -1753,7 +1775,7 @@ async function openSeparate(
     // succeeded, never before: a refused attach must leave the records standing. And if the
     // batch itself cannot land, the attach ROLLS BACK — the alternative is an attached pool the
     // caller holds no handle to, listed as detached while it is not.
-    const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+    const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
     const records = table.detached.get(spec.entity) ?? [];
     if (records.length > 0) {
       const strikes = records.map((r) =>
@@ -1782,7 +1804,12 @@ async function openSeparate(
     declarationId:
       spec.entity === undefined
         ? undefined
-        : currentContainerDeclarationId(gw.reactor, gw.operatorAuthor, spec.entity),
+        : currentContainerDeclarationId(
+            gw.reactor,
+            gw.validityNow(),
+            gw.operatorAuthor,
+            spec.entity,
+          ),
     members: () => [...pool.reactor.snapshot()],
     reseed,
     // Drop DISCARDS — at the bytes, on every backend (T72). Purge everything the container can NAME,
@@ -1905,7 +1932,12 @@ async function openSeparate(
       // append error that claims nothing.
       if (spec.entity !== undefined) {
         try {
-          for (const id of survivingDeclarationIds(gw.reactor, gw.operatorAuthor!, spec.entity)) {
+          for (const id of survivingDeclarationIds(
+            gw.reactor,
+            gw.validityNow(),
+            gw.operatorAuthor!,
+            spec.entity,
+          )) {
             await gw.append([
               signClaims(
                 retractionOf(id, gw.operatorAuthor!, gw.nextTimestamp()),
@@ -1980,7 +2012,7 @@ export function poolForBindingImpl(gw: Gateway, binding: ConnectionBinding): Gat
   // the name alone let that connection keep appending law into a subtree the person had removed
   // from every page they have: unseeable, and un-droppable, because their pages walk edges. This
   // is the same question the MCP roster asks; both write on the binding's authority, so both ask it.
-  const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+  const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   if (chainBreaksAt(table, binding.container) !== undefined) {
     throw new Error(
       `the container ${binding.container} this connection is bound to no longer stands, so this ` +
@@ -2063,7 +2095,7 @@ export async function bindConnectionImpl(
   // this process spawned. The handle's own drop is the one place a handle is cleared, and it clears
   // only once the pool is unregistered, so a held handle is always a standing declaration; the
   // table is still consulted, defensively, so a struck name can never be resumed from a handle.
-  const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+  const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   const declared = table.containers.has(name);
   const held = declared ? gw.connectionInboxes.get(name) : undefined;
   // A drop unregisters the pool before its declaration is struck and its handle cleared; in that
@@ -2194,7 +2226,7 @@ function inboxHandle(gw: Gateway, name: string, inbox: Container): Container {
 // from booting, and a read of it meets containerScope's refusal by name, which is the honest answer.
 export async function resumeInboxesImpl(gw: Gateway): Promise<void> {
   if (gw.operatorAuthor === undefined) return;
-  const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+  const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   for (const [name, rec] of table.containers) {
     if (rec.inboxOf === undefined || !name.startsWith("inbox:")) continue;
     if (gw.connectionInboxes.has(name) || table.detached.has(name)) continue;
@@ -2252,7 +2284,7 @@ export function unreachableStoreReport(gw: Gateway): {
    *  needs the name, and deriving one by parsing a refusal message is how a report goes stale. */
   faultEntities: string[];
 } {
-  const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+  const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   const faults: string[] = [];
   const kept: string[] = [];
   const faultEntities: string[] = [];
@@ -2270,7 +2302,7 @@ export function unreachableStoreReport(gw: Gateway): {
   // predates the rename, and a guard that stops firing reports completeness it never proved (H7).
   const struckSeparate = new Set<string>();
   if (gw.operatorAuthor !== undefined) {
-    const negated = lawfulNegated(gw.reactor, gw.operatorAuthor);
+    const negated = negatedAt(gw.reactor, gw.validityNow(), gw.operatorAuthor);
     for (const delta of lawfulSnapshot(gw.reactor, gw.operatorAuthor)) {
       if (!negated(delta.id)) continue;
       const name = containerRef(delta.claims, CTX_CONTAINER);

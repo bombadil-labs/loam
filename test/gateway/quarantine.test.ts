@@ -96,7 +96,7 @@ describe("§24.8 erasure reaches the quarantine — the law, no evasion", () => 
     await primary.erase(secret.id, { reason: "the subject asked to be forgotten" });
 
     // (a) the erasure propagated IN
-    expect(readErasures(q.gateway.reactor, OP).has(secret.id)).toBe(true);
+    expect(readErasures(q.gateway.reactor, q.gateway.validityNow(), OP).has(secret.id)).toBe(true);
     // (b) the byte is GONE from the pool — not in its ground, and not in its backend
     expect(holds(q.gateway, secret.id)).toBe(false);
     expect((await poolBackend.deltasSince(new Set())).some((d) => d.id === secret.id)).toBe(false);

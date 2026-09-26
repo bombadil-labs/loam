@@ -8,7 +8,7 @@ import {
   type Reactor,
 } from "@bombadil/rhizomatic";
 import type { Gateway } from "../gateway/gateway.js";
-import { lawfulNegated } from "../gateway/registration.js";
+import { negatedAt } from "../gateway/negation.js";
 import { containerDeclarationName, currentContainerDeclarationId } from "../gateway/container.js";
 import { channelStatusImpl } from "./channel.js";
 import { eraseDefect, isErasure, readErasures, erasureTarget } from "../gateway/erase.js";
@@ -236,7 +236,7 @@ export function localChannelsInContainer(gw: Gateway, container: string): string
   // that serves this read per request must switch to `reactor.byTarget(container)` filtered to
   // the event context, the affordance `lawfulDeltasAt` uses; then one `get` and one negation
   // read per opening.
-  const negated = lawfulNegated(gw.reactor, gw.operatorAuthor);
+  const negated = negatedAt(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   const names = new Set<string>();
   for (const d of gw.reactor.snapshot()) {
     if (!inLocalContext(d, LOCAL_EVENT)) continue;
@@ -348,7 +348,7 @@ export function localControlChannel(d: Delta): string | undefined {
     : undefined;
 }
 export function currentPoolDeclaration(gw: Gateway, name: string): string | undefined {
-  return currentContainerDeclarationId(gw.reactor, gw.operatorAuthor, name);
+  return currentContainerDeclarationId(gw.reactor, gw.validityNow(), gw.operatorAuthor, name);
 }
 const field = (d: Delta, role: string): unknown => {
   const ps = d.claims.pointers.filter((p) => p.role === role);
@@ -357,7 +357,7 @@ const field = (d: Delta, role: string): unknown => {
 export function openingAgrees(gw: Gateway, o: LocalChannelOpening): boolean {
   const status = gw.reactor.get(o.statusAtOpen),
     declaration = gw.reactor.get(o.poolDeclaration);
-  const dead = readErasures(gw.reactor, gw.operatorAuthor);
+  const dead = readErasures(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   if (
     status === undefined ||
     declaration === undefined ||
@@ -502,7 +502,7 @@ export function localChannelEvidence(gw: Gateway, channel: string): LocalChannel
   if (history.state !== "open") return history;
   const { opening, ground, receivedIds } = history;
   const received: Delta[] = [];
-  const sourceDead = readErasures(ground.reactor, ground.operatorAuthor);
+  const sourceDead = readErasures(ground.reactor, ground.validityNow(), ground.operatorAuthor);
   for (const id of receivedIds) {
     const d = ground.reactor.get(id);
     if (d === undefined || sourceDead.has(id) || !sameVerifiedDelta(d, d))

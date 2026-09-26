@@ -163,7 +163,11 @@ export function selectRendererForActivation(
   if (
     status === undefined ||
     !boundChannelAdmits(gw, exact, status) ||
-    !withinSubtree(readContainerTable(gw.reactor, gw.operatorAuthor), status.into, exact.container)
+    !withinSubtree(
+      readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor),
+      status.into,
+      exact.container,
+    )
   )
     throw refusal(
       "not_authorized",
@@ -271,7 +275,7 @@ export function selectRendererForActivation(
   // exists; duplicate records naming it are one answer.
   const matches = new Map<string, readonly string[]>();
   const faults: string[] = [];
-  for (const adoption of readLawAdoptions(pool.reactor, pool.operatorAuthor)) {
+  for (const adoption of readLawAdoptions(pool.reactor, pool.validityNow(), pool.operatorAuthor)) {
     if (adoption.adoptedDelta !== row.boundId) continue;
     try {
       const law = classifyExactReceivedSchema(

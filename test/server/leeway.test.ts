@@ -144,7 +144,11 @@ const declare = (
   leeway: Leeway,
   parent?: string,
 ): Promise<unknown> => {
-  const standing = readContainerTable(gw.reactor, gw.operatorAuthor).containers.get(container);
+  const standing = readContainerTable(
+    gw.reactor,
+    gw.validityNow(),
+    gw.operatorAuthor,
+  ).containers.get(container);
   const spec =
     standing === undefined
       ? {
@@ -260,9 +264,11 @@ describe("§58 — leeway fits its parent's terms, and cascades", () => {
       ),
     ]);
     expect(
-      readContainerTable(gateway.reactor, gateway.operatorAuthor).containers.has(
-        "ada:journal:plain",
-      ),
+      readContainerTable(
+        gateway.reactor,
+        gateway.validityNow(),
+        gateway.operatorAuthor,
+      ).containers.has("ada:journal:plain"),
     ).toBe(true);
     await closeAll();
   });
@@ -309,9 +315,11 @@ describe("§58 — leeway fits its parent's terms, and cascades", () => {
       "ada:journal",
     );
     expect(
-      readContainerTable(gateway.reactor, gateway.operatorAuthor).containers.get(
-        "ada:journal:small",
-      )?.leewayDeclared,
+      readContainerTable(
+        gateway.reactor,
+        gateway.validityNow(),
+        gateway.operatorAuthor,
+      ).containers.get("ada:journal:small")?.leewayDeclared,
     ).toBe(true);
     await closeAll();
   });

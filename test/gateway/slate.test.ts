@@ -529,7 +529,7 @@ describe("T64 criterion 15 — negation, both sides of the cut", () => {
     expect(await gw.backend.holds(condemned.id)).toBe(false);
     // The DURABLE arithmetic reports it as negated WITH its strike id rather than as a missing
     // erasure: the graveyard records an event that happened, and negation is a later event.
-    const check = graveyardCompleteness(gw.reactor, OP, report.graveyard);
+    const check = graveyardCompleteness(gw.reactor, gw.validityNow(), OP, report.graveyard);
     expect(check.negated).toEqual([{ member: condemned.id, negation: strike(erasure, 70_000).id }]);
     expect(check.missing).toEqual([]);
     expect(check.holds).toBe(false);
@@ -629,9 +629,9 @@ describe("T64 criterion 17 — the mint is new vocabulary only, so no §20 step 
     const condemned = observed(FERN, "height", 30, 1000, OP_SEED);
     await gw.append([condemned]);
     await standSlate(gw, { members: [condemned], closes: ["cite"] });
-    expect(() => readSlates(gw.reactor, OP, undefined as unknown as number)).toThrow(
-      /no moment was passed/,
-    );
+    expect(() =>
+      readSlates(gw.reactor, gw.validityNow(), OP, undefined as unknown as number),
+    ).toThrow(/no moment was passed/);
     await gw.close();
   });
 });

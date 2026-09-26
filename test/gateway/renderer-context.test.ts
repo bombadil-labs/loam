@@ -475,7 +475,9 @@ describe("explicit renderer execution context", () => {
       signClaims(revocationClaims(f.ancestor.id, OP, f.gateway.nextTimestamp()), OP_SEED),
     ]);
     expect(
-      readContainerTable(f.gateway.reactor, OP).containers.has(f.first.binding.container),
+      readContainerTable(f.gateway.reactor, f.gateway.validityNow(), OP).containers.has(
+        f.first.binding.container,
+      ),
     ).toBe(true);
     refused(await renderRendererInContext(f.renderer, FERN, first));
     expect((await renderRendererInContext(f.renderer, FERN, second)).body).toContain("first=301");

@@ -763,10 +763,10 @@ describe("T278 — exact received renderer selection", () => {
     await w.sync();
     expect(w.received().some((d) => d.id === narrow.id)).toBe(true);
     expect(w.refusal("narrow").code).toBe("law_unavailable");
-    expect(readLawAdoptions(w.pool.reactor, OP).length).toBeGreaterThan(0);
+    expect(readLawAdoptions(w.pool.reactor, w.pool.validityNow(), OP).length).toBeGreaterThan(0);
     await w.gw.curseChannelLaw(w.channel, "alice:Plant");
     expect(w.refusal("hello").code).toBe("law_unavailable");
-    expect(readLawAdoptions(w.pool.reactor, OP).length).toBeGreaterThan(0);
+    expect(readLawAdoptions(w.pool.reactor, w.pool.validityNow(), OP).length).toBeGreaterThan(0);
   });
 
   it("criterion 12: an absent route in complete evidence is renderer_ineligible, not source_unavailable", async () => {

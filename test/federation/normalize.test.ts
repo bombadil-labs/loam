@@ -184,7 +184,9 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
       ],
       { admit: () => true },
     );
-    expect(readTranslations(gateway.reactor, OPERATOR).map((t) => t.name)).toEqual(["cinelog"]);
+    expect(
+      readTranslations(gateway.reactor, gateway.validityNow(), OPERATOR).map((t) => t.name),
+    ).toEqual(["cinelog"]);
 
     // and an unrelated delta is untouched by the lawful spec
     await gateway.append([
@@ -271,7 +273,9 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
         OPERATOR_SEED,
       ),
     ]);
-    expect(readTranslations(gateway.reactor, OPERATOR).map((t) => t.name)).toEqual(["cinelog"]);
+    expect(
+      readTranslations(gateway.reactor, gateway.validityNow(), OPERATOR).map((t) => t.name),
+    ).toEqual(["cinelog"]);
     await gateway.federate([cinelogEntry("person:wren", "film:stalker", "2026-07-08", 5000)]);
     await expect(translate(gateway, { seed: TRANSLATOR_SEED })).resolves.toMatchObject({
       emitted: 1,
@@ -445,7 +449,7 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
       ),
     )!;
     await gateway.append([signClaims(makeNegationClaims(OPERATOR, 7000, spec.id), OPERATOR_SEED)]);
-    expect(readTranslations(gateway.reactor, OPERATOR)).toEqual([]);
+    expect(readTranslations(gateway.reactor, gateway.validityNow(), OPERATOR)).toEqual([]);
 
     await gateway.federate([cinelogEntry("person:miles", "film:mirror", "2026-07-09", 8000)]);
     const report = await translate(gateway, { seed: TRANSLATOR_SEED });

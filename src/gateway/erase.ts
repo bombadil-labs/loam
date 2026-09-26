@@ -36,7 +36,8 @@ import { bytesToHex } from "@noble/hashes/utils.js";
 import { DeltaSet, Reactor, signClaims } from "@bombadil/rhizomatic";
 import type { Claims, Delta } from "@bombadil/rhizomatic";
 import { evalTerm, parseTerm } from "@bombadil/rhizomatic";
-import { lawfulNegated, readRegistrations } from "./registration.js";
+import { readRegistrations } from "./registration.js";
+import { negatedAt } from "./negation.js";
 import { programMaskJson } from "./listing.js";
 import { currentContainerDeclarationId, unreachableStoreReport } from "./container.js";
 import {
@@ -204,9 +205,13 @@ export function eraseDefect(
 // operator's erasures bind, so an ungoverned store honors no erasure. A negated erasure
 // leaves this set, while its target id stays in `refusedIds`, which the write and read paths
 // consult.
-export function readErasures(reactor: Reactor, operator: string | undefined): Set<string> {
+export function readErasures(
+  reactor: Reactor,
+  now: number,
+  operator: string | undefined,
+): Set<string> {
   const dead = new Set<string>();
-  for (const tomb of standingErasures(reactor, operator)) {
+  for (const tomb of standingErasures(reactor, now, operator)) {
     dead.add(erasureParts(tomb.claims).targetId!); // standingErasures proved it well-shaped
   }
   return dead;
@@ -222,7 +227,7 @@ export function readErasures(reactor: Reactor, operator: string | undefined): Se
 // A batch that carries an erasure and its target is handled by `erasedInBatch`.
 export function refusedIds(reactor: Reactor, operator: string | undefined): Set<string> {
   const refused = new Set<string>();
-  for (const tomb of boundErasures(reactor, operator, false)) {
+  for (const tomb of boundErasures(reactor, operator, undefined)) {
     refused.add(erasureParts(tomb.claims).targetId!);
   }
   return refused;
@@ -356,19 +361,24 @@ export function erasuresOfErasures(accepted: readonly Delta[]): Set<string> {
 // forgotten (that it forgot, never what). One place computes the set both readErasures (the
 // dead ids) and forgottenSince (the as-of annotation) draw from, so the author-confirmation and
 // negation rules cannot drift between them.
-export function standingErasures(reactor: Reactor, operator: string | undefined): Delta[] {
-  return boundErasures(reactor, operator, true);
+export function standingErasures(
+  reactor: Reactor,
+  now: number,
+  operator: string | undefined,
+): Delta[] {
+  return boundErasures(reactor, operator, now);
 }
 
-// The operator's well-shaped erasures. With `honorNegations`, a negated ordinary erasure is left
-// out; without it, every erasure that ever bound is in.
+// The operator's well-shaped erasures. With `honorNegationsAt`, an ordinary erasure negated at that
+// time is left out; without it, every erasure that ever bound is in.
 function boundErasures(
   reactor: Reactor,
   operator: string | undefined,
-  honorNegations: boolean,
+  honorNegationsAt: number | undefined,
 ): Delta[] {
   if (operator === undefined) return []; // an ungoverned store honors no erasure at all
-  const negated = honorNegations ? lawfulNegated(reactor, operator) : () => false;
+  const negated =
+    honorNegationsAt !== undefined ? negatedAt(reactor, honorNegationsAt, operator) : () => false;
   const out: Delta[] = [];
   // Every erasure points at ERASE_ENTITY, so the by-target index finds them all without a full
   // walk of the delta set (H8). The index is written with the set, so it cannot lag it.
@@ -813,6 +823,7 @@ export interface ErasureReceipt {
  */
 export function receiptLedger(
   reactor: Reactor,
+  now: number,
   operator: string | undefined,
 ): { receipts: ErasureReceipt[]; inert: number } {
   // ONE walk, not two. `reactor.snapshot()` re-derives every delta's content address on the way in
@@ -829,7 +840,7 @@ export function receiptLedger(
       }
     }
   }
-  const surviving = standingErasures(reactor, operator);
+  const surviving = standingErasures(reactor, now, operator);
   const receipts = surviving
     .map((d) => {
       const parts = erasureParts(d.claims);
@@ -857,10 +868,11 @@ export function receiptLedger(
 // since T (their length is the count), never scoped to this view.
 export function forgottenSince(
   reactor: Reactor,
+  now: number,
   operator: string | undefined,
   since: number,
 ): number[] {
-  return standingErasures(reactor, operator)
+  return standingErasures(reactor, now, operator)
     .map((d) => d.claims.timestamp)
     .filter((t) => t > since)
     .sort((a, b) => a - b);
@@ -874,10 +886,14 @@ export function forgottenSince(
 // between boot and run. (A lawfully struck erasure is therefore NOT in the set — heal will
 // not drop a negated record — and a self-erasure that disagrees with its target's author
 // binds nothing here too.)
-export function erasuresIn(deltas: Iterable<Delta>, operator: string | undefined): Set<string> {
+export function erasuresIn(
+  deltas: Iterable<Delta>,
+  now: number,
+  operator: string | undefined,
+): Set<string> {
   const probe = new Reactor();
   for (const d of deltas) probe.ingest(d);
-  return readErasures(probe, operator);
+  return readErasures(probe, now, operator);
 }
 
 // Sealed authorship (degree 3): a commitment carried on an anonymous reassertion. Anonymous
@@ -924,7 +940,7 @@ async function liveOpening(
       "a container attached by hand under its name holds bytes: detach() it, then drop the " +
       "channel (dropChannel), then erase again."
     );
-  const negated = lawfulNegated(gw.reactor, gw.operatorAuthor);
+  const negated = negatedAt(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   if (gw.reactor.get(o.poolDeclaration) !== undefined && !negated(o.poolDeclaration))
     return `its pool's declaration still stands. ${drop}`;
   // The pool under this NAME may be a later incarnation, in which case its bytes are that
@@ -987,7 +1003,12 @@ async function liveOpening(
     // A declaration can stand with no handle in memory: the pool detached on the record, or its
     // store unreadable when this process booted. Attached again, that incarnation's own bytes are
     // its own and the erase proceeds; a drop would purge them, so it is not the road named.
-    const standing = currentContainerDeclarationId(gw.reactor, gw.operatorAuthor, o.channel);
+    const standing = currentContainerDeclarationId(
+      gw.reactor,
+      gw.validityNow(),
+      gw.operatorAuthor,
+      o.channel,
+    );
     if (standing !== undefined && standing !== o.poolDeclaration)
       return (
         "a declaration under its name still stands while no pool is attached here: attach it " +
@@ -1093,7 +1114,7 @@ export async function eraseImpl(
   // Anchor only on an erasure that is SURVIVING (a negated one is a negated erasure, and the
   // id stays refused) and that ERASES this id (a pointer merely mentioning it is not an erasure of it).
   // `standingErasures` owns both rules, so the anchor and the dead set cannot drift.
-  const already = standingErasures(gw.reactor, gw.operatorAuthor).find(
+  const already = standingErasures(gw.reactor, gw.validityNow(), gw.operatorAuthor).find(
     (d) => erasureParts(d.claims).targetId === id,
   );
   const target = gw.reactor.get(id);
@@ -1114,7 +1135,7 @@ export async function eraseImpl(
   // that slate unable to read its own condemned set, so every door it closed silently stops enforcing
   // while the slate still reports itself standing. Refused here rather than tolerated, which is what
   // keeps that state unreachable through a door at all — the cut refuses the same delta as a member.
-  const pinning = readSlates(gw.reactor, gw.operatorAuthor, Date.now()).find(
+  const pinning = readSlates(gw.reactor, gw.validityNow(), gw.operatorAuthor, Date.now()).find(
     (s) => s.membershipAt === id,
   );
   if (pinning !== undefined) {
@@ -1153,7 +1174,7 @@ export async function eraseImpl(
     if (opts.cascade !== false)
       await withChannelCommit(gw, o.channel, async () => {
         for (const member of incarnationMembers(gw, id)) {
-          const erased = standingErasures(gw.reactor, gw.operatorAuthor).some(
+          const erased = standingErasures(gw.reactor, gw.validityNow(), gw.operatorAuthor).some(
             (d) => erasureParts(d.claims).targetId === member,
           );
           if (erased && !(await erasureOutstanding(gw, member))) continue;
@@ -1385,7 +1406,7 @@ export async function erasureStandings(
   for (const id of physical.unasked) note(id, "unasked");
   // ASKED EVEN WHERE THE BYTES COULD NOT BE. The reactor is a separate question from the tier, and
   // a ground with no receipt still owes the delivery whatever its disk would have said.
-  const tombs = readErasures(gw.reactor, gw.operatorAuthor);
+  const tombs = readErasures(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   for (const id of ids) if (!tombs.has(id)) note(id, "owed");
   for (const pool of gw.quarantinePools) {
     const sub = await erasureStandings(pool, ids, seen);
@@ -1476,7 +1497,7 @@ export async function eraseReplicaImpl(
     await appendLocalErasure(gw, erasure);
   } else await gw.federate([erasure], { admit: () => true });
   await gw.flush();
-  if (!readErasures(gw.reactor, gw.operatorAuthor).has(id)) {
+  if (!readErasures(gw.reactor, gw.validityNow(), gw.operatorAuthor).has(id)) {
     throw new Error(
       `the erasure did not complete: the operator's erasure for ${id} could not land in an attached pool`,
     );
@@ -1664,7 +1685,7 @@ async function outstandingAmong(
 }
 
 export async function healthImpl(gw: Gateway, now = Date.now()): Promise<StoreHealth> {
-  const dead = readErasures(gw.reactor, gw.operatorAuthor);
+  const dead = readErasures(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   const ids = [...dead];
   let erasure: ErasureHealth;
   if (ids.length === 0) {

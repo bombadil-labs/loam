@@ -21,7 +21,11 @@ const OPEN: Leeway = { ...SEALED_LEEWAY, receive: true };
 const PICK = { pick: { order: { byTimestamp: "desc" } } };
 
 const declareAs = (gw: Gateway, container: string, leeway: Leeway): Promise<unknown> => {
-  const standing = readContainerTable(gw.reactor, gw.operatorAuthor).containers.get(container);
+  const standing = readContainerTable(
+    gw.reactor,
+    gw.validityNow(),
+    gw.operatorAuthor,
+  ).containers.get(container);
   return gw.append([
     signClaims(
       containerClaims(

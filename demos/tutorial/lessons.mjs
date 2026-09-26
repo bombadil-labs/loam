@@ -1782,7 +1782,8 @@ not a right to be forgotten, and Jamie is owed the real one.`,
                 // they are there, so the false here is a fact rather than a needle that never
                 // matched anything.
                 !wordsInStorage(ctx, PRIVATE_LINE) &&
-                loam.readErasures(ctx.gateway.reactor, ctx.author).size >= 1 &&
+                loam.readErasures(ctx.gateway.reactor, ctx.gateway.validityNow(), ctx.author)
+                  .size >= 1 &&
                 // ...and the diary is whole around the hole: the line beside it survived, and so
                 // did everything else. A door that removed too much would pass the first test.
                 night.includes(MOVIE_NIGHT_NOTE) &&
@@ -1821,7 +1822,9 @@ not a right to be forgotten, and Jamie is owed the real one.`,
           want: "Every copy that held them destroyed, and every copy that did not, kept.",
           how: "Press the button. The page names what went, what stayed, and why.",
           run: async (ctx) => {
-            sweepCheckpoints(ctx.storage, [...loam.readErasures(ctx.gateway.reactor, ctx.author)]);
+            sweepCheckpoints(ctx.storage, [
+              ...loam.readErasures(ctx.gateway.reactor, ctx.gateway.validityNow(), ctx.author),
+            ]);
           },
           observe: {
             page: { selector: "#sweep-holder", contains: "checkpoint" },
@@ -1843,7 +1846,11 @@ not a right to be forgotten, and Jamie is owed the real one.`,
             // with the record in it while the report said none had. A verdict that re-derived
             // the numbers would be blind to exactly the blob the sweep exists to catch.
             store: async (ctx) => {
-              const dead = loam.readErasures(ctx.gateway.reactor, ctx.author);
+              const dead = loam.readErasures(
+                ctx.gateway.reactor,
+                ctx.gateway.validityNow(),
+                ctx.author,
+              );
               if (dead.size === 0) return false;
               const words = asStored(PRIVATE_LINE);
               for (let i = 0; i < ctx.storage.length; i++) {
@@ -1909,7 +1916,7 @@ not a right to be forgotten, and Jamie is owed the real one.`,
       ],
       check: async (ctx) =>
         !anywhere(ctx, PRIVATE_LINE) &&
-        loam.readErasures(ctx.gateway.reactor, ctx.author).size >= 1 &&
+        loam.readErasures(ctx.gateway.reactor, ctx.gateway.validityNow(), ctx.author).size >= 1 &&
         list((await read(ctx, "viewing", MOVIE_NIGHT)).note).includes(MOVIE_NIGHT_NOTE) &&
         (await read(ctx, "viewing", VIEWING)).rating === 4,
     },

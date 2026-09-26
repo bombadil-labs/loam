@@ -185,7 +185,9 @@ describe("T34 delta level: the envelope is one operator-authored declaration, re
     const pool = await gw.openQuarantine();
 
     // Delta level: the operator's declaration is what the pool resolves, read from the parent's ground.
-    expect(readEnvelopePolicy(gw.reactor, OP).get(ENVELOPE_ANY)?.maxConcurrentRenders).toBe(1);
+    expect(
+      readEnvelopePolicy(gw.reactor, gw.validityNow(), OP).get(ENVELOPE_ANY)?.maxConcurrentRenders,
+    ).toBe(1);
     expect(gw.envelopeReports()[0]!.envelope.maxConcurrentRenders).toBe(1);
     // Object level: what a caller meets when the slots are gone.
     const [a, b] = await Promise.all([serve(pool.gateway, "hang"), serve(pool.gateway, "hang")]);
@@ -243,7 +245,9 @@ describe("T34 delta level: the envelope is one operator-authored declaration, re
 
     // Lawful, well-formed, operator-signed — and landed on the POOL's ground, where it binds nothing.
     await declare(pool.gateway, ENVELOPE_ANY, { maxConcurrentRenders: 32 }, 3_000_000);
-    expect(readEnvelopePolicy(pool.gateway.reactor, OP).get(ENVELOPE_ANY)).toEqual({
+    expect(
+      readEnvelopePolicy(pool.gateway.reactor, pool.gateway.validityNow(), OP).get(ENVELOPE_ANY),
+    ).toEqual({
       maxConcurrentRenders: 32, // the pool's OWN ground really does say 32…
     });
 
@@ -410,7 +414,9 @@ describe("T34 delta level: the envelope is one operator-authored declaration, re
     expect(gw.reactor.get(signed.id)).toBeDefined();
 
     // Delta level: the reader drops the whole declaration, so the honest earlier one still governs.
-    expect(readEnvelopePolicy(gw.reactor, OP).get(ENVELOPE_ANY)?.maxConcurrentRenders).toBe(1);
+    expect(
+      readEnvelopePolicy(gw.reactor, gw.validityNow(), OP).get(ENVELOPE_ANY)?.maxConcurrentRenders,
+    ).toBe(1);
     // Object level: the pool meters at 1, not at the duplicate's 64.
     const pool = await gw.openQuarantine();
     expect(gw.envelopeReports()[0]!.envelope.maxConcurrentRenders).toBe(1);
@@ -567,14 +573,16 @@ describe("T34 suppression: a struck declaration stops binding, at both levels", 
         SURVEYOR_SEED,
       ),
     ]);
-    expect(readEnvelopePolicy(gw.reactor, OP).get("loam:pool:struck")).toEqual({
+    expect(readEnvelopePolicy(gw.reactor, gw.validityNow(), OP).get("loam:pool:struck")).toEqual({
       maxConcurrentRenders: 1, // a stranger's strike retires nothing the operator planted
     });
     expect(gw.envelopeReports()[0]!.envelope.maxConcurrentRenders).toBe(1);
 
     // Now the operator's. Delta level first, then what a caller meets.
     await gw.append([signClaims(strikeOf(tightening.id, gw.nextTimestamp()), OP_SEED)]);
-    expect(readEnvelopePolicy(gw.reactor, OP).has("loam:pool:struck")).toBe(false);
+    expect(readEnvelopePolicy(gw.reactor, gw.validityNow(), OP).has("loam:pool:struck")).toBe(
+      false,
+    );
     expect(gw.envelopeReports()[0]!.envelope.maxConcurrentRenders).toBe(3);
     const after = await Promise.all([
       serve(pool.gateway!, "ok"),
@@ -598,7 +606,7 @@ describe("T34 suppression: a struck declaration stops binding, at both levels", 
     expect(gw.envelopeReports()[0]!.envelope.maxConcurrentRenders).toBe(9);
 
     await gw.append([signClaims(strikeOf(wide.id, gw.nextTimestamp()), OP_SEED)]);
-    expect(readEnvelopePolicy(gw.reactor, OP).size).toBe(0);
+    expect(readEnvelopePolicy(gw.reactor, gw.validityNow(), OP).size).toBe(0);
     expect(gw.envelopeReports()[0]!.envelope).toEqual(DEFAULT_QUARANTINE_ENVELOPE);
 
     await pool.drop();
@@ -660,7 +668,11 @@ describe("T34 suppression: a struck declaration stops binding, at both levels", 
     const middle = await gw.openContainer({ name: "loam:pool:middle" });
     // Struck AFTER the seeding: the copy inside `middle` still carries the wide declaration.
     await gw.append([signClaims(strikeOf(wide.id, gw.nextTimestamp()), OP_SEED)]);
-    expect(readEnvelopePolicy(middle.gateway!.reactor, OP).get(ENVELOPE_ANY)).toEqual({
+    expect(
+      readEnvelopePolicy(middle.gateway!.reactor, middle.gateway!.validityNow(), OP).get(
+        ENVELOPE_ANY,
+      ),
+    ).toEqual({
       maxConcurrentRenders: 9,
       renderTimeoutMs: 3000,
     });
@@ -733,7 +745,10 @@ describe("T34 reach: metering rides DOWN, whatever the child declares", () => {
     await declare(gw, "loam:pool:big", { maxConcurrentRenders: 64, renderTimeoutMs: 3000 }, 9971);
     // The generous subject is real and readable: without this the rail could pass because the
     // declaration never bound, rather than because the clamp caught it.
-    expect(readEnvelopePolicy(gw.reactor, OP).get("loam:pool:big")?.maxConcurrentRenders).toBe(64);
+    expect(
+      readEnvelopePolicy(gw.reactor, gw.validityNow(), OP).get("loam:pool:big")
+        ?.maxConcurrentRenders,
+    ).toBe(64);
 
     const pool = await gw.openQuarantine();
     expect(gw.envelopeReports()[0]!.envelope.maxConcurrentRenders).toBe(1);

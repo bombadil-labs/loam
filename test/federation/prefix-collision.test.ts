@@ -83,7 +83,7 @@ const refusalOf = async (open: Promise<unknown>): Promise<string | undefined> =>
   open.then(() => undefined).catch((e: unknown) => (e instanceof Error ? e.message : String(e)));
 
 const declares = (gw: Gateway, container: string): boolean =>
-  readContainerTable(gw.reactor, gw.operatorAuthor).containers.has(container);
+  readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor).containers.has(container);
 
 /** The newest channel-record delta for one channel, read from the ground rather than the API. */
 const recordOf = (gw: Gateway, channel: string): Delta =>
@@ -448,7 +448,8 @@ describe("T215 (d) — only this store's own law assigns a prefix", () => {
       ]);
       // DELTA LEVEL: the re-declaration bound, so the derivation really has nothing to cut against.
       expect(
-        readContainerTable(gw.reactor, gw.operatorAuthor).containers.get(ch.name)?.inboxOf,
+        readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor).containers.get(ch.name)
+          ?.inboxOf,
       ).toBe("other");
       expect(gw.channelStatus(ch.name)[0]!.prefix).toBe("alice");
 
@@ -481,7 +482,8 @@ describe("T215 (d) — only this store's own law assigns a prefix", () => {
         ),
       ]);
       expect(
-        readContainerTable(gw.reactor, gw.operatorAuthor).containers.get(ch.name)?.inboxOf,
+        readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor).containers.get(ch.name)
+          ?.inboxOf,
       ).toBe("ada");
       expect(gw.channelStatus(ch.name)[0]!.prefix).toBe("alice");
 
@@ -598,7 +600,12 @@ describe("T215 (d) — only this store's own law assigns a prefix", () => {
       // The mirror of the case above, and the one a sever produces if its two halves fail apart:
       // the pool's declaration goes and the record stays. Of the two mistakes available here,
       // reserving a prefix costs a rename; freeing one two channels answer to cannot be undone.
-      for (const id of survivingDeclarationIds(gw.reactor, gw.operatorAuthor!, ch.name)) {
+      for (const id of survivingDeclarationIds(
+        gw.reactor,
+        gw.validityNow(),
+        gw.operatorAuthor!,
+        ch.name,
+      )) {
         await strikeBy(gw, BOB_SEED, id);
       }
       expect(declares(gw, ch.name)).toBe(false);
@@ -683,7 +690,9 @@ describe("T215 (e) — one pool name, one meaning", () => {
       // DELTA LEVEL, two-sided: the standing channel is untouched and the parent was not re-pointed.
       expect(gw.channelStatus(feed.name)[0]!.prefix).toBe("alice");
       expect(
-        readContainerTable(gw.reactor, gw.operatorAuthor).containers.get(feed.name)?.inboxOf,
+        readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor).containers.get(
+          feed.name,
+        )?.inboxOf,
       ).toBe("ada:feed");
       expect(declares(gw, "ada")).toBe(false);
 

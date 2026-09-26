@@ -220,9 +220,9 @@ describe("T82 — the container and law surfaces are reachable from the package 
     const table: ContainerTable = tableDoor(gw);
     const resolved: ResolvedContainer | undefined = table.containers.get(SPEC.container);
     expect(resolved?.trust).toBe("curated");
-    expect(readContainerTable(gw.reactor, OP).containers.get(SPEC.container)?.posture).toBe(
-      "shared",
-    );
+    expect(
+      readContainerTable(gw.reactor, gw.validityNow(), OP).containers.get(SPEC.container)?.posture,
+    ).toBe("shared");
 
     // A frozen module version over what the container holds, named from the barrel — and the same
     // address the DOOR computes over the same members, which is what makes `freezeMembers` public
@@ -250,7 +250,7 @@ describe("T82 — the container and law surfaces are reachable from the package 
     await expect(blessDoor(gw, version, {} satisfies BlessAllOptions)).rejects.toThrow(
       /exports no law/,
     );
-    expect(readLawAdoptions(gw.reactor, OP)).toEqual([]);
+    expect(readLawAdoptions(gw.reactor, gw.validityNow(), OP)).toEqual([]);
 
     // The rest of the surface, each name asserted by what it DOES: an export nobody exercises can
     // be deleted from the barrel with the rail still green, which is the same unreachability one
@@ -272,7 +272,7 @@ describe("T82 — the container and law surfaces are reachable from the package 
       containerClaims({ ...SPEC, trust: "untrusted", posture: "separate" }, OP, 8000),
       OP_SEED,
     );
-    expect(containerDefect(wallFlip, gw.reactor, OP)).toMatch(/§28\.4/);
+    expect(containerDefect(wallFlip, gw.reactor, gw.validityNow(), OP)).toMatch(/§28\.4/);
 
     // §28.6's ADMISSION axis, filed at the container's own entity — a `loam:trust` shape whose
     // subject is the container rather than the store. `CTX_TRUST` is the whole vocabulary needed
@@ -294,9 +294,11 @@ describe("T82 — the container and law surfaces are reachable from the package 
         OP_SEED,
       ),
     ]);
-    expect(containerAdmission(gw.reactor, OP, SPEC.container).mode).toBe("closed");
+    expect(containerAdmission(gw.reactor, gw.validityNow(), OP, SPEC.container).mode).toBe(
+      "closed",
+    );
     // And the axis is the CONTAINER's, not the store's — the root policy is untouched by it.
-    expect(readTrustPolicy(gw.reactor, OP).mode).not.toBe("closed");
+    expect(readTrustPolicy(gw.reactor, gw.validityNow(), OP).mode).not.toBe("closed");
 
     await gw.close();
   });

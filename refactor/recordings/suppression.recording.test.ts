@@ -118,7 +118,7 @@ describe("recordings: suppression, four readers side by side", () => {
     ] as const) {
       out[mode] = bothOrders(corpus, (r) => {
         const lawful = lawfulNegated(r, op);
-        const struck = dataStruck(r, op);
+        const struck = dataStruck(r, Date.now(), op);
         const selfOnly = survivalOver([...r.snapshot()]);
         return Object.fromEntries(
           corpus.map((d) => [
@@ -126,7 +126,7 @@ describe("recordings: suppression, four readers side by side", () => {
             {
               lawfulNegated: lawful(d.id),
               dataStruck: struck(d.id),
-              honoredStrikeOn: honoredStrikeOn(r, d.id, op),
+              honoredStrikeOn: honoredStrikeOn(r, Date.now(), d.id, op),
               // survivalOver answers "does it survive"; its inverse reads like the others.
               struckUnderSelfAuthor: !selfOnly(d.id),
             },

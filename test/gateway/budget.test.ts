@@ -81,7 +81,7 @@ const grow = (gateway: Gateway, ts: number, seed = GARDENER_SEED) =>
 describe("per-author door budgets (SPEC §25)", () => {
   it("a granted author with no budget policy appends freely — unchanged", async () => {
     const gateway = await governed();
-    expect(readBudgetPolicy(gateway.reactor, OPERATOR).size).toBe(0);
+    expect(readBudgetPolicy(gateway.reactor, gateway.validityNow(), OPERATOR).size).toBe(0);
     for (let i = 0; i < 5; i += 1) {
       await expect(grow(gateway, 1000 + i)).resolves.toMatchObject({ accepted: 1 });
     }
@@ -91,7 +91,9 @@ describe("per-author door budgets (SPEC §25)", () => {
   it("an operator-signed budget meters that author at the append door", async () => {
     const gateway = await governed();
     await setBudget(gateway, GARDENER, 2, 5000);
-    expect(readBudgetPolicy(gateway.reactor, OPERATOR).get(GARDENER)?.maxAppends).toBe(2);
+    expect(
+      readBudgetPolicy(gateway.reactor, gateway.validityNow(), OPERATOR).get(GARDENER)?.maxAppends,
+    ).toBe(2);
 
     await expect(grow(gateway, 1001)).resolves.toMatchObject({ accepted: 1 }); // held 0 → 1
     await expect(grow(gateway, 1002)).resolves.toMatchObject({ accepted: 1 }); // held 1 → 2
@@ -126,7 +128,9 @@ describe("per-author door budgets (SPEC §25)", () => {
     // A fresh declaration raises the ceiling — a delta, not a reboot — and the same live
     // gateway lets the next append through.
     await setBudget(gateway, GARDENER, 3, 5001);
-    expect(readBudgetPolicy(gateway.reactor, OPERATOR).get(GARDENER)?.maxAppends).toBe(3);
+    expect(
+      readBudgetPolicy(gateway.reactor, gateway.validityNow(), OPERATOR).get(GARDENER)?.maxAppends,
+    ).toBe(3);
     await expect(grow(gateway, 1004)).resolves.toMatchObject({ accepted: 1 }); // held 2 → 3
     await expect(grow(gateway, 1005)).rejects.toThrow(/over budget/); // and metered again at 3
     await gateway.close();
@@ -162,7 +166,7 @@ describe("per-author door budgets (SPEC §25)", () => {
     await gateway.append([
       signClaims(makeNegationClaims(OPERATOR, 5001, budget.id), OPERATOR_SEED),
     ]);
-    expect(readBudgetPolicy(gateway.reactor, OPERATOR).size).toBe(0);
+    expect(readBudgetPolicy(gateway.reactor, gateway.validityNow(), OPERATOR).size).toBe(0);
     for (let i = 0; i < 4; i += 1) {
       await expect(grow(gateway, 2000 + i)).resolves.toMatchObject({ accepted: 1 });
     }
@@ -174,7 +178,7 @@ describe("per-author door budgets (SPEC §25)", () => {
     // The surveyor holds write standing, so the declaration LANDS as data — but only the
     // operator's voice budgets, so it meters no one.
     await gateway.append([signClaims(budgetClaims(GARDENER, 1, SURVEYOR, 5000), SURVEYOR_SEED)]);
-    expect(readBudgetPolicy(gateway.reactor, OPERATOR).size).toBe(0);
+    expect(readBudgetPolicy(gateway.reactor, gateway.validityNow(), OPERATOR).size).toBe(0);
     for (let i = 0; i < 4; i += 1) {
       await expect(grow(gateway, 1000 + i)).resolves.toMatchObject({ accepted: 1 });
     }
@@ -184,7 +188,7 @@ describe("per-author door budgets (SPEC §25)", () => {
   it("an ungoverned store meters no one — no lawful voice to set a budget with", async () => {
     const gateway = await Gateway.open(new MemoryBackend());
     await gateway.append([signClaims(budgetClaims(GARDENER, 1, OPERATOR, 5000), OPERATOR_SEED)]);
-    expect(readBudgetPolicy(gateway.reactor, undefined).size).toBe(0);
+    expect(readBudgetPolicy(gateway.reactor, gateway.validityNow(), undefined).size).toBe(0);
     for (let i = 0; i < 4; i += 1) {
       await expect(grow(gateway, 1000 + i)).resolves.toMatchObject({ accepted: 1 });
     }
@@ -255,7 +259,9 @@ describe("per-author door budgets (SPEC §25)", () => {
         OPERATOR_SEED,
       ),
     ]);
-    expect(readBudgetPolicy(gateway.reactor, OPERATOR).get(GARDENER)?.maxAppends).toBe(1);
+    expect(
+      readBudgetPolicy(gateway.reactor, gateway.validityNow(), OPERATOR).get(GARDENER)?.maxAppends,
+    ).toBe(1);
     await expect(grow(gateway, 1001)).resolves.toMatchObject({ accepted: 1 }); // maxAppends honored
     await expect(grow(gateway, 1002)).rejects.toThrow(/over budget/); // the unknown dimension ignored
     await gateway.close();
@@ -268,7 +274,9 @@ describe("per-author door budgets (SPEC §25)", () => {
     await gateway.append([
       signClaims(budgetWith(GARDENER, [{ role: "maxRate", value: 1 }], 5000), OPERATOR_SEED),
     ]);
-    expect(readBudgetPolicy(gateway.reactor, OPERATOR).has(GARDENER)).toBe(false);
+    expect(readBudgetPolicy(gateway.reactor, gateway.validityNow(), OPERATOR).has(GARDENER)).toBe(
+      false,
+    );
     for (let i = 0; i < 4; i += 1) {
       await expect(grow(gateway, 2000 + i)).resolves.toMatchObject({ accepted: 1 });
     }

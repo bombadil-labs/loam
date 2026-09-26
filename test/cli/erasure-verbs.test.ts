@@ -453,7 +453,7 @@ describe("T206 (a) — `loam slate list` prints §29.1's record", () => {
         (d) => isSlateRecord(d.claims) && d.claims.author === OP,
       );
       expect(records).toHaveLength(1);
-      const slates = readSlates(gw.reactor, OP, Date.now());
+      const slates = readSlates(gw.reactor, gw.validityNow(), OP, Date.now());
       expect(slates).toHaveLength(1);
       return { record: records[0]!.id, slate: slates[0]! };
     });
@@ -520,7 +520,9 @@ describe("T206 (a) — `loam slate list` prints §29.1's record", () => {
     expect(empty).toMatch(/no slates?/i);
     expect(empty).not.toMatch(/deadline/i);
     expect(empty).not.toMatch(/requested by/i);
-    expect(await ground(home, (gw) => readSlates(gw.reactor, OP, Date.now()).length)).toBe(0);
+    expect(
+      await ground(home, (gw) => readSlates(gw.reactor, gw.validityNow(), OP, Date.now()).length),
+    ).toBe(0);
 
     // SIDE TWO: the SAME store, one slate later.
     await ground(home, async (gw) => {
@@ -842,7 +844,7 @@ describe("T206 (d) — `loam erasures` reads the receipt, never the record", () 
     expect(forgotten.spokenBy).toBe(SUBJECT);
 
     // DELTA LEVEL: one surviving operator erasure, and it erases the id we think it does.
-    const tombs = await ground(home, (gw) => standingErasures(gw.reactor, OP));
+    const tombs = await ground(home, (gw) => standingErasures(gw.reactor, gw.validityNow(), OP));
     expect(tombs).toHaveLength(1);
     expect(erasureTarget(tombs[0]!.claims)).toBe(forgotten.target);
     expect(tombs[0]!.id).toBe(forgotten.erasure);
@@ -899,9 +901,12 @@ describe("T206 (d) — `loam erasures` reads the receipt, never the record", () 
     const reasonLine = lineOf("reason");
     expect(reasonLine, shown).toContain("kit asked, under article 17");
     expect(reasonLine).not.toContain("ed25519:");
-    expect(await ground(home, (gw) => receiptLedger(gw.reactor, OP).receipts[0]!.reasons)).toEqual([
-      "kit asked, under article 17",
-    ]);
+    expect(
+      await ground(
+        home,
+        (gw) => receiptLedger(gw.reactor, gw.validityNow(), OP).receipts[0]!.reasons,
+      ),
+    ).toEqual(["kit asked, under article 17"]);
 
     // The same receipt, found by the id the operator actually has: the one that was erased.
     clear();
@@ -931,7 +936,9 @@ describe("T206 (d) — `loam erasures` reads the receipt, never the record", () 
     });
 
     // DELTA LEVEL: the ground holds two erasures and exactly one of them still binds.
-    const surviving = await ground(home, (gw) => standingErasures(gw.reactor, OP).map((d) => d.id));
+    const surviving = await ground(home, (gw) =>
+      standingErasures(gw.reactor, gw.validityNow(), OP).map((d) => d.id),
+    );
     expect(surviving).toEqual([both.kept.erasure]);
 
     clear();
@@ -1028,7 +1035,10 @@ describe("T206 (d) — `loam erasures` reads the receipt, never the record", () 
     });
 
     // DELTA LEVEL: the ground really does hold one receipt with two reasons and one with none.
-    const held = await ground(home, (gw) => receiptLedger(gw.reactor, OP).receipts);
+    const held = await ground(
+      home,
+      (gw) => receiptLedger(gw.reactor, gw.validityNow(), OP).receipts,
+    );
     expect(held.find((r) => r.erasure === both.many)!.reasons).toEqual([
       "kit asked in March",
       "and again in April",
@@ -1097,7 +1107,9 @@ describe("T206 (d) — `loam erasures` reads the receipt, never the record", () 
       const second = await gw.erase(vera.id, { reason: "vera asked in April" });
       return { first, second };
     });
-    const at = await ground(home, (gw) => receiptLedger(gw.reactor, OP).receipts.map((r) => r.at));
+    const at = await ground(home, (gw) =>
+      receiptLedger(gw.reactor, gw.validityNow(), OP).receipts.map((r) => r.at),
+    );
     expect(at[0]!, "the fixture must span two moments").toBeLessThan(at[1]!);
 
     expect(await run(["erasures", "list", "--home", home], io()), printed()).toBe(0);
@@ -1429,7 +1441,10 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
 
     // DELTA LEVEL: one receipt in the ground, naming this id — and the id the SCREEN printed is
     // that receipt, so the operator can look up what they were just told.
-    const receipts = await ground(home, (gw) => receiptLedger(gw.reactor, OP).receipts);
+    const receipts = await ground(
+      home,
+      (gw) => receiptLedger(gw.reactor, gw.validityNow(), OP).receipts,
+    );
     expect(receipts).toHaveLength(1);
     expect(receipts[0]!.erased).toBe(target);
     expect(said).toContain(receipts[0]!.erasure);
@@ -1905,7 +1920,10 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     expect(await run(["erase", target, "--reason", "kit asked again", "--home", home], io())).toBe(
       1,
     );
-    const receipt = await ground(home, (gw) => receiptLedger(gw.reactor, OP).receipts[0]!);
+    const receipt = await ground(
+      home,
+      (gw) => receiptLedger(gw.reactor, gw.validityNow(), OP).receipts[0]!,
+    );
     expect(printed()).toContain(receipt.erasure);
     expect(printed()).toContain(new Date(receipt.at).toISOString());
     // WHICH ARM. The id and the moment appear in both branches, so asserting them pins that a line
@@ -1917,7 +1935,9 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     expect(printed()).not.toMatch(/forgot it at/);
     expect(printed()).not.toMatch(/is NOT finished/);
     // And no SECOND receipt was minted — a refused order writes nothing.
-    expect(await ground(home, (gw) => receiptLedger(gw.reactor, OP).receipts)).toHaveLength(1);
+    expect(
+      await ground(home, (gw) => receiptLedger(gw.reactor, gw.validityNow(), OP).receipts),
+    ).toHaveLength(1);
   });
 
   it("prints the receipt's own reason on a REUSE, and says the new one was not recorded", async () => {
@@ -1969,7 +1989,10 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     expect(said).toMatch(/YOUR --reason IS NOT ON THE RECEIPT/);
 
     // DELTA LEVEL: one receipt, still carrying the first sentence, and no second was minted.
-    const receipts = await ground(home, (gw) => receiptLedger(gw.reactor, OP).receipts);
+    const receipts = await ground(
+      home,
+      (gw) => receiptLedger(gw.reactor, gw.validityNow(), OP).receipts,
+    );
     expect(receipts).toHaveLength(1);
     expect(receipts[0]!.erasure).toBe(world.tomb);
     expect(receipts[0]!.reasons).toEqual(["the first sentence, art. 17"]);
@@ -3085,7 +3108,9 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     // the silent sweep it exists to prevent.
     expect(primaryHolds(home, "kit-erased-marker")).toBe(true);
     expect(vaultHolds(home, "kit-erased-marker")).toBe(true);
-    expect(await ground(home, (gw) => receiptLedger(gw.reactor, OP).receipts)).toHaveLength(0);
+    expect(
+      await ground(home, (gw) => receiptLedger(gw.reactor, gw.validityNow(), OP).receipts),
+    ).toHaveLength(0);
 
     // Named, it proceeds — so the refusal is about the SILENCE, not about the vault existing.
     clear();
@@ -3146,7 +3171,9 @@ describe("T206 (c) — `loam erase` without a reason erases nothing", () => {
     // resolves through its Schema.
     expect(homeHolds(home, "kit-erased-marker")).toBe(true);
     expect(await deltaCount(home)).toBe(before);
-    expect(await ground(home, (gw) => receiptLedger(gw.reactor, OP).receipts)).toHaveLength(0);
+    expect(
+      await ground(home, (gw) => receiptLedger(gw.reactor, gw.validityNow(), OP).receipts),
+    ).toHaveLength(0);
     expect(await ground(home, (gw) => gw.resolvedNode("Note", "note:kit").view["title"])).toBe(
       "kit-erased-marker",
     );

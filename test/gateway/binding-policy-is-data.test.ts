@@ -76,9 +76,11 @@ describe("§47 — the policy is data", () => {
         ),
       ]);
       // Qualified for "friends": the ROOT reads undeclared, so root behavior is unchanged...
-      expect(readBindingPolicy(gw.reactor, gw.operatorAuthor)).toBeUndefined();
+      expect(readBindingPolicy(gw.reactor, gw.validityNow(), gw.operatorAuthor)).toBeUndefined();
       // ...and the qualified reading answers — the later per-container delta, already expressible.
-      expect(readBindingPolicy(gw.reactor, gw.operatorAuthor, "friends")).toBe("conflicts");
+      expect(readBindingPolicy(gw.reactor, gw.validityNow(), gw.operatorAuthor, "friends")).toBe(
+        "conflicts",
+      );
     } finally {
       await gw.close();
     }
@@ -130,7 +132,9 @@ describe("§47 — a struck declaration stops governing (H1)", () => {
           ),
         )!;
       })();
-      expect(readBindingPolicy(gw.reactor, gw.operatorAuthor)).toBe("byTimestamp");
+      expect(readBindingPolicy(gw.reactor, gw.validityNow(), gw.operatorAuthor)).toBe(
+        "byTimestamp",
+      );
 
       const { makeNegationClaims } = await import("@bombadil/rhizomatic");
       await gw.append([
@@ -142,7 +146,7 @@ describe("§47 — a struck declaration stops governing (H1)", () => {
       // The strike binds: withdrawn law governs nothing. Before this rail, the reader picked the
       // latest declaration by timestamp WITHOUT consulting negation — so a struck declaration kept
       // silently evicting contest losers from every door, under law the operator withdrew.
-      expect(readBindingPolicy(gw.reactor, gw.operatorAuthor)).toBeUndefined();
+      expect(readBindingPolicy(gw.reactor, gw.validityNow(), gw.operatorAuthor)).toBeUndefined();
     } finally {
       await gw.close();
     }
@@ -170,7 +174,7 @@ describe("§47 — a struck declaration stops governing (H1)", () => {
               p.role === "mode" && p.target.kind === "primitive" && p.target.value === "conflicts",
           ) && gw.reactor.negationsOf(d.id).length === 0,
       )!;
-      expect(readBindingPolicy(gw.reactor, gw.operatorAuthor)).toBe("conflicts");
+      expect(readBindingPolicy(gw.reactor, gw.validityNow(), gw.operatorAuthor)).toBe("conflicts");
 
       const { makeNegationClaims } = await import("@bombadil/rhizomatic");
       await gw.append([
@@ -180,7 +184,9 @@ describe("§47 — a struck declaration stops governing (H1)", () => {
         ),
       ]);
       // The corpse must not shadow the living: t1's byTimestamp is the latest SURVIVOR.
-      expect(readBindingPolicy(gw.reactor, gw.operatorAuthor)).toBe("byTimestamp");
+      expect(readBindingPolicy(gw.reactor, gw.validityNow(), gw.operatorAuthor)).toBe(
+        "byTimestamp",
+      );
     } finally {
       await gw.close();
     }

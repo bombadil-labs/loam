@@ -86,7 +86,7 @@ describe("§24.8 rail (a) — a closed-trust pool cannot evade erasure", () => {
       reason: "closed means closed, but forgotten means forgotten",
     });
 
-    expect(readErasures(q.gateway.reactor, OP).has(secret.id)).toBe(true);
+    expect(readErasures(q.gateway.reactor, q.gateway.validityNow(), OP).has(secret.id)).toBe(true);
     expect(holds(q.gateway, secret.id)).toBe(false);
     await backendForgot(poolBackend, secret.id, FORGOTTEN);
     await q.drop();
@@ -214,7 +214,9 @@ describe("§24.8 rail (g) — a pool that retains makes the primary's erase REFU
 
     // The healthy replica was still swept and still erased, despite its sibling's fault.
     await backendForgot(healthy, secret.id, FORGOTTEN);
-    expect(readErasures(q2.gateway.reactor, OP).has(secret.id)).toBe(true);
+    expect(readErasures(q2.gateway.reactor, q2.gateway.validityNow(), OP).has(secret.id)).toBe(
+      true,
+    );
     await q2.drop();
     await q1.detach(); // the sick fixture cannot prove discard — detach, deliberately (T72)
     await primary.close();
@@ -273,7 +275,7 @@ describe("§24.8 rail (g) — a pool that retains makes the primary's erase REFU
     await expect(primary.erase(secret.id, { reason: "the subject asked" })).resolves.toMatchObject({
       erased: secret.id,
     });
-    expect(readErasures(q.gateway.reactor, OP).has(secret.id)).toBe(true); // delivered at last
+    expect(readErasures(q.gateway.reactor, q.gateway.validityNow(), OP).has(secret.id)).toBe(true); // delivered at last
     await q.drop();
     await primary.close();
   });
@@ -335,7 +337,7 @@ describe("§24.8 rails (e)/(f) — the seeding filter narrows what a pool SEES, 
       admit: (d) => d.claims.pointers.some((p) => p.role === "subject"),
     });
     // A quarantine inherits the holes along with the ground.
-    expect(readErasures(q.gateway.reactor, OP).has(secret.id)).toBe(true);
+    expect(readErasures(q.gateway.reactor, q.gateway.validityNow(), OP).has(secret.id)).toBe(true);
 
     // A lagging peer (or a saved offer) re-sends the purged bytes: the door remembers the hole.
     const report = await q.gateway.federate([secret]);
@@ -365,7 +367,7 @@ describe("§24.8 rails (e)/(f) — the seeding filter narrows what a pool SEES, 
     // An erasure of the unseen fact still fans out its erasure (the hole crosses even where
     // the byte never did — a later widened reseed must not resurrect it).
     await primary.erase(message.id);
-    expect(readErasures(q.gateway.reactor, OP).has(message.id)).toBe(true);
+    expect(readErasures(q.gateway.reactor, q.gateway.validityNow(), OP).has(message.id)).toBe(true);
     expect(holds(q.gateway, height.id)).toBe(true); // the filter's positive selection is untouched
     await q.drop();
     await primary.close();

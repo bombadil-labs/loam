@@ -70,9 +70,9 @@ describe("the runner: definitions in the store, execution in a peer client", () 
   it("passive: a definition IS present in the store, yet without a runner computes nothing", async () => {
     const { gateway } = await plantStore();
     // the definition is really there — inert, not absent
-    expect(readBindingDefinitions(gateway.reactor).map((s) => s.name)).toEqual([
-      "binding:avgHeight",
-    ]);
+    expect(
+      readBindingDefinitions(gateway.reactor, gateway.validityNow()).map((s) => s.name),
+    ).toEqual(["binding:avgHeight"]);
     await gateway.append([observed(FERN, "height", 30, 1000, GARDENER_SEED)]);
     await gateway.append([observed(FERN, "height", 34, 2000, SURVEYOR_SEED)]);
     expect(avgAt(gateway)).toHaveLength(0); // present but unrun
@@ -113,15 +113,15 @@ describe("the runner: definitions in the store, execution in a peer client", () 
     await gateway.append([
       signClaims(makeNegationClaims(authorForSeed(ALICE_SEED), 3, definition.id), ALICE_SEED),
     ]);
-    expect(readBindingDefinitions(gateway.reactor, OPERATOR).map((s) => s.name)).toEqual([
-      "binding:avgHeight",
-    ]);
+    expect(
+      readBindingDefinitions(gateway.reactor, gateway.validityNow(), OPERATOR).map((s) => s.name),
+    ).toEqual(["binding:avgHeight"]);
 
     // the operator's strike, by contrast, retires it
     await gateway.append([
       signClaims(makeNegationClaims(OPERATOR, 4, definition.id), OPERATOR_SEED),
     ]);
-    expect(readBindingDefinitions(gateway.reactor, OPERATOR)).toEqual([]);
+    expect(readBindingDefinitions(gateway.reactor, gateway.validityNow(), OPERATOR)).toEqual([]);
     await gateway.close();
   });
 
@@ -189,7 +189,7 @@ describe("the runner: definitions in the store, execution in a peer client", () 
       signClaims(bindingDefinitionClaims({ ...SPEC, budget: 99 }, RUNNER, 5), RUNNER_SEED),
       signClaims(bindingDefinitionClaims({ ...SPEC, budget: 7 }, RUNNER, 3), RUNNER_SEED),
     ]);
-    const specs = readBindingDefinitions(gateway.reactor);
+    const specs = readBindingDefinitions(gateway.reactor, gateway.validityNow());
     expect(specs).toHaveLength(1); // one binding, not two definitions of it
     expect(specs[0]!.budget).toBe(99); // the later blessing is the law
     // and attach does not die on a duplicate install

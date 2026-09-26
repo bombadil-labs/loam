@@ -29,10 +29,13 @@ import {
   type Reactor,
   type Term,
 } from "@bombadil/rhizomatic";
+import { negatedAt } from "./negation.js";
 // A deliberate one-way-at-runtime cycle: binding-policy imports `lawfulDeltasAt` from here, and
 // this reader calls its interpreter. Both uses are call-time, so ESM resolves it; the modules stay
 // split because the interpreter is the SPEC and this file is the fast path it disciplines.
 import { interpretBindingPolicy, readBindingPolicy } from "./binding-policy.js";
+
+export { lawfulNegated } from "./negation.js";
 
 export const CTX_REGISTRATION = "loam.registration";
 
@@ -808,39 +811,6 @@ const primitive = (claims: Claims, role: string): string | number | boolean | un
 // The latest registration per schema entity names the policy and roots; `loadHyperSchema` over the
 // lawful slice yields the schema itself. A registration whose definition does not survive (or
 // never arrived, or is malformed) binds nothing — unbound, never a crash.
-// The substrate's negation algebra, over the lawful slice — shared by every constitutional
-// reader (registrations here, binding definitions in the runner): a negation retires its
-// target only while it survives itself (negating the negation revives), and only LAWFUL
-// negations count — a write-granted author's strike, or a federated stranger's, retires
-// nothing the operator planted. Content addressing keeps the chain acyclic; memoized anyway.
-export function lawfulNegated(reactor: Reactor, operator?: string): (id: string) => boolean {
-  const memo = new Map<string, boolean>();
-  const negated = (id: string): boolean => {
-    const memoed = memo.get(id);
-    if (memoed !== undefined) return memoed;
-    memo.set(id, false); // in-progress: treat as surviving (acyclic by construction)
-    const verdict = reactor
-      .negationsOf(id)
-      .some((negation) => isLawful(reactor, negation, operator) && !negated(negation));
-    memo.set(id, verdict);
-    return verdict;
-  };
-  return negated;
-}
-
-// Membership of the lawful slice, asked one id at a time (hazard H8). The set answer and this one
-// agree by construction: `lawfulSnapshot` is `reactor.snapshot()` filtered on author, `reactor.get`
-// reads the same set, so `lawfulIds.has(id)` and this are the SAME predicate — one materializes
-// every delta to answer, the other answers from the id.
-//
-// It is not a stored index and cannot go stale: there is no state here to fall behind the ground.
-// Every answer is read from the reactor at the moment it is asked.
-function isLawful(reactor: Reactor, id: string, operator?: string): boolean {
-  const delta = reactor.get(id);
-  if (delta === undefined) return false; // gone is gone — a purged strike retires nothing (§11)
-  return operator === undefined || delta.claims.author === operator;
-}
-
 // The lawful deltas FILED AT one entity under one context — the question every constitutional
 // reader actually asks, answered from the reactor's target index rather than by walking the store
 // (hazard H8). `byTarget` is the substrate's own index, written inside `ingest` alongside the set
@@ -940,7 +910,7 @@ function survivingCandidates(
   boundary?: Boundary,
 ): Map<string, Candidate[]> {
   const lawful = lawfulSnapshot(reactor, operator);
-  const negated = lawfulNegated(reactor, operator);
+  const negated = negatedAt(reactor, now, operator);
   const groups = new Map<string, Candidate[]>();
   for (const delta of lawful) {
     // Valid over [validFrom, validUntil). A binding outside its interval binds nothing now, and
@@ -1117,7 +1087,7 @@ export function readContestedBindings(
   now: number,
   operator?: string,
 ): Map<string, ContestedBinding[]> {
-  const mode = readBindingPolicy(reactor, operator);
+  const mode = readBindingPolicy(reactor, now, operator);
   const out = new Map<string, ContestedBinding[]>();
   if (mode !== "conflicts") return out;
   const groups = survivingCandidates(reactor, now, operator);
@@ -1180,7 +1150,7 @@ export function readRegistrations(
   // whole (criterion 12), including its build-time collision when two entities want one lens. The
   // production loop above stays the fast path; `interpretBindingPolicy` is the spec as code, and
   // the equivalence rail holds this block to its answers so the two can never drift silently.
-  const mode = readBindingPolicy(reactor, operator);
+  const mode = readBindingPolicy(reactor, now, operator);
   const resolvedAway = new Set<string>();
   if (mode !== undefined) {
     const resolved = interpretBindingPolicy(

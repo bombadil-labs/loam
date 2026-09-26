@@ -33,7 +33,8 @@ import { ARTIFACT_SPAWN_TIMEOUT_MS, artifactPage } from "./artifact-page.js";
 import { HOST_GLOBALS, scanHostReferences } from "./artifact-scan.js";
 import type { Gateway, RequestContext } from "./gateway.js";
 import { RENDER_TIMEOUT_MS } from "./render-worker.js";
-import { lawfulDeltasAt, lawfulNegated, lensOf } from "./registration.js";
+import { lawfulDeltasAt, lensOf } from "./registration.js";
+import { negatedAt } from "./negation.js";
 import type { Registered } from "../surface/surface.js";
 import type { RendererBinding } from "./renderers.js";
 
@@ -122,10 +123,14 @@ export function artifactDefect(claims: Claims): string | undefined {
 
 // The routes currently publishable as artifacts: the union of `route` pointers across ALL surviving
 // lawful declarations. Governed stores only — with no operator there is no lawful voice to publish with.
-export function readArtifactRoutes(reactor: Reactor, operator?: string): ReadonlySet<string> {
+export function readArtifactRoutes(
+  reactor: Reactor,
+  now: number,
+  operator?: string,
+): ReadonlySet<string> {
   const open = new Set<string>();
   if (operator === undefined) return open;
-  const negated = lawfulNegated(reactor, operator);
+  const negated = negatedAt(reactor, now, operator);
   for (const delta of lawfulDeltasAt(
     reactor,
     { entity: ARTIFACT_ENTITY, context: CTX_ARTIFACT },
