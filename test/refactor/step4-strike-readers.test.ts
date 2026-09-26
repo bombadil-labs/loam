@@ -8,9 +8,8 @@
 //   - `survivingOperatorGrantIds` is asserted at the reader only. The panel that calls it needs the
 //     whole connector consent flow (`test/server/admin-connections.test.ts` has that fixture); a
 //     served rail there would drive `/admin/revoke-confirm` with a strike planted first.
-//   - The CLI grant ledger (`inertStrike`) and grant survival are not moved here: the door's own
-//     constitution walk (`struck` in accounts.ts) does not read validity yet, and those readers must
-//     agree with the door.
+//   - Grant survival at the door (`struck` in accounts.ts) is railed in
+//     `test/refactor/grant-strike-window.test.ts`.
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

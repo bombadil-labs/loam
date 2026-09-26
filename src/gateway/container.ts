@@ -1171,7 +1171,14 @@ export function openerStands(
   const stem = `inbox:${channel.openedBy ?? ""}:`;
   if (!channel.openedFrom.startsWith(stem)) return false;
   const key = channel.openedFrom.slice(stem.length);
-  return holdsGrant(inbox.reactor, STORE_ENTITY, key, "write", gw.operatorAuthor);
+  return holdsGrant(
+    inbox.reactor,
+    inbox.validityNow(),
+    STORE_ENTITY,
+    key,
+    "write",
+    gw.operatorAuthor,
+  );
 }
 
 /**
@@ -2177,7 +2184,7 @@ export async function bindConnectionImpl(
   // own store entity, so this never touches the real store's authority; grantHeld resolves
   // connection-write → owner-admin → operator. The store operator appears once here (administrative
   // provisioning, §39.1 point 3) and never on the read/write data path.
-  if (!holdsGrant(pool.reactor, STORE_ENTITY, owner, "admin", operator)) {
+  if (!holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, owner, "admin", operator)) {
     await pool.append([
       signClaims(
         withStamp(pool.stamp(operator), (t) =>
@@ -2187,7 +2194,16 @@ export async function bindConnectionImpl(
       ),
     ]);
   }
-  if (!holdsGrant(pool.reactor, STORE_ENTITY, opts.connectionKey, "write", operator)) {
+  if (
+    !holdsGrant(
+      pool.reactor,
+      pool.validityNow(),
+      STORE_ENTITY,
+      opts.connectionKey,
+      "write",
+      operator,
+    )
+  ) {
     await pool.append([
       signClaims(
         withStamp(pool.stamp(owner), (t) =>

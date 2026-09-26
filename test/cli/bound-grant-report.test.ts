@@ -57,7 +57,9 @@ it("records a bound actor's grant without promising to widen its container fence
       assembleGenesis({ operatorSeed: seed }),
     );
     try {
-      expect(registerPrefixesOf(gw.reactor, actor, authorForSeed(seed))).toContain("zed:");
+      expect(
+        registerPrefixesOf(gw.reactor, gw.validityNow(), actor, authorForSeed(seed)),
+      ).toContain("zed:");
     } finally {
       await gw.close();
     }

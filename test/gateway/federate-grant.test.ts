@@ -50,7 +50,9 @@ describe("T188 — a container-scoped federate grant", () => {
     try {
       const friend = authorForSeed(FRIEND);
       await grantFederate(gw, friend, "friends");
-      expect(federateContainersOf(gw.reactor, friend, gw.operatorAuthor)).toEqual(["friends"]);
+      expect(federateContainersOf(gw.reactor, gw.validityNow(), friend, gw.operatorAuthor)).toEqual(
+        ["friends"],
+      );
     } finally {
       await gw.close();
     }
@@ -62,7 +64,7 @@ describe("T188 — a container-scoped federate grant", () => {
     try {
       const friend = authorForSeed(FRIEND);
       await grantFederate(gw, friend, "friends");
-      const held = federateContainersOf(gw.reactor, friend, gw.operatorAuthor);
+      const held = federateContainersOf(gw.reactor, gw.validityNow(), friend, gw.operatorAuthor);
       expect(held).toContain("friends");
       expect(held).not.toContain("work");
     } finally {
@@ -75,9 +77,14 @@ describe("T188 — a container-scoped federate grant", () => {
     try {
       await grantFederate(gw, authorForSeed(FRIEND), "friends");
       // Two-sided: the reader must distinguish a holder from a bystander, or the fence is decorative.
-      expect(federateContainersOf(gw.reactor, authorForSeed(STRANGER), gw.operatorAuthor)).toEqual(
-        [],
-      );
+      expect(
+        federateContainersOf(
+          gw.reactor,
+          gw.validityNow(),
+          authorForSeed(STRANGER),
+          gw.operatorAuthor,
+        ),
+      ).toEqual([]);
     } finally {
       await gw.close();
     }
@@ -87,13 +94,27 @@ describe("T188 — a container-scoped federate grant", () => {
     const gw = await store();
     try {
       const friend = authorForSeed(FRIEND);
-      expect(holdsGrant(gw.reactor, STORE_ENTITY, friend, "federate", gw.operatorAuthor)).toBe(
-        false,
-      );
+      expect(
+        holdsGrant(
+          gw.reactor,
+          gw.validityNow(),
+          STORE_ENTITY,
+          friend,
+          "federate",
+          gw.operatorAuthor,
+        ),
+      ).toBe(false);
       await grantFederate(gw, friend, "friends");
-      expect(holdsGrant(gw.reactor, STORE_ENTITY, friend, "federate", gw.operatorAuthor)).toBe(
-        true,
-      );
+      expect(
+        holdsGrant(
+          gw.reactor,
+          gw.validityNow(),
+          STORE_ENTITY,
+          friend,
+          "federate",
+          gw.operatorAuthor,
+        ),
+      ).toBe(true);
     } finally {
       await gw.close();
     }
@@ -123,9 +144,13 @@ describe("T188 — a container-scoped federate grant", () => {
         signClaims(makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), grant.id), OP),
       ]);
 
-      expect(federateContainersOf(gw.reactor, friend, gw.operatorAuthor)).toEqual([]);
+      expect(federateContainersOf(gw.reactor, gw.validityNow(), friend, gw.operatorAuthor)).toEqual(
+        [],
+      );
       // Two-sided: the bystander's grant is untouched.
-      expect(federateContainersOf(gw.reactor, other, gw.operatorAuthor)).toEqual(["work"]);
+      expect(federateContainersOf(gw.reactor, gw.validityNow(), other, gw.operatorAuthor)).toEqual([
+        "work",
+      ]);
     } finally {
       await gw.close();
     }

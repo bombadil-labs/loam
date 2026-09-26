@@ -319,9 +319,8 @@ export function honoredStrikeOn(
   id: string,
   operator?: string,
 ): { readonly id: string; readonly timestamp: number } | undefined {
-  const ctx: Ctx = { reactor, operator };
-  // Standing is still Loam's own walk (`standsFor`), and that walk does not read validity: only the
-  // strike edges themselves are read at `now`.
+  const ctx: Ctx = { reactor, now, operator };
+  // Standing is Loam's own walk (`standsFor`), read at the same `now` as the strike edges.
   const witnesses = reactor.negationWitnesses(now, (negation) =>
     operator === undefined ? true : standsFor(ctx, negation, new Set([negation.id])),
   )(id);
@@ -359,25 +358,36 @@ export const TENANT_POLICY: Schema = {
 //
 // Everything here answers under one discipline: in a governed store (an operator is named), a
 // constitutional delta — a grant, a membership, or a strike against one — is EFFECTIVE only if
-// its authority chain roots in the operator. The chain is timeless: it needs no arrival order,
-// only reachability, so a store compromised while ungoverned (self-signed grants, unauthorized strikes)
-// resolves to nothing the moment an operator opens it — a cycle of self-appointed admins roots
-// nowhere. Ungoverned stores skip the discipline entirely: no operator, no constitution.
+// its authority chain roots in the operator. The chain needs no arrival order, only reachability,
+// so a store compromised while ungoverned (self-signed grants, unauthorized strikes) resolves to
+// nothing the moment an operator opens it — a cycle of self-appointed admins roots nowhere.
+// Ungoverned stores skip the discipline entirely: no operator, no constitution.
+//
+// The walk reads at one instant, `now`. A grant, a membership or a negation counts only inside its
+// own [validFrom, validUntil). So an expired negation of a grant revives it, and a negation that
+// starts later does not bind yet. The door, the revoke panel and the grant ledger all read so.
 
 interface Ctx {
   readonly reactor: Reactor;
+  readonly now: number;
   readonly operator: string | undefined;
 }
 
-// Is `id` struck by a negation that (a) itself survives and (b) had the standing to strike?
-// Content addressing makes the negation graph a DAG, but `visited` guards it regardless.
+/** Is `d` valid at `now`: inside [validFrom, validUntil)? */
+export function validAt(d: Delta, now: number): boolean {
+  const { validFrom, validUntil } = d.claims;
+  return validFrom <= now && (validUntil === undefined || now < validUntil);
+}
+
+// Is `id` struck by a negation that (a) is valid now, (b) itself survives and (c) had the standing
+// to strike? Content addressing makes the negation graph a DAG, but `visited` guards it regardless.
 function struck(ctx: Ctx, id: string, visited: ReadonlySet<string>): boolean {
   for (const negId of ctx.reactor.negationsOf(id)) {
     if (visited.has(negId)) continue;
+    const neg = ctx.reactor.get(negId);
+    if (neg === undefined || !validAt(neg, ctx.now)) continue; // absent or out of window: inert
     const branch = new Set(visited).add(negId);
     if (struck(ctx, negId, branch)) continue; // the strike is itself struck: inert
-    const neg = ctx.reactor.get(negId);
-    if (neg === undefined) continue;
     if (ctx.operator !== undefined && !standsFor(ctx, neg, branch)) continue; // no standing: inert
     return true;
   }
@@ -393,7 +403,7 @@ function standsFor(ctx: Ctx, delta: Delta, visited: ReadonlySet<string>): boolea
   return grantHeld(ctx, STORE_ENTITY, delta.claims.author, "admin", visited);
 }
 
-// The surviving deltas filed at `entity` under `context`.
+// The surviving deltas filed at `entity` under `context`: valid now, and not struck.
 function survivingAt(
   ctx: Ctx,
   entity: string,
@@ -403,9 +413,9 @@ function survivingAt(
   const out: Delta[] = [];
   for (const id of ctx.reactor.byTarget(entity)) {
     if (visited.has(id)) continue;
-    if (struck(ctx, id, visited)) continue;
     const delta = ctx.reactor.get(id);
-    if (delta === undefined) continue;
+    if (delta === undefined || !validAt(delta, ctx.now)) continue;
+    if (struck(ctx, id, visited)) continue;
     const filedHere = delta.claims.pointers.some(
       (p) =>
         p.target.kind === "entity" &&
@@ -484,8 +494,13 @@ function grantHeld(
 }
 
 // The tenant `entity` currently belongs to — the latest effective membership claim wins.
-export function tenantOf(reactor: Reactor, entity: string, operator?: string): string | undefined {
-  return tenantOfWith({ reactor, operator }, entity, new Set());
+export function tenantOf(
+  reactor: Reactor,
+  now: number,
+  entity: string,
+  operator?: string,
+): string | undefined {
+  return tenantOfWith({ reactor, now, operator }, entity, new Set());
 }
 
 // One grant `author` currently holds at the store entity, as an operator reads it.
@@ -502,8 +517,13 @@ export interface HeldGrant {
 // grant binds only if the operator signed it or an effective admin did, and only if it survives
 // strikes that themselves had standing. A revocation therefore removes a row here on the very next
 // read, with nothing to invalidate.
-export function grantsHeldBy(reactor: Reactor, author: string, operator?: string): HeldGrant[] {
-  const ctx: Ctx = { reactor, operator };
+export function grantsHeldBy(
+  reactor: Reactor,
+  now: number,
+  author: string,
+  operator?: string,
+): HeldGrant[] {
+  const ctx: Ctx = { reactor, now, operator };
   const out: HeldGrant[] = [];
   for (const d of survivingAt(ctx, STORE_ENTITY, CTX_GRANTS, new Set())) {
     if (constitutionalDefect(d) !== undefined) continue; // malformed law binds nothing
@@ -551,19 +571,25 @@ export function grantsHeldBy(reactor: Reactor, author: string, operator?: string
  */
 export function federateContainersOf(
   reactor: Reactor,
+  now: number,
   author: string,
   operator?: string,
 ): string[] {
   const seen = new Set<string>();
-  for (const g of grantsHeldBy(reactor, author, operator)) {
+  for (const g of grantsHeldBy(reactor, now, author, operator)) {
     if (g.verb === "federate" && g.prefix !== undefined) seen.add(g.prefix);
   }
   return [...seen];
 }
 
-export function registerPrefixesOf(reactor: Reactor, author: string, operator?: string): string[] {
+export function registerPrefixesOf(
+  reactor: Reactor,
+  now: number,
+  author: string,
+  operator?: string,
+): string[] {
   const seen = new Set<string>();
-  for (const g of grantsHeldBy(reactor, author, operator)) {
+  for (const g of grantsHeldBy(reactor, now, author, operator)) {
     if (g.verb === "register" && g.prefix !== undefined) seen.add(g.prefix);
   }
   return [...seen];
@@ -572,12 +598,13 @@ export function registerPrefixesOf(reactor: Reactor, author: string, operator?: 
 // Does `author` hold `verb` (admin covers write) on `tenant`, by an effective surviving grant?
 export function holdsGrant(
   reactor: Reactor,
+  now: number,
   tenant: string,
   author: string,
   verb: Verb,
   operator?: string,
 ): boolean {
-  return grantHeld({ reactor, operator }, tenant, author, verb, new Set());
+  return grantHeld({ reactor, now, operator }, tenant, author, verb, new Set());
 }
 
 // --- enforcement: the one question the gateway asks -----------------------------------------------
@@ -688,7 +715,7 @@ export function authorize(
   }
   const author = delta.claims.author;
   if (operator === undefined || author === operator) return { ok: true };
-  if (grantHeld({ reactor, operator }, STORE_ENTITY, author, "write", new Set())) {
+  if (grantHeld({ reactor, now, operator }, STORE_ENTITY, author, "write", new Set())) {
     return { ok: true };
   }
   return {

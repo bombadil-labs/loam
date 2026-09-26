@@ -173,10 +173,11 @@ export const adminFederation = (ctx: AdminFederationCtx) => {
   // request, never remembered by this door.
   const grantStateOf = (
     reactor: Reactor,
+    now: number,
     operator: string | undefined,
     key: string,
   ): "active" | "revoked" | "ungranted" => {
-    if (holdsGrant(reactor, STORE_ENTITY, key, "write", operator)) return "active";
+    if (holdsGrant(reactor, now, STORE_ENTITY, key, "write", operator)) return "active";
     for (const id of reactor.byTarget(STORE_ENTITY)) {
       const delta = reactor.get(id);
       if (delta === undefined) continue;
@@ -288,7 +289,9 @@ export const adminFederation = (ctx: AdminFederationCtx) => {
     }
     const pool = gw.attachedContainers.get(name);
     const state =
-      pool === undefined ? undefined : grantStateOf(pool.reactor, gw.operatorAuthor, key);
+      pool === undefined
+        ? undefined
+        : grantStateOf(pool.reactor, pool.validityNow(), gw.operatorAuthor, key);
     const stateWords =
       state === undefined
         ? "its inbox pool is not attached here, so its grant cannot be read from this page"
@@ -569,7 +572,8 @@ ${flowNote}`;
     // voice — the session user's own seed, never the operator's.
     const pool = gw.attachedContainers.get(name);
     const standing =
-      pool !== undefined && holdsGrant(pool.reactor, STORE_ENTITY, key, "write", gw.operatorAuthor);
+      pool !== undefined &&
+      holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, key, "write", gw.operatorAuthor);
     // §58: a key may hold a sibling pool — a re-consent into another container spawns a second
     // inbox and the first stands — and a revoke is the KEY's, so every pool of this key that still
     // holds the grant is struck with the row's. Named on the confirm page before anything happens.
@@ -584,7 +588,14 @@ ${flowNote}`;
           reach.has(sibling) &&
           handle.gateway !== undefined &&
           gw.attachedContainers.get(sibling) === handle.gateway && // not mid-drop
-          holdsGrant(handle.gateway.reactor, STORE_ENTITY, key, "write", gw.operatorAuthor),
+          holdsGrant(
+            handle.gateway.reactor,
+            handle.gateway.validityNow(),
+            STORE_ENTITY,
+            key,
+            "write",
+            gw.operatorAuthor,
+          ),
       )
       .map(([sibling]) => sibling)
       .sort();
@@ -816,7 +827,17 @@ ${flowNote}`;
           failedSiblings.push(sibling);
           continue;
         }
-        if (!holdsGrant(pool.reactor, STORE_ENTITY, plan.key, "write", gw.operatorAuthor)) continue;
+        if (
+          !holdsGrant(
+            pool.reactor,
+            pool.validityNow(),
+            STORE_ENTITY,
+            plan.key,
+            "write",
+            gw.operatorAuthor,
+          )
+        )
+          continue;
         try {
           await gw.revokeConnection({
             inbox: handle,

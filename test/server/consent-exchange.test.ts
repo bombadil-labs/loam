@@ -328,7 +328,9 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(table.get(inbox)?.inboxOf).toBe("ada:journal");
     const pool = gateway.connectionInboxes.get(inbox)?.gateway;
     expect(pool).toBeDefined();
-    expect(holdsGrant(pool!.reactor, STORE_ENTITY, grant.actor, "write", OPERATOR)).toBe(true);
+    expect(
+      holdsGrant(pool!.reactor, pool!.validityNow(), STORE_ENTITY, grant.actor, "write", OPERATOR),
+    ).toBe(true);
     // The token acts — the door knows who it is.
     expect((await whoami(base, token)).status).toBe(200);
   });
@@ -616,7 +618,16 @@ describe("§58 S1b — the exchange honors the binding", () => {
     const scope = reopened.containerScope({ containers: ["ada:journal"] }).map((d) => d.id);
     expect(scope).toContain(note.id);
     const reattached = reopened.connectionInboxes.get(grant.inbox!)!.gateway!;
-    expect(holdsGrant(reattached.reactor, STORE_ENTITY, grant.actor, "write", OPERATOR)).toBe(true);
+    expect(
+      holdsGrant(
+        reattached.reactor,
+        reattached.validityNow(),
+        STORE_ENTITY,
+        grant.actor,
+        "write",
+        OPERATOR,
+      ),
+    ).toBe(true);
     // A re-attached handle is the inbox kind, not a bare container: it refuses detach, and a drop
     // through it clears the durable entry so a later bind spawns fresh rather than resuming a
     // purged pool.
@@ -641,7 +652,9 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(gateway.containers().containers.get(first.inbox!)?.inboxOf).toBe("ada:journal");
     const pool = gateway.connectionInboxes.get(first.inbox!)?.gateway;
     expect(pool).toBeDefined();
-    expect(holdsGrant(pool!.reactor, STORE_ENTITY, first.actor, "write", OPERATOR)).toBe(true);
+    expect(
+      holdsGrant(pool!.reactor, pool!.validityNow(), STORE_ENTITY, first.actor, "write", OPERATOR),
+    ).toBe(true);
     expect((await whoami(base, token)).status).toBe(200);
   });
 
@@ -656,11 +669,25 @@ describe("§58 S1b — the exchange honors the binding", () => {
     const otherInbox = inboxName("ada:other", ada.actor);
     const poolOf = (name: string) => gateway.connectionInboxes.get(name)!.gateway!;
     expect(
-      holdsGrant(poolOf(journalInbox).reactor, STORE_ENTITY, ada.actor, "write", OPERATOR),
+      holdsGrant(
+        poolOf(journalInbox).reactor,
+        poolOf(journalInbox).validityNow(),
+        STORE_ENTITY,
+        ada.actor,
+        "write",
+        OPERATOR,
+      ),
     ).toBe(true);
-    expect(holdsGrant(poolOf(otherInbox).reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(
-      true,
-    );
+    expect(
+      holdsGrant(
+        poolOf(otherInbox).reactor,
+        poolOf(otherInbox).validityNow(),
+        STORE_ENTITY,
+        ada.actor,
+        "write",
+        OPERATOR,
+      ),
+    ).toBe(true);
 
     const session = await signIn(base, "ada", PASSWORD);
     const { dashboard, confirmHtml, done } = await revokeViaPanel(base, session, journalInbox);
@@ -680,20 +707,59 @@ describe("§58 S1b — the exchange honors the binding", () => {
     // Two-sided: bea's inbox is named on neither page, and her pool's grant stands.
     expect(confirmHtml).not.toContain(`<code>${bea.inbox!}</code>`);
     expect(doneHtml).not.toContain(`<code>${bea.inbox!}</code>`);
-    expect(holdsGrant(poolOf(bea.inbox!).reactor, STORE_ENTITY, bea.actor, "write", OPERATOR)).toBe(
-      true,
-    );
+    expect(
+      holdsGrant(
+        poolOf(bea.inbox!).reactor,
+        poolOf(bea.inbox!).validityNow(),
+        STORE_ENTITY,
+        bea.actor,
+        "write",
+        OPERATOR,
+      ),
+    ).toBe(true);
     // And at the GROUND: neither key ever held a store-wide grant (§58) — the pools are the whole
     // of their standing.
-    expect(holdsGrant(gateway.reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(false);
-    expect(holdsGrant(gateway.reactor, STORE_ENTITY, bea.actor, "write", OPERATOR)).toBe(false);
+    expect(
+      holdsGrant(
+        gateway.reactor,
+        gateway.validityNow(),
+        STORE_ENTITY,
+        ada.actor,
+        "write",
+        OPERATOR,
+      ),
+    ).toBe(false);
+    expect(
+      holdsGrant(
+        gateway.reactor,
+        gateway.validityNow(),
+        STORE_ENTITY,
+        bea.actor,
+        "write",
+        OPERATOR,
+      ),
+    ).toBe(false);
     // Both of the key's pools are struck; bea's binding and token stand.
     expect(
-      holdsGrant(poolOf(journalInbox).reactor, STORE_ENTITY, ada.actor, "write", OPERATOR),
+      holdsGrant(
+        poolOf(journalInbox).reactor,
+        poolOf(journalInbox).validityNow(),
+        STORE_ENTITY,
+        ada.actor,
+        "write",
+        OPERATOR,
+      ),
     ).toBe(false);
-    expect(holdsGrant(poolOf(otherInbox).reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(
-      false,
-    );
+    expect(
+      holdsGrant(
+        poolOf(otherInbox).reactor,
+        poolOf(otherInbox).validityNow(),
+        STORE_ENTITY,
+        ada.actor,
+        "write",
+        OPERATOR,
+      ),
+    ).toBe(false);
     const file = readOAuthFile(connectorsHome);
     expect(file.grants.map((g) => g.user)).toEqual(["bea"]);
     expect(file.clients[0]!.generation).toBe(1);
@@ -712,9 +778,16 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect((await handle.gateway!.backend.deltasSince(new Set())).length).toBeGreaterThan(0);
     expect(gateway.connectionInboxes.get(grant.inbox!)).toBe(handle);
     expect(gateway.attachedContainers.has(grant.inbox!)).toBe(true);
-    expect(holdsGrant(handle.gateway!.reactor, STORE_ENTITY, grant.actor, "write", OPERATOR)).toBe(
-      true,
-    );
+    expect(
+      holdsGrant(
+        handle.gateway!.reactor,
+        handle.gateway!.validityNow(),
+        STORE_ENTITY,
+        grant.actor,
+        "write",
+        OPERATOR,
+      ),
+    ).toBe(true);
     const again = await connect(base, "ada", "journal");
     expect((await whoami(base, again)).status).toBe(200);
     expect(gateway.connectionInboxes.get(grant.inbox!)).toBe(handle);
@@ -754,7 +827,9 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(file.tokens.every((t) => t.user === "ada")).toBe(true);
     expect((await whoami(base, adaToken)).status).toBe(200);
     const oldPool = gateway.connectionInboxes.get(oldInbox)!.gateway!;
-    expect(holdsGrant(oldPool.reactor, STORE_ENTITY, oldKey, "write", OPERATOR)).toBe(false);
+    expect(
+      holdsGrant(oldPool.reactor, oldPool.validityNow(), STORE_ENTITY, oldKey, "write", OPERATOR),
+    ).toBe(false);
   });
 
   it("a pair nobody holds is its own answer, and the records are untouched", async () => {
@@ -793,14 +868,32 @@ describe("§58 S1b — the exchange honors the binding", () => {
     });
     const foreign = inboxName("bea:notes", ada.actor);
     const foreignPool = gateway.connectionInboxes.get(foreign)!.gateway!;
-    expect(holdsGrant(foreignPool.reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(true);
+    expect(
+      holdsGrant(
+        foreignPool.reactor,
+        foreignPool.validityNow(),
+        STORE_ENTITY,
+        ada.actor,
+        "write",
+        OPERATOR,
+      ),
+    ).toBe(true);
 
     const session = await signIn(base, "ada", PASSWORD);
     const { confirmHtml, done } = await revokeViaPanel(base, session, ada.inbox!);
     expect(done.status).toBe(200);
     expect(confirmHtml).not.toContain(foreign);
     expect(await done.text()).not.toContain(foreign);
-    expect(holdsGrant(foreignPool.reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(true);
+    expect(
+      holdsGrant(
+        foreignPool.reactor,
+        foreignPool.validityNow(),
+        STORE_ENTITY,
+        ada.actor,
+        "write",
+        OPERATOR,
+      ),
+    ).toBe(true);
   });
 
   it("a row whose own pool is not attached refuses, naming the sibling rows where the act can be done", async () => {
@@ -828,7 +921,16 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(text).toContain("Nothing was revoked");
     // Nothing was: the sibling's grant stands, and ada's token still acts.
     const otherPool = gateway.connectionInboxes.get(otherInbox)!.gateway!;
-    expect(holdsGrant(otherPool.reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(true);
+    expect(
+      holdsGrant(
+        otherPool.reactor,
+        otherPool.validityNow(),
+        STORE_ENTITY,
+        ada.actor,
+        "write",
+        OPERATOR,
+      ),
+    ).toBe(true);
     expect((await whoami(base, adaToken)).status).toBe(200);
   });
 
@@ -860,7 +962,16 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(await done.text()).toContain("not attached here");
     // Nothing was struck: the sibling's grant, ada's pair and her token all stand.
     const otherPool = gateway.connectionInboxes.get(otherInbox)!.gateway!;
-    expect(holdsGrant(otherPool.reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(true);
+    expect(
+      holdsGrant(
+        otherPool.reactor,
+        otherPool.validityNow(),
+        STORE_ENTITY,
+        ada.actor,
+        "write",
+        OPERATOR,
+      ),
+    ).toBe(true);
     expect(readOAuthFile(connectorsHome).grants.map((g) => g.user)).toEqual(["ada"]);
     expect((await whoami(base, adaToken)).status).toBe(200);
   });
@@ -886,8 +997,26 @@ describe("§58 S1b — the exchange honors the binding", () => {
     // grant stands, which is exactly what the page said.
     const journalPool = gateway.connectionInboxes.get(journalInbox)!.gateway!;
     const otherPool = gateway.connectionInboxes.get(otherInbox)!.gateway!;
-    expect(holdsGrant(journalPool.reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(false);
-    expect(holdsGrant(otherPool.reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(true);
+    expect(
+      holdsGrant(
+        journalPool.reactor,
+        journalPool.validityNow(),
+        STORE_ENTITY,
+        ada.actor,
+        "write",
+        OPERATOR,
+      ),
+    ).toBe(false);
+    expect(
+      holdsGrant(
+        otherPool.reactor,
+        otherPool.validityNow(),
+        STORE_ENTITY,
+        ada.actor,
+        "write",
+        OPERATOR,
+      ),
+    ).toBe(true);
     expect((await whoami(base, adaToken)).status).toBe(401);
   });
 
@@ -949,12 +1078,39 @@ describe("§58 S1b — the exchange honors the binding", () => {
     // Bea's pool is struck; ada's pair, token and own pool all stand — and no store-wide grant
     // ever stood for her key.
     const foreignPool = gateway.connectionInboxes.get(foreign)!.gateway!;
-    expect(holdsGrant(foreignPool.reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(false);
+    expect(
+      holdsGrant(
+        foreignPool.reactor,
+        foreignPool.validityNow(),
+        STORE_ENTITY,
+        ada.actor,
+        "write",
+        OPERATOR,
+      ),
+    ).toBe(false);
     const file = readOAuthFile(connectorsHome);
     expect(file.grants.map((g) => g.user).sort()).toEqual(["ada", "bea"]);
     expect((await whoami(base, adaToken)).status).toBe(200);
     const adaPool = gateway.connectionInboxes.get(ada.inbox!)!.gateway!;
-    expect(holdsGrant(adaPool.reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(true);
-    expect(holdsGrant(gateway.reactor, STORE_ENTITY, ada.actor, "write", OPERATOR)).toBe(false);
+    expect(
+      holdsGrant(
+        adaPool.reactor,
+        adaPool.validityNow(),
+        STORE_ENTITY,
+        ada.actor,
+        "write",
+        OPERATOR,
+      ),
+    ).toBe(true);
+    expect(
+      holdsGrant(
+        gateway.reactor,
+        gateway.validityNow(),
+        STORE_ENTITY,
+        ada.actor,
+        "write",
+        OPERATOR,
+      ),
+    ).toBe(false);
   });
 });

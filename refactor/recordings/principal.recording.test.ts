@@ -302,7 +302,7 @@ describe("recordings: principals", () => {
     for (const [world, deltas] of Object.entries(WORLDS)) {
       out[world] = bothOrders(deltas, (r) => ({
         grantsHeldBy: Object.fromEntries(
-          SUBJECTS.map((w) => [w, grantsHeldBy(r, KEY[w], KEY.operator)]),
+          SUBJECTS.map((w) => [w, grantsHeldBy(r, NOW, KEY[w], KEY.operator)]),
         ),
         authorizeData: Object.fromEntries(
           SUBJECTS.map((w) => [w, authorize(r, NOW, data(w), KEY.operator).ok]),

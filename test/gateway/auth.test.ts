@@ -110,7 +110,9 @@ describe("standing: deny is the default, permission is an artifact", () => {
     );
     await expect(gateway.append([hosted])).resolves.toMatchObject({ accepted: 1 });
     // and none of those entities ever needed a tenant
-    expect(tenantOf(gateway.reactor, "person:wren", OPERATOR)).toBeUndefined();
+    expect(
+      tenantOf(gateway.reactor, gateway.validityNow(), "person:wren", OPERATOR),
+    ).toBeUndefined();
     await gateway.close();
   });
 
@@ -476,7 +478,9 @@ describe("standing: deny is the default, permission is an artifact", () => {
     await gateway.append([
       signClaims(membershipClaims("tenant:garden", "plant:moss", OPERATOR, tick()), OPERATOR_SEED),
     ]);
-    expect(tenantOf(gateway.reactor, "plant:moss", OPERATOR)).toBe("tenant:garden");
+    expect(tenantOf(gateway.reactor, gateway.validityNow(), "plant:moss", OPERATOR)).toBe(
+      "tenant:garden",
+    );
     // and alice writes moss without any relationship to that tenant — standing is store-wide
     const result = await gateway.query(
       `mutation { plant(entity: "plant:moss", height: 2) { height } }`,

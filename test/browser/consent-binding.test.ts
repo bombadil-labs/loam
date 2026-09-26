@@ -213,7 +213,16 @@ describe("§58 S1 — the story, in a real browser", () => {
       58,
     );
     // No store-wide grant ever stood for the key; whoami says where it is bound.
-    expect(holdsGrant(gateway.reactor, STORE_ENTITY, grant.actor, "write", OPERATOR)).toBe(false);
+    expect(
+      holdsGrant(
+        gateway.reactor,
+        gateway.validityNow(),
+        STORE_ENTITY,
+        grant.actor,
+        "write",
+        OPERATOR,
+      ),
+    ).toBe(false);
     const who = (await (
       await fetch(`${base}/default/whoami`, { headers: { authorization: `Bearer ${token}` } })
     ).json()) as { kind: string; write: boolean; binding?: { container: string } };

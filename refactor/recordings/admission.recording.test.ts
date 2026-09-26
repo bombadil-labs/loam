@@ -111,7 +111,10 @@ describe("recordings: grants, trust and admission", () => {
           WHO.map((w) => [
             w,
             Object.fromEntries(
-              [...VERBS].map((v) => [v, holdsGrant(r, STORE_ENTITY, KEY[w], v as Verb, op)]),
+              [...VERBS].map((v) => [
+                v,
+                holdsGrant(r, Date.now(), STORE_ENTITY, KEY[w], v as Verb, op),
+              ]),
             ),
           ]),
         ),
@@ -124,7 +127,7 @@ describe("recordings: grants, trust and admission", () => {
     const out: Record<string, unknown> = {};
     for (const [mode, op] of Object.entries(OPERATORS)) {
       out[mode] = bothOrders(GRANTS, (r) =>
-        Object.fromEntries(WHO.map((w) => [w, grantsHeldBy(r, KEY[w], op)])),
+        Object.fromEntries(WHO.map((w) => [w, grantsHeldBy(r, Date.now(), KEY[w], op)])),
       );
     }
     await record("admission.grantsHeldBy", out);

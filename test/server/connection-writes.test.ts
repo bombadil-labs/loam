@@ -179,7 +179,16 @@ describe("S1b-ii — a bound connection's writes land in its inbox pool, never t
         ),
       ]);
     }
-    expect(holdsGrant(gateway.reactor, STORE_ENTITY, grant.actor, "write", OPERATOR)).toBe(true);
+    expect(
+      holdsGrant(
+        gateway.reactor,
+        gateway.validityNow(),
+        STORE_ENTITY,
+        grant.actor,
+        "write",
+        OPERATOR,
+      ),
+    ).toBe(true);
     // The grant is REAL — the key may append to the primary through the library — which is what
     // makes the door's routing, and not a missing grant, the reason nothing lands there below.
     const direct = heightClaim(grant.actorSeed, 50, gateway.nextTimestamp());
@@ -312,7 +321,16 @@ describe("S1b-ii — a bound connection's writes land in its inbox pool, never t
       write: true,
       binding: { user: "ada", container: "ada:journal", inbox: grant.inbox },
     });
-    expect(holdsGrant(gateway.reactor, STORE_ENTITY, grant.actor, "write", OPERATOR)).toBe(false);
+    expect(
+      holdsGrant(
+        gateway.reactor,
+        gateway.validityNow(),
+        STORE_ENTITY,
+        grant.actor,
+        "write",
+        OPERATOR,
+      ),
+    ).toBe(false);
 
     const { readUserSeed } = await import("../../src/cli/config.js");
     const owner = readUserSeed(usersHome, "ada");
@@ -344,7 +362,16 @@ describe("S1b-ii — a bound connection's writes land in its inbox pool, never t
     const negationsBefore = [...gateway.reactor.snapshot()].filter((d) =>
       d.claims.pointers.some((p) => p.role === "negates"),
     ).length;
-    expect(holdsGrant(gateway.reactor, STORE_ENTITY, grant.actor, "write", OPERATOR)).toBe(false);
+    expect(
+      holdsGrant(
+        gateway.reactor,
+        gateway.validityNow(),
+        STORE_ENTITY,
+        grant.actor,
+        "write",
+        OPERATOR,
+      ),
+    ).toBe(false);
     const struck: string[] = [];
     const outcome = await revokeConnector(
       connectorsHome,
@@ -370,6 +397,8 @@ describe("S1b-ii — a bound connection's writes land in its inbox pool, never t
     // caller that strikes only here leaves a live grant behind, which is what the CLI's own rail
     // (test/cli/grant-ledger-58.test.ts) proves it now strikes too.
     const pool = poolOf(gateway, grant.inbox!);
-    expect(holdsGrant(pool.reactor, STORE_ENTITY, grant.actor, "write", OPERATOR)).toBe(true);
+    expect(
+      holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, grant.actor, "write", OPERATOR),
+    ).toBe(true);
   });
 });

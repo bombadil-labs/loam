@@ -526,7 +526,14 @@ export function buildArc(loam) {
     ]);
 
   const canWrite = (ctx, who) =>
-    loam.holdsGrant(ctx.gateway.reactor, loam.STORE_ENTITY, who, "write", ctx.author);
+    loam.holdsGrant(
+      ctx.gateway.reactor,
+      ctx.gateway.validityNow(),
+      loam.STORE_ENTITY,
+      who,
+      "write",
+      ctx.author,
+    );
 
   /** The record filed at (id, context) carrying these words — or undefined if it is not here. */
   const rowSaying = (ctx, id, context, value) => rowsSaying(ctx, id, context, value)[0];

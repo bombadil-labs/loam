@@ -230,7 +230,7 @@ async function poolGrantsWrite(inbox: string): Promise<boolean> {
   const pool = gw.connectionInboxes.get(inbox)?.gateway;
   const held =
     pool !== undefined &&
-    holdsGrant(pool.reactor, STORE_ENTITY, CONN, "write", authorForSeed(seed));
+    holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, CONN, "write", authorForSeed(seed));
   await gw.close();
   return held;
 }

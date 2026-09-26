@@ -861,9 +861,9 @@ describe("T242 (f) — `loam grant <url>` treats a URL id as opaque", () => {
       assembleGenesis({ operatorSeed: seed }),
     );
     try {
-      expect(registerPrefixesOf(gateway.reactor, CONNECTOR, authorForSeed(seed))).toEqual([
-        "cimd:",
-      ]);
+      expect(
+        registerPrefixesOf(gateway.reactor, gateway.validityNow(), CONNECTOR, authorForSeed(seed)),
+      ).toEqual(["cimd:"]);
     } finally {
       await gateway.close();
     }

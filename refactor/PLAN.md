@@ -128,12 +128,14 @@ level. Loam then consumes it through the barrel and compares its recordings.
      set, and the evaluator reads validity), `withoutErased`, `isPlainClaim` and the renderer
      selection's hole check (each errs toward disclosing less), and the registration boundary walk
      (it wants every boundary).
-   - **The constitution walk (open).** `accounts.ts` `struck` and `standsFor` decide whether a grant
-     binds, and neither reads validity. So the door treats a timed strike on a grant as holding
-     forever, while `honoredStrikeOn` counts it only in its window. The CLI ledger's `inertStrike`
-     and grant survival (`claimIdsBySurvival` for grants and pens) stay validity-blind so that they
-     agree with the door. Making the door read validity lets an expired strike revive a grant. That
-     widens standing, so it is Myk's decision.
+   - **The constitution walk (done, Myk's ruling of 2026-09-26).** An expired negation of a grant
+     revives it. `accounts.ts` `struck` counts a negation only inside its own window at the read
+     time, and `survivingAt` counts a grant or membership only inside its own window. Every entry
+     point (`authorize`, `holdsGrant`, `grantsHeldBy`, `tenantOf`, `honoredStrikeOn`) takes the
+     read time. The CLI's grant survival (`grantStanding`) reads the operator's strikes at the
+     read time too, so `pen create` and `user remove-role` agree with the door. Pen records stay
+     raw: nothing else reads them. `test/refactor/grant-strike-window.test.ts` pins the door, the
+     readers and the revoke panel on both sides of each boundary.
    - **Hand-written filters.** The channel, curse and law-adoption readers read `lawfulSnapshot`.
      `receive-policy.ts` still filters by the receiver's key over a private reactor. It asks a
      different question, and moves to the governed read with the receiver as its author set.
@@ -159,6 +161,11 @@ level. Loam then consumes it through the barrel and compares its recordings.
      `test/refactor/step4-caches.test.ts` pins all three, at the table and at the door.
 5. **Principal.** Roots, key binding, succession, delegation, locators. Loam moves user,
    connection and container keys into signed data.
+   Settled inputs (Myk, 2026-09-26; `README.md` rulings 2 to 4): succession records continuity
+   only, and authority comes from a separate delegation. The pinned principal root must authorize
+   a succession; the old key's signature is optional evidence. Until step 6's arrival testimony,
+   a revoked key's earlier acts are judged at the present, so revoking its authority removes their
+   effect.
 6. **Peer and admission.** The peer model, the guard pipeline, arrival testimony. Loam's
    containers become peers, and the import cycle breaks.
    Decide the scope of a channel curse. `curseChannelLawImpl` also strikes a matching binding in

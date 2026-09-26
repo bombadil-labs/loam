@@ -63,6 +63,18 @@ Design:
    sealed before it left.
 8. **Resolvers become a rhizomatic library.**
 
+## Rulings (Myk, 2026-09-26, in chat)
+
+1. **An expired negation of a grant revives it.** Write standing reads a negation only inside its
+   own window, [validFrom, validUntil), at the read time. A grant also counts only inside its own
+   window. The door, the revoke panel and the grant ledger read the same way.
+2. **Succession records continuity only.** It does not confer authority. Authority comes from a
+   separate delegation.
+3. **The pinned principal root must authorize a succession.** The old key's signature is optional
+   evidence.
+4. **A revoked key's earlier acts are judged at the present, until step 6.** Step 6 brings arrival
+   testimony. Until then, revoking a key's authority removes the effect of its earlier acts.
+
 ## What stays in force
 
 - `npm run check` is the green bar: format, lint, typecheck, build and every test. Read the counts.

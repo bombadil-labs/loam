@@ -63,6 +63,7 @@ import {
   grantsHeldBy,
   holdsGrant,
   honoredStrikeOn,
+  validAt,
 } from "../gateway/accounts.js";
 import { negatedAt } from "../gateway/negation.js";
 import {
@@ -2755,10 +2756,10 @@ async function cmdUserCreate(
 // alone cannot tell apart: one is a standing nobody has retired, the other is a standing somebody
 // DID, and re-planting the second silently un-revokes it.
 //
-// `isStruck` decides survival. The default is the raw read above, which ignores validity; that is
-// right for grants and pens, because the door's constitution walk (`struck` in accounts.ts) ignores
-// it too, and the two must agree. A role is resolved by `rolesOf` through the substrate's mask, which
-// counts a strike only while it is valid, so role survival passes the substrate's reader at `now`.
+// `isStruck` decides survival. The default is the raw read above, which ignores validity; only pen
+// records use it, and nothing else reads them. Grants and roles pass the operator's negation reader
+// at `now`, which counts a strike only while it is valid: the door's constitution walk (`struck` in
+// accounts.ts) reads a grant's strikes so, and `rolesOf` reads a role's so, and each must agree.
 interface ClaimStanding {
   readonly surviving: string[];
   readonly struck: string[];
@@ -2827,6 +2828,7 @@ const survivingRoleClaimIds = (
 // pen would read an `admin` grant as write standing the door would then refuse.
 const grantStanding = (
   reactor: Reactor,
+  now: number,
   operator: string,
   subject: string,
   verb?: string,
@@ -2845,10 +2847,15 @@ const grantStanding = (
         delta.claims.pointers.some(
           (p) => p.role === "verb" && p.target.kind === "primitive" && p.target.value === verb,
         )),
+    negatedAt(reactor, now, operator),
   );
 
-const survivingGrantClaimIds = (reactor: Reactor, operator: string, subject: string): string[] =>
-  grantStanding(reactor, operator, subject).surviving;
+const survivingGrantClaimIds = (
+  reactor: Reactor,
+  now: number,
+  operator: string,
+  subject: string,
+): string[] => grantStanding(reactor, now, operator, subject).surviving;
 
 // Which author a named pen signs as, according to the ground, and the record deltas that say so.
 // A record whose author no longer matches the seed file on disk is the whole point: that is a
@@ -3007,7 +3014,12 @@ async function cmdUserRole(
       }
       if (seedRead.kind === "present") {
         const subject = authorForSeed(seedRead.seed);
-        grantIds = survivingGrantClaimIds(gateway.reactor, operator, subject);
+        grantIds = survivingGrantClaimIds(
+          gateway.reactor,
+          gateway.validityNow(),
+          operator,
+          subject,
+        );
       } else {
         grantNote =
           ` (its signing grant could not be located — ${userSeedPath(home, name)} is missing — ` +
@@ -3128,7 +3140,13 @@ async function cmdPen(args: readonly string[], io: IO): Promise<number> {
       // and read the STRUCK grants too: a revoked pen and a never-granted one look identical to a
       // "does anything survive" question, and re-planting the first would un-revoke it silently.
       const held = authorForSeed(seedRead.seed);
-      const standing = grantStanding(gateway.reactor, operator, held, "write");
+      const standing = grantStanding(
+        gateway.reactor,
+        gateway.validityNow(),
+        operator,
+        held,
+        "write",
+      );
       if (standing.surviving.length > 0) {
         io.err(
           `pen create: ${name} is already provisioned — ${penSeedPath(home, name)} exists and its ` +
@@ -3175,7 +3193,12 @@ async function cmdPen(args: readonly string[], io: IO): Promise<number> {
     const deltas: Delta[] = [];
     let at = Date.now();
     for (const stale of records.filter((r) => r.author !== penAuthor)) {
-      const held = grantStanding(gateway.reactor, operator, stale.author).surviving;
+      const held = grantStanding(
+        gateway.reactor,
+        gateway.validityNow(),
+        operator,
+        stale.author,
+      ).surviving;
       for (const id of [stale.id, ...held]) {
         deltas.push(signClaims(makeNegationClaims(operator, at++, id), seed));
       }
@@ -3184,7 +3207,10 @@ async function cmdPen(args: readonly string[], io: IO): Promise<number> {
     if (!records.some((r) => r.author === penAuthor)) {
       deltas.push(signClaims(penRecordClaims(name, penAuthor, operator, at++), seed));
     }
-    if (grantStanding(gateway.reactor, operator, penAuthor, "write").surviving.length === 0) {
+    if (
+      grantStanding(gateway.reactor, gateway.validityNow(), operator, penAuthor, "write").surviving
+        .length === 0
+    ) {
       deltas.push(signClaims(grantClaims(STORE_ENTITY, penAuthor, "write", operator, at++), seed));
     }
     if (deltas.length > 0) await gateway.append(deltas);
@@ -3538,8 +3564,10 @@ interface GroundGrant {
   readonly prefix?: string;
   /** When an HONORED strike retired it. Absent when nothing with standing struck it. */
   readonly struckAt?: number;
-  /** A negation names it and binds nothing — struck by an author with no standing, or itself struck. */
+  /** A negation names it and binds nothing: no standing, itself struck, or outside its window. */
   readonly inertStrike: boolean;
+  /** The grant's own [validFrom, validUntil) does not hold at the read time. */
+  readonly outOfWindow: boolean;
   /** Why this grant is not law at all, when it is not. Malformed law binds nothing for anyone. */
   readonly defect?: string;
 }
@@ -3592,6 +3620,7 @@ function groundGrants(reactor: Reactor, now: number, operator: string): GroundGr
       ...(prefix === undefined ? {} : { prefix }),
       ...(honored === undefined ? {} : { struckAt: honored.timestamp }),
       inertStrike: honored === undefined && reactor.negationsOf(id).length > 0,
+      outOfWindow: !validAt(delta, now),
       ...(defect === undefined ? {} : { defect }),
     });
   }
@@ -3600,9 +3629,10 @@ function groundGrants(reactor: Reactor, now: number, operator: string): GroundGr
 
 /**
  * Why a grant that nothing struck still binds nothing. The reasons are genuinely different and an
- * operator acts differently on each, so one catch-all sentence would be false for two of the three:
+ * operator acts differently on each, so one catch-all sentence would be false for most of them:
  *
  *  - MALFORMED LAW binds nothing for anyone, the operator included, and no re-granting fixes it.
+ *  - OUT OF WINDOW: the grant's own [validFrom, validUntil) does not hold at the read time.
  *  - REGISTER is not delegable. An admin may mint `write` and `admin` all day; `register` from any
  *    author but the operator is refused by `grantsHeldBy` no matter how sound its chain, because the
  *    store signs registrations with the OPERATOR'S key. Saying "no chain reaches the operator" here
@@ -3611,6 +3641,7 @@ function groundGrants(reactor: Reactor, now: number, operator: string): GroundGr
  */
 function whyNotBinding(g: GroundGrant, operator: string): string {
   if (g.defect !== undefined) return `malformed law — ${g.defect}`;
+  if (g.outOfWindow) return "the grant's own validity window does not hold now";
   if (g.verb === "register" && g.granter !== operator) {
     return "register standing is the operator's alone to mint, whatever the chain says";
   }
@@ -3698,7 +3729,8 @@ async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<numbe
     // effectiveness here: two answers to "does this bind" is one too many.
     const binding = new Set<string>();
     for (const subject of new Set(grants.map((g) => g.subject))) {
-      for (const held of grantsHeldBy(gateway.reactor, subject, operator)) binding.add(held.id);
+      for (const held of grantsHeldBy(gateway.reactor, gateway.validityNow(), subject, operator))
+        binding.add(held.id);
     }
     const withNote = (text: string, note?: string): string =>
       note === undefined ? text : `${text} · ${note}`;
@@ -3743,7 +3775,14 @@ async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<numbe
       const bound =
         pool?.gateway !== undefined &&
         i.author !== undefined &&
-        holdsGrant(pool.gateway.reactor, STORE_ENTITY, i.author, "write", operator);
+        holdsGrant(
+          pool.gateway.reactor,
+          pool.gateway.validityNow(),
+          STORE_ENTITY,
+          i.author,
+          "write",
+          operator,
+        );
       const noGround =
         i.inbox === undefined
           ? "no grant in the ground"
@@ -3831,7 +3870,12 @@ async function cmdGrantRevoke(
     // writes on. Striking one and announcing both is the H7 shape the admin page's own revoke
     // guards against, and this path used to have it.
     const strike = async (grant: OAuthGrant): Promise<void> => {
-      const ids = survivingGrantClaimIds(gateway.reactor, operator, grant.actor);
+      const ids = survivingGrantClaimIds(
+        gateway.reactor,
+        gateway.validityNow(),
+        operator,
+        grant.actor,
+      );
       if (ids.length > 0) {
         const at = Date.now();
         await gateway.append(
@@ -4140,7 +4184,9 @@ async function cmdClientRevoke(
     // command strikes is what enforcement honors as of this read. (A grant naming this key whose
     // ISSUER's own chain is currently broken survives dormant and unstruck — a property of the
     // admin chain, shared with every revoke surface, not widened here.)
-    const ids = grantsHeldBy(gateway.reactor, actor, operator).map((g) => g.id);
+    const ids = grantsHeldBy(gateway.reactor, gateway.validityNow(), actor, operator).map(
+      (g) => g.id,
+    );
     struckCount = ids.length;
     // A record carries the store its grants landed in; a record-less orphan carries nothing, so
     // the store guard above cannot protect it. The fallback: if this store holds NO delta naming

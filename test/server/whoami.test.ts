@@ -218,7 +218,16 @@ describe("T255 (a) — four kinds, four distinct truthful answers", () => {
     expect(a.binding).toEqual({ user: "myk", container: JOURNAL, inbox: INBOX });
     expect(a.note).toContain(INBOX);
     // The write standing it reports is the POOL's (§58): the primary grants the key nothing.
-    expect(holdsGrant(gateway.reactor, STORE_ENTITY, CONNECTOR, "write", OPERATOR)).toBe(false);
+    expect(
+      holdsGrant(
+        gateway.reactor,
+        gateway.validityNow(),
+        STORE_ENTITY,
+        CONNECTOR,
+        "write",
+        OPERATOR,
+      ),
+    ).toBe(false);
   });
 
   it("ANONYMOUS says so, in words: masked reads, views folding empty for this caller", async () => {
