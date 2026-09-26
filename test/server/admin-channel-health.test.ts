@@ -50,6 +50,7 @@ import { grantClaims } from "../../src/gateway/accounts.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { writeUserSeed } from "../../src/cli/config.js";
 import { SAME_ORIGIN, formTokenOf, signIn } from "../helpers/session-fixture.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
@@ -207,10 +208,8 @@ async function channelServer(): Promise<{ base: string; gateway: Gateway }> {
   const corrupt = (pool: string, field: Partial<ChannelStatus>): Promise<unknown> =>
     gateway.append([
       signClaims(
-        channelRecordClaims(
-          { ...gateway.channelStatus(pool)[0]!, ...field },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(OPERATOR), (t) =>
+          channelRecordClaims({ ...gateway.channelStatus(pool)[0]!, ...field }, OPERATOR, t),
         ),
         OPERATOR_SEED,
       ),

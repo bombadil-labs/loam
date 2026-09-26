@@ -10,7 +10,7 @@
 // Erasure standing rule: every store here is the fixture's own mkdtemp/memory store.
 
 import { afterEach, describe, expect, it } from "vitest";
-import { signClaims } from "@bombadil/rhizomatic";
+import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { readUserSeed } from "../../src/cli/config.js";
 import { containerClaims } from "../../src/gateway/container.js";
 import { FERN, observed } from "../spike/garden.js";
@@ -25,6 +25,7 @@ import {
   heightVia,
   mutateHeight,
 } from "../helpers/connection-fixture.js";
+import { withStamp, type Stamp } from "../../src/gateway/stamp.js";
 
 afterEach(closeAll);
 
@@ -43,10 +44,16 @@ describe("S1c — a bound read resolves over the bound container's scope", () =>
     const token = await connect(base, "ada", "journal");
     // ada's OWN claim in the primary: a member of her home, so of the bound container's scope.
     await gateway.append([
-      observed(FERN, "height", 30, gateway.nextTimestamp(), seedOf(usersHome, "ada")),
+      observed(
+        FERN,
+        "height",
+        30,
+        gateway.stamp(authorForSeed(seedOf(usersHome, "ada"))),
+        seedOf(usersHome, "ada"),
+      ),
     ]);
     // The operator's claim in the primary: nobody's member, later than ada's.
-    await gateway.append([observed(FERN, "height", 99, gateway.nextTimestamp(), OPERATOR_SEED)]);
+    await gateway.append([observed(FERN, "height", 99, gateway.stamp(OPERATOR), OPERATOR_SEED)]);
     expect(await heightVia(base, token)).toBe(30); // ada's, not the operator's later 99
     expect(await heightVia(base, "op-token")).toBe(99);
     // The pool's claim is the latest in scope; the operator still reads the primary.
@@ -59,9 +66,15 @@ describe("S1c — a bound read resolves over the bound container's scope", () =>
     const { base, gateway, usersHome } = await connectionServer();
     const token = await connect(base, "ada", "journal");
     await gateway.append([
-      observed(FERN, "height", 30, gateway.nextTimestamp(), seedOf(usersHome, "ada")),
+      observed(
+        FERN,
+        "height",
+        30,
+        gateway.stamp(authorForSeed(seedOf(usersHome, "ada"))),
+        seedOf(usersHome, "ada"),
+      ),
     ]);
-    await gateway.append([observed(OAK, "height", 1, gateway.nextTimestamp(), OPERATOR_SEED)]);
+    await gateway.append([observed(OAK, "height", 1, gateway.stamp(OPERATOR), OPERATOR_SEED)]);
     const wrote = await graphql(
       base,
       token,
@@ -91,12 +104,18 @@ describe("S1c — a bound read resolves over the bound container's scope", () =>
     const { base, gateway, usersHome } = await connectionServer();
     const token = await connect(base, "ada", "journal");
     await gateway.append([
-      observed(FERN, "height", 30, gateway.nextTimestamp(), seedOf(usersHome, "ada")),
+      observed(
+        FERN,
+        "height",
+        30,
+        gateway.stamp(authorForSeed(seedOf(usersHome, "ada"))),
+        seedOf(usersHome, "ada"),
+      ),
     ]);
     expect((await mutateHeight(base, token, 31)).status).toBe(200);
     // An OUT-OF-SCOPE claim, later than the connection's own: without the scoping the pinned read
     // below would answer 99, so this is what makes the pin a scope assertion rather than a clock one.
-    await gateway.append([observed(FERN, "height", 99, gateway.nextTimestamp(), OPERATOR_SEED)]);
+    await gateway.append([observed(FERN, "height", 99, gateway.stamp(OPERATOR), OPERATOR_SEED)]);
     const at = Date.now();
     await new Promise((r) => setTimeout(r, 5));
     expect((await mutateHeight(base, token, 32)).status).toBe(200);
@@ -116,9 +135,15 @@ describe("S1c — a bound read resolves over the bound container's scope", () =>
     const { base, gateway, usersHome } = await connectionServer();
     const token = await connect(base, "ada", "journal");
     await gateway.append([
-      observed(FERN, "height", 30, gateway.nextTimestamp(), seedOf(usersHome, "ada")),
+      observed(
+        FERN,
+        "height",
+        30,
+        gateway.stamp(authorForSeed(seedOf(usersHome, "ada"))),
+        seedOf(usersHome, "ada"),
+      ),
     ]);
-    await gateway.append([observed(FERN, "height", 99, gateway.nextTimestamp(), OPERATOR_SEED)]);
+    await gateway.append([observed(FERN, "height", 99, gateway.stamp(OPERATOR), OPERATOR_SEED)]);
     const res = await fetch(`${base}/default/mcp`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
@@ -144,7 +169,13 @@ describe("S1c — a bound read resolves over the bound container's scope", () =>
     // ada's own claim FIRST, so it is the older one: what the read falls back to is then a fact
     // about scope, not about the clock.
     await gateway.append([
-      observed(FERN, "height", 30, gateway.nextTimestamp(), seedOf(usersHome, "ada")),
+      observed(
+        FERN,
+        "height",
+        30,
+        gateway.stamp(authorForSeed(seedOf(usersHome, "ada"))),
+        seedOf(usersHome, "ada"),
+      ),
     ]);
     expect((await mutateHeight(base, token, 40)).status).toBe(200);
     expect(await heightVia(base, token)).toBe(40); // in scope, and the latest
@@ -173,22 +204,24 @@ describe("S1c — a bound read resolves over the bound container's scope", () =>
   // same deltas and prove nothing about descent. Here each room admits what the OPERATOR authored,
   // which the workspace itself never admits — so a delta seen through the workspace can only have
   // arrived by descending into the room.
-  const room = (gateway: { nextTimestamp(): number }, container: string, parent: string) =>
+  const room = (gateway: { stamp(): Stamp }, container: string, parent: string) =>
     signClaims(
-      containerClaims(
-        {
-          container,
-          parent,
-          trust: "curated",
-          posture: "shared",
-          membership: {
-            op: "select",
-            pred: { match: { field: "author", cmp: "eq", const: OPERATOR } },
-            in: "input",
+      withStamp(gateway.stamp(), (t) =>
+        containerClaims(
+          {
+            container,
+            parent,
+            trust: "curated",
+            posture: "shared",
+            membership: {
+              op: "select",
+              pred: { match: { field: "author", cmp: "eq", const: OPERATOR } },
+              in: "input",
+            },
           },
-        },
-        OPERATOR,
-        gateway.nextTimestamp(),
+          OPERATOR,
+          t,
+        ),
       ),
       OPERATOR_SEED,
     );
@@ -202,12 +235,12 @@ describe("S1c — a bound read resolves over the bound container's scope", () =>
     ]);
     // One operator claim per room. Neither is a member of `ada:workspace` itself, whose membership
     // is what ada authored — so each is visible only by reaching into its own room.
-    await gateway.append([observed(FERN, "height", 7, gateway.nextTimestamp(), OPERATOR_SEED)]);
+    await gateway.append([observed(FERN, "height", 7, gateway.stamp(OPERATOR), OPERATOR_SEED)]);
     expect(await heightVia(base, token)).toBe(7); // the child's room, reached by descent
 
     // And the sibling stays out. Its claim is later, so were the fence leaking it would win the
     // pick and this would read 99 — the assertion cannot pass by accident.
-    await gateway.append([observed(MOSS, "height", 99, gateway.nextTimestamp(), OPERATOR_SEED)]);
+    await gateway.append([observed(MOSS, "height", 99, gateway.stamp(OPERATOR), OPERATOR_SEED)]);
     const res = await graphql(base, token, `{ plant(entity: "${MOSS}") { height } }`);
     const body = (await res.json()) as { data?: { plant?: { height?: unknown } } };
     expect(body.data?.plant?.height ?? null).toBe(99);
@@ -222,15 +255,17 @@ describe("S1c — a bound read resolves over the bound container's scope", () =>
     // room were empty, which is the fail-closed price of reading a subtree.
     await gateway.append([
       signClaims(
-        containerClaims(
-          {
-            container: "ada:workspace:vault",
-            parent: "ada:workspace",
-            trust: "curated",
-            posture: "separate",
-          },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(), (t) =>
+          containerClaims(
+            {
+              container: "ada:workspace:vault",
+              parent: "ada:workspace",
+              trust: "curated",
+              posture: "separate",
+            },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),

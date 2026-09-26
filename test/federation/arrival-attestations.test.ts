@@ -488,6 +488,7 @@ describe("T207 — a sync that accepts deltas stamps its own custody", () => {
     }
   });
 
+  // 300 deltas and two syncs: about 4.5s alone, past the 20s default under full-suite load.
   it("records what a partial landing left unstamped, and heals it on the next sync", async () => {
     // THE GAP THAT MUST NOT BE PERMANENT. A refusal that wrote nothing to the channel would leave
     // these arrivals unstampable forever: the standing sync swallows the throw, the next poll holds
@@ -563,7 +564,7 @@ describe("T207 — a sync that accepts deltas stamps its own custody", () => {
       await alice.close();
       await me.close();
     }
-  });
+  }, 60_000);
 
   it("a quiet poll against a door that will not name its arrivals does not refuse", async () => {
     // The refusal below says "the peer's deltas landed". On a poll that accepted nothing that

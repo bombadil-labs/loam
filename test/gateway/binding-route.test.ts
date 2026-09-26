@@ -32,7 +32,6 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { handleRest } from "../../src/surface/rest.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
-import { stamped } from "../../src/gateway/stamp.js";
 
 const OP_SEED = "0e".repeat(32);
 const OP = authorForSeed(OP_SEED);
@@ -58,7 +57,7 @@ const ALICES_OWN = {
 const strikeBy = (gw: Gateway, target: string, author: string, seed: string): Delta =>
   signClaims(
     {
-      ...stamped(gw.nextTimestamp()),
+      ...gw.stamp(author),
       author,
       pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: target } } }],
     },

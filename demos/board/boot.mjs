@@ -157,7 +157,7 @@ try {
     await gw.append([
       signClaims(
         {
-          ...((t) => ({ timestamp: t, validFrom: t }))(gw.nextTimestamp()),
+          ...gw.stamp(),
           author: operator,
           pointers: [
             {

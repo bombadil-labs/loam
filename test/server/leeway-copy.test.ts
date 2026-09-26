@@ -81,6 +81,7 @@ import {
   PASSWORD,
   pkce,
 } from "../helpers/connection-fixture.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 /** Whitespace is layout, not copy: the spec wraps its sentences, the page wraps them elsewhere. */
 const flat = (s: string): string => s.replace(/\s+/g, " ").trim();
@@ -319,16 +320,18 @@ describe("§58 — the five controls, in words", () => {
     ).containers.get("ada")!;
     await gateway.append([
       signClaims(
-        containerClaims(
-          {
-            container: "ada",
-            trust: home.trust,
-            posture: home.posture,
-            ...(home.membership === undefined ? {} : { membership: home.membership }),
-            leeway: { ...SEALED_LEEWAY, receive: true },
-          },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(OPERATOR), (t) =>
+          containerClaims(
+            {
+              container: "ada",
+              trust: home.trust,
+              posture: home.posture,
+              ...(home.membership === undefined ? {} : { membership: home.membership }),
+              leeway: { ...SEALED_LEEWAY, receive: true },
+            },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),
@@ -621,15 +624,17 @@ describe("§58 — the five controls, in words", () => {
     });
     await gateway.append([
       signClaims(
-        containerClaims(
-          {
-            container: "ada:journal:annex",
-            trust: "curated",
-            posture: "separate",
-            parent: "ada:journal",
-          },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(OPERATOR), (t) =>
+          containerClaims(
+            {
+              container: "ada:journal:annex",
+              trust: "curated",
+              posture: "separate",
+              parent: "ada:journal",
+            },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),

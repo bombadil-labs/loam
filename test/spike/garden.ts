@@ -4,6 +4,7 @@
 
 import { Reactor, authorForSeed, signClaims, type Delta, type Term } from "@bombadil/rhizomatic";
 import { entityGatherBody } from "../../src/gateway/gather.js";
+import { stamped, type Stamp } from "../../src/gateway/stamp.js";
 
 export const GARDENER_SEED = "a1".repeat(32);
 export const SURVEYOR_SEED = "b2".repeat(32);
@@ -22,18 +23,18 @@ export function plantReactor(roots: readonly string[] = [FERN]): Reactor {
   return reactor;
 }
 
-// One signed observation: `plant` has `value` in the `context` bucket, says `seed`'s key.
+// One signed observation: `plant` has `value` in the `context` bucket, says `seed`'s key. `at` is
+// either one time for both fields, or a gateway's `stamp()`.
 export function observed(
   plant: string,
   context: string,
   value: string | number,
-  timestamp: number,
+  at: number | Stamp,
   seed: string,
 ): Delta {
   return signClaims(
     {
-      timestamp,
-      validFrom: timestamp,
+      ...(typeof at === "number" ? stamped(at) : at),
       author: authorForSeed(seed),
       pointers: [
         { role: "subject", target: { kind: "entity", entity: { id: plant, context } } },

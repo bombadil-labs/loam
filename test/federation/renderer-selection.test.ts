@@ -67,7 +67,7 @@ import {
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
-import { stamped } from "../../src/gateway/stamp.js";
+import { withStamp, type Stamp } from "../../src/gateway/stamp.js";
 
 const OP_SEED = "3a".repeat(32);
 const OP = authorForSeed(OP_SEED);
@@ -98,21 +98,23 @@ afterEach(async () => {
 
 async function declare(gw: Gateway, container: string, leeway?: Leeway, parent?: string) {
   const delta = signClaims(
-    containerClaims(
-      {
-        container,
-        trust: "curated",
-        posture: "shared",
-        membership: {
-          op: "select",
-          pred: { hasPointer: { context: { exact: "height" } } },
-          in: "input",
+    withStamp(gw.stamp(OP), (t) =>
+      containerClaims(
+        {
+          container,
+          trust: "curated",
+          posture: "shared",
+          membership: {
+            op: "select",
+            pred: { hasPointer: { context: { exact: "height" } } },
+            in: "input",
+          },
+          ...(leeway === undefined ? {} : { leeway }),
+          ...(parent === undefined ? {} : { parent }),
         },
-        ...(leeway === undefined ? {} : { leeway }),
-        ...(parent === undefined ? {} : { parent }),
-      },
-      OP,
-      gw.nextTimestamp(),
+        OP,
+        t,
+      ),
     ),
     OP_SEED,
   );
@@ -290,14 +292,21 @@ async function rawRenderer(
   edit: (claims: Claims) => Claims = (c) => c,
 ): Promise<Delta> {
   const delta = signClaims(
-    edit(rendererBindingClaims(core, undefined, authorForSeed(seed), store.nextTimestamp())),
+    edit(
+      withStamp(store.stamp(authorForSeed(seed)), (t) =>
+        rendererBindingClaims(core, undefined, authorForSeed(seed), t),
+      ),
+    ),
     seed,
   );
   await store.append([delta]);
   return delta;
 }
-const strike = (author: string, seed: string, target: string, ts: number): Delta =>
-  signClaims(makeNegationClaims(author, ts, target), seed);
+const strike = (author: string, seed: string, target: string, at: Stamp): Delta =>
+  signClaims(
+    withStamp(at, (t) => makeNegationClaims(author, t, target)),
+    seed,
+  );
 /** The peer evolves its Plant law: a new registration over a narrower reading. */
 const evolve = (alice: Gateway, name = "Plant"): Promise<unknown> =>
   alice.publishRegistration(
@@ -335,7 +344,7 @@ const currentAdoption = (w: World, lens = "alice:Plant") => {
 async function forge(pool: Gateway, from: Delta, edit: Record<string, string>): Promise<Delta> {
   const claims: Claims = {
     ...from.claims,
-    timestamp: pool.nextTimestamp(),
+    ...pool.stamp(OP),
     pointers: from.claims.pointers.map((p) =>
       p.role in edit && p.target.kind === "primitive"
         ? { ...p, target: { kind: "primitive", value: edit[p.role]! } }
@@ -491,7 +500,7 @@ describe("T278 — exact received renderer selection", () => {
           !JSON.stringify(d.claims).includes(`"${LEAF}"`),
       );
     expect(rootDeclaration).toBeDefined();
-    await w.gw.append([strike(OP, OP_SEED, rootDeclaration!.id, w.gw.nextTimestamp())]);
+    await w.gw.append([strike(OP, OP_SEED, rootDeclaration!.id, w.gw.stamp(OP))]);
     expect(w.refusal("hello").code).toBe("not_authorized");
   });
 
@@ -513,7 +522,12 @@ describe("T278 — exact received renderer selection", () => {
     // never attested what arrived, so there is no operand to select from.
     const status = w.gw.channelStatus(w.channel)[0]!;
     const ghost = { ...status, name: "channel:owner:room:ghost", prefix: "ghost" };
-    await w.gw.append([signClaims(channelRecordClaims(ghost, OP, w.gw.nextTimestamp()), OP_SEED)]);
+    await w.gw.append([
+      signClaims(
+        withStamp(w.gw.stamp(OP), (t) => channelRecordClaims(ghost, OP, t)),
+        OP_SEED,
+      ),
+    ]);
     expect(w.gw.channelStatus(ghost.name)).toHaveLength(1);
     expect(w.refusal("hello", { channel: ghost.name }).code).toBe("source_unavailable");
   });
@@ -530,7 +544,12 @@ describe("T278 — exact received renderer selection", () => {
       prefix: "stray",
       into: "owner:other",
     };
-    await w.gw.append([signClaims(channelRecordClaims(stray, OP, w.gw.nextTimestamp()), OP_SEED)]);
+    await w.gw.append([
+      signClaims(
+        withStamp(w.gw.stamp(OP), (t) => channelRecordClaims(stray, OP, t)),
+        OP_SEED,
+      ),
+    ]);
     const r = w.refusal("hello", { channel: stray.name });
     expect(r.code).toBe("not_authorized");
   });
@@ -539,7 +558,9 @@ describe("T278 — exact received renderer selection", () => {
     const w = await world();
     // Relayed by the peer: authored by this store's operator, but it arrived through the channel.
     const mine = signClaims(
-      rendererBindingClaims({ ...HELLO, route: "mine" }, undefined, OP, w.alice.nextTimestamp()),
+      withStamp(w.alice.stamp(OP), (t) =>
+        rendererBindingClaims({ ...HELLO, route: "mine" }, undefined, OP, t),
+      ),
       OP_SEED,
     );
     await w.alice.federate([mine]);
@@ -547,11 +568,8 @@ describe("T278 — exact received renderer selection", () => {
     expect(w.select("mine").sourceDelta).toBe(mine.id);
     // Planted in the pool by hand, and root-published: present in the pool, absent from the receipts.
     const planted = signClaims(
-      rendererBindingClaims(
-        { ...HELLO, route: "planted" },
-        undefined,
-        MALLORY,
-        w.pool.nextTimestamp(),
+      withStamp(w.pool.stamp(MALLORY), (t) =>
+        rendererBindingClaims({ ...HELLO, route: "planted" }, undefined, MALLORY, t),
       ),
       MALLORY_SEED,
     );
@@ -646,12 +664,12 @@ describe("T278 — exact received renderer selection", () => {
     const v2 = await rawRenderer(w.alice, ALICE_SEED, { ...HELLO, bundle: BUNDLE + " // v2" });
     await w.sync();
     expect(w.select("hello").sourceDelta).toBe(v2.id);
-    const s = strike(ALICE, ALICE_SEED, v2.id, w.alice.nextTimestamp());
+    const s = strike(ALICE, ALICE_SEED, v2.id, w.alice.stamp(ALICE));
     await w.alice.append([s]);
     await w.sync();
     expect(w.select("hello").sourceDelta).toBe(v1.id);
     expect(w.pool.reactor.get(v2.id)).toBeDefined();
-    const ss = strike(ALICE, ALICE_SEED, s.id, w.alice.nextTimestamp());
+    const ss = strike(ALICE, ALICE_SEED, s.id, w.alice.stamp(ALICE));
     await w.alice.append([ss]);
     await w.sync();
     expect(w.select("hello").sourceDelta).toBe(v2.id);
@@ -661,9 +679,9 @@ describe("T278 — exact received renderer selection", () => {
     const [registration] = registrations(w.received());
     const definition = definitionsOf(w.received(), entityRef(registration!, "hyperschema"))[0]!;
     const foreign = [
-      strike(MALLORY, MALLORY_SEED, v2.id, w.alice.nextTimestamp()),
-      strike(MALLORY, MALLORY_SEED, registration!.id, w.alice.nextTimestamp()),
-      strike(MALLORY, MALLORY_SEED, definition.id, w.alice.nextTimestamp()),
+      strike(MALLORY, MALLORY_SEED, v2.id, w.alice.stamp(MALLORY)),
+      strike(MALLORY, MALLORY_SEED, registration!.id, w.alice.stamp(MALLORY)),
+      strike(MALLORY, MALLORY_SEED, definition.id, w.alice.stamp(MALLORY)),
     ];
     await w.alice.federate(foreign);
     await w.sync();
@@ -679,7 +697,7 @@ describe("T278 — exact received renderer selection", () => {
     const v1 = rendererAt(w.received(), "hello")[0]!;
     const v2 = await rawRenderer(w.alice, ALICE_SEED, { ...HELLO, bundle: BUNDLE + " // v2" });
     await w.sync();
-    const s = strike(ALICE, ALICE_SEED, v2.id, w.alice.nextTimestamp());
+    const s = strike(ALICE, ALICE_SEED, v2.id, w.alice.stamp(ALICE));
     await w.alice.append([s]);
     await w.sync();
     expect(w.select("hello").sourceDelta).toBe(v1.id);
@@ -703,7 +721,7 @@ describe("T278 — exact received renderer selection", () => {
     // A fresh world: the same strike planted straight into the pool, never offered.
     const w2 = await world();
     const target = rendererAt(w2.received(), "hello")[0]!;
-    const planted = strike(ALICE, ALICE_SEED, target.id, w2.pool.nextTimestamp());
+    const planted = strike(ALICE, ALICE_SEED, target.id, w2.pool.stamp(ALICE));
     await w2.pool.federate([planted]);
     expect(w2.received().some((d) => d.id === planted.id)).toBe(false);
     const hole = w2.refusal("hello");
@@ -712,7 +730,7 @@ describe("T278 — exact received renderer selection", () => {
     // CONTROL: a stranger's strike in the same position counts nowhere, so it is no hole either.
     const w3 = await world();
     const target3 = rendererAt(w3.received(), "hello")[0]!;
-    await w3.pool.federate([strike(MALLORY, MALLORY_SEED, target3.id, w3.pool.nextTimestamp())]);
+    await w3.pool.federate([strike(MALLORY, MALLORY_SEED, target3.id, w3.pool.stamp(MALLORY))]);
     expect(w3.select("hello").sourceDelta).toBe(target3.id);
   });
 
@@ -721,7 +739,7 @@ describe("T278 — exact received renderer selection", () => {
     const before = w.select("hello");
     const note = signClaims(
       {
-        ...stamped(w.alice.nextTimestamp()),
+        ...w.alice.stamp(ALICE),
         author: ALICE,
         pointers: [
           { role: "negates", target: { kind: "entity", entity: { id: FERN, context: "height" } } },
@@ -820,7 +838,7 @@ describe("T278 — exact received renderer selection", () => {
     const malformed = signClaims(
       {
         ...v2!.claims,
-        timestamp: w.alice.nextTimestamp(),
+        ...w.alice.stamp(ALICE),
         pointers: v2!.claims.pointers.filter((p) => p.role !== "schemaVersion"),
       },
       ALICE_SEED,
@@ -833,8 +851,8 @@ describe("T278 — exact received renderer selection", () => {
     // ahead; the current survivor is v1, whose FROZEN snapshot must be what the lineage names —
     // and the destination, still on v2's content, does not match it until it is re-adopted.
     await w.alice.append([
-      strike(ALICE, ALICE_SEED, malformed.id, w.alice.nextTimestamp()),
-      strike(ALICE, ALICE_SEED, v2!.id, w.alice.nextTimestamp()),
+      strike(ALICE, ALICE_SEED, malformed.id, w.alice.stamp(ALICE)),
+      strike(ALICE, ALICE_SEED, v2!.id, w.alice.stamp(ALICE)),
     ]);
     await w.sync();
     const withdrawn = w.refusal("hello");
@@ -858,7 +876,7 @@ describe("T278 — exact received renderer selection", () => {
     const rival = signClaims(
       {
         ...v1!.claims,
-        timestamp: w.alice.nextTimestamp(),
+        ...w.alice.stamp(ALICE),
         pointers: v1!.claims.pointers.map((p) =>
           p.role === "hyperschema" && p.target.kind === "entity"
             ? {
@@ -884,18 +902,20 @@ describe("T278 — exact received renderer selection", () => {
     // different gather body: the bound row keeps its id and its law moves under it.
     await w.pool.append([
       signClaims(
-        publishHyperSchemaClaims(
-          {
-            ...PLANT,
-            body: parseTerm({
-              op: "select",
-              pred: { hasPointer: { context: { exact: "tag" } } },
-              in: "input",
-            }),
-          },
-          row.entity!,
-          OP,
-          w.pool.nextTimestamp(),
+        withStamp(w.pool.stamp(OP), (t) =>
+          publishHyperSchemaClaims(
+            {
+              ...PLANT,
+              body: parseTerm({
+                op: "select",
+                pred: { hasPointer: { context: { exact: "tag" } } },
+                in: "input",
+              }),
+            },
+            row.entity!,
+            OP,
+            t,
+          ),
         ),
         OP_SEED,
       ),
@@ -915,7 +935,7 @@ describe("T278 — exact received renderer selection", () => {
     const w = await world();
     const { adoption } = currentAdoption(w);
     const good = w.select("hello");
-    await w.pool.append([strike(OP, OP_SEED, adoption.id, w.pool.nextTimestamp())]);
+    await w.pool.append([strike(OP, OP_SEED, adoption.id, w.pool.stamp(OP))]);
     expect(w.refusal("hello").code).toBe("law_unavailable");
     const [v1] = registrations(w.received());
     const [renderer] = rendererAt(w.received(), "hello");
@@ -936,7 +956,7 @@ describe("T278 — exact received renderer selection", () => {
         // A stale law-address alone is not disqualifying — the CONTENT is compared — so this
         // shape, faithful in every field the join reads, passes; the others do not.
         expect(w.select("hello").sourceRegistration).toBe(good.sourceRegistration);
-        await w.pool.append([strike(OP, OP_SEED, forged.id, w.pool.nextTimestamp())]);
+        await w.pool.append([strike(OP, OP_SEED, forged.id, w.pool.stamp(OP))]);
       } else {
         expect(w.refusal("hello").code, JSON.stringify(edit)).toBe("law_unavailable");
       }
@@ -1045,7 +1065,7 @@ describe("T278 — exact received renderer selection", () => {
     const dangling = signClaims(
       {
         ...v1!.claims,
-        timestamp: w.alice.nextTimestamp(),
+        ...w.alice.stamp(ALICE),
         pointers: v1!.claims.pointers.map((p) =>
           p.role === "schemaVersion" && p.target.kind === "entity"
             ? {
@@ -1091,11 +1111,13 @@ describe("T278 — exact received renderer selection", () => {
     // Two rows each, byte-identical in content, differing only in the id their timestamp mints —
     // so the loader's tie-break is the ONLY thing that picks, and the law does not move under
     // the destination.
-    const at = w.alice.nextTimestamp() + 10;
+    const stamp = w.alice.stamp(ALICE);
+    const at = stamp.timestamp + 10;
     const twins = [at, at].map((ts, i) =>
       signClaims(
         {
           ...publishHyperSchemaClaims(law.hyperschema, entity, ALICE, ts),
+          validFrom: stamp.validFrom,
           pointers: [
             ...publishHyperSchemaClaims(law.hyperschema, entity, ALICE, ts).pointers,
             { role: "twin", target: { kind: "primitive", value: i } },
@@ -1108,6 +1130,7 @@ describe("T278 — exact received renderer selection", () => {
       signClaims(
         {
           ...publishSchemaClaims(law.schema, snapshotEntity, ALICE, ts),
+          validFrom: stamp.validFrom,
           pointers: [
             ...publishSchemaClaims(law.schema, snapshotEntity, ALICE, ts).pointers,
             { role: "twin", target: { kind: "primitive", value: i } },

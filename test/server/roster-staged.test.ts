@@ -61,6 +61,7 @@ import {
   OPERATOR_SEED,
 } from "../helpers/connection-fixture.js";
 import { FERN, observed } from "../spike/garden.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const PEER_SEED = "7a".repeat(32);
 const PEER_TOKEN = "peer-door-token";
@@ -81,7 +82,7 @@ async function peerStore(): Promise<string> {
       ],
     }),
   );
-  await peer.append([observed(FERN, "height", 11, peer.nextTimestamp(), PEER_SEED)]);
+  await peer.append([observed(FERN, "height", 11, peer.stamp(), PEER_SEED)]);
   const handle = await serve({
     mounts: { default: peer },
     tokens: { [PEER_TOKEN]: { operator: true } },
@@ -103,19 +104,23 @@ const declareAs = (gw: Gateway, container: string, leeway: Leeway): Promise<unkn
   ).containers.get(container);
   return gw.append([
     signClaims(
-      containerClaims(
-        {
-          container,
-          trust: standing?.trust ?? ("curated" as const),
-          posture: standing?.posture ?? ("separate" as const),
-          ...(standing?.parent === undefined ? {} : { parent: standing.parent }),
-          ...(standing?.membership === undefined ? {} : { membership: standing.membership }),
-          ...(standing?.membershipAt === undefined ? {} : { membershipAt: standing.membershipAt }),
-          ...(standing?.version === undefined ? {} : { version: standing.version }),
-          leeway,
-        },
-        OPERATOR,
-        gw.nextTimestamp(),
+      withStamp(gw.stamp(OPERATOR), (t) =>
+        containerClaims(
+          {
+            container,
+            trust: standing?.trust ?? ("curated" as const),
+            posture: standing?.posture ?? ("separate" as const),
+            ...(standing?.parent === undefined ? {} : { parent: standing.parent }),
+            ...(standing?.membership === undefined ? {} : { membership: standing.membership }),
+            ...(standing?.membershipAt === undefined
+              ? {}
+              : { membershipAt: standing.membershipAt }),
+            ...(standing?.version === undefined ? {} : { version: standing.version }),
+            leeway,
+          },
+          OPERATOR,
+          t,
+        ),
       ),
       OPERATOR_SEED,
     ),

@@ -41,6 +41,7 @@ import { grantClaims } from "../../src/gateway/accounts.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { writeUserSeed } from "../../src/cli/config.js";
 import { signIn } from "../helpers/session-fixture.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const OPERATOR_SEED = "2c".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
@@ -110,10 +111,8 @@ async function channelServer(): Promise<{ base: string; gateway: Gateway }> {
 
   // bram's record, MINUS its `lastSyncedAt` pointer. Built by the product's own claims function so
   // the reader meets the shape the product writes; only the truncation is the fixture's doing.
-  const built = channelRecordClaims(
-    gateway.channelStatus(BRAM)[0]!,
-    OPERATOR,
-    gateway.nextTimestamp(),
+  const built = withStamp(gateway.stamp(OPERATOR), (t) =>
+    channelRecordClaims(gateway.channelStatus(BRAM)[0]!, OPERATOR, t),
   );
   await gateway.append([
     signClaims(

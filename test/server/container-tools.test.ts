@@ -142,7 +142,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { signClaims } from "@bombadil/rhizomatic";
+import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import {
   containerClaims,
   containerDefect,
@@ -176,7 +176,7 @@ import {
   OPERATOR_SEED,
 } from "../helpers/connection-fixture.js";
 import { FERN, observed } from "../spike/garden.js";
-import { stamped } from "../../src/gateway/stamp.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const PEER_SEED = "7a".repeat(32);
 const PEER_TOKEN = "peer-door-token";
@@ -216,7 +216,9 @@ async function peerStore(): Promise<string> {
       ],
     }),
   );
-  await peer.append([observed(FERN, "height", 11, peer.nextTimestamp(), PEER_SEED)]);
+  await peer.append([
+    observed(FERN, "height", 11, peer.stamp(authorForSeed(PEER_SEED)), PEER_SEED),
+  ]);
   const handle = await serve({
     mounts: { default: peer },
     tokens: { [PEER_TOKEN]: { operator: true } },
@@ -248,7 +250,10 @@ const declareAs = (gw: Gateway, container: string, leeway: Leeway): Promise<unkn
     leeway,
   };
   return gw.append([
-    signClaims(containerClaims(spec, OPERATOR, gw.nextTimestamp()), OPERATOR_SEED),
+    signClaims(
+      withStamp(gw.stamp(), (t) => containerClaims(spec, OPERATOR, t)),
+      OPERATOR_SEED,
+    ),
   ]);
 };
 
@@ -518,16 +523,18 @@ describe("§58 — the container roster", () => {
     await declareAs(gateway, "ada:sibling", OPEN);
     await gateway.append([
       signClaims(
-        containerClaims(
-          {
-            container: "ada:journal:away",
-            trust: "curated",
-            posture: "shared",
-            membership: recOf(gateway, "ada:journal")!.membership,
-            parent: "ada:sibling",
-          },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(), (t) =>
+          containerClaims(
+            {
+              container: "ada:journal:away",
+              trust: "curated",
+              posture: "shared",
+              membership: recOf(gateway, "ada:journal")!.membership,
+              parent: "ada:sibling",
+            },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),
@@ -567,15 +574,17 @@ describe("§58 — the container roster", () => {
     // reached by a name that was never joined to the tree rather than one whose join was struck.
     await gateway.append([
       signClaims(
-        containerClaims(
-          {
-            container: "ada:journal:rootless",
-            trust: "curated",
-            posture: "shared",
-            membership: recOf(gateway, "ada:journal")!.membership,
-          },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(), (t) =>
+          containerClaims(
+            {
+              container: "ada:journal:rootless",
+              trust: "curated",
+              posture: "shared",
+              membership: recOf(gateway, "ada:journal")!.membership,
+            },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),
@@ -612,17 +621,19 @@ describe("§58 — the container roster", () => {
     await declareTool(base, ada, "ada:journal:held");
     await gateway.append([
       signClaims(
-        containerClaims(
-          {
-            container: "ada:journal:held",
-            trust: "curated",
-            posture: "shared",
-            membership: recOf(gateway, "ada:journal:held")!.membership,
-            parent: "ada:journal",
-            inboxOf: "ada:journal",
-          },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(), (t) =>
+          containerClaims(
+            {
+              container: "ada:journal:held",
+              trust: "curated",
+              posture: "shared",
+              membership: recOf(gateway, "ada:journal:held")!.membership,
+              parent: "ada:journal",
+              inboxOf: "ada:journal",
+            },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),
@@ -641,16 +652,18 @@ describe("§58 — the container roster", () => {
     await declareAs(gateway, "ada:elsewhere", OPEN);
     await gateway.append([
       signClaims(
-        containerClaims(
-          {
-            container: "ada:journal:away",
-            trust: "curated",
-            posture: "shared",
-            membership: recOf(gateway, "ada:journal:held")!.membership,
-            parent: "ada:elsewhere",
-          },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(), (t) =>
+          containerClaims(
+            {
+              container: "ada:journal:away",
+              trust: "curated",
+              posture: "shared",
+              membership: recOf(gateway, "ada:journal:held")!.membership,
+              parent: "ada:elsewhere",
+            },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),
@@ -826,7 +839,7 @@ describe("§58 — the container roster", () => {
       ids.map((id) =>
         signClaims(
           {
-            ...stamped(gateway.nextTimestamp()),
+            ...gateway.stamp(),
             author: OPERATOR,
             pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
           },
@@ -870,7 +883,7 @@ describe("§58 — the container roster", () => {
       ids.map((id) =>
         signClaims(
           {
-            ...stamped(gateway.nextTimestamp()),
+            ...gateway.stamp(),
             author: OPERATOR,
             pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
           },
@@ -931,16 +944,18 @@ describe("§58 — the container roster", () => {
     // a child called `…:work:notes` would satisfy it by accident whatever the door said.
     await gateway.append([
       signClaims(
-        containerClaims(
-          {
-            container: "ada:journal:zeta",
-            trust: "curated",
-            posture: "shared",
-            membership: recOf(gateway, "ada:journal:work")!.membership,
-            parent: "ada:journal:work",
-          },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(), (t) =>
+          containerClaims(
+            {
+              container: "ada:journal:zeta",
+              trust: "curated",
+              posture: "shared",
+              membership: recOf(gateway, "ada:journal:work")!.membership,
+              parent: "ada:journal:work",
+            },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),
@@ -956,7 +971,7 @@ describe("§58 — the container roster", () => {
       ids.map((id) =>
         signClaims(
           {
-            ...stamped(gateway.nextTimestamp()),
+            ...gateway.stamp(),
             author: OPERATOR,
             pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
           },
@@ -1020,7 +1035,7 @@ describe("§58 — the container roster", () => {
       ids.map((id) =>
         signClaims(
           {
-            ...stamped(gateway.nextTimestamp()),
+            ...gateway.stamp(),
             author: OPERATOR,
             pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
           },
@@ -1104,10 +1119,12 @@ describe("§58 — the container roster", () => {
     const declare = (container: string, parent: string): Promise<unknown> =>
       gateway.append([
         signClaims(
-          containerClaims(
-            { container, trust: "curated", posture: "shared", membership, parent },
-            OPERATOR,
-            gateway.nextTimestamp(),
+          withStamp(gateway.stamp(), (t) =>
+            containerClaims(
+              { container, trust: "curated", posture: "shared", membership, parent },
+              OPERATOR,
+              t,
+            ),
           ),
           OPERATOR_SEED,
         ),
@@ -1151,18 +1168,20 @@ describe("§58 — the container roster", () => {
     await declare("bea:shared:double", "bea:notes");
     await gateway.append([
       signClaims(
-        containerClaims(
-          {
-            container: "bea:shared:double",
-            trust: "curated",
-            posture: "shared",
-            membership,
-            parent: "bea:notes",
-            inboxOf: "bea:shared",
-            leeway: OPEN,
-          },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(), (t) =>
+          containerClaims(
+            {
+              container: "bea:shared:double",
+              trust: "curated",
+              posture: "shared",
+              membership,
+              parent: "bea:notes",
+              inboxOf: "bea:shared",
+              leeway: OPEN,
+            },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),
@@ -1230,22 +1249,24 @@ describe("§58 — the container roster", () => {
     // right pick, so the door fails closed.
     await gateway.append([
       signClaims(
-        containerClaims(
-          {
-            container: "bea:shared",
-            trust: "curated",
-            posture: "shared",
-            membership,
-            parent: "ada:journal",
-            inboxOf: "bea",
-            // CARRIED, because latest-wins is per declaration: omitting it here DELETES the
-            // leeway, and the door then refuses for a reason that has nothing to do with the
-            // ambiguity under test. An earlier draft of this case omitted it and recorded the
-            // guard as unreachable from any door, which was false.
-            leeway: OPEN,
-          },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(), (t) =>
+          containerClaims(
+            {
+              container: "bea:shared",
+              trust: "curated",
+              posture: "shared",
+              membership,
+              parent: "ada:journal",
+              inboxOf: "bea",
+              // CARRIED, because latest-wins is per declaration: omitting it here DELETES the
+              // leeway, and the door then refuses for a reason that has nothing to do with the
+              // ambiguity under test. An earlier draft of this case omitted it and recorded the
+              // guard as unreachable from any door, which was false.
+              leeway: OPEN,
+            },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),
@@ -1279,16 +1300,18 @@ describe("§58 — the container roster", () => {
     await declareAs(gateway, "ada:journal", OPEN);
     await gateway.append([
       signClaims(
-        containerClaims(
-          {
-            container: "ada:journal:y",
-            trust: "curated",
-            posture: "shared",
-            membership: recOf(gateway, "ada:journal")!.membership,
-            parent: "bea:notes",
-          },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(), (t) =>
+          containerClaims(
+            {
+              container: "ada:journal:y",
+              trust: "curated",
+              posture: "shared",
+              membership: recOf(gateway, "ada:journal")!.membership,
+              parent: "bea:notes",
+            },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),
@@ -1313,16 +1336,18 @@ describe("§58 — the container roster", () => {
     // name governs and the leeway in force is the one this person set.
     await gateway.append([
       signClaims(
-        containerClaims(
-          {
-            container: "ada:journal:x",
-            trust: "curated",
-            posture: "shared",
-            membership: recOf(gateway, "ada:journal")!.membership,
-            parent: "ada",
-          },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(), (t) =>
+          containerClaims(
+            {
+              container: "ada:journal:x",
+              trust: "curated",
+              posture: "shared",
+              membership: recOf(gateway, "ada:journal")!.membership,
+              parent: "ada",
+            },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),
@@ -1398,10 +1423,12 @@ describe("§58 — the container roster", () => {
     const { base, gateway } = await connectionServer();
     await gateway.append([
       signClaims(
-        containerClaims(
-          { container: "zed", trust: "curated", posture: "shared", membership: ANY_AUTHOR },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(), (t) =>
+          containerClaims(
+            { container: "zed", trust: "curated", posture: "shared", membership: ANY_AUTHOR },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),
@@ -1417,7 +1444,7 @@ describe("§58 — the container roster", () => {
       ids.map((id) =>
         signClaims(
           {
-            ...stamped(gateway.nextTimestamp()),
+            ...gateway.stamp(),
             author: OPERATOR,
             pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
           },
@@ -1460,7 +1487,7 @@ describe("§58 — the container roster", () => {
       ids.map((id) =>
         signClaims(
           {
-            ...stamped(gateway.nextTimestamp()),
+            ...gateway.stamp(),
             author: OPERATOR,
             pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
           },
@@ -1507,7 +1534,7 @@ describe("§58 — the container roster", () => {
       ids.map((id) =>
         signClaims(
           {
-            ...stamped(gateway.nextTimestamp()),
+            ...gateway.stamp(),
             author: OPERATOR,
             pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
           },
@@ -1582,7 +1609,7 @@ describe("§58 — the container roster", () => {
       ids.map((id) =>
         signClaims(
           {
-            ...stamped(gateway.nextTimestamp()),
+            ...gateway.stamp(),
             author: OPERATOR,
             pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
           },
@@ -1702,7 +1729,7 @@ describe("§58 — the container roster", () => {
       ids.map((id) =>
         signClaims(
           {
-            ...stamped(gateway.nextTimestamp()),
+            ...gateway.stamp(),
             author: OPERATOR,
             pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
           },
@@ -1768,7 +1795,7 @@ describe("§58 — the container roster", () => {
       ids.map((id) =>
         signClaims(
           {
-            ...stamped(gateway.nextTimestamp()),
+            ...gateway.stamp(),
             author: OPERATOR,
             pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
           },

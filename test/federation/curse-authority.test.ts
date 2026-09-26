@@ -56,7 +56,7 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { cursesOf, type Channel } from "../../src/federation/channel.js";
 import { FERN } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
-import { stamped } from "../../src/gateway/stamp.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const OPERATOR_SEED = "17".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
@@ -97,7 +97,9 @@ async function meAndAlice(): Promise<{ me: Gateway; alice: Gateway; ch: Channel 
   const me = await store(OPERATOR_SEED);
   await me.append([
     signClaims(
-      grantClaims(STORE_ENTITY, STRANGER, "write", OPERATOR, me.nextTimestamp()),
+      withStamp(me.stamp(OPERATOR), (t) =>
+        grantClaims(STORE_ENTITY, STRANGER, "write", OPERATOR, t),
+      ),
       OPERATOR_SEED,
     ),
   ]);
@@ -115,7 +117,7 @@ async function meAndAlice(): Promise<{ me: Gateway; alice: Gateway; ch: Channel 
 /** The stranger's negation of a delta, appended into the store under its write grant. */
 async function strangerNegates(me: Gateway, targetId: string): Promise<string> {
   const forged = signClaims(
-    makeNegationClaims(STRANGER, me.nextTimestamp(), targetId),
+    withStamp(me.stamp(STRANGER), (t) => makeNegationClaims(STRANGER, t, targetId)),
     STRANGER_SEED,
   );
   await me.append([forged]);
@@ -242,7 +244,7 @@ describe("T232 — a write-granted stranger cannot lift an operator's curse", ()
     const forged: Claims = {
       ...template,
       author: STRANGER,
-      ...stamped(me.nextTimestamp()),
+      ...me.stamp(STRANGER),
       pointers: template.pointers.map((p) =>
         p.role === "living" ? { ...p, target: { kind: "primitive", value: "alice:Sprout" } } : p,
       ),

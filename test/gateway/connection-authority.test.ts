@@ -24,6 +24,7 @@ import { holdsGrant, revocationClaims } from "../../src/gateway/accounts.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { SEALED_LEEWAY, type Leeway } from "../../src/gateway/leeway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const OP_SEED = "3a".repeat(32);
 const OP = authorForSeed(OP_SEED);
@@ -40,21 +41,23 @@ afterEach(async () => {
 
 async function declare(gateway: Gateway, container: string, leeway?: Leeway, parent?: string) {
   const delta = signClaims(
-    containerClaims(
-      {
-        container,
-        trust: "curated",
-        posture: "shared",
-        membership: {
-          op: "select",
-          pred: { hasPointer: { context: { exact: "height" } } },
-          in: "input",
+    withStamp(gateway.stamp(OP), (t) =>
+      containerClaims(
+        {
+          container,
+          trust: "curated",
+          posture: "shared",
+          membership: {
+            op: "select",
+            pred: { hasPointer: { context: { exact: "height" } } },
+            in: "input",
+          },
+          ...(leeway === undefined ? {} : { leeway }),
+          ...(parent === undefined ? {} : { parent }),
         },
-        ...(leeway === undefined ? {} : { leeway }),
-        ...(parent === undefined ? {} : { parent }),
-      },
-      OP,
-      gateway.nextTimestamp(),
+        OP,
+        t,
+      ),
     ),
     OP_SEED,
   );
@@ -200,7 +203,10 @@ describe("live bound connection authority", () => {
     await declare(gateway, LEAF, RECEIVES, ROOT);
     expect(boundChannelAdmits(gateway, first.binding, first.status)).toBe(true);
     await gateway.append([
-      signClaims(revocationClaims(ancestor.id, OP, gateway.nextTimestamp()), OP_SEED),
+      signClaims(
+        withStamp(gateway.stamp(OP), (t) => revocationClaims(ancestor.id, OP, t)),
+        OP_SEED,
+      ),
     ]);
     const table = readContainerTable(
       gateway.reactor,

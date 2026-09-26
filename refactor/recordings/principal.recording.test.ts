@@ -60,6 +60,7 @@ import { subtreeOf } from "../../src/server/subtree.js";
 import { resolveUserView, roleClaims, rolesOf, userClaims } from "../../src/server/users.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { bothOrders, idsOf, KEY, nameOf, Raw, record, SEEDS, signed, type Who } from "./corpus.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const NOW = 1_000_000;
 
@@ -324,16 +325,18 @@ describe("recordings: principals", () => {
     const gw = await bootAda();
     const declare = (container: string, member: Who, parent?: string) =>
       signed(
-        containerClaims(
-          {
-            container,
-            trust: "curated",
-            posture: "shared",
-            membership: authoredBy(KEY[member]),
-            ...(parent === undefined ? {} : { parent }),
-          },
-          KEY.operator,
-          gw.nextTimestamp(),
+        withStamp(gw.stamp(KEY.operator), (t) =>
+          containerClaims(
+            {
+              container,
+              trust: "curated",
+              posture: "shared",
+              membership: authoredBy(KEY[member]),
+              ...(parent === undefined ? {} : { parent }),
+            },
+            KEY.operator,
+            t,
+          ),
         ),
         "operator",
       );

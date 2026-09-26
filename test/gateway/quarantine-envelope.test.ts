@@ -30,6 +30,7 @@ import {
 } from "../../src/gateway/envelope.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
+import type { Stamp } from "../../src/gateway/stamp.js";
 import { FERN, SURVEYOR, SURVEYOR_SEED, observed } from "../spike/garden.js";
 
 const OP_SEED = "0e".repeat(32);
@@ -68,9 +69,8 @@ const declare = (
 
 // One strike, the shape every reader in this repo suppresses on: a lone `negates` pointer, no
 // entity and no context — which is exactly why a per-entity candidate filter can never find it.
-const strikeOf = (target: string, ts: number): Claims => ({
-  timestamp: ts,
-  validFrom: ts,
+const strikeOf = (target: string, at: Stamp): Claims => ({
+  ...at,
   author: OP,
   pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: target } } }],
 });
@@ -481,7 +481,9 @@ describe("T34 object level: what a caller meets, and what the operator can read"
         OP_SEED,
       ),
     ]);
-    await declare(gw, ENVELOPE_ANY, { maxConcurrentRenders: 2, renderTimeoutMs: 900 }, 9700);
+    // The pool's spawn window is its render budget (renderers.ts), and a spawn past it counts as
+    // `faulted`, not `timedOut`. 3000ms leaves room for spawn under load, as elsewhere in this file.
+    await declare(gw, ENVELOPE_ANY, { maxConcurrentRenders: 2, renderTimeoutMs: 3000 }, 9700);
     const pool = await gw.openContainer({ name: "loam:pool:again" });
 
     const inFlight = serve(pool.gateway!, "hang");
@@ -569,7 +571,7 @@ describe("T34 suppression: a struck declaration stops binding, at both levels", 
     await gw.append([signClaims(grantClaims(STORE_ENTITY, SURVEYOR, "write", OP, 9250), OP_SEED)]);
     await gw.append([
       signClaims(
-        { ...strikeOf(tightening.id, gw.nextTimestamp()), author: SURVEYOR },
+        { ...strikeOf(tightening.id, gw.stamp(SURVEYOR)), author: SURVEYOR },
         SURVEYOR_SEED,
       ),
     ]);
@@ -579,7 +581,7 @@ describe("T34 suppression: a struck declaration stops binding, at both levels", 
     expect(gw.envelopeReports()[0]!.envelope.maxConcurrentRenders).toBe(1);
 
     // Now the operator's. Delta level first, then what a caller meets.
-    await gw.append([signClaims(strikeOf(tightening.id, gw.nextTimestamp()), OP_SEED)]);
+    await gw.append([signClaims(strikeOf(tightening.id, gw.stamp(OP)), OP_SEED)]);
     expect(readEnvelopePolicy(gw.reactor, gw.validityNow(), OP).has("loam:pool:struck")).toBe(
       false,
     );
@@ -605,7 +607,7 @@ describe("T34 suppression: a struck declaration stops binding, at both levels", 
     const pool = await gw.openQuarantine();
     expect(gw.envelopeReports()[0]!.envelope.maxConcurrentRenders).toBe(9);
 
-    await gw.append([signClaims(strikeOf(wide.id, gw.nextTimestamp()), OP_SEED)]);
+    await gw.append([signClaims(strikeOf(wide.id, gw.stamp(OP)), OP_SEED)]);
     expect(readEnvelopePolicy(gw.reactor, gw.validityNow(), OP).size).toBe(0);
     expect(gw.envelopeReports()[0]!.envelope).toEqual(DEFAULT_QUARANTINE_ENVELOPE);
 
@@ -667,7 +669,7 @@ describe("T34 suppression: a struck declaration stops binding, at both levels", 
     await declare(gw, "loam:pool:middle", { maxConcurrentRenders: 9, renderTimeoutMs: 3000 }, 9910);
     const middle = await gw.openContainer({ name: "loam:pool:middle" });
     // Struck AFTER the seeding: the copy inside `middle` still carries the wide declaration.
-    await gw.append([signClaims(strikeOf(wide.id, gw.nextTimestamp()), OP_SEED)]);
+    await gw.append([signClaims(strikeOf(wide.id, gw.stamp(OP)), OP_SEED)]);
     expect(
       readEnvelopePolicy(middle.gateway!.reactor, middle.gateway!.validityNow(), OP).get(
         ENVELOPE_ANY,

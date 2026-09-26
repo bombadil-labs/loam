@@ -12,6 +12,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "./fixtures.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const OP_SEED = "cc".repeat(32);
 const named = (name: string): Schema => ({ ...PLANT_POLICY, name });
@@ -25,7 +26,7 @@ describe("§47 — conflicts serves neither and names both", () => {
     try {
       await gw.append([
         signClaims(
-          bindingPolicyClaims("conflicts", gw.operatorAuthor!, gw.nextTimestamp()),
+          withStamp(gw.stamp(), (t) => bindingPolicyClaims("conflicts", gw.operatorAuthor!, t)),
           OP_SEED,
         ),
       ]);
@@ -69,7 +70,7 @@ describe("§47 — conflicts serves neither and names both", () => {
     try {
       await gw.append([
         signClaims(
-          bindingPolicyClaims("conflicts", gw.operatorAuthor!, gw.nextTimestamp()),
+          withStamp(gw.stamp(), (t) => bindingPolicyClaims("conflicts", gw.operatorAuthor!, t)),
           OP_SEED,
         ),
       ]);

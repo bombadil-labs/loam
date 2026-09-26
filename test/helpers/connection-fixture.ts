@@ -29,6 +29,7 @@ import { AUTHORIZE_PATH } from "../../src/server/oauth.js";
 import { SAME_ORIGIN, signIn } from "./session-fixture.js";
 import { FERN } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
+import { stamped, type Stamp } from "../../src/gateway/stamp.js";
 
 export const OPERATOR_SEED = "0e".repeat(32);
 export const OPERATOR = authorForSeed(OPERATOR_SEED);
@@ -237,11 +238,11 @@ export const heightDeltas = (gw: Gateway, height: number): Delta[] =>
   );
 
 /** A signed Plant height claim by `seed`, the shape the typed door mints. */
-export const heightClaim = (seed: string, height: number, timestamp: number): Delta =>
+/** `at` is one time for both fields, or a gateway's `stamp()`. */
+export const heightClaim = (seed: string, height: number, at: number | Stamp): Delta =>
   signClaims(
     {
-      timestamp,
-      validFrom: timestamp,
+      ...(typeof at === "number" ? stamped(at) : at),
       author: authorForSeed(seed),
       pointers: [
         { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "height" } } },

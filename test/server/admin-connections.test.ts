@@ -17,6 +17,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { authorForSeed, signClaims, type Claims, type Delta } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
+import { stamped, type Stamp } from "../../src/gateway/stamp.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import { hashPassword, writeCredentials, type ScryptParams } from "../../src/server/credentials.js";
@@ -140,11 +141,10 @@ async function revokeViaPanel(base: string, sessionId: string, name: string): Pr
 }
 
 /** A connection-signed data write into an inbox pool. */
-const noteBy = (seed: string, ts: number, text: string): Delta =>
+const noteBy = (seed: string, at: number | Stamp, text: string): Delta =>
   signClaims(
     {
-      timestamp: ts,
-      validFrom: ts,
+      ...(typeof at === "number" ? stamped(at) : at),
       author: authorForSeed(seed),
       pointers: [{ role: "note", target: { kind: "primitive", value: text } }],
     },
@@ -234,7 +234,7 @@ describe("§40 criterion 12 — the connections panel (bare bound connections)",
     const { base, gateway, inboxes } = await bareServer();
     const pool1 = gateway.connectionInboxes.get(inboxes.one)!.gateway!;
     const pool2 = gateway.connectionInboxes.get(inboxes.two)!.gateway!;
-    const past = noteBy(CONN_SEED, gateway.nextTimestamp(), "written before the revoke");
+    const past = noteBy(CONN_SEED, gateway.stamp(CONN), "written before the revoke");
     await pool1.append([past]);
 
     const ada = await signIn(base, "ada");
@@ -247,7 +247,7 @@ describe("§40 criterion 12 — the connections panel (bare bound connections)",
       confirm_token: "not-a-minted-token",
     });
     expect(forged.status).toBe(403);
-    await pool1.append([noteBy(CONN_SEED, gateway.nextTimestamp(), "still writable")]);
+    await pool1.append([noteBy(CONN_SEED, gateway.stamp(CONN), "still writable")]);
 
     // The confirm page tells the truth before anything happens: refuse-next-write, keep the past.
     const confirm = await postAdmin(base, "/admin/revoke", ada, {
@@ -267,9 +267,9 @@ describe("§40 criterion 12 — the connections panel (bare bound connections)",
     // DELTA level, two-sided (§39.3c): the next write refuses; the sibling still writes; the past
     // delta keeps its author and stays in the gather.
     await expect(
-      pool1.append([noteBy(CONN_SEED, gateway.nextTimestamp(), "after the revoke")]),
+      pool1.append([noteBy(CONN_SEED, gateway.stamp(CONN), "after the revoke")]),
     ).rejects.toThrow();
-    const w2 = noteBy(CONN2_SEED, gateway.nextTimestamp(), "the sibling is untouched");
+    const w2 = noteBy(CONN2_SEED, gateway.stamp(CONN2), "the sibling is untouched");
     await pool2.append([w2]);
     expect(pool2.reactor.get(w2.id)).toBeDefined();
     expect(pool1.reactor.get(past.id)!.claims.author).toBe(CONN);
@@ -297,7 +297,7 @@ describe("§40 criterion 12 — the connections panel (bare bound connections)",
     const body = await res.text();
     expect(body).not.toContain("inbox:ada"); // existence is confirmed neither way
     // Positive control: the connection still writes — nothing was revoked.
-    await pool1.append([noteBy(CONN_SEED, gateway.nextTimestamp(), "unrevoked")]);
+    await pool1.append([noteBy(CONN_SEED, gateway.stamp(CONN), "unrevoked")]);
   });
 });
 
@@ -474,7 +474,7 @@ describe("§40 criterion 12 — the connections panel joins oauth.json (phases 1
 
     // Positive controls: the bearer writes AND the actor's inbox write lands, BEFORE the revoke.
     expect((await mutate(base, token, 90)).status).toBe(200);
-    const past = noteBy(actorSeed, gateway.nextTimestamp(), "written before the revoke");
+    const past = noteBy(actorSeed, gateway.stamp(actor), "written before the revoke");
     await pool.append([past]);
 
     // Revoke through the panel's confirm flow.
@@ -497,7 +497,7 @@ describe("§40 criterion 12 — the connections panel joins oauth.json (phases 1
     // the bearer's landed write — in the pool its binding named, never the primary (SPEC §58) —
     // both keep the actor as author.
     await expect(
-      pool.append([noteBy(actorSeed, gateway.nextTimestamp(), "after the revoke")]),
+      pool.append([noteBy(actorSeed, gateway.stamp(actor), "after the revoke")]),
     ).rejects.toThrow();
     expect(pool.reactor.get(past.id)!.claims.author).toBe(actor);
     const heightAuthorsIn = (gw: Gateway): string[] =>

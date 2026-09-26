@@ -96,6 +96,7 @@ import {
   redeem,
 } from "../helpers/connection-fixture.js";
 import { FERN } from "../spike/garden.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const PEER_SEED = "7a".repeat(32);
 const PEER_TOKEN = "peer-door-token";
@@ -169,7 +170,10 @@ const declare = (
           leeway,
         };
   return gw.append([
-    signClaims(containerClaims(spec, OPERATOR, gw.nextTimestamp()), OPERATOR_SEED),
+    signClaims(
+      withStamp(gw.stamp(), (t) => containerClaims(spec, OPERATOR, t)),
+      OPERATOR_SEED,
+    ),
   ]);
 };
 
@@ -230,11 +234,13 @@ const envelopeOf = (gw: Gateway, container: string) =>
 const wideCeiling = (gw: Gateway): Promise<unknown> =>
   gw.append([
     signClaims(
-      envelopeClaims(
-        ENVELOPE_ANY,
-        { maxConcurrentRenders: 32, renderTimeoutMs: 4000, maxMemoryMb: 1024 },
-        OPERATOR,
-        gw.nextTimestamp(),
+      withStamp(gw.stamp(), (t) =>
+        envelopeClaims(
+          ENVELOPE_ANY,
+          { maxConcurrentRenders: 32, renderTimeoutMs: 4000, maxMemoryMb: 1024 },
+          OPERATOR,
+          t,
+        ),
       ),
       OPERATOR_SEED,
     ),
@@ -250,15 +256,17 @@ describe("§58 — leeway fits its parent's terms, and cascades", () => {
     // Two-sided: a child that declares NO leeway is a pure namespace and binds.
     await gateway.append([
       signClaims(
-        containerClaims(
-          {
-            container: "ada:journal:plain",
-            trust: "curated",
-            posture: "separate",
-            parent: "ada:journal",
-          },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(), (t) =>
+          containerClaims(
+            {
+              container: "ada:journal:plain",
+              trust: "curated",
+              posture: "separate",
+              parent: "ada:journal",
+            },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),
@@ -458,7 +466,7 @@ describe("§58 — leeway fits its parent's terms, and cascades", () => {
     };
     await gateway.append([
       signClaims(
-        channelRecordClaims(withoutBinding, OPERATOR, gateway.nextTimestamp()),
+        withStamp(gateway.stamp(), (t) => channelRecordClaims(withoutBinding, OPERATOR, t)),
         OPERATOR_SEED,
       ),
     ]);
@@ -595,7 +603,10 @@ describe("§58 — leeway fits its parent's terms, and cascades", () => {
     ).toBeGreaterThan(0);
     await pool.append(
       grants.map((id) =>
-        signClaims(makeNegationClaims(OPERATOR, pool.nextTimestamp(), id), OPERATOR_SEED),
+        signClaims(
+          withStamp(pool.stamp(OPERATOR), (t) => makeNegationClaims(OPERATOR, t, id)),
+          OPERATOR_SEED,
+        ),
       ),
     );
     // The channel record still stands — nothing was deleted — but it serves nobody and is not

@@ -16,6 +16,7 @@ import {
   OPERATOR_SEED,
 } from "../helpers/connection-fixture.js";
 import { readOAuthFile } from "../../src/server/oauth-file.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const OPEN: Leeway = { ...SEALED_LEEWAY, receive: true };
 const PICK = { pick: { order: { byTimestamp: "desc" } } };
@@ -28,17 +29,19 @@ const declareAs = (gw: Gateway, container: string, leeway: Leeway): Promise<unkn
   ).containers.get(container);
   return gw.append([
     signClaims(
-      containerClaims(
-        {
-          container,
-          trust: standing?.trust ?? ("curated" as const),
-          posture: standing?.posture ?? ("separate" as const),
-          ...(standing?.parent === undefined ? {} : { parent: standing.parent }),
-          ...(standing?.membership === undefined ? {} : { membership: standing.membership }),
-          leeway,
-        },
-        OPERATOR,
-        gw.nextTimestamp(),
+      withStamp(gw.stamp(OPERATOR), (t) =>
+        containerClaims(
+          {
+            container,
+            trust: standing?.trust ?? ("curated" as const),
+            posture: standing?.posture ?? ("separate" as const),
+            ...(standing?.parent === undefined ? {} : { parent: standing.parent }),
+            ...(standing?.membership === undefined ? {} : { membership: standing.membership }),
+            leeway,
+          },
+          OPERATOR,
+          t,
+        ),
       ),
       OPERATOR_SEED,
     ),
@@ -85,7 +88,9 @@ describe("§58 — a connection's fence is its container, and a grant adds nothi
     const actor = readOAuthFile(connectorsHome).grants[0]!.actor;
     await gateway.append([
       signClaims(
-        grantClaims(STORE_ENTITY, actor, "register", OPERATOR, gateway.nextTimestamp(), "sync:"),
+        withStamp(gateway.stamp(OPERATOR), (t) =>
+          grantClaims(STORE_ENTITY, actor, "register", OPERATOR, t, "sync:"),
+        ),
         OPERATOR_SEED,
       ),
     ]);
@@ -114,13 +119,15 @@ describe("§58 — a connection's fence is its container, and a grant adds nothi
     const { authorForSeed } = await import("@bombadil/rhizomatic");
     await gateway.append([
       signClaims(
-        grantClaims(
-          STORE_ENTITY,
-          authorForSeed("4d".repeat(32)),
-          "register",
-          OPERATOR,
-          gateway.nextTimestamp(),
-          "sync:",
+        withStamp(gateway.stamp(OPERATOR), (t) =>
+          grantClaims(
+            STORE_ENTITY,
+            authorForSeed("4d".repeat(32)),
+            "register",
+            OPERATOR,
+            t,
+            "sync:",
+          ),
         ),
         OPERATOR_SEED,
       ),

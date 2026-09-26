@@ -13,6 +13,7 @@ import { prepareRendererInContext, renderRendererInContext } from "../../src/gat
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "./fixtures.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const OP_SEED = "6c".repeat(32);
 const OP = authorForSeed(OP_SEED);
@@ -28,26 +29,30 @@ async function fixture() {
   });
   await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
   await gateway.append([
-    observed(FERN, "height", 101, gateway.nextTimestamp(), OP_SEED),
+    observed(FERN, "height", 101, gateway.stamp(OP), OP_SEED),
     signClaims(
-      containerClaims(
-        {
-          container: DESTINATION,
-          trust: "curated",
-          posture: "shared",
-          membership: {
-            op: "select",
-            pred: { match: { field: "author", cmp: "eq", const: "none" } },
-            in: "input",
+      withStamp(gateway.stamp(OP), (t) =>
+        containerClaims(
+          {
+            container: DESTINATION,
+            trust: "curated",
+            posture: "shared",
+            membership: {
+              op: "select",
+              pred: { match: { field: "author", cmp: "eq", const: "none" } },
+              in: "input",
+            },
           },
-        },
-        OP,
-        gateway.nextTimestamp(),
+          OP,
+          t,
+        ),
       ),
       OP_SEED,
     ),
     signClaims(
-      envelopeClaims(ENVELOPE_ANY, { renderTimeoutMs: 10_000 }, OP, gateway.nextTimestamp()),
+      withStamp(gateway.stamp(OP), (t) =>
+        envelopeClaims(ENVELOPE_ANY, { renderTimeoutMs: 10_000 }, OP, t),
+      ),
       OP_SEED,
     ),
   ]);
@@ -57,7 +62,7 @@ async function fixture() {
     ownerSeed: "b4".repeat(32),
   });
   await inbox.gateway!.append([
-    observed(FERN, "height", 201, inbox.gateway!.nextTimestamp(), CONNECTION_SEED),
+    observed(FERN, "height", 201, inbox.gateway!.stamp(REQUESTER), CONNECTION_SEED),
   ]);
   const execution = (await gateway.openQuarantine()).gateway;
   await gateway.publishRenderer({

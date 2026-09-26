@@ -32,6 +32,7 @@ import { artifactClaims, artifactDefect } from "../../src/gateway/artifact.js";
 import { eraseClaims } from "../../src/gateway/erase.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 import { FERN, observed } from "../spike/garden.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const OP_SEED = "0e".repeat(32);
 const OP = authorForSeed(OP_SEED);
@@ -188,7 +189,10 @@ describe("§30 criterion 2: publication is a declaration, and it fail-closes bot
     expect(artifactDefect(artifactClaims([], OP, 1))).toMatch(/at least one route/);
     expect(artifactDefect(artifactClaims(["plant"], OP, 1))).toBeUndefined();
     const gw = await boot();
-    const malformed = signClaims(artifactClaims([], OP, gw.nextTimestamp()), OP_SEED);
+    const malformed = signClaims(
+      withStamp(gw.stamp(OP), (t) => artifactClaims([], OP, t)),
+      OP_SEED,
+    );
     await expect(gw.append([malformed])).rejects.toThrow(/malformed law/);
     // …and the INGEST door refuses the very same bytes. A declaration OPENS something, so a
     // malformed one must be refused wherever it arrives; the two doors disagreeing is how a store
@@ -199,7 +203,10 @@ describe("§30 criterion 2: publication is a declaration, and it fail-closes bot
     expect(receipt.rejected).toBe(1);
     // A WELL-FORMED one lands through the same door, so this is not a rail that passes by refusing
     // everything.
-    const good = signClaims(artifactClaims(["plant"], OP, gw.nextTimestamp()), OP_SEED);
+    const good = signClaims(
+      withStamp(gw.stamp(OP), (t) => artifactClaims(["plant"], OP, t)),
+      OP_SEED,
+    );
     const ok = await gw.federate([good], { admit: () => true });
     expect(ok.accepted).toBe(1);
     expect(gw.artifactRoutes().has("plant")).toBe(true);

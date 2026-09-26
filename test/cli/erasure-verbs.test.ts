@@ -164,6 +164,7 @@ import { storePath } from "../../src/cli/config.js";
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 import {
   CTX_ERASE,
   eraseClaims,
@@ -342,7 +343,10 @@ async function noteAs(
 /** An operator-signed write grant, so a subject's own claim passes the append door. */
 const grantWrite = (gw: Gateway, subject: string): Promise<unknown> =>
   gw.append([
-    signClaims(grantClaims(STORE_ENTITY, subject, "write", OP, gw.nextTimestamp()), OP_SEED),
+    signClaims(
+      withStamp(gw.stamp(OP), (t) => grantClaims(STORE_ENTITY, subject, "write", OP, t)),
+      OP_SEED,
+    ),
   ]);
 
 /** The one delta in the ground carrying `marker` as a primitive — REFUSES on any other count. */
@@ -563,7 +567,10 @@ describe("T206 (a) — `loam slate list` prints §29.1's record", () => {
     // catches an over-broad list. What this rail owns is the SCREEN: that the block prints them.
     const world = await ground(home, async (gw) => {
       const claim = await note(gw, "note:kit", "title", "kit-retracted-marker");
-      const strike = signClaims(makeNegationClaims(OP, gw.nextTimestamp(), claim.id), OP_SEED);
+      const strike = signClaims(
+        withStamp(gw.stamp(OP), (t) => makeNegationClaims(OP, t, claim.id)),
+        OP_SEED,
+      );
       await gw.append([strike]);
       // A wall whose membership covers the strike, so the overlap is real rather than declared.
       const term = frozenMembershipTerm([strike.id]);
@@ -930,7 +937,10 @@ describe("T206 (d) — `loam erasures` reads the receipt, never the record", () 
       // Negation (§11): striking the erasure withdraws the erasure order, so the id may
       // return. The receipt stops binding and leaves the surviving set.
       await gw.append([
-        signClaims(makeNegationClaims(OP, gw.nextTimestamp(), negated.erasure), OP_SEED),
+        signClaims(
+          withStamp(gw.stamp(OP), (t) => makeNegationClaims(OP, t, negated.erasure)),
+          OP_SEED,
+        ),
       ]);
       return { kept, negated };
     });
@@ -1079,7 +1089,10 @@ describe("T206 (d) — `loam erasures` reads the receipt, never the record", () 
       const target = await note(gw, "note:kit", "title", "kit-erased-marker");
       const receipt = await gw.erase(target.id, { reason: "kit asked" });
       await gw.append([
-        signClaims(makeNegationClaims(OP, gw.nextTimestamp(), receipt.erasure), OP_SEED),
+        signClaims(
+          withStamp(gw.stamp(OP), (t) => makeNegationClaims(OP, t, receipt.erasure)),
+          OP_SEED,
+        ),
       ]);
       return { erased: target.id, erasure: receipt.erasure };
     });
@@ -1214,7 +1227,9 @@ describe("T206 (d) — `loam erasures` reads the receipt, never the record", () 
       const target = await note(gw, "note:kit", "title", "kit-erased-marker");
       await note(gw, "note:vera", "title", "vera-bystander-marker");
       const tomb = signClaims(
-        eraseClaims(target.id, target.claims.author, OP, gw.nextTimestamp(), "kit asked"),
+        withStamp(gw.stamp(OP), (t) =>
+          eraseClaims(target.id, target.claims.author, OP, t, "kit asked"),
+        ),
         OP_SEED,
       );
       await gw.append([tomb]);
@@ -1550,7 +1565,10 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     // it withdrew, so erasing the claim leaves the strike dangling at an id that is gone.
     const world = await ground(home, async (gw) => {
       const claim = await note(gw, "note:kit", "title", "kit-erased-marker");
-      const strike = signClaims(makeNegationClaims(OP, gw.nextTimestamp(), claim.id), OP_SEED);
+      const strike = signClaims(
+        withStamp(gw.stamp(OP), (t) => makeNegationClaims(OP, t, claim.id)),
+        OP_SEED,
+      );
       await gw.append([strike]);
       return { claim: claim.id, strike: strike.id };
     });
@@ -1574,7 +1592,10 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     const offer = join(root, "revival-offer.json");
     const world = await ground(peer, async (gw) => {
       const claim = await note(gw, "note:kit", "title", "kit-retracted-marker");
-      const strike = signClaims(makeNegationClaims(OP, gw.nextTimestamp(), claim.id), OP_SEED);
+      const strike = signClaims(
+        withStamp(gw.stamp(OP), (t) => makeNegationClaims(OP, t, claim.id)),
+        OP_SEED,
+      );
       await gw.append([strike]);
       writeFileSync(offer, exportOffer(gw));
       return { claim: claim.id, strike: strike.id };
@@ -1951,12 +1972,8 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
       const target = await note(gw, "note:kit", "title", "kit-erased-marker");
       await note(gw, "note:vera", "title", "vera-bystander-marker");
       const tomb = signClaims(
-        eraseClaims(
-          target.id,
-          target.claims.author,
-          OP,
-          gw.nextTimestamp(),
-          "the first sentence, art. 17",
+        withStamp(gw.stamp(OP), (t) =>
+          eraseClaims(target.id, target.claims.author, OP, t, "the first sentence, art. 17"),
         ),
         OP_SEED,
       );
@@ -2009,7 +2026,9 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     const world = await ground(home, async (gw) => {
       const target = await note(gw, "note:kit", "title", "kit-erased-marker");
       const tomb = signClaims(
-        eraseClaims(target.id, target.claims.author, OP, gw.nextTimestamp(), "kit asked"),
+        withStamp(gw.stamp(OP), (t) =>
+          eraseClaims(target.id, target.claims.author, OP, t, "kit asked"),
+        ),
         OP_SEED,
       );
       await gw.append([tomb]);
@@ -2172,7 +2191,10 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     // every reader. H1's headline outcome, reachable in one command.
     const world = await ground(home, async (gw) => {
       const claim = await note(gw, "note:kit", "title", "kit-retracted-marker");
-      const strike = signClaims(makeNegationClaims(OP, gw.nextTimestamp(), claim.id), OP_SEED);
+      const strike = signClaims(
+        withStamp(gw.stamp(OP), (t) => makeNegationClaims(OP, t, claim.id)),
+        OP_SEED,
+      );
       await gw.append([strike]);
       return { claim: claim.id, strike: strike.id };
     });
@@ -2209,7 +2231,10 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
       const strikes: string[] = [];
       let target = claim.id;
       for (let i = 0; i < 3; i += 1) {
-        const s = signClaims(makeNegationClaims(OP, gw.nextTimestamp(), target), OP_SEED);
+        const s = signClaims(
+          withStamp(gw.stamp(OP), (t) => makeNegationClaims(OP, t, target)),
+          OP_SEED,
+        );
         await gw.append([s]);
         strikes.push(s.id);
         target = s.id;
@@ -2299,9 +2324,12 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     const world = await ground(home, async (gw) => {
       await grantWrite(gw, SUBJECT);
       const claim = await note(gw, "note:kit", "title", "kit-retracted-marker");
-      const byOperator = signClaims(makeNegationClaims(OP, gw.nextTimestamp(), claim.id), OP_SEED);
+      const byOperator = signClaims(
+        withStamp(gw.stamp(OP), (t) => makeNegationClaims(OP, t, claim.id)),
+        OP_SEED,
+      );
       const bySubject = signClaims(
-        makeNegationClaims(SUBJECT, gw.nextTimestamp(), claim.id),
+        withStamp(gw.stamp(SUBJECT), (t) => makeNegationClaims(SUBJECT, t, claim.id)),
         SUBJECT_SEED,
       );
       await gw.append([byOperator, bySubject]);
@@ -2353,7 +2381,7 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
       await grantWrite(gw, SUBJECT);
       const claim = await note(gw, "note:kit", "title", "kit-retracted-marker");
       const strike = signClaims(
-        makeNegationClaims(SUBJECT, gw.nextTimestamp(), claim.id),
+        withStamp(gw.stamp(SUBJECT), (t) => makeNegationClaims(SUBJECT, t, claim.id)),
         SUBJECT_SEED,
       );
       await gw.append([strike]);
@@ -2403,7 +2431,7 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
         JSON.stringify(d.claims).includes("Plain"),
       )!;
       const strike = signClaims(
-        makeNegationClaims(OP, gw.nextTimestamp(), registration.id),
+        withStamp(gw.stamp(OP), (t) => makeNegationClaims(OP, t, registration.id)),
         OP_SEED,
       );
       await gw.append([strike]);
@@ -2531,7 +2559,7 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
       // AND THE STRIKE OVER IT IS WHAT GETS ERASED. Erasing the definition itself would move Ledger
       // onto mask-a, a key no surviving reading holds — skipped before any attribution happens.
       const strike = signClaims(
-        makeNegationClaims(OP, gw.nextTimestamp(), definitions[1]!.id),
+        withStamp(gw.stamp(OP), (t) => makeNegationClaims(OP, t, definitions[1]!.id)),
         OP_SEED,
       );
       await gw.append([strike]);
@@ -2574,7 +2602,10 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
 
     const world = await ground(home, async (gw) => {
       const claim = await note(gw, "note:kit", "title", "kit-withdrawn-marker");
-      const strike = signClaims(makeNegationClaims(OP, gw.nextTimestamp(), claim.id), OP_SEED);
+      const strike = signClaims(
+        withStamp(gw.stamp(OP), (t) => makeNegationClaims(OP, t, claim.id)),
+        OP_SEED,
+      );
       await gw.append([strike]);
       return { strike: strike.id };
     });
@@ -2671,7 +2702,10 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     const plain = await noteHome("all-consulted");
     const other = await ground(plain, async (gw) => {
       const claim = await note(gw, "note:kit", "title", "kit-withdrawn-marker");
-      const strike = signClaims(makeNegationClaims(OP, gw.nextTimestamp(), claim.id), OP_SEED);
+      const strike = signClaims(
+        withStamp(gw.stamp(OP), (t) => makeNegationClaims(OP, t, claim.id)),
+        OP_SEED,
+      );
       await gw.append([strike]);
       return strike.id;
     });
@@ -2745,7 +2779,10 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     // login door serves it again.
     const world = await ground(home, async (gw) => {
       const claim = await note(gw, "note:kit", "title", "kit-condemned-marker");
-      const strike = signClaims(makeNegationClaims(OP, gw.nextTimestamp(), claim.id), OP_SEED);
+      const strike = signClaims(
+        withStamp(gw.stamp(OP), (t) => makeNegationClaims(OP, t, claim.id)),
+        OP_SEED,
+      );
       await gw.append([strike]);
       const stood = await standSlate(gw, {
         container: "container:slate:kit",
@@ -2916,7 +2953,10 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
         )
         .sort((a, b) => a.claims.timestamp - b.claims.timestamp);
       expect(second, "FilmB's own definition").toHaveLength(1);
-      const strike = signClaims(makeNegationClaims(OP, gw.nextTimestamp(), second[0]!.id), OP_SEED);
+      const strike = signClaims(
+        withStamp(gw.stamp(OP), (t) => makeNegationClaims(OP, t, second[0]!.id)),
+        OP_SEED,
+      );
       await gw.append([strike]);
       return { strike: strike.id };
     });
@@ -2958,7 +2998,7 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
         JSON.stringify(d.claims).includes("Ledger"),
       )!;
       const strike = signClaims(
-        makeNegationClaims(OP, gw.nextTimestamp(), registration.id),
+        withStamp(gw.stamp(OP), (t) => makeNegationClaims(OP, t, registration.id)),
         OP_SEED,
       );
       await gw.append([strike]);
@@ -2989,13 +3029,13 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     // the claim live all along, and erasing that strike would free it with nothing printed.
     const world = await ground(home, async (gw) => {
       const grant = signClaims(
-        grantClaims(STORE_ENTITY, SUBJECT, "write", OP, gw.nextTimestamp()),
+        withStamp(gw.stamp(OP), (t) => grantClaims(STORE_ENTITY, SUBJECT, "write", OP, t)),
         OP_SEED,
       );
       await gw.append([grant]);
       const claim = await noteAs(gw, "note:kit", "title", "kit-retracted-marker", SUBJECT_SEED);
       const strike = signClaims(
-        makeNegationClaims(SUBJECT, gw.nextTimestamp(), claim.id),
+        withStamp(gw.stamp(SUBJECT), (t) => makeNegationClaims(SUBJECT, t, claim.id)),
         SUBJECT_SEED,
       );
       await gw.append([strike]);
@@ -3004,7 +3044,12 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
       // signed a negation, so the retraction still binds at the anonymous door — while the trust
       // mask drops the subject from the striker set, and a governed reader sees the claim as never
       // having been withdrawn at all.
-      await gw.append([signClaims(makeNegationClaims(OP, gw.nextTimestamp(), grant.id), OP_SEED)]);
+      await gw.append([
+        signClaims(
+          withStamp(gw.stamp(OP), (t) => makeNegationClaims(OP, t, grant.id)),
+          OP_SEED,
+        ),
+      ]);
       return { claim: claim.id, strike: strike.id };
     });
     // The premise, at the object level: the subject's own strike really does suppress the claim at
@@ -3038,8 +3083,14 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     // to destroy a record that was never exposed — the false alarm costs what a missed one does.
     const world = await ground(home, async (gw) => {
       const claim = await note(gw, "note:kit", "title", "kit-retracted-marker");
-      const first = signClaims(makeNegationClaims(OP, gw.nextTimestamp(), claim.id), OP_SEED);
-      const second = signClaims(makeNegationClaims(OP, gw.nextTimestamp(), claim.id), OP_SEED);
+      const first = signClaims(
+        withStamp(gw.stamp(OP), (t) => makeNegationClaims(OP, t, claim.id)),
+        OP_SEED,
+      );
+      const second = signClaims(
+        withStamp(gw.stamp(OP), (t) => makeNegationClaims(OP, t, claim.id)),
+        OP_SEED,
+      );
       await gw.append([first, second]);
       return { claim: claim.id, first: first.id };
     });

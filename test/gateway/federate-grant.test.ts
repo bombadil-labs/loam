@@ -15,6 +15,7 @@ import { federateContainersOf, grantClaims, holdsGrant } from "../../src/gateway
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const OP = "cc".repeat(32);
 const FRIEND = "d1".repeat(32);
@@ -31,13 +32,8 @@ async function store(): Promise<Gateway> {
 async function grantFederate(gw: Gateway, subject: string, container: string): Promise<void> {
   await gw.append([
     signClaims(
-      grantClaims(
-        STORE_ENTITY,
-        subject,
-        "federate",
-        authorForSeed(OP),
-        gw.nextTimestamp(),
-        container,
+      withStamp(gw.stamp(authorForSeed(OP)), (t) =>
+        grantClaims(STORE_ENTITY, subject, "federate", authorForSeed(OP), t, container),
       ),
       OP,
     ),
@@ -141,7 +137,10 @@ describe("T188 — a container-scoped federate grant", () => {
           ),
       )!;
       await gw.append([
-        signClaims(makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), grant.id), OP),
+        signClaims(
+          withStamp(gw.stamp(), (t) => makeNegationClaims(gw.operatorAuthor!, t, grant.id)),
+          OP,
+        ),
       ]);
 
       expect(federateContainersOf(gw.reactor, gw.validityNow(), friend, gw.operatorAuthor)).toEqual(

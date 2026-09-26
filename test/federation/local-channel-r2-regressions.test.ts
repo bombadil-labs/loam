@@ -5,6 +5,7 @@ import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { localChannelEvidence } from "../../src/federation/local-channel-events.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const SEED = "cc".repeat(32);
 const inContext = (d: Delta, context: string) =>
@@ -93,7 +94,9 @@ describe("T288 R2 regression controls", () => {
       const baseline = localChannelEvidence(gw, ch.name);
       expect(baseline.state).toBe("open");
       if (baseline.state === "open") expect(baseline.received).toEqual([]);
-      const claims = makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), erased.erasure);
+      const claims = withStamp(gw.stamp(), (t) =>
+        makeNegationClaims(gw.operatorAuthor!, t, erased.erasure),
+      );
       const unsupported = signClaims(
         {
           ...claims,
