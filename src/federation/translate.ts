@@ -30,6 +30,7 @@ import type { AppendReceipt, Gateway } from "../gateway/gateway.js";
 import { lawfulSnapshot } from "../gateway/registration.js";
 import { negatedAt } from "../gateway/negation.js";
 import { dataStruck } from "../gateway/accounts.js";
+import { keysEverOf } from "../gateway/principal.js";
 import { promotionRefusal } from "../gateway/adopt.js";
 
 export const CTX_TRANSLATION = "loam.translation";
@@ -371,6 +372,8 @@ export async function translate(
   //
   // Runs whether or not any spec survives: a retired spec must not strand the renderings it made.
   const retractions: Delta[] = [];
+  // A rendering is ours when any key of the translator's principal signed it.
+  const mine = keysEverOf(gateway.reactor, { key: author });
   let stranded = 0;
   for (const held of gateway.reactor.snapshot()) {
     if (struck(held.id)) continue;
@@ -378,7 +381,7 @@ export async function translate(
       (p) => p.role === "translates" && p.target.kind === "delta",
     );
     if (cite?.target.kind !== "delta" || !struck(cite.target.deltaRef.delta)) continue;
-    if (held.claims.author !== author) {
+    if (!mine.has(held.claims.author)) {
       stranded += 1;
       continue;
     }

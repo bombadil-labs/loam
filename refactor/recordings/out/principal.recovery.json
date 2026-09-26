@@ -1,0 +1,63 @@
+{
+  "first key's grant kept": {
+    "afterNewKeyClears": [
+      "first-key"
+    ],
+    "before": [
+      "first-key"
+    ],
+    "connection": {
+      "connectionWriteInPool": true,
+      "connectionWrites": "accepted",
+      "firstKeyAdminInPool": true
+    },
+    "container": {
+      "membershipGathers": [
+        "@writer: ada's write, first key",
+        "@writer: first-key",
+        "@writer: tenant+subject+verb"
+      ],
+      "tableNames": [
+        "ada",
+        "inbox:ada:@subadmin"
+      ]
+    },
+    "firstKeyWrites": "accepted",
+    "newKeyWrites": "accepted",
+    "standing": {
+      "firstKeyWrite": true,
+      "newKeyWrite": true
+    }
+  },
+  "first key's grant struck": {
+    "afterNewKeyClears": [
+      "first-key"
+    ],
+    "before": [
+      "first-key"
+    ],
+    "connection": {
+      "connectionWriteInPool": true,
+      "connectionWrites": "accepted",
+      "firstKeyAdminInPool": true
+    },
+    "container": {
+      "membershipGathers": [
+        "@writer: first-key",
+        "@writer: tenant+subject+verb"
+      ],
+      "tableNames": [
+        "ada",
+        "inbox:ada:@subadmin"
+      ]
+    },
+    "firstKeyWrites": {
+      "refused": "append rejected: @writer is not permitted: publishing through this store requires write standing (a surviving grant at loam:store), and no surviving grant says so"
+    },
+    "newKeyWrites": "accepted",
+    "standing": {
+      "firstKeyWrite": false,
+      "newKeyWrite": true
+    }
+  }
+}

@@ -19,6 +19,11 @@
 // - `principal.container`: a container owned by membership `authoredBy(<key>)`, which of a rotated
 //   user's writes its scope gathers, and `subtreeOf` reach by name.
 // - `principal.retract`: the retract-your-own check (`mutate.ts`) after a rotation.
+// - `principal.recovery`: ada's first key (`writer`) is lost and the operator re-points her to a
+//   new key (`peer`). Today that is a new write grant for the new key, which is what
+//   `ensureUserKey` appends when the seed file is gone; nothing links the two keys. `subadmin` is
+//   a connection the first key bound to her container. Recorded with the first key's store grant
+//   kept (the file that named it is gone, so `remove-role` cannot find it) and struck.
 //
 // Deliberately not recorded: admission (see `admission.recording.test.ts`); the token door's
 // `resolve`/`describe` and `resolveClientBearer`, which read `oauth.json` and `clients.json` rather
@@ -38,11 +43,13 @@ import {
   authorize,
   grantClaims,
   grantsHeldBy,
+  holdsGrant,
   honoredStrikeOn,
   type Verb,
 } from "../../src/gateway/accounts.js";
 import {
   containerClaims,
+  inboxName,
   containerScopeImpl,
   readContainerTable,
   survivingWriteGrantIds,
@@ -398,5 +405,134 @@ describe("recordings: principals", () => {
     await hooks.clear("Note", "note:ada", ["tag"], SEEDS.writer);
     steps["the first key clears tag"] = tags();
     await record("principal.retract", steps);
+  });
+
+  it("key recovery: the operator re-points a lost key to a new one", async () => {
+    const run = async (strikeFirstKey: boolean) => {
+      let at = NOW;
+      const tick = () => vi.setSystemTime((at += 1_000));
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(at);
+      // Only the first key holds write before the recovery.
+      const gw = await Gateway.boot(
+        new MemoryBackend(),
+        assembleGenesis({
+          operatorSeed: SEEDS.operator,
+          registrations: [NOTE_REG],
+          grants: [grantClaims(STORE_ENTITY, KEY.writer, "write", KEY.operator, 2)],
+        }),
+      );
+      const hooks = gw.gqlHooks();
+      const tags = () => gw.resolvedNode("Note", "note:ada").view["tag"] ?? null;
+      // Her container, owned by membership on the first key, as `declareOwned` writes it.
+      tick();
+      await gw.append([
+        signed(
+          withStamp(gw.stamp(KEY.operator), (t) =>
+            containerClaims(
+              {
+                container: "ada",
+                trust: "curated",
+                posture: "shared",
+                membership: authoredBy(KEY.writer),
+              },
+              KEY.operator,
+              t,
+            ),
+          ),
+          "operator",
+        ),
+      ]);
+      tick();
+      await gw.bindConnection({
+        container: "ada",
+        connectionKey: KEY.subadmin,
+        ownerSeed: SEEDS.writer,
+      });
+      const pool = gw.poolForBinding({
+        container: "ada",
+        inbox: inboxName("ada", KEY.subadmin),
+      });
+      tick();
+      await hooks.mutate("Note", "note:ada", { tag: "first-key" }, SEEDS.writer);
+      const before = tags();
+      // The recovery: the first key is lost; the operator grants the new key write.
+      tick();
+      const recovery = [
+        signed(
+          withStamp(gw.stamp(KEY.operator), (t) =>
+            grantClaims(STORE_ENTITY, KEY.peer, "write", KEY.operator, t),
+          ),
+          "operator",
+        ),
+      ];
+      if (strikeFirstKey) {
+        const [grantId] = survivingWriteGrantIds(
+          gw.reactor,
+          gw.validityNow(),
+          KEY.writer,
+          KEY.operator,
+        );
+        recovery.push(
+          signed(
+            withStamp(gw.stamp(KEY.operator), (t) => makeNegationClaims(KEY.operator, t, grantId!)),
+            "operator",
+          ),
+        );
+      }
+      await gw.append(recovery);
+      tick();
+      const holds = (r: Gateway, who: Who, verb: Verb) =>
+        holdsGrant(r.reactor, r.validityNow(), STORE_ENTITY, KEY[who], verb, KEY.operator);
+      const standing = {
+        newKeyWrite: holds(gw, "peer", "write"),
+        firstKeyWrite: holds(gw, "writer", "write"),
+      };
+      const newKeyWrites = await outcome(gw, note("peer", at + 1, "ada's write, new key"));
+      const firstKeyWrites = await outcome(gw, note("writer", at + 2, "ada's write, first key"));
+      tick();
+      await hooks.clear("Note", "note:ada", ["tag"], SEEDS.peer);
+      const afterNewKeyClears = tags();
+      tick();
+      const connection = {
+        firstKeyAdminInPool: holds(pool, "writer", "admin"),
+        connectionWriteInPool: holds(pool, "subadmin", "write"),
+        connectionWrites: await outcome(
+          pool,
+          note("subadmin", at + 1, "connection's write after the recovery"),
+        ),
+      };
+      tick();
+      const container = {
+        // Ada's own deltas the container gathers, by signing key: her tag write and her notes.
+        membershipGathers: containerScopeImpl(gw, { containers: ["ada"] })
+          .filter((d) => d.claims.author === KEY.writer || d.claims.author === KEY.peer)
+          .map((d) => {
+            const text = d.claims.pointers.find((p) => p.role === "text" || p.role === "value");
+            const said =
+              text?.target.kind === "primitive"
+                ? String(text.target.value)
+                : d.claims.pointers.map((p) => p.role).join("+");
+            return `${nameOf(d.claims.author)}: ${said}`;
+          })
+          .sort(),
+        tableNames: [
+          ...readContainerTable(gw.reactor, gw.validityNow(), KEY.operator).containers.keys(),
+        ].sort(),
+      };
+      return {
+        before,
+        standing,
+        newKeyWrites,
+        firstKeyWrites,
+        afterNewKeyClears,
+        connection,
+        container,
+      };
+    };
+    await record("principal.recovery", {
+      "first key's grant kept": await run(false),
+      "first key's grant struck": await run(true),
+    });
   });
 });

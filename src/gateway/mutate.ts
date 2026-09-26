@@ -18,6 +18,7 @@ import type { HVEntry, Primitive } from "@bombadil/rhizomatic";
 import type { ConnectionBinding, Gateway } from "./gateway.js";
 import { legalNameFor, queryFieldFor, type ClaimPointerSpec, type ResolvedNode } from "./gql.js";
 import { edgeRoles, lensOf, referenceProps, type ReferenceProp } from "./registration.js";
+import { keysEverOf } from "./principal.js";
 import { withStamp } from "./stamp.js";
 
 // Where a write LANDS (SPEC §58): a bound connection's deltas go into its inbox pool — the pool's
@@ -93,7 +94,7 @@ export async function mutateEntityImpl(
 // per its own absentAs). The negations sign and append through the same standing-checked path as
 // every write.
 //
-// The `claims.author === author` filter is the SINGLE load-bearing check of the retract-your-own
+// The `mine.has(claims.author)` filter is the SINGLE load-bearing check of the retract-your-own
 // invariant (Myk, 2026-07-12): `append` only proves the negation's author holds write standing,
 // NOT that the target is theirs — so a future refactor must never loosen this into negating a
 // foreign delta. (`claims.author` is signature-bound by verifyDelta at append, not self-assertable.
@@ -121,10 +122,12 @@ async function retract(
   // A bound connection gathers ITS scope: its own claims live in its pool, and a strike it signs
   // lands beside them there.
   const hview = gw.gatherForRetraction(name, entity, binding);
+  // "Your own" is every key of the caller's principal, not only the key signing this retraction.
+  const mine = keysEverOf(gw.reactor, { key: author });
   const targets = new Set<string>();
   for (const [field, entries] of hview.props) {
     for (const entry of entries) {
-      if (entry.delta.claims.author === author && !entry.negated && keep(field, entry)) {
+      if (mine.has(entry.delta.claims.author) && !entry.negated && keep(field, entry)) {
         targets.add(entry.delta.id);
       }
     }
