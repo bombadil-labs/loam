@@ -442,7 +442,10 @@ describe("T34 object level: what a caller meets, and what the operator can read"
 
   it("exhaustion is ATTRIBUTABLE: the report names which pool hit which limit", async () => {
     const gw = await primary();
-    await declare(gw, ENVELOPE_ANY, { maxConcurrentRenders: 1, renderTimeoutMs: 700 });
+    // The pool's spawn window is its render budget, and a spawn past it counts as `faulted`, not
+    // `timedOut`. Spawn measures 20-100ms here but shares the clock with a loaded suite; 3000ms
+    // leaves room, as elsewhere in this file.
+    await declare(gw, ENVELOPE_ANY, { maxConcurrentRenders: 1, renderTimeoutMs: 3000 });
     const busyPool = await gw.openQuarantine();
     const quietPool = await gw.openQuarantine();
 
