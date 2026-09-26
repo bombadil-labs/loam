@@ -379,14 +379,15 @@ Fix the rail first, then read what it says.
 
 ---
 
-## H11. A time every reader shares must never follow a value an author signed
+## H11. A shared present-time read must never follow a value an author signed
 
 **The property.** Since rhizomatic 0.11 every claim carries `validFrom` and an optional
-`validUntil`, and a read happens at an explicit time (SPEC-1 §6). One gateway reads for every
-caller, so its read time is shared. A claim's `timestamp` and `validFrom` are signed by its author,
-and the store accepts any finite value.
+`validUntil`, and the substrate evaluates validity at a `now` its caller supplies (SPEC-1 §6). A
+caller may pass any time, and an as-of read passes a past one on purpose. Loam's serving gateway
+reads the present for every caller, so the time it supplies for a present read is shared. A claim's
+`timestamp` and `validFrom` are signed by its author, and the store accepts any finite value.
 
-**The hazard (silent).** If the shared read time follows anything an author signed, that author
+**The hazard (silent).** If the shared present time follows anything an author signed, that author
 moves every reader's clock. Then leases end early, scheduled claims appear early, and nothing
 reports it. The path need not be direct. Here it was an ordering floor: "stamp this author's next
 claim above their newest held claim" also raised the gateway's read time. So one appended delta
@@ -394,9 +395,10 @@ dated an hour ahead, plus one ordinary write, moved the whole store an hour forw
 restart, because boot seeded the same floor from held claims. A count of writes is the same shape:
 a floor raised by one per write lets a busy writer drift the clock.
 
-**The question.** For every time a read uses: can any author's signed value, or any number of writes,
-change it? Keep ordering times and validity times apart. Ordering may follow an author's own claims;
-validity must follow the wall clock alone.
+**The question.** For a shared present-time read: can signed values or write counts change the time
+the host supplies? Keep ordering times and validity times apart. Ordering may follow an author's own
+claims; the present a gateway supplies follows its trusted host clock alone. An explicit as-of read
+may use another time deliberately.
 
 **What it cost.** It shipped in the 0.11 switch with every rail green. A hands-on operator review
 reproduced it against a live server in minutes; the fix then took four review rounds, each on an
