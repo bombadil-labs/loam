@@ -797,9 +797,15 @@ export function parseRegistrationInput(raw: unknown): RegistrationInput {
 // when governed. Definitions, registrations, and negations are all read from this set — a
 // foreign negation can no more retire the operator's schema than a foreign definition can
 // replace it.
+/** The operator's deltas that hold at `now`. */
 export function lawfulSnapshot(reactor: Reactor, now: number, operator?: string): DeltaSet {
   // Step-3 limit (refactor/PLAN.md step 4): claim validity is not read here yet, so `now` is unused.
   void now;
+  return lawfulHistory(reactor, operator);
+}
+
+/** Every delta the operator ever signed, whatever its validity. For questions about history. */
+export function lawfulHistory(reactor: Reactor, operator?: string): DeltaSet {
   if (operator === undefined) return reactor.snapshot();
   return DeltaSet.from([...reactor.snapshot()].filter((d) => d.claims.author === operator));
 }

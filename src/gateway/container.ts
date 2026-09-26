@@ -54,7 +54,7 @@ import {
   SIZE_ENVELOPES,
 } from "./envelope.js";
 import { withNegationClosure, withNegationClosureAcross } from "./ingest.js";
-import { lawfulDeltasAt, lawfulHistoryAt, lawfulSnapshot } from "./registration.js";
+import { lawfulDeltasAt, lawfulHistory, lawfulHistoryAt, lawfulSnapshot } from "./registration.js";
 import { negatedAt } from "./negation.js";
 import { readTrustPolicyAt, type TrustPolicy } from "./trust.js";
 import { Gateway, type ConnectionBinding, type FederationReport } from "./gateway.js";
@@ -2305,7 +2305,8 @@ export function unreachableStoreReport(gw: Gateway): {
   const struckSeparate = new Set<string>();
   if (gw.operatorAuthor !== undefined) {
     const negated = negatedAt(gw.reactor, gw.validityNow(), gw.operatorAuthor);
-    for (const delta of lawfulSnapshot(gw.reactor, gw.validityNow(), gw.operatorAuthor)) {
+    // HISTORY: an expired separate declaration still named a store.
+    for (const delta of lawfulHistory(gw.reactor, gw.operatorAuthor)) {
       if (!negated(delta.id)) continue;
       const name = containerRef(delta.claims, CTX_CONTAINER);
       if (name !== undefined && asPosture(primitives(delta.claims, "posture")[0]) === "separate") {
