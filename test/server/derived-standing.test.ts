@@ -18,13 +18,15 @@
 // so what a boot needs is exactly what S1 proves.
 
 //
+// The file has 18 cases. Every count below was measured on the 17-case version, before the
+// fence-widening case was split in two. They have not been re-measured since.
 // RAILS-RED on origin/main, this file copied in: 15 red, 2 green — 17 cases. Both greens are
 // CONTROLS and say so: the door-fence case (on main a connection may register nothing, so every
 // name outside the fence is refused for a different reason) and the two-grant case (it pins that
 // a plain grant-holder's mixed pair still lands, which main already did). Each pins that this
 // slice did not widen or narrow something; neither proves the slice, and neither pads the count.
 //
-// REVERT PROBES, MEASURED against this file as it stands — 17 cases. Re-measure when you add one.
+// REVERT PROBES, MEASURED on the 17-case version. Re-measure when you add a case.
 //   the binding grants no register fence                          → 14 red,  3 green
 //   the fence drops the COLON                                     →  3 red, 14 green
 //   every bound identity is routed to its pool (granted law dies) →  1 red, 16 green
