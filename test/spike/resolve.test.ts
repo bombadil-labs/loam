@@ -34,7 +34,7 @@ const deltas = [
 ];
 
 function gather(set: DeltaSet): HView {
-  const result = evalTerm(PLANT_BODY, set, FERN);
+  const result = evalTerm(PLANT_BODY, set, Date.now(), FERN);
   if (result.sort !== "hview") throw new Error(`expected an hview, got ${result.sort}`);
   return result.hview;
 }

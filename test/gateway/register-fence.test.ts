@@ -105,6 +105,7 @@ describe("T174 — a register grant is malformed law without exactly one non-emp
   it("an unknown verb is still refused, and the message names the three that exist", () => {
     const bogus = makeDelta({
       timestamp: 1,
+      validFrom: 1,
       author: OPERATOR,
       pointers: [
         {

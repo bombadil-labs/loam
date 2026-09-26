@@ -91,6 +91,7 @@ function decision(value: object, ts = 1): Delta {
     {
       author,
       timestamp: ts,
+      validFrom: ts,
       pointers: [
         {
           role: "decision",
@@ -133,7 +134,7 @@ function tags(result: ReturnType<typeof projectLiveReceiving>[number]): unknown 
     observed(FERN, "tag", "other-peer", 102, "43".repeat(32)),
   ])
     r.ingest(d);
-  r.register("law", reg.hyperschema.body, reg.roots);
+  r.register("law", reg.hyperschema.body, reg.roots, Date.now());
   return (resolveView(reg.schema, r.materializedView("law", FERN)!) as Record<string, unknown>).tag;
 }
 it("changes actual values on live revision, fallback and revival without another local decision", () => {
@@ -144,7 +145,12 @@ it("changes actual values on live revision, fallback and revival without another
     });
   const decisions = [decision(bind("media"))];
   const run = (ds: Delta[]) =>
-    projectLiveReceiving({ ...input, decisions, sources: [{ id: "media", deltas: ds }] })[0]!;
+    projectLiveReceiving({
+      ...input,
+      decisions,
+      sources: [{ id: "media", deltas: ds }],
+      now: Date.now(),
+    })[0]!;
   expect(tags(run(a))).toEqual(["local", "peer", "other-peer"]);
   expect(tags(run([...a, ...b]))).toBe("other-peer");
   const withdrawn = strike(b[3]!, 30);
@@ -168,6 +174,7 @@ it("keeps two valid same-author source programs separate and reports a receiving
     ...input,
     decisions: [decision(bind("a", "PlantA")), decision(bind("b", "PlantB"))],
     sources,
+    now: Date.now(),
   });
   expect(tags(r[0]!)).toEqual(["local", "peer", "other-peer"]);
   expect(tags(r[1]!)).toBe("other-peer");
@@ -180,6 +187,7 @@ it("keeps two valid same-author source programs separate and reports a receiving
       { id: "a", deltas: law(10) },
       { id: "b", deltas: law(20) },
     ],
+    now: Date.now(),
   });
   expect(contested.map((r) => r.status)).toEqual(["conflict", "conflict"]);
   expect(contested.every((r) => r.registration === undefined)).toBe(true);
@@ -193,12 +201,14 @@ it("never accepts recipient-signed policy solely from source bytes and validates
       ...input,
       decisions: [],
       sources: [{ id: "media", deltas: [...ds, binding] }],
+      now: Date.now(),
     }),
   ).toEqual([]);
   const r = projectLiveReceiving({
     ...input,
     decisions: [binding],
     sources: [{ id: "media", deltas: [...ds, curse] }],
+    now: Date.now(),
   });
   expect(r[0]!.status).toBe("selected");
   for (const deltas of [
@@ -206,7 +216,12 @@ it("never accepts recipient-signed policy solely from source bytes and validates
     [{ ...ds[0]!, sig: "00" }, ...ds],
   ])
     expect(
-      projectLiveReceiving({ ...input, decisions: [binding], sources: [{ id: "media", deltas }] }),
+      projectLiveReceiving({
+        ...input,
+        decisions: [binding],
+        sources: [{ id: "media", deltas }],
+        now: Date.now(),
+      }),
     ).toEqual([{ status: "invalid-input" }]);
 });
 it("reports conflicting relationship decisions identically in either replay order without a spurious winner", () => {
@@ -216,7 +231,8 @@ it("reports conflicting relationship decisions identically in either replay orde
     { id: "media", deltas: law(10) },
     { id: "other", deltas: law(20, "PlantB") },
   ];
-  const run = (decisions: Delta[]) => projectLiveReceiving({ ...input, decisions, sources });
+  const run = (decisions: Delta[]) =>
+    projectLiveReceiving({ ...input, decisions, sources, now: Date.now() });
   expect(run([a, b])).toEqual([{ relationship: "relationship", destination, status: "conflict" }]);
   expect(run([b, a, b])).toEqual(run([a, b]));
 });
@@ -228,6 +244,7 @@ it("refuses malformed or duplicate resolver metadata instead of silently serving
     {
       ...binding.claims,
       timestamp: 20,
+      validFrom: 20,
       pointers: binding.claims.pointers.map((p) =>
         p.role === "resolvers"
           ? { role: "resolvers", target: { kind: "primitive" as const, value: "not-json" } }
@@ -237,7 +254,12 @@ it("refuses malformed or duplicate resolver metadata instead of silently serving
     seed,
   );
   const duplicate = signClaims(
-    { ...binding.claims, timestamp: 20, pointers: [...binding.claims.pointers, resolver] },
+    {
+      ...binding.claims,
+      timestamp: 20,
+      validFrom: 20,
+      pointers: [...binding.claims.pointers, resolver],
+    },
     seed,
   );
   for (const candidate of [malformed, duplicate]) {
@@ -245,6 +267,7 @@ it("refuses malformed or duplicate resolver metadata instead of silently serving
       ...input,
       decisions: [decision(bind("media"))],
       sources: [{ id: "media", deltas: [...ds, candidate] }],
+      now: Date.now(),
     });
     expect(r[0]!.status).toBe("unsupported");
     expect(r[0]!.registration).toBeUndefined();
@@ -285,6 +308,7 @@ it("rejects signed policy envelopes with extra pointers or a wrong decision enti
         ...input,
         decisions: [invalid],
         sources: [{ id: "media", deltas: law(10) }],
+        now: Date.now(),
       }),
     ).toEqual([{ status: "invalid-input" }]);
   }
@@ -312,6 +336,7 @@ it("rejects a verified nonprimitive payload even when uncommitted extra properti
       ...input,
       decisions: [envelope],
       sources: [{ id: "media", deltas: law(10) }],
+      now: Date.now(),
     }),
   ).toEqual([{ status: "invalid-input" }]);
 });
@@ -325,6 +350,7 @@ it("refuses malformed or ambiguous roots rather than returning an unusable readi
       {
         ...binding.claims,
         timestamp: 20,
+        validFrom: 20,
         pointers: pointers.map((p) =>
           p.role === "roots" ? { role: "roots", target: { kind: "primitive" as const, value } } : p,
         ),
@@ -333,7 +359,10 @@ it("refuses malformed or ambiguous roots rather than returning an unusable readi
     ),
   );
   candidates.push(
-    signClaims({ ...binding.claims, timestamp: 20, pointers: [...pointers, roots] }, seed),
+    signClaims(
+      { ...binding.claims, timestamp: 20, validFrom: 20, pointers: [...pointers, roots] },
+      seed,
+    ),
   );
   for (const candidate of candidates) {
     expect(verifyDelta(candidate)).toBe("verified");
@@ -341,6 +370,7 @@ it("refuses malformed or ambiguous roots rather than returning an unusable readi
       ...input,
       decisions: [decision(bind("media"))],
       sources: [{ id: "media", deltas: [...ds, candidate] }],
+      now: Date.now(),
     });
     expect(r[0]!.status).toBe("unsupported");
     expect(r[0]!.registration).toBeUndefined();
@@ -354,6 +384,7 @@ it("refuses resolver envelopes whose signed field names would be lost by the leg
     {
       ...binding.claims,
       timestamp: 20,
+      validFrom: 20,
       pointers: binding.claims.pointers.map((p) =>
         p.role === "resolvers"
           ? { role: "resolvers", target: { kind: "primitive" as const, value } }
@@ -367,6 +398,7 @@ it("refuses resolver envelopes whose signed field names would be lost by the leg
     ...input,
     decisions: [decision(bind("media"))],
     sources: [{ id: "media", deltas: [...ds, candidate] }],
+    now: Date.now(),
   });
   expect(r[0]!.status).toBe("unsupported");
   expect(r[0]!.registration).toBeUndefined();
@@ -395,6 +427,7 @@ it("does not let context discovery on an entity payload validate a wrong-context
       ...input,
       decisions: [envelope],
       sources: [{ id: "media", deltas: law(10) }],
+      now: Date.now(),
     }),
   ).toEqual([{ status: "invalid-input" }]);
 });
@@ -418,6 +451,7 @@ it("rejects signed JSON null, arrays and scalars as policy decisions", () => {
         ...input,
         decisions: [envelope],
         sources: [{ id: "media", deltas: law(10) }],
+        now: Date.now(),
       }),
     ).toEqual([{ status: "invalid-input" }]);
   }

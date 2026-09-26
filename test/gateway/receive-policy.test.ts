@@ -93,6 +93,7 @@ function decision(value: object, seed = R, timestamp = 1): Delta {
     {
       author: authorForSeed(seed),
       timestamp,
+      validFrom: timestamp,
       pointers: [
         {
           role: "decision",
@@ -128,7 +129,13 @@ function law(ts = 10, schema: Schema = PLANT_POLICY): Delta[] {
 const strike = (d: Delta, seed = S, ts = 40) =>
   signClaims(makeNegationClaims(authorForSeed(seed), ts, d.id), seed);
 const run = (deltas: Delta[], decisions = [binding], source = "media_log") =>
-  projectLiveReceiving({ receiver, destination, decisions, sources: [{ id: source, deltas }] });
+  projectLiveReceiving({
+    receiver,
+    destination,
+    decisions,
+    sources: [{ id: source, deltas }],
+    now: Date.now(),
+  });
 function values(reg: NonNullable<ReturnType<typeof run>[number]>["registration"]): unknown {
   expect(reg).toBeDefined();
   const data = new Reactor();
@@ -138,7 +145,7 @@ function values(reg: NonNullable<ReturnType<typeof run>[number]>["registration"]
   const rootDecoy = observed(FERN, "tag", "SECRET", 103, X);
   expect(rootDecoy.claims.pointers).toHaveLength(2);
   for (const d of [local, first, second]) data.ingest(d);
-  data.register("received", reg!.hyperschema.body, reg!.roots);
+  data.register("received", reg!.hyperschema.body, reg!.roots, Date.now());
   return resolveView(reg!.schema, data.materializedView("received", FERN)!);
 }
 describe("experimental live receiving projection", () => {
@@ -208,6 +215,7 @@ describe("experimental live receiving projection", () => {
         { id: "media_log", deltas: a },
         { id: "other", deltas: b },
       ],
+      now: Date.now(),
     });
     expect(r.find((x) => x.relationship === body.relationship)!.registration!.boundId).toBe(
       a[3]!.id,
@@ -220,6 +228,7 @@ describe("experimental live receiving projection", () => {
         destination: "elsewhere",
         decisions: [binding],
         sources: [{ id: "media_log", deltas: a }],
+        now: Date.now(),
       }),
     ).toEqual([]);
   });
@@ -241,6 +250,7 @@ describe("experimental live receiving projection", () => {
           { id: "media_log", deltas: ds },
           { id: "media_log", deltas: ds },
         ],
+        now: Date.now(),
       })[0]!.status,
     ).toBe("invalid-input");
     expect(run(ds.slice(1))[0]!.status).toBe("unavailable");
@@ -437,6 +447,7 @@ describe("experimental live receiving projection", () => {
           decisions: [binding],
           sources: [{ id: "media_log", deltas: ds }],
           ...input,
+          now: Date.now(),
         }),
       ).toEqual([{ status: "invalid-input" }]);
   });

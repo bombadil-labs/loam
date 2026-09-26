@@ -77,6 +77,7 @@ const strikeOf = (targetId: string, seed: string, timestamp: number): Delta =>
   signClaims(
     {
       timestamp,
+      validFrom: timestamp,
       author: authorForSeed(seed),
       pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: targetId } } }],
     },
@@ -237,19 +238,27 @@ describe("§40 phase A3 — the schema panel", () => {
     const { base, gateway } = await schemaServer();
     const bea = await signIn(base, "bea"); // actor only
     const page = await (await getPage(base, bea)).text();
-    const before = readRegistrations(gateway.reactor, gateway.operatorAuthor).length;
+    const before = readRegistrations(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor,
+    ).length;
 
     const refused = await register(base, bea, tokenOf(page), JSON.stringify(plantRegistration()));
     expect(refused.status).toBe(403);
     expect(await refused.text()).toContain("operator role");
-    expect(readRegistrations(gateway.reactor, gateway.operatorAuthor).length).toBe(before);
+    expect(
+      readRegistrations(gateway.reactor, gateway.validityNow(), gateway.operatorAuthor).length,
+    ).toBe(before);
 
     // The positive control: the SAME body from an operator session lands.
     const ada = await signIn(base, "ada");
     const adaPage = await (await getPage(base, ada)).text();
     const ok = await register(base, ada, tokenOf(adaPage), JSON.stringify(plantRegistration()));
     expect(ok.status).toBe(303);
-    expect(readRegistrations(gateway.reactor, gateway.operatorAuthor).length).toBe(before + 1);
+    expect(
+      readRegistrations(gateway.reactor, gateway.validityNow(), gateway.operatorAuthor).length,
+    ).toBe(before + 1);
   });
 
   it("(8) the register form lands the same body as `loam register`; the panel lists it; the sibling door still works", async () => {
@@ -261,7 +270,7 @@ describe("§40 phase A3 — the schema panel", () => {
     const token = tokenOf(before);
     const ok = await register(base, ada, token, JSON.stringify(plantRegistration()));
     expect(ok.status).toBe(303);
-    const regs = readRegistrations(gateway.reactor, gateway.operatorAuthor);
+    const regs = readRegistrations(gateway.reactor, gateway.validityNow(), gateway.operatorAuthor);
     expect(regs.map((r) => r.hyperschema.name)).toContain("Plant");
 
     // The panel lists the lens with its roots, and the honest-empty line is gone.
@@ -305,10 +314,14 @@ describe("§40 phase A3 — the schema panel", () => {
     // Forged token: nothing lands. Positive control beside it: the honest token does.
     const forged = await register(base, ada, "not-the-token", JSON.stringify(plantRegistration()));
     expect(forged.status).toBe(403);
-    expect(readRegistrations(gateway.reactor, gateway.operatorAuthor)).toHaveLength(0);
+    expect(
+      readRegistrations(gateway.reactor, gateway.validityNow(), gateway.operatorAuthor),
+    ).toHaveLength(0);
     const honest = await register(base, ada, token, JSON.stringify(plantRegistration()));
     expect(honest.status).toBe(303);
-    expect(readRegistrations(gateway.reactor, gateway.operatorAuthor)).toHaveLength(1);
+    expect(
+      readRegistrations(gateway.reactor, gateway.validityNow(), gateway.operatorAuthor),
+    ).toHaveLength(1);
   });
 });
 

@@ -20,7 +20,7 @@ import {
 
 // The cinelog dialect: sasha's app says "viewer watched film on date" its own way.
 const cinelogEntry = (viewer, film, date, ts) => ({
-  timestamp: ts,
+  timestamp: ts, validFrom: ts,
   author: AUTHORS.sasha,
   pointers: [
     { role: "film_watched", target: { kind: "entity", entity: { id: film, context: "log" } } },

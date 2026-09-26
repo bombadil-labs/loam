@@ -92,6 +92,7 @@ function decision(value: object, seed = R, timestamp = 1): Delta {
     {
       author: authorForSeed(seed),
       timestamp,
+      validFrom: timestamp,
       pointers: [
         {
           role: "decision",
@@ -152,6 +153,7 @@ const run = (ds: Delta[], decisions = [binding]) =>
     destination: body.destination,
     decisions,
     sources: [{ id: body.source, deltas: ds }],
+    now: Date.now(),
   });
 function height(result: ReturnType<typeof run>[number], extra = false) {
   expect(result.status).toBe("selected");
@@ -163,7 +165,7 @@ function height(result: ReturnType<typeof run>[number], extra = false) {
     ...(extra ? [observed(FERN, "height", 33, 102, X), observed(FERN, "height", 9, 99, X)] : []),
   ])
     data.ingest(d);
-  data.register("reading", reg.hyperschema.body, reg.roots);
+  data.register("reading", reg.hyperschema.body, reg.roots, Date.now());
   const view = resolveView(reg.schema, data.materializedView("reading", FERN)!);
   if (view === null || typeof view !== "object" || Array.isArray(view))
     throw new Error("expected object view");
@@ -217,7 +219,7 @@ describe("exact receiving snapshot operands", () => {
       // Include two valid definitions of the SAME resolution entity with identical content.
       const schemaRef = a[3]!.claims.pointers.find((p) => p.role === "schemaVersion")!.target;
       if (schemaRef.kind !== "entity") throw Error("fixture");
-      const oldSchema = signClaims({ ...a[2]!.claims, timestamp: 4 }, S);
+      const oldSchema = signClaims({ ...a[2]!.claims, timestamp: 4, validFrom: 4 }, S);
       const members = [oldSchema, ...ds],
         p = pause(members, { selection: selection(members, a[3]!.id) }),
         one = decision({ ...body, mode: "one-time", selection: selection(members, a[3]!.id) });
@@ -261,7 +263,7 @@ describe("exact receiving snapshot operands", () => {
   it("withdrawal of unselected older definitions preserves the selected law", () => {
     const a = law(),
       older = law(5);
-    const oldSchema = signClaims({ ...a[2]!.claims, timestamp: 4 }, S);
+    const oldSchema = signClaims({ ...a[2]!.claims, timestamp: 4, validFrom: 4 }, S);
     const members = [...older, ...a, oldSchema];
     const p = pause(members, { selection: selection(members, a[3]!.id) });
     const result = run([...members, strike(older[0]!), strike(oldSchema)], [binding, p])[0]!;
@@ -376,6 +378,7 @@ describe("exact receiving snapshot operands", () => {
       destination: body.destination,
       decisions: [signed],
       sources: [{ id: "s", deltas: a }],
+      now: Date.now(),
     })[0]!;
     expect(result.status).toBe("selected");
     expect(result.registration!.boundId).toBe(a[3]!.id);

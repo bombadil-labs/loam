@@ -90,7 +90,7 @@ describe("§47 — the equivalence: the fast path is a cache with a proof", () =
 
         // PRODUCTION: what the optimized reader serves, as lens -> entity.
         const production = new Map(
-          readRegistrations(gw.reactor, gw.operatorAuthor).map((r) => [
+          readRegistrations(gw.reactor, gw.validityNow(), gw.operatorAuthor).map((r) => [
             lensOf(r) as string,
             r.entity,
           ]),

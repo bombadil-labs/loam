@@ -481,6 +481,7 @@ describe("§52 (c) — linkevent_attending authors the symmetric delta and the v
         id: "x",
         claims: {
           timestamp: 0,
+          validFrom: 0,
           author: WRITER,
           pointers: [
             {

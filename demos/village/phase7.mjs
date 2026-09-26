@@ -52,7 +52,7 @@ try {
   for (const [name, s] of Object.entries(stores)) {
     const grant = signClaims(
       {
-        timestamp: now,
+        timestamp: now, validFrom: now,
         author: AUTHORS.mallory,
         pointers: [
           {

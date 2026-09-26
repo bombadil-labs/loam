@@ -24,14 +24,14 @@
     ],
     "writer": [
       {
-        "id": "#op→writer:federate",
-        "prefix": "friends",
-        "verb": "federate"
-      },
-      {
         "id": "#op→writer:register",
         "prefix": "w:",
         "verb": "register"
+      },
+      {
+        "id": "#op→writer:federate",
+        "prefix": "friends",
+        "verb": "federate"
       },
       {
         "id": "#subadmin→writer:write",
@@ -84,14 +84,14 @@
     ],
     "writer": [
       {
-        "id": "#op→writer:federate",
-        "prefix": "friends",
-        "verb": "federate"
-      },
-      {
         "id": "#op→writer:register",
         "prefix": "w:",
         "verb": "register"
+      },
+      {
+        "id": "#op→writer:federate",
+        "prefix": "friends",
+        "verb": "federate"
       },
       {
         "id": "#subadmin→writer:write",

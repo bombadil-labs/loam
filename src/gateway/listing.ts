@@ -236,7 +236,7 @@ async function ensureListingContainer(
           ...(standing?.leewayDeclared ? { leeway: standing.leeway } : {}),
         },
         law.operator,
-        gw.nextTimestamp(),
+        gw.nextTimestamp(law.operator),
       ),
       law.seed,
     ),

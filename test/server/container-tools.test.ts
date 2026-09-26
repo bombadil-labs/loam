@@ -177,6 +177,7 @@ import {
   OPERATOR_SEED,
 } from "../helpers/connection-fixture.js";
 import { FERN, observed } from "../spike/garden.js";
+import { stamped } from "../../src/gateway/stamp.js";
 
 const PEER_SEED = "7a".repeat(32);
 const PEER_TOKEN = "peer-door-token";
@@ -813,7 +814,7 @@ describe("§58 — the container roster", () => {
       ids.map((id) =>
         signClaims(
           {
-            timestamp: gateway.nextTimestamp(),
+            ...stamped(gateway.nextTimestamp()),
             author: OPERATOR,
             pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
           },
@@ -856,7 +857,7 @@ describe("§58 — the container roster", () => {
       ids.map((id) =>
         signClaims(
           {
-            timestamp: gateway.nextTimestamp(),
+            ...stamped(gateway.nextTimestamp()),
             author: OPERATOR,
             pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
           },
@@ -936,7 +937,7 @@ describe("§58 — the container roster", () => {
       ids.map((id) =>
         signClaims(
           {
-            timestamp: gateway.nextTimestamp(),
+            ...stamped(gateway.nextTimestamp()),
             author: OPERATOR,
             pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
           },
@@ -995,7 +996,7 @@ describe("§58 — the container roster", () => {
       ids.map((id) =>
         signClaims(
           {
-            timestamp: gateway.nextTimestamp(),
+            ...stamped(gateway.nextTimestamp()),
             author: OPERATOR,
             pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
           },
@@ -1387,7 +1388,7 @@ describe("§58 — the container roster", () => {
       ids.map((id) =>
         signClaims(
           {
-            timestamp: gateway.nextTimestamp(),
+            ...stamped(gateway.nextTimestamp()),
             author: OPERATOR,
             pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
           },
@@ -1425,7 +1426,7 @@ describe("§58 — the container roster", () => {
       ids.map((id) =>
         signClaims(
           {
-            timestamp: gateway.nextTimestamp(),
+            ...stamped(gateway.nextTimestamp()),
             author: OPERATOR,
             pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
           },
@@ -1471,7 +1472,7 @@ describe("§58 — the container roster", () => {
       ids.map((id) =>
         signClaims(
           {
-            timestamp: gateway.nextTimestamp(),
+            ...stamped(gateway.nextTimestamp()),
             author: OPERATOR,
             pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
           },
@@ -1541,7 +1542,7 @@ describe("§58 — the container roster", () => {
       ids.map((id) =>
         signClaims(
           {
-            timestamp: gateway.nextTimestamp(),
+            ...stamped(gateway.nextTimestamp()),
             author: OPERATOR,
             pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
           },
@@ -1656,7 +1657,7 @@ describe("§58 — the container roster", () => {
       ids.map((id) =>
         signClaims(
           {
-            timestamp: gateway.nextTimestamp(),
+            ...stamped(gateway.nextTimestamp()),
             author: OPERATOR,
             pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
           },
@@ -1717,7 +1718,7 @@ describe("§58 — the container roster", () => {
       ids.map((id) =>
         signClaims(
           {
-            timestamp: gateway.nextTimestamp(),
+            ...stamped(gateway.nextTimestamp()),
             author: OPERATOR,
             pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: id } } }],
           },
@@ -1750,6 +1751,7 @@ describe("§58 — the container roster", () => {
       signClaims(
         {
           timestamp: 9000,
+          validFrom: 9000,
           author: OPERATOR,
           pointers: [
             {

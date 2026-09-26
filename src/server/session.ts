@@ -873,7 +873,7 @@ page will offer.</p>`,
   const groundRoles = (user: string): ReadonlySet<UserRole> | undefined => {
     const ground = deps.ground();
     if (ground === undefined || ground.operator === undefined) return undefined;
-    return rolesOf(ground.reactor, ground.operator, user);
+    return rolesOf(ground.reactor, ground.operator, Date.now(), user);
   };
 
   const getLogin = (req: IncomingMessage, res: ServerResponse): void => {

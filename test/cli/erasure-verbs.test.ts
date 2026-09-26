@@ -1120,6 +1120,7 @@ describe("T206 (d) — `loam erasures` reads the receipt, never the record", () 
     const bare = signClaims(
       {
         timestamp: 9_500_000,
+        validFrom: 9_500_000,
         author: OP,
         pointers: [
           {

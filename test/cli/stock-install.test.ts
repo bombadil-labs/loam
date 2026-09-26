@@ -64,7 +64,7 @@ async function boundRows(h: string): Promise<Registration[]> {
   const backend = new SqliteBackend(join(h, "store.sqlite"));
   const reopened = await Gateway.open(backend);
   try {
-    return readRegistrations(reopened.reactor, operatorOf(h));
+    return readRegistrations(reopened.reactor, reopened.validityNow(), operatorOf(h));
   } finally {
     await reopened.close();
   }

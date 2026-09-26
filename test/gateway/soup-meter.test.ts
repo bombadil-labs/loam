@@ -34,6 +34,7 @@ const claim = (author: string, seed: string, entity: string, t: number) =>
   signClaims(
     {
       timestamp: t,
+      validFrom: t,
       author,
       pointers: [
         { role: "reading", target: { kind: "entity", entity: { id: entity, context: "sensor" } } },

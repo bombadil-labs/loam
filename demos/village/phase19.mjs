@@ -65,7 +65,7 @@ try {
   await almanac.gateway.append([
     signClaims(
       {
-        timestamp: Date.now(),
+        ...((t) => ({ timestamp: t, validFrom: t }))(Date.now()),
         author: operator,
         pointers: [
           {
@@ -116,7 +116,7 @@ try {
   await almanac.gateway.append([
     signClaims(
       {
-        timestamp: Date.now(),
+        ...((t) => ({ timestamp: t, validFrom: t }))(Date.now()),
         author: operator,
         pointers: [
           {

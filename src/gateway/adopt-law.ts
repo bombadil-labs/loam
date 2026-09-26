@@ -123,6 +123,7 @@ export function manifestExportClaims(
   }
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       {
@@ -423,6 +424,8 @@ interface Source {
   /** The declared container the members came from, joinable to the T32 table. */
   readonly container?: string;
   readonly from: string;
+  /** The instant definitions are loaded at. */
+  readonly now: number;
 }
 
 function classify(src: Source, row: ManifestRow): Export {
@@ -468,7 +471,7 @@ function classify(src: Source, row: ManifestRow): Export {
   if (definitions.length > 0) {
     const live = definitions.filter((d) => src.survives(d.id));
     if (live.length === 0) struck("a hyperschema definition", definitions[0]!.id);
-    return schemaExport(src, row, live);
+    return schemaExport(src, row, live, src.now);
   }
   // Not law. Is it an entity the module carries claims about at all?
   const mentioned = src.members.some((d) =>
@@ -529,7 +532,12 @@ function rendererExport(row: ManifestRow, target: Delta): RendererExport {
   };
 }
 
-function schemaExport(src: Source, row: ManifestRow, definitions: readonly Delta[]): SchemaExport {
+function schemaExport(
+  src: Source,
+  row: ManifestRow,
+  definitions: readonly Delta[],
+  now: number,
+): SchemaExport {
   const definition = [...definitions]
     .sort((a, b) =>
       byAge(
@@ -583,8 +591,8 @@ function schemaExport(src: Source, row: ManifestRow, definitions: readonly Delta
         `living Schema, snapshot, or roots — malformed law, named rather than skipped`,
     );
   }
-  const hyperschema = loadHyperSchema(src.dset, row.target);
-  const schema = loadSchema(src.dset, snapshotEntity);
+  const hyperschema = loadHyperSchema(src.dset, row.target, now);
+  const schema = loadSchema(src.dset, snapshotEntity, now);
   const roots = JSON.parse(rootsJson) as string[];
   const mutationsJson = primitiveOf(binding.claims, "mutations");
   const resolversJson = primitiveOf(binding.claims, "resolvers");
@@ -716,6 +724,7 @@ function sourceOf(
   const livesAtSource = survivalOver(version.members);
   const container = containerOf(gw, version);
   return {
+    now: gw.validityNow(),
     version,
     members: version.members,
     survives: reading === "blessing" ? livesAtSource : () => true,
@@ -766,6 +775,7 @@ interface RecordSpec {
 function lawAdoptionRecordClaims(spec: RecordSpec, operator: string, timestamp: number): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author: operator,
     pointers: [
       {
@@ -1052,7 +1062,7 @@ function entityCaptureRefusal(gw: Gateway, ex: SchemaExport): string | undefined
 // module's bytes).
 function boundHyperschemaAt(gw: Gateway, entity: string): HyperSchema | undefined {
   try {
-    return loadHyperSchema(lawfulSnapshot(gw.reactor, gw.operatorAuthor), entity);
+    return loadHyperSchema(lawfulSnapshot(gw.reactor, gw.operatorAuthor), entity, gw.validityNow());
   } catch {
     return undefined;
   }
@@ -1921,8 +1931,13 @@ function exactBinding(d: Delta): ExactBinding | undefined {
 // tie-break — timestamp DESCENDING, id ASCENDING — which is not the (timestamp, id)-ascending-
 // then-last order registrations resolve by. The loader is then called for the canonical parse, so
 // a malformed winner refuses exactly where it would, and never by falling back to an older row.
-function definitionWinner(dset: DeltaSet, bootstrap: HyperSchema, entity: string): Delta {
-  const result = evalTerm(bootstrap.body, dset, entity);
+function definitionWinner(
+  dset: DeltaSet,
+  bootstrap: HyperSchema,
+  entity: string,
+  now: number,
+): Delta {
+  const result = evalTerm(bootstrap.body, dset, now, entity);
   if (result.sort !== "hview") throw new Error("bootstrap body must yield an HView");
   const defs = result.hview.props.get("definition") ?? [];
   const latest = [...defs].sort((a, b) => {
@@ -1947,6 +1962,7 @@ export function classifyExactReceivedSchema(
   received: readonly Delta[],
   lens: string,
   registration: string,
+  now: number,
 ): ExactReceivedSchema {
   const survives = survivalOver(received);
   const named = received.find((d) => d.id === registration);
@@ -1981,10 +1997,10 @@ export function classifyExactReceivedSchema(
         (current === undefined ? "" : ` (${current.id} is)`),
     );
   const dset = operandSet(received, survives, "blessing");
-  const definition = definitionWinner(dset, HYPER_SCHEMA_SCHEMA, binding.entity);
-  const snapshot = definitionWinner(dset, SCHEMA_SCHEMA, binding.snapshot);
-  const hyperschema = loadHyperSchema(dset, binding.entity);
-  const schema = loadSchema(dset, binding.snapshot);
+  const definition = definitionWinner(dset, HYPER_SCHEMA_SCHEMA, binding.entity, now);
+  const snapshot = definitionWinner(dset, SCHEMA_SCHEMA, binding.snapshot, now);
+  const hyperschema = loadHyperSchema(dset, binding.entity, now);
+  const schema = loadSchema(dset, binding.snapshot, now);
   return Object.freeze({
     registration: binding.id,
     lens,

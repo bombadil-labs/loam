@@ -41,6 +41,7 @@ export function adoptionRecordClaims(
 ): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author: operator,
     pointers: [
       {
@@ -312,7 +313,11 @@ export async function promoteImpl(
   // never pollutes the value's own gather — §11's erasure-is-separate discipline, applied to adoption).
   const adopted = signClaims(
     {
-      timestamp: src.claims.timestamp, // inherited — content-addressed, idempotent, honest ordering
+      // Times inherited whole — content-addressed, idempotent, and valid over the source's own
+      // interval.
+      timestamp: src.claims.timestamp,
+      validFrom: src.claims.validFrom,
+      ...(src.claims.validUntil === undefined ? {} : { validUntil: src.claims.validUntil }),
       author: gw.operatorAuthor,
       pointers,
     },

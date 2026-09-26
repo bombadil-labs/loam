@@ -22,7 +22,7 @@ exports[`§21.7 pinning — the degenerate single-lens case is byte-identical > 
       ],
       "get": {
         "summary": "resolve a Plant view (version 1)",
-        "description": "Version alias v1 of Plant; its true name is the registration delta 1e2090cd6b17c41e213192936aa740768cf6ab1b48137a4dc4af61c2e087033dc629. Aliases shift when a version is withdrawn; the hash never lies.",
+        "description": "Version alias v1 of Plant; its true name is the registration delta 1e20f764ff350c10f1896bfa439f692c561d841cd3db27110eec231cb4acf98805ca. Aliases shift when a version is withdrawn; the hash never lies.",
         "responses": {
           "200": {
             "description": "the resolved view",

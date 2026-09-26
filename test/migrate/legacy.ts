@@ -66,6 +66,7 @@ export function stripReadingFromExpandDefinitions(deltas: readonly Delta[], seed
     const rehex = termCanonicalHex(parseTerm(stripped));
     const claims: Claims = {
       timestamp: d.claims.timestamp,
+      validFrom: d.claims.timestamp,
       author: d.claims.author,
       pointers: d.claims.pointers.map((p) =>
         p.role === HS_TERM ? { ...p, target: { kind: "primitive" as const, value: rehex } } : p,
@@ -94,6 +95,7 @@ export function legacyInlineRegistrationClaims(
 ): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       ...(writable === undefined
@@ -155,6 +157,7 @@ export function legacyContainerClaims(
   });
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       entityPtr("container", spec.container),

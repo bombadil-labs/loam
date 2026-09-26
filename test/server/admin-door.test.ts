@@ -124,6 +124,7 @@ async function adminServer(
   const note = signClaims(
     {
       timestamp: ts++,
+      validFrom: ts++,
       author: KEYS.ada,
       pointers: [{ role: "note", target: { kind: "primitive", value: "a first note" } }],
     },

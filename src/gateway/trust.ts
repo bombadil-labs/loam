@@ -43,6 +43,7 @@ export function trustClaims(
 ): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       {

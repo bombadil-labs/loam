@@ -65,6 +65,7 @@ async function seededDoor(): Promise<{ base: string; gateway: Gateway }> {
     signClaims(
       {
         timestamp: 20_000,
+        validFrom: 20_000,
         author: OPAL,
         pointers: [
           {
@@ -98,6 +99,7 @@ async function seededDoor(): Promise<{ base: string; gateway: Gateway }> {
     signClaims(
       {
         timestamp: 21_000,
+        validFrom: 21_000,
         author: OPAL,
         pointers: [
           {

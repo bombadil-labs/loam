@@ -65,6 +65,7 @@ import type { Gateway } from "../../src/gateway/gateway.js";
 import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
 import { FERN, observed } from "../spike/garden.js";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
+import { stamped } from "../../src/gateway/stamp.js";
 
 /** A minimal, valid registration for one lens name — the canonical entity program. */
 const envelope = (name: string, prop = "note", roots = [`${name}:1`]): unknown => ({
@@ -119,7 +120,9 @@ const serves = async (base: string, bearer: string, field: string): Promise<bool
 
 /** The lens names a reactor holds — `lensName` falling back to the hyperschema's. */
 const lensesIn = (gw: Gateway): string[] =>
-  readRegistrations(gw.reactor, gw.operatorAuthor).map((r) => r.lensName ?? r.hyperschema.name);
+  readRegistrations(gw.reactor, gw.validityNow(), gw.operatorAuthor).map(
+    (r) => r.lensName ?? r.hyperschema.name,
+  );
 const pools = (gw: Gateway): Gateway[] =>
   [...gw.connectionInboxes.values()]
     .map((c) => c.gateway)
@@ -203,7 +206,7 @@ describe("§58 position 2 — the binding is the register grant, and the law ser
     await gateway.append([
       signClaims(
         {
-          timestamp: gateway.nextTimestamp(),
+          ...stamped(gateway.nextTimestamp()),
           author: gateway.operatorAuthor!,
           pointers: [
             {

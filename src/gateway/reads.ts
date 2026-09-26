@@ -138,6 +138,7 @@ export function gatherImpl(
     const result = evalTerm(
       gw.def(name, binding).hyperschema.body,
       boundGroundFor(gw, binding, now, asOf),
+      asOf ?? gw.validityNow(now),
       entity,
       surface.registry,
     );
@@ -164,7 +165,13 @@ export function gatherImpl(
   // explicit (T190).
   const scoped = channelGroundFor(gw, name, now, asOf);
   if (scoped !== undefined) {
-    const result = evalTerm(gw.def(name).hyperschema.body, scoped, entity, gw.registry);
+    const result = evalTerm(
+      gw.def(name).hyperschema.body,
+      scoped,
+      asOf ?? gw.validityNow(now),
+      entity,
+      gw.registry,
+    );
     if (result.sort !== "hview") throw new Error(`schema ${name} does not evaluate to a hyperview`);
     return result.hview;
   }
@@ -172,7 +179,9 @@ export function gatherImpl(
   if (asOf !== undefined) {
     const def = gw.def(name);
     const ground = asOfGroundImpl(gw, asOf, closed);
-    const result = evalTerm(def.hyperschema.body, ground, entity, gw.registry);
+    // An as-of read reconstructs the past on both axes: what had been said by `asOf`, and what
+    // held at `asOf`.
+    const result = evalTerm(def.hyperschema.body, ground, asOf, entity, gw.registry);
     if (result.sort !== "hview") {
       throw new Error(`schema ${name} does not evaluate to a hyperview`);
     }
@@ -199,8 +208,14 @@ export function gatherImpl(
   const def = gw.def(name);
   const result =
     closed.size === 0
-      ? gw.reactor.eval(def.hyperschema.body, entity, gw.registry)
-      : evalTerm(def.hyperschema.body, readGround(gw, now), entity, gw.registry);
+      ? gw.reactor.eval(def.hyperschema.body, gw.validityNow(now), entity, gw.registry)
+      : evalTerm(
+          def.hyperschema.body,
+          readGround(gw, now),
+          gw.validityNow(now),
+          entity,
+          gw.registry,
+        );
   if (result.sort !== "hview") throw new Error(`schema ${name} does not evaluate to a hyperview`);
   return result.hview;
 }
@@ -344,6 +359,7 @@ export function gatherForRetractionImpl(
   name: string,
   entity: string,
   binding?: ConnectionBinding,
+  now: number = gw.validityNow(),
 ): HView {
   const def = gw.def(name, binding);
   // A bound connection's own claims live in its pool, so its retraction gathers ITS scope — the
@@ -351,10 +367,11 @@ export function gatherForRetractionImpl(
   // its container's registry, where a lens that lives only in a pool is known.
   const result =
     binding === undefined
-      ? gw.reactor.eval(def.hyperschema.body, entity, gw.registry)
+      ? gw.reactor.eval(def.hyperschema.body, gw.validityNow(now), entity, gw.registry)
       : evalTerm(
           def.hyperschema.body,
           DeltaSet.from(gw.connectionScope({ bound: binding.container })),
+          gw.validityNow(now),
           entity,
           gw.boundSurface(binding).registry,
         );
@@ -469,12 +486,30 @@ export function resolvePinnedImpl(
   // old lens over the connection's scope, never over the store's own ground.
   const result =
     binding !== undefined
-      ? evalTerm(reg.hyperschema.body, boundGroundFor(gw, binding, now, asOf), entity, gw.registry)
+      ? evalTerm(
+          reg.hyperschema.body,
+          boundGroundFor(gw, binding, now, asOf),
+          asOf ?? gw.validityNow(now),
+          entity,
+          gw.registry,
+        )
       : asOf === undefined
         ? closed.size === 0
-          ? gw.reactor.eval(reg.hyperschema.body, entity, gw.registry)
-          : evalTerm(reg.hyperschema.body, readGround(gw, now), entity, gw.registry)
-        : evalTerm(reg.hyperschema.body, asOfGroundImpl(gw, asOf, closed), entity, gw.registry);
+          ? gw.reactor.eval(reg.hyperschema.body, gw.validityNow(now), entity, gw.registry)
+          : evalTerm(
+              reg.hyperschema.body,
+              readGround(gw, now),
+              gw.validityNow(now),
+              entity,
+              gw.registry,
+            )
+        : evalTerm(
+            reg.hyperschema.body,
+            asOfGroundImpl(gw, asOf, closed),
+            asOf,
+            entity,
+            gw.registry,
+          );
   if (result.sort !== "hview") {
     throw new Error(`schema ${reg.hyperschema.name} does not evaluate to a hyperview`);
   }
@@ -556,6 +591,7 @@ export function watchEntityImpl(
             const result = evalTerm(
               bound.hyperschema.body,
               readGround(gw, now),
+              gw.validityNow(now),
               entity,
               gw.registry,
             );

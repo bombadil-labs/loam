@@ -56,6 +56,7 @@ const bedSchema = (name: string) => ({
 const planting = signClaims(
   {
     timestamp: 1100,
+    validFrom: 1100,
     author: GARDENER,
     pointers: [
       { role: "bed", target: { kind: "entity", entity: { id: BED, context: "plants" } } },

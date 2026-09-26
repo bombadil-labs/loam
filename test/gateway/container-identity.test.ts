@@ -219,6 +219,7 @@ describe("§27.2 freeze — a membership Term becomes a content-addressed module
     const retraction = signClaims(
       {
         timestamp: 1100,
+        validFrom: 1100,
         author: authorForSeed(OP_SEED),
         pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: claim.id } } }],
       },

@@ -882,7 +882,11 @@ async function installStock(
   );
   try {
     const contenders = new Map<string, Registration[]>();
-    for (const r of readRegistrations(gateway.reactor, gateway.operatorAuthor)) {
+    for (const r of readRegistrations(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor,
+    )) {
       const lens = lensOf(r) as string;
       const rows = contenders.get(lens);
       if (rows === undefined) contenders.set(lens, [r]);
@@ -1508,7 +1512,11 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
       // pre-flight refusal below is a sovereignty decision and would otherwise decide from half
       // the picture.
       const contenders = new Map<string, Registration[]>();
-      for (const r of readRegistrations(gateway.reactor, gateway.operatorAuthor)) {
+      for (const r of readRegistrations(
+        gateway.reactor,
+        gateway.validityNow(),
+        gateway.operatorAuthor,
+      )) {
         const lens = lensOf(r) as string;
         const rows = contenders.get(lens);
         if (rows === undefined) contenders.set(lens, [r]);
@@ -2603,8 +2611,11 @@ async function cmdUserCreate(
     // credential removed by hand, or a write that failed after the deltas landed), and appending a
     // SECOND user record for the same name is the shape that outlives that: `pickLatest` would
     // resolve whichever record won, silently.
-    known = resolveUserView(gateway.reactor, gateway.operator, name) !== undefined;
-    already = known ? rolesOf(gateway.reactor, gateway.operator, name) : new Set<UserRole>();
+    known =
+      resolveUserView(gateway.reactor, gateway.operator, gateway.validityNow(), name) !== undefined;
+    already = known
+      ? rolesOf(gateway.reactor, gateway.operator, gateway.validityNow(), name)
+      : new Set<UserRole>();
     if (!known) {
       const at = Date.now();
       const deltas: Delta[] = [
@@ -2871,14 +2882,15 @@ async function cmdUserRole(
   const path = storePath(home, parsed.flags.get("store"));
   const gateway = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }));
   try {
-    const known = resolveUserView(gateway.reactor, gateway.operator, name) !== undefined;
+    const known =
+      resolveUserView(gateway.reactor, gateway.operator, gateway.validityNow(), name) !== undefined;
     if (!known) {
       io.err(
         `user ${label}: ${home}'s ground does not know ${name} — \`loam user create ${name}\` makes one`,
       );
       return 2;
     }
-    const held = rolesOf(gateway.reactor, gateway.operator, name);
+    const held = rolesOf(gateway.reactor, gateway.operator, gateway.validityNow(), name);
 
     if (mode === "assign") {
       if (held.has(role)) {

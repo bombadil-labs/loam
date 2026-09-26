@@ -158,6 +158,7 @@ describe("§58 — a leeway is a declaration on the container", () => {
     const bad = signClaims(
       {
         timestamp: 1000,
+        validFrom: 1000,
         author: OP,
         pointers: [
           ...containerClaims({ container: "ada", trust: "curated", posture: "separate" }, OP, 1000)
@@ -184,6 +185,7 @@ describe("§58 — a leeway is a declaration on the container", () => {
     const twice = signClaims(
       {
         timestamp: 1000,
+        validFrom: 1000,
         author: OP,
         pointers: [
           ...base.pointers,
@@ -210,6 +212,7 @@ describe("§58 — a leeway is a declaration on the container", () => {
       signClaims(
         {
           timestamp: ts,
+          validFrom: ts,
           author: OP,
           pointers: [
             ...containerClaims({ container: name, trust: "curated", posture: "separate" }, OP, ts)
@@ -258,6 +261,7 @@ describe("§58 — a leeway is a declaration on the container", () => {
       signClaims(
         {
           timestamp: ts,
+          validFrom: ts,
           author: OP,
           pointers: [
             ...containerClaims({ container: name, trust: "curated", posture: "separate" }, OP, ts)
@@ -348,6 +352,7 @@ describe("§58 — a leeway is a declaration on the container", () => {
       const bad = signClaims(
         {
           timestamp: 1000,
+          validFrom: 1000,
           author: authorForSeed(stranger),
           pointers: [
             ...containerClaims(

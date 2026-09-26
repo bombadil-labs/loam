@@ -56,6 +56,7 @@ const canary = (mark: string, timestamp: number, reps = 400): Delta =>
   signClaims(
     {
       timestamp,
+      validFrom: timestamp,
       author: AUTHOR,
       pointers: [
         {

@@ -92,6 +92,7 @@ describe("loam repair list", () => {
     const stranger = signClaims(
       {
         timestamp: 5000,
+        validFrom: 5000,
         author: authorForSeed(strangerSeed),
         pointers: [
           {

@@ -33,6 +33,7 @@ beforeAll(async () => {
     signClaims(
       {
         timestamp: 1000,
+        validFrom: 1000,
         author: OP,
         pointers: [
           { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "avatar" } } },

@@ -164,11 +164,21 @@ const entity = (role, id, context) => ({
 const prim = (value) => ({ role: "value", target: { kind: "primitive", value } });
 
 const say = (loam, ctx, pointers) =>
-  loam.signClaims({ timestamp: ctx.ts(), author: ctx.author, pointers }, ctx.seed);
+  loam.signClaims(
+    { ...((t) => ({ timestamp: t, validFrom: t }))(ctx.ts()), author: ctx.author, pointers },
+    ctx.seed,
+  );
 
 /** The same claim, in someone else's hand — signed by their key, refused if it is not theirs. */
 const sayAs = (loam, ctx, seed, pointers) =>
-  loam.signClaims({ timestamp: ctx.ts(), author: loam.authorForSeed(seed), pointers }, seed);
+  loam.signClaims(
+    {
+      ...((t) => ({ timestamp: t, validFrom: t }))(ctx.ts()),
+      author: loam.authorForSeed(seed),
+      pointers,
+    },
+    seed,
+  );
 
 /** One line of a viewing: the entity, the field, the words. */
 const field = (loam, ctx, id, name, value) =>
@@ -1081,7 +1091,7 @@ Rae is a character. You would never hold anybody else's.)`,
               await ctx.gateway.append([
                 loam.signClaims(
                   {
-                    timestamp: ctx.ts(),
+                    ...((t) => ({ timestamp: t, validFrom: t }))(ctx.ts()),
                     author: RAE_FIRST,
                     pointers: [entity("subject", VIEWING, "note"), prim(FORGED_LINE)],
                   },

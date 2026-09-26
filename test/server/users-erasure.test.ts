@@ -223,10 +223,10 @@ describe("T131 criteria 3 & 4 — a login whose user record delta was erased is 
     // DELTA LEVEL: alice's record delta is gone; the ground no longer names her, so rolesOf is empty.
     // The bystander bob is untouched at both the delta and the resolution level.
     expect(gw.reactor.get(recordIds.alice!)).toBeUndefined();
-    expect(resolveUserView(gw.reactor, OPERATOR, "alice")).toBeUndefined();
-    expect(rolesOf(gw.reactor, OPERATOR, "alice").size).toBe(0);
+    expect(resolveUserView(gw.reactor, OPERATOR, Date.now(), "alice")).toBeUndefined();
+    expect(rolesOf(gw.reactor, OPERATOR, Date.now(), "alice").size).toBe(0);
     expect(gw.reactor.get(recordIds.bob!)).toBeDefined();
-    expect(rolesOf(gw.reactor, OPERATOR, "bob").has("operator")).toBe(true);
+    expect(rolesOf(gw.reactor, OPERATOR, Date.now(), "bob").has("operator")).toBe(true);
 
     // DOOR LEVEL: alice's CORRECT password is now refused — the ground shut the door, not the
     // credential file, which still holds her entry. The refusal is phase 5's ordinary 401, byte for

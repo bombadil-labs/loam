@@ -70,6 +70,7 @@ const dataClaim = (t: number) =>
   signClaims(
     {
       timestamp: t,
+      validFrom: t,
       author: ADA,
       pointers: [
         { role: "notes", target: { kind: "entity", entity: { id: "note:day", context: "diary" } } },

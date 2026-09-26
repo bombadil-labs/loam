@@ -21,6 +21,7 @@ import { serve, type ServerHandle } from "../../src/server/http.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
+import { stamped } from "../../src/gateway/stamp.js";
 
 vi.setConfig({ testTimeout: 20_000 });
 
@@ -148,7 +149,7 @@ describe("the trust policy: one delta at loam:trust, latest lawful word wins", (
     await declare(b, "roster", [GARDENER]);
     const bogusMode = signClaims(
       {
-        timestamp: Date.now() + 10,
+        ...stamped(Date.now() + 10),
         author: OPERATOR_B,
         pointers: [
           {
@@ -164,7 +165,7 @@ describe("the trust policy: one delta at loam:trust, latest lawful word wins", (
     await expect(b.append([bogusMode])).rejects.toThrow(/malformed law/);
     const twoModes = signClaims(
       {
-        timestamp: Date.now() + 11,
+        ...stamped(Date.now() + 11),
         author: OPERATOR_B,
         pointers: [
           {

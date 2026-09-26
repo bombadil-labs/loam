@@ -37,6 +37,7 @@ const signed1 = observed(FERN, "height", 30, 1000, GARDENER_SEED);
 const signed2 = observed(FERN, "height", 34, 2000, SURVEYOR_SEED);
 const unsigned = makeDelta({
   timestamp: 3000,
+  validFrom: 3000,
   author: "did:key:zAnon",
   pointers: [{ role: "note", target: { kind: "primitive", value: "unsigned but true" } }],
 });
@@ -44,6 +45,7 @@ const unsigned = makeDelta({
 const negation = makeDelta(makeNegationClaims(GARDENER, 3500, signed2.id, "remeasured"));
 const mixed = makeDelta({
   timestamp: 4000,
+  validFrom: 4000,
   author: "did:key:zAnon",
   pointers: [
     { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "watered" } } },
@@ -208,6 +210,7 @@ for (const makeHarness of harnesses) {
     it("every driver returns the canonical form: -0 comes back as 0, id unchanged", async () => {
       const minusZero = makeDelta({
         timestamp: 5000,
+        validFrom: 5000,
         author: "did:key:zAnon",
         pointers: [{ role: "value", target: { kind: "primitive", value: -0 } }],
       });
@@ -255,6 +258,7 @@ for (const makeHarness of harnesses) {
     it("a lone surrogate is refused: its bytes and its identity disagree", async () => {
       const torn = makeDelta({
         timestamp: 6000,
+        validFrom: 6000,
         author: "did:key:zAnon",
         pointers: [{ role: "value", target: { kind: "primitive", value: "\ud800" } }],
       });

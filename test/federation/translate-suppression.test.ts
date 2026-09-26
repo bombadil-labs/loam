@@ -71,6 +71,7 @@ const cinelogEntry = (ts: number, film = STALKER): Delta =>
   signClaims(
     {
       timestamp: ts,
+      validFrom: ts,
       author: CINELOG,
       pointers: [
         { role: "film_watched", target: { kind: "entity", entity: { id: film, context: "log" } } },
@@ -317,6 +318,7 @@ describe("T58 — a retraction reaches the canonical rendering across the `trans
     const theirs = signClaims(
       {
         timestamp: 5001,
+        validFrom: 5001,
         author: CINELOG,
         pointers: [
           {

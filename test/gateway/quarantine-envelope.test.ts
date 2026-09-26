@@ -70,6 +70,7 @@ const declare = (
 // entity and no context — which is exactly why a per-entity candidate filter can never find it.
 const strikeOf = (target: string, ts: number): Claims => ({
   timestamp: ts,
+  validFrom: ts,
   author: OP,
   pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: target } } }],
 });
@@ -355,7 +356,12 @@ describe("T34 delta level: the envelope is one operator-authored declaration, re
       role: "declares",
       target: { kind: "entity" as const, entity: { id: ENVELOPE_ENTITY, context: CTX_ENVELOPE } },
     };
-    const noSubject: Claims = { timestamp: 9001, author: OP, pointers: [declares] };
+    const noSubject: Claims = {
+      timestamp: 9001,
+      validFrom: 9001,
+      author: OP,
+      pointers: [declares],
+    };
     await expect(gw.append([signClaims(noSubject, OP_SEED)])).rejects.toThrow(/subject/i);
 
     const zeroSlots = envelopeClaims(ENVELOPE_ANY, { maxConcurrentRenders: 0 }, OP, 9002);
@@ -382,7 +388,8 @@ describe("T34 delta level: the envelope is one operator-authored declaration, re
     const gw = await primary();
     await declare(gw, ENVELOPE_ANY, { maxConcurrentRenders: 1, renderTimeoutMs: 3000 }, 9100);
     const twice: Claims = {
-      timestamp: 9200, // later than the honest one, so a reader that accepted it would supersede
+      timestamp: 9200,
+      validFrom: 9200, // later than the honest one, so a reader that accepted it would supersede
       author: OP,
       pointers: [
         {

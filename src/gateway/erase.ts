@@ -73,6 +73,7 @@ export function eraseClaims(
 ): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       {
@@ -531,7 +532,7 @@ export function maskReadings(
     else if (!seen.readings.some((r) => r.identity === identity)) seen.readings.push(pair);
   };
   remember("drop", UNGOVERNED_READING);
-  for (const reg of readRegistrations(gw.reactor, gw.operatorAuthor)) {
+  for (const reg of readRegistrations(gw.reactor, gw.validityNow(), gw.operatorAuthor)) {
     const name = reg.lensName ?? reg.hyperschema.name;
     const identity = `${reg.entity ?? `hyperschema:${reg.hyperschema.name}`}\u0000${name}`;
     try {
@@ -612,7 +613,7 @@ export function readGrounds(
       for (const id of live) mask.live.add(id);
       continue;
     }
-    const masked = evalTerm(parseTerm({ op: "mask", policy: mask.policy, in: "input" }), over);
+    const masked = evalTerm(parseTerm({ op: "mask", policy: mask.policy, in: "input" }), over, now);
     if (masked.sort !== "dset") throw new Error("a mask always evaluates to a delta set");
     for (const delta of masked.set) mask.live.add(delta.id);
   }

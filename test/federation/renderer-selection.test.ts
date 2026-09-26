@@ -67,6 +67,7 @@ import {
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
+import { stamped } from "../../src/gateway/stamp.js";
 
 const OP_SEED = "3a".repeat(32);
 const OP = authorForSeed(OP_SEED);
@@ -720,7 +721,7 @@ describe("T278 — exact received renderer selection", () => {
     const before = w.select("hello");
     const note = signClaims(
       {
-        timestamp: w.alice.nextTimestamp(),
+        ...stamped(w.alice.nextTimestamp()),
         author: ALICE,
         pointers: [
           { role: "negates", target: { kind: "entity", entity: { id: FERN, context: "height" } } },
@@ -847,7 +848,7 @@ describe("T278 — exact received renderer selection", () => {
       definitionsOf(w.received(), entityRef(r, "schemaVersion"))[0]!.id;
     expect(reverted.sourceLineage).toContain(snapshotOf(v1!));
     expect(reverted.sourceLineage).not.toContain(snapshotOf(v2!));
-    const law = classifyExactReceivedSchema(w.received(), "Plant", v1!.id);
+    const law = classifyExactReceivedSchema(w.received(), "Plant", v1!.id, Date.now());
     expect(new Set(law.schema.props.keys())).toEqual(new Set(PLANT_POLICY.props.keys()));
   });
 
@@ -976,7 +977,7 @@ describe("T278 — exact received renderer selection", () => {
     const [v3] = registrations(w.received()).sort(
       (a, b) => b.claims.timestamp - a.claims.timestamp,
     );
-    const law = classifyExactReceivedSchema(w.received(), "Plant", v3!.id);
+    const law = classifyExactReceivedSchema(w.received(), "Plant", v3!.id, Date.now());
     expect(law.roots).toEqual(["plant:oak"]);
     expect(row.roots).toEqual([FERN]);
     await forge(w.pool, adoption, { "source-delta": v3!.id });
@@ -1059,9 +1060,9 @@ describe("T278 — exact received renderer selection", () => {
     await w.alice.append([dangling]);
     await w.sync();
     expect(w.received().some((d) => d.id === dangling.id)).toBe(true);
-    expect(() => classifyExactReceivedSchema(w.received(), "Plant", dangling.id)).toThrow(
-      /no surviving schema definition for schema:Plant@never/,
-    );
+    expect(() =>
+      classifyExactReceivedSchema(w.received(), "Plant", dangling.id, Date.now()),
+    ).toThrow(/no surviving schema definition for schema:Plant@never/);
     await forge(w.pool, currentAdoption(w).adoption, { "source-delta": dangling.id });
     const r = w.refusal("hello");
     expect(r.code).toBe("law_unavailable");
@@ -1086,7 +1087,7 @@ describe("T278 — exact received renderer selection", () => {
     const [v1] = registrations(w.received());
     const entity = entityRef(v1!, "hyperschema");
     const snapshotEntity = entityRef(v1!, "schemaVersion");
-    const law = classifyExactReceivedSchema(w.received(), "Plant", v1!.id);
+    const law = classifyExactReceivedSchema(w.received(), "Plant", v1!.id, Date.now());
     // Two rows each, byte-identical in content, differing only in the id their timestamp mints —
     // so the loader's tie-break is the ONLY thing that picks, and the law does not move under
     // the destination.
@@ -1120,6 +1121,7 @@ describe("T278 — exact received renderer selection", () => {
       {
         ...twins[0]!.claims,
         timestamp: at + 1,
+        validFrom: at + 1,
         pointers: twins[0]!.claims.pointers.map((p) =>
           p.target.kind === "entity"
             ? {
@@ -1142,7 +1144,7 @@ describe("T278 — exact received renderer selection", () => {
     const byId = (a: Delta, b: Delta) => (a.id < b.id ? -1 : 1);
     const winner = [...twins].sort(byId)[0]!;
     const snapshotWinner = [...snapshotTwins].sort(byId)[0]!;
-    const exact = classifyExactReceivedSchema(received, "Plant", v1!.id);
+    const exact = classifyExactReceivedSchema(received, "Plant", v1!.id, Date.now());
     expect(exact.lineage).toEqual([v1!.id, winner.id, snapshotWinner.id]);
     expect(exact.hyperschema).toEqual(law.hyperschema);
     expect(exact.schema).toEqual(law.schema);
@@ -1153,6 +1155,7 @@ describe("T278 — exact received renderer selection", () => {
       {
         ...twins[0]!.claims,
         timestamp: at + 2,
+        validFrom: at + 2,
         pointers: twins[0]!.claims.pointers.map((p) =>
           p.role.endsWith(".term") ? { ...p, target: { kind: "primitive", value: "not-hex" } } : p,
         ),
@@ -1161,7 +1164,7 @@ describe("T278 — exact received renderer selection", () => {
     );
     await w.alice.append([broken]);
     await w.sync();
-    expect(() => classifyExactReceivedSchema(w.received(), "Plant", v1!.id)).toThrow();
+    expect(() => classifyExactReceivedSchema(w.received(), "Plant", v1!.id, Date.now())).toThrow();
     const r = w.refusal("hello");
     expect(r.code).toBe("law_unavailable");
     expect(r.message).not.toContain(winner.id);

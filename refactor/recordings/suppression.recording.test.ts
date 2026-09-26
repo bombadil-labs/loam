@@ -14,6 +14,7 @@ import { bothOrders, idsOf, KEY, record, signed, strike, type Who } from "./corp
 const claim = (by: Who, t: number, label: string): Delta => {
   const claims: Claims = {
     timestamp: t,
+    validFrom: t,
     author: KEY[by],
     pointers: [
       { role: "height", target: { kind: "primitive", value: t } },

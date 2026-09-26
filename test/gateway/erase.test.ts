@@ -75,6 +75,7 @@ describe("erasures are law: validated at the door while the evidence exists", ()
     const { gateway, fact } = await grove();
     const noSpokenBy = makeDelta({
       timestamp: 2000,
+      validFrom: 2000,
       author: OPERATOR,
       pointers: [
         {

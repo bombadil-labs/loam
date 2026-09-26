@@ -37,7 +37,7 @@
 
 import {
   DeltaSet,
-  evalTerm,
+  evalTermRaw,
   parseTerm,
   signClaims,
   type Claims,
@@ -136,6 +136,7 @@ export interface SlateSpec {
 export function slateClaims(spec: SlateSpec, author: string, timestamp: number): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       entityPtr("declares", SLATE_ENTITY, CTX_SLATE),
@@ -176,6 +177,7 @@ export interface GraveyardSpec {
 export function graveyardClaims(spec: GraveyardSpec, author: string, timestamp: number): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       entityPtr("declares", SLATE_ENTITY, CTX_GRAVEYARD),
@@ -547,7 +549,7 @@ export function freezeAgreement(
 // bring the read-closure narrowing into the membership machinery and jam the cut, §29.3) — the
 // reader takes a bare Reactor for exactly that reason: there is no gateway here to narrow.
 function evalMembership(reactor: Reactor, term: unknown): Delta[] {
-  const result = evalTerm(parseTerm(term), reactor.snapshot());
+  const result = evalTermRaw(parseTerm(term), reactor.snapshot());
   if (result.sort !== "dset") throw new Error("a membership Term must select a delta set");
   return [...result.set];
 }
@@ -1209,6 +1211,7 @@ const OBSERVATION_FIELDS = RECEIPT_FIELDS.filter((f) => f.side === "observation"
 
 const retractionOf = (targetId: string, author: string, timestamp: number): Claims => ({
   timestamp,
+  validFrom: timestamp,
   author,
   pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: targetId } } }],
 });

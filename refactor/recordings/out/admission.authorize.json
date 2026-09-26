@@ -124,7 +124,7 @@
       },
       "grant with unknown verb": {
         "ok": false,
-        "refusal": "delta 1e2036433ffe3266656791bec90c08a63deb9e6ccc6113bd72544f61eb61d7548988 is malformed law: a grant carries exactly one verb: \"write\", \"admin\", \"register\" or \"federate\""
+        "refusal": "delta 1e208d3106a025d3b83cfbd1ea30dc7da081db398a274075392fc90a08470517cd8f is malformed law: a grant carries exactly one verb: \"write\", \"admin\", \"register\" or \"federate\""
       },
       "trust closed by stranger": {
         "ok": false,
@@ -135,7 +135,7 @@
       },
       "trust with two modes": {
         "ok": false,
-        "refusal": "delta 1e20695ec28e718c9013b23a6947183619b306859bd8f3d4370101ee30a677dff62a is malformed law: a trust declaration carries exactly one mode: \"open\", \"roster\", or \"closed\""
+        "refusal": "delta 1e20d8fcef0fb24f37eb5f05239026898bdd48326f1c4482f39fe1686fd19d8f1fbe is malformed law: a trust declaration carries exactly one mode: \"open\", \"roster\", or \"closed\""
       }
     },
     "ungoverned": {
@@ -165,7 +165,7 @@
       },
       "grant with unknown verb": {
         "ok": false,
-        "refusal": "delta 1e2036433ffe3266656791bec90c08a63deb9e6ccc6113bd72544f61eb61d7548988 is malformed law: a grant carries exactly one verb: \"write\", \"admin\", \"register\" or \"federate\""
+        "refusal": "delta 1e208d3106a025d3b83cfbd1ea30dc7da081db398a274075392fc90a08470517cd8f is malformed law: a grant carries exactly one verb: \"write\", \"admin\", \"register\" or \"federate\""
       },
       "trust closed by stranger": {
         "ok": true
@@ -175,7 +175,7 @@
       },
       "trust with two modes": {
         "ok": false,
-        "refusal": "delta 1e20695ec28e718c9013b23a6947183619b306859bd8f3d4370101ee30a677dff62a is malformed law: a trust declaration carries exactly one mode: \"open\", \"roster\", or \"closed\""
+        "refusal": "delta 1e20d8fcef0fb24f37eb5f05239026898bdd48326f1c4482f39fe1686fd19d8f1fbe is malformed law: a trust declaration carries exactly one mode: \"open\", \"roster\", or \"closed\""
       }
     }
   }

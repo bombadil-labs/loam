@@ -277,7 +277,7 @@ describe("versioning: publishing is append-only (SPEC §17 amendment)", () => {
   let v1Hash: string;
 
   it("evolution mints v2; v1 stays answerable, without the new prop", async () => {
-    const versions0 = readRegistrationVersions(gateway.reactor, OPERATOR);
+    const versions0 = readRegistrationVersions(gateway.reactor, gateway.validityNow(), OPERATOR);
     const plantV1 = versions0.find((v) => v.hyperschema.name === "Plant" && v.version === 1);
     expect(plantV1).toBeDefined();
     v1Hash = plantV1!.deltaId;
@@ -301,7 +301,7 @@ describe("versioning: publishing is append-only (SPEC §17 amendment)", () => {
       `mutation { plant(entity: "${FERN}", note: "evolved and thriving") { height } }`,
     );
 
-    const versions = readRegistrationVersions(gateway.reactor, OPERATOR);
+    const versions = readRegistrationVersions(gateway.reactor, gateway.validityNow(), OPERATOR);
     const plants = versions.filter((v) => v.hyperschema.name === "Plant");
     expect(plants.map((v) => v.version)).toEqual([1, 2]);
 
@@ -359,9 +359,11 @@ describe("versioning: publishing is append-only (SPEC §17 amendment)", () => {
   it("an anonymous @hash probe learns nothing: uniform 404 for held, withdrawn, and imaginary hashes alike", async () => {
     // A LIVE registration of an undeclared schema — the ground holds it; the stranger must
     // not learn that.
-    const bookHash = readRegistrationVersions(gateway.reactor, OPERATOR).find(
-      (v) => v.hyperschema.name === "Book",
-    )!.deltaId;
+    const bookHash = readRegistrationVersions(
+      gateway.reactor,
+      gateway.validityNow(),
+      OPERATOR,
+    ).find((v) => v.hyperschema.name === "Book")!.deltaId;
     const probes = [
       `/rest/@${bookHash}/Book/${encodeURIComponent("book:dune")}`,
       `/rest/@${v1Hash}/Plant/${encodeURIComponent(FERN)}`, // still surviving at this point
@@ -396,7 +398,7 @@ describe("versioning: publishing is append-only (SPEC §17 amendment)", () => {
     );
     expect(wrongName.status).toBe(404);
     // Aliases shift: the surviving registration is now v1 (the Nth SURVIVING, in ground order).
-    const versions = readRegistrationVersions(gateway.reactor, OPERATOR);
+    const versions = readRegistrationVersions(gateway.reactor, gateway.validityNow(), OPERATOR);
     const plants = versions.filter((v) => v.hyperschema.name === "Plant");
     expect(plants).toHaveLength(1);
     expect(plants[0]!.version).toBe(1);

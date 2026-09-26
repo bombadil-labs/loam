@@ -80,7 +80,7 @@ if (claimsFile !== undefined) {
   const deltas = triples.map((t, i) =>
     signClaims(
       {
-        timestamp: 2_000_100 + i,
+        timestamp: 2_000_100 + i, validFrom: 2_000_100 + i,
         author: scribe,
         pointers: [
           { role: "subject", target: { kind: "entity", entity: { id: t.at, context: t.context } } },

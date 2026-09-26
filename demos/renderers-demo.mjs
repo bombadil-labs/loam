@@ -95,6 +95,7 @@ const fact = (entity, ctx, value, ts) =>
   signClaims(
     {
       timestamp: ts,
+      validFrom: ts,
       author: operator,
       pointers: [
         { role: "subject", target: { kind: "entity", entity: { id: entity, context: ctx } } },

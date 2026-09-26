@@ -4,7 +4,7 @@
 // gateways over one memory backend with a pinned clock.
 
 import { afterEach, describe, it, vi } from "vitest";
-import type { Delta } from "@bombadil/rhizomatic";
+import { signClaims, type Delta } from "@bombadil/rhizomatic";
 import { lookedClaims, readLookedImpl } from "../../src/gateway/attention.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -133,12 +133,24 @@ describe("recordings: time", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const backend = new MemoryBackend();
     const genesis = assembleGenesis({ operatorSeed: SEEDS.operator, registrations: [] });
+    // Each stamp is written, so the restarted process has the store's history to read.
+    const write = async (gw: Gateway): Promise<number> => {
+      const t = gw.nextTimestamp();
+      const claims = {
+        timestamp: t,
+        validFrom: t,
+        author: KEY.operator,
+        pointers: [{ role: "tick", target: { kind: "primitive" as const, value: t } }],
+      };
+      await gw.append([signClaims(claims, SEEDS.operator)]);
+      return t;
+    };
     vi.setSystemTime(10_000);
     const first = await Gateway.boot(backend, genesis);
-    const before = [first.nextTimestamp(), first.nextTimestamp(), first.nextTimestamp()];
+    const before = [await write(first), await write(first), await write(first)];
     vi.setSystemTime(5_000); // the host clock steps back before the process restarts
     const second = await Gateway.open(backend, { seed: SEEDS.operator });
-    const after = [second.nextTimestamp(), second.nextTimestamp()];
+    const after = [await write(second), await write(second)];
     await record("time.restart", { before, after, afterSortsBeforeBefore: after[0]! < before[2]! });
   });
 });

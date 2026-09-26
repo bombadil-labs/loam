@@ -35,7 +35,7 @@ import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { authorForSeed, parseTerm, signClaims } from "@bombadil/rhizomatic";
+import { authorForSeed, parseTerm, signClaims, ParseError } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -168,7 +168,7 @@ describe("(b) the register refusal points at the manual — and ONLY the unknown
       "op-token",
     );
     expect(refused.isError).toBe(true);
-    expect(refused.content[0]!.text).toMatch(/unknown term op/);
+    expect(refused.content[0]!.text).toMatch(/unknown op latest on term/);
     expect(refused.content[0]!.text).toMatch(/latest/); // the parser's words survive the wrap
     expect(refused.content[0]!.text).toContain(POINTER);
   });
@@ -181,7 +181,7 @@ describe("(b) the register refusal points at the manual — and ONLY the unknown
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { errors: string[] };
-    expect(body.errors[0]).toMatch(/unknown term op/);
+    expect(body.errors[0]).toMatch(/unknown op latest on term/);
     expect(body.errors[0]).toContain(POINTER);
   });
 
@@ -233,7 +233,7 @@ describe("(b) the register refusal points at the manual — and ONLY the unknown
       "op-token",
     );
     expect(refused.isError).toBe(true);
-    expect(refused.content[0]!.text).toMatch(/pred must be/);
+    expect(refused.content[0]!.text).toMatch(/unknown key "nope" on pred/);
     expect(refused.content[0]!.text).not.toContain("loam_docs");
   });
 });
@@ -259,9 +259,7 @@ const verdictOf = (op: string): "accepted" | "unknown" | "refused-otherwise" => 
     parseTerm(MINIMAL[op] ?? { op });
     return "accepted";
   } catch (err) {
-    return /^unknown term op/.test(err instanceof Error ? err.message : String(err))
-      ? "unknown"
-      : "refused-otherwise";
+    return err instanceof ParseError && err.kind === "unknown-op" ? "unknown" : "refused-otherwise";
   }
 };
 
@@ -286,7 +284,11 @@ describe("(c) anti-drift: the served doc's §3 and the parser agree, both direct
     // no case label and silently drop from direction two. The substrate is frozen, so that shape
     // arriving is remote — but it is this scrape's failure mode, not a covered case.
     const require = createRequire(import.meta.url);
-    const termJson = join(dirname(require.resolve("@bombadil/rhizomatic")), "term-json.js");
+    const termJson = join(
+      dirname(require.resolve("@bombadil/rhizomatic")),
+      "syntax",
+      "term-json.js",
+    );
     const source = readFileSync(termJson, "utf8");
     const start = source.indexOf("export function parseTerm");
     expect(start).toBeGreaterThan(-1);

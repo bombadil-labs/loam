@@ -247,6 +247,7 @@ describe("T43(b) — a rostered inbound door carries the strikes of what it admi
     const supersedes = signClaims(
       {
         timestamp: 1500,
+        validFrom: 1500,
         author: MODERATOR,
         pointers: [
           { role: "supersededBy", target: { kind: "delta", deltaRef: { delta: post.id } } },
@@ -257,6 +258,7 @@ describe("T43(b) — a rostered inbound door carries the strikes of what it admi
     const negatesAnEntity = signClaims(
       {
         timestamp: 1600,
+        validFrom: 1600,
         author: MODERATOR,
         pointers: [
           { role: "negates", target: { kind: "entity", entity: { id: FERN, context: "height" } } },

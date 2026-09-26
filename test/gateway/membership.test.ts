@@ -64,7 +64,7 @@ describe("§27.6 select — evaluate a membership Term over this store's ground,
       .select(HEIGHTS)
       .map((d) => d.id)
       .sort();
-    const expected = evalTerm(parseTerm(HEIGHTS), gw.reactor.snapshot());
+    const expected = evalTerm(parseTerm(HEIGHTS), gw.reactor.snapshot(), Date.now());
     if (expected.sort !== "dset") throw new Error("fixture term must be dset");
     expect(got).toEqual([...expected.set].map((d) => d.id).sort());
     expect(got).toContain(h.id);

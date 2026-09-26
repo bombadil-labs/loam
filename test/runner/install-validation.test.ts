@@ -252,7 +252,7 @@ describe("T157/1 — a definition naming a materialization nothing provides refu
     // `RunnerOptions.materializations` is how it says so. Both sides are railed here, because a
     // rail that only proved the refusal would call the narrowing correct.
     const gateway = await Gateway.open(new MemoryBackend());
-    gateway.reactor.register("plant", PLANT.body, [FERN]); // the host's own, not the gateway's
+    gateway.reactor.register("plant", PLANT.body, [FERN], Date.now()); // the host's own, not the gateway's
     await gateway.append([
       signClaims(
         bindingDefinitionClaims({ ...SPEC, materialization: "plant" }, RUNNER, 1),

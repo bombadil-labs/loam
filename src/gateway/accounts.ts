@@ -12,7 +12,7 @@
 // chain — but `authorize` consults exactly one thing: standing at `loam:store`.
 
 import {
-  evalTerm,
+  evalTermRaw,
   parseTerm,
   type Claims,
   type Delta,
@@ -101,6 +101,7 @@ export function membershipClaims(
 ): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       { role: "member", target: { kind: "entity", entity: { id: tenant, context: CTX_MEMBERS } } },
@@ -123,6 +124,7 @@ export function grantClaims(
 ): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       { role: "tenant", target: { kind: "entity", entity: { id: tenant, context: CTX_GRANTS } } },
@@ -139,6 +141,7 @@ export function grantClaims(
 export function revocationClaims(grantDeltaId: string, author: string, timestamp: number): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: grantDeltaId } } }],
   };
@@ -228,8 +231,11 @@ export function governedGatherBody(operator: string): Term {
 // Absence is not suppression: an id the store does not hold answers FALSE — it is not something
 // this can say has been struck. Callers weighing a purged source (§11) must ask erasure, not this.
 // One term evaluation per call (H8): build it once per pass and reuse the closure.
+//
+// It counts every held negation, whether or not its validity interval has ended: filtering by
+// validity would read a not-yet-valid delta as retired. Loam writes no expiring negations today.
 export function dataStruck(reactor: Reactor, operator?: string): (id: string) => boolean {
-  const masked = evalTerm(
+  const masked = evalTermRaw(
     parseTerm({
       op: "mask",
       policy: operator === undefined ? "drop" : { trust: lawfulStrikersJson(operator, false) },

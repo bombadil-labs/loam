@@ -83,6 +83,7 @@ export function artifactClaims(
 ): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       {

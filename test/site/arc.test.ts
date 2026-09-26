@@ -83,6 +83,7 @@ import {
   takeCheckpoint,
 } from "../../demos/tutorial/player.mjs";
 import { classifyDelta } from "../../demos/tutorial/instruments.mjs";
+import { stamped } from "../../src/gateway/stamp.js";
 
 // A hang guard, not a performance bound (the T73/T75 shape): the whole arc plus a CLI round
 // trip runs in seconds unloaded and legitimately takes tens under contention.
@@ -433,7 +434,7 @@ describe("progress is claims", () => {
     await ctx.gateway.federate([
       loam.signClaims(
         {
-          timestamp: ctx.ts(),
+          ...stamped(ctx.ts()),
           author: ctx.author,
           pointers: [
             {
@@ -476,7 +477,7 @@ describe("progress is claims", () => {
     await ctx.gateway.federate([
       loam.signClaims(
         {
-          timestamp: ctx.ts(),
+          ...stamped(ctx.ts()),
           author: ctx.author,
           pointers: [
             {
@@ -555,7 +556,7 @@ describe("progress is claims", () => {
     const stranger = loam.authorForSeed(strangerSeed);
     const forged = loam.signClaims(
       {
-        timestamp: ctx.ts(),
+        ...stamped(ctx.ts()),
         author: stranger,
         pointers: [
           {

@@ -44,7 +44,7 @@
     },
     "#op→peer:write": {
       "honoredStrike": {
-        "id": "1e203c9180ade8cf93197fc3063cdfdbb3d6dc25ebc510e56e2350a27fa47e0dc5bc",
+        "id": "1e20714476e2f7b384c691e10e2c9e5fc7f76081ef04b38cb8e8caeb80d928c4a497",
         "timestamp": 22
       },
       "struck": true
@@ -79,30 +79,30 @@
       },
       "struck": false
     },
-    "1e20139b6c6046bb2373054e4e39658876b8935498e899a1287caa5fbaaa467f9abc": {
+    "1e20714476e2f7b384c691e10e2c9e5fc7f76081ef04b38cb8e8caeb80d928c4a497": {
       "honoredStrike": {
         "$": "undefined"
       },
       "struck": false
     },
-    "1e20290cfaec7b3d3f2c6b9a6faefb87b9b4703ec6d979f1e40f118a93a9789b6b26": {
+    "1e20818016f8ec37a27385361addaa1b20e01b54427ad3a8a2efc23cbf4e96537c42": {
       "honoredStrike": {
-        "id": "1e20139b6c6046bb2373054e4e39658876b8935498e899a1287caa5fbaaa467f9abc",
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "1e20a0326e69a01c82e8411fbae231e08a3a17c4826f2a11305c7b995c10a735d693": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "1e20d8b50f839bca3ecd4417c4fbe152bfd6ae3cec8d846bf3d4f856ebbec702bfdd": {
+      "honoredStrike": {
+        "id": "1e20818016f8ec37a27385361addaa1b20e01b54427ad3a8a2efc23cbf4e96537c42",
         "timestamp": 26
       },
       "struck": true
-    },
-    "1e203c9180ade8cf93197fc3063cdfdbb3d6dc25ebc510e56e2350a27fa47e0dc5bc": {
-      "honoredStrike": {
-        "$": "undefined"
-      },
-      "struck": false
-    },
-    "1e20fb0db143b7998f0b70228ecf924bd29201d2637b0d216a7e6a33917553a74415": {
-      "honoredStrike": {
-        "$": "undefined"
-      },
-      "struck": false
     }
   },
   "ungoverned": {
@@ -132,7 +132,7 @@
     },
     "#op→admin:admin": {
       "honoredStrike": {
-        "id": "1e20fb0db143b7998f0b70228ecf924bd29201d2637b0d216a7e6a33917553a74415",
+        "id": "1e20a0326e69a01c82e8411fbae231e08a3a17c4826f2a11305c7b995c10a735d693",
         "timestamp": 23
       },
       "struck": true
@@ -151,7 +151,7 @@
     },
     "#op→peer:write": {
       "honoredStrike": {
-        "id": "1e203c9180ade8cf93197fc3063cdfdbb3d6dc25ebc510e56e2350a27fa47e0dc5bc",
+        "id": "1e20714476e2f7b384c691e10e2c9e5fc7f76081ef04b38cb8e8caeb80d928c4a497",
         "timestamp": 22
       },
       "struck": true
@@ -186,30 +186,30 @@
       },
       "struck": false
     },
-    "1e20139b6c6046bb2373054e4e39658876b8935498e899a1287caa5fbaaa467f9abc": {
+    "1e20714476e2f7b384c691e10e2c9e5fc7f76081ef04b38cb8e8caeb80d928c4a497": {
       "honoredStrike": {
         "$": "undefined"
       },
       "struck": false
     },
-    "1e20290cfaec7b3d3f2c6b9a6faefb87b9b4703ec6d979f1e40f118a93a9789b6b26": {
+    "1e20818016f8ec37a27385361addaa1b20e01b54427ad3a8a2efc23cbf4e96537c42": {
       "honoredStrike": {
-        "id": "1e20139b6c6046bb2373054e4e39658876b8935498e899a1287caa5fbaaa467f9abc",
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "1e20a0326e69a01c82e8411fbae231e08a3a17c4826f2a11305c7b995c10a735d693": {
+      "honoredStrike": {
+        "$": "undefined"
+      },
+      "struck": false
+    },
+    "1e20d8b50f839bca3ecd4417c4fbe152bfd6ae3cec8d846bf3d4f856ebbec702bfdd": {
+      "honoredStrike": {
+        "id": "1e20818016f8ec37a27385361addaa1b20e01b54427ad3a8a2efc23cbf4e96537c42",
         "timestamp": 26
       },
       "struck": true
-    },
-    "1e203c9180ade8cf93197fc3063cdfdbb3d6dc25ebc510e56e2350a27fa47e0dc5bc": {
-      "honoredStrike": {
-        "$": "undefined"
-      },
-      "struck": false
-    },
-    "1e20fb0db143b7998f0b70228ecf924bd29201d2637b0d216a7e6a33917553a74415": {
-      "honoredStrike": {
-        "$": "undefined"
-      },
-      "struck": false
     }
   }
 }

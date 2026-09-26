@@ -57,6 +57,7 @@ const strikeBy = (targetId: string, seed: string, ts: number): Delta =>
   signClaims(
     {
       timestamp: ts,
+      validFrom: ts,
       author: authorForSeed(seed),
       pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: targetId } } }],
     },

@@ -18,7 +18,7 @@ export const PLANT_BODY: Term = entityGatherBody();
 // A reactor watching the garden: the "plant" materialization rooted at each given plant.
 export function plantReactor(roots: readonly string[] = [FERN]): Reactor {
   const reactor = new Reactor();
-  reactor.register("plant", PLANT_BODY, roots);
+  reactor.register("plant", PLANT_BODY, roots, Date.now());
   return reactor;
 }
 
@@ -33,6 +33,7 @@ export function observed(
   return signClaims(
     {
       timestamp,
+      validFrom: timestamp,
       author: authorForSeed(seed),
       pointers: [
         { role: "subject", target: { kind: "entity", entity: { id: plant, context } } },

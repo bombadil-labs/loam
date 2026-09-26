@@ -32,6 +32,7 @@ const signed = observed(FERN, "height", 30, 1000, GARDENER_SEED);
 const other = observed(FERN, "height", 34, 2000, SURVEYOR_SEED);
 const unsigned = makeDelta({
   timestamp: 3000,
+  validFrom: 3000,
   author: "did:key:zAnon",
   pointers: [{ role: "note", target: { kind: "primitive", value: "cold but true" } }],
 });

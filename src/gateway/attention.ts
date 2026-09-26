@@ -41,6 +41,7 @@ export function lookedClaims(
 ): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       {
@@ -66,6 +67,7 @@ export function quietClaims(
 ): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       {

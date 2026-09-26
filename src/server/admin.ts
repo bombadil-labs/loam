@@ -121,6 +121,7 @@ const CONFIRM_CAP = 64;
 // (the same shape container.ts's retractionOf builds), never a new delta shape.
 const negationOf = (targetId: string, author: string, timestamp: number): Claims => ({
   timestamp,
+  validFrom: timestamp,
   author,
   pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: targetId } } }],
 });
@@ -229,7 +230,9 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     // The orphaned-channels block is store-wide, so it asks for the OPERATOR role — the same read the
     // register door makes, from the GROUND where roles live (a session carries a name, never a
     // privilege). A non-operator sees nothing there: the orphans are outside every subtree (T218).
-    const isOperator = rolesOf(gw.reactor, gw.operatorAuthor, session.user).has("operator");
+    const isOperator = rolesOf(gw.reactor, gw.operatorAuthor, gw.validityNow(), session.user).has(
+      "operator",
+    );
     // §49: which keys speak for this user is the DOOR's answer — the ground holds no canonical
     // user-to-key binding (T137's arc), so the accepted set is the user's own seed on this host
     // plus the operator. A user whose seed is absent still gets the page; their looked-moments
@@ -291,7 +294,7 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     if (gated === undefined) return;
     const gw = signerGround(res);
     if (gw === undefined) return;
-    if (!rolesOf(gw.reactor, gw.operatorAuthor, gated.user).has("operator")) {
+    if (!rolesOf(gw.reactor, gw.operatorAuthor, gw.validityNow(), gated.user).has("operator")) {
       refuse(res, 403, "Quiet is the operator's mark, and this session is not the operator's.");
       return;
     }
@@ -485,7 +488,7 @@ ${back}`,
       refuse(res, 503, "This container's contents cannot be read right now.");
       return;
     }
-    const regs = readRegistrations(gw.reactor, gw.operatorAuthor);
+    const regs = readRegistrations(gw.reactor, gw.validityNow(), gw.operatorAuthor);
     if (lens === "") {
       // The lens picker: honestly cheap — every registered lens, as a link into this same page.
       const choices =
@@ -1081,7 +1084,7 @@ this lens does not gather; the lens may read ground this container does not hold
     if (gated === undefined) return;
     const gw = signerGround(res);
     if (gw === undefined) return;
-    if (!rolesOf(gw.reactor, gw.operatorAuthor, gated.user).has("operator")) {
+    if (!rolesOf(gw.reactor, gw.operatorAuthor, gw.validityNow(), gated.user).has("operator")) {
       refuse(
         res,
         403,

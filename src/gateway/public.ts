@@ -27,6 +27,7 @@ export function publicClaims(
 ): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       {

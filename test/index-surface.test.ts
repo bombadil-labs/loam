@@ -134,6 +134,7 @@ const height = (value: number, timestamp: number) =>
   signClaims(
     {
       timestamp,
+      validFrom: timestamp,
       author: OP,
       pointers: [
         { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "height" } } },
@@ -280,6 +281,7 @@ describe("T82 — the container and law surfaces are reachable from the package 
       signClaims(
         {
           timestamp: 8100,
+          validFrom: 8100,
           author: OP,
           pointers: [
             {

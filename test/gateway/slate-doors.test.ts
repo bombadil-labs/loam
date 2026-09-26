@@ -166,6 +166,7 @@ describe("T64 criterion 5 — cite closure: ONE predicate, two doors, asymmetric
       signClaims(
         {
           timestamp: ts,
+          validFrom: ts,
           author: OP,
           pointers: [
             { role: "notes", target: { kind: "delta", deltaRef: { delta: target } } },
@@ -187,6 +188,7 @@ describe("T64 criterion 5 — cite closure: ONE predicate, two doors, asymmetric
     const strangerCite = signClaims(
       {
         timestamp: 60_100,
+        validFrom: 60_100,
         author: authorForSeed(strangerSeed),
         pointers: [
           { role: "notes", target: { kind: "delta", deltaRef: { delta: member.id } } },
@@ -211,6 +213,7 @@ describe("T64 criterion 5 — cite closure: ONE predicate, two doors, asymmetric
     const strangerOk = signClaims(
       {
         timestamp: 60_300,
+        validFrom: 60_300,
         author: authorForSeed(strangerSeed),
         pointers: [
           { role: "notes", target: { kind: "delta", deltaRef: { delta: bystander.id } } },
@@ -245,6 +248,7 @@ describe("T64 criterion 5 — a NEGATION is not a citation: cite closure must ne
     const peerStrike = signClaims(
       {
         timestamp: 60_100,
+        validFrom: 60_100,
         author: authorForSeed(peerSeed),
         pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: member.id } } }],
       },
@@ -262,6 +266,7 @@ describe("T64 criterion 5 — a NEGATION is not a citation: cite closure must ne
     const both = signClaims(
       {
         timestamp: 60_200,
+        validFrom: 60_200,
         author: OP,
         pointers: [
           { role: "negates", target: { kind: "delta", deltaRef: { delta: member.id } } },
@@ -352,6 +357,7 @@ describe("T64 criterion 6 — cite is DIRECT only, and the post-cut resubmission
     const hop1 = signClaims(
       {
         timestamp: 1500,
+        validFrom: 1500,
         author: OP,
         pointers: [
           { role: "notes", target: { kind: "delta", deltaRef: { delta: member.id } } },
@@ -365,6 +371,7 @@ describe("T64 criterion 6 — cite is DIRECT only, and the post-cut resubmission
     const hop2 = signClaims(
       {
         timestamp: 60_000,
+        validFrom: 60_000,
         author: OP,
         pointers: [
           { role: "notes", target: { kind: "delta", deltaRef: { delta: hop1.id } } },
@@ -386,6 +393,7 @@ describe("T64 criterion 6 — cite is DIRECT only, and the post-cut resubmission
     const cite = signClaims(
       {
         timestamp: 60_000,
+        validFrom: 60_000,
         author: OP,
         pointers: [
           { role: "notes", target: { kind: "delta", deltaRef: { delta: member.id } } },
@@ -420,6 +428,7 @@ const bytesFact = (value: Uint8Array, ts: number): Delta =>
   signClaims(
     {
       timestamp: ts,
+      validFrom: ts,
       author: OP,
       pointers: [
         { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "avatar" } } },

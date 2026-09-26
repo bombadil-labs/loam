@@ -21,6 +21,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, SURVEYOR, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE, garden } from "./fixtures.js";
+import { stamped } from "../../src/gateway/stamp.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
 const ALICE_SEED = GARDENER_SEED; // alice is the gardener
@@ -83,7 +84,7 @@ describe("standing: deny is the default, permission is an artifact", () => {
     // entities she was never "granted" — no membership, no adoption, no re-tenanting.
     const hosted: Delta = signClaims(
       {
-        timestamp: tick(),
+        ...stamped(tick()),
         author: ALICE,
         pointers: [
           {
@@ -118,7 +119,7 @@ describe("standing: deny is the default, permission is an artifact", () => {
     const source = garden[0]!;
     const citing = signClaims(
       {
-        timestamp: tick(),
+        ...stamped(tick()),
         author: ALICE,
         pointers: [
           { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "height" } } },
@@ -387,7 +388,7 @@ describe("standing: deny is the default, permission is an artifact", () => {
     const gateway = await grantedWorld();
     const twoVerbs = signClaims(
       {
-        timestamp: tick(),
+        ...stamped(tick()),
         author: OPERATOR,
         pointers: [
           {
@@ -453,7 +454,7 @@ describe("standing: deny is the default, permission is an artifact", () => {
     const gateway = await grantedWorld();
     const bogus = signClaims(
       {
-        timestamp: tick(),
+        ...stamped(tick()),
         author: OPERATOR,
         pointers: [
           {

@@ -429,7 +429,7 @@ const acts = [
     const viewer = pick(viewers);
     await appendAs(cinelog.gateway, "sasha", [
       {
-        timestamp: Date.now(),
+        ...((t) => ({ timestamp: t, validFrom: t }))(Date.now()),
         author: AUTHORS.sasha,
         pointers: [
           { role: "film_watched", target: { kind: "entity", entity: { id: film, context: "log" } } },
@@ -507,7 +507,7 @@ const acts = [
       ]);
       const bounced = signClaims(
         {
-          timestamp: Date.now() + 8_000_000,
+          ...((t) => ({ timestamp: t, validFrom: t }))(Date.now() + 8_000_000),
           author: AUTHORS.mallory,
           pointers: [
             { role: "subject", target: { kind: "entity", entity: { id: "person:wren", context: "bio" } } },
@@ -572,7 +572,7 @@ const acts = [
     } else {
       const forgery = signClaims(
         {
-          timestamp: Date.now() + 8_000_000,
+          ...((t) => ({ timestamp: t, validFrom: t }))(Date.now() + 8_000_000),
           author: AUTHORS.mallory,
           pointers: [
             {
@@ -605,7 +605,7 @@ const acts = [
 async function theUnsaying() {
   const regret = signClaims(
     {
-      timestamp: Date.now(),
+      ...((t) => ({ timestamp: t, validFrom: t }))(Date.now()),
       author: AUTHORS.wren,
       pointers: [
         { role: 'subject', target: { kind: 'entity', entity: { id: 'person:wren', context: 'bio' } } },

@@ -67,6 +67,7 @@ const link = (post: string): Delta =>
   signClaims(
     {
       timestamp: 10,
+      validFrom: 10,
       author: OP,
       pointers: [
         { role: "feed", target: { kind: "entity", entity: { id: "feed:main", context: "post" } } },
@@ -79,6 +80,7 @@ const say = (post: string, text: string, at: number): Delta =>
   signClaims(
     {
       timestamp: at,
+      validFrom: at,
       author: OP,
       pointers: [
         { role: "subject", target: { kind: "entity", entity: { id: post, context: "text" } } },
@@ -231,6 +233,7 @@ describe("resolvers reach expanded children (T26)", () => {
     const richLink = signClaims(
       {
         timestamp: 10,
+        validFrom: 10,
         author: OP,
         pointers: [
           {
@@ -295,6 +298,7 @@ describe("resolvers reach expanded children (T26)", () => {
       signClaims(
         {
           timestamp: 5,
+          validFrom: 5,
           author: OP,
           pointers: [
             {
@@ -309,6 +313,7 @@ describe("resolvers reach expanded children (T26)", () => {
       signClaims(
         {
           timestamp: 6,
+          validFrom: 6,
           author: OP,
           pointers: [
             {

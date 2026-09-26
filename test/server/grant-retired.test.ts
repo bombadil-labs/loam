@@ -124,16 +124,18 @@ describe("§58 — a connection's fence is its container, and a grant adds nothi
     const kept = await registerAs(base, "keyed-token", "sync:log");
     expect(kept.status, `an unbound key's grant still stands: ${kept.body}`).toBe(200);
     expect(
-      readRegistrations(gateway.reactor, gateway.operatorAuthor).map(
+      readRegistrations(gateway.reactor, gateway.validityNow(), gateway.operatorAuthor).map(
         (r) => r.lensName ?? r.hyperschema.name,
       ),
     ).toContain("sync:log");
     for (const inbox of gateway.connectionInboxes.values()) {
       if (inbox.gateway !== undefined) {
         expect(
-          readRegistrations(inbox.gateway.reactor, inbox.gateway.operatorAuthor).map(
-            (r) => r.lensName ?? r.hyperschema.name,
-          ),
+          readRegistrations(
+            inbox.gateway.reactor,
+            inbox.gateway.validityNow(),
+            inbox.gateway.operatorAuthor,
+          ).map((r) => r.lensName ?? r.hyperschema.name),
         ).not.toContain("sync:log");
       }
     }

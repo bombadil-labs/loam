@@ -20,6 +20,7 @@ import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { PLANT, PLANT_POLICY, pickLatest } from "./fixtures.js";
 import { FERN, observed } from "../spike/garden.js";
+import { stamped } from "../../src/gateway/stamp.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
@@ -40,6 +41,7 @@ const strayClaim = (t: number) =>
   signClaims(
     {
       timestamp: t,
+      validFrom: t,
       author: ADA,
       pointers: [
         {
@@ -168,7 +170,7 @@ describe("§55(b) — the two levels: ground buckets count strikes, lit/dark cou
     await gw.append([
       signClaims(
         {
-          timestamp: ts(),
+          ...stamped(ts()),
           author: ADA,
           pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: stray.id } } }],
         } as never,
@@ -206,6 +208,7 @@ describe("§55(b) — dark is decided by the surviving-lens context union, two-s
       signClaims(
         {
           timestamp: 2500,
+          validFrom: 2500,
           author: ADA,
           pointers: [
             {

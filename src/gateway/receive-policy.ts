@@ -17,6 +17,8 @@ interface Input {
   readonly destination: string;
   readonly decisions: readonly Delta[];
   readonly sources: readonly { readonly id: string; readonly deltas: readonly Delta[] }[];
+  /** The instant validity is read at. A projection never reads a clock. */
+  readonly now: number;
 }
 interface Decision {
   kind: "binding" | "curse" | "pause";
@@ -214,7 +216,8 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
         pauses.some(
           (p) =>
             p.selection !== null &&
-            selectReceivingSnapshot(source, d, p.selection, true).status === "invalid-selection",
+            selectReceivingSnapshot(source, d, p.selection, true, input.now).status ===
+              "invalid-selection",
         )
       ) {
         results.push({ ...base, status: "invalid-selection" });
@@ -252,6 +255,7 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
           d,
           pause === undefined ? d.selection : pause.selection,
           pause !== undefined,
+          input.now,
         );
         if (pinned.status !== "selected") {
           results.push({ ...base, status: pinned.status });
@@ -260,7 +264,7 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
         selected = pinned.registration;
         operand = pinned.operand;
       } else {
-        const rows = readRegistrations(source, d.sourceAuthor).filter(
+        const rows = readRegistrations(source, input.now, d.sourceAuthor).filter(
           (r) => r.entity === d.entity && lensOf(r) === d.reading,
         );
         if (rows.length !== 1) {

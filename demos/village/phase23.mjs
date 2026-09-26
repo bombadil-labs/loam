@@ -60,7 +60,7 @@ try {
   const fact = (ctx, value) =>
     signClaims(
       {
-        timestamp: Date.now(),
+        ...((t) => ({ timestamp: t, validFrom: t }))(Date.now()),
         author: operator,
         pointers: [
           { role: "subject", target: { kind: "entity", entity: { id: "card:almanac", context: ctx } } },

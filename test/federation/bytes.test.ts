@@ -37,6 +37,7 @@ const avatarDelta = (subject: string, ts: number, seed: string): Delta =>
   signClaims(
     {
       timestamp: ts,
+      validFrom: ts,
       author: authorForSeed(seed),
       pointers: [
         {

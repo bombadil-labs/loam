@@ -165,6 +165,7 @@ function openLiteral(name: string, status: string, declaration: string, bound?: 
   return {
     author: OP,
     timestamp: 100,
+    validFrom: 100,
     pointers: [
       ...header(name, "open"),
       p("nonce", "0123456789abcdef".repeat(4)),
@@ -182,6 +183,7 @@ function receivedLiteral(name: string, opening: string, received: readonly strin
   return {
     author: OP,
     timestamp: 101,
+    validFrom: 101,
     pointers: [
       ...header(name, "received"),
       r("opening", opening),
@@ -193,6 +195,7 @@ function closeLiteral(name: string, opening: string): Claims {
   return {
     author: OP,
     timestamp: 102,
+    validFrom: 102,
     pointers: [...header(name, "close"), r("opening", opening), p("reason", "drop")],
   };
 }
@@ -307,7 +310,14 @@ describe("T288 actual ingest attestation", () => {
     const originalGet = gw.reactor.get.bind(gw.reactor);
     vi.spyOn(gw.reactor, "get").mockImplementation((id) =>
       id === a.id
-        ? { ...a, claims: { ...a.claims, timestamp: a.claims.timestamp + 1 } }
+        ? {
+            ...a,
+            claims: {
+              ...a.claims,
+              timestamp: a.claims.timestamp + 1,
+              validFrom: a.claims.timestamp + 1,
+            },
+          }
         : originalGet(id),
     );
     expect((await gw.federate([a], { ids: true, admittedIds: true })).admittedIds).toEqual([]);
@@ -561,6 +571,7 @@ describe("T288 protected ingress is unconditional across same-key homes", () => 
       const malformed = signed({
         author: OP,
         timestamp: 100,
+        validFrom: 100,
         pointers: [p("ordinary", "first"), e("wrong-role", "not-a-channel", context)],
       });
       let callbacks = 0;
@@ -627,6 +638,7 @@ describe("T288 honest local received operand", () => {
     const arrival = signed({
       author: OP,
       timestamp: 3000,
+      validFrom: 3000,
       pointers: [
         e("arrival", `channel:${ch.name}`, "loam.arrival"),
         p("from", "https://peer.example/default"),
@@ -1147,8 +1159,8 @@ describe("T288 strict literal history and exact attachment projection", () => {
         ),
       }),
     ],
-    ["fractional timestamp", (c) => ({ ...c, timestamp: 1.5 })],
-    ["negative timestamp", (c) => ({ ...c, timestamp: -1 })],
+    ["fractional timestamp", (c) => ({ ...c, timestamp: 1.5, validFrom: 1.5 })],
+    ["negative timestamp", (c) => ({ ...c, timestamp: -1, validFrom: -1 })],
     [
       "unknown version",
       (c) => ({
@@ -1201,7 +1213,7 @@ describe("T288 strict literal history and exact attachment projection", () => {
   it("two current matching opens are ambiguous even with different timestamps", async () => {
     const f = await literalFixture();
     const a = signed(f.claims),
-      b = signed({ ...f.claims, timestamp: 200 });
+      b = signed({ ...f.claims, timestamp: 200, validFrom: 200 });
     await raw(f.gw, [a, b]);
     const evidence = localChannelEvidence(f.gw, f.ch.name);
     expect(evidence.state).toBe("unavailable");
@@ -1526,6 +1538,7 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     const predicted = signed({
       ...receivedLiteral(ch.name, opened(gw, ch.name).opening.id, [a.id]),
       timestamp: 50000,
+      validFrom: 50000,
     });
     const preplant = strike(predicted, SEED, 49999);
     await gw.append([preplant]);
@@ -1545,6 +1558,7 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     const predicted = signed({
       ...receivedLiteral(ch.name, opened(gw, ch.name).opening.id, [a.id]),
       timestamp: 50000,
+      validFrom: 50000,
     });
     const preplant = signed(eraseClaims(predicted.id, OP, OP, 49999));
     await gw.append([preplant]);
@@ -1573,6 +1587,7 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     const predicted = signed({
       ...template.claims,
       timestamp: 70000,
+      validFrom: 70000,
       pointers: template.claims.pointers.map((pt) =>
         pt.role === "erases"
           ? r("erases", target.id)

@@ -288,13 +288,13 @@ const entityPtr = (role, id, context) => ({
 });
 
 export const followClaims = (who, whom, timestamp) => ({
-  timestamp,
+  timestamp, validFrom: timestamp,
   author: "",
   pointers: [entityPtr("subject", who, "follows"), entityPtr("friend", whom, "circle")],
 });
 
 export const companionClaims = (screening, person, timestamp) => ({
-  timestamp,
+  timestamp, validFrom: timestamp,
   author: "",
   pointers: [
     entityPtr("screening", screening, "with"),
@@ -303,13 +303,13 @@ export const companionClaims = (screening, person, timestamp) => ({
 });
 
 export const filmOfClaims = (screening, film, timestamp) => ({
-  timestamp,
+  timestamp, validFrom: timestamp,
   author: "",
   pointers: [entityPtr("screening", screening, "film"), entityPtr("film", film, "screened")],
 });
 
 export const attendClaims = (gathering, person, timestamp) => ({
-  timestamp,
+  timestamp, validFrom: timestamp,
   author: "",
   pointers: [
     entityPtr("gathering", gathering, "attendee"),

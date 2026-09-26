@@ -54,6 +54,7 @@ export function budgetClaims(
 ): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       {

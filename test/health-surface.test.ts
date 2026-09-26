@@ -112,6 +112,7 @@ describe("T111 — the health report is nameable from the package barrel", () =>
     const delta = signClaims(
       {
         timestamp: 1000,
+        validFrom: 1000,
         author: OP,
         pointers: [
           { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "height" } } },

@@ -57,6 +57,7 @@ const BED_SCHEMA = {
 const planting = signClaims(
   {
     timestamp: 1100,
+    validFrom: 1100,
     author: operator,
     pointers: [
       { role: "bed", target: { kind: "entity", entity: { id: BED, context: "plants" } } },
@@ -154,6 +155,7 @@ describe("migration: a legacy (readingless) expand body is carried forward (issu
     const poison = signClaims(
       {
         timestamp: 9000,
+        validFrom: 9000,
         author: authorForSeed(STRANGER_SEED),
         pointers: [
           {

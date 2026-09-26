@@ -118,6 +118,7 @@ const speaksHyperschemaVocab = (d: Delta): boolean =>
 // Everything else (targets, timestamp, author) is preserved — a re-expression, not a new fact.
 const toNewForm = (claims: Claims): Claims => ({
   timestamp: claims.timestamp,
+  validFrom: claims.timestamp,
   author: claims.author,
   pointers: claims.pointers.map((p) =>
     p.role.startsWith(OLD_PREFIX)
@@ -136,6 +137,7 @@ const supersession = (
   reason: string,
 ): Claims => ({
   timestamp,
+  validFrom: timestamp,
   author,
   pointers: [
     { role: "negates", target: { kind: "delta", deltaRef: { delta: oldId } } },
@@ -276,7 +278,12 @@ const toRenamedForm = (claims: Claims): Claims => {
       });
     }
   }
-  return { timestamp: claims.timestamp, author: claims.author, pointers };
+  return {
+    timestamp: claims.timestamp,
+    validFrom: claims.timestamp,
+    author: claims.author,
+    pointers,
+  };
 };
 
 const SCHEMA_ENTITY_RENAME: Migration = {
@@ -545,7 +552,9 @@ const readingMap = (
     }
     let readingName: string | undefined;
     try {
-      readingName = loadSchema(dset, schemaId).name; // the name `lookupReading` will resolve against
+      // A migrated store predates validity: its definitions never expire, so the latest
+      // representable instant reads every one of them.
+      readingName = loadSchema(dset, schemaId, Number.MAX_SAFE_INTEGER).name; // what `lookupReading` resolves
     } catch {
       continue; // no loadable Schema at that entity: it names no reading we can vouch for
     }
@@ -629,6 +638,7 @@ const EXPAND_READING: Migration = {
       const reExpressed = signClaims(
         {
           timestamp: d.claims.timestamp,
+          validFrom: d.claims.timestamp,
           author: d.claims.author,
           pointers: d.claims.pointers.map((p) =>
             p.role === HS_TERM ? { ...p, target: { kind: "primitive" as const, value: hex } } : p,
@@ -693,6 +703,7 @@ const retiredPostureWord = (d: Delta): string | undefined => {
 // The new form: the posture primitive in the storage vocabulary, every other pointer untouched.
 const toStorageWords = (claims: Claims): Claims => ({
   timestamp: claims.timestamp,
+  validFrom: claims.timestamp,
   author: claims.author,
   pointers: claims.pointers.map((p) => {
     if (p.role !== POSTURE_ROLE || p.target.kind !== "primitive") return p;

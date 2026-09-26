@@ -16,7 +16,7 @@ try {
   const fact = (ctx, value, ts) =>
     signClaims(
       {
-        timestamp: ts,
+        timestamp: ts, validFrom: ts,
         author: almanac.operator,
         pointers: [
           { role: "subject", target: { kind: "entity", entity: { id: subject, context: ctx } } },

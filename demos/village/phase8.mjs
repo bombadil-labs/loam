@@ -44,7 +44,7 @@ try {
   await pullFrom(almanac.gateway, commons.base, opToken("commons"));
   const forgery = signClaims(
     {
-      timestamp: Date.now() + 10_000_000,
+      ...((t) => ({ timestamp: t, validFrom: t }))(Date.now() + 10_000_000),
       author: AUTHORS.mallory,
       pointers: [
         { role: "subject", target: { kind: "entity", entity: { id: "person:wren", context: "bio" } } },

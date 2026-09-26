@@ -30,7 +30,7 @@ describe("spike: loadHyperSchema(deltas) → HyperSchema", () => {
   it("publish → load round-trips a schema through deltas", () => {
     const claims = publishHyperSchemaClaims(PLANT, "schema:Plant", GARDENER, 1000);
     const dset = DeltaSet.from([makeDelta(claims)]);
-    const loaded = loadHyperSchema(dset, "schema:Plant");
+    const loaded = loadHyperSchema(dset, "schema:Plant", Date.now());
     expect(loaded.name).toBe("Plant");
     expect(loaded.alg).toBe(PLANT.alg);
     expect(termHash(loaded.body)).toBe(termHash(PLANT.body));
@@ -41,9 +41,9 @@ describe("spike: loadHyperSchema(deltas) → HyperSchema", () => {
       observed(FERN, "height", 30, 1000, GARDENER_SEED),
       makeDelta(publishHyperSchemaClaims(PLANT, "schema:Plant", GARDENER, 1000)),
     ]);
-    const loaded = loadHyperSchema(world, "schema:Plant");
-    const viaLoaded = evalTerm(loaded.body, world, FERN);
-    const viaOriginal = evalTerm(PLANT.body, world, FERN);
+    const loaded = loadHyperSchema(world, "schema:Plant", Date.now());
+    const viaLoaded = evalTerm(loaded.body, world, Date.now(), FERN);
+    const viaOriginal = evalTerm(PLANT.body, world, Date.now(), FERN);
     expect(resultCanonicalHex(viaLoaded)).toBe(resultCanonicalHex(viaOriginal));
   });
 
@@ -60,6 +60,7 @@ describe("spike: loadHyperSchema(deltas) → HyperSchema", () => {
     const loaded = loadHyperSchema(
       DeltaSet.from([makeDelta(v1), makeDelta(v2)]),
       "schema:Evolving",
+      Date.now(),
     );
     expect(loaded.name).toBe("PlantV2");
     expect(termHash(loaded.body)).toBe(termHash(v2Body));
@@ -69,14 +70,14 @@ describe("spike: loadHyperSchema(deltas) → HyperSchema", () => {
   it("deprecation is negation: a negated definition does not load", () => {
     const only = makeDelta(publishHyperSchemaClaims(PLANT, "schema:Dead", GARDENER, 1000));
     const negation = makeDelta(makeNegationClaims(GARDENER, 1100, only.id));
-    expect(() => loadHyperSchema(DeltaSet.from([only, negation]), "schema:Dead")).toThrow(
-      /no surviving schema definition/,
-    );
+    expect(() =>
+      loadHyperSchema(DeltaSet.from([only, negation]), "schema:Dead", Date.now()),
+    ).toThrow(/no surviving schema definition/);
   });
 
   it("the metacircular seed: HYPER_SCHEMA_SCHEMA round-trips through its own machinery", () => {
     const claims = publishHyperSchemaClaims(HYPER_SCHEMA_SCHEMA, "schema:schema", GARDENER, 1);
-    const loaded = loadHyperSchema(DeltaSet.from([makeDelta(claims)]), "schema:schema");
+    const loaded = loadHyperSchema(DeltaSet.from([makeDelta(claims)]), "schema:schema", Date.now());
     expect(loaded.name).toBe(HYPER_SCHEMA_SCHEMA.name);
     expect(termHash(loaded.body)).toBe(termHash(HYPER_SCHEMA_SCHEMA.body));
   });
@@ -117,6 +118,7 @@ describe("spike: schema refs — the recursion step 3's nested GraphQL types sta
   const planting = signClaims(
     {
       timestamp: 1100,
+      validFrom: 1100,
       author: GARDENER,
       pointers: [
         { role: "bed", target: { kind: "entity", entity: { id: BED, context: "plants" } } },
@@ -132,7 +134,7 @@ describe("spike: schema refs — the recursion step 3's nested GraphQL types sta
   });
 
   it("expansion nests the child HView; resolveView recurses through it", () => {
-    const result = evalTerm(BED_BODY, world, BED, registry);
+    const result = evalTerm(BED_BODY, world, Date.now(), BED, registry);
     if (result.sort !== "hview") throw new Error(`expected an hview, got ${result.sort}`);
     const entries = result.hview.props.get("plants");
     expect(entries).toHaveLength(1);

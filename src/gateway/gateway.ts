@@ -14,7 +14,7 @@ import {
   SchemaRegistry,
   authorForSeed,
   computeId,
-  evalTerm,
+  evalTermRaw,
   type Delta,
   type HView,
   type HyperSchema,
@@ -136,7 +136,7 @@ import {
   type WithdrawnRegistration,
   type LensName,
 } from "./registration.js";
-import { readRegistrations } from "./registration.js";
+import { CTX_REGISTRATION, readRegistrations } from "./registration.js";
 import { newResolverMemo, type ResolverMemo } from "./resolvers.js";
 import {
   openQuarantineImpl,
@@ -355,6 +355,7 @@ const bindableNames = (r: Bound): string[] => [lensOf(r), programOf(r)];
 // coupling — widen the seam loudly, here, or question the boundary.
 /** No name at all — what a channel pool has declared open to a tokenless caller (see `openNames`). */
 const EMPTY_PUBLIC: ReadonlySet<string> = new Set<string>();
+const MAX_TIMER_DELAY = 2 ** 31 - 1; // the largest delay setTimeout accepts
 
 export class Gateway {
   /** @internal — T19 seam (renderers.ts) */
@@ -469,7 +470,7 @@ export class Gateway {
     // blow up when a peer first pulls, in production. Trial-eval it now (empty store → empty
     // dset; the SORT is what we're checking, and that is content-independent).
     if (options.offeredLens !== undefined) {
-      const trial = evalTerm(options.offeredLens, reactor.snapshot());
+      const trial = evalTermRaw(options.offeredLens, reactor.snapshot());
       if (trial.sort !== "dset") {
         throw new Error("offeredLens must select a delta set (a mask/select term, not a group)");
       }
@@ -511,7 +512,8 @@ export class Gateway {
   // constitution, and that is a failure the operator must see, not one to boot past.
   static async open(backend: StoreBackend, options: GatewayOptions = {}): Promise<Gateway> {
     const reactor = new Reactor();
-    for (const d of await backend.deltasSince(new Set())) {
+    const replayed = await backend.deltasSince(new Set());
+    for (const d of replayed) {
       const result = reactor.ingest(d);
       if (result.status === "rejected") {
         throw new Error(`replay: the store handed back an unacceptable delta ${d.id}`);
@@ -532,7 +534,9 @@ export class Gateway {
       }
     }
     const gateway = new Gateway(backend, reactor, options);
+    gateway.seedAuthorClocks(replayed);
     gateway.replayRegistrations();
+    gateway.advanceToNow();
     await gateway.preloadResolvers();
     return gateway;
   }
@@ -631,7 +635,7 @@ export class Gateway {
   // Every answerable version of every registration (SPEC §17): the append-only publication
   // history, read live from the ground under this store's law.
   registrationVersions(): RegistrationVersion[] {
-    return readRegistrationVersions(this.reactor, this.operatorAuthor);
+    return readRegistrationVersions(this.reactor, this.validityNow(), this.operatorAuthor);
   }
 
   // The names a declared `conflicts` policy is WITHHOLDING (§47.1), across every ground this store
@@ -644,7 +648,7 @@ export class Gateway {
   // The versions the operator lawfully struck (SPEC §17): served no longer, remembered
   // forever — the 410 door's only witness.
   withdrawnRegistrations(): WithdrawnRegistration[] {
-    return readWithdrawnRegistrations(this.reactor, this.operatorAuthor);
+    return readWithdrawnRegistrations(this.reactor, this.validityNow(), this.operatorAuthor);
   }
 
   // Pinned resolution (SPEC §17 versioning × §26 as-of): the body lives in reads.ts.
@@ -657,7 +661,7 @@ export class Gateway {
     now?: number,
     binding?: ConnectionBinding,
   ): ResolvedNode {
-    return resolvePinnedImpl(this, reg, entity, now ?? Date.now(), asOf, binding);
+    return resolvePinnedImpl(this, reg, entity, now ?? this.now(), asOf, binding);
   }
 
   // Re-derive the store's slice of the surface and follow it. The desired set is the manual
@@ -860,7 +864,7 @@ export class Gateway {
   // this store is eventually consistent about forgetting, and the gap between an erasure landing
   // and the bytes leaving every tier is a health state to watch, not a fault to boot past.
   async health(now?: number): Promise<StoreHealth> {
-    return healthImpl(this, now ?? Date.now());
+    return healthImpl(this, now ?? this.now());
   }
 
   // --- slating (SPEC §29, ticket T64) -------------------------------------------------------------
@@ -875,7 +879,7 @@ export class Gateway {
    * closes `read` — a read-closed slate that could not be reviewed would defeat itself.
    */
   slates(now?: number): SlateReport[] {
-    return slateReportsImpl(this, now ?? Date.now());
+    return slateReportsImpl(this, now ?? this.now());
   }
 
   /** Every surviving lawful graveyard — the durable record of each erasure EVENT (SPEC §29.6). */
@@ -1303,6 +1307,7 @@ export class Gateway {
     this.ingestVia = (d) => this.reactor.ingest(d);
     this.attachPersistence(reactor);
     if (this.registered.length > 0) rebindImpl(this, this.registered);
+    this.advanceToNow();
     // The registered set is a PARSED COPY of definition content — hyperschema bodies, schemas,
     // resolver source — so it is a tier like any other (§11), and rebinding it alone would keep
     // serving law whose bytes this cut just removed: `surface()`, the GraphQL schema and every
@@ -1312,6 +1317,7 @@ export class Gateway {
     // returns), so the second bind is paid only when the cut actually took law away. Manual
     // registrations are this process's own, not the ground's: the replay keeps them by origin.
     this.replayRegistrations();
+    this.armValidityTimer(); // the replay re-read the registration boundary
   }
 
   // --- federation ------------------------------------------------------------------------------
@@ -1423,8 +1429,114 @@ export class Gateway {
   }
 
   /** @internal — T19 seam (erase.ts, adopt.ts) */
-  nextTimestamp(): number {
-    this.lastMutationTs = Math.max(Date.now(), this.lastMutationTs + 1);
+  /** The wall clock, read in this one place. Rhizomatic never reads a clock itself. */
+  now(): number {
+    return Date.now();
+  }
+
+  /** The instant a validity read looks at: `now`, but never earlier than this gateway's own latest
+   * write. `nextTimestamp` can run ahead of the wall clock, and a write must be valid when the next
+   * read looks. Deadlines never use this: they compare the wall clock alone. */
+  validityNow(now: number = this.now()): number {
+    return Math.max(now, this.lastMutationTs);
+  }
+
+  private validityTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /**
+   * Brings the reactor's maintained views to the present, then arms the validity timer. Views are
+   * evaluated at an instant: a delta written after that instant is not yet valid there, so every
+   * ingest advances first.
+   * @internal — ingest.ts calls it before each batch
+   */
+  advanceToNow(): void {
+    this.reactor.advanceTime(this.validityNow());
+    this.armValidityTimer();
+  }
+
+  /**
+   * Arms one timer for the next validity boundary a held delta names: a delta that becomes valid,
+   * or stops being valid, with nothing written at all. Re-arm after every ingest, because the batch
+   * may name an earlier boundary than the one already armed.
+   * @internal — ingest.ts calls it after each batch
+   */
+  armValidityTimer(): void {
+    if (this.validityTimer !== undefined) clearTimeout(this.validityTimer);
+    this.validityTimer = undefined;
+    const now = this.validityNow();
+    const next = [this.reactor.nextValidityBoundary(now), this.registrationBoundary]
+      .filter((t): t is number => t !== undefined)
+      .reduce((a, b) => Math.min(a, b), Infinity);
+    if (next === Infinity) return;
+    // A delay past 2^31-1 ms overflows, and Node then fires it at once, every time. Waking early
+    // is harmless: the callback advances and re-arms for what remains.
+    const delay = Math.min(Math.max(0, next - now), MAX_TIMER_DELAY);
+    this.validityTimer = setTimeout(() => this.onValidityBoundary(), delay);
+    this.validityTimer.unref?.();
+  }
+
+  /** @internal — the next moment a registration claim starts or stops; replay sets it */
+  registrationBoundary: number | undefined;
+
+  // A registration boundary changes which bindings exist, so it replays the registrations, which
+  // re-reads the next registration boundary. A data boundary only moves the views.
+  private onValidityBoundary(): void {
+    const crossed =
+      this.registrationBoundary !== undefined && this.validityNow() >= this.registrationBoundary;
+    this.reactor.advanceTime(this.validityNow());
+    if (crossed) this.replayRegistrations();
+    this.armValidityTimer();
+  }
+
+  // Each author's newest held claim time. A Schema that orders `byTimestamp` needs an author's
+  // writes to sort in the order they were made, and a host clock can step back across a restart.
+  private readonly authorClocks = new Map<string, number>();
+
+  /**
+   * A registration claim that starts or stops later moves the registration boundary, so the timer
+   * replays the registrations when that moment arrives. A claim valid now is left to the caller
+   * that wrote it, as before: a raw append does not replay.
+   * @internal — ingest.ts calls it for every delta it lands
+   */
+  noteRegistrationTime(d: Delta): void {
+    const files = d.claims.pointers.some(
+      (p) => p.target.kind === "entity" && p.target.entity.context === CTX_REGISTRATION,
+    );
+    if (!files) return;
+    const now = this.validityNow();
+    for (const t of [d.claims.validFrom, d.claims.validUntil]) {
+      if (t === undefined || t <= now) continue;
+      if (this.registrationBoundary === undefined || t < this.registrationBoundary) {
+        this.registrationBoundary = t;
+      }
+    }
+  }
+
+  /** @internal — ingest.ts calls it for every delta it lands */
+  noteAuthorTime(d: Delta): void {
+    const { author, timestamp } = d.claims;
+    if (timestamp > (this.authorClocks.get(author) ?? -Infinity)) {
+      this.authorClocks.set(author, timestamp);
+    }
+  }
+
+  // The store's own history is the only witness to time before this process started. The
+  // operator's clock also floors `validityNow`, so its pre-restart writes stay valid. A user's
+  // pre-restart writes are not covered: until that user or the wall clock moves past them, a
+  // write stamped ahead of a stepped-back clock is not yet valid.
+  private seedAuthorClocks(deltas: Iterable<Delta>): void {
+    for (const d of deltas) this.noteAuthorTime(d);
+    const operator =
+      this.operatorAuthor === undefined ? undefined : this.authorClocks.get(this.operatorAuthor);
+    if (operator !== undefined) this.lastMutationTs = Math.max(this.lastMutationTs, operator);
+  }
+
+  /** A creation time for a claim `author` is about to sign: never behind the wall clock, never
+   * equal to this gateway's last stamp, and never behind a claim the store already holds from
+   * `author`. */
+  nextTimestamp(author: string | undefined = this.operatorAuthor): number {
+    const held = author === undefined ? -Infinity : (this.authorClocks.get(author) ?? -Infinity);
+    this.lastMutationTs = Math.max(this.now(), this.lastMutationTs + 1, held + 1);
     return this.lastMutationTs;
   }
 
@@ -1497,7 +1609,7 @@ export class Gateway {
     now?: number,
     binding?: ConnectionBinding,
   ): HView {
-    return gatherImpl(this, name, entity, now ?? Date.now(), asOf, binding);
+    return gatherImpl(this, name, entity, now ?? this.now(), asOf, binding);
   }
 
   gatherForRetraction(name: string, entity: string, binding?: ConnectionBinding): HView {
@@ -1512,7 +1624,7 @@ export class Gateway {
     now?: number,
     binding?: ConnectionBinding,
   ): ResolvedNode {
-    return resolvedNodeImpl(this, name, entity, now ?? Date.now(), asOf, binding);
+    return resolvedNodeImpl(this, name, entity, now ?? this.now(), asOf, binding);
   }
 
   // --- the write seam --------------------------------------------------------------------------
@@ -1643,7 +1755,7 @@ export class Gateway {
   // whole-store read is acceptable here where it would not be per request.
   private emptySurfaceMessage(): string {
     let inert = "";
-    if (readRegistrations(this.reactor, undefined).length > 0) {
+    if (readRegistrations(this.reactor, this.validityNow(), undefined).length > 0) {
       // The derivable fact is that registrations exist and none binds. The causes are stated as
       // general rules, attributed only where the store's own posture makes them true: foreign
       // inertia is a governed-store rule (SPEC §8), never claimed of an ungoverned store.
@@ -1807,6 +1919,8 @@ export class Gateway {
   // Close ends every live subscription (a parked reader wakes with done, never hangs), then
   // always releases the backend, even when a latched write failure has to be surfaced.
   async close(): Promise<void> {
+    if (this.validityTimer !== undefined) clearTimeout(this.validityTimer);
+    this.validityTimer = undefined;
     for (const channel of [...this.channels]) await channel.return();
     // ATTACHED POOLS CLOSE WITH THEIR PARENT. A separate container holds its own store open, and
     // nothing else will ever close it — so before this, every channel pool leaked its sqlite handle

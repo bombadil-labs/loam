@@ -68,8 +68,8 @@ describe("§36 phase 2 — a user is a fact", () => {
     expect(reactor.get(strangerRole.id)).toBeDefined();
 
     // object level: the store's seed never spoke, so no user resolves at all
-    expect(resolveUserView(reactor, OPERATOR, "carol")).toBeUndefined();
-    expect(rolesOf(reactor, OPERATOR, "carol")).toEqual(new Set());
+    expect(resolveUserView(reactor, OPERATOR, Date.now(), "carol")).toBeUndefined();
+    expect(rolesOf(reactor, OPERATOR, Date.now(), "carol")).toEqual(new Set());
   });
 
   // Criterion 3 — two-sided
@@ -85,7 +85,7 @@ describe("§36 phase 2 — a user is a fact", () => {
     // delta level: the strike really is in the store
     expect(reactor.negationsOf(role.id)).toContain(strangerStrike.id);
     // object level: it does not bind — the role still resolves
-    expect(rolesOf(reactor, OPERATOR, "dave")).toEqual(new Set<UserRole>(["operator"]));
+    expect(rolesOf(reactor, OPERATOR, Date.now(), "dave")).toEqual(new Set<UserRole>(["operator"]));
   });
 
   // Criterion 4
@@ -94,8 +94,8 @@ describe("§36 phase 2 — a user is a fact", () => {
     ingested(reactor, mkUser("erin", OPERATOR_SEED, 1));
     ingested(reactor, mkRole("erin", "operator", OPERATOR_SEED, 2));
 
-    expect(resolveUserView(reactor, undefined, "erin")).toBeUndefined();
-    expect(rolesOf(reactor, undefined, "erin")).toEqual(new Set());
+    expect(resolveUserView(reactor, undefined, Date.now(), "erin")).toBeUndefined();
+    expect(rolesOf(reactor, undefined, Date.now(), "erin")).toEqual(new Set());
   });
 
   // Criterion 5 — two-sided
@@ -111,8 +111,8 @@ describe("§36 phase 2 — a user is a fact", () => {
     // delta level
     expect(reactor.negationsOf(role.id)).toContain(strike.id);
     // object level: user still readable, role gone
-    expect(resolveUserView(reactor, OPERATOR, "finn")).toBeDefined();
-    expect(rolesOf(reactor, OPERATOR, "finn")).toEqual(new Set());
+    expect(resolveUserView(reactor, OPERATOR, Date.now(), "finn")).toBeDefined();
+    expect(rolesOf(reactor, OPERATOR, Date.now(), "finn")).toEqual(new Set());
   });
 
   // Criterion 6
@@ -122,7 +122,9 @@ describe("§36 phase 2 — a user is a fact", () => {
     ingested(reactor, mkRole("gail", "operator", OPERATOR_SEED, 2));
     ingested(reactor, mkRole("gail", "actor", OPERATOR_SEED, 3));
 
-    expect(rolesOf(reactor, OPERATOR, "gail")).toEqual(new Set<UserRole>(["operator", "actor"]));
+    expect(rolesOf(reactor, OPERATOR, Date.now(), "gail")).toEqual(
+      new Set<UserRole>(["operator", "actor"]),
+    );
   });
 
   // Criterion 7
@@ -130,10 +132,10 @@ describe("§36 phase 2 — a user is a fact", () => {
     const reactor = new Reactor();
     ingested(reactor, mkUser("hank", OPERATOR_SEED, 1));
 
-    const roles = rolesOf(reactor, OPERATOR, "hank");
+    const roles = rolesOf(reactor, OPERATOR, Date.now(), "hank");
     expect(roles).toEqual(new Set());
     expect(roles.has("operator")).toBe(false); // membership, not equality
-    expect(resolveUserView(reactor, OPERATOR, "hank")).toBeDefined(); // the user is still readable
+    expect(resolveUserView(reactor, OPERATOR, Date.now(), "hank")).toBeDefined(); // the user is still readable
   });
 
   // Criterion 8
@@ -144,7 +146,7 @@ describe("§36 phase 2 — a user is a fact", () => {
     const reactor = new Reactor();
     ingested(reactor, mkUser("iris", OPERATOR_SEED, 1));
     ingested(reactor, mkRole("iris", "operator", OPERATOR_SEED, 2));
-    expect(rolesOf(reactor, OPERATOR, "iris")).toBeInstanceOf(Set);
+    expect(rolesOf(reactor, OPERATOR, Date.now(), "iris")).toBeInstanceOf(Set);
   });
 
   // Criterion 9
@@ -169,13 +171,13 @@ describe("§36 phase 2 — a user is a fact", () => {
     const janeRole = ingested(reactor, mkRole("jane", "operator", OPERATOR_SEED, 3));
     ingested(reactor, mkRole("kane", "operator", OPERATOR_SEED, 4));
 
-    expect(rolesOf(reactor, OPERATOR, "jane")).toEqual(new Set<UserRole>(["operator"]));
-    expect(rolesOf(reactor, OPERATOR, "kane")).toEqual(new Set<UserRole>(["operator"]));
+    expect(rolesOf(reactor, OPERATOR, Date.now(), "jane")).toEqual(new Set<UserRole>(["operator"]));
+    expect(rolesOf(reactor, OPERATOR, Date.now(), "kane")).toEqual(new Set<UserRole>(["operator"]));
 
     ingested(reactor, signClaims(makeNegationClaims(OPERATOR, 5, janeRole.id), OPERATOR_SEED));
 
-    expect(rolesOf(reactor, OPERATOR, "jane")).toEqual(new Set()); // revoked
-    expect(rolesOf(reactor, OPERATOR, "kane")).toEqual(new Set<UserRole>(["operator"])); // survives
+    expect(rolesOf(reactor, OPERATOR, Date.now(), "jane")).toEqual(new Set()); // revoked
+    expect(rolesOf(reactor, OPERATOR, Date.now(), "kane")).toEqual(new Set<UserRole>(["operator"])); // survives
   });
 
   // Criterion 11
@@ -192,12 +194,14 @@ describe("§36 phase 2 — a user is a fact", () => {
     // delta level: the stray claim IS in the store
     expect(reactor.get(impostorRole.id)).toBeDefined();
     // object level: no reading admits it
-    expect(rolesOf(reactor, OPERATOR, "carol")).toEqual(new Set());
+    expect(rolesOf(reactor, OPERATOR, Date.now(), "carol")).toEqual(new Set());
 
     // positive control: the identical claim, signed by the store's seed, does resolve
     const genuineRole = ingested(reactor, mkRole("carol", "operator", OPERATOR_SEED, 3));
     expect(reactor.get(genuineRole.id)).toBeDefined();
-    expect(rolesOf(reactor, OPERATOR, "carol")).toEqual(new Set<UserRole>(["operator"]));
+    expect(rolesOf(reactor, OPERATOR, Date.now(), "carol")).toEqual(
+      new Set<UserRole>(["operator"]),
+    );
   });
 
   // Criterion 13
@@ -209,7 +213,7 @@ describe("§36 phase 2 — a user is a fact", () => {
     const reactor = new Reactor();
     ingested(reactor, mkUser("liam", OPERATOR_SEED, 1));
     ingested(reactor, mkRole("liam", "actor", OPERATOR_SEED, 2));
-    expect(rolesOf(reactor, OPERATOR, "liam")).toEqual(new Set<UserRole>(["actor"]));
+    expect(rolesOf(reactor, OPERATOR, Date.now(), "liam")).toEqual(new Set<UserRole>(["actor"]));
   });
 
   // Not one of the ticket's 13, but earned by the P1 premortem (T123): entityGatherBody's new

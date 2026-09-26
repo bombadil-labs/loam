@@ -34,7 +34,7 @@ import {
 
 import {
   computeId,
-  evalTerm,
+  evalTermRaw,
   parseTerm,
   verifyDelta,
   type Delta,
@@ -62,6 +62,7 @@ import {
   slateRefusal,
 } from "./slate.js";
 import { readTrustPolicy } from "./trust.js";
+import { stamped } from "./stamp.js";
 
 // Persist a batch, THEN serve it (the body of `Gateway.append`). The batch is validated whole (one
 // bad delta refuses the lot); it lands in the backend before the reactor sees it, so nothing a
@@ -146,7 +147,7 @@ async function persistChannelEvent(
     else pointers.push(...input.received.map((id) => eventRef("received", id)));
   }
   const d = signClaims(
-    { author: gw.operatorAuthor, timestamp: gw.nextTimestamp(), pointers },
+    { author: gw.operatorAuthor, ...stamped(gw.nextTimestamp()), pointers },
     gw.options.seed,
   );
   const parsed = parseLocalEvent(d, gw.operatorAuthor);
@@ -315,10 +316,13 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
   let accepted = 0;
   let duplicates = 0;
   const fresh: Delta[] = [];
+  gw.advanceToNow(); // views must stand at the present, or this batch is not yet valid there
   for (const d of batch) gw.justPersisted.add(d.id);
   try {
     for (const d of batch) {
       const result = gw.ingestVia(d);
+      gw.noteAuthorTime(d);
+      gw.noteRegistrationTime(d);
       if (result.status === "accepted") {
         accepted += 1;
         fresh.push(d);
@@ -328,6 +332,7 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
     // Always cleared — duplicates never hit the raw stream, and a mid-ingest throw must not
     // leave stale ids silently exempting future raw-stream writes.
     for (const d of batch) gw.justPersisted.delete(d.id);
+    gw.armValidityTimer(); // the batch may name the next boundary
   }
   // A landing slate that closes `read` ends live subscriptions the way an erase does (SPEC §29.3).
   // `reseat()` already solves precisely this one phase later — "a parked reader must not keep serving
@@ -552,7 +557,7 @@ export function offeredDeltasImpl(gw: Gateway): Delta[] {
     lens === undefined
       ? [...gw.reactor.snapshot()]
       : (() => {
-          const result = evalTerm(lens, gw.reactor.snapshot());
+          const result = evalTermRaw(lens, gw.reactor.snapshot());
           if (result.sort !== "dset") throw new Error("an offered lens must select a delta set");
           return withNegationClosure(gw, [...result.set]);
         })();
@@ -573,7 +578,7 @@ export function offeredDeltasImpl(gw: Gateway): Delta[] {
 // so it hands back exactly what the Term selected, no more.
 export function selectImpl(gw: Gateway, term: unknown): Delta[] {
   const parsed = parseTerm(term);
-  const result = evalTerm(parsed, gw.reactor.snapshot());
+  const result = evalTermRaw(parsed, gw.reactor.snapshot());
   if (result.sort !== "dset") {
     throw new Error(
       `select: the membership term must evaluate to a delta set (dset), not a ${result.sort} — ` +
@@ -589,7 +594,7 @@ export function selectImpl(gw: Gateway, term: unknown): Delta[] {
 // newest membership. §27.6's "nearly free": every pulse re-evaluates the one Term.
 export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], void, unknown> {
   const parsed = parseTerm(term);
-  const initial = evalTerm(parsed, gw.reactor.snapshot());
+  const initial = evalTermRaw(parsed, gw.reactor.snapshot());
   if (initial.sort !== "dset") {
     throw new Error(
       `watch: the membership term must evaluate to a delta set (dset), not a ${initial.sort}`,
@@ -630,7 +635,7 @@ export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], v
   // discipline the entity-stream sinks run).
   gw.reactor.subscribeRaw(() => {
     if (closed) return;
-    const next = evalTerm(parsed, gw.reactor.snapshot());
+    const next = evalTermRaw(parsed, gw.reactor.snapshot());
     if (next.sort !== "dset") return; // the term's sort is content-independent; unreachable
     const members = live([...next.set]);
     const ids = new Set(members.map((d) => d.id));
@@ -744,10 +749,15 @@ export async function federateImpl(
   const admittedIds = new Set<string>();
   if (admitted.length > 0) {
     await gw.backend.append(admitted);
+    gw.advanceToNow(); // as at append
     for (const d of admitted) gw.justPersisted.add(d.id);
     try {
       for (const d of admitted) {
         const result = gw.ingestVia(d);
+        if (result.status !== "rejected") {
+          gw.noteAuthorTime(d);
+          gw.noteRegistrationTime(d);
+        }
         if (result.status === "accepted") {
           acceptedIds.push(d.id);
           admittedIds.add(d.id);
@@ -756,6 +766,7 @@ export async function federateImpl(
       }
     } finally {
       for (const d of admitted) gw.justPersisted.delete(d.id);
+      gw.armValidityTimer(); // as at append
     }
   }
   // As at append: a batch that closes reads (a slate record or an erasure) touches no watched

@@ -18,7 +18,12 @@ const AUTHOR = authorForSeed(SEED);
 
 function planted(role: string, value: string, timestamp: number): Delta {
   return signClaims(
-    { timestamp, author: AUTHOR, pointers: [{ role, target: { kind: "primitive", value } }] },
+    {
+      timestamp,
+      validFrom: timestamp,
+      author: AUTHOR,
+      pointers: [{ role, target: { kind: "primitive", value } }],
+    },
     SEED,
   );
 }

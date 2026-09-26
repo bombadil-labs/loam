@@ -100,6 +100,12 @@ level. Loam then consumes it through the barrel and compares its recordings.
    schema read with an explicit key-set or author-predicate input, `applyPolicy`, and the named
    lens binding. Loam replaces hand-written strike walks and law loops where its recordings show
    equal answers. How many go is measured, not promised.
+   Step 3 left one limit for this step. Loam's negation walks (`lawfulNegated`, 34 readers, and
+   `dataStruck`) ignore validity. A negation with a future start counts at once, and an expired
+   negation still counts. The same holds for a negation of a registration, so a timed negation
+   does not change the served surface at its boundary. Loam writes no timed negation today. The
+   governed read must answer at an explicit read time, and Loam's recordings must pin a timed
+   negation of a registration before this step lands.
 5. **Principal.** Roots, key binding, succession, delegation, locators. Loam moves user,
    connection and container keys into signed data.
 6. **Peer and admission.** The peer model, the guard pipeline, arrival testimony. Loam's
