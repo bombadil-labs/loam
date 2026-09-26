@@ -63,7 +63,7 @@ import {
   erasureTarget,
 } from "./erase.js";
 import { withNegationClosure } from "./ingest.js";
-import { lawfulSnapshot } from "./registration.js";
+import { lawfulDeltasAt, lawfulSnapshot } from "./registration.js";
 import { negatedAt } from "./negation.js";
 import type { Gateway } from "./gateway.js";
 import { withStamp } from "./stamp.js";
@@ -77,6 +77,7 @@ import { withStamp } from "./stamp.js";
  */
 export const SLATE_ENTITY = "loam:erasure";
 export const CTX_SLATE = "loam.erasure.slate";
+const SLATE_AT = { entity: SLATE_ENTITY, context: CTX_SLATE } as const;
 export const CTX_GRAVEYARD = "loam.erasure.graveyard";
 // The whole mint, enumerable — the vocabulary rail asserts the prefix discipline over this list.
 export const SLATE_CONTEXTS = [CTX_SLATE, CTX_GRAVEYARD] as const;
@@ -622,21 +623,19 @@ export function readSlates(
   requireMoment(now, "readSlates");
   // The cheap existence probe first (the `deadSet` discipline, H8): a store holding no slate record
   // at all answers without paying for the negation materialization or the container table. It
-  // decides nothing else — which records SURVIVE stays the one place below that owns the rule.
-  let any = false;
-  for (const d of reactor.snapshot()) {
-    if (d.claims.author === operator && isSlateRecord(d.claims)) {
-      any = true;
-      break;
-    }
-  }
-  if (!any) return [];
+  // decides nothing else — which records SURVIVE stays the one place below that owns the rule. A
+  // slate record is filed at SLATE_ENTITY, so the target index answers it; `reactor.snapshot()`
+  // would copy and walk the whole store on every read and every write.
+  const records = lawfulDeltasAt(reactor, validityNow, SLATE_AT, operator).filter((d) =>
+    isSlateRecord(d.claims),
+  );
+  if (records.length === 0) return [];
 
   const negated = negatedAt(reactor, validityNow, operator);
   const table = readContainerTable(reactor, validityNow, operator);
   const out: Slate[] = [];
-  for (const delta of lawfulSnapshot(reactor, validityNow, operator)) {
-    if (negated(delta.id) || !isSlateRecord(delta.claims)) continue;
+  for (const delta of records) {
+    if (negated(delta.id)) continue;
     // SHAPE only. A malformed record binds nothing, at the reader as at the door; but a record whose
     // CONTAINER has moved is reported below rather than dropped, because dropping it would silently
     // reopen every door the slate had closed at exactly the moment its state became unreadable.
