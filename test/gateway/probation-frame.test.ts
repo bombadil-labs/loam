@@ -395,7 +395,7 @@ describe("T35 §24.7 — the pen's second key is asked of the HOST, live", () =>
     await gw.append([
       signClaims(makeNegationClaims(OP, 9_600_000, grant.id, "revoke the pen"), OP_SEED),
     ]);
-    expect(holdsGrant(pool.reactor, STORE_ENTITY, PEN, "write", OP)).toBe(true); // stale copy stands
+    expect(holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, PEN, "write", OP)).toBe(true); // stale copy stands
 
     const refused = await pool.writeRoute("stranger", FERN, { message: "after" }, "full");
     expect(refused.status).toBe(403);
@@ -435,7 +435,16 @@ describe("T35 §24.7 — the pen's second key is asked of the HOST, live", () =>
     await gw.append([
       signClaims(makeNegationClaims(OP, 9_700_000, grant.id, "revoke the pen"), OP_SEED),
     ]);
-    expect(holdsGrant(outer.gateway.reactor, STORE_ENTITY, PEN, "write", OP)).toBe(true);
+    expect(
+      holdsGrant(
+        outer.gateway.reactor,
+        outer.gateway.validityNow(),
+        STORE_ENTITY,
+        PEN,
+        "write",
+        OP,
+      ),
+    ).toBe(true);
 
     const refused = await inner.gateway.writeRoute("deep", FERN, { message: "after" }, "full");
     expect(refused.status).toBe(403);

@@ -1859,7 +1859,12 @@ export class Gateway {
   // (attachPersistence), so a tokenless request costs O(registered), not O(store) — which
   // also keeps a nothing-public mount's refusal as cheap as an absent mount's (no timing
   // oracle where the status codes are uniform).
-  private publicOpen: ReadonlySet<string> | undefined;
+  // It also holds only between validity boundaries: a declaration or strike valid until T changes
+  // the open set at T with nothing written. So a cached set answers for a read time in
+  // [from, until), where `until` is the next boundary any held delta names.
+  private publicOpen:
+    | { readonly open: ReadonlySet<string>; readonly from: number; readonly until: number }
+    | undefined;
 
   /**
    * THE NAMES THIS STORE HAS DECLARED OPEN TO A TOKENLESS CALLER — and the one place that decides
@@ -1876,8 +1881,19 @@ export class Gateway {
    */
   private openNames(): ReadonlySet<string> {
     if (this.channelPool === true) return EMPTY_PUBLIC;
-    this.publicOpen ??= readPublicSchemas(this.reactor, this.validityNow(), this.operatorAuthor);
-    return this.publicOpen;
+    const now = this.validityNow();
+    if (
+      this.publicOpen === undefined ||
+      now < this.publicOpen.from ||
+      now >= this.publicOpen.until
+    ) {
+      this.publicOpen = {
+        open: readPublicSchemas(this.reactor, now, this.operatorAuthor),
+        from: now,
+        until: this.reactor.nextValidityBoundary(now) ?? Infinity,
+      };
+    }
+    return this.publicOpen.open;
   }
   private publicSurface(): GraphQLSchema | undefined {
     const open = this.openNames();

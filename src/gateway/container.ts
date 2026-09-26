@@ -479,11 +479,19 @@ const byAge = (a: { ts: number; id: string }, b: { ts: number; id: string }): nu
 // count moved. Nobody mutates a returned table (its fields are read-only views), which is what lets
 // one instance be shared. Without this every door that consulted the table paid a full snapshot
 // copy and walk per call — ~200ms at a 10k-delta ground.
+//
+// THE TABLE IS ALSO A FUNCTION OF THE READ TIME. A declaration, exclusion or strike counts only
+// inside its own [validFrom, validUntil), so a boundary moves the table with nothing written. The
+// sweep keeps every validity boundary of container law, and a built table answers only for reads
+// inside the interval between the boundaries around the time it was built.
 interface TableMemo {
   readonly operator: string | undefined;
   swept: number; // arrival-log high-water mark
   lawCount: number; // container-law deltas in log[0, swept)
   builtAt: number; // the lawCount the table was computed from
+  readonly bounds: number[]; // every validFrom and validUntil of container law in log[0, swept)
+  from: number; // the table holds for a read time in [from, until)
+  until: number;
   table: ContainerTable;
 }
 const tableMemo = new WeakMap<Reactor, TableMemo>();
@@ -506,16 +514,35 @@ export function readContainerTable(
 ): ContainerTable {
   let memo = tableMemo.get(reactor);
   if (memo === undefined || memo.operator !== operator) {
-    memo = { operator, swept: 0, lawCount: 0, builtAt: -1, table: EMPTY_TABLE };
+    memo = {
+      operator,
+      swept: 0,
+      lawCount: 0,
+      builtAt: -1,
+      bounds: [],
+      from: Infinity,
+      until: -Infinity,
+      table: EMPTY_TABLE,
+    };
     tableMemo.set(reactor, memo);
   }
   const log = reactor.arrivalLog();
   for (; memo.swept < log.length; memo.swept += 1) {
-    if (isContainerLaw(log[memo.swept]!, operator)) memo.lawCount += 1;
+    const d = log[memo.swept]!;
+    if (!isContainerLaw(d, operator)) continue;
+    memo.lawCount += 1;
+    memo.bounds.push(d.claims.validFrom);
+    if (d.claims.validUntil !== undefined) memo.bounds.push(d.claims.validUntil);
   }
-  if (memo.builtAt !== memo.lawCount) {
+  if (memo.builtAt !== memo.lawCount || now < memo.from || now >= memo.until) {
     memo.table = computeContainerTable(reactor, now, operator);
     memo.builtAt = memo.lawCount;
+    memo.from = -Infinity;
+    memo.until = Infinity;
+    for (const b of memo.bounds) {
+      if (b <= now) memo.from = Math.max(memo.from, b);
+      else memo.until = Math.min(memo.until, b);
+    }
   }
   return memo.table;
 }
@@ -1144,7 +1171,14 @@ export function openerStands(
   const stem = `inbox:${channel.openedBy ?? ""}:`;
   if (!channel.openedFrom.startsWith(stem)) return false;
   const key = channel.openedFrom.slice(stem.length);
-  return holdsGrant(inbox.reactor, STORE_ENTITY, key, "write", gw.operatorAuthor);
+  return holdsGrant(
+    inbox.reactor,
+    inbox.validityNow(),
+    STORE_ENTITY,
+    key,
+    "write",
+    gw.operatorAuthor,
+  );
 }
 
 /**
@@ -2150,7 +2184,7 @@ export async function bindConnectionImpl(
   // own store entity, so this never touches the real store's authority; grantHeld resolves
   // connection-write → owner-admin → operator. The store operator appears once here (administrative
   // provisioning, §39.1 point 3) and never on the read/write data path.
-  if (!holdsGrant(pool.reactor, STORE_ENTITY, owner, "admin", operator)) {
+  if (!holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, owner, "admin", operator)) {
     await pool.append([
       signClaims(
         withStamp(pool.stamp(operator), (t) =>
@@ -2160,7 +2194,16 @@ export async function bindConnectionImpl(
       ),
     ]);
   }
-  if (!holdsGrant(pool.reactor, STORE_ENTITY, opts.connectionKey, "write", operator)) {
+  if (
+    !holdsGrant(
+      pool.reactor,
+      pool.validityNow(),
+      STORE_ENTITY,
+      opts.connectionKey,
+      "write",
+      operator,
+    )
+  ) {
     await pool.append([
       signClaims(
         withStamp(pool.stamp(owner), (t) =>

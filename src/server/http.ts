@@ -553,7 +553,12 @@ function registerStanding(
   } catch {
     return undefined; // an actor that names no key holds no grant
   }
-  const granted = registerPrefixesOf(gateway.reactor, author, gateway.operatorAuthor);
+  const granted = registerPrefixesOf(
+    gateway.reactor,
+    gateway.validityNow(),
+    author,
+    gateway.operatorAuthor,
+  );
   return granted.length === 0 ? undefined : granted;
 }
 
@@ -580,7 +585,12 @@ function federateStanding(
   } catch {
     return undefined;
   }
-  const containers = federateContainersOf(gateway.reactor, author, gateway.operatorAuthor);
+  const containers = federateContainersOf(
+    gateway.reactor,
+    gateway.validityNow(),
+    author,
+    gateway.operatorAuthor,
+  );
   return containers.length === 0 ? undefined : containers;
 }
 
@@ -1359,11 +1369,25 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
     const writeStanding = (): boolean => {
       if (gateway === undefined) return false;
       if (binding === undefined) {
-        return holdsGrant(gateway.reactor, STORE_ENTITY, author, "write", gateway.operatorAuthor);
+        return holdsGrant(
+          gateway.reactor,
+          gateway.validityNow(),
+          STORE_ENTITY,
+          author,
+          "write",
+          gateway.operatorAuthor,
+        );
       }
       try {
         const pool = gateway.poolForBinding(binding);
-        return holdsGrant(pool.reactor, STORE_ENTITY, author, "write", gateway.operatorAuthor);
+        return holdsGrant(
+          pool.reactor,
+          pool.validityNow(),
+          STORE_ENTITY,
+          author,
+          "write",
+          gateway.operatorAuthor,
+        );
       } catch {
         return false;
       }
@@ -1383,7 +1407,12 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       federateContainers:
         gateway === undefined
           ? []
-          : federateContainersOf(gateway.reactor, author, gateway.operatorAuthor),
+          : federateContainersOf(
+              gateway.reactor,
+              gateway.validityNow(),
+              author,
+              gateway.operatorAuthor,
+            ),
       masked: false,
       note:
         binding !== undefined

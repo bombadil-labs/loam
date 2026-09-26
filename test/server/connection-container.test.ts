@@ -283,11 +283,13 @@ describe("§39 criterion 7 — the connection grant and a store grant coexist, n
     expect(subjectVerb(connGrant!).verb).toBe("write");
     expect(connGrant!.claims.author).toBe(OWNER); // owner-authored authority
     // The connection's write standing resolves through the chain (connection-write → owner-admin).
-    expect(holdsGrant(pool.reactor, STORE_ENTITY, CONN, "write", OP)).toBe(true);
+    expect(holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, CONN, "write", OP)).toBe(
+      true,
+    );
 
     // A store-targeting grant shape still validates UNCHANGED beside it, in the real store.
     await gw.append([signClaims(grantClaims(STORE_ENTITY, FOREIGN, "write", OP, 2000), OP_SEED)]);
-    expect(holdsGrant(gw.reactor, STORE_ENTITY, FOREIGN, "write", OP)).toBe(true);
+    expect(holdsGrant(gw.reactor, gw.validityNow(), STORE_ENTITY, FOREIGN, "write", OP)).toBe(true);
     await gw.close();
   });
 });

@@ -135,8 +135,10 @@ describe("T174 — register standing, read from the ground", () => {
         OPERATOR_SEED,
       ),
     ]);
-    expect(registerPrefixesOf(gw.reactor, CONNECTOR, OPERATOR)).toEqual(["thread:"]);
-    expect(registerPrefixesOf(gw.reactor, BYSTANDER, OPERATOR)).toEqual([]);
+    expect(registerPrefixesOf(gw.reactor, gw.validityNow(), CONNECTOR, OPERATOR)).toEqual([
+      "thread:",
+    ]);
+    expect(registerPrefixesOf(gw.reactor, gw.validityNow(), BYSTANDER, OPERATOR)).toEqual([]);
     await gw.close();
   });
 
@@ -145,7 +147,7 @@ describe("T174 — register standing, read from the ground", () => {
     await gw.append([
       signClaims(grantClaims(STORE_ENTITY, CONNECTOR, "admin", OPERATOR, 100), OPERATOR_SEED),
     ]);
-    expect(registerPrefixesOf(gw.reactor, CONNECTOR, OPERATOR)).toEqual([]);
+    expect(registerPrefixesOf(gw.reactor, gw.validityNow(), CONNECTOR, OPERATOR)).toEqual([]);
     await gw.close();
   });
 
@@ -160,12 +162,16 @@ describe("T174 — register standing, read from the ground", () => {
       OPERATOR_SEED,
     );
     await gw.append([held, other]);
-    expect(registerPrefixesOf(gw.reactor, CONNECTOR, OPERATOR)).toEqual(["thread:"]);
+    expect(registerPrefixesOf(gw.reactor, gw.validityNow(), CONNECTOR, OPERATOR)).toEqual([
+      "thread:",
+    ]);
 
     await gw.append([signClaims(revocationClaims(held.id, OPERATOR, 200), OPERATOR_SEED)]);
-    expect(registerPrefixesOf(gw.reactor, CONNECTOR, OPERATOR)).toEqual([]);
+    expect(registerPrefixesOf(gw.reactor, gw.validityNow(), CONNECTOR, OPERATOR)).toEqual([]);
     // Two-sided: the strike took its target and nothing else.
-    expect(registerPrefixesOf(gw.reactor, BYSTANDER, OPERATOR)).toEqual(["note:"]);
+    expect(registerPrefixesOf(gw.reactor, gw.validityNow(), BYSTANDER, OPERATOR)).toEqual([
+      "note:",
+    ]);
     await gw.close();
   });
 
@@ -184,7 +190,7 @@ describe("T174 — register standing, read from the ground", () => {
         WRITER_SEED,
       ),
     ]);
-    expect(registerPrefixesOf(gw.reactor, CONNECTOR, OPERATOR)).toEqual([]);
+    expect(registerPrefixesOf(gw.reactor, gw.validityNow(), CONNECTOR, OPERATOR)).toEqual([]);
     await gw.close();
   });
 
@@ -203,14 +209,16 @@ describe("T174 — register standing, read from the ground", () => {
         WRITER_SEED,
       ),
     ]);
-    expect(registerPrefixesOf(gw.reactor, CONNECTOR, OPERATOR)).toEqual([]);
+    expect(registerPrefixesOf(gw.reactor, gw.validityNow(), CONNECTOR, OPERATOR)).toEqual([]);
     // TWO-SIDED: the admin chain still carries `write`, so this is a narrowing of one verb rather
     // than a change to how grants are honoured.
-    expect(grantsHeldBy(gw.reactor, CONNECTOR, OPERATOR)).toEqual([]);
+    expect(grantsHeldBy(gw.reactor, gw.validityNow(), CONNECTOR, OPERATOR)).toEqual([]);
     await gw.append([
       signClaims(grantClaims(STORE_ENTITY, CONNECTOR, "write", WRITER, 102), WRITER_SEED),
     ]);
-    expect(grantsHeldBy(gw.reactor, CONNECTOR, OPERATOR).map((g) => g.verb)).toEqual(["write"]);
+    expect(
+      grantsHeldBy(gw.reactor, gw.validityNow(), CONNECTOR, OPERATOR).map((g) => g.verb),
+    ).toEqual(["write"]);
     await gw.close();
   });
 
@@ -222,7 +230,9 @@ describe("T174 — register standing, read from the ground", () => {
         OPERATOR_SEED,
       ),
     ]);
-    expect(registerPrefixesOf(gw.reactor, CONNECTOR, OPERATOR)).toEqual(["note:"]);
+    expect(registerPrefixesOf(gw.reactor, gw.validityNow(), CONNECTOR, OPERATOR)).toEqual([
+      "note:",
+    ]);
     await gw.close();
   });
 
@@ -235,7 +245,7 @@ describe("T174 — register standing, read from the ground", () => {
         OPERATOR_SEED,
       ),
     ]);
-    const held = grantsHeldBy(gw.reactor, CONNECTOR, OPERATOR);
+    const held = grantsHeldBy(gw.reactor, gw.validityNow(), CONNECTOR, OPERATOR);
     expect(held.map((g) => g.verb).sort()).toEqual(["register", "write"]);
     expect(held.find((g) => g.verb === "register")?.prefix).toBe("thread:");
     expect(held.find((g) => g.verb === "write")?.prefix).toBeUndefined();

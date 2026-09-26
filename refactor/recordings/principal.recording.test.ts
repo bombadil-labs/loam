@@ -302,7 +302,7 @@ describe("recordings: principals", () => {
     for (const [world, deltas] of Object.entries(WORLDS)) {
       out[world] = bothOrders(deltas, (r) => ({
         grantsHeldBy: Object.fromEntries(
-          SUBJECTS.map((w) => [w, grantsHeldBy(r, KEY[w], KEY.operator)]),
+          SUBJECTS.map((w) => [w, grantsHeldBy(r, NOW, KEY[w], KEY.operator)]),
         ),
         authorizeData: Object.fromEntries(
           SUBJECTS.map((w) => [w, authorize(r, NOW, data(w), KEY.operator).ok]),
@@ -357,6 +357,9 @@ describe("recordings: principals", () => {
     ];
     await gw.append(writes);
     const writeIds = new Set(writes.map((d) => d.id));
+    // One read time for the table and the scopes: the declarations are valid from their
+    // `nextTimestamp`, which runs ahead of the clock set at boot.
+    vi.setSystemTime(NOW + 100);
     const table = readContainerTable(gw.reactor, NOW + 100, KEY.operator);
     const labelsIn = (containers: string[]) =>
       containerScopeImpl(gw, { containers })

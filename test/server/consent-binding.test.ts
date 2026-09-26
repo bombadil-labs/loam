@@ -217,7 +217,16 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     const mintedKey = authorForSeed(seed);
     expect(table.get("ada")!.membership).toEqual(authoredBy(mintedKey));
     expect(table.get("ada:journal")!.membership).toEqual(authoredBy(mintedKey));
-    expect(holdsGrant(gateway.reactor, STORE_ENTITY, mintedKey, "write", OPERATOR)).toBe(true);
+    expect(
+      holdsGrant(
+        gateway.reactor,
+        gateway.validityNow(),
+        STORE_ENTITY,
+        mintedKey,
+        "write",
+        OPERATOR,
+      ),
+    ).toBe(true);
     expect(seed).toMatch(/^[0-9a-f]{64}$/);
     expect(JSON.stringify(readOAuthFile(connectorsHome))).not.toContain(seed);
     expect(await consentPage(base, ada)).not.toContain(seed);

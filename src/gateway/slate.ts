@@ -1773,7 +1773,7 @@ export function graveyardCompleteness(
   const surviving = new Map(
     standingErasures(reactor, now, operator).map((t) => [erasureTarget(t.claims)!, t]),
   );
-  const isNegated = negatedAt(reactor, now, operator);
+  const witnesses = operatorStrikes(reactor, now, operator);
   const missing: string[] = [];
   const negated: { member: string; negation: string }[] = [];
   for (const member of members) {
@@ -1785,7 +1785,7 @@ export function graveyardCompleteness(
       continue;
     }
     // No SURVIVING erasure. Struck (negated) is reported as itself; absent is a real hole.
-    const strike = strikeOf(reactor, now, operator, isNegated, member);
+    const strike = strikeOf(reactor, now, operator, witnesses, member);
     if (strike !== undefined) negated.push({ member, negation: strike });
     else missing.push(member);
   }
@@ -1803,24 +1803,26 @@ export function graveyardCompleteness(
 }
 
 // The lawful negation of a member's erasure — the id a receipt reports beside NEGATED. It must be a
-// negation that holds: an erasure can carry an older negation that was itself negated.
+// negation that holds at `now`: an erasure can carry an older negation that was itself negated, or
+// one whose own validity has not begun or has ended. The witnesses are exactly the strikes that
+// decide "negated", so the id reported cannot disagree with the verdict.
 function strikeOf(
   reactor: Reactor,
   now: number,
   operator: string,
-  negated: (id: string) => boolean,
+  witnesses: (id: string) => readonly Delta[],
   member: string,
 ): string | undefined {
   for (const d of lawfulSnapshot(reactor, now, operator)) {
     if (!isErasure(d.claims) || erasureTarget(d.claims) !== member) continue;
-    if (!negated(d.id)) continue;
-    for (const strike of reactor.negationsOf(d.id)) {
-      const s = reactor.get(strike);
-      if (s !== undefined && s.claims.author === operator && !negated(strike)) return strike;
-    }
+    const strike = witnesses(d.id)[0];
+    if (strike !== undefined) return strike.id;
   }
   return undefined;
 }
+
+const operatorStrikes = (reactor: Reactor, now: number, operator: string) =>
+  reactor.negationWitnesses(now, (n) => n.claims.author === operator);
 
 // Every tier a sweep did NOT examine — covered walls and unreachable ones alike. One reader, so the
 // cut's refusal and the receipt's confession can never disagree about which tiers were skipped.
@@ -1888,7 +1890,7 @@ export async function deriveReceiptImpl(
   const issuedAt = opts.now ?? Date.now();
   const request = gw.reactor.get(grave.record);
   const completeness = graveyardCompleteness(gw.reactor, gw.validityNow(), operator, graveyardId);
-  const negated = negatedAt(gw.reactor, gw.validityNow(), operator);
+  const witnesses = operatorStrikes(gw.reactor, gw.validityNow(), operator!);
   const surviving = new Map(
     standingErasures(gw.reactor, gw.validityNow(), operator).map((t) => [
       erasureTarget(t.claims)!,
@@ -1901,7 +1903,7 @@ export async function deriveReceiptImpl(
     const tomb = surviving.get(member);
     const strike =
       tomb === undefined
-        ? strikeOf(gw.reactor, gw.validityNow(), operator!, negated, member)
+        ? strikeOf(gw.reactor, gw.validityNow(), operator!, witnesses, member)
         : undefined;
     // The manifest walks the SAME tier set the byte verdict does (T216) — primary plus every attached
     // pool — so a surviving pool-resident dangler (a T207 arrival stamp echoing the erased member) is

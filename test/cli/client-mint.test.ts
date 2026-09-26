@@ -279,8 +279,10 @@ describe("T256 (b) — revoke is two-sided at both levels; the sibling survives"
       expect(struck.has(id), `grant ${id} of "one" not struck`).toBe(true);
     for (const id of twoGrants) expect(struck.has(id), `grant ${id} of "two" struck`).toBe(false);
     const operator = authorForSeed(readSeed(home));
-    expect(grantsHeldBy(audit.reactor, oneActor, operator)).toEqual([]);
-    expect(grantsHeldBy(audit.reactor, twoActor, operator).map((g) => g.verb)).toContain("write");
+    expect(grantsHeldBy(audit.reactor, audit.validityNow(), oneActor, operator)).toEqual([]);
+    expect(
+      grantsHeldBy(audit.reactor, audit.validityNow(), twoActor, operator).map((g) => g.verb),
+    ).toContain("write");
     // The sibling's key file survives; the revoked one's is gone.
     expect(existsSync(clientSeedPath(home, "two"))).toBe(true);
     expect(existsSync(clientSeedPath(home, "one"))).toBe(false);
@@ -328,7 +330,9 @@ describe("T256 (b) — revoke is two-sided at both levels; the sibling survives"
       seed: readSeed(home),
     });
     gateways.push(audit);
-    expect(grantsHeldBy(audit.reactor, ghostActor, authorForSeed(readSeed(home)))).toEqual([]);
+    expect(
+      grantsHeldBy(audit.reactor, audit.validityNow(), ghostActor, authorForSeed(readSeed(home))),
+    ).toEqual([]);
     expect(existsSync(clientSeedPath(home, "ghost"))).toBe(false);
   });
 
@@ -362,7 +366,9 @@ describe("T256 (b) — revoke is two-sided at both levels; the sibling survives"
     expect(existsSync(clientSeedPath(home, "stray"))).toBe(false);
     const audit = await Gateway.open(new SqliteBackend(other), { seed: readSeed(home) });
     gateways.push(audit);
-    expect(grantsHeldBy(audit.reactor, strayActor, authorForSeed(readSeed(home)))).toEqual([]);
+    expect(
+      grantsHeldBy(audit.reactor, audit.validityNow(), strayActor, authorForSeed(readSeed(home))),
+    ).toEqual([]);
   });
 });
 
@@ -380,6 +386,7 @@ describe("T256 — the mint's own fences", () => {
     gateways.push(audit);
     const held = grantsHeldBy(
       audit.reactor,
+      audit.validityNow(),
       authorForSeed(readClientSeed(home, "carrier")),
       authorForSeed(readSeed(home)),
     );

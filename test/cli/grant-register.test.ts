@@ -83,7 +83,7 @@ const prefixesInGround = async (author: string): Promise<string[]> => {
     assembleGenesis({ operatorSeed: seed }),
   );
   try {
-    return registerPrefixesOf(gateway.reactor, author, authorForSeed(seed));
+    return registerPrefixesOf(gateway.reactor, gateway.validityNow(), author, authorForSeed(seed));
   } finally {
     await gateway.close();
   }

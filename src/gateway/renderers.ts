@@ -1321,6 +1321,7 @@ export async function writeRouteImpl(
     if (
       !holdsGrant(
         authority.reactor,
+        authority.validityNow(),
         STORE_ENTITY,
         authorForSeed(penSeed),
         "write",

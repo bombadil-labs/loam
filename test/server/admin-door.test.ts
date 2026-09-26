@@ -470,7 +470,16 @@ describe("§40 phase A1 — the admin door", () => {
     const mintedKey = authorForSeed(raw);
 
     // The write grant, operator-signed, on the minted key.
-    expect(holdsGrant(gateway.reactor, STORE_ENTITY, mintedKey, "write", OPERATOR)).toBe(true);
+    expect(
+      holdsGrant(
+        gateway.reactor,
+        gateway.validityNow(),
+        STORE_ENTITY,
+        mintedKey,
+        "write",
+        OPERATOR,
+      ),
+    ).toBe(true);
     // The root's Term names the minted key — the container gathers what CAL authors.
     expect(gateway.containers().containers.get("cal")!.membership).toEqual(authoredBy(mintedKey));
     // The SECRET never entered the ground (the H7 discipline: prove the scan can see, then clean).

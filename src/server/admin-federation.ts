@@ -35,6 +35,7 @@ import { revokeConnector } from "./oauth.js";
 import { escapeHtml, page } from "./session.js";
 import { ADMIN_PATH, ADMIN_REVOKE_PATH, adminPages, type RevokePlan } from "./admin-pages.js";
 import { withStamp } from "../gateway/stamp.js";
+import { negatedAt } from "../gateway/negation.js";
 
 // A pasted offer carries real deltas — a store's worth, potentially. Bounded, but generously.
 const FEDERATE_MAX_BODY = 1024 * 1024;
@@ -106,6 +107,40 @@ export interface AdminFederationCtx {
   readonly pages: ReturnType<typeof adminPages>;
 }
 
+/**
+ * Every operator-authored grant delta at the store entity naming `subject` that the operator has not
+ * struck at `now` — what the connector revoke strikes in the ground. Only the operator's strikes
+ * count, down the whole chain, and only while each is valid at `now`: a stranger's strike, or an
+ * operator strike whose window has not begun or has ended, leaves the grant to be struck.
+ */
+export function survivingOperatorGrantIds(
+  reactor: Reactor,
+  now: number,
+  operator: string,
+  subject: string,
+): string[] {
+  const struck = negatedAt(reactor, now, operator);
+  const out: string[] = [];
+  for (const id of reactor.byTarget(STORE_ENTITY)) {
+    const delta = reactor.get(id);
+    if (delta === undefined || delta.claims.author !== operator) continue;
+    const ptrs = delta.claims.pointers;
+    const atGrants = ptrs.some(
+      (p) =>
+        p.target.kind === "entity" &&
+        p.target.entity.id === STORE_ENTITY &&
+        p.target.entity.context === CTX_GRANTS,
+    );
+    if (!atGrants) continue;
+    const named = ptrs.some(
+      (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === subject,
+    );
+    if (!named || struck(id)) continue;
+    out.push(id);
+  }
+  return out;
+}
+
 /** The federation/connector door group, in one closure (moved verbatim from admin.ts). */
 export const adminFederation = (ctx: AdminFederationCtx) => {
   const {
@@ -138,10 +173,11 @@ export const adminFederation = (ctx: AdminFederationCtx) => {
   // request, never remembered by this door.
   const grantStateOf = (
     reactor: Reactor,
+    now: number,
     operator: string | undefined,
     key: string,
   ): "active" | "revoked" | "ungranted" => {
-    if (holdsGrant(reactor, STORE_ENTITY, key, "write", operator)) return "active";
+    if (holdsGrant(reactor, now, STORE_ENTITY, key, "write", operator)) return "active";
     for (const id of reactor.byTarget(STORE_ENTITY)) {
       const delta = reactor.get(id);
       if (delta === undefined) continue;
@@ -253,7 +289,9 @@ export const adminFederation = (ctx: AdminFederationCtx) => {
     }
     const pool = gw.attachedContainers.get(name);
     const state =
-      pool === undefined ? undefined : grantStateOf(pool.reactor, gw.operatorAuthor, key);
+      pool === undefined
+        ? undefined
+        : grantStateOf(pool.reactor, pool.validityNow(), gw.operatorAuthor, key);
     const stateWords =
       state === undefined
         ? "its inbox pool is not attached here, so its grant cannot be read from this page"
@@ -459,35 +497,6 @@ ${flowNote}`;
 
   // --- revoke a connection (phase A5) ------------------------------------------------------------
 
-  // Every SURVIVING operator-authored grant delta at the store entity naming `subject` — what the
-  // connector revoke strikes in the ground, the same derivation `loam grant revoke` runs.
-  const survivingOperatorGrantIds = (
-    reactor: Reactor,
-    operator: string,
-    subject: string,
-  ): string[] => {
-    const out: string[] = [];
-    for (const id of reactor.byTarget(STORE_ENTITY)) {
-      const delta = reactor.get(id);
-      if (delta === undefined || delta.claims.author !== operator) continue;
-      const ptrs = delta.claims.pointers;
-      const atGrants = ptrs.some(
-        (p) =>
-          p.target.kind === "entity" &&
-          p.target.entity.id === STORE_ENTITY &&
-          p.target.entity.context === CTX_GRANTS,
-      );
-      if (!atGrants) continue;
-      const named = ptrs.some(
-        (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === subject,
-      );
-      if (!named) continue;
-      if (reactor.negationsOf(id).some((n) => reactor.get(n) !== undefined)) continue;
-      out.push(id);
-    }
-    return out;
-  };
-
   // What a revoke of this connection would truthfully be — resolved fresh at BOTH steps, exactly
   // as a drop's plan is. It can have two halves, and either may stand alone: the §39.3c strike of
   // the write grant in the inbox pool (owner-authored, in the session user's voice), and phase 15's
@@ -563,7 +572,8 @@ ${flowNote}`;
     // voice — the session user's own seed, never the operator's.
     const pool = gw.attachedContainers.get(name);
     const standing =
-      pool !== undefined && holdsGrant(pool.reactor, STORE_ENTITY, key, "write", gw.operatorAuthor);
+      pool !== undefined &&
+      holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, key, "write", gw.operatorAuthor);
     // §58: a key may hold a sibling pool — a re-consent into another container spawns a second
     // inbox and the first stands — and a revoke is the KEY's, so every pool of this key that still
     // holds the grant is struck with the row's. Named on the confirm page before anything happens.
@@ -578,7 +588,14 @@ ${flowNote}`;
           reach.has(sibling) &&
           handle.gateway !== undefined &&
           gw.attachedContainers.get(sibling) === handle.gateway && // not mid-drop
-          holdsGrant(handle.gateway.reactor, STORE_ENTITY, key, "write", gw.operatorAuthor),
+          holdsGrant(
+            handle.gateway.reactor,
+            handle.gateway.validityNow(),
+            STORE_ENTITY,
+            key,
+            "write",
+            gw.operatorAuthor,
+          ),
       )
       .map(([sibling]) => sibling)
       .sort();
@@ -705,7 +722,12 @@ ${flowNote}`;
     if (plan.client !== undefined) {
       const clientId = plan.client.clientId;
       const strike = async (grant: { actor: string }): Promise<void> => {
-        const ids = survivingOperatorGrantIds(gw.reactor, gw.operatorAuthor!, grant.actor);
+        const ids = survivingOperatorGrantIds(
+          gw.reactor,
+          gw.validityNow(),
+          gw.operatorAuthor!,
+          grant.actor,
+        );
         if (ids.length === 0) return;
         await gw.append(
           ids.map((id) =>
@@ -805,7 +827,17 @@ ${flowNote}`;
           failedSiblings.push(sibling);
           continue;
         }
-        if (!holdsGrant(pool.reactor, STORE_ENTITY, plan.key, "write", gw.operatorAuthor)) continue;
+        if (
+          !holdsGrant(
+            pool.reactor,
+            pool.validityNow(),
+            STORE_ENTITY,
+            plan.key,
+            "write",
+            gw.operatorAuthor,
+          )
+        )
+          continue;
         try {
           await gw.revokeConnection({
             inbox: handle,

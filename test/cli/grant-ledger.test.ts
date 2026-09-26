@@ -240,7 +240,7 @@ const grantIds = (subject: string): Promise<{ surviving: string[]; struck: strin
 // The OBJECT-level half at the derivation the door reads: what standing this author actually holds.
 const heldVerbs = (author: string): Promise<string[]> =>
   ground((gw, operator) =>
-    grantsHeldBy(gw.reactor, author, operator)
+    grantsHeldBy(gw.reactor, gw.validityNow(), author, operator)
       .map((g) => g.verb as string)
       .sort(),
   );
@@ -317,7 +317,9 @@ const bindingSubjects = (): Promise<string[]> =>
         }
       }
     }
-    return [...subjects].filter((s) => grantsHeldBy(gw.reactor, s, operator).length > 0).sort();
+    return [...subjects]
+      .filter((s) => grantsHeldBy(gw.reactor, gw.validityNow(), s, operator).length > 0)
+      .sort();
   });
 
 // A delta the operator signs AT the store entity that is not a grant: it is filed under a different

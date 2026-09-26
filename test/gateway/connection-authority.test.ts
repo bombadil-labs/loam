@@ -169,7 +169,14 @@ describe("live bound connection authority", () => {
     });
     expect(strikes()).toBe(before + 1);
     expect(
-      holdsGrant(inbox.reactor, STORE_ENTITY, first.key, "write", gateway.operatorAuthor),
+      holdsGrant(
+        inbox.reactor,
+        inbox.validityNow(),
+        STORE_ENTITY,
+        first.key,
+        "write",
+        gateway.operatorAuthor,
+      ),
     ).toBe(false);
     probes(gateway, () => {
       expect(connectionStands(gateway, first.binding)).toBe(false);

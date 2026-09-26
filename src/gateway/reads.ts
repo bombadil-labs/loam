@@ -288,7 +288,7 @@ function channelGroundFor(
       (asOf === undefined || d.claims.timestamp <= asOf) &&
       !closed.has(d.id) &&
       !erased.has(d.id) &&
-      !negatedInGround(gw, d.id, new Set()),
+      !negatedInGround(gw, asOf ?? gw.validityNow(now), d.id, new Set()),
   );
   return DeltaSet.from(deltas);
 }
@@ -316,7 +316,7 @@ export function boundGroundFor(
         (asOf === undefined || d.claims.timestamp <= asOf) &&
         !closed.has(d.id) &&
         !erased.has(d.id) &&
-        !negatedInGround(gw, d.id, new Set()),
+        !negatedInGround(gw, asOf ?? gw.validityNow(now), d.id, new Set()),
     ),
   );
 }
@@ -329,10 +329,27 @@ export function boundGroundFor(
  * one link sees `negationsOf(n1)` non-empty and revives d. `seen` closes the walk over a cycle,
  * which binds nothing.
  */
-const negatedInGround = (gw: Gateway, id: string, seen: ReadonlySet<string>): boolean => {
+// A strike counts only while it is valid at `now`, the time the read resolves validity at (the
+// pin when there is one). The substrate's `negationPredicate` cannot ask
+// this: the id is often held only in a pool, and that reader answers false for a target this
+// reactor does not hold.
+const negatedInGround = (
+  gw: Gateway,
+  now: number,
+  id: string,
+  seen: ReadonlySet<string>,
+): boolean => {
   if (seen.has(id)) return false;
   const next = new Set(seen).add(id);
-  return gw.reactor.negationsOf(id).some((n) => !negatedInGround(gw, n, next));
+  return gw.reactor.negationsOf(id).some((n) => {
+    const strike = gw.reactor.get(n);
+    return (
+      strike !== undefined &&
+      strike.claims.validFrom <= now &&
+      (strike.claims.validUntil === undefined || now < strike.claims.validUntil) &&
+      !negatedInGround(gw, now, n, next)
+    );
+  });
 };
 
 const asOfGroundImpl = (gw: Gateway, asOf: number, closed: ReadonlySet<string>): DeltaSet =>
