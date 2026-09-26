@@ -67,6 +67,7 @@ import type { Gateway } from "./gateway.js";
 import { publishRegistrationImpl } from "./lifecycle.js";
 import {
   CTX_REGISTRATION,
+  lawfulHistory,
   lawfulSnapshot,
   lensOf,
   parseClaimTemplates,
@@ -825,8 +826,13 @@ export function readLawAdoptions(
 ): LawAdoption[] {
   const negated = negatedAt(reactor, now, operator);
   const out: LawAdoption[] = [];
-  for (const d of reactor.snapshot()) {
-    if (d.claims.author !== operator || !isAdoption(d.claims)) continue;
+  // With struck records included, this asks what was ever recorded, so it reads history.
+  const records =
+    opts?.includeStruck === true
+      ? lawfulHistory(reactor, operator)
+      : lawfulSnapshot(reactor, now, operator);
+  for (const d of records) {
+    if (!isAdoption(d.claims)) continue;
     if (opts?.includeStruck !== true && negated(d.id)) continue;
     const kind = primitiveOf(d.claims, ROLE_RECORD_KIND);
     if (kind !== "adopted-from" && kind !== "witnessed") continue; // a FACT adoption, not law
