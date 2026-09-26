@@ -117,6 +117,10 @@ level. Loam then consumes it through the barrel and compares its recordings.
      - `everDeclared`: a name whose declaration expired still cannot be minted again.
      - `unreachableStoreReport`: an expired separate declaration still named a store. Its negation
        test is a present-time read. Decide whether an expired negation still counts as "struck".
+     - Channel listings with severed channels, law-adoption reads with struck records, and
+       `dropChannelCommit` read history already. A drop skips a record that is negated now. If
+       that negation has a `validUntil`, the record revives when it expires. Pin this once timed
+       negations take effect.
      - Erasure is eternal (decision F3). Erasure and graveyard records (`slate.ts` `findGraveyard`,
        `readGraveyards`, `strikeOf`) must keep counting after any validity end. Move them to a
        history read.
