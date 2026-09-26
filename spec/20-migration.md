@@ -1,5 +1,13 @@
 ## 20. Migration — old deltas in, new deltas out
 
+**Retired (greenfield, 2026-09-26).** Loam no longer migrates. Since rhizomatic 0.11 no earlier
+store or offer can be read, so there is nothing to carry forward. The `loam migrate` command, the
+`MIGRATIONS` chain and every reader that honoured a retired word are removed. A retired word is now
+an unknown word. A store Loam cannot read is refused at boot.
+
+**Everything below is historical.** It records the migration policy as it stood before the
+greenfield ruling. None of it describes current behaviour.
+
 A store is grow-only and content-addressed, which makes a breaking change to the on-wire format a
 genuine problem: a signed delta CANNOT be rewritten in place (the id is its content; the signature
 is its author's). When a format change alters the bytes or roles of a delta that older stores

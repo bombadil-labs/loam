@@ -135,16 +135,15 @@ function assertMaterializable(schema: HyperSchema, registry: SchemaRegistry): vo
 // `collectReadingRefs` has no ref to resolve, and `assertMaterializable` trial-evals over an EMPTY
 // delta set, so no expansion is ever produced and no error is raised. Such a body would persist on
 // append-only ground, bind, advertise its type — and then throw on the first read of an entity that
-// actually carries a child pointer, permanently and un-appendably. The absent case now gets the same
-// loud refusal the wrong-name case always had; a store holding such a body from before 0.8 is healed
-// by the §20 `expand-reading` migration instead of being served broken.
+// actually carries a child pointer, permanently and un-appendably. The absent case gets the same
+// loud refusal the wrong-name case gets.
 function assertReadingsNamed(schema: HyperSchema): void {
   const role = readinglessExpandRole(schema.body);
   if (role === undefined) return;
   throw new Error(
     `schema ${schema.name}: its \`expand\` of role "${role}" names no \`reading\` — an expanded ` +
       `child resolves through its OWN resolution Schema (rhizomatic issue #23), so the gather must ` +
-      `name it; a pre-0.8 body is migrated (SPEC §20), not served`,
+      `name it`,
   );
 }
 

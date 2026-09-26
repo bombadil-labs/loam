@@ -735,19 +735,8 @@ replants it. Embedders get the same pieces as values: `MirrorBackend(primary, mi
 
 ## Migrations
 
-A store is grow-only and content-addressed, so a signed delta can never be rewritten — which makes
-a breaking change to the on-wire format something you migrate to, not patch in place. Loam ships a
-migration for every such change (a standing rule), and it supersedes rather than rewrites:
-
-```sh
-loam init --home ./store --seed <the store's original seed>   # re-signing is the operator's own hand
-loam migrate my-export.json --out migrated.json               # old deltas in, new deltas out
-```
-
-For each delta a format change touched, the migration **re-signs** it into the new form and
-**negates** the original with a negation that points `supersededBy` at its replacement and records a
-reason — so the history reads as a linked chain of supersessions, nothing lost. It is idempotent
-(re-running adds nothing) and composes across versions. See [SPEC §20](SPEC.md).
+Loam does not migrate. It reads only the current vocabulary: a retired word is an unknown word, and
+a store whose rows no current reader can read is refused at boot. See [SPEC §20](SPEC.md).
 
 ## How the repo is organized
 
@@ -756,8 +745,7 @@ GraphQL, mutations, registrations, accounts & capabilities, trust, erasure), `st
 `StoreBackend` drivers — sqlite, archive/mirror, localStorage), `server/` (the HTTP server
 itself — every door, MCP, login and OAuth, the admin pages), `surface/` (surfaces as
 materializations — the GraphQL and REST/OpenAPI doors from one generator seam), `federation/`
-(offer / pull / wire / translate), `runner/` (derived functions), `migrate/` (format migrations —
-old deltas in, new deltas out), `stock/` (the schema shelf `init` and `register --stock` read),
+(offer / pull / wire / translate), `runner/` (derived functions), `stock/` (the schema shelf `init` and `register --stock` read),
 `cli/`, and `browser/` + `client/` (the full in-page store and the
 read-only public client). `test/` mirrors that tree;
 [`demos/`](demos/README.md) holds the [tutorial](https://bombadil-labs.github.io/loam/tutorial.html) and the

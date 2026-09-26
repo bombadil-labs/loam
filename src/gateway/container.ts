@@ -82,28 +82,6 @@ export type ContainerPosture = "separate" | "shared";
 const TRUSTS = new Set<string>(["curated", "untrusted"]);
 const POSTURES = new Set<string>(["separate", "shared"]);
 
-// The at-rest posture words before the storage rename, and what each one meant. The §20 step
-// `container-posture-storage-words` carries a surviving declaration forward; these stay legible here
-// for two reasons no migration can cover. A store is migrated only when someone RUNS `loam migrate`,
-// so until then the reader must resolve a legacy declaration exactly as it always did — a container
-// that dropped out of the table would drop out of every scope and out of the erasure guard, with no
-// error anywhere (the H9 shape). And the step re-signs only SURVIVING law, so a STRUCK legacy
-// declaration keeps these bytes forever — which is precisely what `unreachableStoreReport` reads to
-// ask whether anything in a lineage ever named a store of its own.
-export const LEGACY_POSTURES: ReadonlyMap<string, ContainerPosture> = new Map([
-  ["wall", "separate"],
-  ["property", "shared"],
-]);
-
-// The posture a primitive BINDS — current word or retired one. The door does not use this (it
-// refuses a retired word outright, naming the migration); every READER does, because a reader's job
-// is to resolve the bytes it was given rather than the bytes it wishes it had.
-const asPosture = (value: string | number | boolean | undefined): ContainerPosture | undefined =>
-  typeof value !== "string"
-    ? undefined
-    : POSTURES.has(value)
-      ? (value as ContainerPosture)
-      : LEGACY_POSTURES.get(value);
 const NUL = "\u0000";
 const NOTE_BYTES = 256;
 
@@ -123,14 +101,13 @@ export interface ContainerSpec {
   /**
    * This container is the INBOX POOL of the named parent container (SPEC §39). A separate pool that
    * a connection's writes land in; its members compose into the parent's gather. The pointer is what
-   * makes an inbox declaration shape-distinguishable from a plain one (no §20 migration owed — an old
-   * declaration simply has no `inboxOf`).
+   * makes an inbox declaration shape-distinguishable from a plain one.
    */
   readonly inboxOf?: string;
   /**
    * What this container may do and what it allows beneath it (SPEC §58, position 4), inlined as
-   * canonical JSON under role `leeway`. Absent means SEALED — every switch off — so an older
-   * declaration reads as the private journal and owes no §20 migration, exactly as `inboxOf` does.
+   * canonical JSON under role `leeway`. Absent means SEALED — every switch off — so a declaration
+   * without one reads as the private journal.
    */
   readonly leeway?: Leeway;
 }
@@ -268,17 +245,6 @@ export function containerDefect(
   }
   const postures = primitives(claims, "posture");
   if (postures.length !== 1 || typeof postures[0] !== "string" || !POSTURES.has(postures[0])) {
-    // A RETIRED word gets its own refusal. The door speaks one vocabulary and only the current one
-    // — but a declaration carrying the old bytes is a store that has not been migrated, not a
-    // malformed claim, and telling it so is the difference between a fixable error and a mystery.
-    const retired = typeof postures[0] === "string" ? LEGACY_POSTURES.get(postures[0]) : undefined;
-    if (retired !== undefined) {
-      return (
-        `posture "${postures[0]}" is the retired word for "${retired}" — the axis is STORAGE (its ` +
-        `own bytes, or a reading over ground already held), so the words say storage now. An older ` +
-        `store is carried forward by \`loam migrate\` (§20), never by re-minting the old bytes`
-      );
-    }
     return (
       'a container declaration carries exactly one posture: "separate" (its own bytes in its own ' +
       'store) or "shared" (a reading over ground this store already holds) — §28.4 recommends ' +
@@ -767,10 +733,9 @@ export function containerAdmission(
  * THIS IS THE BIND TEST, AND IT IS NOT THE DOOR'S TEST. `containerDefect` weighs whether a NEW
  * declaration may be ADMITTED, against the state standing right now: it reads the leeway tree, so
  * a parent tightening its terms later can turn a declaration that was law when it was signed into
- * one the door would refuse today. It also refuses a retired posture word the reader still honours
- * on an unmigrated store. Neither belongs in the question "did this ever bind" — and using the
- * door's test for it was a licence to mint, because a name that answers "never declared" is a name
- * a walk will make again.
+ * one the door would refuse today. That does not belong in the question "did this ever bind" — and
+ * using the door's test for it was a licence to mint, because a name that answers "never declared"
+ * is a name a walk will make again.
  *
  * So the table and `everDeclared` ask THIS, together. Two readers of one predicate cannot drift.
  */
@@ -784,20 +749,17 @@ function boundContainer(
   const name = containerRef(claims, CTX_CONTAINER);
   if (name === undefined) return undefined;
   const trust = primitives(claims, "trust")[0];
-  // A RETIRED posture word still binds HERE, unlike at the door: a store is migrated when someone
-  // runs `loam migrate`, and until then dropping its containers would empty every scope and blind
-  // the erasure guard without saying a word (H9). The word is normalized, never widened — the
-  // legacy pair maps onto the same two postures, so nothing new becomes lawful.
-  const posture = asPosture(primitives(claims, "posture")[0]);
+  const posture = primitives(claims, "posture")[0];
   if (
     typeof trust !== "string" ||
     !TRUSTS.has(trust) ||
-    posture === undefined ||
+    typeof posture !== "string" ||
+    !POSTURES.has(posture) ||
     (trust === "untrusted" && posture === "shared")
   ) {
     return undefined;
   }
-  return { name, trust, posture };
+  return { name, trust, posture: posture as ContainerPosture };
 }
 
 /** The declaration identity used by the container reader, excluding malformed and control rows. */
@@ -2315,11 +2277,7 @@ export function unreachableStoreReport(gw: Gateway): {
   // the table whose lineage holds a STRUCK separate declaration is treated as separate. Forgetting
   // the container WHOLE (striking every declaration) still ends the entity and clears the guard —
   // that is the honest forget, unchanged.
-  //
-  // The struck posture is read through `asPosture`, so a RETIRED word counts. The §20 rename step
-  // re-signs only SURVIVING law, which means a struck declaration keeps its legacy bytes forever;
-  // matching the current word alone would have quietly retired this guard for every store that
-  // predates the rename, and a guard that stops firing reports completeness it never proved (H7).
+
   const struckSeparate = new Set<string>();
   if (gw.operatorAuthor !== undefined) {
     const negated = negatedAt(gw.reactor, gw.validityNow(), gw.operatorAuthor);
@@ -2327,7 +2285,7 @@ export function unreachableStoreReport(gw: Gateway): {
     for (const delta of lawfulHistory(gw.reactor, gw.operatorAuthor)) {
       if (!negated(delta.id)) continue;
       const name = containerRef(delta.claims, CTX_CONTAINER);
-      if (name !== undefined && asPosture(primitives(delta.claims, "posture")[0]) === "separate") {
+      if (name !== undefined && primitives(delta.claims, "posture")[0] === "separate") {
         struckSeparate.add(name);
       }
     }

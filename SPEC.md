@@ -49,7 +49,7 @@ name begins with that number.
 | §17 | [Surfaces are materializations](spec/17-surfaces.md) |
 | §18 | [Glossary](spec/18-glossary.md) |
 | §19 | [Tutorial v2 — needs before doctrine](spec/19-tutorial-v2.md) |
-| §20 | [Migration — old deltas in, new deltas out](spec/20-migration.md) |
+| §20 | [Migration — old deltas in, new deltas out (retired)](spec/20-migration.md) |
 | §21 | [Schema identity & versioning — the lens ladder](spec/21-schema-identity.md) |
 | §22 | [Custom resolvers — the last step of the lens becomes programmable](spec/22-resolvers.md) |
 | §23 | [Renderers — push deltas, get software](spec/23-renderers.md) |

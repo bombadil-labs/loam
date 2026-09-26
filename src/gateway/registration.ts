@@ -505,18 +505,13 @@ export function parseClaimTemplates(raw: unknown): ClaimTemplates {
 }
 
 // The at-rest entity a hyperschema DEFINITION lives at. `hyperschema:<Name>` by default (§21): the
-// prefix names what the entity holds — the gather program — and is shape-distinguishable from the
-// old `schema:<Name>` form by construction, so a §20 migration can tell a pre-rename store from a
-// migrated one without a per-delta version stamp. `schema:` is freed for the resolution Schema's own
-// entities (a later §21 slice). An explicit `entity` always overrides the default.
+// prefix names what the entity holds — the gather program — and `schema:` is left for the resolution
+// Schema's own entities. An explicit `entity` always overrides the default.
 export const schemaEntityFor = (hyperschema: HyperSchema, entity?: string): string =>
   entity ?? `hyperschema:${hyperschema.name}`;
 
-// The living resolution Schema's own entity (SPEC §21): `schema:<name>`, freed for exactly this by
-// slice 1's `schema:`→`hyperschema:` rename. Single-lens for now — the name is the hyperschema's,
-// so one lens per gather program. A migrated store may still hold the OLD hyperschema definition at
-// this id, but those deltas are negated by slice 1 and the SCHEMA_SCHEMA gather masks negations, so
-// `loadSchema` here only ever sees the resolution Schema's own claims — the ids coexist, never collide.
+// The living resolution Schema's own entity (SPEC §21): `schema:<name>`. Single-lens for now — the
+// name is the hyperschema's, so one lens per gather program.
 export const schemaLivingEntityFor = (name: string): string => `schema:${name}`;
 
 // A VersionedSchema's true name (SPEC §21 — `name@hash`): the content address of the FROZEN bytes.

@@ -620,20 +620,12 @@ busy.
   file.** Don't restate a hazard `SUBSTRATE-HAZARDS.md` already owns — cite it (`H6`) in one line.
   A test header says what the rail asserts and what it deliberately does not; not its rewrite
   history. Legacy cruft is not free: it churns tokens forever and crowds the real signal.
-- **Every breaking on-wire change ships a migration** (Myk, 2026-07-12) — if a change alters the
-  bytes/roles of any delta that older stores already hold, add a step to `src/migrate/` (the
-  `MIGRATIONS` chain) in the SAME PR. A migration is grow-only: it re-signs each changed delta into
-  the new form and NEGATES the old one with a negation that points `supersededBy` at the replacement
-  and records a reason — never a silent rewrite. Steps are shape-detected and composable, so a store
-  several versions back is carried forward one step at a time (naive is fine; optimize later). See
-  SPEC §20.
-  - **Corollary — the changed deltas must be shape-distinguishable.** Because migrations detect by
-    shape, every breaking change MUST give its changed deltas a shape unambiguously distinct from all
-    prior versions — the version lives IN the vocabulary (0.3 did it: `rhizomatic.hyperschema.*` can
-    never be confused with `rhizomatic.schema.*`). That is what keeps shape-detection sufficient and
-    makes a per-delta version stamp unnecessary (it would only pollute content addresses with metadata
-    the bytes already carry). Almost no delta kinds ever change between versions — only the structural
-    ones — and those few carry their version in their own roles.
+- ~~**Every breaking on-wire change ships a migration** (Myk, 2026-07-12)~~ — **SUPERSEDED
+  2026-09-25 by the greenfield ruling** (Myk; `refactor/README.md`): no migrations and no backward
+  compatibility. A breaking change changes the bytes and nothing carries old stores forward; a
+  store Loam cannot read is refused at boot. `src/migrate/` and `loam migrate` are gone, and SPEC
+  §20 is marked retired. A breaking change still owes its tests, and the recordings under
+  `refactor/recordings/` show which decisions it moved.
 
 ## Standing decisions
 

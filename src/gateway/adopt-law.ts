@@ -239,7 +239,7 @@ export function readManifest(members: readonly Delta[]): ManifestRow[] {
 // --- survival inside a version's members --------------------------------------------------------
 
 // The negation algebra over a version's MEMBERS, scoped by AUTHORSHIP — the rule every sibling
-// constitutional reader keeps (`lawfulNegated`, migrate's survivor walk), stated here for a
+// constitutional reader keeps (`lawfulNegated`), stated here for a
 // member set rather than a store:
 //
 //   **A strike binds a member only when the member's OWN AUTHOR signed it.**

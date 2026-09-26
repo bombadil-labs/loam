@@ -19,7 +19,6 @@ const COMMANDS: Readonly<Record<string, readonly string[]>> = {
   serve: ["--home", "--store", "--port", "--token", "--http", "--archive"],
   register: ["--home", "--store"],
   pull: ["--home", "--store", "--token"],
-  migrate: ["--home", "--out"],
   store: ["--home", "--store"],
   repair: ["--home", "--store"],
 };

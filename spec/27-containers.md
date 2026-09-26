@@ -104,15 +104,8 @@ container is not an imitation of a separate one — it is a different, equally r
 is simply false: a separate container's sqlite file is no more physical than the primary's. What is true of
 it is that it is its **own**.
 
-The rename is a breaking on-wire change and ships its §20 migration (`container-posture-storage-words`): a
-declaration carrying a retired word is re-signed into the storage vocabulary and the original NEGATED with a
-`supersededBy` link at the re-expression and a reason — grow-only, nothing rewritten. The VALUE is the
-shape-distinguishing byte, which is what satisfies the §20 corollary without a version stamp. The DOOR speaks
-only the current words and names `loam migrate` when it sees a retired one; every READER still resolves both,
-because a migration is something a person runs, and a store whose containers vanished until they ran it would
-empty every scope and blind the erasure guard with no error anywhere. A struck declaration keeps its retired
-word forever — the migration re-signs only surviving law — so §27.7's completeness guard reads the retired
-word too: a lineage that once had a store of its own still says so.
+The retired words `"wall"` and `"property"` are now unknown words. The door refuses them with the refusal it
+gives any unknown posture, and a reader binds nothing from a declaration that carries one (§20, retired).
 
 **When a container can be SHARED, and when it must be SEPARATE.** §24.1 proved *you cannot discard a mark* —
 a "sandboxed" flag on canonical deltas that every reader must honor forever, discarded only by negating each
@@ -727,14 +720,5 @@ migration detects, railed). Capability/federation surface + a vocabulary mint �
 reasoning and not only the words. The axis was always storage; the gloss on this page was more legible than
 the terms it explained, and `"property"` additionally collided with a dozen ordinary-English uses of the word
 in this very section. `physical | virtual` was Myk's first instinct and is rejected in §27.1 for cause.
-A breaking on-wire change, so it ships its §20 step — `container-posture-storage-words` in
-`src/migrate/migrate.ts`: the retired declaration is re-signed into the storage vocabulary at its own
-timestamp and NEGATED with `supersededBy` at the re-expression plus a reason, grow-only. The posture VALUE is
-the shape-distinguishing byte (§20's corollary, no version stamp). Asymmetric by design, and this is the part
-worth remembering: the DOOR refuses a retired word and names `loam migrate`, while every READER still
-resolves both — a migration is something a person runs, and a container that vanished until they ran it would
-empty every scope and blind §27.7's completeness guard with no error anywhere (H9). Because the step re-signs
-only SURVIVING law, a struck declaration keeps its retired word permanently, so that guard reads the retired
-word too; matching only the current one would have quietly retired the guard for every pre-rename store (H7).
-Railed both directions plus two-sided on erasure in `test/migrate/container-posture.test.ts`; the retired
-shape is mintable only from `test/migrate/legacy.ts`, so no production path can re-mint it.
+The retired words are unknown words: the door refuses them and every reader ignores them, exactly as any
+other unknown posture (`test/server/container-tools.test.ts`).
