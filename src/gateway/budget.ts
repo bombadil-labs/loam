@@ -131,6 +131,7 @@ export function readBudgetPolicy(
   const latest = new Map<string, { policy: BudgetPolicy; timestamp: number; id: string }>();
   for (const delta of lawfulDeltasAt(
     reactor,
+    now,
     { entity: BUDGET_ENTITY, context: CTX_BUDGET },
     operator,
   )) {

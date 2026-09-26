@@ -1063,7 +1063,11 @@ function entityCaptureRefusal(gw: Gateway, ex: SchemaExport): string | undefined
 // module's bytes).
 function boundHyperschemaAt(gw: Gateway, entity: string): HyperSchema | undefined {
   try {
-    return loadHyperSchema(lawfulSnapshot(gw.reactor, gw.operatorAuthor), entity, gw.validityNow());
+    return loadHyperSchema(
+      lawfulSnapshot(gw.reactor, gw.validityNow(), gw.operatorAuthor),
+      entity,
+      gw.validityNow(),
+    );
   } catch {
     return undefined;
   }

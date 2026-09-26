@@ -133,6 +133,7 @@ export function readArtifactRoutes(
   const negated = negatedAt(reactor, now, operator);
   for (const delta of lawfulDeltasAt(
     reactor,
+    now,
     { entity: ARTIFACT_ENTITY, context: CTX_ARTIFACT },
     operator,
   )) {

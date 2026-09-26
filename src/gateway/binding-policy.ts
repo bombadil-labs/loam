@@ -110,6 +110,7 @@ export function readBindingPolicy(
   const negated = negatedAt(reactor, now, operator);
   for (const d of lawfulDeltasAt(
     reactor,
+    now,
     { entity: BINDING_POLICY_ENTITY, context: CTX_BINDING_POLICY },
     operator,
   )) {

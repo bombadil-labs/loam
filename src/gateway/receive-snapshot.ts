@@ -47,7 +47,7 @@ function fromMembers(members: readonly Delta[]): Reactor {
   return r;
 }
 function definitionId(r: Reactor, author: string, entity: string, body: Term, now: number): string {
-  const rows = evalTerm(body, lawfulSnapshot(r, author), now, entity);
+  const rows = evalTerm(body, lawfulSnapshot(r, now, author), now, entity);
   if (rows.sort !== "hview") throw new Error("bootstrap sort");
   const definitions = rows.hview.props.get("definition") ?? [];
   const selected = [...definitions].sort(

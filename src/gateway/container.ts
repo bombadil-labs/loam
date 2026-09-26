@@ -54,7 +54,7 @@ import {
   SIZE_ENVELOPES,
 } from "./envelope.js";
 import { withNegationClosure, withNegationClosureAcross } from "./ingest.js";
-import { lawfulDeltasAt, lawfulSnapshot } from "./registration.js";
+import { lawfulDeltasAt, lawfulHistory, lawfulHistoryAt, lawfulSnapshot } from "./registration.js";
 import { negatedAt } from "./negation.js";
 import { readTrustPolicyAt, type TrustPolicy } from "./trust.js";
 import { Gateway, type ConnectionBinding, type FederationReport } from "./gateway.js";
@@ -566,7 +566,7 @@ function computeContainerTable(
   const detached = new Map<string, DetachRecord[]>();
   const defects: string[] = [];
 
-  for (const delta of lawfulSnapshot(reactor, operator)) {
+  for (const delta of lawfulSnapshot(reactor, now, operator)) {
     if (negated(delta.id)) continue;
     const claims = delta.claims;
     const excludedName = containerRef(claims, CTX_CONTAINER_EXCLUDED);
@@ -810,7 +810,7 @@ export function currentContainerDeclarationId(
   // Filed AT the container's entity, so the target index answers it (H8); `lawfulDeltasAt` already
   // keeps only the operator's deltas and carries no negation closure, so the strike filter is here.
   const negated = negatedAt(reactor, now, operator);
-  return lawfulDeltasAt(reactor, { entity, context: CTX_CONTAINER }, operator)
+  return lawfulDeltasAt(reactor, now, { entity, context: CTX_CONTAINER }, operator)
     .filter((delta) => !negated(delta.id) && containerDeclarationName(delta.claims) === entity)
     .sort((a, b) => b.claims.timestamp - a.claims.timestamp || b.id.localeCompare(a.id))[0]?.id;
 }
@@ -826,7 +826,7 @@ export function survivingDeclarationIds(
   // `everDeclared` below, on the road that drops a container. `lawfulDeltasAt` carries no negation
   // closure of its own, so the strike filter stays here.
   const negated = negatedAt(reactor, now, operator);
-  return lawfulDeltasAt(reactor, { entity, context: CTX_CONTAINER }, operator)
+  return lawfulDeltasAt(reactor, now, { entity, context: CTX_CONTAINER }, operator)
     .filter((delta) => !negated(delta.id))
     .filter((delta) => containerRef(delta.claims, CTX_CONTAINER) === entity)
     .map((delta) => delta.id);
@@ -862,10 +862,12 @@ export function everDeclared(
   // a dropped subtree back to its reader. `byTarget` is written by ingest beside the set it
   // indexes and replayed whole by an erase, so it cannot answer absent for a delta the store
   // holds; a Set maintained on this side could.
+  // HISTORY, NOT THE PRESENT. A declaration whose validity has ended was still made, so it still
+  // forbids a re-mint; this read never filters by validity.
   // WELL-FORMED ONLY. Malformed law binds nothing — `computeContainerTable` skips a declaration
   // whose trust or posture the law refuses — so a name that only ever carried one never stood, and
   // reporting it as dropped would refuse a road forever over a container nobody ever had.
-  return lawfulDeltasAt(reactor, { entity, context: CTX_CONTAINER }, operator).some(
+  return lawfulHistoryAt(reactor, { entity, context: CTX_CONTAINER }, operator).some(
     (delta) => boundContainer(delta.claims)?.name === entity,
   );
 }
@@ -2303,7 +2305,8 @@ export function unreachableStoreReport(gw: Gateway): {
   const struckSeparate = new Set<string>();
   if (gw.operatorAuthor !== undefined) {
     const negated = negatedAt(gw.reactor, gw.validityNow(), gw.operatorAuthor);
-    for (const delta of lawfulSnapshot(gw.reactor, gw.operatorAuthor)) {
+    // HISTORY: an expired separate declaration still named a store.
+    for (const delta of lawfulHistory(gw.reactor, gw.operatorAuthor)) {
       if (!negated(delta.id)) continue;
       const name = containerRef(delta.claims, CTX_CONTAINER);
       if (name !== undefined && asPosture(primitives(delta.claims, "posture")[0]) === "separate") {

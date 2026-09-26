@@ -164,7 +164,7 @@ const primitive = (claims: Claims, role: string): string | number | boolean | un
 export function readTranslations(reactor: Reactor, now: number, operator?: string): Translation[] {
   const negated = negatedAt(reactor, now, operator);
   const latest = new Map<string, { t: Translation; timestamp: number; id: string }>();
-  for (const delta of lawfulSnapshot(reactor, operator)) {
+  for (const delta of lawfulSnapshot(reactor, now, operator)) {
     let entity: string | undefined;
     for (const p of delta.claims.pointers) {
       if (p.target.kind === "entity" && p.target.entity.context === CTX_TRANSLATION) {

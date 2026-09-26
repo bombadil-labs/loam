@@ -100,19 +100,30 @@ level. Loam then consumes it through the barrel and compares its recordings.
    schema read with an explicit key-set or author-predicate input, `applyPolicy`, and the named
    lens binding. Loam replaces hand-written strike walks and law loops where its recordings show
    equal answers. How many go is measured, not promised.
-   Step 3 left one limit for this step. Loam's negation walks (`lawfulNegated`, 34 readers, and
-   `dataStruck`) ignore validity. A negation with a future start counts at once, and an expired
-   negation still counts. The same holds for a negation of a registration, so a timed negation
-   does not change the served surface at its boundary. Loam writes no timed negation today. The
-   governed read must answer at an explicit read time, and Loam's recordings must pin a timed
-   negation of a registration before this step lands.
-   Every negation reader already calls `negatedAt(reactor, now, author)` in
-   `src/gateway/negation.ts`, so the swap edits that body. `dataStruck` and `honoredStrikeOn` take
-   `now` too, and each needs its own new body. Three caches break when negation depends on time.
-   `readContainerTable` is memoized by a count of container law. `Gateway.publicOpen` is cleared on
-   ingest and reseat, not at a validity boundary. Several readers keep one predicate across an
-   `await` (`refactor/audit/negation-readers.md`, defect 1). Each must rebuild per read time, or be
-   cleared when the validity timer fires.
+   Loam's duties for this step:
+   - **The step-3 limit.** Loam's negation readers ignore validity. A negation with a future start
+     counts at once, and an expired one still counts. A timed negation of a registration does not
+     change the served surface. Loam writes no timed negation today.
+     `recordings/suppression-time.recording.test.ts` pins this.
+   - **The seams.** Every negation reader calls `negatedAt(reactor, now, author)`
+     (`src/gateway/negation.ts`). The law readers `lawfulSnapshot` and `lawfulDeltasAt` take `now`.
+     The swap edits those three bodies. `dataStruck` and `honoredStrikeOn` take `now` too, and each
+     needs its own new body.
+   - **Hand-written filters.** Five readers still filter the snapshot by author by hand:
+     `channel.ts` `readChannels`, `dropChannelCommit` and `cursesOf`; `adopt-law.ts`
+     `readLawAdoptions`; `receive-policy.ts`. They move to the governed read one by one.
+   - **History reads.** Some reads ask about the past and must never filter by validity. They use
+     `lawfulHistory` or `lawfulHistoryAt`, not `governedDeltas`.
+     - `everDeclared`: a name whose declaration expired still cannot be minted again.
+     - `unreachableStoreReport`: an expired separate declaration still named a store. Its negation
+       test is a present-time read. Decide whether an expired negation still counts as "struck".
+     - Erasure is eternal (decision F3). Erasure and graveyard records (`slate.ts` `findGraveyard`,
+       `readGraveyards`, `strikeOf`) must keep counting after any validity end. Move them to a
+       history read.
+   - **Caches.** Three break when negation depends on time: `readContainerTable` (memoized by a
+     count of container law), `Gateway.publicOpen` (cleared on ingest and reseat, not at a
+     boundary), and predicates kept across an `await` (`refactor/audit/negation-readers.md`, defect
+     1). Each must rebuild per read time, or be cleared when the validity timer fires.
 5. **Principal.** Roots, key binding, succession, delegation, locators. Loam moves user,
    connection and container keys into signed data.
 6. **Peer and admission.** The peer model, the guard pipeline, arrival testimony. Loam's

@@ -120,7 +120,12 @@ export function readTrustPolicyAt(
   const negated = negatedAt(reactor, now, operator);
   const roster = new Set<string>();
   let latest: { mode: TrustMode; timestamp: number; id: string } | undefined;
-  for (const delta of lawfulDeltasAt(reactor, { entity: subject, context: CTX_TRUST }, operator)) {
+  for (const delta of lawfulDeltasAt(
+    reactor,
+    now,
+    { entity: subject, context: CTX_TRUST },
+    operator,
+  )) {
     if (negated(delta.id)) continue;
 
     let mode: string | undefined;

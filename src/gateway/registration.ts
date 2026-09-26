@@ -797,7 +797,15 @@ export function parseRegistrationInput(raw: unknown): RegistrationInput {
 // when governed. Definitions, registrations, and negations are all read from this set — a
 // foreign negation can no more retire the operator's schema than a foreign definition can
 // replace it.
-export function lawfulSnapshot(reactor: Reactor, operator?: string): DeltaSet {
+/** The operator's deltas that hold at `now`. */
+export function lawfulSnapshot(reactor: Reactor, now: number, operator?: string): DeltaSet {
+  // Step-3 limit (refactor/PLAN.md step 4): claim validity is not read here yet, so `now` is unused.
+  void now;
+  return lawfulHistory(reactor, operator);
+}
+
+/** Every delta the operator ever signed, whatever its validity. For questions about history. */
+export function lawfulHistory(reactor: Reactor, operator?: string): DeltaSet {
   if (operator === undefined) return reactor.snapshot();
   return DeltaSet.from([...reactor.snapshot()].filter((d) => d.claims.author === operator));
 }
@@ -840,7 +848,22 @@ export interface LawAt {
   readonly context: string;
 }
 
-export function lawfulDeltasAt(reactor: Reactor, at: LawAt, operator?: string): Delta[] {
+/** The operator's law filed at `at` that holds at `now`. */
+export function lawfulDeltasAt(
+  reactor: Reactor,
+  now: number,
+  at: LawAt,
+  operator?: string,
+): Delta[] {
+  void now; // step-3 limit, as in lawfulSnapshot
+  return lawfulHistoryAt(reactor, at, operator);
+}
+
+/**
+ * Every lawful delta ever filed at `at`, whatever its validity. For a historical question such as
+ * "was this name ever declared", where an expired declaration must still count.
+ */
+export function lawfulHistoryAt(reactor: Reactor, at: LawAt, operator?: string): Delta[] {
   const out: Delta[] = [];
   for (const id of reactor.byTarget(at.entity)) {
     // Unreachable against today's substrate: nothing removes from the reactor's set, and an erase
@@ -909,7 +932,7 @@ function survivingCandidates(
   withdrawn?: Candidate[],
   boundary?: Boundary,
 ): Map<string, Candidate[]> {
-  const lawful = lawfulSnapshot(reactor, operator);
+  const lawful = lawfulSnapshot(reactor, now, operator);
   const negated = negatedAt(reactor, now, operator);
   const groups = new Map<string, Candidate[]>();
   for (const delta of lawful) {
@@ -1126,7 +1149,7 @@ export function readRegistrations(
   operator?: string,
   boundary?: Boundary,
 ): Registration[] {
-  const lawful = lawfulSnapshot(reactor, operator);
+  const lawful = lawfulSnapshot(reactor, now, operator);
   const groups = survivingCandidates(reactor, now, operator, undefined, boundary);
   // Latest-wins narrows to latest-PER-LENS (§21.7): within one registration entity's group, each
   // lens name (the living `schema:<name>` pointer, in the bytes since slice 2prime) keeps its own
@@ -1236,7 +1259,7 @@ export function readRegistrationVersions(
   now: number,
   operator?: string,
 ): RegistrationVersion[] {
-  const lawful = lawfulSnapshot(reactor, operator);
+  const lawful = lawfulSnapshot(reactor, now, operator);
   const out: RegistrationVersion[] = [];
   for (const group of survivingCandidates(reactor, now, operator).values()) {
     let n = 0;
@@ -1300,7 +1323,7 @@ export function readWithdrawnRegistrations(
   now: number,
   operator?: string,
 ): WithdrawnRegistration[] {
-  const lawful = lawfulSnapshot(reactor, operator);
+  const lawful = lawfulSnapshot(reactor, now, operator);
   const withdrawn: Candidate[] = [];
   survivingCandidates(reactor, now, operator, withdrawn);
   const out: WithdrawnRegistration[] = [];
