@@ -53,7 +53,10 @@ const entity = (role, id, context) => ({
 const value = (v) => ({ role: "value", target: { kind: "primitive", value: v } });
 
 const say = (ts, pointers) =>
-  signClaims({ timestamp: BASE + ts, author: CIRCLE_OP, pointers }, CIRCLE_SEED);
+  signClaims(
+    { timestamp: BASE + ts, validFrom: BASE + ts, author: CIRCLE_OP, pointers },
+    CIRCLE_SEED,
+  );
 
 async function buildCircle() {
   const gateway = await Gateway.boot(
@@ -118,6 +121,7 @@ function buildAdversary() {
   const forged = signClaims(
     {
       timestamp: BASE + 500_000_000_000,
+      validFrom: BASE, // valid now: only the creation time lies
       author: ADVERSARY,
       pointers: [
         entity("subject", "film:arrival", "title"),
@@ -135,6 +139,7 @@ function buildDialect() {
   const logged = signClaims(
     {
       timestamp: BASE + 42,
+      validFrom: BASE + 42,
       author: DIALECT,
       pointers: [
         entity("film_watched", "film:arrival", "elsewhere"),

@@ -65,7 +65,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "npm run format:check && npm run lint && npm run census && npm run typecheck && npm run build && npm test",
+    "check": "npm run format:check && npm run lint && npm run census && npm run typecheck && npm run build && node scripts/gen-packets.mjs --check && npm test",
     "release": "node scripts/release.mjs",
     "version": "node scripts/sync-version.mjs",
     "prepublishOnly": "npm run check"
