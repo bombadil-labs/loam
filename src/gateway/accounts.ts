@@ -258,9 +258,24 @@ export function dataStruck(
   now: number,
   operator?: string,
 ): (id: string) => boolean {
-  if (operator === undefined) return reactor.negationPredicate(now, () => true);
-  // The trusted strikers, read from the same Term the gather's mask reflects over: the operator,
-  // plus the subject of every surviving operator grant valid at `now`.
+  const witnesses = dataStrikeWitnesses(reactor, now, operator);
+  return (id) => witnesses(id).length > 0;
+}
+
+/** The strikes that hold on `id` as data at `now`: the witness form of `dataStruck`. */
+export function dataStrikeWitnesses(
+  reactor: Reactor,
+  now: number,
+  operator?: string,
+): (id: string) => readonly Delta[] {
+  if (operator === undefined) return reactor.negationWitnesses(now, () => true);
+  const strikers = dataStrikers(reactor, now, operator);
+  return reactor.negationWitnesses(now, (n) => strikers.has(n.claims.author));
+}
+
+// The trusted strikers, read from the same Term the gather's mask reflects over: the operator,
+// plus the subject of every surviving operator grant valid at `now`.
+function dataStrikers(reactor: Reactor, now: number, operator: string): Set<string> {
   // Every grant is filed at the store entity, so the index finds the candidates. The term's mask
   // must see every negation that can reach them, so the candidates carry their whole negation
   // closure (H1); nothing else in the store can change which grants survive.
@@ -281,7 +296,7 @@ export function dataStruck(
     throw new Error("the lawful-grants term always evaluates to a delta set");
   const strikers = new Set<string>([operator]);
   for (const g of grants.set) for (const s of reflectedSubjects(g, "subject")) strikers.add(s);
-  return reactor.negationPredicate(now, (n) => strikers.has(n.claims.author));
+  return strikers;
 }
 
 // WHICH strike actually retired `id`, if any — the constitutional question, answered by the same

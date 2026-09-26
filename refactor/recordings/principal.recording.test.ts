@@ -357,6 +357,9 @@ describe("recordings: principals", () => {
     ];
     await gw.append(writes);
     const writeIds = new Set(writes.map((d) => d.id));
+    // One read time for the table and the scopes: the declarations are valid from their
+    // `nextTimestamp`, which runs ahead of the clock set at boot.
+    vi.setSystemTime(NOW + 100);
     const table = readContainerTable(gw.reactor, NOW + 100, KEY.operator);
     const labelsIn = (containers: string[]) =>
       containerScopeImpl(gw, { containers })

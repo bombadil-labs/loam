@@ -111,12 +111,29 @@ level. Loam then consumes it through the barrel and compares its recordings.
      subject of each operator grant that is valid at `now` and not struck by the operator.
      `honoredStrikeOn` calls `negationWitnesses`. Its suppression callback is Loam's `standsFor`.
      That walk reads raw `negationsOf` and never the reader, so it cannot re-enter it.
-   - **One-id reader audit (PR B).** An absent target is no longer negated. The old
-     `lawfulNegated` said true for an absent target with a held negation. Check each one-id caller
-     of `negatedAt` for a purged target that it used to treat as struck.
-   - **Raw `negationsOf` readers (PR B).** `adopt.ts` `ownStrikes`, `slate.ts` `strikeOf` and
-     `cli.ts` `inertStrike` still walk the raw index. Move each to a governed read, or to a
-     history read where erasure needs it.
+   - **One-id reader audit (done, PR B).** An absent target is no longer negated. The old
+     `lawfulNegated` said true for an absent target with a held negation. Every one-id caller was
+     read: `localChannelsInContainer`, `liveOpening`, `withdrawnBinding` (receive-policy) and
+     `promoteImpl` already check `reactor.get(id)` first and decide absence themselves.
+     `selectReceivingSnapshot` asks only of ids its operand holds by construction. No caller relied
+     on the old answer, so none changed.
+   - **Raw `negationsOf` readers (done, PR B).** These now count a strike only inside its window:
+     `adopt.ts` `ownStrikes` and both "negated here" lists (the witness readers, with
+     `dataStrikeWitnesses` beside `dataStruck`), `slate.ts` `strikeOf` (the operator's witnesses),
+     `reads.ts` `negatedInGround` (validity at the read time, since the id is often held only in a
+     pool), the curse lift's "already lifted" test (`negatedAt`), the revoke panel's
+     `survivingOperatorGrantIds` (`negatedAt`, which also stops a stranger's strike from hiding a
+     grant), and role survival in `loam user remove-role`. `test/refactor/step4-strike-readers.test.ts`
+     pins each. Left raw on purpose: the negation closures in `ingest.ts` (they carry strikes into a
+     set, and the evaluator reads validity), `withoutErased`, `isPlainClaim` and the renderer
+     selection's hole check (each errs toward disclosing less), and the registration boundary walk
+     (it wants every boundary).
+   - **The constitution walk (open).** `accounts.ts` `struck` and `standsFor` decide whether a grant
+     binds, and neither reads validity. So the door treats a timed strike on a grant as holding
+     forever, while `honoredStrikeOn` counts it only in its window. The CLI ledger's `inertStrike`
+     and grant survival (`claimIdsBySurvival` for grants and pens) stay validity-blind so that they
+     agree with the door. Making the door read validity lets an expired strike revive a grant. That
+     widens standing, so it is Myk's decision.
    - **Hand-written filters.** The channel, curse and law-adoption readers read `lawfulSnapshot`.
      `receive-policy.ts` still filters by the receiver's key over a private reactor. It asks a
      different question, and moves to the governed read with the receiver as its author set.
@@ -132,13 +149,14 @@ level. Loam then consumes it through the barrel and compares its recordings.
      - Erasure is eternal (decision F3). Erasure and graveyard records (`slate.ts` `findGraveyard`,
        `readGraveyards`, `strikeOf`) must keep counting after any validity end. Move them to a
        history read.
-   - **Caches.** Four break when negation depends on time. The registration boundary is fixed in
-     PR A: it now includes the validity boundaries of each negation in a registration's chain, and
-     `noteRegistrationTime` notes a negation that reaches a registration. Three stay for PR B:
-     `readContainerTable` (memoized by a count of container law), `Gateway.publicOpen` (cleared
-     on ingest and reseat, not at a boundary), and predicates kept across an `await`
-     (`refactor/audit/negation-readers.md`, defect 1). Each must rebuild per read time, or be
-     cleared when the validity timer fires.
+   - **Caches (done).** Four broke when negation depends on time. The registration boundary is
+     fixed in PR A: it now includes the validity boundaries of each negation in a registration's
+     chain, and `noteRegistrationTime` notes a negation that reaches a registration. PR B fixed
+     the other three. `readContainerTable` keeps every validity boundary of container law, and a
+     built table answers only between the boundaries around its build time. `Gateway.publicOpen`
+     answers only until the reactor's next validity boundary. A predicate held across an `await`
+     is safe: the substrate's reader clears its memo after an accepted ingest.
+     `test/refactor/step4-caches.test.ts` pins all three, at the table and at the door.
 5. **Principal.** Roots, key binding, succession, delegation, locators. Loam moves user,
    connection and container keys into signed data.
 6. **Peer and admission.** The peer model, the guard pipeline, arrival testimony. Loam's

@@ -2581,7 +2581,10 @@ export async function curseChannelLawImpl(
     // re-syncing revives it. Negating the curse's own negation is the only thing that can.
     const liftPool = gw.channelPools.get(channel)?.gateway;
     const liftGrounds = liftPool === undefined ? [gw] : [liftPool, gw];
-    for (const g of liftGrounds)
+    for (const g of liftGrounds) {
+      // A strike is already lifted only while a counter-negation holds at the read time. An expired
+      // or not-yet-valid counter lifts nothing, so the strike is negated again.
+      const lifted = negatedAt(g.reactor, g.validityNow(), undefined);
       for (const binding of [...g.reactor.snapshot()]) {
         if (!isRegistrationBinding(binding.claims)) continue;
         const p = binding.claims.pointers.find((pt) => pt.role === "schema");
@@ -2591,7 +2594,7 @@ export async function curseChannelLawImpl(
             : undefined;
         if (lens !== living) continue;
         for (const negationId of g.reactor.negationsOf(binding.id)) {
-          if (g.reactor.negationsOf(negationId).length > 0) continue; // already lifted
+          if (lifted(negationId)) continue;
           await g.append([
             signClaims(
               withStamp(gw.stamp(), (t) => makeNegationClaims(gw.operatorAuthor!, t, negationId)),
@@ -2600,6 +2603,7 @@ export async function curseChannelLawImpl(
           ]);
         }
       }
+    }
     replayEverywhere(gw);
     // Lifting strikes the curse record itself. The next poll re-blesses through the ordinary path,
     // so nothing here needs to know how binding works.

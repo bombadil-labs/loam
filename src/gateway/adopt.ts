@@ -11,7 +11,7 @@ import { signClaims } from "@bombadil/rhizomatic";
 import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
 import type { Gateway } from "./gateway.js";
 import { negatedAt } from "./negation.js";
-import { dataStruck } from "./accounts.js";
+import { dataStrikeWitnesses } from "./accounts.js";
 import { withStamp } from "./stamp.js";
 
 export const ADOPTION_ENTITY = "loam:adoption";
@@ -233,13 +233,15 @@ export async function promoteImpl(
   //
   // Asked BEFORE the law/data classification below — a struck delta is refused as struck, never by its
   // kind (§27.8 orders it the same way).
-  const struckAtSource = dataStruck(source.reactor, source.validityNow(), source.operator);
-  const withdrawn = negatedAt(source.reactor, source.validityNow(), src.claims.author);
+  const sourceNow = source.validityNow();
   // Derived, never asserted separately: the strikes named ARE the ones that carry the verdict, so the
-  // message cannot drift from the algebra.
+  // message cannot drift from the algebra. A strike counts only while it is valid at `sourceNow`.
   const ownStrikes = source.reactor
-    .negationsOf(src.id)
-    .filter((n) => source.reactor.get(n)?.claims.author === src.claims.author && !withdrawn(n));
+    .negationWitnesses(
+      sourceNow,
+      (n) => n.claims.author === src.claims.author,
+    )(src.id)
+    .map((n) => n.id);
   if (ownStrikes.length > 0) {
     throw new Error(
       `promotion refused: ${deltaId} — its author ${src.claims.author} retracted it where it was ` +
@@ -248,10 +250,12 @@ export async function promoteImpl(
         `publish the claim as your own act rather than adopt it.`,
     );
   }
-  if (struckAtSource(src.id)) {
-    const standing = source.reactor
-      .negationsOf(src.id)
-      .filter((n) => source.reactor.get(n) !== undefined && !struckAtSource(n) && !withdrawn(n));
+  const standing = dataStrikeWitnesses(
+    source.reactor,
+    sourceNow,
+    source.operator,
+  )(src.id).map((n) => n.id);
+  if (standing.length > 0) {
     throw new Error(
       `promotion refused: ${deltaId} — the source's own reading has it negated (${standing.join(", ")}), ` +
         `and promotion must not re-speak what that store already retired. Negate the retraction ` +
@@ -336,11 +340,12 @@ export async function promoteImpl(
   // erasure and the promise "an erased adoption stays dead" is unchanged.
   const live = new Map(gw.adoptions().map((a) => [a.sourceDelta, a.adoptedDelta]));
   if (live.get(deltaId) === adopted.id && gw.reactor.get(adopted.id) !== undefined) {
-    const struckHere = dataStruck(gw.reactor, gw.validityNow(), gw.operatorAuthor);
-    if (struckHere(adopted.id)) {
-      const standing = gw.reactor
-        .negationsOf(adopted.id)
-        .filter((n) => gw.reactor.get(n) !== undefined && !struckHere(n));
+    const standing = dataStrikeWitnesses(
+      gw.reactor,
+      gw.validityNow(),
+      gw.operatorAuthor,
+    )(adopted.id).map((n) => n.id);
+    if (standing.length > 0) {
       throw new Error(
         `promotion refused: ${deltaId} was already adopted as ${adopted.id}, and that claim is ` +
           `negated here (${standing.join(", ")}) — re-promoting would report a success no reader can ` +

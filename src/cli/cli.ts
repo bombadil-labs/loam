@@ -64,6 +64,7 @@ import {
   holdsGrant,
   honoredStrikeOn,
 } from "../gateway/accounts.js";
+import { negatedAt } from "../gateway/negation.js";
 import {
   lensNameFor,
   lensOf,
@@ -2753,6 +2754,11 @@ async function cmdUserCreate(
 // SPLIT BY SURVIVAL, because "struck" and "never planted" are opposite answers that a surviving-set
 // alone cannot tell apart: one is a standing nobody has retired, the other is a standing somebody
 // DID, and re-planting the second silently un-revokes it.
+//
+// `isStruck` decides survival. The default is the raw read above, which ignores validity; that is
+// right for grants and pens, because the door's constitution walk (`struck` in accounts.ts) ignores
+// it too, and the two must agree. A role is resolved by `rolesOf` through the substrate's mask, which
+// counts a strike only while it is valid, so role survival passes the substrate's reader at `now`.
 interface ClaimStanding {
   readonly surviving: string[];
   readonly struck: string[];
@@ -2764,6 +2770,7 @@ function claimIdsBySurvival(
   entity: string,
   context: string,
   matches: (delta: Delta) => boolean,
+  isStruck?: (id: string) => boolean,
 ): ClaimStanding {
   const surviving: string[] = [];
   const struck: string[] = [];
@@ -2777,9 +2784,10 @@ function claimIdsBySurvival(
         p.target.entity.context === context,
     );
     if (!filedHere || !matches(delta)) continue;
-    const negated = reactor
-      .negationsOf(id)
-      .some((negId) => reactor.get(negId)?.claims.author === operator);
+    const negated =
+      isStruck !== undefined
+        ? isStruck(id)
+        : reactor.negationsOf(id).some((negId) => reactor.get(negId)?.claims.author === operator);
     (negated ? struck : surviving).push(id);
   }
   return { surviving, struck };
@@ -2795,15 +2803,22 @@ const survivingClaimIds = (
 
 const survivingRoleClaimIds = (
   reactor: Reactor,
+  now: number,
   operator: string,
   name: string,
   role: UserRole,
 ): string[] =>
-  survivingClaimIds(reactor, operator, userEntity(name), CTX_ROLE, (delta) =>
-    delta.claims.pointers.some(
-      (p) => p.role === "role" && p.target.kind === "primitive" && p.target.value === role,
-    ),
-  );
+  claimIdsBySurvival(
+    reactor,
+    operator,
+    userEntity(name),
+    CTX_ROLE,
+    (delta) =>
+      delta.claims.pointers.some(
+        (p) => p.role === "role" && p.target.kind === "primitive" && p.target.value === role,
+      ),
+    negatedAt(reactor, now, operator),
+  ).surviving;
 
 // Every grant this store's own seed authored for `subject` — the CURRENT holder of a name's seed
 // file, never a historical one (the working spec's §36.3.1.7 names that residual) — split by
@@ -2999,7 +3014,13 @@ async function cmdUserRole(
           `and stays live; it is inert unless someone still holds that lost key)`;
       }
     }
-    const roleIds = survivingRoleClaimIds(gateway.reactor, operator, name, role);
+    const roleIds = survivingRoleClaimIds(
+      gateway.reactor,
+      gateway.validityNow(),
+      operator,
+      name,
+      role,
+    );
     const at = Date.now();
     const targets = [...roleIds, ...grantIds];
     const negations = targets.map((id, i) =>
