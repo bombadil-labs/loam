@@ -22,6 +22,7 @@ import {
   type Reactor,
   type Term,
 } from "@bombadil/rhizomatic";
+import { keysActingFor } from "./principal.js";
 import { STORE_ENTITY } from "./genesis.js";
 import { entityGatherBody } from "./gather.js";
 import { eraseDefect } from "./erase.js";
@@ -480,7 +481,11 @@ function grantHeld(
       if (p.role === "subject" && typeof p.target.value === "string") subject = p.target.value;
       if (p.role === "verb" && typeof p.target.value === "string") granted = p.target.value;
     }
-    if (subject !== author) continue;
+    if (
+      subject === undefined ||
+      !keysActingFor(ctx.reactor, ctx.now, { root: subject }, tenant).has(author)
+    )
+      continue;
     // `admin` covers `write`, and NEVER `register`. An admin grant carries no prefix, so "admin
     // covers register" could only ever mean register AT ROOT — the one authority that is not
     // delegable through the verb lattice. An admin who wants to register mints themselves a
