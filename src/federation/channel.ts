@@ -2627,12 +2627,17 @@ export async function curseChannelLawImpl(
   // container that owns the law. The root ground is searched too, for a store carrying bindings
   // blessed before the move; a curse must reach law wherever an older store put it.
   const pool = gw.channelPools.get(channel)?.gateway;
-  const grounds: { reactor: Gateway["reactor"]; sign: (id: string) => Promise<void> }[] = [
+  const grounds: {
+    reactor: Gateway["reactor"];
+    now: number;
+    sign: (id: string) => Promise<void>;
+  }[] = [
     ...(pool === undefined
       ? []
       : [
           {
             reactor: pool.reactor,
+            now: pool.validityNow(),
             sign: async (id: string): Promise<void> => {
               await pool.append([
                 signClaims(makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), id), seed),
@@ -2642,6 +2647,7 @@ export async function curseChannelLawImpl(
         ]),
     {
       reactor: gw.reactor,
+      now: gw.validityNow(),
       sign: async (id: string): Promise<void> => {
         await gw.append([
           signClaims(makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), id), seed),
@@ -2656,7 +2662,7 @@ export async function curseChannelLawImpl(
     // live again. Asked that way, a SECOND curse finds nothing to strike and refuses with "not
     // served by this store" while the lens is on the surface and a mounted app is rendering it —
     // H9's shape, and the licence it hands out is "you have nothing to retire".
-    const struckHere = negatedAt(g.reactor, gw.validityNow(), gw.operatorAuthor);
+    const struckHere = negatedAt(g.reactor, g.now, gw.operatorAuthor);
     for (const d of g.reactor.snapshot()) {
       if (!isRegistrationBinding(d.claims)) continue;
       if (livesAt(d) !== living) continue;
