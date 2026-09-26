@@ -236,6 +236,27 @@ describe("the store guard's present-time read of a separate declaration's negati
     await gw.close();
   });
 
+  it("gate: a negated separate declaration with a successor not yet started still names its store", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(T1 - 100);
+    const gw = await boot();
+    const fact = observed(FERN, "height", 38, T1 - 200, OP_SEED);
+    const separate = declare(WALL, "separate", T1 - 90, T1);
+    await gw.append([fact, separate, declare(BYSTANDER, "shared", T1 - 85)]);
+
+    vi.setSystemTime(T1 + 10);
+    const T2 = T1 + 500;
+    await gw.append([strike(separate.id, T1 + 5, { validFrom: T1 + 5 })]);
+    await gw.append([declare(WALL, "shared", T2)]); // held and not negated, but not started
+    expect(gw.containers().containers.has(WALL)).toBe(false); // the live table is empty
+    expect(guard(gw).faults).toEqual([WALL]); // not every declaration is negated: no forget
+    await expectEraseRefused(gw, fact.id);
+
+    vi.setSystemTime(T2 + 10); // the successor is live, shared: the lineage path names it
+    expect(guard(gw)).toEqual({ faults: [WALL], path: "lineage" });
+    await gw.close();
+  });
+
   it("control: the explicit forget still clears the guard: every declaration negated", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(T1 - 100);

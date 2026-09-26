@@ -2350,12 +2350,18 @@ export function unreachableStoreReport(gw: Gateway): {
   // act: negating EVERY declaration ends the entity and clears the guard, unchanged.
   const lineageSeparate = new Set<string>();
   const endedSeparate = new Set<string>();
+  // Names with any held declaration NOT negated now, whatever its posture or its own window. Only
+  // negating every declaration forgets a container whole; anything short of that keeps its store
+  // named, including a successor that has not started yet.
+  const notForgotten = new Set<string>();
   if (gw.operatorAuthor !== undefined) {
     const negated = negatedAt(gw.reactor, now, gw.operatorAuthor);
     for (const delta of lawfulHistory(gw.reactor, gw.operatorAuthor)) {
       const name = containerRef(delta.claims, CTX_CONTAINER);
-      if (name === undefined || primitives(delta.claims, "posture")[0] !== "separate") continue;
+      if (name === undefined) continue;
       const struck = negated(delta.id);
+      if (!struck) notForgotten.add(name);
+      if (primitives(delta.claims, "posture")[0] !== "separate") continue;
       const until = delta.claims.validUntil;
       const ended = until !== undefined && until <= now;
       if (!struck && !ended) continue;
@@ -2368,7 +2374,10 @@ export function unreachableStoreReport(gw: Gateway): {
   for (const [entity, rec] of table.containers) {
     if (rec.posture === "separate" || lineageSeparate.has(entity)) named.set(entity, rec.posture);
   }
-  for (const entity of endedSeparate) if (!table.containers.has(entity)) named.set(entity, "ended");
+  for (const entity of lineageSeparate) {
+    if (table.containers.has(entity) || !notForgotten.has(entity)) continue;
+    named.set(entity, endedSeparate.has(entity) ? "ended" : "lineage");
+  }
   for (const [entity, posture] of named) {
     const attached = gw.attachedContainers.get(entity);
     if (attached !== undefined && gw.quarantinePools.has(attached)) continue;
@@ -2387,10 +2396,14 @@ export function unreachableStoreReport(gw: Gateway): {
             `ended — but an expiry is not a forget, and its store may still hold bytes outside ` +
             `this sweep. Cover it with a detach record, or negate every declaration of it to ` +
             `forget it whole.`
-          : `container "${entity}" resolves posture "${posture}", but a negated or ended ` +
-            `declaration in its lineage gave it a store of its OWN — which may still hold bytes ` +
-            `outside this sweep (§28.4: the knobs do not flip through the survival algebra). ` +
-            `Cover it with a detach record, or forget the container whole and declare a new name.`,
+          : posture === "lineage"
+            ? `container "${entity}" once had a store of its own, and not every declaration of ` +
+              `it is negated — its store may still hold bytes outside this sweep. Cover it with a ` +
+              `detach record, or negate every declaration of it to forget it whole.`
+            : `container "${entity}" resolves posture "${posture}", but a negated or ended ` +
+              `declaration in its lineage gave it a store of its OWN — which may still hold bytes ` +
+              `outside this sweep (§28.4: the knobs do not flip through the survival algebra). ` +
+              `Cover it with a detach record, or forget the container whole and declare a new name.`,
     );
   }
   // A surviving detach record whose declaration is gone is a store mid-forget: still parked at
