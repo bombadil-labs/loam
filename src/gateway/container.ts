@@ -32,7 +32,13 @@ import {
 import type { StoreBackend } from "../store/backend.js";
 import { MemoryBackend } from "../store/memory.js";
 import { isRepairable } from "../store/quarantine.js";
-import { CTX_GRANTS, grantClaims, holdsGrant, revocationClaims } from "./accounts.js";
+import {
+  CTX_GRANTS,
+  grantClaims,
+  holdsGrant,
+  honoredStrikeOn,
+  revocationClaims,
+} from "./accounts.js";
 import { STORE_ENTITY } from "./genesis.js";
 import { isErasure, readErasures } from "./erase.js";
 import {
@@ -2040,13 +2046,20 @@ export function poolForBindingImpl(gw: Gateway, binding: ConnectionBinding): Gat
 }
 
 // The surviving WRITE grant ids naming `subject` at this pool's store entity — what a revocation
-// strikes. "Surviving" is no standing negation; effectiveness is grantHeld's concern, not this.
+// strikes. "Surviving" means no strike that holds under the pool's standing, the same rule the write
+// door uses: a strike by an author without standing, such as the subject's own, leaves the grant
+// standing, so it must leave it revocable too.
 //
 // NAMED GAP: this is narrower than the verb vocabulary. A `register` grant naming the same subject
 // would survive an unbind. Nothing mints one for a connection key today — register standing is
 // handed to OAuth connector actors, and `loam grant revoke` strikes every verb — so the gap is not
 // reachable now. It becomes reachable the moment a connection key is granted `register`.
-export function survivingWriteGrantIds(reactor: Reactor, subject: string): string[] {
+export function survivingWriteGrantIds(
+  reactor: Reactor,
+  now: number,
+  subject: string,
+  operator: string | undefined,
+): string[] {
   const out: string[] = [];
   for (const id of reactor.byTarget(STORE_ENTITY)) {
     const delta = reactor.get(id);
@@ -2067,7 +2080,7 @@ export function survivingWriteGrantIds(reactor: Reactor, subject: string): strin
       if (p.role === "verb" && typeof p.target.value === "string") verb = p.target.value;
     }
     if (subj !== subject || verb !== "write") continue;
-    if (reactor.negationsOf(id).some((n) => reactor.get(n) !== undefined)) continue; // already struck
+    if (honoredStrikeOn(reactor, now, id, operator) !== undefined) continue; // already struck
     out.push(id);
   }
   return out;
@@ -2258,7 +2271,12 @@ export async function revokeConnectionImpl(opts: {
     throw new Error("revokeConnection: the inbox has no pool of its own — nothing to revoke (§39)");
   }
   const owner = authorForSeed(opts.ownerSeed);
-  const grantIds = survivingWriteGrantIds(pool.reactor, opts.connectionKey);
+  const grantIds = survivingWriteGrantIds(
+    pool.reactor,
+    pool.validityNow(),
+    opts.connectionKey,
+    pool.operatorAuthor,
+  );
   if (grantIds.length === 0) {
     throw new Error(
       `revokeConnection: no surviving write grant names ${opts.connectionKey} in this inbox`,

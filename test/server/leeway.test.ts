@@ -583,7 +583,12 @@ describe("§58 — leeway fits its parent's terms, and cascades", () => {
     // Revoke ada's connection: strike its write grant in its own pool, as the revoke road does.
     const grant = grantOf(connectorsHome, "ada");
     const pool = poolOf(gateway, inboxName("ada:journal", grant.actor));
-    const grants = survivingWriteGrantIds(pool.reactor, grant.actor);
+    const grants = survivingWriteGrantIds(
+      pool.reactor,
+      pool.validityNow(),
+      grant.actor,
+      pool.operatorAuthor,
+    );
     expect(
       grants.length,
       "premise: the connection holds a write grant in its pool",
