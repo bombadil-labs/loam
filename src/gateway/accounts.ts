@@ -12,6 +12,9 @@
 // chain — but `authorize` consults exactly one thing: standing at `loam:store`.
 
 import {
+  DeltaSet,
+  evalTerm,
+  parseTerm,
   type Claims,
   type Delta,
   type HyperSchema,
@@ -173,7 +176,11 @@ export const TENANT: HyperSchema = { name: "Tenant", alg: 1, body: entityGatherB
 // a federated pull ever admits deltas authored by that key. Closing it means narrowing this term,
 // which moves the bytes of an exported gather body; the rail that would close it asserts a register
 // grantee's ingested strike is inert in a governed read.
-function lawfulStrikersJson(operator: string, adminsOnly: boolean): unknown {
+// The operator's surviving grants, as a Term: grant-shaped deltas the operator minted (admin grants
+// only, when asked), after masking by the operator's own negations — a stranger cannot shrink the
+// trusted set by negating a grant delta. `lawfulStrikersJson` reflects over it and `dataStruck`
+// evaluates it, so the two read one definition.
+function lawfulGrantsTermJson(operator: string, adminsOnly: boolean): unknown {
   const operatorMinted = { match: { field: "author", cmp: "eq", const: operator } };
   const grantShaped = {
     hasPointer: { targetEntity: STORE_ENTITY, context: { exact: CTX_GRANTS } },
@@ -182,32 +189,47 @@ function lawfulStrikersJson(operator: string, adminsOnly: boolean): unknown {
     hasPointer: { role: { exact: "verb" }, targetValue: { vcmp: { cmp: "eq", value: "admin" } } },
   };
   return {
+    op: "select",
+    pred: {
+      and: [grantShaped, adminsOnly ? { and: [operatorMinted, adminVerbed] } : operatorMinted],
+    },
+    in: {
+      op: "mask",
+      policy: { trust: { match: { field: "author", cmp: "eq", const: operator } } },
+      in: "input",
+    },
+  };
+}
+
+/** @internal — the data-strike trust predicate, exported for its parity rail */
+export function lawfulStrikersJson(operator: string, adminsOnly: boolean): unknown {
+  return {
     or: [
       { match: { field: "author", cmp: "eq", const: operator } },
       {
         inView: {
-          term: {
-            op: "select",
-            pred: {
-              and: [
-                grantShaped,
-                adminsOnly ? { and: [operatorMinted, adminVerbed] } : operatorMinted,
-              ],
-            },
-            // The grants themselves survive only the OPERATOR's strikes — a stranger cannot
-            // shrink the trusted set by striking a grant delta.
-            in: {
-              op: "mask",
-              policy: { trust: { match: { field: "author", cmp: "eq", const: operator } } },
-              in: "input",
-            },
-          },
+          term: lawfulGrantsTermJson(operator, adminsOnly),
           field: "author",
           extract: { role: "subject" },
         },
       },
     ],
   };
+}
+
+// The strings an `inView` extract reflects from one pointer role, exactly as the substrate's
+// `extractReflected` does: an entity id, a delta id, or a STRING primitive. Any other primitive
+// names no author.
+function reflectedSubjects(d: Delta, role: string): string[] {
+  const out: string[] = [];
+  for (const p of d.claims.pointers) {
+    if (p.role !== role) continue;
+    const t = p.target;
+    if (t.kind === "entity") out.push(t.entity.id);
+    else if (t.kind === "delta") out.push(t.deltaRef.delta);
+    else if (typeof t.value === "string") out.push(t.value);
+  }
+  return out;
 }
 
 // The canonical gather with a TRUST-AWARE negation mask: data negations bind only from the
@@ -237,32 +259,30 @@ export function dataStruck(
   operator?: string,
 ): (id: string) => boolean {
   if (operator === undefined) return reactor.negationPredicate(now, () => true);
-  // The trusted strikers, as `lawfulStrikersJson(operator, false)` names them: the operator, plus
-  // the subject of every grant the operator minted that is valid at `now` and survives the
-  // operator's own strikes. Every grant is filed at the store entity, so the index finds them all.
-  const operatorStruck = reactor.negationPredicate(now, (n) => n.claims.author === operator);
-  const strikers = new Set<string>([operator]);
-  for (const id of reactor.byTarget(STORE_ENTITY)) {
+  // The trusted strikers, read from the same Term the gather's mask reflects over: the operator,
+  // plus the subject of every surviving operator grant valid at `now`.
+  // Every grant is filed at the store entity, so the index finds the candidates. The term's mask
+  // must see every negation that can reach them, so the candidates carry their whole negation
+  // closure (H1); nothing else in the store can change which grants survive.
+  const scope = new Map<string, Delta>();
+  const take = (id: string): void => {
     const d = reactor.get(id);
-    if (d === undefined || d.claims.author !== operator || !validAt(d, now)) continue;
-    const grantShaped = d.claims.pointers.some(
-      (p) =>
-        p.target.kind === "entity" &&
-        p.target.entity.id === STORE_ENTITY &&
-        p.target.entity.context === CTX_GRANTS,
-    );
-    if (!grantShaped || operatorStruck(d.id)) continue;
-    for (const p of d.claims.pointers) {
-      if (p.role === "subject" && p.target.kind === "primitive") {
-        strikers.add(String(p.target.value));
-      }
-    }
-  }
+    if (d === undefined || scope.has(id)) return;
+    scope.set(id, d);
+    for (const n of reactor.negationsOf(id)) take(n);
+  };
+  for (const id of reactor.byTarget(STORE_ENTITY)) take(id);
+  const grants = evalTerm(
+    parseTerm(lawfulGrantsTermJson(operator, false)),
+    DeltaSet.from(scope.values()),
+    now,
+  );
+  if (grants.sort !== "dset")
+    throw new Error("the lawful-grants term always evaluates to a delta set");
+  const strikers = new Set<string>([operator]);
+  for (const g of grants.set) for (const s of reflectedSubjects(g, "subject")) strikers.add(s);
   return reactor.negationPredicate(now, (n) => strikers.has(n.claims.author));
 }
-
-const validAt = (d: Delta, now: number): boolean =>
-  d.claims.validFrom <= now && (d.claims.validUntil === undefined || now < d.claims.validUntil);
 
 // WHICH strike actually retired `id`, if any — the constitutional question, answered by the same
 // `struck`/`standsFor` walk resolution runs, so a report of WHEN standing ended cannot drift from

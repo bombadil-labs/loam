@@ -4,7 +4,7 @@
 // which follows the maintained view. Every case names a bystander that must stay.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { signClaims, type Delta } from "@bombadil/rhizomatic";
+import { makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { CTX_REGISTRATION } from "../../src/gateway/registration.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -197,4 +197,26 @@ describe("a registration binds over its own interval", () => {
       await gw.close();
     },
   );
+  // Arrival order is free: the negation of a registration may land before the registration.
+  it.each([
+    ["the registration, then its negation", false],
+    ["the negation, then its registration", true],
+  ])("a negation from T drops a served registration at T, with %s", async (_, negationFirst) => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    vi.setSystemTime(T0);
+    const { backend, timed } = await shrubStore({}, true);
+    const gw = await Gateway.open(backend, { seed: OP_SEED });
+    const negation = signClaims(
+      { ...makeNegationClaims(gw.operatorAuthor!, T0, timed.id), validFrom: T0 + 1_000 },
+      OP_SEED,
+    );
+    await gw.append(negationFirst ? [negation, timed] : [timed, negation]);
+    gw.replayRegistrations(); // a raw append binds nothing until a replay
+    expect(names(gw)).toEqual(expect.arrayContaining(["Plant", "Shrub"]));
+
+    await vi.advanceTimersByTimeAsync(1_000); // no write at T
+    expect(names(gw)).toContain("Plant");
+    expect(names(gw)).not.toContain("Shrub");
+    await gw.close();
+  });
 });

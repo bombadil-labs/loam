@@ -1518,26 +1518,41 @@ export class Gateway {
    * @internal — ingest.ts calls it for every delta it lands
    */
   noteRegistrationTime(d: Delta): void {
-    if (!this.touchesRegistration(d)) return;
+    // Arrival order is free: a negation can land before the registration it negates, or a middle
+    // link can land last. So walk UP from `d` to every held registration it reaches, then DOWN from
+    // each through every held negation, and note every future boundary on the way.
     const now = this.validityNow();
-    for (const t of [d.claims.validFrom, d.claims.validUntil]) {
-      if (t === undefined || t <= now) continue;
-      if (this.registrationBoundary === undefined || t < this.registrationBoundary) {
-        this.registrationBoundary = t;
+    const note = (x: Delta): void => {
+      for (const t of [x.claims.validFrom, x.claims.validUntil]) {
+        if (t === undefined || t <= now) continue;
+        if (this.registrationBoundary === undefined || t < this.registrationBoundary) {
+          this.registrationBoundary = t;
+        }
       }
-    }
-  }
-
-  // A registration claim, or a negation somewhere down a registration's chain.
-  private touchesRegistration(d: Delta, depth = 0): boolean {
-    for (const p of d.claims.pointers) {
-      if (p.target.kind === "entity" && p.target.entity.context === CTX_REGISTRATION) return true;
-      if (p.role === "negates" && p.target.kind === "delta" && depth < 64) {
-        const target = this.reactor.get(p.target.deltaRef.delta);
-        if (target !== undefined && this.touchesRegistration(target, depth + 1)) return true;
+    };
+    const down = new Set<string>();
+    const walkDown = (x: Delta): void => {
+      if (down.has(x.id)) return;
+      down.add(x.id);
+      note(x);
+      for (const id of this.reactor.negationsOf(x.id)) {
+        const n = this.reactor.get(id);
+        if (n !== undefined) walkDown(n);
       }
-    }
-    return false;
+    };
+    const up = new Set<string>();
+    const walkUp = (x: Delta): void => {
+      if (up.has(x.id)) return;
+      up.add(x.id);
+      for (const p of x.claims.pointers) {
+        if (p.target.kind === "entity" && p.target.entity.context === CTX_REGISTRATION) walkDown(x);
+        if (p.role === "negates" && p.target.kind === "delta") {
+          const target = this.reactor.get(p.target.deltaRef.delta);
+          if (target !== undefined) walkUp(target);
+        }
+      }
+    };
+    walkUp(d);
   }
 
   /** @internal — ingest.ts calls it for every delta it lands */
