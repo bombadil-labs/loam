@@ -15,6 +15,7 @@ Audited tree: branch `claude/fervent-bohr-djmmsw` at `a9276e96`, with `@bombadil
 | [peers.md](peers.md) | containers, pools, channels, federation, wire |
 | [law.md](law.md) | registration, adoption, schemas, resolvers, anchors, derivation |
 | [forgetting.md](forgetting.md) | tombstones, purge, slates, receipts, sealed payloads |
+| [negation-readers.md](negation-readers.md) | every negation reader, for the step 4 swap |
 
 ## Themes
 
