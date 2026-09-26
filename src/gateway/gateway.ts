@@ -1562,11 +1562,13 @@ export class Gateway {
   }
 
   /**
-   * The ordering time for a claim `author` is about to sign. It is above every time this gateway
-   * issued before, so writes through one gateway sort in the order they were made. It is also above
-   * every claim the store holds, and every time issued, for `author` (within the safe-integer
-   * range). It can run ahead of the wall clock, so it is never a validity time. Source code signs
-   * with `stamp()`, which calls this; call it directly only from a fixture.
+   * The ordering time for a claim `author` is about to sign. For one author it is strictly
+   * increasing: above every claim the store holds, and every time issued, for `author` (within the
+   * safe-integer range). Across authors it follows this gateway's own clock only, so same-moment
+   * writes through one gateway sort in the order they were made, unless an author's own floor
+   * lifts that author's time above the clock. One author's floor never lifts another's. It can run
+   * ahead of the wall clock, so it is never a validity time. Source code signs with `stamp()`,
+   * which calls this; call it directly only from a fixture.
    * @internal
    */
   nextTimestamp(author: string | undefined = this.operatorAuthor): number {

@@ -11,7 +11,11 @@ import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { FERN } from "../spike/garden.js";
+import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
+import { grantClaims } from "../../src/gateway/accounts.js";
+import { containerClaims } from "../../src/gateway/container.js";
+import { STORE_ENTITY } from "../../src/gateway/genesis.js";
+import { boundGroundFor } from "../../src/gateway/reads.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 
 const OP_SEED = "7c".repeat(32);
@@ -194,6 +198,111 @@ describe("the author's claims still sort in the order they were made", () => {
     expect(Number.isSafeInteger(written.claims.timestamp)).toBe(true);
     expect(gw.validityNow()).toBe(T0);
     expect((await read(gw)).height).toBe(5);
+    await gw.close();
+  });
+});
+
+// The inbox's seeding cut is a signed time taken from the operator's ordering clock. A key's own
+// held claims never raise it: if they did, a key that once signed a far-future claim would stop
+// seeding what it writes after the binding. Deliberately not asserted: the pre-binding future claim
+// itself, whose timestamp is past the cut and so seeds. A cut on arrival would close that;
+// `refactor/PLAN.md` step 6 names it.
+describe("a connection's inbox cut does not follow the key's held timestamps", () => {
+  it("a root claim the key writes after binding seeds its inbox, though it holds one an hour ahead", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(T0);
+    const CONN_SEED = "e5".repeat(32);
+    const conn = authorForSeed(CONN_SEED);
+    const gw = await Gateway.boot(
+      new MemoryBackend(),
+      assembleGenesis({
+        operatorSeed: OP_SEED,
+        registrations: [
+          {
+            hyperschema: PLANT,
+            schema: PLANT_POLICY,
+            roots: [FERN],
+            writable: [...PLANT_WRITABLE],
+          },
+        ],
+      }),
+    );
+    const op = gw.operatorAuthor!;
+    await gw.append([signClaims(grantClaims(STORE_ENTITY, GARDENER, "write", op, T0), OP_SEED)]);
+    await gw.append([signClaims(grantClaims(STORE_ENTITY, conn, "write", op, T0), OP_SEED)]);
+    const ahead = signClaims(
+      {
+        ...observed(FERN, "tag", "signed ahead", 0, CONN_SEED).claims,
+        timestamp: T0 + HOUR,
+        validFrom: T0,
+      },
+      CONN_SEED,
+    );
+    await gw.append([ahead]);
+    await gw.append([
+      signClaims(
+        containerClaims(
+          {
+            container: "home:ada",
+            trust: "curated",
+            posture: "shared",
+            membership: {
+              op: "select",
+              pred: { match: { field: "author", cmp: "eq", const: GARDENER } },
+              in: "input",
+            },
+          },
+          op,
+          T0,
+        ),
+        OP_SEED,
+      ),
+    ]);
+    const inbox = (
+      await gw.bindConnection({
+        container: "home:ada",
+        connectionKey: conn,
+        ownerSeed: GARDENER_SEED,
+      })
+    ).entity!;
+    const binding = { container: "home:ada", inbox };
+
+    vi.setSystemTime(T0 + 5);
+    const fresh = observed(FERN, "height", 12, T0 + 5, CONN_SEED); // written in the parent
+    await gw.append([fresh]);
+    await gw.connectionInboxes.get(inbox)!.reseed(); // seeding runs at open and on a re-pulse
+    expect(gw.poolForBinding(binding).reactor.get(fresh.id)).toBeDefined(); // seeded, at the bytes
+    expect(boundGroundFor(gw, binding, gw.validityNow()).has(fresh.id)).toBe(true);
+    await gw.close();
+  });
+});
+
+describe("one author's ordering floor does not lift another's", () => {
+  it("B stamps near the clock after A stamps above A's held future time", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(T0);
+    const gw = await Gateway.boot(
+      new MemoryBackend(),
+      assembleGenesis({ operatorSeed: OP_SEED, registrations: [] }),
+    );
+    const A = authorForSeed("a9".repeat(32));
+    const B = authorForSeed("b9".repeat(32));
+    await gw.append([signClaims(grantClaims(STORE_ENTITY, A, "write", OP, T0), OP_SEED)]);
+    const held = signClaims(
+      {
+        ...observed(FERN, "tag", "ahead", 0, "a9".repeat(32)).claims,
+        timestamp: T0 + HOUR,
+        validFrom: T0,
+      },
+      "a9".repeat(32),
+    );
+    await gw.append([held]);
+
+    const a = gw.stamp(A);
+    const b = gw.stamp(B);
+    expect(a.timestamp).toBeGreaterThan(T0 + HOUR); // A stays above its own held claim
+    expect(b.timestamp).toBeLessThan(T0 + 1_000); // B follows the clock, not A's floor
+    expect([a.validFrom, b.validFrom]).toEqual([T0, T0]);
     await gw.close();
   });
 });

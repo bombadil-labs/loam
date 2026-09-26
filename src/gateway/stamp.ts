@@ -6,7 +6,8 @@ export const stamped = (t: number): { timestamp: number; validFrom: number } => 
 });
 
 /** The two times a gateway gives a claim it is about to sign: `timestamp` orders it among its
- * author's claims, and `validFrom` says when it holds. `validFrom` is never after `timestamp`. */
+ * author's claims, and `validFrom` says when it holds. They are independent: either may be the
+ * later one. */
 export interface Stamp {
   readonly timestamp: number;
   readonly validFrom: number;
@@ -24,7 +25,7 @@ export function stampOn(
   now: number,
 ): Stamp {
   const timestamp = ground.nextTimestamp(author);
-  return { timestamp, validFrom: Math.min(timestamp, now) };
+  return { timestamp, validFrom: now };
 }
 
 /** Claims from a builder that takes one time, given both times of `s`: the builder sets

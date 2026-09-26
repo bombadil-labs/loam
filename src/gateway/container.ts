@@ -2095,11 +2095,14 @@ export async function bindConnectionImpl(
   if (!declared) {
     // The inbox seeds only THIS connection's deltas, and only those written AFTER the binding
     // (SPEC §58 criterion 8): a delta the key authored elsewhere before it was bound here — under
-    // a pre-§58 store-wide grant, say — is not this pool's, at the bytes. The clock is wall time
-    // with a monotonic bump on both gateways, so a write through the pool always lands later
-    // than its own declaration. A connection is provably the owner's, so the pool is the owner's
-    // trust domain (curated), separate storage.
-    const boundAt = gw.stamp(opts.connectionKey).timestamp;
+    // a pre-§58 store-wide grant, say — is not this pool's, at the bytes. This membership is the
+    // SEEDING scope: it picks which of the parent's deltas are copied into the pool, and a write
+    // made into the pool itself is always the pool's. The cut is on the claim's signed `timestamp`,
+    // taken from the operator's ordering clock and never from the key's own held claims, so a key
+    // that once signed a far-future claim still seeds what it writes after the binding. A
+    // connection is provably the owner's, so the pool is the owner's trust domain (curated),
+    // separate storage.
+    const boundAt = gw.stamp().timestamp;
     const membership = {
       op: "select",
       pred: {
