@@ -548,7 +548,7 @@ describe("T64 criterion 15 — negation, both sides of the cut", () => {
     await gw.close();
   });
 
-  it("AFTER the cut: the receipt names the strike that holds, not a countered one", async () => {
+  it("AFTER the cut: the receipt names the negation that holds, not a negated one", async () => {
     const gw = await bootSlateStore();
     const condemned = observed(FERN, "height", 30, 1000, OP_SEED);
     const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
@@ -557,9 +557,9 @@ describe("T64 criterion 15 — negation, both sides of the cut", () => {
     const report = await gw.cut(stood.container, { now: BEFORE_DEADLINE });
     const erasure = report.members[0]!.erasure;
 
-    // Two strikes on the erasure. The first is itself struck, so only the second holds. The index
-    // answers in id order, so the countered strike must sort first, or a reader that takes the
-    // first strike would pass by luck.
+    // Two negations of the erasure. The first is itself negated, so only the second holds. The
+    // index answers in id order, so the negated one must sort first, or a reader that takes the
+    // first negation would pass by luck.
     const countered = strike(erasure, 70_000);
     let at = 72_000;
     while (strike(erasure, at).id < countered.id) at += 1;
@@ -569,10 +569,12 @@ describe("T64 criterion 15 — negation, both sides of the cut", () => {
 
     const check = graveyardCompleteness(gw.reactor, gw.validityNow(), OP, report.graveyard);
     expect(check.negated).toEqual([{ member: condemned.id, negation: holding.id }]);
+    expect(check.members).toEqual([condemned.id]);
+    expect(check.missing).toEqual([]);
     const receipt = await gw.receipt(report.graveyard, { now: AFTER_DEADLINE });
     const member = receipt.members.find((m) => m.member === condemned.id)!;
     expect(member.negated).toBe(holding.id);
-    // Two-sided: the bystander is in no report.
+    // Two-sided: the bystander is in neither report, the durable check above nor the receipt.
     expect(await gw.backend.holds(bystander.id)).toBe(true);
     expect(receipt.members.map((m) => m.member)).toEqual([condemned.id]);
     await gw.close();

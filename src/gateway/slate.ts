@@ -1795,8 +1795,8 @@ export function graveyardCompleteness(
   };
 }
 
-// The lawful strike that forgave a member's erasure — the id a receipt reports beside NEGATED. It
-// must be a strike that holds: an erasure can carry an older strike that was itself struck.
+// The lawful negation of a member's erasure — the id a receipt reports beside NEGATED. It must be a
+// negation that holds: an erasure can carry an older negation that was itself negated.
 function strikeOf(
   reactor: Reactor,
   now: number,
