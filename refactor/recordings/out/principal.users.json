@@ -1,0 +1,150 @@
+{
+  "operator is the store seed": {
+    "ada": {
+      "roles": [
+        "operator"
+      ],
+      "view": {
+        "loam.role": [
+          "operator"
+        ],
+        "loam.user": "ada"
+      }
+    },
+    "bob": {
+      "roles": [],
+      "view": {
+        "$": "undefined"
+      }
+    },
+    "cy": {
+      "roles": [],
+      "view": {
+        "loam.user": "cy"
+      }
+    },
+    "dee": {
+      "roles": [
+        "actor"
+      ],
+      "view": {
+        "loam.role": [
+          "actor"
+        ],
+        "loam.user": "dee"
+      }
+    },
+    "nobody": {
+      "roles": [],
+      "view": {
+        "$": "undefined"
+      }
+    }
+  },
+  "operator rotated to a key that signed nothing": {
+    "ada": {
+      "roles": [],
+      "view": {
+        "$": "undefined"
+      }
+    },
+    "bob": {
+      "roles": [],
+      "view": {
+        "$": "undefined"
+      }
+    },
+    "cy": {
+      "roles": [],
+      "view": {
+        "$": "undefined"
+      }
+    },
+    "dee": {
+      "roles": [],
+      "view": {
+        "$": "undefined"
+      }
+    },
+    "nobody": {
+      "roles": [],
+      "view": {
+        "$": "undefined"
+      }
+    }
+  },
+  "operator rotated to the stranger's key": {
+    "ada": {
+      "roles": [
+        "actor"
+      ],
+      "view": {
+        "loam.role": [
+          "actor"
+        ],
+        "loam.user": "ada"
+      }
+    },
+    "bob": {
+      "roles": [
+        "operator"
+      ],
+      "view": {
+        "loam.role": [
+          "operator"
+        ],
+        "loam.user": "bob"
+      }
+    },
+    "cy": {
+      "roles": [],
+      "view": {
+        "$": "undefined"
+      }
+    },
+    "dee": {
+      "roles": [],
+      "view": {
+        "$": "undefined"
+      }
+    },
+    "nobody": {
+      "roles": [],
+      "view": {
+        "$": "undefined"
+      }
+    }
+  },
+  "ungoverned": {
+    "ada": {
+      "roles": [],
+      "view": {
+        "$": "undefined"
+      }
+    },
+    "bob": {
+      "roles": [],
+      "view": {
+        "$": "undefined"
+      }
+    },
+    "cy": {
+      "roles": [],
+      "view": {
+        "$": "undefined"
+      }
+    },
+    "dee": {
+      "roles": [],
+      "view": {
+        "$": "undefined"
+      }
+    },
+    "nobody": {
+      "roles": [],
+      "view": {
+        "$": "undefined"
+      }
+    }
+  }
+}

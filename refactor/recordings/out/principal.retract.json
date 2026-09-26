@@ -1,0 +1,12 @@
+{
+  "both keys wrote": [
+    "first-key",
+    "rotated-key"
+  ],
+  "the first key clears tag": {
+    "$": "undefined"
+  },
+  "the rotated key clears tag": [
+    "first-key"
+  ]
+}

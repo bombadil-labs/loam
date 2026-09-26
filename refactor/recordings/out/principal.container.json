@@ -1,0 +1,31 @@
+{
+  "scope": {
+    "ada": [
+      "#ada's write, first key"
+    ],
+    "ada:notes": [
+      "#ada's write, first key"
+    ],
+    "adb": [
+      "#ada's write, rotated key"
+    ]
+  },
+  "strangerDeclarationAtTheDoor": {
+    "refused": "append rejected: @stranger is not permitted: publishing through this store requires write standing (a surviving grant at loam:store), and no surviving grant says so"
+  },
+  "subtreeOf": {
+    "ada": [
+      "ada",
+      "ada:notes"
+    ],
+    "adb": [
+      "adb"
+    ],
+    "bob": []
+  },
+  "tableNames": [
+    "ada",
+    "ada:notes",
+    "adb"
+  ]
+}
