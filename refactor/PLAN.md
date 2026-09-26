@@ -205,16 +205,20 @@ level. Loam then consumes it through the barrel and compares its recordings.
      for the store's own rules, and nothing in the delta set can replace it.
    - **Users.** Each user is a principal rooted at their own key. An operator-signed user record
      names the user's root. Loam chooses that root through its governed read of operator rules.
-     To recover a lost key, the operator re-points the record to a new root, which binds or
-     succeeds the old key so its history stays associated.
+     To recover a lost key, the operator re-points the record to a new root. The new root is a
+     new principal. To keep the old key's history, the new root first signs a `binding` for the
+     old key; only then does `associatedKeys` of the new root include it. A `succession` from the
+     old key to the new one is optional after the binding.
    - **Connection keys.** Each is a delegation signed by the user's root with
      `delegable: false` and `scope` set to the container name. The `prefix` policy lets a
      container scope cover its children (`ada:journal` covers `ada:journal:notes`).
-   - **Grants.** Loam's verbs (write, admin, register, federate) stay Loam vocabulary. Their
-     subject becomes a principal, resolved at the read time through `authorsForPrincipal`, not a
-     bare key.
-   - **Container membership.** Terms that name a key (`author = K`) become `actsFor` terms naming
-     the principal, so a membership follows the user across key changes.
+   - **Grants and memberships name the Loam user, never a root.** At the read time, Loam resolves
+     the user to their current root through the governed operator read, then asks
+     `authorsForPrincipal` (or lowers the membership to an `actsFor` term over that root). So a
+     recovery re-point moves every grant and membership at once, with nothing to reissue. Loam's
+     verbs (write, admin, register, federate) stay Loam vocabulary.
+   - **Container membership** follows a user across key changes, because it names the user and
+     is lowered to `actsFor` at the read time.
    - **Retract your own.** It compares against every key associated with the retractor's
      principal (`associatedKeys`), not the one signing key.
    - **Revocation.** Delegations are negated under `rootOrSameAuthor`: the user's root can revoke a
