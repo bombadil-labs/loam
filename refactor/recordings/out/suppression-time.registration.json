@@ -1,11 +1,9 @@
 {
   "now = T": [
-    "Plant",
-    "Shrub"
+    "Plant"
   ],
   "now = T+1": [
-    "Plant",
-    "Shrub"
+    "Plant"
   ],
   "now = T-1": [
     "Plant",

@@ -46,8 +46,11 @@ export const bootSlateStore = (backend: StoreBackend = new MemoryBackend()): Pro
     }),
   );
 
-export const declareContainer = (spec: Parameters<typeof containerClaims>[0], ts: number): Delta =>
-  signClaims(containerClaims(spec, OP, ts), OP_SEED);
+export const declareContainer = (
+  spec: Parameters<typeof containerClaims>[0],
+  ts: number,
+  validFrom = ts,
+): Delta => signClaims({ ...containerClaims(spec, OP, ts), validFrom }, OP_SEED);
 
 export interface StoodSlate {
   readonly container: string;
@@ -72,6 +75,8 @@ export interface SlateFixture {
   readonly trust?: ContainerTrust;
   readonly posture?: ContainerPosture;
   readonly ts?: number;
+  /** When the slate's deltas hold. Defaults to `ts`; set it where `ts` runs ahead of the read. */
+  readonly validFrom?: number;
   /** Omit the `version` role, to drive the frozen-by-enforcement refusal. */
   readonly omitVersion?: boolean;
   /** Declare a `version` that the membership Term does NOT freeze to. */
@@ -92,8 +97,9 @@ export interface SlateFixture {
 export async function standSlate(gw: Gateway, spec: SlateFixture): Promise<StoodSlate> {
   const container = spec.container ?? "container:slate:subject-42";
   const ts = spec.ts ?? 50_000;
+  const validFrom = spec.validFrom ?? ts;
   const term = spec.liveTerm ?? frozenMembershipTerm(spec.members.map((d) => d.id));
-  const published = signClaims(termClaims(term, OP, ts), OP_SEED);
+  const published = signClaims({ ...termClaims(term, OP, ts), validFrom }, OP_SEED);
   await gw.append([published]);
   // The version is `Gateway.freeze` over the same Term — the ONE address the door's agreement check,
   // the cut's pre-flight, and the graveyard's frozen set all mean.
@@ -111,27 +117,31 @@ export async function standSlate(gw: Gateway, spec: SlateFixture): Promise<Stood
       ...(spec.omitVersion === true ? {} : { version }),
     },
     ts + 1,
+    spec.validFrom ?? ts + 1,
   );
   await gw.append([declaration]);
   const record = signClaims(
-    slateClaims(
-      {
-        container,
-        membershipAt: recordPins.membershipAt,
-        version: recordPins.version,
-        requestedBy: spec.requestedBy ?? "subject:42",
-        requestedByForm: spec.requestedByForm ?? "plain",
-        requestedAt: spec.requestedAt ?? REQUESTED_AT,
-        deadline: spec.deadline ?? DEADLINE,
-        closes: spec.closes,
-        ...(spec.reason === undefined ? {} : { reason: spec.reason }),
-        ...(spec.acceptsIncomplete === undefined
-          ? {}
-          : { acceptsIncomplete: spec.acceptsIncomplete }),
-      },
-      OP,
-      ts + 2,
-    ),
+    {
+      ...slateClaims(
+        {
+          container,
+          membershipAt: recordPins.membershipAt,
+          version: recordPins.version,
+          requestedBy: spec.requestedBy ?? "subject:42",
+          requestedByForm: spec.requestedByForm ?? "plain",
+          requestedAt: spec.requestedAt ?? REQUESTED_AT,
+          deadline: spec.deadline ?? DEADLINE,
+          closes: spec.closes,
+          ...(spec.reason === undefined ? {} : { reason: spec.reason }),
+          ...(spec.acceptsIncomplete === undefined
+            ? {}
+            : { acceptsIncomplete: spec.acceptsIncomplete }),
+        },
+        OP,
+        ts + 2,
+      ),
+      validFrom: spec.validFrom ?? ts + 2,
+    },
     OP_SEED,
   );
   await gw.append([record]);

@@ -1,7 +1,7 @@
-// Records how Loam's negation readers treat a strike with its own validity interval, before step 4
-// replaces them. Each strike is read at the moment before its boundary, at it, and after it. Beside
-// Loam's readers sits the substrate's answer: a `trust` mask for the operator, evaluated at the
-// read time. Where the two differ, step 4 moves a decision.
+// Records how Loam's negation readers treat a strike with its own validity interval. Each strike is
+// read at the moment before its boundary, at it, and after it. Beside Loam's readers sits the
+// substrate's answer: a `trust` mask for the operator, evaluated at the read time. Since step 4 the
+// two agree in every cell; a cell where they differ is a moved decision.
 // Scope: raw ingest for the readers; one booted gateway for a registration's served surface.
 
 import { afterEach, describe, it, vi } from "vitest";

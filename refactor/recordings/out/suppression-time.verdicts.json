@@ -19,9 +19,9 @@
       "substrateStruck": true
     },
     "#claim/struck-until-T": {
-      "dataStruck": true,
-      "honoredStrikeOn": true,
-      "negatedAt": true,
+      "dataStruck": false,
+      "honoredStrikeOn": false,
+      "negatedAt": false,
       "substrateStruck": false
     }
   },
@@ -45,17 +45,17 @@
       "substrateStruck": true
     },
     "#claim/struck-until-T": {
-      "dataStruck": true,
-      "honoredStrikeOn": true,
-      "negatedAt": true,
+      "dataStruck": false,
+      "honoredStrikeOn": false,
+      "negatedAt": false,
       "substrateStruck": false
     }
   },
   "now = T-1": {
     "#claim/counterstruck-from-T": {
-      "dataStruck": false,
-      "honoredStrikeOn": false,
-      "negatedAt": false,
+      "dataStruck": true,
+      "honoredStrikeOn": true,
+      "negatedAt": true,
       "substrateStruck": true
     },
     "#claim/never-struck": {
@@ -65,9 +65,9 @@
       "substrateStruck": false
     },
     "#claim/struck-from-T": {
-      "dataStruck": true,
-      "honoredStrikeOn": true,
-      "negatedAt": true,
+      "dataStruck": false,
+      "honoredStrikeOn": false,
+      "negatedAt": false,
       "substrateStruck": false
     },
     "#claim/struck-until-T": {

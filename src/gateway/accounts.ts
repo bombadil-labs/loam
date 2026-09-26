@@ -12,7 +12,8 @@
 // chain — but `authorize` consults exactly one thing: standing at `loam:store`.
 
 import {
-  evalTermRaw,
+  DeltaSet,
+  evalTerm,
   parseTerm,
   type Claims,
   type Delta,
@@ -175,7 +176,11 @@ export const TENANT: HyperSchema = { name: "Tenant", alg: 1, body: entityGatherB
 // a federated pull ever admits deltas authored by that key. Closing it means narrowing this term,
 // which moves the bytes of an exported gather body; the rail that would close it asserts a register
 // grantee's ingested strike is inert in a governed read.
-function lawfulStrikersJson(operator: string, adminsOnly: boolean): unknown {
+// The operator's surviving grants, as a Term: grant-shaped deltas the operator minted (admin grants
+// only, when asked), after masking by the operator's own negations — a stranger cannot shrink the
+// trusted set by negating a grant delta. `lawfulStrikersJson` reflects over it and `dataStruck`
+// evaluates it, so the two read one definition.
+function lawfulGrantsTermJson(operator: string, adminsOnly: boolean): unknown {
   const operatorMinted = { match: { field: "author", cmp: "eq", const: operator } };
   const grantShaped = {
     hasPointer: { targetEntity: STORE_ENTITY, context: { exact: CTX_GRANTS } },
@@ -184,32 +189,47 @@ function lawfulStrikersJson(operator: string, adminsOnly: boolean): unknown {
     hasPointer: { role: { exact: "verb" }, targetValue: { vcmp: { cmp: "eq", value: "admin" } } },
   };
   return {
+    op: "select",
+    pred: {
+      and: [grantShaped, adminsOnly ? { and: [operatorMinted, adminVerbed] } : operatorMinted],
+    },
+    in: {
+      op: "mask",
+      policy: { trust: { match: { field: "author", cmp: "eq", const: operator } } },
+      in: "input",
+    },
+  };
+}
+
+/** @internal — the data-strike trust predicate, exported for its parity rail */
+export function lawfulStrikersJson(operator: string, adminsOnly: boolean): unknown {
+  return {
     or: [
       { match: { field: "author", cmp: "eq", const: operator } },
       {
         inView: {
-          term: {
-            op: "select",
-            pred: {
-              and: [
-                grantShaped,
-                adminsOnly ? { and: [operatorMinted, adminVerbed] } : operatorMinted,
-              ],
-            },
-            // The grants themselves survive only the OPERATOR's strikes — a stranger cannot
-            // shrink the trusted set by striking a grant delta.
-            in: {
-              op: "mask",
-              policy: { trust: { match: { field: "author", cmp: "eq", const: operator } } },
-              in: "input",
-            },
-          },
+          term: lawfulGrantsTermJson(operator, adminsOnly),
           field: "author",
           extract: { role: "subject" },
         },
       },
     ],
   };
+}
+
+// The strings an `inView` extract reflects from one pointer role, exactly as the substrate's
+// `extractReflected` does: an entity id, a delta id, or a STRING primitive. Any other primitive
+// names no author.
+function reflectedSubjects(d: Delta, role: string): string[] {
+  const out: string[] = [];
+  for (const p of d.claims.pointers) {
+    if (p.role !== role) continue;
+    const t = p.target;
+    if (t.kind === "entity") out.push(t.entity.id);
+    else if (t.kind === "delta") out.push(t.deltaRef.delta);
+    else if (typeof t.value === "string") out.push(t.value);
+  }
+  return out;
 }
 
 // The canonical gather with a TRUST-AWARE negation mask: data negations bind only from the
@@ -224,34 +244,44 @@ export function governedGatherBody(operator: string): Term {
 // grantee's strike must not retire the operator's schema) and wrong for data, where the governed
 // gather honors the wider community — the operator plus any author their surviving grants name. Any
 // operation that FILTERS data by survival wants this one; anything resolving the constitution wants
-// the other. Built on the same `lawfulStrikersJson` predicate the gather masks with, so what a
-// reader resolves and what a filter admits cannot drift. Ungoverned, `drop` is the honest mask:
-// no operator, no constitution, every negation binds.
+// the other. The striker set RESTATES `lawfulStrikersJson(operator, false)` in code: the substrate
+// predicate takes a function, not a Pred, so the gather's mask and this filter are two derivations
+// of one rule, and a change to one must change the other. Ungoverned, every negation binds.
 //
 // Absence is not suppression: an id the store does not hold answers FALSE — it is not something
 // this can say has been struck. Callers weighing a purged source (§11) must ask erasure, not this.
-// One term evaluation per call (H8): build it once per pass and reuse the closure.
+// Build it once per pass and reuse the closure; it clears its memo after an accepted ingest.
 //
-// It counts every held negation, whether or not its validity interval has ended: filtering by
-// validity would read a not-yet-valid delta as retired. Loam writes no expiring negations today.
+// A strike counts only while it is valid at `now`; the target's own validity is not asked.
 export function dataStruck(
   reactor: Reactor,
   now: number,
   operator?: string,
 ): (id: string) => boolean {
-  // Step-3 limit (refactor/PLAN.md step 4): negation validity is not read yet, so `now` is unused.
-  void now;
-  const masked = evalTermRaw(
-    parseTerm({
-      op: "mask",
-      policy: operator === undefined ? "drop" : { trust: lawfulStrikersJson(operator, false) },
-      in: "input",
-    }),
-    reactor.snapshot(),
+  if (operator === undefined) return reactor.negationPredicate(now, () => true);
+  // The trusted strikers, read from the same Term the gather's mask reflects over: the operator,
+  // plus the subject of every surviving operator grant valid at `now`.
+  // Every grant is filed at the store entity, so the index finds the candidates. The term's mask
+  // must see every negation that can reach them, so the candidates carry their whole negation
+  // closure (H1); nothing else in the store can change which grants survive.
+  const scope = new Map<string, Delta>();
+  const take = (id: string): void => {
+    const d = reactor.get(id);
+    if (d === undefined || scope.has(id)) return;
+    scope.set(id, d);
+    for (const n of reactor.negationsOf(id)) take(n);
+  };
+  for (const id of reactor.byTarget(STORE_ENTITY)) take(id);
+  const grants = evalTerm(
+    parseTerm(lawfulGrantsTermJson(operator, false)),
+    DeltaSet.from(scope.values()),
+    now,
   );
-  if (masked.sort !== "dset") throw new Error("a mask always evaluates to a delta set");
-  const surviving = new Set([...masked.set].map((d) => d.id));
-  return (id) => !surviving.has(id) && reactor.get(id) !== undefined;
+  if (grants.sort !== "dset")
+    throw new Error("the lawful-grants term always evaluates to a delta set");
+  const strikers = new Set<string>([operator]);
+  for (const g of grants.set) for (const s of reflectedSubjects(g, "subject")) strikers.add(s);
+  return reactor.negationPredicate(now, (n) => strikers.has(n.claims.author));
 }
 
 // WHICH strike actually retired `id`, if any — the constitutional question, answered by the same
@@ -274,17 +304,15 @@ export function honoredStrikeOn(
   id: string,
   operator?: string,
 ): { readonly id: string; readonly timestamp: number } | undefined {
-  // Step-3 limit (refactor/PLAN.md step 4): negation validity is not read yet, so `now` is unused.
-  void now;
   const ctx: Ctx = { reactor, operator };
+  // Standing is still Loam's own walk (`standsFor`), and that walk does not read validity: only the
+  // strike edges themselves are read at `now`.
+  const witnesses = reactor.negationWitnesses(now, (negation) =>
+    operator === undefined ? true : standsFor(ctx, negation, new Set([negation.id])),
+  )(id);
   let earliest: { id: string; timestamp: number } | undefined;
-  for (const negId of reactor.negationsOf(id)) {
-    const branch = new Set<string>([negId]);
-    if (struck(ctx, negId, branch)) continue; // the strike is itself struck: inert
-    const neg = reactor.get(negId);
-    if (neg === undefined) continue;
-    if (operator !== undefined && !standsFor(ctx, neg, branch)) continue; // no standing: inert
-    const candidate = { id: negId, timestamp: neg.claims.timestamp };
+  for (const neg of witnesses) {
+    const candidate = { id: neg.id, timestamp: neg.claims.timestamp };
     if (
       earliest === undefined ||
       candidate.timestamp < earliest.timestamp ||

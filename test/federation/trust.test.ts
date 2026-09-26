@@ -198,8 +198,15 @@ describe("the trust policy: one delta at loam:trust, latest lawful word wins", (
     // remove Mallory: a FRESH declaration only adds, so the operator strikes the old one and
     // declares the roster she should have had — negation is the eraser, here as everywhere
     await b.append([
-      signClaims(makeNegationClaims(OPERATOR_B, Date.now() + 1, admitting.id), OP_B),
-      signClaims(trustClaims("roster", [GARDENER], OPERATOR_B, Date.now() + 2), OP_B),
+      // Ordered after `admitting`, and valid from now, as `stamp()` signs them.
+      signClaims(
+        { ...makeNegationClaims(OPERATOR_B, Date.now() + 1, admitting.id), validFrom: Date.now() },
+        OP_B,
+      ),
+      signClaims(
+        { ...trustClaims("roster", [GARDENER], OPERATOR_B, Date.now() + 2), validFrom: Date.now() },
+        OP_B,
+      ),
     ]);
     const policy = readTrustPolicy(b.reactor, b.validityNow(), OPERATOR_B);
     expect(policy.roster.has(MALLORY)).toBe(false); // the door agrees
