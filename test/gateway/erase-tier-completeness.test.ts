@@ -314,7 +314,14 @@ describe("the retry bypass is for an OUTSTANDING erasure, not for any erasure", 
     // try to erase the cut itself and be refused by the append-only guard.
     for (const cited of first.citations) {
       expect(
-        isErasure(gateway.reactor.get(cited)?.claims ?? { timestamp: 0, author: "", pointers: [] }),
+        isErasure(
+          gateway.reactor.get(cited)?.claims ?? {
+            timestamp: 0,
+            validFrom: 0,
+            author: "",
+            pointers: [],
+          },
+        ),
       ).toBe(false);
     }
     await gateway.close();

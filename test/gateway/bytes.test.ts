@@ -67,6 +67,7 @@ const bytesFact = (
   signClaims(
     {
       timestamp: ts,
+      validFrom: ts,
       author: OP,
       pointers: [
         { role: "subject", target: { kind: "entity", entity: { id: entity, context: field } } },

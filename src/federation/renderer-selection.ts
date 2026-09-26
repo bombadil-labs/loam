@@ -274,7 +274,12 @@ export function selectRendererForActivation(
   for (const adoption of readLawAdoptions(pool.reactor, pool.operatorAuthor)) {
     if (adoption.adoptedDelta !== row.boundId) continue;
     try {
-      const law = classifyExactReceivedSchema(received, renderer.schemaName, adoption.sourceDelta);
+      const law = classifyExactReceivedSchema(
+        received,
+        renderer.schemaName,
+        adoption.sourceDelta,
+        gw.validityNow(),
+      );
       if (
         adoption.alias !== renderer.schemaName ||
         adoption.target !== law.entity ||

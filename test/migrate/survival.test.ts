@@ -33,6 +33,7 @@ const oldDefinition = (name: string, timestamp: number): Delta =>
   signClaims(
     {
       timestamp,
+      validFrom: timestamp,
       author: OPERATOR,
       pointers: [
         {
@@ -56,6 +57,7 @@ const withdraw = (targetId: string, timestamp: number): Delta =>
   signClaims(
     {
       timestamp,
+      validFrom: timestamp,
       author: OPERATOR,
       pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: targetId } } }],
     },
@@ -187,7 +189,9 @@ describe("§20 — a migration does not resurrect withdrawn law", () => {
     const { deltas } = migrate(legacy, { seed: SEED });
     const gw = await Gateway.boot(new MemoryBackend(), { operatorSeed: SEED, deltas });
     try {
-      const bound = readRegistrations(gw.reactor, OPERATOR).map((r) => r.hyperschema.name);
+      const bound = readRegistrations(gw.reactor, gw.validityNow(), OPERATOR).map(
+        (r) => r.hyperschema.name,
+      );
       // Two-sided on purpose: the withdrawn one stays gone AND the kept one still binds. Without
       // the second clause, a "fix" that bound nothing at all would pass.
       expect(bound).not.toContain("Withdrawn");
@@ -203,6 +207,7 @@ describe("§20 — a migration does not resurrect withdrawn law", () => {
     const foreign = signClaims(
       {
         timestamp: 1100,
+        validFrom: 1100,
         author: authorForSeed(strangerSeed),
         pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: def.id } } }],
       },

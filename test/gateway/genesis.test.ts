@@ -122,6 +122,7 @@ describe("genesis: a fresh store, born governed and registered", () => {
       signClaims(
         {
           timestamp: 1,
+          validFrom: 1,
           author: OPERATOR,
           pointers: [
             {
@@ -199,18 +200,18 @@ describe("genesis ids are golden: a drive-by constant cannot re-mint the constit
     // the clock-base mutant does not (the marker predates the clock). That asymmetry is why the
     // full-list assertion below exists too — neither alone sees both mutants.
     const marker = goldenGenesis().deltas[0]!;
-    expect(marker.id).toBe("1e208c2b970b22107c5b5baf13d3e14d6a492ec9f11f1068137b19e9afb409ed37d0");
+    expect(marker.id).toBe("1e208c8e789157512e9ff8a7f78b5eea9e9e79476aaf34b275d681771715a5a8e8de");
   });
 
   it("every genesis delta id, in order — pins the clock base and the whole constitution", () => {
     const ids = goldenGenesis().deltas.map((d) => d.id);
     expect(ids).toEqual([
-      "1e208c2b970b22107c5b5baf13d3e14d6a492ec9f11f1068137b19e9afb409ed37d0", // marker
-      "1e20cd6f5b660cee168b9ec524b899049ecc3657982069c39e323e177be76186d724", // hyperschema definition
-      "1e2046d8c0b6ac67adb9d965da1317864380aad84669b852a87c8047362139657fa1", // living schema
-      "1e2006e329ab31a8b6d5ffd1d4b1bd21b155c15dafa99dd022bd93acbb9b3816e1ca", // frozen snapshot
-      "1e20bca161bd5a271cea3ba9f141901850286c2dafce53a9032cbafe78a08d54eb1b", // binding
-      "1e202cef7789d2444f75e99b776899e6fff54cd6f00fdb464e901e008e391cd3b203", // operator grant
+      "1e208c8e789157512e9ff8a7f78b5eea9e9e79476aaf34b275d681771715a5a8e8de", // marker
+      "1e20254aac5c179c9c9559a97a0fb6c0ebf5406b565a12030b6f1291465f3726416d", // hyperschema definition
+      "1e2081df71b7eb87e9dc4fe1f684d64a62de02c91c274f808c396bd87070a9421696", // living schema
+      "1e206d4e4a9f072b084c91ec9fb8d6444b886234701d03313492454d6f013a881709", // frozen snapshot
+      "1e205acd66ec82624c3004d8d38190e458a12b62dc411732eddd7d3efe0c90060f41", // binding
+      "1e20db1fe4205979bfc16f2528f30e5122913bac8a17cbb08d02aae4d6d0a59a9c53", // operator grant
     ]);
   });
 });

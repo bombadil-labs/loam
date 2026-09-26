@@ -10,7 +10,7 @@
 
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import {
-  evalTerm,
+  evalTermRaw,
   parseTerm,
   signClaims,
   DeltaSet,
@@ -391,7 +391,7 @@ ${flowNote}`;
           );
           return;
         }
-        const result = evalTerm(term, DeltaSet.from(deltas));
+        const result = evalTermRaw(term, DeltaSet.from(deltas));
         if (result.sort !== "dset") {
           refuse(
             res,

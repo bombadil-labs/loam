@@ -111,6 +111,7 @@ describe("the loam.public law", () => {
     const gateway = await governedGarden();
     const malformed: Claims = {
       timestamp: 10_000,
+      validFrom: 10_000,
       author: OPERATOR,
       pointers: [
         {
@@ -126,6 +127,7 @@ describe("the loam.public law", () => {
 
     const empty: Claims = {
       timestamp: 10_001,
+      validFrom: 10_001,
       author: OPERATOR,
       pointers: [
         {
@@ -150,6 +152,7 @@ describe("the loam.public law", () => {
     const malformed = signClaims(
       {
         timestamp: 10_000,
+        validFrom: 10_000,
         author: OPERATOR,
         pointers: [
           {

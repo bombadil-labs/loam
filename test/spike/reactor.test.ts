@@ -39,7 +39,7 @@ const latest: Schema = {
 
 // Ground truth: batch-evaluate the same term over a bare DeltaSet.
 function batchHex(deltas: readonly Delta[]): string {
-  return resultCanonicalHex(evalTerm(PLANT_BODY, DeltaSet.from(deltas), FERN));
+  return resultCanonicalHex(evalTerm(PLANT_BODY, DeltaSet.from(deltas), Date.now(), FERN));
 }
 
 function watched(): { reactor: ReturnType<typeof plantReactor>; changes: MaterializationChange[] } {
@@ -110,7 +110,7 @@ describe("spike: reactor materializations + subscribe", () => {
     const reactor = plantReactor(); // "plant" watches; "late" does not exist yet
     reactor.ingest(height30);
     reactor.ingest(tag);
-    reactor.register("late", PLANT_BODY, [FERN]);
+    reactor.register("late", PLANT_BODY, [FERN], Date.now());
     expect(reactor.materializedHex("late", FERN)).toBe(batchHex([height30, tag]));
   });
 
@@ -134,7 +134,7 @@ describe("spike: reactor materializations + subscribe", () => {
     for (const d of [height30, height34, tag]) reactor.ingest(d);
     const liveResult = resolveView(latest, reactor.materializedView("plant", FERN)!);
 
-    const batch = evalTerm(PLANT_BODY, DeltaSet.from([height30, height34, tag]), FERN);
+    const batch = evalTerm(PLANT_BODY, DeltaSet.from([height30, height34, tag]), Date.now(), FERN);
     if (batch.sort !== "hview") throw new Error(`expected an hview, got ${batch.sort}`);
     const batchResult = resolveView(latest, batch.hview);
 

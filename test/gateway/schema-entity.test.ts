@@ -52,6 +52,7 @@ describe("§21 slice 2: the Schema is a first-class entity", () => {
     const living = loadSchema(
       DeltaSet.from([...gw.reactor.snapshot()]),
       schemaLivingEntityFor("Plant"),
+      Date.now(),
     );
     // the living lens is a genuine domain node now — named, resolvable, carrying the policy
     expect(living.name).toBe("Plant");
@@ -68,8 +69,8 @@ describe("§21 slice 2: the Schema is a first-class entity", () => {
     expect(v1Snapshot).not.toBe(v2Snapshot); // different resolution bytes → different content address
 
     // both snapshots load BEFORE evolution only for v1; v2 does not exist yet
-    expect(() => loadSchema(ground(), v2Snapshot)).toThrow();
-    expect(loadSchema(ground(), v1Snapshot).name).toBe("Plant");
+    expect(() => loadSchema(ground(), v2Snapshot, Date.now())).toThrow();
+    expect(loadSchema(ground(), v1Snapshot, Date.now()).name).toBe("Plant");
 
     // evolve the lens: add `note`
     await gw.publishRegistration(PLANT, EVOLVED, [FERN], undefined, undefined, undefined, [
@@ -78,12 +79,14 @@ describe("§21 slice 2: the Schema is a first-class entity", () => {
     ]);
 
     // BOTH snapshots now answer — the old frozen reading was not disturbed by minting the new one
-    const v1 = loadSchema(ground(), v1Snapshot);
-    const v2 = loadSchema(ground(), v2Snapshot);
+    const v1 = loadSchema(ground(), v1Snapshot, Date.now());
+    const v2 = loadSchema(ground(), v2Snapshot, Date.now());
     expect(v1.props.has("note")).toBe(false); // v1 froze before `note` existed
     expect(v2.props.has("note")).toBe(true); // v2 sees it
     // the living entity has moved on to the latest reading
-    expect(loadSchema(ground(), schemaLivingEntityFor("Plant")).props.has("note")).toBe(true);
+    expect(loadSchema(ground(), schemaLivingEntityFor("Plant"), Date.now()).props.has("note")).toBe(
+      true,
+    );
     await gw.close();
   });
 
@@ -110,7 +113,9 @@ describe("§21 slice 2: the Schema is a first-class entity", () => {
     ]);
     // the live lens now reads the evolved schema (has `note`)
     const bound = () =>
-      readRegistrations(gw.reactor, OPERATOR).find((r) => r.hyperschema.name === "Plant")!;
+      readRegistrations(gw.reactor, gw.validityNow(), OPERATOR).find(
+        (r) => r.hyperschema.name === "Plant",
+      )!;
     expect(bound().schema.props.has("note")).toBe(true);
 
     // strike the LATEST registration (v2) — its living-entity publish is NOT itself negated
@@ -136,6 +141,7 @@ describe("§21 slice 2: the Schema is a first-class entity", () => {
       loadSchema(
         DeltaSet.from([...gw.reactor.snapshot()]),
         schemaLivingEntityFor("Plant"),
+        Date.now(),
       ).props.has("note"),
     ).toBe(true);
     await gw.close();

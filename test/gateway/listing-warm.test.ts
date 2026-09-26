@@ -555,6 +555,7 @@ describe("the maintained candidate set — under a trust mask that reads the gro
       signClaims(
         {
           timestamp: 3200,
+          validFrom: 3200,
           author: MALLORY,
           pointers: [{ role: "deputize", target: { kind: "entity", entity: { id: "plant:oak" } } }],
         },

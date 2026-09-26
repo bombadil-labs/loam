@@ -116,7 +116,7 @@ try {
   // 5.6 — verification at the boundary: forgery and anonymity refused, honesty lands
   const honest = signClaims(
     {
-      timestamp: Date.now(),
+      ...((t) => ({ timestamp: t, validFrom: t }))(Date.now()),
       author: AUTHORS.odile,
       pointers: [
         {
@@ -130,7 +130,7 @@ try {
   );
   const forged = { ...honest, id: `1e20${"00".repeat(32)}` };
   const unsigned = makeDelta({
-    timestamp: Date.now(),
+    ...((t) => ({ timestamp: t, validFrom: t }))(Date.now()),
     author: "did:key:zNobody",
     pointers: [
       { role: "subject", target: { kind: "entity", entity: { id: "colony:1", context: "yield" } } },

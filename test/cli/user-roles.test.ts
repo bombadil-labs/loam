@@ -381,7 +381,7 @@ describe("loam user assign-role", () => {
     expect(secondKeyRead.kind === "present" ? secondKeyRead.seed : "").not.toBe(firstKey);
 
     const g = await ground();
-    expect(rolesOf(g.reactor, g.operator, "sam").has("operator")).toBe(true);
+    expect(rolesOf(g.reactor, g.operator, Date.now(), "sam").has("operator")).toBe(true);
     await g.close();
   });
 });
@@ -413,7 +413,7 @@ describe("loam user remove-role", () => {
     const after = await ground();
     expect(after.reactor.get(roleDeltaId)).toBeDefined(); // the delta itself still exists
     expect(after.reactor.negationsOf(roleDeltaId).length).toBeGreaterThan(0);
-    expect(rolesOf(after.reactor, after.operator, "tara").has("operator")).toBe(false);
+    expect(rolesOf(after.reactor, after.operator, Date.now(), "tara").has("operator")).toBe(false);
     await after.close();
   });
 
@@ -437,13 +437,13 @@ describe("loam user remove-role", () => {
     await appendDirect(roleClaims("vic", "operator", operator, 99999), seed);
 
     const mid = await ground();
-    expect(rolesOf(mid.reactor, mid.operator, "vic").has("operator")).toBe(true); // held through the 2nd claim
+    expect(rolesOf(mid.reactor, mid.operator, Date.now(), "vic").has("operator")).toBe(true); // held through the 2nd claim
     await mid.close();
 
     const code = await run(["user", "remove-role", "vic", "--role=operator", "--home", home], io());
     expect(code).toBe(0);
     const after = await ground();
-    expect(rolesOf(after.reactor, after.operator, "vic").has("operator")).toBe(false);
+    expect(rolesOf(after.reactor, after.operator, Date.now(), "vic").has("operator")).toBe(false);
     await after.close();
   });
 
@@ -451,20 +451,22 @@ describe("loam user remove-role", () => {
     await run(["user", "create", "wade", "--operator", "--home", home], io(), password("pw"));
     await run(["user", "assign-role", "wade", "--role=actor", "--home", home], io());
     let g = await ground();
-    expect(rolesOf(g.reactor, g.operator, "wade")).toEqual(
+    expect(rolesOf(g.reactor, g.operator, Date.now(), "wade")).toEqual(
       new Set<UserRole>(["operator", "actor"]),
     );
     await g.close();
 
     await run(["user", "remove-role", "wade", "--role=operator", "--home", home], io());
     g = await ground();
-    expect(rolesOf(g.reactor, g.operator, "wade")).toEqual(new Set<UserRole>(["actor"]));
+    expect(rolesOf(g.reactor, g.operator, Date.now(), "wade")).toEqual(
+      new Set<UserRole>(["actor"]),
+    );
     await g.close();
 
     await run(["user", "remove-role", "wade", "--role=actor", "--home", home], io());
     g = await ground();
-    expect(rolesOf(g.reactor, g.operator, "wade")).toEqual(new Set());
-    expect(resolveUserView(g.reactor, g.operator, "wade")).toBeDefined(); // still a readable user
+    expect(rolesOf(g.reactor, g.operator, Date.now(), "wade")).toEqual(new Set());
+    expect(resolveUserView(g.reactor, g.operator, Date.now(), "wade")).toBeDefined(); // still a readable user
     await g.close();
   });
 
@@ -474,14 +476,14 @@ describe("loam user remove-role", () => {
       await run(["user", "remove-role", "xena", "--role=operator", "--home", home], io()),
     ).toBe(0);
     let g = await ground();
-    expect(rolesOf(g.reactor, g.operator, "xena").has("operator")).toBe(false);
+    expect(rolesOf(g.reactor, g.operator, Date.now(), "xena").has("operator")).toBe(false);
     await g.close();
 
     expect(
       await run(["user", "assign-role", "xena", "--role=operator", "--home", home], io()),
     ).toBe(0);
     g = await ground();
-    expect(rolesOf(g.reactor, g.operator, "xena").has("operator")).toBe(true);
+    expect(rolesOf(g.reactor, g.operator, Date.now(), "xena").has("operator")).toBe(true);
     await g.close();
   });
 
@@ -496,7 +498,7 @@ describe("loam user remove-role", () => {
     expect(code).toBe(0);
     expect(out.join("\n")).toMatch(/could not be located/);
     const g = await ground();
-    expect(rolesOf(g.reactor, g.operator, "yara").has("operator")).toBe(false);
+    expect(rolesOf(g.reactor, g.operator, Date.now(), "yara").has("operator")).toBe(false);
     await g.close();
   });
 
@@ -515,7 +517,7 @@ describe("loam user remove-role", () => {
         expect(err.join("\n")).toMatch(/could not be read/);
         expect(await deltaCount()).toBe(before);
         const g = await ground();
-        expect(rolesOf(g.reactor, g.operator, "zane").has("operator")).toBe(true); // untouched
+        expect(rolesOf(g.reactor, g.operator, Date.now(), "zane").has("operator")).toBe(true); // untouched
         await g.close();
       } finally {
         chmodSync(userSeedPath(home, "zane"), 0o600);

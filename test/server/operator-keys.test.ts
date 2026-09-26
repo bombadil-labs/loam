@@ -224,10 +224,10 @@ describe("F — no on-wire migration is owed: shapes are pinned literals, not se
     // Pinned against a LITERAL computed once and hard-coded (H10) — never against the function's
     // own answer. A change here means a delta's bytes moved and a §20 migration step is owed.
     expect(roleDelta.id).toBe(
-      "1e20fa69af47264786f83c3f00758ff8573c4dde81e122f99d0a4882d3c9268952a7",
+      "1e20352ef6e9922ca6df144cded11f0541059a6e503ee9e10e8764407238e44b1b82",
     );
     expect(grantDelta.id).toBe(
-      "1e20cff97051e6c82ce38eefea410d06f42a7dc5fd7d3fed6264972f99b8609109f4",
+      "1e20125027f8510762431d5550b4255156a34d733224641ba7f76253d2ac769cc103",
     );
   });
 });

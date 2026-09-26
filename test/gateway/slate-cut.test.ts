@@ -385,6 +385,7 @@ describe("T64 criterion 20 — a detached wall that demonstrably holds a member 
       signClaims(
         {
           timestamp: 53_001,
+          validFrom: 53_001,
           author: OP,
           pointers: [
             {
@@ -514,6 +515,7 @@ describe("T64 criterion 21 — content re-spoken under another id: the window cl
     const cite = signClaims(
       {
         timestamp: 1500,
+        validFrom: 1500,
         author: OP,
         pointers: [
           { role: "notes", target: { kind: "delta", deltaRef: { delta: member.id } } },

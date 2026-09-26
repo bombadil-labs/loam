@@ -76,7 +76,7 @@ async function ground(h: string): Promise<{
 async function boundLenses(h: string): Promise<string[]> {
   const g = await ground(h);
   try {
-    return readRegistrations(g.reactor, g.operator)
+    return readRegistrations(g.reactor, Date.now(), g.operator)
       .map((r) => lensOf(r) as string)
       .sort();
   } finally {
@@ -272,7 +272,7 @@ describe("§54(a) --user + --password-file on a fresh home", () => {
     // ground: ada holds the operator role, and all six shelf lenses bind
     const g = await ground(home);
     try {
-      expect(rolesOf(g.reactor, g.operator, "ada").has("operator")).toBe(true);
+      expect(rolesOf(g.reactor, g.operator, Date.now(), "ada").has("operator")).toBe(true);
     } finally {
       await g.close();
     }

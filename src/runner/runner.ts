@@ -29,6 +29,7 @@ export function bindingDefinitionClaims(
   const emit = typeof spec.emit === "string" ? spec.emit : JSON.stringify(spec.emit);
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       {

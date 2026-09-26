@@ -94,6 +94,7 @@ export function envelopeClaims(
 ): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       {

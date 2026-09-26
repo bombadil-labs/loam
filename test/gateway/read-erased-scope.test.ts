@@ -85,11 +85,11 @@ describe("serving reads outside the gathers never show an erased delta", () => {
     const operatorRole = signClaims(roleClaims("ada", "operator", OP, 2), OP_SEED);
     const viewerRole = signClaims(roleClaims("ada", "actor", OP, 3), OP_SEED);
     for (const d of [user, operatorRole, viewerRole]) reactor.ingest(d);
-    expect(rolesOf(reactor, OP, "ada")).toEqual(new Set(["operator", "actor"])); // control
+    expect(rolesOf(reactor, OP, Date.now(), "ada")).toEqual(new Set(["operator", "actor"])); // control
 
     reactor.ingest(signClaims(eraseClaims(operatorRole.id, OP, OP, 4), OP_SEED));
     expect(reactor.get(operatorRole.id)).toBeDefined(); // bytes still held
-    expect(rolesOf(reactor, OP, "ada")).toEqual(new Set(["actor"]));
+    expect(rolesOf(reactor, OP, Date.now(), "ada")).toEqual(new Set(["actor"]));
   });
 
   it("a bound connection's scope drops a claim that only its pool has erased", async () => {

@@ -14,7 +14,7 @@ import {
   SchemaRegistry,
   authorForSeed,
   computeId,
-  evalTerm,
+  evalTermRaw,
   type Delta,
   type HView,
   type HyperSchema,
@@ -469,7 +469,7 @@ export class Gateway {
     // blow up when a peer first pulls, in production. Trial-eval it now (empty store → empty
     // dset; the SORT is what we're checking, and that is content-independent).
     if (options.offeredLens !== undefined) {
-      const trial = evalTerm(options.offeredLens, reactor.snapshot());
+      const trial = evalTermRaw(options.offeredLens, reactor.snapshot());
       if (trial.sort !== "dset") {
         throw new Error("offeredLens must select a delta set (a mask/select term, not a group)");
       }
@@ -631,7 +631,7 @@ export class Gateway {
   // Every answerable version of every registration (SPEC §17): the append-only publication
   // history, read live from the ground under this store's law.
   registrationVersions(): RegistrationVersion[] {
-    return readRegistrationVersions(this.reactor, this.operatorAuthor);
+    return readRegistrationVersions(this.reactor, this.validityNow(), this.operatorAuthor);
   }
 
   // The names a declared `conflicts` policy is WITHHOLDING (§47.1), across every ground this store
@@ -644,7 +644,7 @@ export class Gateway {
   // The versions the operator lawfully struck (SPEC §17): served no longer, remembered
   // forever — the 410 door's only witness.
   withdrawnRegistrations(): WithdrawnRegistration[] {
-    return readWithdrawnRegistrations(this.reactor, this.operatorAuthor);
+    return readWithdrawnRegistrations(this.reactor, this.validityNow(), this.operatorAuthor);
   }
 
   // Pinned resolution (SPEC §17 versioning × §26 as-of): the body lives in reads.ts.
@@ -657,7 +657,7 @@ export class Gateway {
     now?: number,
     binding?: ConnectionBinding,
   ): ResolvedNode {
-    return resolvePinnedImpl(this, reg, entity, now ?? Date.now(), asOf, binding);
+    return resolvePinnedImpl(this, reg, entity, now ?? this.now(), asOf, binding);
   }
 
   // Re-derive the store's slice of the surface and follow it. The desired set is the manual
@@ -860,7 +860,7 @@ export class Gateway {
   // this store is eventually consistent about forgetting, and the gap between an erasure landing
   // and the bytes leaving every tier is a health state to watch, not a fault to boot past.
   async health(now?: number): Promise<StoreHealth> {
-    return healthImpl(this, now ?? Date.now());
+    return healthImpl(this, now ?? this.now());
   }
 
   // --- slating (SPEC §29, ticket T64) -------------------------------------------------------------
@@ -875,7 +875,7 @@ export class Gateway {
    * closes `read` — a read-closed slate that could not be reviewed would defeat itself.
    */
   slates(now?: number): SlateReport[] {
-    return slateReportsImpl(this, now ?? Date.now());
+    return slateReportsImpl(this, now ?? this.now());
   }
 
   /** Every surviving lawful graveyard — the durable record of each erasure EVENT (SPEC §29.6). */
@@ -1423,8 +1423,40 @@ export class Gateway {
   }
 
   /** @internal — T19 seam (erase.ts, adopt.ts) */
+  /** The wall clock, read in this one place. Rhizomatic never reads a clock itself. */
+  now(): number {
+    return Date.now();
+  }
+
+  /** The instant a validity read looks at: `now`, but never earlier than this gateway's own latest
+   * write. `nextTimestamp` can run ahead of the wall clock, and a write must be valid when the next
+   * read looks. Deadlines never use this: they compare the wall clock alone. */
+  validityNow(now: number = this.now()): number {
+    return Math.max(now, this.lastMutationTs);
+  }
+
+  private validityTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /**
+   * Brings the reactor's maintained views to the present, then arms one timer for the next validity
+   * boundary a held delta names. Views are evaluated at an instant: a delta written after that
+   * instant is not yet valid there, so every ingest advances first. The timer covers the other
+   * direction, a delta that becomes valid, or stops being valid, with nothing written at all.
+   * @internal — ingest.ts calls it before each batch
+   */
+  advanceToNow(): void {
+    const now = this.validityNow();
+    this.reactor.advanceTime(now);
+    if (this.validityTimer !== undefined) clearTimeout(this.validityTimer);
+    this.validityTimer = undefined;
+    const next = this.reactor.nextValidityBoundary(now);
+    if (next === undefined) return;
+    this.validityTimer = setTimeout(() => this.advanceToNow(), Math.max(0, next - now));
+    this.validityTimer.unref?.();
+  }
+
   nextTimestamp(): number {
-    this.lastMutationTs = Math.max(Date.now(), this.lastMutationTs + 1);
+    this.lastMutationTs = Math.max(this.now(), this.lastMutationTs + 1);
     return this.lastMutationTs;
   }
 
@@ -1497,7 +1529,7 @@ export class Gateway {
     now?: number,
     binding?: ConnectionBinding,
   ): HView {
-    return gatherImpl(this, name, entity, now ?? Date.now(), asOf, binding);
+    return gatherImpl(this, name, entity, now ?? this.now(), asOf, binding);
   }
 
   gatherForRetraction(name: string, entity: string, binding?: ConnectionBinding): HView {
@@ -1512,7 +1544,7 @@ export class Gateway {
     now?: number,
     binding?: ConnectionBinding,
   ): ResolvedNode {
-    return resolvedNodeImpl(this, name, entity, now ?? Date.now(), asOf, binding);
+    return resolvedNodeImpl(this, name, entity, now ?? this.now(), asOf, binding);
   }
 
   // --- the write seam --------------------------------------------------------------------------
@@ -1643,7 +1675,7 @@ export class Gateway {
   // whole-store read is acceptable here where it would not be per request.
   private emptySurfaceMessage(): string {
     let inert = "";
-    if (readRegistrations(this.reactor, undefined).length > 0) {
+    if (readRegistrations(this.reactor, this.validityNow(), undefined).length > 0) {
       // The derivable fact is that registrations exist and none binds. The causes are stated as
       // general rules, attributed only where the store's own posture makes them true: foreign
       // inertia is a governed-store rule (SPEC §8), never claimed of an ungoverned store.
@@ -1807,6 +1839,8 @@ export class Gateway {
   // Close ends every live subscription (a parked reader wakes with done, never hangs), then
   // always releases the backend, even when a latched write failure has to be surfaced.
   async close(): Promise<void> {
+    if (this.validityTimer !== undefined) clearTimeout(this.validityTimer);
+    this.validityTimer = undefined;
     for (const channel of [...this.channels]) await channel.return();
     // ATTACHED POOLS CLOSE WITH THEIR PARENT. A separate container holds its own store open, and
     // nothing else will ever close it — so before this, every channel pool leaked its sqlite handle

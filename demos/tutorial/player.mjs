@@ -68,7 +68,10 @@ const entity = (role, id, context) => ({
 const prim = (role, value) => ({ role, target: { kind: "primitive", value } });
 
 const sign = (loam, ctx, pointers) =>
-  loam.signClaims({ timestamp: ctx.ts(), author: ctx.author, pointers }, ctx.seed);
+  loam.signClaims(
+    { ...((t) => ({ timestamp: t, validFrom: t }))(ctx.ts()), author: ctx.author, pointers },
+    ctx.seed,
+  );
 
 /**
  * The student's own LIVE tutorial records. Progress is what THEY did, so four filters, each

@@ -32,7 +32,7 @@ import {
   parseBodyFields as parseAppBody,
   readBodyStrict as readBody,
 } from "./body.js";
-import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
+import { authorForSeed, signClaims, type Delta, ParseError } from "@bombadil/rhizomatic";
 import { Kind, OperationTypeNode, parse, type DocumentNode } from "graphql";
 import { fromWire, toWire, type WireDelta } from "../federation/wire.js";
 import { buildOpenApi, handleRest } from "../surface/rest.js";
@@ -1003,7 +1003,7 @@ async function performRegistration(
   try {
     input = parseRegistrationInput(raw);
   } catch (err) {
-    if (err instanceof Error && /^unknown term op /.test(err.message)) {
+    if (err instanceof ParseError && err.kind === "unknown-op") {
       throw new Error(`${err.message} — call loam_docs(topic: "register-grammar")`);
     }
     throw err;

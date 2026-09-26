@@ -60,6 +60,7 @@ describe("§49(a) — a pulse is not a fact: the channel sync under audit", () =
     const arrival = signClaims(
       {
         timestamp: 6000,
+        validFrom: 6000,
         author: PEER,
         pointers: [
           { role: "note", target: { kind: "entity", entity: { id: "note:hi", context: "mail" } } },

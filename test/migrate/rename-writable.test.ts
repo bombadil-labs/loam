@@ -97,7 +97,7 @@ describe("migration: the full §21 chain (rename + writable + inline-schema lift
     // the living Schema entity actually LOADS — the (now-negated) old hyperschema deltas that a
     // migrated store still holds at `schema:Plant` are masked by the SCHEMA_SCHEMA gather, so
     // loadSchema sees only the lifted resolution Schema, and it round-trips the inline policy's fields
-    const lifted = loadSchema(DeltaSet.from(deltas), "schema:Plant");
+    const lifted = loadSchema(DeltaSet.from(deltas), "schema:Plant", Date.now());
     expect(lifted.name).toBe("Plant");
     expect([...lifted.props.keys()].sort()).toEqual([...PLANT_WRITABLE].sort());
 

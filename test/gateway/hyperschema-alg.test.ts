@@ -128,13 +128,17 @@ describe("the algebra version reaches the bytes", () => {
 describe("a reader resolves the algebra version back", () => {
   it("hands TENANT's alg back through loadHyperSchema over the lawful slice", async () => {
     const gw = await boot(TENANT);
-    const held = loadHyperSchema(lawfulSnapshot(gw.reactor, gw.operator), TENANT_ENTITY);
+    const held = loadHyperSchema(
+      lawfulSnapshot(gw.reactor, gw.operator),
+      TENANT_ENTITY,
+      Date.now(),
+    );
     expect(held.alg).toBe(SHIPPED_ALG);
   });
 
   it("hands it back through Loam's own registration reader", async () => {
     const gw = await boot(TENANT);
-    const reg = readRegistrations(gw.reactor, gw.operator).find(
+    const reg = readRegistrations(gw.reactor, gw.validityNow(), gw.operator).find(
       (r) => r.hyperschema.name === "Tenant",
     );
     expect(reg?.hyperschema.alg).toBe(SHIPPED_ALG);
@@ -142,7 +146,11 @@ describe("a reader resolves the algebra version back", () => {
 
   it("hands tenantSchemaFor's alg back the same way", async () => {
     const gw = await boot(tenantSchemaFor(OP));
-    const held = loadHyperSchema(lawfulSnapshot(gw.reactor, gw.operator), TENANT_ENTITY);
+    const held = loadHyperSchema(
+      lawfulSnapshot(gw.reactor, gw.operator),
+      TENANT_ENTITY,
+      Date.now(),
+    );
     expect(held.alg).toBe(SHIPPED_ALG);
   });
 });

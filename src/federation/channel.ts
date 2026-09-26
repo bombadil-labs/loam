@@ -48,6 +48,7 @@ import { CTX_REGISTRATION, lawfulNegated, lensOf } from "../gateway/registration
 import { freezeMembers } from "../gateway/container-identity.js";
 import type { RendererBinding } from "../gateway/renderers.js";
 import { readForeignRenderers, readPoolRenderers, routeServableOn } from "../gateway/renderers.js";
+import { stamped } from "../gateway/stamp.js";
 
 /** Where a channel's deltas come from. A live peer, a frozen offer, or a fixture. */
 export interface ChannelSource {
@@ -263,6 +264,7 @@ export function channelRecordClaims(
 ): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       {
@@ -345,6 +347,7 @@ export function arrivalClaims(
 ): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       {
@@ -2670,7 +2673,7 @@ export async function curseChannelLawImpl(
   await gw.append([
     signClaims(
       {
-        timestamp: gw.nextTimestamp(),
+        ...stamped(gw.nextTimestamp()),
         author: gw.operatorAuthor!,
         pointers: [
           {

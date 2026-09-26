@@ -143,6 +143,7 @@ const height = (value: number, timestamp: number) =>
   signClaims(
     {
       timestamp,
+      validFrom: timestamp,
       author: OP,
       pointers: [
         { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "height" } } },

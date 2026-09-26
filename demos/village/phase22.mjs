@@ -68,7 +68,7 @@ try {
   const entry = (v, ts) =>
     signClaims(
       {
-        timestamp: ts,
+        timestamp: ts, validFrom: ts,
         author: operator,
         pointers: [
           { role: "subject", target: { kind: "entity", entity: { id: "ledger:lens22", context: "amount" } } },

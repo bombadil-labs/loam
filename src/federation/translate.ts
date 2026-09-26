@@ -139,6 +139,7 @@ export function translationClaims(
   parseEmitTemplate(emit);
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       {
@@ -314,14 +315,22 @@ export async function translate(
         // an operator-blessed spec whose template names a reserved context lets a stranger's delta —
         // which picks the entity id — mint operator-authored LAW (a grant, a trust edge, a
         // registration). The guard is `promotionRefusal`, the one that guards adoption (§24.4/T54).
-        if (promotionRefusal({ timestamp: source.claims.timestamp, author, pointers: emitted })) {
+        if (
+          promotionRefusal({
+            timestamp: source.claims.timestamp,
+            validFrom: source.claims.timestamp,
+            author,
+            pointers: emitted,
+          })
+        ) {
           refused += 1;
           continue;
         }
         emissions.push(
           signClaims(
             {
-              timestamp: source.claims.timestamp, // deterministic → same id → idempotent
+              timestamp: source.claims.timestamp,
+              validFrom: source.claims.timestamp, // deterministic → same id → idempotent
               author,
               pointers: emitted,
             },

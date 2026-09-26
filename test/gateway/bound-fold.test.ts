@@ -70,6 +70,7 @@ import { refusalKey } from "../../src/gateway/lifecycle.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
+import { stamped } from "../../src/gateway/stamp.js";
 
 const OP_SEED = "0e".repeat(32);
 const OP = authorForSeed(OP_SEED);
@@ -156,7 +157,7 @@ const strike = (p: Gateway, deltaId: string): Promise<unknown> =>
   p.append([
     signClaims(
       {
-        timestamp: p.nextTimestamp(),
+        ...stamped(p.nextTimestamp()),
         author: OP,
         pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: deltaId } } }],
       },
@@ -308,14 +309,14 @@ describe("§58 — two pools in one container contest a name by who staked it fi
       { ...PLANT_POLICY, name: A, props: new Map([["watered", PLANT_POLICY.default]]) },
       [FERN],
     ); // evolve A: a later binding
-    const firstA = readRegistrationVersions(p.reactor, p.operatorAuthor)
+    const firstA = readRegistrationVersions(p.reactor, p.validityNow(), p.operatorAuthor)
       .filter((v) => v.lensName === A)
       .sort((x, y) => x.timestamp - y.timestamp)[0]!;
     await strike(p, firstA.deltaId);
     // The premise, pinned from the reader the fold sorts on: the strike moved A's first
     // surviving claim after B's. Without this line the case stays green under one pass too,
     // once a strike stops counting.
-    const rows = readRegistrations(p.reactor, p.operatorAuthor);
+    const rows = readRegistrations(p.reactor, p.validityNow(), p.operatorAuthor);
     const firstClaim = (name: string): number =>
       rows.find((r) => lensOf(r) === name)!.firstBoundAt!;
     expect(firstClaim(A)).toBeGreaterThan(firstClaim(B));
@@ -361,7 +362,7 @@ describe("§58 — two pools in one container contest a name by who staked it fi
     await p.publishRegistration({ ...PLANT, name: A }, { ...PLANT_POLICY, name: A }, [FERN]);
     await p.publishRegistration(expanding(LENS, A), { ...PLANT_POLICY, name: LENS }, [FERN]);
     await publish(gw, second);
-    for (const v of readRegistrationVersions(p.reactor, p.operatorAuthor).filter(
+    for (const v of readRegistrationVersions(p.reactor, p.validityNow(), p.operatorAuthor).filter(
       (v) => v.lensName === A,
     ))
       await strike(p, v.deltaId);

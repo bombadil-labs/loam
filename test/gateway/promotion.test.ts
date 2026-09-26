@@ -37,6 +37,7 @@ const foreignFact = (value: string, ts: number) =>
   signClaims(
     {
       timestamp: ts,
+      validFrom: ts,
       author: GUEST,
       pointers: [
         { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "message" } } },
@@ -116,6 +117,7 @@ describe("§24.3 promote-outputs — adopt a quarantine's output as the operator
     const dangling = signClaims(
       {
         timestamp: 3300,
+        validFrom: 3300,
         author: GUEST,
         pointers: [
           { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "message" } } },
@@ -142,6 +144,7 @@ describe("§24.3 promote-outputs — adopt a quarantine's output as the operator
     const factB = signClaims(
       {
         timestamp: 3410,
+        validFrom: 3410,
         author: GUEST,
         pointers: [
           { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "message" } } },
@@ -203,7 +206,10 @@ describe("§24.3 promote-outputs adopts FACTS, never LAW — operator authorship
   const refusesPromotion = async (pointers: Parameters<typeof signClaims>[0]["pointers"]) => {
     const primary = await bootPrimary();
     const q = await primary.openQuarantine();
-    const lawShaped = signClaims({ timestamp: 3700, author: GUEST, pointers }, GUEST_SEED);
+    const lawShaped = signClaims(
+      { timestamp: 3700, validFrom: 3700, author: GUEST, pointers },
+      GUEST_SEED,
+    );
     await q.gateway.federate([lawShaped]);
     await expect(primary.promote(q.gateway, lawShaped.id)).rejects.toThrow(/promotion refused/);
     await q.drop();
@@ -237,6 +243,7 @@ describe("§24.3 promote-outputs adopts FACTS, never LAW — operator authorship
     const strike = signClaims(
       {
         timestamp: 3810,
+        validFrom: 3810,
         author: GUEST,
         pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: promoted } } }],
       },
@@ -327,6 +334,7 @@ describe("§24.3/§27 — a STRUCK adoption record leaves the trail and lets pro
     const factB = signClaims(
       {
         timestamp: 3910,
+        validFrom: 3910,
         author: GUEST,
         pointers: [
           { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "message" } } },

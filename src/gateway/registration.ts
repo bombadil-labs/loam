@@ -564,6 +564,7 @@ export function registrationClaims(
 ): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       ...(mutations === undefined
@@ -1131,7 +1132,11 @@ export function readContestedBindings(
   return out;
 }
 
-export function readRegistrations(reactor: Reactor, operator?: string): Registration[] {
+export function readRegistrations(
+  reactor: Reactor,
+  now: number,
+  operator?: string,
+): Registration[] {
   const lawful = lawfulSnapshot(reactor, operator);
   const groups = survivingCandidates(reactor, operator);
   // Latest-wins narrows to latest-PER-LENS (§21.7): within one registration entity's group, each
@@ -1185,7 +1190,7 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
   for (const cand of [...latest.values()].sort((a, b) => a.timestamp - b.timestamp)) {
     if (resolvedAway.has(cand.id)) continue;
     try {
-      const hyperschema = loadHyperSchema(lawful, cand.schemaEntity);
+      const hyperschema = loadHyperSchema(lawful, cand.schemaEntity, now);
       // NUL is the gateway's own alphabet (internal materialization names): a definition whose
       // name carries it — plantable only by hand, never through publishRegistration — binds
       // nothing rather than colliding with that namespace.
@@ -1198,7 +1203,7 @@ export function readRegistrations(reactor: Reactor, operator?: string): Registra
       // ITS snapshot keeps the live reading and the version door in lockstep — the snapshot of the
       // latest survivor IS the current reading, and it recedes exactly when its binding is withdrawn.
       // (The living entity remains a first-class, directly-loadable node; it just is not the read path.)
-      const schema = loadSchema(lawful, cand.snapshotEntity);
+      const schema = loadSchema(lawful, cand.snapshotEntity, now);
       out.push({
         hyperschema,
         schema,
@@ -1239,6 +1244,7 @@ export interface RegistrationVersion extends Registration {
 // a definition in place is the same append-only story one level down.
 export function readRegistrationVersions(
   reactor: Reactor,
+  now: number,
   operator?: string,
 ): RegistrationVersion[] {
   const lawful = lawfulSnapshot(reactor, operator);
@@ -1251,13 +1257,13 @@ export function readRegistrationVersions(
       try {
         // The SCHEMA entity the candidate references, not the registration entity it files
         // under — the same resolution readRegistrations performs.
-        hyperschema = loadHyperSchema(lawful, cand.schemaEntity);
+        hyperschema = loadHyperSchema(lawful, cand.schemaEntity, now);
         // NUL is the gateway's own alphabet (see readRegistrations) — it binds nothing.
         if (hyperschema.name.includes(String.fromCharCode(0))) continue;
         // A VERSION freezes against ITS OWN snapshot (SPEC §21/§17) — never the living entity — so
         // v1 keeps resolving an evolved field with its old reading long after the living Schema has
         // moved on. This IS §17's per-version freezing, now a named, content-addressed entity.
-        schema = loadSchema(lawful, cand.snapshotEntity);
+        schema = loadSchema(lawful, cand.snapshotEntity, now);
       } catch {
         continue; // no surviving definition/snapshot: this candidate is unbound, not fatal
       }
@@ -1302,6 +1308,7 @@ export interface WithdrawnRegistration {
 
 export function readWithdrawnRegistrations(
   reactor: Reactor,
+  now: number,
   operator?: string,
 ): WithdrawnRegistration[] {
   const lawful = lawfulSnapshot(reactor, operator);
@@ -1314,7 +1321,7 @@ export function readWithdrawnRegistrations(
       // definition is gone. The NAME comes from `lensNameOf`, the lens the door will compare, never
       // from the hyperschema (the program). This is the same reader the sibling latest-per-lens and
       // version readers use above.
-      loadHyperSchema(lawful, cand.schemaEntity);
+      loadHyperSchema(lawful, cand.schemaEntity, now);
       out.push({ deltaId: cand.id, lensName: lensNameOf(cand) });
     } catch {
       // its definition is gone too: nothing nameable remains to say "withdrawn" about

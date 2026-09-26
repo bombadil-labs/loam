@@ -241,6 +241,7 @@ export const heightClaim = (seed: string, height: number, timestamp: number): De
   signClaims(
     {
       timestamp,
+      validFrom: timestamp,
       author: authorForSeed(seed),
       pointers: [
         { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "height" } } },

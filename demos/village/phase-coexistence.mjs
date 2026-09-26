@@ -29,7 +29,7 @@ try {
   const say = (value, ts) =>
     signClaims(
       {
-        timestamp: ts,
+        timestamp: ts, validFrom: ts,
         author: almanac.operator,
         pointers: [
           { role: "subject", target: { kind: "entity", entity: { id: subject, context: "note" } } },

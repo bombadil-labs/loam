@@ -85,6 +85,7 @@ import {
   type OAuthFile,
 } from "../../src/server/oauth-file.js";
 import type { ScryptParams } from "../../src/server/credentials.js";
+import { stamped } from "../../src/gateway/stamp.js";
 
 vi.setConfig({ testTimeout: 60_000 });
 
@@ -333,7 +334,7 @@ async function plantNonGrantAtStore(subject: string): Promise<void> {
     await gw.append([
       signClaims(
         {
-          timestamp: Date.now(),
+          ...stamped(Date.now()),
           author: operator,
           pointers: [
             {

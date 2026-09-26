@@ -44,6 +44,7 @@ const grant = (by: Who, subject: Who, verb: string, t: number, label: string, pr
 
 const data = (by: Who, t: number): Claims => ({
   timestamp: t,
+  validFrom: t,
   author: KEY[by],
   pointers: [{ role: "note", target: { kind: "entity", entity: { id: "note:1", context: "n" } } }],
 });

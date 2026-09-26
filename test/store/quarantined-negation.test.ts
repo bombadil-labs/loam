@@ -77,6 +77,7 @@ describe("§25/H1 — a quarantined negation names the strike it stranded", () =
     // A hand-authored claims striking two ids at once — the foreign-delta shape the store ingests.
     const claims = {
       timestamp: 1,
+      validFrom: 1,
       author: OP,
       pointers: [
         {

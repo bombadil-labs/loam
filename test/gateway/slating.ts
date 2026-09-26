@@ -156,6 +156,7 @@ export const strike = (targetId: string, ts: number): Delta =>
   signClaims(
     {
       timestamp: ts,
+      validFrom: ts,
       author: OP,
       pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: targetId } } }],
     },

@@ -23,7 +23,7 @@ const heightsOnly = {
 
 // Evaluate a JSON term profile over the ground and return the surviving delta ids, sorted.
 function idsOf(raw: unknown): string[] {
-  const result = evalTerm(parseTerm(raw), ground);
+  const result = evalTerm(parseTerm(raw), ground, Date.now());
   if (result.sort !== "dset") throw new Error(`expected a dset result, got ${result.sort}`);
   return [...result.set].map((d) => d.id).sort();
 }

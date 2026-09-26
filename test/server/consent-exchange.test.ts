@@ -242,6 +242,7 @@ const withoutKeys = (html: string): string => html.replace(/[0-9a-f]{16,}/g, "<k
 const noteClaims = (author: string, id: string, text: string, timestamp: number): Claims => ({
   author,
   timestamp,
+  validFrom: timestamp,
   pointers: [
     { role: "note", target: { kind: "entity", entity: { id, context: "text" } } },
     { role: "value", target: { kind: "primitive", value: text } },

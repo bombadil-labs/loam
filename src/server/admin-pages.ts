@@ -176,7 +176,7 @@ ${parents}
   // the register form. Registration is deliberately STORE-WIDE — a lens is how this store reads,
   // for every reader — so the panel is the same for every user and takes no subtree gate.
   const schemaPanelHtml = (gw: Gateway, formToken: string): string => {
-    const regs = readRegistrations(gw.reactor, gw.operatorAuthor);
+    const regs = readRegistrations(gw.reactor, gw.validityNow(), gw.operatorAuthor);
     const listing =
       regs.length === 0
         ? "<p>No lens is registered on this store yet.</p>"

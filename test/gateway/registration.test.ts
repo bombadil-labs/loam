@@ -150,7 +150,7 @@ describe("registration claims: a binding, never a carrier", () => {
 describe("readRegistrations: the surface is generated from surviving definitions", () => {
   it("loads the schema from its own entity deltas and round-trips policy and roots", () => {
     const reactor = world(define(PLANT, OPERATOR, 1), ...register(OPERATOR, 2));
-    const regs = readRegistrations(reactor, OPERATOR);
+    const regs = readRegistrations(reactor, Date.now(), OPERATOR);
     expect(regs).toHaveLength(1);
     expect(regs[0]!.hyperschema.name).toBe("Plant");
     expect(termHash(regs[0]!.hyperschema.body)).toBe(termHash(PLANT.body));
@@ -166,7 +166,7 @@ describe("readRegistrations: the surface is generated from surviving definitions
       ...register(OPERATOR, 2),
       define(PLANT_V2, OPERATOR, 3),
     );
-    const regs = readRegistrations(reactor, OPERATOR);
+    const regs = readRegistrations(reactor, Date.now(), OPERATOR);
     expect(regs).toHaveLength(1);
     expect(termHash(regs[0]!.hyperschema.body)).toBe(termHash(V2_BODY));
   });
@@ -178,7 +178,7 @@ describe("readRegistrations: the surface is generated from surviving definitions
       ...register(OPERATOR, 2),
       makeDelta(makeNegationClaims(OPERATOR, 3, definition.id)),
     );
-    expect(readRegistrations(reactor, OPERATOR)).toEqual([]);
+    expect(readRegistrations(reactor, Date.now(), OPERATOR)).toEqual([]);
   });
 
   it("a negated registration binds nothing even while its definition survives", () => {
@@ -188,7 +188,7 @@ describe("readRegistrations: the surface is generated from surviving definitions
       ...registration,
       makeDelta(makeNegationClaims(OPERATOR, 3, bindingOf(registration).id)),
     );
-    expect(readRegistrations(reactor, OPERATOR)).toEqual([]);
+    expect(readRegistrations(reactor, Date.now(), OPERATOR)).toEqual([]);
   });
 
   it("negating the negation revives: the substrate's algebra, honored on registrations too", () => {
@@ -200,7 +200,7 @@ describe("readRegistrations: the surface is generated from surviving definitions
       retirement,
       makeDelta(makeNegationClaims(OPERATOR, 4, retirement.id)), // the retirement, retired
     );
-    const regs = readRegistrations(reactor, OPERATOR);
+    const regs = readRegistrations(reactor, Date.now(), OPERATOR);
     expect(regs).toHaveLength(1); // the registration lives again
   });
 
@@ -211,7 +211,7 @@ describe("readRegistrations: the surface is generated from surviving definitions
       ...registration,
       makeDelta(makeNegationClaims(MALLORY, 3, bindingOf(registration).id)), // Mallory's, roots in nobody
     );
-    expect(readRegistrations(reactor, OPERATOR)).toHaveLength(1);
+    expect(readRegistrations(reactor, Date.now(), OPERATOR)).toHaveLength(1);
   });
 
   it("foreign law is inert: a newer non-operator definition cannot reshape a governed surface", () => {
@@ -220,26 +220,26 @@ describe("readRegistrations: the surface is generated from surviving definitions
       ...register(OPERATOR, 2),
       define(PLANT_V2, MALLORY, 999), // newer, but Mallory roots in nobody the operator blessed
     );
-    const regs = readRegistrations(reactor, OPERATOR);
+    const regs = readRegistrations(reactor, Date.now(), OPERATOR);
     expect(regs).toHaveLength(1);
     expect(termHash(regs[0]!.hyperschema.body)).toBe(termHash(PLANT.body)); // the operator's v1 holds
   });
 
   it("a foreign registration is likewise inert in a governed store", () => {
     const reactor = world(define(PLANT, OPERATOR, 1), ...register(MALLORY, 2));
-    expect(readRegistrations(reactor, OPERATOR)).toEqual([]);
+    expect(readRegistrations(reactor, Date.now(), OPERATOR)).toEqual([]);
   });
 
   it("ungoverned (no operator): any verified author's definition binds", () => {
     const reactor = world(define(PLANT, MALLORY, 1), ...register(MALLORY, 2));
-    const regs = readRegistrations(reactor);
+    const regs = readRegistrations(reactor, Date.now());
     expect(regs).toHaveLength(1);
     expect(regs[0]!.hyperschema.name).toBe("Plant");
   });
 
   it("a registration whose definition never arrived binds nothing (unbound, not a crash)", () => {
     const reactor = world(...register(OPERATOR, 2));
-    expect(readRegistrations(reactor, OPERATOR)).toEqual([]);
+    expect(readRegistrations(reactor, Date.now(), OPERATOR)).toEqual([]);
   });
 
   it("a malformed binding binds nothing (roots stripped)", () => {
@@ -256,7 +256,7 @@ describe("readRegistrations: the surface is generated from surviving definitions
       pointers: binding.pointers.filter((p) => p.role !== "roots"),
     });
     const reactor = world(define(PLANT, OPERATOR, 1), mangled);
-    expect(readRegistrations(reactor, OPERATOR)).toEqual([]);
+    expect(readRegistrations(reactor, Date.now(), OPERATOR)).toEqual([]);
   });
 
   it("a binding whose schema entity was never planted binds nothing (unbound, not a crash)", () => {
@@ -271,6 +271,6 @@ describe("readRegistrations: the surface is generated from surviving definitions
       () => 5,
     );
     const reactor = world(define(PLANT, OPERATOR, 1), makeDelta(binding));
-    expect(readRegistrations(reactor, OPERATOR)).toEqual([]);
+    expect(readRegistrations(reactor, Date.now(), OPERATOR)).toEqual([]);
   });
 });

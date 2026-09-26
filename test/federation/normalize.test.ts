@@ -27,6 +27,7 @@ const cinelogEntry = (viewer: string, film: string, date: string, ts: number): D
   signClaims(
     {
       timestamp: ts,
+      validFrom: ts,
       author: CINELOG,
       pointers: [
         { role: "film_watched", target: { kind: "entity", entity: { id: film, context: "log" } } },
@@ -190,6 +191,7 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
       signClaims(
         {
           timestamp: 6000,
+          validFrom: 6000,
           author: OPERATOR,
           pointers: [
             {
@@ -239,6 +241,7 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
       signClaims(
         {
           timestamp: 9,
+          validFrom: 9,
           author: OPERATOR,
           pointers: [
             {
@@ -343,6 +346,7 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
     const shared = signClaims(
       {
         timestamp: 5001,
+        validFrom: 5001,
         author: CINELOG,
         pointers: [
           {
@@ -402,6 +406,7 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
     const evasive = signClaims(
       {
         timestamp: 5002,
+        validFrom: 5002,
         author: CINELOG,
         pointers: [
           ...cinelogEntry("person:wren", "film:stalker", "2026-07-08", 5000).claims.pointers,

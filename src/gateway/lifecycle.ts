@@ -18,7 +18,7 @@ import {
   DeltaSet,
   SchemaRegistry,
   authorForSeed,
-  evalTerm,
+  evalTermRaw,
   loadHyperSchema,
   makeDelta,
   schemaToJson,
@@ -92,13 +92,13 @@ function assertTemplatesVisible(
         typeof p.value === "object" && p.value !== null ? "loam:specimen" : (p.value as Primitive);
       return { role: p.role, target: { kind: "primitive" as const, value } };
     });
-    const specimen = makeDelta({ timestamp: 1, author: specimenAuthor, pointers });
+    const specimen = makeDelta({ timestamp: 1, validFrom: 1, author: specimenAuthor, pointers });
     const ground = DeltaSet.from([specimen]);
     const sentinels = [
       ...new Set(pointers.flatMap((p) => (p.target.kind === "entity" ? [p.target.entity.id] : []))),
     ];
     const seen = sentinels.some((root) => {
-      const result = evalTerm(schema.body, ground, root, registry);
+      const result = evalTermRaw(schema.body, ground, root, registry);
       if (result.sort !== "hview") return false;
       for (const entries of result.hview.props.values()) {
         if (entries.some((e) => e.delta.id === specimen.id)) return true;
@@ -119,7 +119,7 @@ function assertTemplatesVisible(
 // sort of a term is content-independent (the offeredLens trick), so trial-eval it empty and
 // refuse a dset-sort body before it can persist, half-bind, or corrupt a boot.
 function assertMaterializable(schema: HyperSchema, registry: SchemaRegistry): void {
-  const trial = evalTerm(schema.body, DeltaSet.from([]), "loam:trial", registry);
+  const trial = evalTermRaw(schema.body, DeltaSet.from([]), "loam:trial", registry);
   if (trial.sort !== "hview") {
     throw new Error(
       `schema ${schema.name}: its body must yield a hyperview (a group over the gathered ` +
@@ -264,7 +264,7 @@ export function matForImpl(
       }
       gw.publicLazyMats.add(matName);
     }
-    gw.reactor.register(matName, def.hyperschema.body, [entity], gw.registry);
+    gw.reactor.register(matName, def.hyperschema.body, [entity], gw.validityNow(), gw.registry);
     gw.lazyMats.add(matName);
   }
   return matName;
@@ -370,6 +370,7 @@ export function rebindImpl(gw: Gateway, next: Bound[]): void {
       matNameImpl(gw, program.hyperschema.name),
       program.hyperschema.body,
       program.roots,
+      gw.validityNow(),
       registry,
     );
   }
@@ -422,17 +423,19 @@ const lastBindFailure = (gw: Gateway, key: string): string | undefined =>
 // them (`contestedNamesImpl` below). A second copy could only drift into a surface that disagrees
 // with the store it reports on.
 function storeBindings(gw: Gateway): Bound[] {
-  const rows: Bound[] = readRegistrations(gw.reactor, gw.operatorAuthor).map((r) => ({
-    ...r,
-    origin: "store" as const,
-  }));
+  const rows: Bound[] = readRegistrations(gw.reactor, gw.validityNow(), gw.operatorAuthor).map(
+    (r) => ({
+      ...r,
+      origin: "store" as const,
+    }),
+  );
   for (const standing of gw.channelStatus()) {
     // A channel a BOUND CONNECTION opened is not here either: its law serves only the container
     // it was opened from, in the bound fold below (SPEC §58 position 2).
     if (standing.openedBy !== undefined) continue;
     const pool = gw.channelPools.get(standing.name)?.gateway;
     if (pool === undefined) continue;
-    for (const r of readRegistrations(pool.reactor, pool.operatorAuthor)) {
+    for (const r of readRegistrations(pool.reactor, pool.validityNow(), pool.operatorAuthor)) {
       if (!lensOf(r).startsWith(`${standing.prefix}:`)) continue;
       rows.push({ ...r, origin: "store" as const, channel: standing.name });
     }
@@ -505,7 +508,11 @@ export function boundBindingsImpl(
     const owner = table.containers.get(name)?.inboxOf;
     if (owner === undefined || !reach.has(owner) || inbox.gateway === undefined) continue;
     const prefix = `${owner}:`;
-    for (const r of readRegistrations(inbox.gateway.reactor, inbox.gateway.operatorAuthor)) {
+    for (const r of readRegistrations(
+      inbox.gateway.reactor,
+      inbox.gateway.validityNow(),
+      inbox.gateway.operatorAuthor,
+    )) {
       if (!fenceAdmits(prefix, r.hyperschema.name)) continue; // the program
       if (!fenceAdmits(prefix, lensOf(r))) continue; // the reading
       if (lensOf(r).includes(NUL)) continue; // a reading name is the gateway's alphabet too
@@ -523,7 +530,7 @@ export function boundBindingsImpl(
     if (!receivesNow(table, standing.into)) continue; // and one whose container stopped receiving
     const pool = gw.channelPools.get(standing.name)?.gateway;
     if (pool === undefined) continue;
-    for (const r of readRegistrations(pool.reactor, pool.operatorAuthor)) {
+    for (const r of readRegistrations(pool.reactor, pool.validityNow(), pool.operatorAuthor)) {
       if (!lensOf(r).startsWith(`${standing.prefix}:`)) continue;
       if (lensOf(r).includes(NUL)) continue;
       candidates.push({ ...r, origin: "store" as const, channel: standing.name });
@@ -943,6 +950,7 @@ export function replayRegistrationsImpl(gw: Gateway): void {
         matNameImpl(gw, program.hyperschema.name),
         program.hyperschema.body,
         program.roots,
+        gw.validityNow(),
         registry,
       );
     }
@@ -996,7 +1004,13 @@ export function registerImpl(
   // under the current generation. register() is the in-process path; the replay's rebind rule
   // governs the durable one.
   const program = groupPrograms(next).get(hyperschema.name)!;
-  gw.reactor.register(matNameImpl(gw, hyperschema.name), hyperschema.body, program.roots, registry);
+  gw.reactor.register(
+    matNameImpl(gw, hyperschema.name),
+    hyperschema.body,
+    program.roots,
+    gw.validityNow(),
+    registry,
+  );
   gw.registered = next;
   gw.registry = registry;
   gw.gql = gql;
@@ -1016,7 +1030,7 @@ export async function loadHyperSchemaImpl(
   const batch = [...deltas];
   const trial = lawfulSnapshot(gw.reactor, gw.operatorAuthor);
   for (const d of batch) trial.add(d);
-  const schema = loadHyperSchema(trial, entity); // throws here → nothing was persisted
+  const schema = loadHyperSchema(trial, entity, gw.validityNow()); // throws here → nothing was persisted
   await gw.append(batch);
   return schema;
 }

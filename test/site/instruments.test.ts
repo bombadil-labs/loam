@@ -86,6 +86,7 @@ describe("classifyDelta: every badge earns its name", () => {
       kindOf(
         sign({
           timestamp: 11,
+          validFrom: 11,
           author: ME,
           pointers: [
             { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "tally" } } },
@@ -105,6 +106,7 @@ describe("classifyDelta: every badge earns its name", () => {
       kindOf(
         sign({
           timestamp: 3,
+          validFrom: 3,
           author: ME,
           pointers: [
             {
@@ -126,6 +128,7 @@ describe("classifyDelta: every badge earns its name", () => {
       kindOf(
         sign({
           timestamp: 4,
+          validFrom: 4,
           author: ME,
           pointers: [
             {

@@ -39,7 +39,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   makeNegationClaims,
   signClaims,
@@ -293,9 +293,11 @@ describe("T204 — a contested name is named, with its origin", () => {
 
       // DELTA LEVEL: both bindings really are in the pool's ground, so the silence below is the
       // prefix filter's doing and not an empty pool.
-      const planted = readRegistrations(pool.reactor, pool.operatorAuthor).filter(
-        (r) => r.lensName === "Sneaky",
-      );
+      const planted = readRegistrations(
+        pool.reactor,
+        pool.validityNow(),
+        pool.operatorAuthor,
+      ).filter((r) => r.lensName === "Sneaky");
       expect(planted).toHaveLength(0); // both are withheld by the pool's own conflicts policy...
       expect(
         [...pool.reactor.snapshot()].filter((d) =>
@@ -411,11 +413,17 @@ describe("T204 — a contested name is named, with its origin", () => {
       for (let t = 0; t <= rootAt + 1000;) t = alice.nextTimestamp();
       for (let t = 0; t <= rootAt + 1000;) t = ch.pool.gateway!.nextTimestamp();
       await alice.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+      // Those stamps sit ahead of the wall clock, so the blessing is not yet valid anywhere. Move
+      // the wall clock past them: every store then reads it as in force.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(rootAt + 5_000);
       await ch.sync();
       const pool = ch.pool.gateway!;
-      const channelRow = readRegistrations(pool.reactor, pool.operatorAuthor).find(
-        (r) => r.lensName === "alice:Plant",
-      );
+      const channelRow = readRegistrations(
+        pool.reactor,
+        pool.validityNow(),
+        pool.operatorAuthor,
+      ).find((r) => r.lensName === "alice:Plant");
       // The fixture's own premise, asserted: the pool holds the PEER's binding, and it is later.
       expect(channelRow?.entity).toBe("hyperschema:Plant");
       expect(channelRow?.boundAt ?? 0).toBeGreaterThan(rootAt);
@@ -429,6 +437,7 @@ describe("T204 — a contested name is named, with its origin", () => {
       // And no law withholds anything, so the reading is silent.
       expect(me.contestedNames().size).toBe(0);
     } finally {
+      vi.useRealTimers();
       await alice.close();
       await me.close();
     }

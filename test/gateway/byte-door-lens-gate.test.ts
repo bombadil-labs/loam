@@ -56,6 +56,7 @@ const bytesFact = (mime: string, value: Uint8Array, ts: number): Delta =>
   signClaims(
     {
       timestamp: ts,
+      validFrom: ts,
       author: OP,
       pointers: [
         { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "avatar" } } },

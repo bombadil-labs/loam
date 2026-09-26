@@ -271,6 +271,7 @@ const sign = (c: Parameters<typeof signClaims>[0], seed = OP_SEED): Delta => sig
 const CAGE = "container:equivalence";
 const trustAt = (subject: string, mode: string, authors: readonly string[], ts: number) => ({
   timestamp: ts,
+  validFrom: ts,
   author: OP,
   pointers: [
     {

@@ -58,6 +58,7 @@ function openLiteral(
   return {
     author: OP,
     timestamp,
+    validFrom: timestamp,
     pointers: [
       entity("event", `channel:${name}`, EVENT),
       primitive("version", 1),
@@ -107,6 +108,7 @@ describe("T288 protected ingress closure has bounded linear work", () => {
       {
         author: OP,
         timestamp: 100,
+        validFrom: 100,
         pointers: [entity("anything", "channel:bounded", EVENT)],
       },
       SEED,
@@ -119,6 +121,7 @@ describe("T288 protected ingress closure has bounded linear work", () => {
       {
         author: OP,
         timestamp: 200,
+        validFrom: 200,
         pointers: [primitive("ordinary", "bystander")],
       },
       SEED,
@@ -129,6 +132,7 @@ describe("T288 protected ingress closure has bounded linear work", () => {
       const claims: Claims = {
         author: delta.claims.author,
         timestamp: delta.claims.timestamp,
+        validFrom: delta.claims.timestamp,
         get pointers() {
           pointerReads += 1;
           return delta.claims.pointers;
@@ -244,6 +248,7 @@ describe("T288 channel declaration identity follows container resolution", () =>
         {
           author: OP,
           timestamp: declarationDelta.claims.timestamp + 100,
+          validFrom: declarationDelta.claims.timestamp + 100,
           pointers: [entity("container", channel.name, CTX_CONTAINER)],
         },
         SEED,
@@ -300,6 +305,7 @@ describe("T288 channel declaration identity follows container resolution", () =>
       {
         author: OP,
         timestamp: declarationDelta.claims.timestamp + 100,
+        validFrom: declarationDelta.claims.timestamp + 100,
         pointers: [
           entity("container", channel.name, CTX_CONTAINER),
           entity("container", "container:unrelated", CTX_CONTAINER_EXCLUDED),

@@ -309,6 +309,7 @@ describe("§51 (c) — the link mutation authors the symmetric two-pointer delta
         id: "x",
         claims: {
           timestamp: 0,
+          validFrom: 0,
           author: WRITER,
           pointers: [
             {
@@ -928,6 +929,7 @@ describe("§51 — sibling readings and a capital-initial prop (H6's documented 
         id: "x",
         claims: {
           timestamp: 0,
+          validFrom: 0,
           author: WRITER,
           pointers: [
             {

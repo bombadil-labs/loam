@@ -78,6 +78,7 @@ const wouldAdopt = (src: { claims: { timestamp: number; pointers: unknown } }): 
   signClaims(
     {
       timestamp: src.claims.timestamp,
+      validFrom: src.claims.timestamp,
       author: OP,
       pointers: src.claims.pointers as never,
     },

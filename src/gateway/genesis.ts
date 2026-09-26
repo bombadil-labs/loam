@@ -42,7 +42,8 @@ export const CTX_OPERATOR = "loam.operator";
 // is auditable like anything else.
 export function operatorMarkerClaims(operator: string): Claims {
   return {
-    timestamp: 0, // fixed, so the marker is the same delta on every boot
+    timestamp: 0,
+    validFrom: 0, // fixed, so the marker is the same delta on every boot
     author: operator,
     pointers: [
       {

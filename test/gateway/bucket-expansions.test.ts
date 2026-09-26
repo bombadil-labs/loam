@@ -48,7 +48,7 @@ const MAKEABLE = {
   },
 };
 
-const at = (timestamp: number) => ({ timestamp, author: OP });
+const at = (timestamp: number) => ({ timestamp, validFrom: timestamp, author: OP });
 const prop = (id: string, context: string, role: string, value: Primitive, ts: number): Delta =>
   signClaims(
     {

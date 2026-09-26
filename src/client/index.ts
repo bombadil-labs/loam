@@ -130,7 +130,7 @@ export function loamClient(options: LoamClientOptions): LoamClient {
     // delta this client signs, not only the auto-stamped ones.
     const ts = timestamp ?? nextTimestamp();
     lastTs = Math.max(lastTs, ts);
-    return toWire(signClaims({ timestamp: ts, author, pointers: mapped }, seed));
+    return toWire(signClaims({ timestamp: ts, validFrom: ts, author, pointers: mapped }, seed));
   };
 
   const append = async (deltas: readonly WireDelta[]): Promise<AppendReceipt> => {

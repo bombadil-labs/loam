@@ -58,6 +58,7 @@ const budgetWith = (
   ts: number,
 ): Claims => ({
   timestamp: ts,
+  validFrom: ts,
   author: OPERATOR,
   pointers: [
     {
@@ -198,6 +199,7 @@ describe("per-author door budgets (SPEC §25)", () => {
     };
     const noCeiling: Claims = {
       timestamp: 5000,
+      validFrom: 5000,
       author: OPERATOR,
       pointers: [declares, { role: "subject", target: { kind: "primitive", value: GARDENER } }],
     };
@@ -206,6 +208,7 @@ describe("per-author door budgets (SPEC §25)", () => {
     );
     const negativeCeiling: Claims = {
       timestamp: 5001,
+      validFrom: 5001,
       author: OPERATOR,
       pointers: [
         declares,
@@ -218,6 +221,7 @@ describe("per-author door budgets (SPEC §25)", () => {
     );
     const noSubject: Claims = {
       timestamp: 5002,
+      validFrom: 5002,
       author: OPERATOR,
       pointers: [declares, { role: "maxAppends", target: { kind: "primitive", value: 3 } }],
     };

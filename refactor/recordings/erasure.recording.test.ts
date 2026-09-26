@@ -36,6 +36,7 @@ import {
 const claim = (by: Who, t: number, label: string): Delta => {
   const claims: Claims = {
     timestamp: t,
+    validFrom: t,
     author: KEY[by],
     pointers: [{ role: "note", target: { kind: "primitive", value: label } }],
   };

@@ -34,6 +34,7 @@ export function bindingPolicyClaims(
 ): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       {

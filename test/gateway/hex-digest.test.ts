@@ -77,7 +77,7 @@ describe("_hex and _hviewHex are fixed-width digests of the canonical bytes (T10
     expect(node.hex).toBe(_hex);
 
     // And _hviewHex is the digest of the gathered hyperview, recomputed through the same body.
-    const evaluated = gateway.reactor.eval(PLANT.body, FERN, gateway.registry);
+    const evaluated = gateway.reactor.eval(PLANT.body, Date.now(), FERN, gateway.registry);
     if (evaluated.sort !== "hview") throw new Error("Plant did not evaluate to a hyperview");
     expect(_hviewHex).toBe(contentAddress(hexToBytes(hviewCanonicalHex(evaluated.hview))));
     await gateway.close();
@@ -153,7 +153,7 @@ describe("_hex and _hviewHex are fixed-width digests of the canonical bytes (T10
     // levels really do carry the marker legibly — that is exactly what the old fields re-disclosed.
     const node = gateway.resolvedNode("Plant", FERN);
     expect(viewCanonicalHex(node.view)).toContain(markerHex);
-    const evaluated = gateway.reactor.eval(PLANT.body, FERN, gateway.registry);
+    const evaluated = gateway.reactor.eval(PLANT.body, Date.now(), FERN, gateway.registry);
     if (evaluated.sort !== "hview") throw new Error("Plant did not evaluate to a hyperview");
     expect(hviewCanonicalHex(evaluated.hview)).toContain(markerHex);
 
@@ -203,7 +203,7 @@ describe("_hex and _hviewHex are fixed-width digests of the canonical bytes (T10
     expect(node.hviewHex).toMatch(DIGEST_RE);
     // The bytes-level pin, on the pinned producer specifically.
     expect(node.hex).toBe(contentAddress(hexToBytes(viewCanonicalHex(node.view))));
-    const evaluated = gateway.reactor.eval(v1.hyperschema.body, FERN, gateway.registry);
+    const evaluated = gateway.reactor.eval(v1.hyperschema.body, Date.now(), FERN, gateway.registry);
     if (evaluated.sort !== "hview") throw new Error("Plant v1 did not evaluate to a hyperview");
     expect(node.hviewHex).toBe(contentAddress(hexToBytes(hviewCanonicalHex(evaluated.hview))));
 
@@ -225,7 +225,7 @@ describe("_hex and _hviewHex are fixed-width digests of the canonical bytes (T10
     // necessarily agree with any canonical-form or hash change, and these literals do not. They
     // move iff the canonical CBOR form, the hash, or this fixture moves — loud, never silent.
     const GOLDEN_HEX = "1e2054f7eb0105ff7d75bc9de787d1214ea7a0587ab29c8f902fe10fa15975ac7a9d";
-    const GOLDEN_HVIEW_HEX = "1e20572b5d5de2db0d7c80d2bddbadb54937b63524c29c54b9eb2fe1001c990ad6d1";
+    const GOLDEN_HVIEW_HEX = "1e20db958ec82152da3f906ee2c3d927f3e2e2e1a0c467a9f54847c9e5319f728c07";
     const gateway = await Gateway.open(new MemoryBackend(), { seed: KEEPER_SEED });
     await gateway.append([
       signClaims(

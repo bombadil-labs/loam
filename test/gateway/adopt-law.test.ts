@@ -278,6 +278,7 @@ describe("T33 criterion 3 — facts never need it", () => {
     const blob = signClaims(
       {
         timestamp: 42_150,
+        validFrom: 42_150,
         author: STRANGER,
         pointers: [
           { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "avatar" } } },
@@ -1364,13 +1365,18 @@ async function captureWorld(
     ),
   ]);
   const wall = await gw.openContainer({ name: "container:capture", backend: new MemoryBackend() });
+  // The definition's creation claim is `defTs`, which may sit past any wall clock; it is valid from
+  // 0 so that it is in force now, and only its timestamp decides the race.
   const definition = signClaims(
-    publishHyperSchemaClaims(
-      { name: "Post", alg: 1, body: BY_ROLE_BODY },
-      "hyperschema:Plant",
-      STRANGER,
-      defTs,
-    ),
+    {
+      ...publishHyperSchemaClaims(
+        { name: "Post", alg: 1, body: BY_ROLE_BODY },
+        "hyperschema:Plant",
+        STRANGER,
+        defTs,
+      ),
+      validFrom: 0,
+    },
     STRANGER_SEED,
   );
   let t = 50_100;

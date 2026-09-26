@@ -377,6 +377,7 @@ describe("T64 criterion 3 — `closes` and `deadline` are required, and `none` i
     const citation = signClaims(
       {
         timestamp: 60_000,
+        validFrom: 60_000,
         author: OP,
         pointers: [
           { role: "notes", target: { kind: "delta", deltaRef: { delta: condemned.id } } },
@@ -599,6 +600,7 @@ describe("T64 criterion 17 — the mint is new vocabulary only, so no §20 step 
     const bad = signClaims(
       {
         timestamp: 60_100,
+        validFrom: 60_100,
         author: OP,
         pointers: [
           ...eraseClaims(target.id, OP, OP, 60_100).pointers,

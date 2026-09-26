@@ -137,6 +137,7 @@ const opalNote = (t: number) =>
   signClaims(
     {
       timestamp: t,
+      validFrom: t,
       author: KEYS.opal,
       pointers: [
         { role: "notes", target: { kind: "entity", entity: { id: "note:day", context: "diary" } } },
@@ -175,6 +176,7 @@ describe("§49(c) — the first screen is the summary; the tree is beneath it", 
       signClaims(
         {
           timestamp: 21_000,
+          validFrom: 21_000,
           author: KEYS.opal,
           pointers: [
             {

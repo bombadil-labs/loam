@@ -100,6 +100,7 @@ export function userRoleDefect(role: string): string | undefined {
 export function userClaims(name: string, author: string, timestamp: number): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       {
@@ -120,6 +121,7 @@ export function roleClaims(
 ): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       {
@@ -192,6 +194,7 @@ const USER_SCHEMA: Schema = {
 export function resolveUserView(
   reactor: Reactor,
   operator: string | undefined,
+  now: number,
   name: string,
 ): View | undefined {
   if (operator === undefined) return undefined; // no operator, no constitution, no users
@@ -201,7 +204,7 @@ export function resolveUserView(
   const snapshot = reactor.snapshot();
   const ground =
     hidden.size === 0 ? snapshot : DeltaSet.from([...snapshot].filter((d) => !hidden.has(d.id)));
-  const result = evalTerm(userHyperSchema(operator).body, ground, userEntity(name));
+  const result = evalTerm(userHyperSchema(operator).body, ground, now, userEntity(name));
   if (result.sort !== "hview") return undefined;
   const view = resolveView(USER_SCHEMA, result.hview);
   if (view === null || typeof view !== "object" || Array.isArray(view)) return undefined;
@@ -222,9 +225,10 @@ export function resolveUserView(
 export function rolesOf(
   reactor: Reactor,
   operator: string | undefined,
+  now: number,
   name: string,
 ): ReadonlySet<UserRole> {
-  const view = resolveUserView(reactor, operator, name);
+  const view = resolveUserView(reactor, operator, now, name);
   const roles = new Set<UserRole>();
   if (view === undefined) return roles;
   const raw = (view as Record<string, View>)[CTX_ROLE];

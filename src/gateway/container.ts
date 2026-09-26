@@ -140,6 +140,7 @@ const primPtr = (role: string, value: string): Claims["pointers"][number] => ({
 export function containerClaims(spec: ContainerSpec, author: string, timestamp: number): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       entityPtr("container", spec.container, CTX_CONTAINER),
@@ -160,6 +161,7 @@ export function containerClaims(spec: ContainerSpec, author: string, timestamp: 
 export function exclusionClaims(container: string, author: string, timestamp: number): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [entityPtr("container", container, CTX_CONTAINER_EXCLUDED)],
   };
@@ -173,6 +175,7 @@ export function detachClaims(
 ): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [
       entityPtr("container", container, CTX_CONTAINER_DETACHED),
@@ -190,6 +193,7 @@ export function detachClaims(
 export function termClaims(term: unknown, author: string, timestamp: number): Claims {
   return {
     timestamp,
+    validFrom: timestamp,
     author,
     pointers: [primPtr("term", JSON.stringify(term))],
   };
@@ -855,6 +859,7 @@ export function everDeclared(
 
 const retractionOf = (targetId: string, author: string, timestamp: number): Claims => ({
   timestamp,
+  validFrom: timestamp,
   author,
   pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: targetId } } }],
 });

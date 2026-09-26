@@ -39,6 +39,7 @@ const strangerPoke = (): Delta =>
   signClaims(
     {
       timestamp: 5000,
+      validFrom: 5000,
       author: MALLORY,
       pointers: [
         { role: "ping", target: { kind: "entity", entity: { id: "loam:trust", context: "poke" } } },

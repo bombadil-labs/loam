@@ -121,6 +121,7 @@ describe("migration: the composable chain, from a 0.2-era store", () => {
     // re-sign its attacker-chosen content under the operator's real key.
     const forgedClaims: Claims = {
       timestamp: 9,
+      validFrom: 9,
       author: operator,
       pointers: [
         {

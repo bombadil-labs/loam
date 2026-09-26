@@ -56,6 +56,7 @@ const HEIGHTS = {
 // hand it, not only what our own claim builder emits.
 const rawDeclaration = (container: string, pointers: Claims["pointers"], ts: number): Claims => ({
   timestamp: ts,
+  validFrom: ts,
   author: OP,
   pointers: [
     {

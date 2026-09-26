@@ -63,7 +63,7 @@ try {
   await notebook.append([
     signClaims(
       {
-        timestamp: 1000,
+        timestamp: 1000, validFrom: 1000,
         author: wanderer,
         pointers: [
           {

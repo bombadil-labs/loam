@@ -11,6 +11,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "./fixtures.js";
+import { stamped } from "../../src/gateway/stamp.js";
 
 const OP_SEED = "cc".repeat(32);
 const named = (name: string): Schema => ({ ...PLANT_POLICY, name });
@@ -93,7 +94,7 @@ describe("§47 — the policy is data", () => {
         gw.append([
           signClaims(
             {
-              timestamp: gw.nextTimestamp(),
+              ...stamped(gw.nextTimestamp()),
               author: gw.operatorAuthor!,
               pointers: [
                 {

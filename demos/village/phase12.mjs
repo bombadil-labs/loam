@@ -35,7 +35,7 @@ try {
   // regret must top the naive pick for 12.1 to say anything.
   const regret = signClaims(
     {
-      timestamp: ts + 10_000_000,
+      timestamp: ts + 10_000_000, validFrom: ts + 10_000_000,
       author: AUTHORS.wren,
       pointers: [
         {

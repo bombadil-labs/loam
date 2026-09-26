@@ -56,6 +56,7 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { cursesOf, type Channel } from "../../src/federation/channel.js";
 import { FERN } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
+import { stamped } from "../../src/gateway/stamp.js";
 
 const OPERATOR_SEED = "17".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
@@ -241,7 +242,7 @@ describe("T232 — a write-granted stranger cannot lift an operator's curse", ()
     const forged: Claims = {
       ...template,
       author: STRANGER,
-      timestamp: me.nextTimestamp(),
+      ...stamped(me.nextTimestamp()),
       pointers: template.pointers.map((p) =>
         p.role === "living" ? { ...p, target: { kind: "primitive", value: "alice:Sprout" } } : p,
       ),

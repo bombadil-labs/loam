@@ -48,6 +48,7 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, pickLatest } from "./fixtures.js";
 import { OP_SEED, OP, BEFORE_DEADLINE, AFTER_DEADLINE, standSlate } from "./slating.js";
+import { stamped } from "../../src/gateway/stamp.js";
 
 const OWNER_SEED = "b4".repeat(32);
 const CONN_SEEDS = ["c5".repeat(32), "d6".repeat(32)];
@@ -263,7 +264,7 @@ describe("explicit renderer execution context", () => {
       signClaims(
         {
           author: f.first.requester,
-          timestamp: local.nextTimestamp(),
+          ...stamped(local.nextTimestamp()),
           pointers: [
             {
               role: "subject",

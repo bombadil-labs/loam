@@ -186,6 +186,7 @@ describe("H1: a struck BoardItem vanishes from the singleton's items[] through t
     signClaims(
       {
         timestamp: ts,
+        validFrom: ts,
         author: FABLE,
         pointers: [
           {
@@ -201,6 +202,7 @@ describe("H1: a struck BoardItem vanishes from the singleton's items[] through t
     signClaims(
       {
         timestamp: ts,
+        validFrom: ts,
         author: FABLE,
         pointers: [
           { role: "subject", target: { kind: "entity", entity: { id, context: prop } } },

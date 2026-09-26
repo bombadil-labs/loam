@@ -216,6 +216,7 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
     const planting = signClaims(
       {
         timestamp: 1100,
+        validFrom: 1100,
         author: GARDENER,
         pointers: [
           { role: "bed", target: { kind: "entity", entity: { id: BED, context: "plants" } } },
@@ -324,6 +325,7 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
     const gateway = await Gateway.open(new MemoryBackend());
     const unsigned = makeDelta({
       timestamp: 1,
+      validFrom: 1,
       author: "did:key:zAnyoneAtAll",
       pointers: [{ role: "note", target: { kind: "primitive", value: "trust me" } }],
     });

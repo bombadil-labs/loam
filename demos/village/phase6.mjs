@@ -160,7 +160,7 @@ try {
   // 6.6 — the trust lens: Mallory's NEWER forgery wins pick-latest, loses byAuthorRank
   const forgery = signClaims(
     {
-      timestamp: Date.now() + 10_000_000, // the newest claim about Wren's bio, by far
+      ...((t) => ({ timestamp: t, validFrom: t }))(Date.now() + 10_000_000), // the newest claim about Wren's bio, by far
       author: AUTHORS.mallory,
       pointers: [
         {

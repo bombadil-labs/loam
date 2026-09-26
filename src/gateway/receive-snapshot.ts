@@ -51,8 +51,8 @@ function fromMembers(members: readonly Delta[]): Reactor {
     if (r.ingest(d).status === "rejected") throw new Error("member rejected");
   return r;
 }
-function definitionId(r: Reactor, author: string, entity: string, body: Term): string {
-  const rows = evalTerm(body, lawfulSnapshot(r, author), entity);
+function definitionId(r: Reactor, author: string, entity: string, body: Term, now: number): string {
+  const rows = evalTerm(body, lawfulSnapshot(r, author), now, entity);
   if (rows.sort !== "hview") throw new Error("bootstrap sort");
   const definitions = rows.hview.props.get("definition") ?? [];
   const selected = [...definitions].sort(
@@ -68,6 +68,7 @@ export function selectReceivingSnapshot(
   binding: Binding,
   value: unknown,
   paused: boolean,
+  now: number,
 ):
   | { status: "selected"; registration: Registration; operand: Reactor }
   | { status: "invalid-selection" | "unavailable" } {
@@ -81,7 +82,7 @@ export function selectReceivingSnapshot(
   }
   if (freezeMembers(members).id !== s.versionId) return { status: "invalid-selection" };
   const original = fromMembers(members);
-  const candidates = readRegistrations(original, binding.sourceAuthor).filter(
+  const candidates = readRegistrations(original, now, binding.sourceAuthor).filter(
     (r) => r.entity === binding.entity && lensOf(r) === binding.reading,
   );
   if (candidates.length !== 1 || candidates[0]!.boundId !== s.registrationId)
@@ -95,8 +96,8 @@ export function selectReceivingSnapshot(
   // definitions cannot substitute for a withdrawn selected authorial act.
   const pinnedIds = [
     s.registrationId,
-    definitionId(original, binding.sourceAuthor, binding.entity!, HYPER_SCHEMA_SCHEMA.body),
-    definitionId(original, binding.sourceAuthor, schemaRef.entity.id, SCHEMA_SCHEMA.body),
+    definitionId(original, binding.sourceAuthor, binding.entity!, HYPER_SCHEMA_SCHEMA.body, now),
+    definitionId(original, binding.sourceAuthor, schemaRef.entity.id, SCHEMA_SCHEMA.body, now),
   ];
   if (paused) {
     const closed = fromMembers(withNegationClosure({ reactor: source }, members));

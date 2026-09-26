@@ -412,7 +412,7 @@ export class TutorialPage {
          const seed = "5a".repeat(32);
          const loam = window.loam;
          const claim = loam.signClaims(
-           { timestamp: Date.now(), author: loam.authorForSeed(seed),
+           { ...((t) => ({ timestamp: t, validFrom: t }))(Date.now()), author: loam.authorForSeed(seed),
              pointers: [
                { role: "step", target: { kind: "entity",
                  entity: { id: "tutorial:step:99.9", context: "tutorial.step" } } },
@@ -438,7 +438,7 @@ export class TutorialPage {
       `(async () => {
          const loam = window.loam, ctx = window.tutorial.ctx;
          const claim = loam.signClaims(
-           { timestamp: Date.now(), author: ctx.author,
+           { ...((t) => ({ timestamp: t, validFrom: t }))(Date.now()), author: ctx.author,
              pointers: [
                { role: "step", target: { kind: "entity",
                  entity: { id: "tutorial:step:88.8", context: "tutorial.step" } } },

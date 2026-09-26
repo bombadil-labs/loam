@@ -30,6 +30,7 @@ export const retraction = (
   signClaims(
     {
       timestamp,
+      validFrom: timestamp,
       author,
       pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: targetId } } }],
     },

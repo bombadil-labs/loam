@@ -148,6 +148,7 @@ describe("federation: two instances meet and merge", () => {
     // a delta whose id recomputes correctly but carries no signature
     const unsigned = makeDelta({
       timestamp: 1000,
+      validFrom: 1000,
       author: "did:key:zNobody",
       pointers: [
         { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "height" } } },
@@ -197,6 +198,7 @@ describe("federation: two instances meet and merge", () => {
     const strike = signClaims(
       {
         timestamp: 2000,
+        validFrom: 2000,
         author: authorForSeed(MALLORY_SEED),
         pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: honest.id } } }],
       },
@@ -304,7 +306,7 @@ describe("federation: two instances meet and merge", () => {
               deltas: [
                 {
                   id: `1e20${"11".repeat(32)}`,
-                  claims: { timestamp: 1, author: "x", pointers: [] },
+                  claims: { timestamp: 1, validFrom: 1, author: "x", pointers: [] },
                 },
               ],
             }),

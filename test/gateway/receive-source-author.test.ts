@@ -105,6 +105,7 @@ function decision(value: object): Delta {
     {
       author: receiver,
       timestamp: 50,
+      validFrom: 50,
       pointers: [
         {
           role: "decision",
@@ -168,6 +169,7 @@ const run = (members: Delta[], policy: Delta[]) =>
     destination: base.destination,
     decisions: policy,
     sources: [{ id: base.source, deltas: members }],
+    now: Date.now(),
   });
 function assertSelected(
   result: ReturnType<typeof run>,
@@ -188,7 +190,7 @@ function assertSelected(
     observed(FERN, "height", 22, 102, R),
   ])
     data.ingest(d);
-  data.register("selected", selected.hyperschema.body, selected.roots);
+  data.register("selected", selected.hyperschema.body, selected.roots, Date.now());
   const view = resolveView(selected.schema, data.materializedView("selected", FERN)!);
   expect(view).toMatchObject({ height: expected });
 }

@@ -63,7 +63,7 @@ try {
 
   const note = signClaims(
     {
-      timestamp: Date.now(),
+      ...((t) => ({ timestamp: t, validFrom: t }))(Date.now()),
       author: wanderer,
       pointers: [
         {
@@ -101,7 +101,7 @@ try {
         // and erased it only on the ALMANAC — per-instance erasure (§11) means the commons still
         // serves it. So the tab, pulling the commons, would see that stale future-dated regret
         // under a naive pick-latest unless this claim out-dates it. +20_000_000 clears the fixture.
-        timestamp: Date.now() + 20_000_000,
+        ...((t) => ({ timestamp: t, validFrom: t }))(Date.now() + 20_000_000),
         author: commons.operator,
         pointers: [
           {

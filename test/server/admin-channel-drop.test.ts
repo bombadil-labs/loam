@@ -59,6 +59,7 @@ const note = (text: string, seed: string, timestamp: number): Delta =>
   signClaims(
     {
       timestamp,
+      validFrom: timestamp,
       author: authorForSeed(seed),
       pointers: [{ role: "note", target: { kind: "primitive", value: text } }],
     },

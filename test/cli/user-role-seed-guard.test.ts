@@ -50,7 +50,7 @@ async function groundRoles(name: string): Promise<ReadonlySet<string>> {
     assembleGenesis({ operatorSeed: readSeed(home) }),
   );
   try {
-    return rolesOf(gw.reactor, gw.operator, name);
+    return rolesOf(gw.reactor, gw.operator, Date.now(), name);
   } finally {
     await gw.close();
   }

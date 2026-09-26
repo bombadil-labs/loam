@@ -38,6 +38,7 @@ const trustAt = (
   ts: number,
 ): Claims => ({
   timestamp: ts,
+  validFrom: ts,
   author: OP,
   pointers: [
     {
