@@ -64,9 +64,9 @@ const lensAt = (d: Delta): string | undefined => {
 };
 
 /** Every registration binding in `reactor`, as lens name + live or struck (by an operator
- * negation that survives), sorted. */
-function bindings(reactor: Reactor): string[] {
-  const struck = negatedAt(reactor, NOW, KEY.operator);
+ * negation that survives) at `now`, the scope's own validity time, sorted. */
+function bindings(reactor: Reactor, now: number): string[] {
+  const struck = negatedAt(reactor, now, KEY.operator);
   return [...reactor.snapshot()]
     .filter((d) => isRegistrationBinding(d.claims))
     .map((d) => `${lensAt(d)}: ${struck(d.id) ? "struck" : "live"}`)
@@ -106,8 +106,8 @@ async function observe(gw: Gateway, channel: string) {
   };
   return {
     delta: {
-      pool: pool === undefined ? "no pool" : bindings(pool.reactor),
-      root: bindings(gw.reactor),
+      pool: pool === undefined ? "no pool" : bindings(pool.reactor, pool.validityNow()),
+      root: bindings(gw.reactor, gw.validityNow()),
       "pool strikes": pool === undefined ? "no pool" : strikes(pool.reactor),
       "root strikes": strikes(gw.reactor),
     },
