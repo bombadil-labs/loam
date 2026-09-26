@@ -16,7 +16,8 @@ import {
 import { dataStruck, honoredStrikeOn } from "../../src/gateway/accounts.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
-import { CTX_REGISTRATION, lawfulNegated } from "../../src/gateway/registration.js";
+import { negatedAt } from "../../src/gateway/negation.js";
+import { CTX_REGISTRATION } from "../../src/gateway/registration.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { PLANT, PLANT_POLICY } from "../../test/gateway/fixtures.js";
 import { bothOrders, idsOf, KEY, record, SEEDS, signed, strike, type Who } from "./corpus.js";
@@ -95,16 +96,16 @@ describe("recordings: suppression across a strike's validity boundary", () => {
   it("each reader at T-1, T and T+1", async () => {
     const at = (now: number) =>
       bothOrders(CORPUS, (r) => {
-        const lawful = lawfulNegated(r, KEY.operator);
-        const struck = dataStruck(r, KEY.operator);
+        const negated = negatedAt(r, now, KEY.operator);
+        const struck = dataStruck(r, now, KEY.operator);
         const live = substrateLive(r, now);
         return Object.fromEntries(
           CLAIMS.map((d) => [
             d.id,
             {
-              lawfulNegated: lawful(d.id),
+              negatedAt: negated(d.id),
               dataStruck: struck(d.id),
-              honoredStrikeOn: honoredStrikeOn(r, d.id, KEY.operator) !== undefined,
+              honoredStrikeOn: honoredStrikeOn(r, now, d.id, KEY.operator) !== undefined,
               substrateStruck: !live.has(d.id),
             },
           ]),
