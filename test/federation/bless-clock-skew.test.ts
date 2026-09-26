@@ -39,8 +39,10 @@ describe("blessing law from a peer whose clock runs ahead", () => {
     const early = await ch.sync();
     expect(early.bound).toEqual([]);
     expect(early.parked).toHaveLength(1);
-    expect(early.parked[0]).toMatch(/alice:Plant: the schema definition for hyperschema:Plant/);
-    const start = Number(/valid only from (\d+)/.exec(early.parked[0]!)?.[1]);
+    expect(early.parked[0]).toMatch(
+      /alice:Plant: a schema definition for hyperschema:Plant first survives at/,
+    );
+    const start = Number(/first survives at (\d+)/.exec(early.parked[0]!)?.[1]);
     expect(start).toBeGreaterThanOrEqual(T + SKEW); // the peer's clock, not ours
     expect(start).toBeLessThan(T + SKEW + 1_000);
     const readsAt = Number(/this store reads at (\d+)/.exec(early.parked[0]!)?.[1]);

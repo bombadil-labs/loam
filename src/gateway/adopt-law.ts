@@ -1963,9 +1963,9 @@ function definitionWinner(
 }
 
 /**
- * Why no schema definition holds for `entity` at `now`: none ever holds, or the first one holds
- * from a later time. A definition from a peer whose clock runs ahead is valid only from its own
- * `validFrom`, and a negation valid only later leaves it live until then.
+ * Why no schema definition holds for `entity` at `now`: none ever survives, or one first survives
+ * at a later time. That time can be a definition's own `validFrom` (a peer whose clock runs ahead),
+ * or the moment a negation of it expires. It is not always the signed `validFrom`.
  */
 export function explainMissingDefinition(dset: DeltaSet, entity: string, now: number): string {
   // The error path only. Each future validity boundary in the set is a moment the answer can
@@ -1980,7 +1980,7 @@ export function explainMissingDefinition(dset: DeltaSet, entity: string, now: nu
     for (const bootstrap of [HYPER_SCHEMA_SCHEMA, SCHEMA_SCHEMA]) {
       const at = evalTerm(bootstrap.body, dset, t, entity);
       if (at.sort === "hview" && (at.hview.props.get("definition") ?? []).length > 0) {
-        return `the schema definition for ${entity} is valid only from ${t}, and this store reads at ${now}`;
+        return `a schema definition for ${entity} first survives at ${t}; this store reads at ${now}`;
       }
     }
   }
