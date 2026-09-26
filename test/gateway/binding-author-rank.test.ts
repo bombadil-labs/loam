@@ -14,6 +14,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "./fixtures.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const OP_SEED = "cc".repeat(32);
 const named = (name: string): Schema => ({ ...PLANT_POLICY, name });
@@ -28,7 +29,7 @@ describe("§47 — byAuthorRank at the door: the root's binding outranks a chann
     try {
       await me.append([
         signClaims(
-          bindingPolicyClaims("byAuthorRank", me.operatorAuthor!, me.nextTimestamp()),
+          withStamp(me.stamp(), (t) => bindingPolicyClaims("byAuthorRank", me.operatorAuthor!, t)),
           OP_SEED,
         ),
       ]);
@@ -75,7 +76,7 @@ describe("§47 — byAuthorRank at the door: the root's binding outranks a chann
     try {
       await me.append([
         signClaims(
-          bindingPolicyClaims("byAuthorRank", me.operatorAuthor!, me.nextTimestamp()),
+          withStamp(me.stamp(), (t) => bindingPolicyClaims("byAuthorRank", me.operatorAuthor!, t)),
           OP_SEED,
         ),
       ]);

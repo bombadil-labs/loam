@@ -48,7 +48,7 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, pickLatest } from "./fixtures.js";
 import { OP_SEED, OP, BEFORE_DEADLINE, AFTER_DEADLINE, standSlate } from "./slating.js";
-import { stamped } from "../../src/gateway/stamp.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const OWNER_SEED = "b4".repeat(32);
 const CONN_SEEDS = ["c5".repeat(32), "d6".repeat(32)];
@@ -70,21 +70,23 @@ afterEach(async () => {
 
 async function declare(gateway: Gateway, container: string, parent?: string) {
   const delta = signClaims(
-    containerClaims(
-      {
-        container,
-        trust: "curated",
-        posture: "shared",
-        // Ground arrives only through this container's inboxes; primary values are a leak control.
-        membership: {
-          op: "select",
-          pred: { match: { field: "author", cmp: "eq", const: "none" } },
-          in: "input",
+    withStamp(gateway.stamp(OP), (t) =>
+      containerClaims(
+        {
+          container,
+          trust: "curated",
+          posture: "shared",
+          // Ground arrives only through this container's inboxes; primary values are a leak control.
+          membership: {
+            op: "select",
+            pred: { match: { field: "author", cmp: "eq", const: "none" } },
+            in: "input",
+          },
+          ...(parent === undefined ? {} : { parent }),
         },
-        ...(parent === undefined ? {} : { parent }),
-      },
-      OP,
-      gateway.nextTimestamp(),
+        OP,
+        t,
+      ),
     ),
     OP_SEED,
   );
@@ -95,15 +97,17 @@ async function declare(gateway: Gateway, container: string, parent?: string) {
 async function envelope(gateway: Gateway, slots = 2, timeout = 10_000) {
   await gateway.append([
     signClaims(
-      envelopeClaims(
-        ENVELOPE_ANY,
-        {
-          maxConcurrentRenders: slots,
-          renderTimeoutMs: timeout,
-          maxMemoryMb: 128,
-        },
-        OP,
-        gateway.nextTimestamp(),
+      withStamp(gateway.stamp(OP), (t) =>
+        envelopeClaims(
+          ENVELOPE_ANY,
+          {
+            maxConcurrentRenders: slots,
+            renderTimeoutMs: timeout,
+            maxMemoryMb: 128,
+          },
+          OP,
+          t,
+        ),
       ),
       OP_SEED,
     ),
@@ -118,8 +122,8 @@ async function fixture() {
   gateways.push(gateway);
   await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN, OTHER]);
   await gateway.append([
-    observed(FERN, "height", 101, gateway.nextTimestamp(), OP_SEED),
-    observed(OTHER, "height", 102, gateway.nextTimestamp(), OP_SEED),
+    observed(FERN, "height", 101, gateway.stamp(authorForSeed(OP_SEED)), OP_SEED),
+    observed(OTHER, "height", 102, gateway.stamp(authorForSeed(OP_SEED)), OP_SEED),
   ]);
   const ancestor = await declare(gateway, "home");
   const connections = [];
@@ -134,8 +138,8 @@ async function fixture() {
     });
     const pool = inbox.gateway!;
     await pool.append([
-      observed(FERN, "height", index === 0 ? 201 : 301, pool.nextTimestamp(), seed),
-      observed(OTHER, "height", index === 0 ? 202 : 302, pool.nextTimestamp(), seed),
+      observed(FERN, "height", index === 0 ? 201 : 301, pool.stamp(requester), seed),
+      observed(OTHER, "height", index === 0 ? 202 : 302, pool.stamp(requester), seed),
     ]);
     const binding: ConnectionBinding = { container, inbox: inbox.entity! };
     connections.push({ inbox, pool, binding, requester, seed });
@@ -264,7 +268,7 @@ describe("explicit renderer execution context", () => {
       signClaims(
         {
           author: f.first.requester,
-          ...stamped(local.nextTimestamp()),
+          ...local.stamp(f.first.requester),
           pointers: [
             {
               role: "subject",
@@ -371,7 +375,13 @@ describe("explicit renderer execution context", () => {
     const f = await fixture();
     const bystander = "plant:oak";
     await f.first.pool.append([
-      observed(bystander, "height", 203, f.first.pool.nextTimestamp(), f.first.seed),
+      observed(
+        bystander,
+        "height",
+        203,
+        f.first.pool.stamp(authorForSeed(f.first.seed)),
+        f.first.seed,
+      ),
     ]);
     const condemned = [...f.first.pool.reactor.snapshot()].filter(
       (delta) =>
@@ -385,10 +395,12 @@ describe("explicit renderer execution context", () => {
     expect(condemned).toHaveLength(2);
     // Use the same signed frozen-membership/slate fixture as the existing read-door rails.
     // Its members name the real inbox delta IDs; no clock, authority, or read callback is mocked.
+    const at = f.gateway.stamp();
     const slate = await standSlate(f.gateway, {
       members: condemned,
       closes: ["cite"],
-      ts: f.gateway.nextTimestamp(),
+      ts: at.timestamp,
+      validFrom: at.validFrom,
     });
     expect(
       f.gateway.slates(BEFORE_DEADLINE).find((row) => row.record === slate.record)?.members,
@@ -472,7 +484,10 @@ describe("explicit renderer execution context", () => {
     await prepareRendererInContext(f.renderer, second);
     expect((await renderRendererInContext(f.renderer, FERN, first)).body).toContain("first=201");
     await f.gateway.append([
-      signClaims(revocationClaims(f.ancestor.id, OP, f.gateway.nextTimestamp()), OP_SEED),
+      signClaims(
+        withStamp(f.gateway.stamp(OP), (t) => revocationClaims(f.ancestor.id, OP, t)),
+        OP_SEED,
+      ),
     ]);
     expect(
       readContainerTable(f.gateway.reactor, f.gateway.validityNow(), OP).containers.has(

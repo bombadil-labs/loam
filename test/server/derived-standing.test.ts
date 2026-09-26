@@ -67,7 +67,7 @@ import type { Gateway } from "../../src/gateway/gateway.js";
 import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
 import { FERN, observed } from "../spike/garden.js";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
-import { stamped } from "../../src/gateway/stamp.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 /** A minimal, valid registration for one lens name — the canonical entity program. */
 const envelope = (name: string, prop = "note", roots = [`${name}:1`]): unknown => ({
@@ -212,7 +212,7 @@ describe("§58 position 2 — the binding is the register grant, and the law ser
     await gateway.append([
       signClaims(
         {
-          ...stamped(gateway.nextTimestamp()),
+          ...gateway.stamp(),
           author: gateway.operatorAuthor!,
           pointers: [
             {
@@ -239,7 +239,9 @@ describe("§58 position 2 — the binding is the register grant, and the law ser
       (mine.data as { ada_journal_peek: { secret: unknown } }).ada_journal_peek.secret,
     ).toBeNull();
     // Two-sided: the operator's own law over the operator's own ground is untouched.
-    await gateway.append([observed(FERN, "height", 30, gateway.nextTimestamp(), OPERATOR_SEED)]);
+    await gateway.append([
+      observed(FERN, "height", 30, gateway.stamp(authorForSeed(OPERATOR_SEED)), OPERATOR_SEED),
+    ]);
     const theirs = await gql(base, "op-token", `{ plant(entity: "${FERN}") { height } }`);
     expect((theirs.data as { plant: { height: number } }).plant.height).toBe(30);
     await closeAll();
@@ -387,7 +389,9 @@ describe("§58 position 2 — the binding is the register grant, and the law ser
       const key = authorForSeed(grantOf(connectorsHome, "ada").actorSeed);
       await gateway.append([
         signClaims(
-          grantClaims(STORE_ENTITY, key, "register", OPERATOR, gateway.nextTimestamp(), "zed:"),
+          withStamp(gateway.stamp(), (t) =>
+            grantClaims(STORE_ENTITY, key, "register", OPERATOR, t, "zed:"),
+          ),
           OPERATOR_SEED,
         ),
       ]);
@@ -422,7 +426,9 @@ describe("§58 position 2 — the binding is the register grant, and the law ser
       const key = authorForSeed(grantOf(connectorsHome, "ada").actorSeed);
       await gateway.append([
         signClaims(
-          grantClaims(STORE_ENTITY, key, "register", OPERATOR, gateway.nextTimestamp(), "zed:"),
+          withStamp(gateway.stamp(), (t) =>
+            grantClaims(STORE_ENTITY, key, "register", OPERATOR, t, "zed:"),
+          ),
           OPERATOR_SEED,
         ),
       ]);
@@ -463,11 +469,15 @@ describe("§58 position 2 — the binding is the register grant, and the law ser
     const key = authorForSeed(TWO_SEED);
     await gateway.append([
       signClaims(
-        grantClaims(STORE_ENTITY, key, "register", OPERATOR, gateway.nextTimestamp(), "zed:"),
+        withStamp(gateway.stamp(), (t) =>
+          grantClaims(STORE_ENTITY, key, "register", OPERATOR, t, "zed:"),
+        ),
         OPERATOR_SEED,
       ),
       signClaims(
-        grantClaims(STORE_ENTITY, key, "register", OPERATOR, gateway.nextTimestamp(), "yon:"),
+        withStamp(gateway.stamp(), (t) =>
+          grantClaims(STORE_ENTITY, key, "register", OPERATOR, t, "yon:"),
+        ),
         OPERATOR_SEED,
       ),
     ]);

@@ -41,6 +41,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Gateway } from "../../src/gateway/gateway.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { containerClaims, readContainerTable } from "../../src/gateway/container.js";
 import { eraseClaims, erasedInDeltas, readErasures } from "../../src/gateway/erase.js";
@@ -397,20 +398,22 @@ describe("T288 exact local lifecycle and independent v1 vocabulary", () => {
     const { gw } = await home();
     await gw.append([
       signed(
-        containerClaims(
-          {
-            container: "ada:journal",
-            trust: "curated",
-            posture: "shared",
-            membership: {
-              op: "select",
-              pred: { match: { field: "author", cmp: "eq", const: "none" } },
-              in: "input",
+        withStamp(gw.stamp(OP), (t) =>
+          containerClaims(
+            {
+              container: "ada:journal",
+              trust: "curated",
+              posture: "shared",
+              membership: {
+                op: "select",
+                pred: { match: { field: "author", cmp: "eq", const: "none" } },
+                in: "input",
+              },
+              leeway: { ...SEALED_LEEWAY, receive: true },
             },
-            leeway: { ...SEALED_LEEWAY, receive: true },
-          },
-          OP,
-          gw.nextTimestamp(),
+            OP,
+            t,
+          ),
         ),
       ),
     ]);
@@ -648,10 +651,12 @@ describe("T288 honest local received operand", () => {
     await pool.federate([arrival]);
     await gw.append([
       signed(
-        channelRecordClaims(
-          { ...gw.channelStatus(ch.name)[0]!, unattested: [a.id, b.id] },
-          OP,
-          gw.nextTimestamp(),
+        withStamp(gw.stamp(OP), (t) =>
+          channelRecordClaims(
+            { ...gw.channelStatus(ch.name)[0]!, unattested: [a.id, b.id] },
+            OP,
+            t,
+          ),
         ),
       ),
     ]);
@@ -1234,7 +1239,7 @@ describe("T288 strict literal history and exact attachment projection", () => {
     const { ch } = await channel(gw);
     const opening = opened(gw, ch.name).opening;
     const original = gw.reactor.get(opening.poolDeclaration)!;
-    await gw.append([signed({ ...original.claims, timestamp: gw.nextTimestamp() })]);
+    await gw.append([signed({ ...original.claims, ...gw.stamp(OP) })]);
     expect(localChannelEvidence(gw, ch.name).state).toBe("unavailable");
     gw.channelPools.delete(ch.name);
     gw.federationChannels.delete(ch.name);

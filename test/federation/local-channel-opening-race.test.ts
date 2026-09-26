@@ -118,7 +118,7 @@ describe("T288 exact freshly authored declaration across async pool attachment",
       expect(opens(gw, name)).toEqual([]);
       // The race is an ordinary operator append on this same gateway while channel creation
       // awaits a real backend. No raw reactor writes, event writer mocks or clock sleeps.
-      const replacement = signClaims({ ...original.claims, timestamp: gw.nextTimestamp() }, SEED);
+      const replacement = signClaims({ ...original.claims, ...gw.stamp() }, SEED);
       expect(replacement.id).not.toBe(original.id);
       await gw.append([replacement]);
       expect(await gw.backend.holds(replacement.id)).toBe(true);

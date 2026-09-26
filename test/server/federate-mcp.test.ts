@@ -14,6 +14,7 @@ import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { serve } from "../../src/server/http.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const OP = "cc".repeat(32);
 const FRIEND = "d1".repeat(32);
@@ -29,13 +30,15 @@ async function storeWithChannels(): Promise<Gateway> {
   await gw.openChannel({ into: "work", prefix: "carol", source: nothing });
   await gw.append([
     signClaims(
-      grantClaims(
-        STORE_ENTITY,
-        authorForSeed(FRIEND),
-        "federate",
-        gw.operatorAuthor!,
-        gw.nextTimestamp(),
-        "friends",
+      withStamp(gw.stamp(), (t) =>
+        grantClaims(
+          STORE_ENTITY,
+          authorForSeed(FRIEND),
+          "federate",
+          gw.operatorAuthor!,
+          t,
+          "friends",
+        ),
       ),
       OP,
     ),
@@ -149,10 +152,8 @@ describe("T188 — federation tools over MCP", () => {
 describe("T217 — a record this store cannot read is reported unreadable, never healthy", () => {
   /** One channel's record, minus one role — the product's own shape, partially legible. */
   async function truncate(gw: Gateway, pool: string, role: string): Promise<void> {
-    const built = channelRecordClaims(
-      gw.channelStatus(pool)[0]!,
-      gw.operatorAuthor!,
-      gw.nextTimestamp(),
+    const built = withStamp(gw.stamp(), (t) =>
+      channelRecordClaims(gw.channelStatus(pool)[0]!, gw.operatorAuthor!, t),
     );
     await gw.append([
       signClaims({ ...built, pointers: built.pointers.filter((p) => p.role !== role) }, OP),

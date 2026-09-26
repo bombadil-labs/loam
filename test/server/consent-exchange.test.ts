@@ -40,6 +40,7 @@ import {
 } from "../../src/server/oauth-file.js";
 import { AUTHORIZE_PATH, revokeConnector } from "../../src/server/oauth.js";
 import { SAME_ORIGIN, signIn } from "../helpers/session-fixture.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
@@ -381,11 +382,15 @@ describe("§58 S1b — the exchange honors the binding", () => {
     const adaPool = gateway.connectionInboxes.get(ada.inbox!)!.gateway!;
     const beaPool = gateway.connectionInboxes.get(bea.inbox!)!.gateway!;
     const adaNote = signClaims(
-      noteClaims(ada.actor, "note:ada", "ada's note", adaPool.nextTimestamp()),
+      withStamp(adaPool.stamp(ada.actor), (t) =>
+        noteClaims(ada.actor, "note:ada", "ada's note", t),
+      ),
       ada.actorSeed,
     );
     const beaNote = signClaims(
-      noteClaims(bea.actor, "note:bea", "bea's note", beaPool.nextTimestamp()),
+      withStamp(beaPool.stamp(bea.actor), (t) =>
+        noteClaims(bea.actor, "note:bea", "bea's note", t),
+      ),
       bea.actorSeed,
     );
     await adaPool.append([adaNote]);
@@ -427,7 +432,9 @@ describe("§58 S1b — the exchange honors the binding", () => {
     // The key holds NO store-wide grant (§58), so a delta of its reaches the primary only by
     // federation — the shape a pre-§58 store's history takes. Appended, it is refused.
     const early = signClaims(
-      noteClaims(grant.actor, "note:early", "before the second binding", gateway.nextTimestamp()),
+      withStamp(gateway.stamp(grant.actor), (t) =>
+        noteClaims(grant.actor, "note:early", "before the second binding", t),
+      ),
       grant.actorSeed,
     );
     await expect(gateway.append([early])).rejects.toThrow(/not permitted/);
@@ -456,7 +463,9 @@ describe("§58 S1b — the exchange honors the binding", () => {
     // key's that reaches the primary AFTER the second binding (federated, as above) is inside the
     // second pool's scope on the next pulse.
     const later = signClaims(
-      noteClaims(grant.actor, "note:later", "after the second binding", gateway.nextTimestamp()),
+      withStamp(gateway.stamp(grant.actor), (t) =>
+        noteClaims(grant.actor, "note:later", "after the second binding", t),
+      ),
       grant.actorSeed,
     );
     await gateway.federate([later], { admit: () => true });
@@ -601,7 +610,9 @@ describe("§58 S1b — the exchange honors the binding", () => {
     const grant = readOAuthFile(connectorsHome).grants[0]!;
     const pool = gateway.connectionInboxes.get(grant.inbox!)!.gateway!;
     const note = signClaims(
-      noteClaims(grant.actor, "note:durable", "written before the restart", pool.nextTimestamp()),
+      withStamp(pool.stamp(grant.actor), (t) =>
+        noteClaims(grant.actor, "note:durable", "written before the restart", t),
+      ),
       grant.actorSeed,
     );
     await pool.append([note]);

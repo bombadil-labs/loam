@@ -26,6 +26,7 @@ import { EMPTY_OAUTH, writeOAuthFile, type OAuthClient } from "../../src/server/
 import { writeCredentials } from "../../src/server/credentials.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import { MemoryBackend } from "../../src/store/memory.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
@@ -260,7 +261,7 @@ describe("T255 (b) — the answer reads the ground: a revocation binds on the ve
     expect(writeGrant, "the fixture's write grant was not found").toBeDefined();
     await gateway.append([
       signClaims(
-        makeNegationClaims(OPERATOR, gateway.nextTimestamp(), writeGrant!.id),
+        withStamp(gateway.stamp(OPERATOR), (t) => makeNegationClaims(OPERATOR, t, writeGrant!.id)),
         OPERATOR_SEED,
       ),
     ]);

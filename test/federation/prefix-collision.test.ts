@@ -46,6 +46,7 @@ import { describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 import {
   containerClaims,
   readContainerTable,
@@ -108,7 +109,7 @@ const roleOf = (d: Delta, role: string): string | number | boolean | undefined =
 /** An operator-signed negation of one delta, appended to the store's own ground. */
 const strikeBy = async (gw: Gateway, seed: string, target: string): Promise<Delta> => {
   const strike = signClaims(
-    makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), target),
+    withStamp(gw.stamp(), (t) => makeNegationClaims(gw.operatorAuthor!, t, target)),
     seed,
   );
   await gw.append([strike]);
@@ -433,15 +434,17 @@ describe("T215 (d) — only this store's own law assigns a prefix", () => {
       // the prefix out. The record still states it.
       await gw.append([
         signClaims(
-          containerClaims(
-            {
-              container: ch.name,
-              trust: "untrusted",
-              posture: "separate",
-              inboxOf: "other",
-            },
-            gw.operatorAuthor!,
-            gw.nextTimestamp(),
+          withStamp(gw.stamp(), (t) =>
+            containerClaims(
+              {
+                container: ch.name,
+                trust: "untrusted",
+                posture: "separate",
+                inboxOf: "other",
+              },
+              gw.operatorAuthor!,
+              t,
+            ),
           ),
           BOB_SEED,
         ),
@@ -473,10 +476,12 @@ describe("T215 (d) — only this store's own law assigns a prefix", () => {
       // record was ever a choice a person made; the other is a derivation from a name.
       await gw.append([
         signClaims(
-          containerClaims(
-            { container: ch.name, trust: "untrusted", posture: "separate", inboxOf: "ada" },
-            gw.operatorAuthor!,
-            gw.nextTimestamp(),
+          withStamp(gw.stamp(), (t) =>
+            containerClaims(
+              { container: ch.name, trust: "untrusted", posture: "separate", inboxOf: "ada" },
+              gw.operatorAuthor!,
+              t,
+            ),
           ),
           BOB_SEED,
         ),
@@ -519,7 +524,9 @@ describe("T215 (d) — only this store's own law assigns a prefix", () => {
       };
       await gw.append([
         signClaims(
-          containerClaims({ ...orphan, inboxOf: "other" }, gw.operatorAuthor!, gw.nextTimestamp()),
+          withStamp(gw.stamp(), (t) =>
+            containerClaims({ ...orphan, inboxOf: "other" }, gw.operatorAuthor!, t),
+          ),
           BOB_SEED,
         ),
       ]);
@@ -539,10 +546,8 @@ describe("T215 (d) — only this store's own law assigns a prefix", () => {
       // with an `inboxOf` that leads its name, and opens resume.
       await gw.append([
         signClaims(
-          containerClaims(
-            { ...orphan, inboxOf: "ada:feed" },
-            gw.operatorAuthor!,
-            gw.nextTimestamp(),
+          withStamp(gw.stamp(), (t) =>
+            containerClaims({ ...orphan, inboxOf: "ada:feed" }, gw.operatorAuthor!, t),
           ),
           BOB_SEED,
         ),
@@ -562,15 +567,17 @@ describe("T215 (d) — only this store's own law assigns a prefix", () => {
       // half, so the remainder is the prefix exactly — colons in the container and all.
       await gw.append([
         signClaims(
-          containerClaims(
-            {
-              container: "channel:ada:feed:alice",
-              trust: "untrusted",
-              posture: "separate",
-              inboxOf: "ada:feed",
-            },
-            gw.operatorAuthor!,
-            gw.nextTimestamp(),
+          withStamp(gw.stamp(), (t) =>
+            containerClaims(
+              {
+                container: "channel:ada:feed:alice",
+                trust: "untrusted",
+                posture: "separate",
+                inboxOf: "ada:feed",
+              },
+              gw.operatorAuthor!,
+              t,
+            ),
           ),
           BOB_SEED,
         ),
@@ -714,15 +721,17 @@ describe("T215 (e) — one pool name, one meaning", () => {
       await gw.openChannel({ into: "ada:feed", prefix: "alice", source: quiet });
       await gw.append([
         signClaims(
-          containerClaims(
-            {
-              container: "channel:inbox:alice",
-              trust: "untrusted",
-              posture: "separate",
-              inboxOf: "inbox",
-            },
-            gw.operatorAuthor!,
-            gw.nextTimestamp(),
+          withStamp(gw.stamp(), (t) =>
+            containerClaims(
+              {
+                container: "channel:inbox:alice",
+                trust: "untrusted",
+                posture: "separate",
+                inboxOf: "inbox",
+              },
+              gw.operatorAuthor!,
+              t,
+            ),
           ),
           BOB_SEED,
         ),

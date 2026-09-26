@@ -70,7 +70,6 @@ import { refusalKey } from "../../src/gateway/lifecycle.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
-import { stamped } from "../../src/gateway/stamp.js";
 
 const OP_SEED = "0e".repeat(32);
 const OP = authorForSeed(OP_SEED);
@@ -157,7 +156,7 @@ const strike = (p: Gateway, deltaId: string): Promise<unknown> =>
   p.append([
     signClaims(
       {
-        ...stamped(p.nextTimestamp()),
+        ...p.stamp(OP),
         author: OP,
         pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: deltaId } } }],
       },

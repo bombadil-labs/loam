@@ -28,6 +28,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const OP_SEED = "cc".repeat(32);
 const named = (name: string): Schema => ({ ...PLANT_POLICY, name });
@@ -74,7 +75,10 @@ async function trickyCorpus(gw: Gateway): Promise<void> {
       ) && gw.reactor.negationsOf(d.id).length === 0,
   )!;
   await gw.append([
-    signClaims(makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), binding.id), OP_SEED),
+    signClaims(
+      withStamp(gw.stamp(), (t) => makeNegationClaims(gw.operatorAuthor!, t, binding.id)),
+      OP_SEED,
+    ),
   ]);
 }
 
@@ -84,7 +88,10 @@ describe("§47 — the equivalence: the fast path is a cache with a proof", () =
       const gw = await store();
       try {
         await gw.append([
-          signClaims(bindingPolicyClaims(mode, gw.operatorAuthor!, gw.nextTimestamp()), OP_SEED),
+          signClaims(
+            withStamp(gw.stamp(), (t) => bindingPolicyClaims(mode, gw.operatorAuthor!, t)),
+            OP_SEED,
+          ),
         ]);
         await trickyCorpus(gw);
 

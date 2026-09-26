@@ -56,6 +56,7 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import { FERN } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "./fixtures.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const OP_SEED = "cc".repeat(32);
 const ALICE_SEED = "a1".repeat(32);
@@ -71,7 +72,10 @@ const feed = (g: Gateway) => ({ pull: () => Promise.resolve(g.reactor.arrivalLog
 /** Declare `conflicts` in a ground, signed by the operator whose law that ground reads. */
 const declareConflicts = (gw: Gateway, seed: string): Promise<unknown> =>
   gw.append([
-    signClaims(bindingPolicyClaims("conflicts", gw.operatorAuthor!, gw.nextTimestamp()), seed),
+    signClaims(
+      withStamp(gw.stamp(), (t) => bindingPolicyClaims("conflicts", gw.operatorAuthor!, t)),
+      seed,
+    ),
   ]);
 
 /**
@@ -347,7 +351,7 @@ describe("T204 — a contested name is named, with its origin", () => {
       // publish loudly (§47 criterion 12), and a store holding one binding proves nothing about a
       // reading that only ever reports contests between two.
       const declaration = signClaims(
-        bindingPolicyClaims("conflicts", gw.operatorAuthor!, gw.nextTimestamp()),
+        withStamp(gw.stamp(), (t) => bindingPolicyClaims("conflicts", gw.operatorAuthor!, t)),
         OP_SEED,
       );
       await gw.append([declaration]);
@@ -366,7 +370,7 @@ describe("T204 — a contested name is named, with its origin", () => {
       // and the reading must fall silent even though both rival bindings are still legible.
       await gw.append([
         signClaims(
-          makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), declaration.id),
+          withStamp(gw.stamp(), (t) => makeNegationClaims(gw.operatorAuthor!, t, declaration.id)),
           OP_SEED,
         ),
       ]);
@@ -591,7 +595,7 @@ describe("T204 — a contested name is named, with its origin", () => {
     const gw = await store(OP_SEED);
     try {
       const declaration = signClaims(
-        bindingPolicyClaims("conflicts", gw.operatorAuthor!, gw.nextTimestamp()),
+        withStamp(gw.stamp(), (t) => bindingPolicyClaims("conflicts", gw.operatorAuthor!, t)),
         OP_SEED,
       );
       await gw.append([declaration]);
@@ -608,7 +612,7 @@ describe("T204 — a contested name is named, with its origin", () => {
       // Strike the declaration and read WITHOUT replaying by hand. Nothing else touches the fold.
       await gw.append([
         signClaims(
-          makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), declaration.id),
+          withStamp(gw.stamp(), (t) => makeNegationClaims(gw.operatorAuthor!, t, declaration.id)),
           OP_SEED,
         ),
       ]);

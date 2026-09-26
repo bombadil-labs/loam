@@ -56,6 +56,7 @@ import { writeUserSeed } from "../../src/cli/config.js";
 import { signIn } from "../helpers/session-fixture.js";
 import { FERN } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
@@ -165,7 +166,10 @@ async function contestedServer(): Promise<{ base: string; gateway: Gateway }> {
   const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
   await seedUsers(gateway);
   await gateway.append([
-    signClaims(bindingPolicyClaims("conflicts", OPERATOR, gateway.nextTimestamp()), OPERATOR_SEED),
+    signClaims(
+      withStamp(gateway.stamp(OPERATOR), (t) => bindingPolicyClaims("conflicts", OPERATOR, t)),
+      OPERATOR_SEED,
+    ),
   ]);
   const channel = await gateway.openChannel({
     into: "ada:feed",
@@ -203,7 +207,10 @@ async function calmServer(): Promise<{ base: string; gateway: Gateway }> {
   const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
   await seedUsers(gateway);
   await gateway.append([
-    signClaims(bindingPolicyClaims("conflicts", OPERATOR, gateway.nextTimestamp()), OPERATOR_SEED),
+    signClaims(
+      withStamp(gateway.stamp(OPERATOR), (t) => bindingPolicyClaims("conflicts", OPERATOR, t)),
+      OPERATOR_SEED,
+    ),
   ]);
   const channel = await gateway.openChannel({
     into: "ada:feed",

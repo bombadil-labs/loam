@@ -57,6 +57,7 @@ import {
   type Leeway,
   type Terms,
 } from "../../src/gateway/leeway.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const OP_SEED = "b7".repeat(32);
 const OP = authorForSeed(OP_SEED);
@@ -472,16 +473,18 @@ describe("§58 — a listing refresh carries a standing leeway forward", () => {
     ).containers.get(name)!;
     await gw.append([
       signClaims(
-        containerClaims(
-          {
-            container: name,
-            trust: standing.trust,
-            posture: standing.posture,
-            membership: standing.membership,
-            leeway: WIDE,
-          },
-          OP,
-          gw.nextTimestamp(),
+        withStamp(gw.stamp(OP), (t) =>
+          containerClaims(
+            {
+              container: name,
+              trust: standing.trust,
+              posture: standing.posture,
+              membership: standing.membership,
+              leeway: WIDE,
+            },
+            OP,
+            t,
+          ),
         ),
         OP_SEED,
       ),
@@ -514,15 +517,17 @@ describe("§58 — a listing refresh carries a standing leeway forward", () => {
       gw.validityNow(),
       gw.operatorAuthor,
     ).containers.get(name)!;
-    const base = containerClaims(
-      {
-        container: name,
-        trust: standing.trust,
-        posture: standing.posture,
-        membership: standing.membership,
-      },
-      OP,
-      gw.nextTimestamp(),
+    const base = withStamp(gw.stamp(OP), (t) =>
+      containerClaims(
+        {
+          container: name,
+          trust: standing.trust,
+          posture: standing.posture,
+          membership: standing.membership,
+        },
+        OP,
+        t,
+      ),
     );
     // Seeded while `gw` still holds the backend, then read by a SECOND gateway: closing this one
     // would close the store under it. `gw` is not used again after this point.
@@ -591,16 +596,18 @@ describe("§58 — a listing refresh carries a standing leeway forward", () => {
     expect(said.leeway).toMatchObject({ receive: false, publish: false, delegate: "off" });
     await gw.append([
       signClaims(
-        containerClaims(
-          {
-            container: name,
-            trust: said.trust,
-            posture: said.posture,
-            membership: said.membership,
-            leeway: WIDE,
-          },
-          OP,
-          gw.nextTimestamp(),
+        withStamp(gw.stamp(OP), (t) =>
+          containerClaims(
+            {
+              container: name,
+              trust: said.trust,
+              posture: said.posture,
+              membership: said.membership,
+              leeway: WIDE,
+            },
+            OP,
+            t,
+          ),
         ),
         OP_SEED,
       ),

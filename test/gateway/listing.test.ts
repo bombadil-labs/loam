@@ -41,6 +41,7 @@ import {
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE, pickLatest } from "./fixtures.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
@@ -336,34 +337,38 @@ describe("the listing door — delta level: what the container actually holds", 
     // knobs this door never sets, and a declaration is latest-wins over the WHOLE record.
     await gw.append([
       signClaims(
-        containerClaims(
-          {
-            container: "container:garden",
-            trust: "curated",
-            posture: "shared",
-            membership: {
-              op: "select",
-              pred: { hasPointer: { context: { exact: "nothing" } } },
-              in: "input",
+        withStamp(gw.stamp(OPERATOR), (t) =>
+          containerClaims(
+            {
+              container: "container:garden",
+              trust: "curated",
+              posture: "shared",
+              membership: {
+                op: "select",
+                pred: { hasPointer: { context: { exact: "nothing" } } },
+                in: "input",
+              },
             },
-          },
-          OPERATOR,
-          gw.nextTimestamp(),
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),
       signClaims(
-        containerClaims(
-          {
-            container: name,
-            trust: "curated",
-            posture: "shared",
-            parent: "container:garden",
-            version: "deadbeef",
-            membership: gw.containers().containers.get(name)!.membership,
-          },
-          OPERATOR,
-          gw.nextTimestamp(),
+        withStamp(gw.stamp(OPERATOR), (t) =>
+          containerClaims(
+            {
+              container: name,
+              trust: "curated",
+              posture: "shared",
+              parent: "container:garden",
+              version: "deadbeef",
+              membership: gw.containers().containers.get(name)!.membership,
+            },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),

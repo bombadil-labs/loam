@@ -11,7 +11,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "./fixtures.js";
-import { stamped } from "../../src/gateway/stamp.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const OP_SEED = "cc".repeat(32);
 const named = (name: string): Schema => ({ ...PLANT_POLICY, name });
@@ -47,7 +47,7 @@ describe("§47 — the policy is data", () => {
       // Same live gateway; the declaration lands as an ordinary append...
       await gw.append([
         signClaims(
-          bindingPolicyClaims("byTimestamp", gw.operatorAuthor!, gw.nextTimestamp()),
+          withStamp(gw.stamp(), (t) => bindingPolicyClaims("byTimestamp", gw.operatorAuthor!, t)),
           OP_SEED,
         ),
       ]);
@@ -71,7 +71,9 @@ describe("§47 — the policy is data", () => {
     try {
       await gw.append([
         signClaims(
-          bindingPolicyClaims("conflicts", gw.operatorAuthor!, gw.nextTimestamp(), "friends"),
+          withStamp(gw.stamp(), (t) =>
+            bindingPolicyClaims("conflicts", gw.operatorAuthor!, t, "friends"),
+          ),
           OP_SEED,
         ),
       ]);
@@ -96,7 +98,7 @@ describe("§47 — the policy is data", () => {
         gw.append([
           signClaims(
             {
-              ...stamped(gw.nextTimestamp()),
+              ...gw.stamp(),
               author: gw.operatorAuthor!,
               pointers: [
                 {
@@ -124,7 +126,9 @@ describe("§47 — a struck declaration stops governing (H1)", () => {
     const gw = await store();
     try {
       const declared = await (async () => {
-        const claims = bindingPolicyClaims("byTimestamp", gw.operatorAuthor!, gw.nextTimestamp());
+        const claims = withStamp(gw.stamp(), (t) =>
+          bindingPolicyClaims("byTimestamp", gw.operatorAuthor!, t),
+        );
         await gw.append([signClaims(claims, OP_SEED)]);
         return [...gw.reactor.snapshot()].find((d) =>
           d.claims.pointers.some(
@@ -139,7 +143,7 @@ describe("§47 — a struck declaration stops governing (H1)", () => {
       const { makeNegationClaims } = await import("@bombadil/rhizomatic");
       await gw.append([
         signClaims(
-          makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), declared.id),
+          withStamp(gw.stamp(), (t) => makeNegationClaims(gw.operatorAuthor!, t, declared.id)),
           OP_SEED,
         ),
       ]);
@@ -157,13 +161,13 @@ describe("§47 — a struck declaration stops governing (H1)", () => {
     try {
       await gw.append([
         signClaims(
-          bindingPolicyClaims("byTimestamp", gw.operatorAuthor!, gw.nextTimestamp()),
+          withStamp(gw.stamp(), (t) => bindingPolicyClaims("byTimestamp", gw.operatorAuthor!, t)),
           OP_SEED,
         ),
       ]);
       await gw.append([
         signClaims(
-          bindingPolicyClaims("conflicts", gw.operatorAuthor!, gw.nextTimestamp()),
+          withStamp(gw.stamp(), (t) => bindingPolicyClaims("conflicts", gw.operatorAuthor!, t)),
           OP_SEED,
         ),
       ]);
@@ -179,7 +183,7 @@ describe("§47 — a struck declaration stops governing (H1)", () => {
       const { makeNegationClaims } = await import("@bombadil/rhizomatic");
       await gw.append([
         signClaims(
-          makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), conflictsDecl.id),
+          withStamp(gw.stamp(), (t) => makeNegationClaims(gw.operatorAuthor!, t, conflictsDecl.id)),
           OP_SEED,
         ),
       ]);

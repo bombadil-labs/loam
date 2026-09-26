@@ -49,6 +49,7 @@ import {
   poolOf,
   whoami,
 } from "../helpers/connection-fixture.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 afterEach(closeAll);
 
@@ -140,7 +141,7 @@ describe("S1b-ii — a bound connection's writes land in its inbox pool, never t
     const grant = grantOf(connectorsHome, "ada");
     const pool = poolOf(gateway, grant.inbox!);
 
-    const own = heightClaim(grant.actorSeed, 44, gateway.nextTimestamp());
+    const own = heightClaim(grant.actorSeed, 44, gateway.stamp(grant.actor));
     const ok = await appendRaw(base, token, [own]);
     expect(ok.status).toBe(200);
     expect(pool.reactor.get(own.id)).toBeDefined();
@@ -148,8 +149,8 @@ describe("S1b-ii — a bound connection's writes land in its inbox pool, never t
 
     // A delta signed by another key rides nowhere on this token: the whole batch is refused and
     // nothing lands in either reactor — including the key's own delta beside it.
-    const foreign = heightClaim(ACTOR_SEED, 45, gateway.nextTimestamp());
-    const ownToo = heightClaim(grant.actorSeed, 46, gateway.nextTimestamp());
+    const foreign = heightClaim(ACTOR_SEED, 45, gateway.stamp(authorForSeed(ACTOR_SEED)));
+    const ownToo = heightClaim(grant.actorSeed, 46, gateway.stamp(grant.actor));
     const refused = await appendRaw(base, token, [ownToo, foreign]);
     expect(refused.status).toBe(403);
     expect(((await refused.json()) as { errors: string[] }).errors[0]).toContain("own key signed");
@@ -158,7 +159,7 @@ describe("S1b-ii — a bound connection's writes land in its inbox pool, never t
       expect(gw.reactor.get(ownToo.id)).toBeUndefined();
     }
     // The bystander: the operator's raw door appends into the primary as it always did.
-    const operators = heightClaim(OPERATOR_SEED, 47, gateway.nextTimestamp());
+    const operators = heightClaim(OPERATOR_SEED, 47, gateway.stamp(OPERATOR));
     expect((await appendRaw(base, "op-token", [operators])).status).toBe(200);
     expect(gateway.reactor.get(operators.id)).toBeDefined();
   });
@@ -174,7 +175,7 @@ describe("S1b-ii — a bound connection's writes land in its inbox pool, never t
     for (const key of [grant.actor, authorForSeed(ACTOR_SEED)]) {
       await gateway.append([
         signClaims(
-          grantClaims(STORE_ENTITY, key, "write", OPERATOR, gateway.nextTimestamp()),
+          withStamp(gateway.stamp(), (t) => grantClaims(STORE_ENTITY, key, "write", OPERATOR, t)),
           OPERATOR_SEED,
         ),
       ]);
@@ -191,7 +192,7 @@ describe("S1b-ii — a bound connection's writes land in its inbox pool, never t
     ).toBe(true);
     // The grant is REAL — the key may append to the primary through the library — which is what
     // makes the door's routing, and not a missing grant, the reason nothing lands there below.
-    const direct = heightClaim(grant.actorSeed, 50, gateway.nextTimestamp());
+    const direct = heightClaim(grant.actorSeed, 50, gateway.stamp(grant.actor));
     await gateway.append([direct]);
     expect(gateway.reactor.get(direct.id)).toBeDefined();
 
@@ -199,7 +200,7 @@ describe("S1b-ii — a bound connection's writes land in its inbox pool, never t
     expect((await mutateHeight(base, token, 51)).status).toBe(200);
     expect(heightDeltas(pool, 51)).toHaveLength(1);
     expect(heightDeltas(gateway, 51)).toEqual([]);
-    const raw = heightClaim(grant.actorSeed, 52, gateway.nextTimestamp());
+    const raw = heightClaim(grant.actorSeed, 52, gateway.stamp(grant.actor));
     expect((await appendRaw(base, token, [raw])).status).toBe(200);
     expect(pool.reactor.get(raw.id)).toBeDefined();
     expect(gateway.reactor.get(raw.id)).toBeUndefined();

@@ -81,6 +81,7 @@ import {
   grantOf,
 } from "../helpers/connection-fixture.js";
 import { FERN } from "../spike/garden.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const PEER_SEED = "7a".repeat(32);
 const PEER_TOKEN = "peer-door-token";
@@ -118,19 +119,21 @@ const declare = (gw: Gateway, container: string, leeway: Leeway): Promise<unknow
   if (standing === undefined) throw new Error(`${container} is not declared`);
   return gw.append([
     signClaims(
-      containerClaims(
-        {
-          container,
-          trust: standing.trust,
-          posture: standing.posture,
-          ...(standing.parent === undefined ? {} : { parent: standing.parent }),
-          ...(standing.membership === undefined ? {} : { membership: standing.membership }),
-          ...(standing.membershipAt === undefined ? {} : { membershipAt: standing.membershipAt }),
-          ...(standing.version === undefined ? {} : { version: standing.version }),
-          leeway,
-        },
-        OPERATOR,
-        gw.nextTimestamp(),
+      withStamp(gw.stamp(), (t) =>
+        containerClaims(
+          {
+            container,
+            trust: standing.trust,
+            posture: standing.posture,
+            ...(standing.parent === undefined ? {} : { parent: standing.parent }),
+            ...(standing.membership === undefined ? {} : { membership: standing.membership }),
+            ...(standing.membershipAt === undefined ? {} : { membershipAt: standing.membershipAt }),
+            ...(standing.version === undefined ? {} : { version: standing.version }),
+            leeway,
+          },
+          OPERATOR,
+          t,
+        ),
       ),
       OPERATOR_SEED,
     ),
@@ -182,7 +185,7 @@ describe("§58 — the walls", () => {
     const operators = (limits: Record<string, number>): Promise<unknown> =>
       gateway.append([
         signClaims(
-          envelopeClaims(ENVELOPE_ANY, limits, OPERATOR, gateway.nextTimestamp()),
+          withStamp(gateway.stamp(), (t) => envelopeClaims(ENVELOPE_ANY, limits, OPERATOR, t)),
           OPERATOR_SEED,
         ),
       ]);
@@ -242,11 +245,13 @@ describe("§58 — the walls", () => {
     await declare(gateway, "ada:journal", { ...SEALED_LEEWAY, receive: true });
     await gateway.append([
       signClaims(
-        envelopeClaims(
-          ENVELOPE_ANY,
-          { maxConcurrentRenders: 32, renderTimeoutMs: 4000, maxMemoryMb: 1024 },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(), (t) =>
+          envelopeClaims(
+            ENVELOPE_ANY,
+            { maxConcurrentRenders: 32, renderTimeoutMs: 4000, maxMemoryMb: 1024 },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),
@@ -270,16 +275,18 @@ describe("§58 — the walls", () => {
     ).containers.get("ada:journal")!;
     await gateway.append([
       signClaims(
-        containerClaims(
-          {
-            container: "ada:journal",
-            trust: standing.trust,
-            posture: standing.posture,
-            ...(standing.parent === undefined ? {} : { parent: standing.parent }),
-            ...(standing.membership === undefined ? {} : { membership: standing.membership }),
-          },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(), (t) =>
+          containerClaims(
+            {
+              container: "ada:journal",
+              trust: standing.trust,
+              posture: standing.posture,
+              ...(standing.parent === undefined ? {} : { parent: standing.parent }),
+              ...(standing.membership === undefined ? {} : { membership: standing.membership }),
+            },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),
@@ -300,15 +307,17 @@ describe("§58 — the walls", () => {
     const { gateway } = await connectionServer();
     await gateway.append([
       signClaims(
-        containerClaims(
-          {
-            container: "inbox:loop",
-            trust: "curated",
-            posture: "separate",
-            inboxOf: "inbox:loop",
-          },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(), (t) =>
+          containerClaims(
+            {
+              container: "inbox:loop",
+              trust: "curated",
+              posture: "separate",
+              inboxOf: "inbox:loop",
+            },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),
@@ -331,40 +340,46 @@ describe("§58 — the walls", () => {
     // points at `bea:elsewhere`, under a `bea` that sealed itself, and is governed by `ada`.
     await gateway.append([
       signClaims(
-        containerClaims(
-          { container: "bea", trust: "curated", posture: "separate", leeway: SEALED_LEEWAY },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(), (t) =>
+          containerClaims(
+            { container: "bea", trust: "curated", posture: "separate", leeway: SEALED_LEEWAY },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),
     ]);
     await gateway.append([
       signClaims(
-        containerClaims(
-          {
-            container: "ada",
-            trust: "curated",
-            posture: "separate",
-            leeway: { ...SEALED_LEEWAY, receive: true },
-          },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(), (t) =>
+          containerClaims(
+            {
+              container: "ada",
+              trust: "curated",
+              posture: "separate",
+              leeway: { ...SEALED_LEEWAY, receive: true },
+            },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),
     ]);
     await gateway.append([
       signClaims(
-        containerClaims(
-          {
-            container: "ada:plain",
-            trust: "curated",
-            posture: "separate",
-            inboxOf: "bea:elsewhere",
-          },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(), (t) =>
+          containerClaims(
+            {
+              container: "ada:plain",
+              trust: "curated",
+              posture: "separate",
+              inboxOf: "bea:elsewhere",
+            },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),
@@ -386,11 +401,13 @@ describe("§58 — the walls", () => {
     await declare(gateway, "ada:journal", { ...SEALED_LEEWAY, receive: true });
     await gateway.append([
       signClaims(
-        envelopeClaims(
-          ENVELOPE_ANY,
-          { maxConcurrentRenders: 32, renderTimeoutMs: 4000, maxMemoryMb: 1024 },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(), (t) =>
+          envelopeClaims(
+            ENVELOPE_ANY,
+            { maxConcurrentRenders: 32, renderTimeoutMs: 4000, maxMemoryMb: 1024 },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),
@@ -407,15 +424,17 @@ describe("§58 — the walls", () => {
     // `ada:journal`, which declared the size.
     await outer.gateway!.append([
       signClaims(
-        containerClaims(
-          {
-            container: "ada:journal:inbox:nested",
-            trust: "untrusted",
-            posture: "separate",
-            parent: "ada:journal:inbox",
-          },
-          OPERATOR,
-          outer.gateway!.nextTimestamp(),
+        withStamp(outer.gateway!.stamp(), (t) =>
+          containerClaims(
+            {
+              container: "ada:journal:inbox:nested",
+              trust: "untrusted",
+              posture: "separate",
+              parent: "ada:journal:inbox",
+            },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),
@@ -454,10 +473,12 @@ describe("§58 — the walls", () => {
     const parented = (name: string, parent: string): Promise<unknown> =>
       gateway.append([
         signClaims(
-          containerClaims(
-            { container: name, trust: "curated", posture: "separate", parent },
-            OPERATOR,
-            gateway.nextTimestamp(),
+          withStamp(gateway.stamp(), (t) =>
+            containerClaims(
+              { container: name, trust: "curated", posture: "separate", parent },
+              OPERATOR,
+              t,
+            ),
           ),
           OPERATOR_SEED,
         ),
@@ -474,11 +495,13 @@ describe("§58 — the walls", () => {
     await declare(gateway, "ada:journal", { ...SEALED_LEEWAY, receive: true, envelope: "small" });
     await gateway.append([
       signClaims(
-        envelopeClaims(
-          ENVELOPE_ANY,
-          { maxConcurrentRenders: 32, renderTimeoutMs: 4000, maxMemoryMb: 1024 },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(), (t) =>
+          envelopeClaims(
+            ENVELOPE_ANY,
+            { maxConcurrentRenders: 32, renderTimeoutMs: 4000, maxMemoryMb: 1024 },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),
@@ -501,15 +524,17 @@ describe("§58 — the walls", () => {
     await declare(gateway, "bea:notes", { ...SEALED_LEEWAY, receive: false });
     await gateway.append([
       signClaims(
-        containerClaims(
-          {
-            container: "ada:journal:y",
-            trust: "curated",
-            posture: "separate",
-            parent: "bea:notes",
-          },
-          OPERATOR,
-          gateway.nextTimestamp(),
+        withStamp(gateway.stamp(), (t) =>
+          containerClaims(
+            {
+              container: "ada:journal:y",
+              trust: "curated",
+              posture: "separate",
+              parent: "bea:notes",
+            },
+            OPERATOR,
+            t,
+          ),
         ),
         OPERATOR_SEED,
       ),

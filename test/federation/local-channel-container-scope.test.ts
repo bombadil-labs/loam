@@ -33,6 +33,7 @@ import {
 } from "../../src/federation/local-channel-events.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const SEED = "cc".repeat(32);
 const OP = authorForSeed(SEED);
@@ -153,46 +154,53 @@ describe("spec 64: lifecycle events name their parent container", () => {
     offering.push(fact(1));
     await ch.sync();
     const opening = gw.reactor.get(opened(gw, ch.name).opening.id)!;
-    const copy = signClaims({ ...opening.claims, timestamp: gw.nextTimestamp() }, SEED);
+    const copy = signClaims({ ...opening.claims, ...gw.stamp(OP) }, SEED);
     await expect(gw.append([copy])).rejects.toThrow(/protected local channel event/);
     const report = await gw.federate([copy], { admit: () => true });
     expect(report.accepted).toBe(0);
     // A slate over the opening: the pinned term is published, then the record is appended.
     const term = frozenMembershipTerm([opening.id]);
-    const published = signClaims(termClaims(term, OP, gw.nextTimestamp()), SEED);
+    const published = signClaims(
+      withStamp(gw.stamp(OP), (t) => termClaims(term, OP, t)),
+      SEED,
+    );
     await gw.append([published]);
     const version = gw.freeze(term).id;
     const container = "container:slate:channel";
     await gw.append([
       signClaims(
-        containerClaims(
-          {
-            container,
-            trust: "curated",
-            posture: "shared",
-            membershipAt: published.id,
-            version,
-          },
-          OP,
-          gw.nextTimestamp(),
+        withStamp(gw.stamp(OP), (t) =>
+          containerClaims(
+            {
+              container,
+              trust: "curated",
+              posture: "shared",
+              membershipAt: published.id,
+              version,
+            },
+            OP,
+            t,
+          ),
         ),
         SEED,
       ),
     ]);
     const record = signClaims(
-      slateClaims(
-        {
-          container,
-          membershipAt: published.id,
-          version,
-          requestedBy: "operator",
-          requestedByForm: "plain",
-          requestedAt: 1_000,
-          deadline: 4_070_908_800_000,
-          closes: ["egress", "cite"],
-        },
-        OP,
-        gw.nextTimestamp(),
+      withStamp(gw.stamp(OP), (t) =>
+        slateClaims(
+          {
+            container,
+            membershipAt: published.id,
+            version,
+            requestedBy: "operator",
+            requestedByForm: "plain",
+            requestedAt: 1_000,
+            deadline: 4_070_908_800_000,
+            closes: ["egress", "cite"],
+          },
+          OP,
+          t,
+        ),
       ),
       SEED,
     );
@@ -257,20 +265,22 @@ describe("spec 64: lifecycle events name their parent container", () => {
     for (const container of ["ada:journal", "bea:notes"])
       await gw.append([
         signClaims(
-          containerClaims(
-            {
-              container,
-              trust: "curated",
-              posture: "shared",
-              membership: {
-                op: "select",
-                pred: { match: { field: "author", cmp: "eq", const: "none" } },
-                in: "input",
+          withStamp(gw.stamp(OP), (t) =>
+            containerClaims(
+              {
+                container,
+                trust: "curated",
+                posture: "shared",
+                membership: {
+                  op: "select",
+                  pred: { match: { field: "author", cmp: "eq", const: "none" } },
+                  in: "input",
+                },
+                leeway: { ...SEALED_LEEWAY, receive: true },
               },
-              leeway: { ...SEALED_LEEWAY, receive: true },
-            },
-            OP,
-            gw.nextTimestamp(),
+              OP,
+              t,
+            ),
           ),
           SEED,
         ),

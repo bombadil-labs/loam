@@ -174,7 +174,7 @@ describe("T288 legacy handle exact declaration and attachment", () => {
         // The pull entered on the original pool, then a real operator append supersedes its exact
         // declaration while keeping every legacy field and the physical attachment unchanged.
         const declaration = gw.reactor.get(originalDeclaration)!;
-        const changed = signClaims({ ...declaration.claims, timestamp: gw.nextTimestamp() }, SEED);
+        const changed = signClaims({ ...declaration.claims, ...gw.stamp() }, SEED);
         await gw.append([changed]);
         expect(changed.id).not.toBe(originalDeclaration);
         expect(gw.channelPools.get(fresh.name)!.gateway).toBe(originalPool);

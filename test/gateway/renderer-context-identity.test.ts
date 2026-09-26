@@ -10,6 +10,7 @@ import { prepareRendererInContext, renderRendererInContext } from "../../src/gat
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "./fixtures.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const OP_SEED = "6c".repeat(32);
 const OP = authorForSeed(OP_SEED);
@@ -19,7 +20,9 @@ async function fixture(gateway: Gateway) {
   await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN, OTHER]);
   await gateway.append([
     signClaims(
-      envelopeClaims(ENVELOPE_ANY, { renderTimeoutMs: 10_000 }, OP, gateway.nextTimestamp()),
+      withStamp(gateway.stamp(OP), (t) =>
+        envelopeClaims(ENVELOPE_ANY, { renderTimeoutMs: 10_000 }, OP, t),
+      ),
       OP_SEED,
     ),
   ]);
@@ -31,19 +34,21 @@ async function fixture(gateway: Gateway) {
   ] as const) {
     await gateway.append([
       signClaims(
-        containerClaims(
-          {
-            container,
-            trust: "curated",
-            posture: "shared",
-            membership: {
-              op: "select",
-              pred: { match: { field: "author", cmp: "eq", const: "none" } },
-              in: "input",
+        withStamp(gateway.stamp(OP), (t) =>
+          containerClaims(
+            {
+              container,
+              trust: "curated",
+              posture: "shared",
+              membership: {
+                op: "select",
+                pred: { match: { field: "author", cmp: "eq", const: "none" } },
+                in: "input",
+              },
             },
-          },
-          OP,
-          gateway.nextTimestamp(),
+            OP,
+            t,
+          ),
         ),
         OP_SEED,
       ),
@@ -56,8 +61,8 @@ async function fixture(gateway: Gateway) {
     });
     const pool = inbox.gateway!;
     await pool.append([
-      observed(FERN, "height", height, pool.nextTimestamp(), seed),
-      observed(OTHER, "height", height + 1, pool.nextTimestamp(), seed),
+      observed(FERN, "height", height, pool.stamp(requester), seed),
+      observed(OTHER, "height", height + 1, pool.stamp(requester), seed),
     ]);
     contexts.push(
       createBoundRendererContext({

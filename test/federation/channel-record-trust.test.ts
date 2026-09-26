@@ -101,7 +101,9 @@ async function storeWithChannels(): Promise<Gateway> {
   grounds.push(gw);
   await gw.append([
     signClaims(
-      grantClaims(STORE_ENTITY, STRANGER, "write", OPERATOR, gw.nextTimestamp()),
+      withStamp(gw.stamp(OPERATOR), (t) =>
+        grantClaims(STORE_ENTITY, STRANGER, "write", OPERATOR, t),
+      ),
       OPERATOR_SEED,
     ),
   ]);
@@ -251,7 +253,7 @@ describe("T217 (a) — a channel record is the operator's record or it is not on
     const target = records[0]!.id;
 
     const forged = signClaims(
-      makeNegationClaims(STRANGER, gw.nextTimestamp(), target),
+      withStamp(gw.stamp(STRANGER), (t) => makeNegationClaims(STRANGER, t, target)),
       STRANGER_SEED,
     );
     await gw.append([forged]);
@@ -267,7 +269,10 @@ describe("T217 (a) — a channel record is the operator's record or it is not on
     // Two-sided: the OPERATOR's strike does sever it — so this reads negations, it just does not
     // read a stranger's. `channelsEver` keeps the severed channel, which is what §46 promises.
     await gw.append([
-      signClaims(makeNegationClaims(OPERATOR, gw.nextTimestamp(), target), OPERATOR_SEED),
+      signClaims(
+        withStamp(gw.stamp(OPERATOR), (t) => makeNegationClaims(OPERATOR, t, target)),
+        OPERATOR_SEED,
+      ),
     ]);
     expect(gw.channelStatus(BRAM)).toHaveLength(0);
     expect(gw.channelsEver(BRAM)).toHaveLength(1);
@@ -284,7 +289,10 @@ describe("T217 (a) — a channel record is the operator's record or it is not on
     // That is the "one command said severed and the next said standing" defect, re-armed from
     // outside; the two questions must be the same question.
     await gw.append([
-      signClaims(makeNegationClaims(STRANGER, gw.nextTimestamp(), target), STRANGER_SEED),
+      signClaims(
+        withStamp(gw.stamp(STRANGER), (t) => makeNegationClaims(STRANGER, t, target)),
+        STRANGER_SEED,
+      ),
     ]);
 
     // A forged RECORD for the same channel sits here too, so the sever meets both shapes a

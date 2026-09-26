@@ -15,6 +15,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "./fixtures.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const OP_SEED = "cc".repeat(32);
 const named = (name: string): Schema => ({ ...PLANT_POLICY, name });
@@ -25,7 +26,10 @@ async function declared(mode: "byTimestamp" | "byAuthorRank" | "conflicts"): Pro
     assembleGenesis({ operatorSeed: OP_SEED, registrations: [] }),
   );
   await gw.append([
-    signClaims(bindingPolicyClaims(mode, gw.operatorAuthor!, gw.nextTimestamp()), OP_SEED),
+    signClaims(
+      withStamp(gw.stamp(), (t) => bindingPolicyClaims(mode, gw.operatorAuthor!, t)),
+      OP_SEED,
+    ),
   ]);
   return gw;
 }

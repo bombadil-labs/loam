@@ -13,6 +13,7 @@ import {
 } from "../../src/federation/local-channel-events.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const SEED = "cc".repeat(32);
 const PEER_SEED = "a1".repeat(32);
@@ -158,7 +159,12 @@ describe("T288 receive service boundary", () => {
   it("actual roster policy carries forward negation closure while refusing an unrelated author and forged strike", async () => {
     const f = await fixture();
     await f.pool.append([
-      signClaims(trustClaims("roster", [PEER], authorForSeed(SEED), f.pool.nextTimestamp()), SEED),
+      signClaims(
+        withStamp(f.pool.stamp(authorForSeed(SEED)), (t) =>
+          trustClaims("roster", [PEER], authorForSeed(SEED), t),
+        ),
+        SEED,
+      ),
     ]);
     const a = fact(6);
     const strangerSeed = "b2".repeat(32);

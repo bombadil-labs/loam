@@ -64,6 +64,7 @@ import {
   OPERATOR_SEED,
 } from "../helpers/connection-fixture.js";
 import { FERN, observed } from "../spike/garden.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const PEER_SEED = "7a".repeat(32);
 const PEER_TOKEN = "peer-door-token";
@@ -83,7 +84,7 @@ async function peerStore(): Promise<string> {
       ],
     }),
   );
-  await peer.append([observed(FERN, "height", 11, peer.nextTimestamp(), PEER_SEED)]);
+  await peer.append([observed(FERN, "height", 11, peer.stamp(), PEER_SEED)]);
   const handle = await serve({
     mounts: { default: peer },
     tokens: { [PEER_TOKEN]: { operator: true } },
@@ -132,7 +133,10 @@ const declare = (
           leeway,
         };
   return gw.append([
-    signClaims(containerClaims(spec, OPERATOR, gw.nextTimestamp()), OPERATOR_SEED),
+    signClaims(
+      withStamp(gw.stamp(OPERATOR), (t) => containerClaims(spec, OPERATOR, t)),
+      OPERATOR_SEED,
+    ),
   ]);
 };
 const leewayOf = (gw: Gateway, container: string): Leeway | undefined =>
@@ -434,13 +438,8 @@ describe("§58 — receive within the subtree", () => {
     });
     await gateway.append([
       signClaims(
-        grantClaims(
-          STORE_ENTITY,
-          authorForSeed(HOLDER_SEED),
-          "federate",
-          OPERATOR,
-          gateway.nextTimestamp(),
-          "friends",
+        withStamp(gateway.stamp(OPERATOR), (t) =>
+          grantClaims(STORE_ENTITY, authorForSeed(HOLDER_SEED), "federate", OPERATOR, t, "friends"),
         ),
         OPERATOR_SEED,
       ),

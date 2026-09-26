@@ -79,6 +79,7 @@ import type { StoreBackend } from "../../src/store/backend.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { MirrorBackend } from "../../src/store/mirror.js";
 import { FERN, observed } from "../spike/garden.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const SEED = "cc".repeat(32);
 const OP = authorForSeed(SEED);
@@ -291,7 +292,12 @@ describe("spec 64: a live opening cannot be erased", () => {
     await ch.sync();
     const opening = opened(gw, ch.name).opening;
     for (const id of survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, ch.name))
-      await gw.append([signClaims(makeNegationClaims(OP, gw.nextTimestamp(), id), SEED)]);
+      await gw.append([
+        signClaims(
+          withStamp(gw.stamp(OP), (t) => makeNegationClaims(OP, t, id)),
+          SEED,
+        ),
+      ]);
     const attached = await gw.erase(opening.id).catch((e: Error) => e.message);
     expect(attached).toContain("its pool is still attached and holds bytes");
     expect(gw.reactor.get(opening.id)).toBeDefined();
@@ -329,10 +335,12 @@ describe("spec 64: a live opening cannot be erased", () => {
     gw.attachedContainers.set(ch.name, ch.pool.gateway!);
     await gw.append([
       signClaims(
-        containerClaims(
-          { container: ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
-          OP,
-          gw.nextTimestamp(),
+        withStamp(gw.stamp(OP), (t) =>
+          containerClaims(
+            { container: ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
+            OP,
+            t,
+          ),
         ),
         SEED,
       ),
@@ -352,10 +360,12 @@ describe("spec 64: a live opening cannot be erased", () => {
     const opening = opened(gw, ch.name).opening;
     await gw.append([
       signClaims(
-        containerClaims(
-          { container: ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
-          OP,
-          gw.nextTimestamp(),
+        withStamp(gw.stamp(OP), (t) =>
+          containerClaims(
+            { container: ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
+            OP,
+            t,
+          ),
         ),
         SEED,
       ),
@@ -392,7 +402,10 @@ describe("spec 64: a live opening cannot be erased", () => {
     ];
     for (const id of struck)
       await first.gw.append([
-        signClaims(makeNegationClaims(OP, first.gw.nextTimestamp(), id), SEED),
+        signClaims(
+          withStamp(first.gw.stamp(OP), (t) => makeNegationClaims(OP, t, id)),
+          SEED,
+        ),
       ]);
     const gw = await first.restart();
     expect(first.holds(a.ch.name, fact(1).id)).toBe(true);
@@ -428,10 +441,12 @@ describe("spec 64: a live opening cannot be erased", () => {
     const opening = opened(first.gw, a.ch.name).opening;
     await first.gw.append([
       signClaims(
-        containerClaims(
-          { container: a.ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
-          OP,
-          first.gw.nextTimestamp(),
+        withStamp(first.gw.stamp(OP), (t) =>
+          containerClaims(
+            { container: a.ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
+            OP,
+            t,
+          ),
         ),
         SEED,
       ),
@@ -442,7 +457,7 @@ describe("spec 64: a live opening cannot be erased", () => {
     const unreadable = signClaims(
       {
         ...held.claims,
-        timestamp: first.gw.nextTimestamp(),
+        ...first.gw.stamp(OP),
         pointers: held.claims.pointers.filter((p) => p.role !== "parent-container"),
       },
       SEED,
@@ -492,7 +507,7 @@ describe("spec 64: a live opening cannot be erased", () => {
     const unreadable = signClaims(
       {
         ...otherOpening.claims,
-        timestamp: first.gw.nextTimestamp(),
+        ...first.gw.stamp(OP),
         pointers: otherOpening.claims.pointers.filter((p) => p.role !== "parent-container"),
       },
       SEED,
@@ -504,10 +519,12 @@ describe("spec 64: a live opening cannot be erased", () => {
     const opening = opened(first.gw, a.ch.name).opening;
     await first.gw.append([
       signClaims(
-        containerClaims(
-          { container: a.ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
-          OP,
-          first.gw.nextTimestamp(),
+        withStamp(first.gw.stamp(OP), (t) =>
+          containerClaims(
+            { container: a.ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
+            OP,
+            t,
+          ),
         ),
         SEED,
       ),
@@ -532,14 +549,19 @@ describe("spec 64: a live opening cannot be erased", () => {
       a.ch.name,
     ))
       await first.gw.append([
-        signClaims(makeNegationClaims(OP, first.gw.nextTimestamp(), id), SEED),
+        signClaims(
+          withStamp(first.gw.stamp(OP), (t) => makeNegationClaims(OP, t, id)),
+          SEED,
+        ),
       ]);
     await first.gw.append([
       signClaims(
-        containerClaims(
-          { container: a.ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
-          OP,
-          first.gw.nextTimestamp(),
+        withStamp(first.gw.stamp(OP), (t) =>
+          containerClaims(
+            { container: a.ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
+            OP,
+            t,
+          ),
         ),
         SEED,
       ),
@@ -562,10 +584,12 @@ describe("spec 64: a live opening cannot be erased", () => {
     const bOpening = opened(second.gw, b.ch.name).opening;
     await second.gw.append([
       signClaims(
-        containerClaims(
-          { container: b.ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
-          OP,
-          second.gw.nextTimestamp(),
+        withStamp(second.gw.stamp(OP), (t) =>
+          containerClaims(
+            { container: b.ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
+            OP,
+            t,
+          ),
         ),
         SEED,
       ),
@@ -727,13 +751,20 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     await ch.sync();
     const opening = opened(gw, ch.name).opening;
     for (const id of survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, ch.name))
-      await gw.append([signClaims(makeNegationClaims(OP, gw.nextTimestamp(), id), SEED)]);
+      await gw.append([
+        signClaims(
+          withStamp(gw.stamp(OP), (t) => makeNegationClaims(OP, t, id)),
+          SEED,
+        ),
+      ]);
     await gw.append([
       signClaims(
-        containerClaims(
-          { container: ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
-          OP,
-          gw.nextTimestamp(),
+        withStamp(gw.stamp(OP), (t) =>
+          containerClaims(
+            { container: ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
+            OP,
+            t,
+          ),
         ),
         SEED,
       ),
@@ -793,13 +824,20 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     await ch.sync();
     const opening = opened(gw, ch.name).opening;
     for (const id of survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, ch.name))
-      await gw.append([signClaims(makeNegationClaims(OP, gw.nextTimestamp(), id), SEED)]);
+      await gw.append([
+        signClaims(
+          withStamp(gw.stamp(OP), (t) => makeNegationClaims(OP, t, id)),
+          SEED,
+        ),
+      ]);
     await gw.append([
       signClaims(
-        containerClaims(
-          { container: ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
-          OP,
-          gw.nextTimestamp(),
+        withStamp(gw.stamp(OP), (t) =>
+          containerClaims(
+            { container: ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
+            OP,
+            t,
+          ),
         ),
         SEED,
       ),
@@ -835,7 +873,12 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     siblingOffering.push(fact(9));
     await sibling.sync();
     for (const id of statusIds(gw, ch.name))
-      await gw.append([signClaims(makeNegationClaims(OP, gw.nextTimestamp(), id), SEED)]);
+      await gw.append([
+        signClaims(
+          withStamp(gw.stamp(OP), (t) => makeNegationClaims(OP, t, id)),
+          SEED,
+        ),
+      ]);
     expect(gw.channelStatus(ch.name)).toHaveLength(0);
     const refusal = await gw.erase(opening.id).catch((e: Error) => e.message);
     expect(refusal).toContain("its pool's declaration still stands");
@@ -875,10 +918,12 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     for (const name of ["mydata", "channel:friends:zzz"]) {
       await gw.append([
         signClaims(
-          containerClaims(
-            { container: name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
-            OP,
-            gw.nextTimestamp(),
+          withStamp(gw.stamp(OP), (t) =>
+            containerClaims(
+              { container: name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
+              OP,
+              t,
+            ),
           ),
           SEED,
         ),
@@ -898,10 +943,12 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     // A separate container by hand with ITS OWN store, first attached, then detached to keep.
     await gw.append([
       signClaims(
-        containerClaims(
-          { container: ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
-          OP,
-          gw.nextTimestamp(),
+        withStamp(gw.stamp(OP), (t) =>
+          containerClaims(
+            { container: ch.name, trust: "untrusted", posture: "separate", inboxOf: "friends" },
+            OP,
+            t,
+          ),
         ),
         SEED,
       ),
@@ -918,23 +965,30 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     expect(files.size).toBe(factoryOpens);
     // A SHARED container by hand under the name: no pool exists to purge, so no purge is reported.
     for (const id of survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, ch.name))
-      await gw.append([signClaims(makeNegationClaims(OP, gw.nextTimestamp(), id), SEED)]);
+      await gw.append([
+        signClaims(
+          withStamp(gw.stamp(OP), (t) => makeNegationClaims(OP, t, id)),
+          SEED,
+        ),
+      ]);
     await gw.append([
       signClaims(
-        containerClaims(
-          {
-            container: ch.name,
-            trust: "curated",
-            posture: "shared",
-            inboxOf: "friends",
-            membership: {
-              op: "select",
-              pred: { hasPointer: { context: { exact: "x" } } },
-              in: "input",
+        withStamp(gw.stamp(OP), (t) =>
+          containerClaims(
+            {
+              container: ch.name,
+              trust: "curated",
+              posture: "shared",
+              inboxOf: "friends",
+              membership: {
+                op: "select",
+                pred: { hasPointer: { context: { exact: "x" } } },
+                in: "input",
+              },
             },
-          },
-          OP,
-          gw.nextTimestamp(),
+            OP,
+            t,
+          ),
         ),
         SEED,
       ),
@@ -953,7 +1007,10 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
       ...statusIds(first.gw, ch.name),
     ])
       await first.gw.append([
-        signClaims(makeNegationClaims(OP, first.gw.nextTimestamp(), id), SEED),
+        signClaims(
+          withStamp(first.gw.stamp(OP), (t) => makeNegationClaims(OP, t, id)),
+          SEED,
+        ),
       ]);
     await expect(first.gw.erase(opening.id)).rejects.toThrow(/Drop the channel first/);
     const refusal = await first.gw.dropChannel(ch.name).catch((e: Error) => e.message);
@@ -988,7 +1045,10 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
       ...statusIds(first.gw, ch.name),
     ])
       await first.gw.append([
-        signClaims(makeNegationClaims(OP, first.gw.nextTimestamp(), id), SEED),
+        signClaims(
+          withStamp(first.gw.stamp(OP), (t) => makeNegationClaims(OP, t, id)),
+          SEED,
+        ),
       ]);
     // The primary purged, the mirror did not: the read path shows nothing, the bytes remain.
     const file = first.files.get(ch.name)!;
@@ -1085,7 +1145,10 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
       ...statusIds(first.gw, ch.name),
     ])
       await first.gw.append([
-        signClaims(makeNegationClaims(OP, first.gw.nextTimestamp(), id), SEED),
+        signClaims(
+          withStamp(first.gw.stamp(OP), (t) => makeNegationClaims(OP, t, id)),
+          SEED,
+        ),
       ]);
     first.files.get(ch.name)!.splice(0);
     first.blind.add(ch.name);
@@ -1131,7 +1194,10 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     ];
     for (const id of struck)
       await first.gw.append([
-        signClaims(makeNegationClaims(OP, first.gw.nextTimestamp(), id), SEED),
+        signClaims(
+          withStamp(first.gw.stamp(OP), (t) => makeNegationClaims(OP, t, id)),
+          SEED,
+        ),
       ]);
     const gw = await first.restart();
     expect(gw.channelPools.get(ch.name)).toBeUndefined();
