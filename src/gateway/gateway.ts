@@ -355,6 +355,7 @@ const bindableNames = (r: Bound): string[] => [lensOf(r), programOf(r)];
 // coupling — widen the seam loudly, here, or question the boundary.
 /** No name at all — what a channel pool has declared open to a tokenless caller (see `openNames`). */
 const EMPTY_PUBLIC: ReadonlySet<string> = new Set<string>();
+const MAX_TIMER_DELAY = 2 ** 31 - 1; // the largest delay setTimeout accepts
 
 export class Gateway {
   /** @internal — T19 seam (renderers.ts) */
@@ -511,7 +512,8 @@ export class Gateway {
   // constitution, and that is a failure the operator must see, not one to boot past.
   static async open(backend: StoreBackend, options: GatewayOptions = {}): Promise<Gateway> {
     const reactor = new Reactor();
-    for (const d of await backend.deltasSince(new Set())) {
+    const replayed = await backend.deltasSince(new Set());
+    for (const d of replayed) {
       const result = reactor.ingest(d);
       if (result.status === "rejected") {
         throw new Error(`replay: the store handed back an unacceptable delta ${d.id}`);
@@ -532,7 +534,9 @@ export class Gateway {
       }
     }
     const gateway = new Gateway(backend, reactor, options);
+    gateway.seedAuthorClocks(replayed);
     gateway.replayRegistrations();
+    gateway.advanceToNow();
     await gateway.preloadResolvers();
     return gateway;
   }
@@ -1303,6 +1307,7 @@ export class Gateway {
     this.ingestVia = (d) => this.reactor.ingest(d);
     this.attachPersistence(reactor);
     if (this.registered.length > 0) rebindImpl(this, this.registered);
+    this.advanceToNow();
     // The registered set is a PARSED COPY of definition content — hyperschema bodies, schemas,
     // resolver source — so it is a tier like any other (§11), and rebinding it alone would keep
     // serving law whose bytes this cut just removed: `surface()`, the GraphQL schema and every
@@ -1438,25 +1443,79 @@ export class Gateway {
   private validityTimer: ReturnType<typeof setTimeout> | undefined;
 
   /**
-   * Brings the reactor's maintained views to the present, then arms one timer for the next validity
-   * boundary a held delta names. Views are evaluated at an instant: a delta written after that
-   * instant is not yet valid there, so every ingest advances first. The timer covers the other
-   * direction, a delta that becomes valid, or stops being valid, with nothing written at all.
+   * Brings the reactor's maintained views to the present, then arms the validity timer. Views are
+   * evaluated at an instant: a delta written after that instant is not yet valid there, so every
+   * ingest advances first.
    * @internal — ingest.ts calls it before each batch
    */
   advanceToNow(): void {
-    const now = this.validityNow();
-    this.reactor.advanceTime(now);
+    this.reactor.advanceTime(this.validityNow());
+    this.armValidityTimer();
+  }
+
+  /**
+   * Arms one timer for the next validity boundary a held delta names: a delta that becomes valid,
+   * or stops being valid, with nothing written at all. Re-arm after every ingest, because the batch
+   * may name an earlier boundary than the one already armed.
+   * @internal — ingest.ts calls it after each batch
+   */
+  armValidityTimer(): void {
     if (this.validityTimer !== undefined) clearTimeout(this.validityTimer);
     this.validityTimer = undefined;
-    const next = this.reactor.nextValidityBoundary(now);
-    if (next === undefined) return;
-    this.validityTimer = setTimeout(() => this.advanceToNow(), Math.max(0, next - now));
+    const now = this.validityNow();
+    const next = [this.reactor.nextValidityBoundary(now), this.registrationBoundary]
+      .filter((t): t is number => t !== undefined)
+      .reduce((a, b) => Math.min(a, b), Infinity);
+    if (next === Infinity) return;
+    // A delay past 2^31-1 ms overflows, and Node then fires it at once, every time. Waking early
+    // is harmless: the callback advances and re-arms for what remains.
+    const delay = Math.min(Math.max(0, next - now), MAX_TIMER_DELAY);
+    this.validityTimer = setTimeout(() => this.onValidityBoundary(), delay);
     this.validityTimer.unref?.();
   }
 
-  nextTimestamp(): number {
-    this.lastMutationTs = Math.max(this.now(), this.lastMutationTs + 1);
+  /** @internal — the next moment a registration claim starts or stops; replay sets it */
+  registrationBoundary: number | undefined;
+
+  // A registration boundary changes which bindings exist, so it replays the registrations, which
+  // re-reads the next registration boundary. A data boundary only moves the views.
+  private onValidityBoundary(): void {
+    const crossed =
+      this.registrationBoundary !== undefined && this.validityNow() >= this.registrationBoundary;
+    this.reactor.advanceTime(this.validityNow());
+    if (crossed) this.replayRegistrations();
+    this.armValidityTimer();
+  }
+
+  // Each author's newest held claim time. A Schema that orders `byTimestamp` needs an author's
+  // writes to sort in the order they were made, and a host clock can step back across a restart.
+  private readonly authorClocks = new Map<string, number>();
+
+  /** @internal — ingest.ts calls it for every delta it lands */
+  noteAuthorTime(d: Delta): void {
+    const { author, timestamp } = d.claims;
+    if (timestamp > (this.authorClocks.get(author) ?? -Infinity)) {
+      this.authorClocks.set(author, timestamp);
+    }
+  }
+
+  // The store's own history is the only witness to time before this process started. The
+  // operator's clock also floors `validityNow`, so its pre-restart writes stay valid. A user's
+  // pre-restart writes are not covered: until that user or the wall clock moves past them, a
+  // write stamped ahead of a stepped-back clock is not yet valid.
+  private seedAuthorClocks(deltas: Iterable<Delta>): void {
+    for (const d of deltas) this.noteAuthorTime(d);
+    const operator =
+      this.operatorAuthor === undefined ? undefined : this.authorClocks.get(this.operatorAuthor);
+    if (operator !== undefined) this.lastMutationTs = Math.max(this.lastMutationTs, operator);
+  }
+
+  /** A creation time for a claim `author` is about to sign: never behind the wall clock, never
+   * equal to this gateway's last stamp, and never behind a claim the store already holds from
+   * `author`. */
+  nextTimestamp(author: string | undefined = this.operatorAuthor): number {
+    const held = author === undefined ? -Infinity : (this.authorClocks.get(author) ?? -Infinity);
+    this.lastMutationTs = Math.max(this.now(), this.lastMutationTs + 1, held + 1);
     return this.lastMutationTs;
   }
 

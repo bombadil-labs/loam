@@ -66,10 +66,9 @@ export async function mutateEntityImpl(
   assertNotReference(gw, name, Object.keys(props), binding);
   assertWritable(gw, name, Object.keys(props), binding);
   const author = authorForSeed(seed);
-  // Strictly monotonic WITHIN THIS INSTANCE: two mutations from one running gateway never tie
-  // on timestamp, so pick-byTimestamp between them is an ordering, not a coin flip on
-  // delta-id hashes. Across restarts (or gateways) the wall clock is the only witness.
-  const timestamp = gw.nextTimestamp();
+  // Strictly monotonic per author: two mutations never tie on timestamp, and a restart with the
+  // clock set back cannot sort a later write before an earlier one under `byTimestamp`.
+  const timestamp = gw.nextTimestamp(author);
   const deltas = entries.map(([prop, value]) =>
     signClaims(
       {
@@ -132,7 +131,7 @@ async function retract(
     }
   }
   if (targets.size > 0) {
-    const timestamp = gw.nextTimestamp();
+    const timestamp = gw.nextTimestamp(author);
     const negations = [...targets].map((id) =>
       signClaims(makeNegationClaims(author, timestamp, id), seed),
     );

@@ -42,6 +42,7 @@ import {
   parseClaimTemplates,
   readContestedBindings,
   readRegistrations,
+  type Boundary,
   referenceProps,
   registrationDeltaClaims,
   schemaEntityFor,
@@ -422,20 +423,24 @@ const lastBindFailure = (gw: Gateway, key: string): string | undefined =>
 // ONE derivation, read by the replay that DROPS a contest's losers and by the reading that NAMES
 // them (`contestedNamesImpl` below). A second copy could only drift into a surface that disagrees
 // with the store it reports on.
-function storeBindings(gw: Gateway): Bound[] {
-  const rows: Bound[] = readRegistrations(gw.reactor, gw.validityNow(), gw.operatorAuthor).map(
-    (r) => ({
-      ...r,
-      origin: "store" as const,
-    }),
-  );
+function storeBindings(gw: Gateway, boundary?: Boundary): Bound[] {
+  const rows: Bound[] = readRegistrations(
+    gw.reactor,
+    gw.validityNow(),
+    gw.operatorAuthor,
+    boundary,
+  ).map((r) => ({
+    ...r,
+    origin: "store" as const,
+  }));
   for (const standing of gw.channelStatus()) {
     // A channel a BOUND CONNECTION opened is not here either: its law serves only the container
     // it was opened from, in the bound fold below (SPEC §58 position 2).
     if (standing.openedBy !== undefined) continue;
     const pool = gw.channelPools.get(standing.name)?.gateway;
     if (pool === undefined) continue;
-    for (const r of readRegistrations(pool.reactor, pool.validityNow(), pool.operatorAuthor)) {
+    const read = readRegistrations(pool.reactor, pool.validityNow(), pool.operatorAuthor, boundary);
+    for (const r of read) {
       if (!lensOf(r).startsWith(`${standing.prefix}:`)) continue;
       rows.push({ ...r, origin: "store" as const, channel: standing.name });
     }
@@ -766,7 +771,11 @@ export function contestedNamesImpl(gw: Gateway): Map<string, ContestedNameReport
     list.push(row);
     drafts.set(lens, list);
   };
-  for (const [lens, list] of readContestedBindings(gw.reactor, gw.operatorAuthor)) {
+  for (const [lens, list] of readContestedBindings(
+    gw.reactor,
+    gw.validityNow(),
+    gw.operatorAuthor,
+  )) {
     for (const c of list) add(lens, { ...c, origin: "root" });
   }
   // A pool is a ground of its own: it reads its OWN declared policy, and the prefix filter is the
@@ -774,7 +783,11 @@ export function contestedNamesImpl(gw: Gateway): Map<string, ContestedNameReport
   for (const standing of gw.channelStatus()) {
     const pool = gw.channelPools.get(standing.name)?.gateway;
     if (pool === undefined) continue;
-    for (const [lens, list] of readContestedBindings(pool.reactor, pool.operatorAuthor)) {
+    for (const [lens, list] of readContestedBindings(
+      pool.reactor,
+      pool.validityNow(),
+      pool.operatorAuthor,
+    )) {
       if (!lens.startsWith(`${standing.prefix}:`)) continue;
       for (const c of list) add(lens, { ...c, origin: originOf(c.deltaId, standing.name) });
     }
@@ -844,7 +857,9 @@ export function contestedNamesImpl(gw: Gateway): Map<string, ContestedNameReport
 export function replayRegistrationsImpl(gw: Gateway): void {
   const manual = gw.registered.filter((r) => r.origin === "manual");
   const accepted: Bound[] = [...manual];
-  const rows = storeBindings(gw);
+  const boundary: Boundary = {};
+  const rows = storeBindings(gw, boundary);
+  gw.registrationBoundary = boundary.next;
   const resolved = crossOriginBindings(gw, rows);
   let pending: Bound[] =
     resolved === undefined

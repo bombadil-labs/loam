@@ -307,7 +307,9 @@ describe("T204 — a contested name is named, with its origin", () => {
         ).length,
       ).toBeGreaterThan(1); // ...and the bindings for the name are down in the pool's bytes.
       // Two-sided, and this is the whole point: the POOL names the contest...
-      expect(readContestedBindings(pool.reactor, pool.operatorAuthor).has("Sneaky")).toBe(true);
+      expect(
+        readContestedBindings(pool.reactor, pool.validityNow(), pool.operatorAuthor).has("Sneaky"),
+      ).toBe(true);
       // ...and the receiver's reading does not, because the name is outside the prefix the fold
       // aggregates by. A pool that could name any lens could put a contest a person did not cause
       // in front of them, over a name this store binds itself.
@@ -379,7 +381,7 @@ describe("T204 — a contested name is named, with its origin", () => {
       expect(gw.contestedNames().size).toBe(0);
       // Asserted on the single-ground reader too, which has no served-surface reconciliation to
       // fall back on — so this pins the POLICY check rather than the surface check.
-      expect(readContestedBindings(gw.reactor, gw.operatorAuthor).size).toBe(0);
+      expect(readContestedBindings(gw.reactor, gw.validityNow(), gw.operatorAuthor).size).toBe(0);
     } finally {
       await gw.close();
     }
@@ -503,9 +505,11 @@ describe("T204 — a contested name is named, with its origin", () => {
         // THE PREMISE, asserted rather than assumed: the re-attached pool's own ground still reads
         // a contest over this name. Without this the test below could pass on a store where the
         // pool simply lost its law, which proves nothing about marking.
-        expect(readContestedBindings(pool!.reactor, pool!.operatorAuthor).has("alice:Plant")).toBe(
-          true,
-        );
+        expect(
+          readContestedBindings(pool!.reactor, pool!.validityNow(), pool!.operatorAuthor).has(
+            "alice:Plant",
+          ),
+        ).toBe(true);
         // The re-attach changed which binding the fold sees, and the name now SERVES...
         expect(rebooted.def("alice:Plant")).toBeDefined();
         // ...so the report still lists it, with exactly one contender marked as the one serving.

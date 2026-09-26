@@ -929,15 +929,24 @@ const entityRef = (claims: Claims, role: string): string | undefined => {
 // order — (timestamp, id), the same tie-break everywhere. readRegistrations takes the last of
 // each group (the live lens); readRegistrationVersions takes them all (§17: publishing is
 // append-only, and every survivor is an answerable version).
+/** Collects the earliest moment after `now` at which a registration claim starts or stops. */
+export type Boundary = { next?: number };
+
 function survivingCandidates(
   reactor: Reactor,
+  now: number,
   operator?: string,
   withdrawn?: Candidate[],
+  boundary?: Boundary,
 ): Map<string, Candidate[]> {
   const lawful = lawfulSnapshot(reactor, operator);
   const negated = lawfulNegated(reactor, operator);
   const groups = new Map<string, Candidate[]>();
   for (const delta of lawful) {
+    // Valid over [validFrom, validUntil). A binding outside its interval binds nothing now, and
+    // `boundary` tells the gateway when to read again.
+    const { validFrom, validUntil } = delta.claims;
+    const valid = validFrom <= now && (validUntil === undefined || now < validUntil);
     let key: string | undefined; // the registration entity this delta files under
     for (const p of delta.claims.pointers) {
       if (p.target.kind === "entity" && p.target.entity.context === CTX_REGISTRATION) {
@@ -946,6 +955,14 @@ function survivingCandidates(
       }
     }
     if (key === undefined) continue;
+    if (boundary !== undefined) {
+      for (const t of [validFrom, validUntil]) {
+        if (t !== undefined && t > now && (boundary.next === undefined || t < boundary.next)) {
+          boundary.next = t;
+        }
+      }
+    }
+    if (!valid) continue;
     // A lawfully struck registration is WITHDRAWN, not unparseable: the caller who asked for
     // the withdrawn list still gets its parsed shape (the 410 door needs the schema it named);
     // everyone else skips it exactly as before.
@@ -1097,12 +1114,13 @@ export interface ContestedBinding {
  */
 export function readContestedBindings(
   reactor: Reactor,
+  now: number,
   operator?: string,
 ): Map<string, ContestedBinding[]> {
   const mode = readBindingPolicy(reactor, operator);
   const out = new Map<string, ContestedBinding[]>();
   if (mode !== "conflicts") return out;
-  const groups = survivingCandidates(reactor, operator);
+  const groups = survivingCandidates(reactor, now, operator);
   const latest = new Map<string, Candidate>();
   for (const [key, group] of groups) {
     for (const cand of group) latest.set([key, lensNameOf(cand)].join(NUL_SEP), cand);
@@ -1136,9 +1154,10 @@ export function readRegistrations(
   reactor: Reactor,
   now: number,
   operator?: string,
+  boundary?: Boundary,
 ): Registration[] {
   const lawful = lawfulSnapshot(reactor, operator);
-  const groups = survivingCandidates(reactor, operator);
+  const groups = survivingCandidates(reactor, now, operator, undefined, boundary);
   // Latest-wins narrows to latest-PER-LENS (§21.7): within one registration entity's group, each
   // lens name (the living `schema:<name>` pointer, in the bytes since slice 2prime) keeps its own
   // latest survivor — registering FilmClassic no longer evicts Film. A pre-coexistence store's
@@ -1249,7 +1268,7 @@ export function readRegistrationVersions(
 ): RegistrationVersion[] {
   const lawful = lawfulSnapshot(reactor, operator);
   const out: RegistrationVersion[] = [];
-  for (const group of survivingCandidates(reactor, operator).values()) {
+  for (const group of survivingCandidates(reactor, now, operator).values()) {
     let n = 0;
     for (const cand of group) {
       let hyperschema: HyperSchema;
@@ -1313,7 +1332,7 @@ export function readWithdrawnRegistrations(
 ): WithdrawnRegistration[] {
   const lawful = lawfulSnapshot(reactor, operator);
   const withdrawn: Candidate[] = [];
-  survivingCandidates(reactor, operator, withdrawn);
+  survivingCandidates(reactor, now, operator, withdrawn);
   const out: WithdrawnRegistration[] = [];
   for (const cand of withdrawn) {
     try {

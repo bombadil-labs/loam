@@ -321,6 +321,7 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
   try {
     for (const d of batch) {
       const result = gw.ingestVia(d);
+      gw.noteAuthorTime(d);
       if (result.status === "accepted") {
         accepted += 1;
         fresh.push(d);
@@ -330,6 +331,7 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
     // Always cleared — duplicates never hit the raw stream, and a mid-ingest throw must not
     // leave stale ids silently exempting future raw-stream writes.
     for (const d of batch) gw.justPersisted.delete(d.id);
+    gw.armValidityTimer(); // the batch may name the next boundary
   }
   // A landing slate that closes `read` ends live subscriptions the way an erase does (SPEC §29.3).
   // `reseat()` already solves precisely this one phase later — "a parked reader must not keep serving
@@ -751,6 +753,7 @@ export async function federateImpl(
     try {
       for (const d of admitted) {
         const result = gw.ingestVia(d);
+        if (result.status !== "rejected") gw.noteAuthorTime(d);
         if (result.status === "accepted") {
           acceptedIds.push(d.id);
           admittedIds.add(d.id);
@@ -759,6 +762,7 @@ export async function federateImpl(
       }
     } finally {
       for (const d of admitted) gw.justPersisted.delete(d.id);
+      gw.armValidityTimer(); // as at append
     }
   }
   // As at append: a batch that closes reads (a slate record or an erasure) touches no watched

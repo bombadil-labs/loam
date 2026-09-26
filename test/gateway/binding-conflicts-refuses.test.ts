@@ -53,7 +53,7 @@ describe("§47 — conflicts serves neither and names both", () => {
       expect(() => gw.def("Shared")).toThrow();
 
       // THE REFUSAL NAMES BOTH (criterion 4's exact words).
-      const contested = readContestedBindings(gw.reactor, gw.operatorAuthor);
+      const contested = readContestedBindings(gw.reactor, gw.validityNow(), gw.operatorAuthor);
       const entities = (contested.get("Shared") ?? []).map((c) => c.entity).sort();
       expect(entities).toEqual(["hyperschema:One", "hyperschema:Two"]);
     } finally {
@@ -90,7 +90,9 @@ describe("§47 — conflicts serves neither and names both", () => {
       );
       // Two-sided: a mode that withheld everything would pass the rail above and be a dead store.
       expect(gw.def("Calm")).toBeDefined();
-      expect(readContestedBindings(gw.reactor, gw.operatorAuthor).has("Calm")).toBe(false);
+      expect(
+        readContestedBindings(gw.reactor, gw.validityNow(), gw.operatorAuthor).has("Calm"),
+      ).toBe(false);
     } finally {
       await gw.close();
     }

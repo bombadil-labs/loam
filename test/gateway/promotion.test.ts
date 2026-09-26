@@ -379,3 +379,47 @@ describe("§24.3/§27 — a STRUCK adoption record leaves the trail and lets pro
     expect(readAdoptions(reactor).some((a) => a.adoptedDelta === "adopted-id")).toBe(false);
   });
 });
+
+// The adopted claim re-speaks the source, so it is valid over the source's own interval, not from
+// its creation time and never-ending. Asked at both levels: the adopted claim's validity fields, and
+// what the primary resolves.
+describe("promotion keeps the source's validity interval", () => {
+  const windowed = (value: string, validFrom: number, validUntil: number) =>
+    signClaims(
+      {
+        timestamp: 100,
+        validFrom,
+        validUntil,
+        author: GUEST,
+        pointers: [
+          { role: "subject", target: { kind: "entity", entity: { id: FERN, context: "message" } } },
+          { role: "value", target: { kind: "primitive", value } },
+        ],
+      },
+      GUEST_SEED,
+    );
+
+  it("an in-window source is adopted with its interval and resolves", async () => {
+    const primary = await bootPrimary();
+    const q = await primary.openQuarantine();
+    const until = Date.UTC(2100, 0, 1);
+    const fact = windowed("valid now", 200, until);
+    await q.gateway.federate([fact]);
+    const { promoted } = await primary.promote(q.gateway, fact.id, { from: "trial-pool" });
+    const adopted = primary.reactor.get(promoted)!.claims;
+    expect([adopted.timestamp, adopted.validFrom, adopted.validUntil]).toEqual([100, 200, until]);
+    expect(await messageOf(primary)).toBe("valid now");
+    await primary.close();
+  });
+
+  it("an expired source is adopted with its interval and does not resolve", async () => {
+    const primary = await bootPrimary();
+    const q = await primary.openQuarantine();
+    const fact = windowed("expired", 200, 300);
+    await q.gateway.federate([fact]);
+    const { promoted } = await primary.promote(q.gateway, fact.id, { from: "trial-pool" });
+    expect(primary.reactor.get(promoted)!.claims.validUntil).toBe(300);
+    expect(await messageOf(primary)).toBeNull();
+    await primary.close();
+  });
+});

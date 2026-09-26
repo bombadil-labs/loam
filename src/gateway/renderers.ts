@@ -673,7 +673,7 @@ export async function publishRendererImpl(
     spec,
     versionId,
     author,
-    internals?.timestamp ?? gw.nextTimestamp(),
+    internals?.timestamp ?? gw.nextTimestamp(author),
   );
   // Taking a ROUTE the same way a blessing takes a schema name (§23.5 is latest-per-route, so the
   // route is a living name too): the negation rides the binding, so striking the binding resurfaces
