@@ -109,9 +109,9 @@ level. Loam then consumes it through the barrel and compares its recordings.
      (`src/gateway/negation.ts`). The law readers `lawfulSnapshot` and `lawfulDeltasAt` take `now`.
      The swap edits those three bodies. `dataStruck` and `honoredStrikeOn` take `now` too, and each
      needs its own new body.
-   - **Hand-written filters.** Five readers still filter the snapshot by author by hand:
-     `channel.ts` `readChannels`, `dropChannelCommit` and `cursesOf`; `adopt-law.ts`
-     `readLawAdoptions`; `receive-policy.ts`. They move to the governed read one by one.
+   - **Hand-written filters.** The channel, curse and law-adoption readers read `lawfulSnapshot`.
+     `receive-policy.ts` still filters by the receiver's key over a private reactor. It asks a
+     different question, and moves to the governed read with the receiver as its author set.
    - **History reads.** Some reads ask about the past and must never filter by validity. They use
      `lawfulHistory` or `lawfulHistoryAt`, not `governedDeltas`.
      - `everDeclared`: a name whose declaration expired still cannot be minted again.

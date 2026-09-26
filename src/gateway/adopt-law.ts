@@ -825,8 +825,8 @@ export function readLawAdoptions(
 ): LawAdoption[] {
   const negated = negatedAt(reactor, now, operator);
   const out: LawAdoption[] = [];
-  for (const d of reactor.snapshot()) {
-    if (d.claims.author !== operator || !isAdoption(d.claims)) continue;
+  for (const d of lawfulSnapshot(reactor, now, operator)) {
+    if (!isAdoption(d.claims)) continue;
     if (opts?.includeStruck !== true && negated(d.id)) continue;
     const kind = primitiveOf(d.claims, ROLE_RECORD_KIND);
     if (kind !== "adopted-from" && kind !== "witnessed") continue; // a FACT adoption, not law

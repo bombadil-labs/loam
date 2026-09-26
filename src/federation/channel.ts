@@ -44,7 +44,7 @@ import {
   manifestExportClaims,
   readManifest,
 } from "../gateway/adopt-law.js";
-import { CTX_REGISTRATION, lensOf } from "../gateway/registration.js";
+import { CTX_REGISTRATION, lawfulSnapshot, lensOf } from "../gateway/registration.js";
 import { negatedAt } from "../gateway/negation.js";
 import { freezeMembers } from "../gateway/container-identity.js";
 import type { RendererBinding } from "../gateway/renderers.js";
@@ -499,8 +499,8 @@ function readChannels(
   name: string | undefined,
   includeSevered: boolean,
 ): ChannelStatus[] {
-  // EVERYTHING WHEN UNGOVERNED, THE OPERATOR'S DELTAS WHEN GOVERNED — `lawfulSnapshot`'s rule,
-  // applied here rather than borrowed, because this reader also needs the marker and the ordering.
+  // EVERYTHING WHEN UNGOVERNED, THE OPERATOR'S DELTAS WHEN GOVERNED — `lawfulSnapshot`'s rule. It
+  // keeps the snapshot's arrival order, which the latest-wins tie below depends on.
   //
   // An early `return []` for the ungoverned case would be worse than useless: `channelGroundFor`
   // reads "no channel with that prefix" as licence to resolve the lens over the RECEIVER's own
@@ -513,12 +513,11 @@ function readChannels(
   // live reading — the same defect as the forged record below, arriving from the other side.
   const negated = negatedAt(gw.reactor, gw.validityNow(), operator);
   const latest = new Map<string, { at: number; status: ChannelStatus }>();
-  for (const d of gw.reactor.snapshot()) {
-    // THE AUTHOR IS PART OF THE SHAPE. Every record is written by `stamp`, signed as the operator,
-    // so a channel-shaped delta from anyone else is a stranger's claim ABOUT this store's channels
-    // rather than one of them — and latest-wins would let one appended a millisecond later flip a
-    // real channel's toggles, invent a channel that was never opened, or hide one that was.
-    if (operator !== undefined && d.claims.author !== operator) continue;
+  // THE AUTHOR IS PART OF THE SHAPE. Every record is written by `stamp`, signed as the operator,
+  // so a channel-shaped delta from anyone else is a stranger's claim ABOUT this store's channels
+  // rather than one of them — and latest-wins would let one appended a millisecond later flip a
+  // real channel's toggles, invent a channel that was never opened, or hide one that was.
+  for (const d of lawfulSnapshot(gw.reactor, gw.validityNow(), operator)) {
     const marker = d.claims.pointers.find(
       (p) => p.target.kind === "entity" && p.target.entity.context === CTX_CHANNEL,
     );
@@ -2312,8 +2311,7 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
     // real record satisfies "already struck" while the reader goes on serving it.
     const operator = gw.operatorAuthor!;
     const negated = negatedAt(gw.reactor, gw.validityNow(), operator);
-    for (const d of [...gw.reactor.snapshot()]) {
-      if (d.claims.author !== operator) continue;
+    for (const d of [...lawfulSnapshot(gw.reactor, gw.validityNow(), operator)]) {
       const marker = d.claims.pointers.find(
         (pt) => pt.target.kind === "entity" && pt.target.entity.context === CTX_CHANNEL,
       );
@@ -2750,8 +2748,7 @@ export function cursesOf(gw: Gateway, channel: string): { living: string; deltaI
   const operator = gw.operatorAuthor;
   const negated = negatedAt(gw.reactor, gw.validityNow(), operator);
   const out: { living: string; deltaId: string }[] = [];
-  for (const d of gw.reactor.snapshot()) {
-    if (operator !== undefined && d.claims.author !== operator) continue;
+  for (const d of lawfulSnapshot(gw.reactor, gw.validityNow(), operator)) {
     const marker = d.claims.pointers.find(
       (p) => p.target.kind === "entity" && p.target.entity.context === CTX_CURSE,
     );
