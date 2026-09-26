@@ -2470,7 +2470,11 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
 
     const pool = readdirSync(join(home, "channels")).find((f) => f.endsWith(".sqlite"))!;
     const db = new Database(join(home, "channels", pool));
-    const row = db.prepare("SELECT id FROM deltas LIMIT 1").get() as { id: string };
+    // A NOTE ROW, named by content. The first row by storage order can be the pool's operator
+    // marker, and a pool whose marker is unreadable refuses to attach, which is a different rail.
+    const row = db.prepare("SELECT id FROM deltas WHERE claims LIKE '%nib-pool-marker%'").get() as {
+      id: string;
+    };
     db.prepare("UPDATE deltas SET claims = ? WHERE id = ?").run(
       JSON.stringify({ not: "claims at all" }),
       row.id,
