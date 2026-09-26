@@ -1,0 +1,320 @@
+{
+  "a. pool lens only": {
+    "after": {
+      "delta": {
+        "pool": [
+          "Plant: live",
+          "alice:Plant: struck"
+        ],
+        "pool strikes": [
+          "negation of alice:Plant"
+        ],
+        "root": [],
+        "root strikes": []
+      },
+      "served": {
+        "alice_Plant query": {
+          "errors": [
+            "Type Query must define one or more fields.",
+            "Type Subscription must define one or more fields."
+          ]
+        },
+        "def": {
+          "Sprout": false,
+          "alice:Plant": false
+        },
+        "root surface": [],
+        "sprout query": {
+          "errors": [
+            "Type Query must define one or more fields.",
+            "Type Subscription must define one or more fields."
+          ]
+        }
+      }
+    },
+    "before": {
+      "delta": {
+        "pool": [
+          "Plant: live",
+          "alice:Plant: live"
+        ],
+        "pool strikes": [],
+        "root": [],
+        "root strikes": []
+      },
+      "served": {
+        "alice_Plant query": {
+          "alice_Plant": {
+            "tag": [
+              "alice's tag",
+              "root tag"
+            ]
+          }
+        },
+        "def": {
+          "Sprout": false,
+          "alice:Plant": true
+        },
+        "root surface": [
+          "alice:Plant from pool (hyperschema:Plant)"
+        ],
+        "sprout query": {
+          "errors": [
+            "Cannot query field \"sprout\" on type \"Query\"."
+          ]
+        }
+      }
+    },
+    "curse": "resolved",
+    "sync": {
+      "bound": [
+        "alice:Plant"
+      ],
+      "parked": []
+    }
+  },
+  "b1. root registration of the same name, published before the channel opens": {
+    "after": {
+      "delta": {
+        "pool": [
+          "Plant: live",
+          "alice:Plant: struck"
+        ],
+        "pool strikes": [
+          "negation of alice:Plant"
+        ],
+        "root": [
+          "alice:Plant: struck"
+        ],
+        "root strikes": [
+          "negation of alice:Plant"
+        ]
+      },
+      "served": {
+        "alice_Plant query": {
+          "errors": [
+            "Type Query must define one or more fields.",
+            "Type Subscription must define one or more fields."
+          ]
+        },
+        "def": {
+          "Sprout": false,
+          "alice:Plant": false
+        },
+        "root surface": [],
+        "sprout query": {
+          "errors": [
+            "Type Query must define one or more fields.",
+            "Type Subscription must define one or more fields."
+          ]
+        }
+      }
+    },
+    "before": {
+      "delta": {
+        "pool": [
+          "Plant: live",
+          "alice:Plant: live"
+        ],
+        "pool strikes": [],
+        "root": [
+          "alice:Plant: live"
+        ],
+        "root strikes": []
+      },
+      "served": {
+        "alice_Plant query": {
+          "alice_Plant": {
+            "tag": [
+              "alice's tag",
+              "root tag"
+            ]
+          }
+        },
+        "def": {
+          "Sprout": false,
+          "alice:Plant": true
+        },
+        "root surface": [
+          "alice:Plant from root (hyperschema:RootPlant)"
+        ],
+        "sprout query": {
+          "errors": [
+            "Cannot query field \"sprout\" on type \"Query\"."
+          ]
+        }
+      }
+    },
+    "curse": "resolved",
+    "root publish": "published",
+    "sync": {
+      "bound": [],
+      "parked": []
+    }
+  },
+  "b2. root registration of the same name, published after the channel syncs": {
+    "after": {
+      "delta": {
+        "pool": [
+          "Plant: live",
+          "alice:Plant: struck"
+        ],
+        "pool strikes": [
+          "negation of alice:Plant"
+        ],
+        "root": [
+          "alice:Plant: struck"
+        ],
+        "root strikes": [
+          "negation of alice:Plant"
+        ]
+      },
+      "served": {
+        "alice_Plant query": {
+          "errors": [
+            "Type Query must define one or more fields.",
+            "Type Subscription must define one or more fields."
+          ]
+        },
+        "def": {
+          "Sprout": false,
+          "alice:Plant": false
+        },
+        "root surface": [],
+        "sprout query": {
+          "errors": [
+            "Type Query must define one or more fields.",
+            "Type Subscription must define one or more fields."
+          ]
+        }
+      }
+    },
+    "before": {
+      "delta": {
+        "pool": [
+          "Plant: live",
+          "alice:Plant: live"
+        ],
+        "pool strikes": [],
+        "root": [
+          "alice:Plant: live"
+        ],
+        "root strikes": []
+      },
+      "served": {
+        "alice_Plant query": {
+          "alice_Plant": {
+            "tag": [
+              "alice's tag",
+              "root tag"
+            ]
+          }
+        },
+        "def": {
+          "Sprout": false,
+          "alice:Plant": true
+        },
+        "root surface": [
+          "alice:Plant from root (hyperschema:RootPlant)"
+        ],
+        "sprout query": {
+          "errors": [
+            "Cannot query field \"sprout\" on type \"Query\"."
+          ]
+        }
+      }
+    },
+    "curse": "resolved",
+    "root publish": "published",
+    "sync": {
+      "bound": [
+        "alice:Plant"
+      ],
+      "parked": []
+    }
+  },
+  "c. root registration of another name (control)": {
+    "after": {
+      "delta": {
+        "pool": [
+          "Plant: live",
+          "alice:Plant: struck"
+        ],
+        "pool strikes": [
+          "negation of alice:Plant"
+        ],
+        "root": [
+          "Sprout: live"
+        ],
+        "root strikes": []
+      },
+      "served": {
+        "alice_Plant query": {
+          "errors": [
+            "Cannot query field \"alice_Plant\" on type \"Query\"."
+          ]
+        },
+        "def": {
+          "Sprout": true,
+          "alice:Plant": false
+        },
+        "root surface": [
+          "Sprout from root (hyperschema:Sprout)"
+        ],
+        "sprout query": {
+          "sprout": {
+            "tag": [
+              "root tag"
+            ]
+          }
+        }
+      }
+    },
+    "before": {
+      "delta": {
+        "pool": [
+          "Plant: live",
+          "alice:Plant: live"
+        ],
+        "pool strikes": [],
+        "root": [
+          "Sprout: live"
+        ],
+        "root strikes": []
+      },
+      "served": {
+        "alice_Plant query": {
+          "alice_Plant": {
+            "tag": [
+              "alice's tag",
+              "root tag"
+            ]
+          }
+        },
+        "def": {
+          "Sprout": true,
+          "alice:Plant": true
+        },
+        "root surface": [
+          "Sprout from root (hyperschema:Sprout)",
+          "alice:Plant from pool (hyperschema:Plant)"
+        ],
+        "sprout query": {
+          "sprout": {
+            "tag": [
+              "root tag"
+            ]
+          }
+        }
+      }
+    },
+    "curse": "resolved",
+    "root publish": "published",
+    "sync": {
+      "bound": [
+        "alice:Plant"
+      ],
+      "parked": []
+    }
+  }
+}
