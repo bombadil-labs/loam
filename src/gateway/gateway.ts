@@ -358,7 +358,7 @@ const bindableNames = (r: Bound): string[] => [lensOf(r), programOf(r)];
 const EMPTY_PUBLIC: ReadonlySet<string> = new Set<string>();
 const MAX_TIMER_DELAY = 2 ** 31 - 1; // the largest delay setTimeout accepts
 
-const unreadableStoreMessage = (rows: number): string =>
+export const unreadableStoreMessage = (rows: number): string =>
   `this store holds ${rows} rows and none of them is readable, so it was not booted. ` +
   `A store written before rhizomatic 0.11 reads this way: its deltas carry no \`validFrom\`, ` +
   `and there is no migration. Open it with the Loam release that wrote it, or start a new ` +
