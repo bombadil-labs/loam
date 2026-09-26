@@ -322,6 +322,7 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
     for (const d of batch) {
       const result = gw.ingestVia(d);
       gw.noteAuthorTime(d);
+      gw.noteRegistrationTime(d);
       if (result.status === "accepted") {
         accepted += 1;
         fresh.push(d);
@@ -753,7 +754,10 @@ export async function federateImpl(
     try {
       for (const d of admitted) {
         const result = gw.ingestVia(d);
-        if (result.status !== "rejected") gw.noteAuthorTime(d);
+        if (result.status !== "rejected") {
+          gw.noteAuthorTime(d);
+          gw.noteRegistrationTime(d);
+        }
         if (result.status === "accepted") {
           acceptedIds.push(d.id);
           admittedIds.add(d.id);

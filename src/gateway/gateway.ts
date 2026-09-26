@@ -136,7 +136,7 @@ import {
   type WithdrawnRegistration,
   type LensName,
 } from "./registration.js";
-import { readRegistrations } from "./registration.js";
+import { CTX_REGISTRATION, readRegistrations } from "./registration.js";
 import { newResolverMemo, type ResolverMemo } from "./resolvers.js";
 import {
   openQuarantineImpl,
@@ -1317,6 +1317,7 @@ export class Gateway {
     // returns), so the second bind is paid only when the cut actually took law away. Manual
     // registrations are this process's own, not the ground's: the replay keeps them by origin.
     this.replayRegistrations();
+    this.armValidityTimer(); // the replay re-read the registration boundary
   }
 
   // --- federation ------------------------------------------------------------------------------
@@ -1490,6 +1491,26 @@ export class Gateway {
   // Each author's newest held claim time. A Schema that orders `byTimestamp` needs an author's
   // writes to sort in the order they were made, and a host clock can step back across a restart.
   private readonly authorClocks = new Map<string, number>();
+
+  /**
+   * A registration claim that starts or stops later moves the registration boundary, so the timer
+   * replays the registrations when that moment arrives. A claim valid now is left to the caller
+   * that wrote it, as before: a raw append does not replay.
+   * @internal — ingest.ts calls it for every delta it lands
+   */
+  noteRegistrationTime(d: Delta): void {
+    const files = d.claims.pointers.some(
+      (p) => p.target.kind === "entity" && p.target.entity.context === CTX_REGISTRATION,
+    );
+    if (!files) return;
+    const now = this.validityNow();
+    for (const t of [d.claims.validFrom, d.claims.validUntil]) {
+      if (t === undefined || t <= now) continue;
+      if (this.registrationBoundary === undefined || t < this.registrationBoundary) {
+        this.registrationBoundary = t;
+      }
+    }
+  }
 
   /** @internal — ingest.ts calls it for every delta it lands */
   noteAuthorTime(d: Delta): void {

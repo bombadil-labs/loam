@@ -108,11 +108,12 @@ describe("a validity boundary moves the live view with no write", () => {
 describe("a registration binds over its own interval", () => {
   const SHRUB = { ...PLANT, name: "Shrub" };
 
-  /** A genesis with Plant and Shrub, Shrub's registration claim re-signed with `interval`. */
-  const storeWithShrub = async (interval: {
-    validFrom?: number;
-    validUntil?: number;
-  }): Promise<MemoryBackend> => {
+  /** A genesis with Plant and Shrub, Shrub's registration claim re-signed with `interval`. With
+   * `hold`, that claim is left out of the store and returned for the caller to write later. */
+  const shrubStore = async (
+    interval: { validFrom?: number; validUntil?: number },
+    hold = false,
+  ): Promise<{ backend: MemoryBackend; timed: Delta }> => {
     const plain = assembleGenesis({
       operatorSeed: OP_SEED,
       registrations: [
@@ -128,9 +129,11 @@ describe("a registration binds over its own interval", () => {
     expect(shrub).toHaveLength(1);
     const timed = signClaims({ ...shrub[0]!.claims, ...interval }, OP_SEED);
     const backend = new MemoryBackend();
-    await backend.append(plain.deltas.map((d) => (d === shrub[0] ? timed : d)));
-    return backend;
+    await backend.append(plain.deltas.flatMap((d) => (d !== shrub[0] ? [d] : hold ? [] : [timed])));
+    return { backend, timed };
   };
+  const storeWithShrub = async (interval: { validFrom?: number; validUntil?: number }) =>
+    (await shrubStore(interval)).backend;
 
   const names = (gw: Gateway): string[] => gw.registered.map((r) => r.hyperschema.name);
 
@@ -174,4 +177,24 @@ describe("a registration binds over its own interval", () => {
     expect(names(gw)).toEqual(expect.arrayContaining(["Plant", "Shrub"]));
     await gw.close();
   });
+
+  it.each([
+    ["append", false],
+    ["federate", true],
+  ])(
+    "a future registration written by %s to a running gateway is bound at its start",
+    async (_, viaFederate) => {
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+      vi.setSystemTime(T0);
+      const { backend, timed } = await shrubStore({ validFrom: T0 + 1_000 }, true);
+      const gw = await Gateway.open(backend, { seed: OP_SEED });
+      expect(names(gw)).toEqual(["Plant"]);
+      if (viaFederate) await gw.federate([timed]);
+      else await gw.append([timed]);
+      expect(gw.reactor.get(timed.id)).toBeDefined();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(names(gw)).toEqual(expect.arrayContaining(["Plant", "Shrub"]));
+      await gw.close();
+    },
+  );
 });
