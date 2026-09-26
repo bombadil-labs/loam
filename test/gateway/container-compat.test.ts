@@ -7,6 +7,7 @@
 import { copyFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { afterAll, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -32,29 +33,44 @@ const genesis = () =>
   });
 
 // Greenfield (refactor/README.md): no migration and no backward compatibility. A store written
-// before rhizomatic 0.11 carries claims without `validFrom`, and this build must not read any of
-// them as live. Deliberately not asserted: a loud refusal at open. Today the rows are quarantined
-// and open succeeds on an empty reactor; the operator-marker guard in `Gateway.open` looks for the
-// marker's new-format id, so it does not fire.
-describe("a previous-format store is not read", () => {
-  it("every row of the pre-0.11 fixture is quarantined, and none resolves", async () => {
+// before rhizomatic 0.11 carries claims without `validFrom`, and this build reads none of it. Boot
+// refuses such a store rather than planting a genesis beside it. The second case is the
+// bystander: a store with one unreadable row among readable ones still opens (§25). Deliberately
+// not refused: `Gateway.open` alone, because a pool may hold only unreadable rows.
+describe("a previous-format store is refused, not booted empty", () => {
+  it("boot refuses the pre-0.11 fixture, and plants nothing beside it", async () => {
     const golden = join("test", "fixtures", "pre-t32");
     const expected = JSON.parse(readFileSync(join(golden, "expected.json"), "utf8")) as {
       ids: string[];
     };
     const path = join(tmp, "pre-mint.db");
     copyFileSync(join(golden, "store.db"), path); // never write beside the checked-in artifact
+    await expect(Gateway.boot(new SqliteBackend(path), genesis())).rejects.toThrow(
+      /8 rows and none of them is readable.*before rhizomatic 0\.11/s,
+    );
+
     const backend = new SqliteBackend(path);
     expect(await backend.deltasSince(new Set())).toEqual([]);
-    const quarantined = (await backend.quarantine()).map((r) => r.key).sort();
-    expect(quarantined).toEqual(expected.ids);
+    const rows = (await backend.quarantine()).map((r) => r.key).sort();
+    expect(rows).toEqual(expected.ids); // the old rows, and no genesis planted beside them
+    await backend.close();
+  });
 
-    const after = await Gateway.open(backend, { seed: OP_SEED });
-    expect([...after.reactor.snapshot()]).toEqual([]);
-    await expect(after.query(`{ Plant(entity: "${FERN}") { height } }`)).rejects.toThrow(
-      /nothing is registered/,
-    );
-    await after.close();
+  it("a store with one unreadable row among readable ones still opens", async () => {
+    const path = join(tmp, "one-bad-row.db");
+    const first = await Gateway.boot(new SqliteBackend(path), genesis());
+    const fact = observed(FERN, "height", 30, 1000, OP_SEED);
+    await first.append([fact]);
+    await first.close();
+    const raw = new Database(path);
+    raw.prepare("INSERT INTO deltas (id, claims, sig) VALUES (?, ?, ?)").run("1e20bad", "{", null);
+    raw.close();
+
+    const backend = new SqliteBackend(path);
+    const gw = await Gateway.open(backend, { seed: OP_SEED });
+    expect(gw.reactor.get(fact.id)).toBeDefined();
+    expect((await backend.quarantine()).map((r) => r.key)).toEqual(["1e20bad"]);
+    await gw.close();
   });
 });
 

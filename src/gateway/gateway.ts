@@ -357,6 +357,12 @@ const bindableNames = (r: Bound): string[] => [lensOf(r), programOf(r)];
 const EMPTY_PUBLIC: ReadonlySet<string> = new Set<string>();
 const MAX_TIMER_DELAY = 2 ** 31 - 1; // the largest delay setTimeout accepts
 
+const unreadableStoreMessage = (rows: number): string =>
+  `this store holds ${rows} rows and none of them is readable, so it was not booted. ` +
+  `A store written before rhizomatic 0.11 reads this way: its deltas carry no \`validFrom\`, ` +
+  `and there is no migration. Open it with the Loam release that wrote it, or start a new ` +
+  `store. \`loam repair\` lists the rows.`;
+
 export class Gateway {
   /** @internal — T19 seam (renderers.ts) */
   registered: Bound[] = [];
@@ -443,6 +449,7 @@ export class Gateway {
   /** @internal — T19 seam (ingest.ts) */
   readonly justPersisted = new Set<string>();
   private lastMutationTs = 0;
+  private unreadableRows = 0; // set by open: rows held, none readable
   /** @internal — T19 seam (erase.ts, adopt.ts) */
   readonly operatorAuthor: string | undefined;
   // When a runner animates the gateway, ingest routes through its DerivationHost (ingest + drain
@@ -519,6 +526,10 @@ export class Gateway {
         throw new Error(`replay: the store handed back an unacceptable delta ${d.id}`);
       }
     }
+    // Degrading past unreadable rows assumes some of the store is readable. A pool may hold only
+    // unreadable rows and still open; boot refuses such a store (see `boot`).
+    const unreadableRows =
+      replayed.length === 0 && isRepairable(backend) ? (await backend.quarantine()).length : 0;
     if (options.seed !== undefined && isRepairable(backend)) {
       // The marker is a deterministic, content-addressed delta (genesis.ts), so its id is known
       // from the operator alone. Quarantined (present but unreadable) is the loud case; simply
@@ -534,6 +545,7 @@ export class Gateway {
       }
     }
     const gateway = new Gateway(backend, reactor, options);
+    gateway.unreadableRows = unreadableRows;
     gateway.seedAuthorClocks(replayed);
     gateway.replayRegistrations();
     gateway.advanceToNow();
@@ -560,6 +572,12 @@ export class Gateway {
     options: Omit<GatewayOptions, "seed"> = {},
   ): Promise<Gateway> {
     const gateway = await Gateway.open(backend, { ...options, seed: genesis.operatorSeed });
+    // A store with rows and none readable would boot empty, with a fresh genesis planted beside
+    // the rows it could not read.
+    if (gateway.unreadableRows > 0) {
+      await gateway.close();
+      throw new Error(unreadableStoreMessage(gateway.unreadableRows));
+    }
     if (genesis.deltas.length > 0) await gateway.append(genesis.deltas);
     gateway.replayRegistrations();
     await gateway.preloadResolvers();
