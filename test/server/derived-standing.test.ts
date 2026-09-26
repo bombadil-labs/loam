@@ -90,6 +90,10 @@ const envelope = (name: string, prop = "note", roots = [`${name}:1`]): unknown =
   writable: [prop],
 });
 
+// Two OAuth connects and several registrations. About 0.3 s here, and 22 s on the Windows CI
+// runner, where this file takes a minute. The default 20 s budget is too small there.
+const SLOW = 60_000;
+
 const register = (base: string, bearer: string, body: unknown): Promise<Response> =>
   fetch(`${base}/default/register`, {
     method: "POST",
@@ -371,60 +375,80 @@ describe("§58 position 2 — the binding is the register grant, and the law ser
     await closeAll();
   });
 
-  it("a grant does not widen a bound connection's registration fence", async () => {
-    // T279 retires the temporary union after container-derived standing landed.
-    // The key grant remains data, but it cannot widen this connection's binding.
-    const { base, gateway, connectorsHome } = await connectionServer();
-    const ada = await connect(base, "ada", "journal");
-    const key = authorForSeed(grantOf(connectorsHome, "ada").actorSeed);
-    await gateway.append([
-      signClaims(
-        grantClaims(STORE_ENTITY, key, "register", OPERATOR, gateway.nextTimestamp(), "zed:"),
-        OPERATOR_SEED,
-      ),
-    ]);
-    const who = (await (
-      await fetch(`${base}/default/whoami`, { headers: { authorization: `Bearer ${ada}` } })
-    ).json()) as { registerPrefixes: string[] };
-    expect(who.registerPrefixes).toEqual(["ada:journal:"]);
+  it(
+    "a grant does not widen a bound connection's registration fence",
+    async () => {
+      // T279 retires the temporary union after container-derived standing landed.
+      // The key grant remains data, but it cannot widen this connection's binding.
+      const { base, gateway, connectorsHome } = await connectionServer();
+      const ada = await connect(base, "ada", "journal");
+      const key = authorForSeed(grantOf(connectorsHome, "ada").actorSeed);
+      await gateway.append([
+        signClaims(
+          grantClaims(STORE_ENTITY, key, "register", OPERATOR, gateway.nextTimestamp(), "zed:"),
+          OPERATOR_SEED,
+        ),
+      ]);
+      const who = (await (
+        await fetch(`${base}/default/whoami`, { headers: { authorization: `Bearer ${ada}` } })
+      ).json()) as { registerPrefixes: string[] };
+      expect(who.registerPrefixes).toEqual(["ada:journal:"]);
 
-    const granted = await register(base, ada, envelope("zed:thing"));
-    expect(granted.status).toBe(403);
-    expect(lensesIn(gateway)).not.toContain("zed:thing");
-    expect(pools(gateway).flatMap(lensesIn)).not.toContain("zed:thing");
-    expect(await serves(base, "op-token", "zed_thing")).toBe(false);
-    expect(await serves(base, ada, "zed_thing")).toBe(false);
-    // ...while law under the container path still takes the pool.
-    expect((await register(base, ada, envelope("ada:journal:own"))).status).toBe(200);
-    expect(lensesIn(gateway)).not.toContain("ada:journal:own");
-    expect(await serves(base, "op-token", "ada_journal_own")).toBe(false);
+      const granted = await register(base, ada, envelope("zed:thing"));
+      expect(granted.status).toBe(403);
+      expect(lensesIn(gateway)).not.toContain("zed:thing");
+      expect(pools(gateway).flatMap(lensesIn)).not.toContain("zed:thing");
+      expect(await serves(base, "op-token", "zed_thing")).toBe(false);
+      expect(await serves(base, ada, "zed_thing")).toBe(false);
+      // ...while law under the container path still takes the pool.
+      expect((await register(base, ada, envelope("ada:journal:own"))).status).toBe(200);
+      expect(lensesIn(gateway)).not.toContain("ada:journal:own");
+      expect(await serves(base, "op-token", "ada_journal_own")).toBe(false);
+      await closeAll();
+    },
+    SLOW,
+  );
 
-    // A MIXED PAIR — program under the container, reading under the grant, or the reverse — is
-    // under NO one prefix and is refused. A fence that admitted each name separately let this
-    // pair clear it, and the route sent container-path law to the primary, served to everyone.
-    const bea = await connect(base, "bea", "journal");
-    for (const [program, reading] of [
-      ["ada:journal:p1", "zed:r1"],
-      ["zed:p2", "ada:journal:r2"],
-    ] as const) {
-      const mixed = await register(base, ada, {
-        ...(envelope(program) as Record<string, unknown>),
-        schema: {
-          name: reading,
-          props: { note: { pick: { order: { byTimestamp: "desc" } } } },
-          default: { pick: { order: { byTimestamp: "desc" } } },
-        },
-      });
-      expect(mixed.status, `${program} / ${reading}`).toBe(403);
-    }
-    const everywhere = [...lensesIn(gateway), ...pools(gateway).flatMap(lensesIn)];
-    for (const name of ["ada:journal:p1", "zed:r1", "zed:p2", "ada:journal:r2"]) {
-      expect(everywhere).not.toContain(name);
-    }
-    expect(await serves(base, "op-token", "ada_journal_r2")).toBe(false);
-    expect(await serves(base, bea, "ada_journal_r2")).toBe(false);
-    await closeAll();
-  });
+  it(
+    "a pair split across the fence and a grant is refused",
+    async () => {
+      // A MIXED PAIR — program under the container, reading under the grant, or the reverse — is
+      // under NO one prefix and is refused. A fence that admitted each name separately let this
+      // pair clear it, and the route sent container-path law to the primary, served to everyone.
+      const { base, gateway, connectorsHome } = await connectionServer();
+      const ada = await connect(base, "ada", "journal");
+      const key = authorForSeed(grantOf(connectorsHome, "ada").actorSeed);
+      await gateway.append([
+        signClaims(
+          grantClaims(STORE_ENTITY, key, "register", OPERATOR, gateway.nextTimestamp(), "zed:"),
+          OPERATOR_SEED,
+        ),
+      ]);
+      const bea = await connect(base, "bea", "journal");
+      for (const [program, reading] of [
+        ["ada:journal:p1", "zed:r1"],
+        ["zed:p2", "ada:journal:r2"],
+      ] as const) {
+        const mixed = await register(base, ada, {
+          ...(envelope(program) as Record<string, unknown>),
+          schema: {
+            name: reading,
+            props: { note: { pick: { order: { byTimestamp: "desc" } } } },
+            default: { pick: { order: { byTimestamp: "desc" } } },
+          },
+        });
+        expect(mixed.status, `${program} / ${reading}`).toBe(403);
+      }
+      const everywhere = [...lensesIn(gateway), ...pools(gateway).flatMap(lensesIn)];
+      for (const name of ["ada:journal:p1", "zed:r1", "zed:p2", "ada:journal:r2"]) {
+        expect(everywhere).not.toContain(name);
+      }
+      expect(await serves(base, "op-token", "ada_journal_r2")).toBe(false);
+      expect(await serves(base, bea, "ada_journal_r2")).toBe(false);
+      await closeAll();
+    },
+    SLOW,
+  );
 
   it("a PLAIN holder of two grants may still pair a program under one with a reading under the other", async () => {
     // Nothing a grant-holder could do stops working: both names reach only what it owns, and
