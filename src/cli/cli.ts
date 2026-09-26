@@ -26,7 +26,7 @@ import {
   type Delta,
   type Reactor,
 } from "@bombadil/rhizomatic";
-import { Gateway, type FederationReport } from "../gateway/gateway.js";
+import { Gateway, unreadableStoreMessage, type FederationReport } from "../gateway/gateway.js";
 import type { PublishOutcome } from "../gateway/lifecycle.js";
 import { parseOffer } from "../federation/offer.js";
 import { pullFrom } from "../federation/pull.js";
@@ -693,6 +693,12 @@ export function channelBackendFor(home: string, io: IO): (pool: string) => Sqlit
   };
 }
 
+// Boot reads past a row it cannot read and serves the rest (§25), so an entity whose delta was set
+// aside reads as absent. The count is the one thing that tells an operator the absence is damage.
+const setAsideLine = (rows: number): string =>
+  `${rows} unreadable row${rows === 1 ? " was" : "s were"} set aside, and what ` +
+  `${rows === 1 ? "it carries does" : "they carry do"} not read — \`loam repair list\` names them`;
+
 function openStore(path: string, io: IO): SqliteBackend {
   return new SqliteBackend(path, { onScrubDeferred: (why) => io.err(why) });
 }
@@ -715,11 +721,29 @@ const recordServing = (home: string, url: string, store: string): void => {
 // cannot be parsed, or is missing its fields WARNS: a false warning costs a sentence; a false
 // silence costs an operator an afternoon of disbelieving their own store.
 function servingWarning(home: string, store: string): string | undefined {
+  const who = servingProbe(home, store);
+  if (who === undefined) return undefined;
+  return (
+    who.said +
+    (who.certain ? " — it answers from the " : ". If one is running, it answers from the ") +
+    "memory it booted with, so it will not see what just landed until it restarts"
+  );
+}
+
+// WHO the serving record names, without the tail about staleness — `servingWarning` qualifies a
+// success with it, and a verb the running server would UNDO refuses with it. `certain` is false
+// when the record exists and cannot be read: a maybe, which both callers treat as a yes.
+function servingProbe(
+  home: string,
+  store: string,
+): { said: string; certain: boolean; url?: string } | undefined {
   const file = servingFile(home);
-  const uncertain =
-    `a server may be serving this store — ${file} exists but does not read as a serving ` +
-    `record, and a maybe must not pass as a no. If one is running, it answers from the memory ` +
-    `it booted with, so it will not see what just landed until it restarts`;
+  const uncertain = {
+    said:
+      `a server may be serving this store — ${file} exists but does not read as a serving ` +
+      `record, and a maybe must not pass as a no`,
+    certain: false,
+  };
   let raw: string;
   try {
     raw = readFileSync(file, "utf8");
@@ -754,11 +778,12 @@ function servingWarning(home: string, store: string): string | undefined {
     // ours) means a process is there, and a process we cannot ask is a process we warn about.
     if ((err as NodeJS.ErrnoException).code === "ESRCH") return undefined;
   }
-  const at = typeof record.url === "string" ? `, ${record.url}` : "";
-  return (
-    `a server is serving this store right now (pid ${record.pid}${at}) — it answers from the ` +
-    `memory it booted with, so it will not see what just landed until it restarts`
-  );
+  const url = typeof record.url === "string" ? record.url : undefined;
+  return {
+    said: `a server is serving this store right now (pid ${record.pid}${url === undefined ? "" : `, ${url}`})`,
+    certain: true,
+    ...(url === undefined ? {} : { url }),
+  };
 }
 
 // §54 — the guided flow's trigger, PURE and exported for its rail: the TTY bit is an argument, so
@@ -1266,6 +1291,8 @@ async function cmdServe(
       return held.kind === "present" ? held.seed : undefined;
     },
   });
+  const setAside = isRepairable(backend) ? (await backend.quarantine()).length : 0;
+  if (setAside > 0) io.err(`loam: ${setAsideLine(setAside)}`);
   let server;
   try {
     server = await serve({
@@ -1338,7 +1365,7 @@ async function cmdServe(
   io.out(
     gateway.federationChannels.size > 0
       ? `  syncing ${gateway.federationChannels.size} channel(s) every ${seconds}s`
-      : `  no channels yet — polling every ${seconds}s, so one opened while serving is followed too`,
+      : `  no channels yet — polling every ${seconds}s, so one opened through this server's door is followed too; one opened by \`loam federate open\` waits for a restart`,
   );
   const unresumed = gateway.channelStatus().filter((c) => !gateway.federationChannels.has(c.name));
   for (const c of unresumed) {
@@ -1699,8 +1726,36 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
   const home = parsed.flags.get("home") ?? defaultHome();
   const init = initHome(home);
   if (init.created) io.out(`loam: initialized ${home}\n  operator ${init.operator}`);
+  const path = storePath(home, parsed.flags.get("store"));
+  // A RUNNING SERVER UNDOES THESE TWO. It holds every channel in the memory it booted with: it
+  // keeps pulling a channel dropped here and rewrites the purged pool on its next tick, and it
+  // re-stamps a channel's record from its own copy, so a freeze made here is ignored and then
+  // overwritten. A report of either would describe a store that is not the one serving.
+  if (verb === "drop" || verb === "set") {
+    const serving = servingProbe(home, path);
+    if (serving !== undefined) {
+      const channel = parsed.flags.get("channel") ?? "<channel>";
+      io.err(
+        `federate ${verb} refused: ${serving.said}. That server holds its channels in the ` +
+          "memory it booted with, " +
+          (verb === "drop"
+            ? "so it would go on pulling this channel and write its pool back on the next sync. "
+            : "so it would go on obeying the old toggles, and its next record of this channel " +
+              "would overwrite the new ones. ") +
+          "Nothing was changed.\n" +
+          `  Stop the server first, then run this again` +
+          (verb === "drop"
+            ? ", or sever it on the running server's own page: " +
+              `${serving.url ?? "<server>"}/admin/container?name=${encodeURIComponent(channel)}. ` +
+              "That page serves only when this home has a user, and it reaches only channels " +
+              "into a signed-in person's own containers."
+            : ", or set it through the running server's own door: the MCP tool loam_federate_set."),
+      );
+      return 2;
+    }
+  }
   const gateway = await Gateway.boot(
-    openStore(storePath(home, parsed.flags.get("store")), io),
+    openStore(path, io),
     assembleGenesis({ operatorSeed: readSeed(home) }),
     {
       channelBackend: channelBackendFor(home, io),
@@ -1911,6 +1966,16 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
             : "") +
           "  union is union; syncing again is safe",
       );
+      // The channel is on disk and a restart resumes it; a server running now polls only the
+      // channels it booted with, so it will not follow this one until then.
+      const serving = servingProbe(home, path);
+      if (serving !== undefined) {
+        io.err(
+          `loam: ${serving.said} — it polls only the channels it booted with, so it will not ` +
+            `follow ${channel.name} until it restarts. A channel opened through that server's own ` +
+            "door (the MCP tool loam_federate_connect) is followed at once.",
+        );
+      }
       return 0;
     }
 
@@ -2201,9 +2266,22 @@ async function cmdStore(args: readonly string[], io: IO): Promise<number> {
     throw err;
   }
   const backend = openStore(path, io);
-  const deltas = await backend.deltasSince(new Set());
-  await backend.close();
+  let deltas: readonly unknown[];
+  let setAside: number;
+  try {
+    deltas = await backend.deltasSince(new Set());
+    setAside = (await backend.quarantine()).length;
+  } finally {
+    await backend.close();
+  }
+  // Rows held and none readable is not an empty store. Every command that boots refuses it with
+  // this sentence, and a count of zero here would be the one door that says otherwise.
+  if (deltas.length === 0 && setAside > 0) {
+    io.err(`loam: ${unreadableStoreMessage(setAside)}`);
+    return 1;
+  }
   io.out(`loam store ${path}\n  ${deltas.length} deltas`);
+  if (setAside > 0) io.err(`loam: ${setAsideLine(setAside)}`);
   return 0;
 }
 
@@ -2340,6 +2418,11 @@ async function cmdRepair(args: readonly string[], io: IO): Promise<number> {
         const key = parsed.positionals[1];
         if (key === undefined) {
           io.err("repair leave wants a key: `loam repair leave <key>`");
+          return 2;
+        }
+        await backend.deltasSince(new Set()); // fill the pen, so we only leave a quarantined row
+        if (!(await backend.quarantine()).some((r) => r.key === key)) {
+          io.err(`repair leave: ${key} is not quarantined — \`loam repair list\` shows what is.`);
           return 2;
         }
         io.out(

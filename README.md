@@ -153,7 +153,6 @@ exist and are easy to miss.
 | `pull`     | land a peer's deltas — a live URL or a frozen offer file                     |
 | `federate` | open, list, adjust and sever federation channels                             |
 | `store`    | inspect a store                                                              |
-| `migrate`  | read an offer, re-express it in the current format, write it back            |
 | `user`     | provision a login user and manage role assignments                           |
 | `grant`    | read the ledger of every author with standing; grant and revoke              |
 | `client`   | mint and revoke non-interactive client credentials — a key, its grants, and a bearer in one motion |
@@ -162,23 +161,28 @@ exist and are easy to miss.
 | `repair`   | list and settle a store's quarantine                                         |
 | `slate`    | read the erasure slates staged over this store                               |
 | `erase`    | forget one delta at the bytes, on every tier, and leave a receipt             |
-| `tombstones` | read the receipts: which ids this store forgot, for whom, and why           |
+| `erasures` | read the receipts: which ids this store forgot, for whom, and why             |
 
 ## The HTTP API
 
 A served store answers these doors per mount, behind a `Bearer` token:
 
 - **`POST /:mount/graphql`** — `{ query, variables? }` → `{ data, errors }`. Both queries and
-  mutations; the mutation acts as the token's identity. Every query field takes `asOf` (a
-  millisecond timestamp) and every view carries `_asOf` and `_forgotten` — the past as it stood,
-  confessing its lawful redactions (SPEC §26).
+  mutations; the mutation acts as the token's identity. Every single-entity query field
+  (`plant(entity)`) takes `asOf` (a millisecond timestamp) and every view carries `_asOf` and
+  `_forgotten` — the past as it stood, confessing its lawful redactions (SPEC §26). A listing
+  field (`plants(limit, after)`) reads the present only and does not take `asOf`.
 - **`GET /:mount/subscribe?query=…`** — a `text/event-stream` (SSE). The query must be a
   `subscription` operation (`subscription { plant(entity: "…") { height _hex _fromHex _changed } }`):
   an initial snapshot, then one `data:` frame per change (`_fromHex → _hex`, `_changed`, and the
   fields).
 - **`POST /:mount/mcp`** — an MCP JSON-RPC surface (`initialize`, `tools/list`, `tools/call`)
-  exposing `loam_query`, `loam_mutate`, `loam_register`, `loam_whoami`, `loam_docs`, and the
-  four `loam_federate_*` channel tools.
+  exposing `loam_query`, `loam_mutate`, `loam_register`, `loam_whoami`, `loam_docs`, the
+  four `loam_federate_*` channel tools, and five `loam_container_*` tools for a connection bound
+  to a container: `_declare` (a container inside its own), `_leeway` (set what a container below
+  it may do), `_receive` (follow another store into its subtree), `_sever` (stage the sever of a
+  channel it opened) and `_promote_stage` (nominate one output for the store's own ground). The
+  two staging tools change nothing; a person completes them in the browser.
 - **`GET /:mount/whoami`** — who this door resolves the caller to be, and what standing the
   ground currently grants them (SPEC §56). Answers the anonymous too, uniformly, saying in words
   that reads are masked — an empty view for an unrecognized caller is not an empty store.
@@ -654,18 +658,20 @@ await gateway.erase(deltaId, { reason: "GDPR art. 17 request #4821" });
 
 `erase` removes the delta from the live store **and every backing tier** — the sqlite, and the
 archive vault if one is configured (a later heal will not replant it) — then re-seats the store
-on what remains. What stays is a **tombstone**: a signed, append-only claim recording _that_ the
+on what remains. What stays is a **receipt**: a signed, append-only claim recording _that_ the
 id was forgotten, by whom, and when — never the content. The store remembers that it forgot. The
-door refuses the id's return thereafter (un-erasure is striking the tombstone). Content addressing
-is what makes this honest: retaining a hash retains zero bytes.
+door refuses the id's return thereafter, and forever: negating a receipt withdraws the record, but
+the id stays refused, so the store never admits it again (§11). There is no un-erasure. The
+refusal is about admission: a purge that fails can leave bytes held on disk. Content addressing is
+what makes this honest: retaining a hash retains zero bytes.
 
 The same machinery has a terminal surface, so a compliance officer needs no script:
 
 ```sh
 loam slate list --home ./mine        # what is staged for erasure, who asked, and when it is due
 loam erase <deltaId> --reason "GDPR art. 17 request #4821" --home ./mine
-loam tombstones list --home ./mine   # every receipt: which id, whose record, when, and why
-loam tombstones show <id> --home ./mine
+loam erasures list --home ./mine     # every receipt: which id, whose record, when, and why
+loam erasures show <id> --home ./mine
 ```
 
 `--reason` is required and has no default: the receipt is all that outlives the record, and one
@@ -686,7 +692,7 @@ a deletion: each operator decides for their own ground.
 What Loam gives you instead is precise, auditable, per-instance forgetting, plus the machinery to
 make erasure across a federation a _coordinated_ act rather than a magic one:
 
-- **The tombstone travels as a request.** It federates like any claim, so downstream operators
+- **The receipt travels as a request.** It federates like any claim, so downstream operators
   _learn_ that you erased — GDPR Art. 17(2)'s "inform downstream controllers," done as data. Each
   peer's operator then chooses to honor it on their own store.
 - **Compliance is queryable.** Ask any store for the id and see what it returns — erased and
