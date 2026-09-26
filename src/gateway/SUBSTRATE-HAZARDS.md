@@ -379,6 +379,36 @@ Fix the rail first, then read what it says.
 
 ---
 
+## H11. A shared present-time read must never follow a value an author signed
+
+**The property.** Since rhizomatic 0.11 every claim carries `validFrom` and an optional
+`validUntil`, and the substrate evaluates validity at a `now` its caller supplies (SPEC-1 §6). A
+caller may pass any time, and an as-of read passes a past one on purpose. Loam's serving gateway
+reads the present for every caller, so the time it supplies for a present read is shared. A claim's
+`timestamp` and `validFrom` are signed by its author, and the store accepts any finite value.
+
+**The hazard (silent).** If the shared present time follows anything an author signed, that author
+moves every reader's clock. Then leases end early, scheduled claims appear early, and nothing
+reports it. The path need not be direct. Here it was an ordering floor: "stamp this author's next
+claim above their newest held claim" also raised the gateway's read time. So one appended delta
+dated an hour ahead, plus one ordinary write, moved the whole store an hour forward. It survived a
+restart, because boot seeded the same floor from held claims. A count of writes is the same shape:
+a floor raised by one per write lets a busy writer drift the clock.
+
+**The question.** For a shared present-time read: can signed values or write counts change the time
+the host supplies? Keep ordering times and validity times apart. Ordering may follow an author's own
+claims; the present a gateway supplies follows its trusted host clock alone. An explicit as-of read
+may use another time deliberately.
+
+**What it cost.** It shipped in the 0.11 switch with every rail green. A hands-on operator review
+reproduced it against a live server in minutes; the fix then took four review rounds, each on an
+edge the previous fix opened (a write-count drift, a float successor at `MAX_SAFE_INTEGER`, one
+author's floor lifting another's, and a seeding cut taken from the wrong clock).
+
+**Provenance.** 2026-09-26 — the operator review after the rhizomatic 0.11 switch; fixed in #600.
+
+---
+
 ## Adding to this file
 
 An entry earns its place by having **cost something** — a bug, a near-miss caught in review, or a
