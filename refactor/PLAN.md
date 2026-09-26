@@ -136,6 +136,11 @@ level. Loam then consumes it through the barrel and compares its recordings.
    the root ground, and current code can still publish one there. First pin a root-binding
    bystander and the pool binding, at the delta and the served-view levels. The lean is a
    pool-local curse under the peer model.
+   Decide what time received law is valid from. Today a blessed definition keeps the peer's
+   `validFrom`, so law from a peer whose clock runs ahead parks until our clock passes it, and the
+   next sync binds it (measured with a 5 s skew). The park reason says "no surviving schema
+   definition", which is false: the definition exists and is valid later. Arrival testimony may
+   be the better start. At least, the reason must name the future start.
 7. **Publish and subscribe.** Per-subscriber lenses, the declared closure rule, a closure audit
    of the exact transferable set and its future additions, signed peer messages, the set digest,
    and a revised HTTP binding. The current HTTP helper does not meet SPEC-6 §4. Loam adopts the
