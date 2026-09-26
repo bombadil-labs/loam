@@ -1958,8 +1958,33 @@ function definitionWinner(
     if (dt !== 0) return dt;
     return a.delta.id < b.delta.id ? -1 : 1;
   })[0];
-  if (latest === undefined) throw new Error(`no surviving schema definition for ${entity}`);
+  if (latest === undefined) throw new Error(explainMissingDefinition(dset, entity, now));
   return latest.delta;
+}
+
+/**
+ * Why no schema definition holds for `entity` at `now`: none ever survives, or one first survives
+ * at a later time. That time can be a definition's own `validFrom` (a peer whose clock runs ahead),
+ * or the moment a negation of it expires. It is not always the signed `validFrom`.
+ */
+export function explainMissingDefinition(dset: DeltaSet, entity: string, now: number): string {
+  // The error path only. Each future validity boundary in the set is a moment the answer can
+  // change, so evaluate there, in order, and report the first moment a definition survives.
+  const boundaries = new Set<number>();
+  for (const d of dset) {
+    for (const t of [d.claims.validFrom, d.claims.validUntil]) {
+      if (t !== undefined && t > now) boundaries.add(t);
+    }
+  }
+  for (const t of [...boundaries].sort((a, b) => a - b)) {
+    for (const bootstrap of [HYPER_SCHEMA_SCHEMA, SCHEMA_SCHEMA]) {
+      const at = evalTerm(bootstrap.body, dset, t, entity);
+      if (at.sort === "hview" && (at.hview.props.get("definition") ?? []).length > 0) {
+        return `a schema definition for ${entity} first survives at ${t}; this store reads at ${now}`;
+      }
+    }
+  }
+  return `no surviving schema definition for ${entity}`;
 }
 
 /**
