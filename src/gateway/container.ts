@@ -64,6 +64,7 @@ import { lawfulDeltasAt, lawfulHistory, lawfulHistoryAt, lawfulSnapshot } from "
 import { negatedAt } from "./negation.js";
 import { readTrustPolicyAt, type TrustPolicy } from "./trust.js";
 import { Gateway, type ConnectionBinding, type FederationReport } from "./gateway.js";
+import { withStamp } from "./stamp.js";
 
 export const CTX_CONTAINER = "loam.container";
 export const CTX_CONTAINER_EXCLUDED = "loam.container.excluded";
@@ -1496,15 +1497,19 @@ function openShared(
       );
       for (const id of ids) {
         await gw.append([
-          signClaims(retractionOf(id, gw.operatorAuthor!, gw.nextTimestamp()), gw.options.seed),
+          signClaims(
+            withStamp(gw.stamp(), (t) => retractionOf(id, gw.operatorAuthor!, t)),
+            gw.options.seed,
+          ),
         ]);
       }
     },
     detach: async (note?: string) => {
-      if (spec.entity === undefined || gw.options.seed === undefined) return; // anonymous: recordless
+      const entity = spec.entity;
+      if (entity === undefined || gw.options.seed === undefined) return; // anonymous: recordless
       await gw.append([
         signClaims(
-          detachClaims(spec.entity, note, gw.operatorAuthor!, gw.nextTimestamp()),
+          withStamp(gw.stamp(), (t) => detachClaims(entity, note, gw.operatorAuthor!, t)),
           gw.options.seed,
         ),
       ]);
@@ -1749,7 +1754,10 @@ async function openSeparate(
     const records = table.detached.get(spec.entity) ?? [];
     if (records.length > 0) {
       const strikes = records.map((r) =>
-        signClaims(retractionOf(r.id, gw.operatorAuthor!, gw.nextTimestamp()), gw.options.seed!),
+        signClaims(
+          withStamp(gw.stamp(), (t) => retractionOf(r.id, gw.operatorAuthor!, t)),
+          gw.options.seed!,
+        ),
       );
       try {
         await gw.append(strikes);
@@ -1910,7 +1918,7 @@ async function openSeparate(
           )) {
             await gw.append([
               signClaims(
-                retractionOf(id, gw.operatorAuthor!, gw.nextTimestamp()),
+                withStamp(gw.stamp(), (t) => retractionOf(id, gw.operatorAuthor!, t)),
                 gw.options.seed!,
               ),
             ]);
@@ -1933,10 +1941,11 @@ async function openSeparate(
     // at-rest record FIRST (T72's named deferral, fulfilled): if the record cannot land, the
     // container stays attached — the erasure guard must never lose sight of bytes it was promised.
     detach: async (note?: string) => {
-      if (spec.entity !== undefined) {
+      const entity = spec.entity;
+      if (entity !== undefined) {
         await gw.append([
           signClaims(
-            detachClaims(spec.entity, note, gw.operatorAuthor!, gw.nextTimestamp()),
+            withStamp(gw.stamp(), (t) => detachClaims(entity, note, gw.operatorAuthor!, t)),
             gw.options.seed!,
           ),
         ]);
@@ -2090,7 +2099,7 @@ export async function bindConnectionImpl(
     // with a monotonic bump on both gateways, so a write through the pool always lands later
     // than its own declaration. A connection is provably the owner's, so the pool is the owner's
     // trust domain (curated), separate storage.
-    const boundAt = gw.nextTimestamp();
+    const boundAt = gw.stamp(opts.connectionKey).timestamp;
     const membership = {
       op: "select",
       pred: {
@@ -2103,16 +2112,18 @@ export async function bindConnectionImpl(
     };
     await gw.append([
       signClaims(
-        containerClaims(
-          {
-            container: name,
-            trust: "curated",
-            posture: "separate",
-            membership,
-            inboxOf: opts.container,
-          },
-          operator,
-          gw.nextTimestamp(),
+        withStamp(gw.stamp(), (t) =>
+          containerClaims(
+            {
+              container: name,
+              trust: "curated",
+              posture: "separate",
+              membership,
+              inboxOf: opts.container,
+            },
+            operator,
+            t,
+          ),
         ),
         operatorSeed,
       ),
@@ -2139,7 +2150,9 @@ export async function bindConnectionImpl(
   if (!holdsGrant(pool.reactor, STORE_ENTITY, owner, "admin", operator)) {
     await pool.append([
       signClaims(
-        grantClaims(STORE_ENTITY, owner, "admin", operator, pool.nextTimestamp()),
+        withStamp(pool.stamp(operator), (t) =>
+          grantClaims(STORE_ENTITY, owner, "admin", operator, t),
+        ),
         operatorSeed,
       ),
     ]);
@@ -2147,7 +2160,9 @@ export async function bindConnectionImpl(
   if (!holdsGrant(pool.reactor, STORE_ENTITY, opts.connectionKey, "write", operator)) {
     await pool.append([
       signClaims(
-        grantClaims(STORE_ENTITY, opts.connectionKey, "write", owner, pool.nextTimestamp()),
+        withStamp(pool.stamp(owner), (t) =>
+          grantClaims(STORE_ENTITY, opts.connectionKey, "write", owner, t),
+        ),
         opts.ownerSeed,
       ),
     ]);
@@ -2246,7 +2261,10 @@ export async function revokeConnectionImpl(opts: {
   }
   await pool.append(
     grantIds.map((id) =>
-      signClaims(revocationClaims(id, owner, pool.nextTimestamp()), opts.ownerSeed),
+      signClaims(
+        withStamp(pool.stamp(owner), (t) => revocationClaims(id, owner, t)),
+        opts.ownerSeed,
+      ),
     ),
   );
 }

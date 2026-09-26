@@ -109,6 +109,7 @@ import {
   ADMIN_REVOKE_CONFIRM_PATH,
   adminPages,
 } from "./admin-pages.js";
+import { withStamp } from "../gateway/stamp.js";
 
 const MAX_BODY = 8 * 1024; // tokens, a name, a membership Term; nothing here needs more
 // A registration carries a hyperschema body and a resolution schema — real JSON, not a name.
@@ -279,7 +280,9 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     const author = authorForSeed(seed.seed);
     await gw.append([
       signClaims(
-        lookedClaims(gated.user, name, gw.nextTimestamp(), author, gw.nextTimestamp()),
+        // The look's moment is its own ordering time, so every claim this gateway stamps after it
+        // sorts after it.
+        withStamp(gw.stamp(author), (t) => lookedClaims(gated.user, name, t, author, t)),
         seed.seed,
       ),
     ]);
@@ -304,7 +307,7 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     const value = gated.fields.get("value") === "true";
     await gw.append([
       signClaims(
-        quietClaims(name, value, gw.operatorAuthor!, gw.nextTimestamp()),
+        withStamp(gw.stamp(), (t) => quietClaims(name, value, gw.operatorAuthor!, t)),
         gw.options.seed!,
       ),
     ]);
@@ -354,7 +357,10 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     };
     try {
       await gw.append([
-        signClaims(containerClaims(spec, gw.operatorAuthor!, gw.nextTimestamp()), gw.options.seed!),
+        signClaims(
+          withStamp(gw.stamp(), (t) => containerClaims(spec, gw.operatorAuthor!, t)),
+          gw.options.seed!,
+        ),
       ]);
     } catch (err) {
       refuse(res, 409, `${escapeHtml(appendRefusal(err))} Nothing was changed.`);
@@ -694,16 +700,18 @@ this lens does not gather; the lens may read ground this container does not hold
     try {
       await gw.append([
         signClaims(
-          containerClaims(
-            {
-              container: name,
-              trust: "curated",
-              posture,
-              parent,
-              ...(membership === undefined ? {} : { membership }),
-            },
-            gw.operatorAuthor!,
-            gw.nextTimestamp(),
+          withStamp(gw.stamp(), (t) =>
+            containerClaims(
+              {
+                container: name,
+                trust: "curated",
+                posture,
+                parent,
+                ...(membership === undefined ? {} : { membership }),
+              },
+              gw.operatorAuthor!,
+              t,
+            ),
           ),
           gw.options.seed!,
         ),
@@ -763,7 +771,7 @@ this lens does not gather; the lens may read ground this container does not hold
     try {
       await gw.append([
         signClaims(
-          detachClaims(name, undefined, gw.operatorAuthor!, gw.nextTimestamp()),
+          withStamp(gw.stamp(), (t) => detachClaims(name, undefined, gw.operatorAuthor!, t)),
           gw.options.seed!,
         ),
       ]);
@@ -806,7 +814,10 @@ this lens does not gather; the lens may read ground this container does not hold
     try {
       await gw.append(
         records.map((r) =>
-          signClaims(negationOf(r.id, gw.operatorAuthor!, gw.nextTimestamp()), gw.options.seed!),
+          signClaims(
+            withStamp(gw.stamp(), (t) => negationOf(r.id, gw.operatorAuthor!, t)),
+            gw.options.seed!,
+          ),
         ),
       );
     } catch (err) {
@@ -1014,7 +1025,10 @@ this lens does not gather; the lens may read ground this container does not hold
       const ids = survivingDeclarationIds(gw.reactor, gw.validityNow(), gw.operatorAuthor!, name);
       await gw.append(
         ids.map((id) =>
-          signClaims(negationOf(id, gw.operatorAuthor!, gw.nextTimestamp()), gw.options.seed!),
+          signClaims(
+            withStamp(gw.stamp(), (t) => negationOf(id, gw.operatorAuthor!, t)),
+            gw.options.seed!,
+          ),
         ),
       );
     } catch (err) {

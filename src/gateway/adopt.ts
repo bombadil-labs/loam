@@ -12,6 +12,7 @@ import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
 import type { Gateway } from "./gateway.js";
 import { negatedAt } from "./negation.js";
 import { dataStruck } from "./accounts.js";
+import { withStamp } from "./stamp.js";
 
 export const ADOPTION_ENTITY = "loam:adoption";
 export const CTX_ADOPTION = "loam.adoption";
@@ -348,14 +349,17 @@ export async function promoteImpl(
     }
     return { promoted: adopted.id };
   }
+  const operator = gw.operatorAuthor;
   const record = signClaims(
-    adoptionRecordClaims(
-      adopted.id,
-      opts.from ?? "quarantine",
-      deltaId,
-      src.claims.author, // the granted-author it wrote under in the pool
-      gw.operatorAuthor,
-      gw.nextTimestamp(),
+    withStamp(gw.stamp(operator), (t) =>
+      adoptionRecordClaims(
+        adopted.id,
+        opts.from ?? "quarantine",
+        deltaId,
+        src.claims.author, // the granted-author it wrote under in the pool
+        operator,
+        t,
+      ),
     ),
     gw.options.seed,
   );

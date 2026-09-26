@@ -34,6 +34,7 @@ import { subtreeOf } from "./subtree.js";
 import { revokeConnector } from "./oauth.js";
 import { escapeHtml, page } from "./session.js";
 import { ADMIN_PATH, ADMIN_REVOKE_PATH, adminPages, type RevokePlan } from "./admin-pages.js";
+import { withStamp } from "../gateway/stamp.js";
 
 // A pasted offer carries real deltas — a store's worth, potentially. Bounded, but generously.
 const FEDERATE_MAX_BODY = 1024 * 1024;
@@ -708,7 +709,10 @@ ${flowNote}`;
         if (ids.length === 0) return;
         await gw.append(
           ids.map((id) =>
-            signClaims(negationOf(id, gw.operatorAuthor!, gw.nextTimestamp()), gw.options.seed!),
+            signClaims(
+              withStamp(gw.stamp(), (t) => negationOf(id, gw.operatorAuthor!, t)),
+              gw.options.seed!,
+            ),
           ),
         );
       };

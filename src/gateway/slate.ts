@@ -66,6 +66,7 @@ import { withNegationClosure } from "./ingest.js";
 import { lawfulSnapshot } from "./registration.js";
 import { negatedAt } from "./negation.js";
 import type { Gateway } from "./gateway.js";
+import { withStamp } from "./stamp.js";
 
 /**
  * The entity both new records DECLARE — the marker that tells a slate record and a graveyard apart
@@ -609,7 +610,7 @@ export const enforcedBy = (slate: Slate): SlateClosure[] =>
  * a deterministic seam — an explicit `now`, never a wall-clock race.
  *
  * `now` is WALL-CLOCK ms and is compared only against `deadline`, never against a delta's own
- * DELTA-TIME timestamp (`nextTimestamp()` is `max(Date.now(), last + 1)` and may run ahead).
+ * DELTA-TIME timestamp (a stamp's `timestamp` orders an author's claims and may run ahead).
  */
 export function readSlates(
   reactor: Reactor,
@@ -1466,21 +1467,23 @@ export async function cutImpl(
   const graveyard =
     existing ??
     signClaims(
-      graveyardClaims(
-        {
-          container,
-          record: slate.record,
-          version: slate.version,
-          membershipAt: slate.membershipAt,
-          memberCount: slate.members.size,
-          opened: slate.requestedAt,
-          cutAt,
-          closes,
-          affected,
-          priorErasure,
-        },
-        operator,
-        gw.nextTimestamp(),
+      withStamp(gw.stamp(operator), (t) =>
+        graveyardClaims(
+          {
+            container,
+            record: slate.record,
+            version: slate.version,
+            membershipAt: slate.membershipAt,
+            memberCount: slate.members.size,
+            opened: slate.requestedAt,
+            cutAt,
+            closes,
+            affected,
+            priorErasure,
+          },
+          operator,
+          t,
+        ),
       ),
       seed,
     );
@@ -1496,7 +1499,12 @@ export async function cutImpl(
   const declarations = survivingDeclarationIds(gw.reactor, gw.validityNow(), operator, container);
   if (declarations.length > 0) {
     await gw.append(
-      declarations.map((id) => signClaims(retractionOf(id, operator, gw.nextTimestamp()), seed)),
+      declarations.map((id) =>
+        signClaims(
+          withStamp(gw.stamp(operator), (t) => retractionOf(id, operator, t)),
+          seed,
+        ),
+      ),
     );
   }
 

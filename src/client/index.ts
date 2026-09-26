@@ -93,7 +93,7 @@ export function loamClient(options: LoamClientOptions): LoamClient {
 
   // Strictly monotonic within this client — the same discipline the gateway keeps.
   let lastTs = 0;
-  const nextTimestamp = (): number => {
+  const clientClock = (): number => {
     lastTs = Math.max(Date.now(), lastTs + 1);
     return lastTs;
   };
@@ -128,7 +128,7 @@ export function loamClient(options: LoamClientOptions): LoamClient {
     });
     // An explicit timestamp still advances the clock: monotonicity is a promise about EVERY
     // delta this client signs, not only the auto-stamped ones.
-    const ts = timestamp ?? nextTimestamp();
+    const ts = timestamp ?? clientClock();
     lastTs = Math.max(lastTs, ts);
     return toWire(signClaims({ timestamp: ts, validFrom: ts, author, pointers: mapped }, seed));
   };

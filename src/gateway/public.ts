@@ -15,6 +15,7 @@ import type { Claims, Reactor } from "@bombadil/rhizomatic";
 import type { Gateway, RequestContext } from "./gateway.js";
 import { lawfulDeltasAt, lensOf, type LensName } from "./registration.js";
 import { negatedAt } from "./negation.js";
+import { withStamp } from "./stamp.js";
 
 export const PUBLIC_ENTITY = "loam:public";
 export const CTX_PUBLIC = "loam.public";
@@ -129,7 +130,12 @@ export async function declarePublicImpl(
   }
   const resolved = entries.map((entry) => freezePublicEntry(gw, entry));
   await gw.append([
-    signClaims(publicClaims(resolved, authorForSeed(seed), gw.nextTimestamp()), seed),
+    signClaims(
+      withStamp(gw.stamp(authorForSeed(seed)), (t) =>
+        publicClaims(resolved, authorForSeed(seed), t),
+      ),
+      seed,
+    ),
   ]);
 }
 

@@ -62,7 +62,6 @@ import {
   slateRefusal,
 } from "./slate.js";
 import { readTrustPolicy } from "./trust.js";
-import { stamped } from "./stamp.js";
 
 // Persist a batch, THEN serve it (the body of `Gateway.append`). The batch is validated whole (one
 // bad delta refuses the lot); it lands in the backend before the reactor sees it, so nothing a
@@ -146,10 +145,7 @@ async function persistChannelEvent(
     if (input.action === "close") pointers.push(eventPrimitive("reason", "drop"));
     else pointers.push(...input.received.map((id) => eventRef("received", id)));
   }
-  const d = signClaims(
-    { author: gw.operatorAuthor, ...stamped(gw.nextTimestamp()), pointers },
-    gw.options.seed,
-  );
+  const d = signClaims({ author: gw.operatorAuthor, ...gw.stamp(), pointers }, gw.options.seed);
   const parsed = parseLocalEvent(d, gw.operatorAuthor);
   if (parsed === undefined || (parsed.action === "open" && !openingAgrees(gw, parsed.opening)))
     throw new Error("invalid local channel event association");

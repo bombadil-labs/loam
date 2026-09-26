@@ -16,6 +16,7 @@ import { containerClaims } from "../gateway/container.js";
 import type { Gateway } from "../gateway/gateway.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
 import type { Leeway } from "../gateway/leeway.js";
+import { stampOn, withStamp } from "../gateway/stamp.js";
 
 export interface ProvisionRefusal {
   readonly status: number;
@@ -61,14 +62,12 @@ export async function ensureUserKey(
     try {
       writeUserSeed(home, user, minted);
       written = true;
+      const operator = gw.operatorAuthor;
+      // `stampOn`, not `gw.stamp`: this act runs over any gateway-shaped ground.
       await gw.append([
         signClaims(
-          grantClaims(
-            STORE_ENTITY,
-            authorForSeed(minted),
-            "write",
-            gw.operatorAuthor,
-            gw.nextTimestamp(),
+          withStamp(stampOn(gw, operator, Date.now()), (t) =>
+            grantClaims(STORE_ENTITY, authorForSeed(minted), "write", operator, t),
           ),
           gw.options.seed,
         ),
@@ -146,9 +145,13 @@ export async function declareOwned(
     // what should inherit, which is a different promise (SPEC §58 position 4).
     ...(leeway === undefined ? {} : { leeway }),
   };
+  const operator = gw.operatorAuthor;
   try {
     await gw.append([
-      signClaims(containerClaims(spec, gw.operatorAuthor, gw.nextTimestamp()), gw.options.seed),
+      signClaims(
+        withStamp(stampOn(gw, operator, Date.now()), (t) => containerClaims(spec, operator, t)),
+        gw.options.seed,
+      ),
     ]);
   } catch (err) {
     onFault(

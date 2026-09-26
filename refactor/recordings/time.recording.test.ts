@@ -143,15 +143,14 @@ describe("recordings: time", () => {
     const genesis = assembleGenesis({ operatorSeed: SEEDS.operator, registrations: [] });
     // Each stamp is written, so the restarted process has the store's history to read.
     const write = async (gw: Gateway): Promise<number> => {
-      const t = gw.nextTimestamp();
+      const s = gw.stamp();
       const claims = {
-        timestamp: t,
-        validFrom: t,
+        ...s,
         author: KEY.operator,
-        pointers: [{ role: "tick", target: { kind: "primitive" as const, value: t } }],
+        pointers: [{ role: "tick", target: { kind: "primitive" as const, value: s.timestamp } }],
       };
       await gw.append([signClaims(claims, SEEDS.operator)]);
-      return t;
+      return s.timestamp;
     };
     vi.setSystemTime(10_000);
     const first = await Gateway.boot(backend, genesis);
