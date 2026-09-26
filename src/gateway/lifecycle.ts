@@ -64,6 +64,7 @@ import {
   type ResolvedBindings,
 } from "./binding-policy.js";
 import { loadResolvers } from "./resolvers.js";
+import { stamped, withStamp, type Stamp } from "./stamp.js";
 
 // Every claim template must be VISIBLE to its own schema: substitute sentinels for the arg
 // holes, build the specimen delta, and require that at least one entity the template touches
@@ -1224,9 +1225,10 @@ export async function publishRegistrationImpl(
   // The clock is a seam, not a decision: an ordinary publish stamps NOW, and a T33 blessing threads
   // the SOURCE's timestamps through so its twins re-mint the source's ids (see adopt-law.ts's H4
   // note — the erasure refusal and idempotence both ride that identity).
-  const tick = internals?.clock ?? ((): number => gw.nextTimestamp());
+  const clock = internals?.clock;
+  const tick = (): Stamp => (clock === undefined ? gw.stamp(author) : stamped(clock()));
   const definition = signClaims(
-    publishHyperSchemaClaims(hyperschema, schemaEntity, author, tick()),
+    withStamp(tick(), (t) => publishHyperSchemaClaims(hyperschema, schemaEntity, author, t)),
     seed,
   );
   await loadHyperSchemaImpl(gw, [definition], schemaEntity); // proves, then persists the definition

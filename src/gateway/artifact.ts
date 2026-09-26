@@ -37,6 +37,7 @@ import { lawfulDeltasAt, lensOf } from "./registration.js";
 import { negatedAt } from "./negation.js";
 import type { Registered } from "../surface/surface.js";
 import type { RendererBinding } from "./renderers.js";
+import { withStamp } from "./stamp.js";
 
 export const ARTIFACT_ENTITY = "loam:artifact";
 export const CTX_ARTIFACT = "loam.artifact";
@@ -170,7 +171,12 @@ export async function declareArtifactImpl(
     throw new Error("artifact: declare at least one non-empty route");
   }
   await gw.append([
-    signClaims(artifactClaims(routes, authorForSeed(seed), gw.nextTimestamp()), seed),
+    signClaims(
+      withStamp(gw.stamp(authorForSeed(seed)), (t) =>
+        artifactClaims(routes, authorForSeed(seed), t),
+      ),
+      seed,
+    ),
   ]);
 }
 

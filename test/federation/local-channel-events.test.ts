@@ -1543,7 +1543,7 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     const preplant = strike(predicted, SEED, 49999);
     await gw.append([preplant]);
     expect(gw.reactor.get(preplant.id)).toBeDefined();
-    vi.spyOn(gw, "nextTimestamp").mockReturnValue(50000);
+    vi.spyOn(gw, "stamp").mockReturnValue({ timestamp: 50000, validFrom: 50000 });
     offering.push(a);
     await ch.sync();
     expect(gw.reactor.get(predicted.id)).toBeDefined();
@@ -1563,7 +1563,7 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     const preplant = signed(eraseClaims(predicted.id, OP, OP, 49999));
     await gw.append([preplant]);
     expect(gw.reactor.get(preplant.id)).toBeDefined();
-    vi.spyOn(gw, "nextTimestamp").mockReturnValue(50000);
+    vi.spyOn(gw, "stamp").mockReturnValue({ timestamp: 50000, validFrom: 50000 });
     offering.push(a);
     await expect(ch.sync()).rejects.toThrow();
     expect(pool.reactor.get(a.id)).toBeDefined();
@@ -1600,7 +1600,7 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     await gw.append([preplant]);
     expect(gw.reactor.get(preplant.id)).toBeDefined();
     expect(gw.reactor.get(predicted.id)).toBeUndefined();
-    vi.spyOn(gw, "nextTimestamp").mockReturnValue(70000);
+    vi.spyOn(gw, "stamp").mockReturnValue({ timestamp: 70000, validFrom: 70000 });
     primary.failPurge = true;
     await expect(gw.erase(target.id)).rejects.toThrow();
     expect(gw.reactor.get(predicted.id)).toEqual(predicted);

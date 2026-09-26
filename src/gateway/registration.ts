@@ -34,6 +34,7 @@ import { negatedAt } from "./negation.js";
 // this reader calls its interpreter. Both uses are call-time, so ESM resolves it; the modules stay
 // split because the interpreter is the SPEC and this file is the fast path it disciplines.
 import { interpretBindingPolicy, readBindingPolicy } from "./binding-policy.js";
+import { stamped, withStamp, type Stamp } from "./stamp.js";
 
 export { lawfulNegated } from "./negation.js";
 
@@ -634,7 +635,8 @@ export function registrationClaims(
 // the binding. rhizomatic requires a published Schema to carry name+alg, so the single-lens name is
 // stamped here. All four deltas (definition aside) go down together: `loadSchema` needs the entities
 // present before the binding that points at them can resolve. Timestamps come from the caller's own
-// monotonic clock so genesis stays idempotent and a live publish stays ordered.
+// monotonic clock so genesis stays idempotent and a live publish stays ordered. A bare number from
+// the clock is both times; a Stamp gives each its own.
 export interface RegistrationDeltaClaims {
   readonly living: Claims;
   readonly snapshot: Claims;
@@ -648,7 +650,7 @@ export function registrationDeltaClaims(
   schema: Schema,
   roots: readonly string[],
   author: string,
-  nextTimestamp: () => number,
+  clock: () => number | Stamp,
   mutations?: ClaimTemplates,
   writable?: readonly string[],
   resolvers?: ResolverSpecs,
@@ -657,19 +659,25 @@ export function registrationDeltaClaims(
   const named: Schema = { ...schema, name, alg: schema.alg ?? 1 };
   const livingEntity = schemaLivingEntityFor(name);
   const snapshotEntity = versionedSchemaEntityFor(name, schema);
-  const living = publishSchemaClaims(named, livingEntity, author, nextTimestamp());
-  const snapshot = publishSchemaClaims(named, snapshotEntity, author, nextTimestamp());
-  const binding = registrationClaims(
-    schemaEntity,
-    livingEntity,
-    snapshotEntity,
-    roots,
-    author,
-    nextTimestamp(),
-    mutations,
-    writable,
-    resolvers,
-    refs,
+  const tick = (): Stamp => {
+    const t = clock();
+    return typeof t === "number" ? stamped(t) : t;
+  };
+  const living = withStamp(tick(), (t) => publishSchemaClaims(named, livingEntity, author, t));
+  const snapshot = withStamp(tick(), (t) => publishSchemaClaims(named, snapshotEntity, author, t));
+  const binding = withStamp(tick(), (t) =>
+    registrationClaims(
+      schemaEntity,
+      livingEntity,
+      snapshotEntity,
+      roots,
+      author,
+      t,
+      mutations,
+      writable,
+      resolvers,
+      refs,
+    ),
   );
   return { living, snapshot, binding, livingEntity, snapshotEntity };
 }

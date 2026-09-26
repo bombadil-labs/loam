@@ -27,6 +27,7 @@ import {
 import { graphql, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
+import { stampOn, type Stamp } from "./stamp.js";
 import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
 import {
   blessChannelAppImpl,
@@ -448,7 +449,6 @@ export class Gateway {
   // a future DerivationHost's emissions ride it into the ground).
   /** @internal — T19 seam (ingest.ts) */
   readonly justPersisted = new Set<string>();
-  private lastMutationTs = 0;
   private unreadableRows = 0; // set by open: rows held, none readable
   /** @internal — T19 seam (erase.ts, adopt.ts) */
   readonly operatorAuthor: string | undefined;
@@ -1452,11 +1452,12 @@ export class Gateway {
     return Date.now();
   }
 
-  /** The instant a validity read looks at: `now`, but never earlier than this gateway's own latest
-   * write. `nextTimestamp` can run ahead of the wall clock, and a write must be valid when the next
-   * read looks. Deadlines never use this: they compare the wall clock alone. */
+  /** The instant a validity read looks at: the wall clock. No signed value and no count of writes
+   * moves it, so no writer can move every reader's time. A claim this gateway stamps is valid from
+   * the wall clock at signing, so the next read sees it. After the host clock steps back, a claim
+   * stamped before the step stays not yet valid until the wall clock passes its `validFrom`. */
   validityNow(now: number = this.now()): number {
-    return Math.max(now, this.lastMutationTs);
+    return now;
   }
 
   private validityTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1532,31 +1533,58 @@ export class Gateway {
 
   /** @internal — ingest.ts calls it for every delta it lands */
   noteAuthorTime(d: Delta): void {
-    const { author, timestamp } = d.claims;
-    if (timestamp > (this.authorClocks.get(author) ?? -Infinity)) {
-      this.authorClocks.set(author, timestamp);
+    this.raiseAuthorClock(d.claims.author, d.claims.timestamp);
+  }
+
+  // The map holds each author's greatest USABLE time. Ordering is monotonic only within the
+  // safe-integer range: above it `t + 1` need not be a new number, so a time there is never
+  // stored (storing it would hide a safe time held beside it). At MAX_SAFE_INTEGER itself strict
+  // order ends; see `nextTimestamp`. Nothing refuses such a
+  // write, and under a `byTimestamp` Policy that claim can still win: the store accepts any finite
+  // signed creation time. It never moves validity.
+  private raiseAuthorClock(author: string, t: number): void {
+    if (t <= Number.MAX_SAFE_INTEGER && t > (this.authorClocks.get(author) ?? -Infinity)) {
+      this.authorClocks.set(author, t);
     }
   }
 
-  // The store's own history is the only witness to time before this process started. The
-  // operator's clock also floors `validityNow`, so its pre-restart writes stay valid. A user's
-  // pre-restart writes are not covered: until that user or the wall clock moves past them, a
-  // write stamped ahead of a stepped-back clock is not yet valid.
+  // The store's own history is the only witness to ordering before this process started. It only
+  // orders: a held timestamp is signed by its author, and no read time follows it.
   private seedAuthorClocks(deltas: Iterable<Delta>): void {
     for (const d of deltas) this.noteAuthorTime(d);
-    const operator =
-      this.operatorAuthor === undefined ? undefined : this.authorClocks.get(this.operatorAuthor);
-    if (operator !== undefined) this.lastMutationTs = Math.max(this.lastMutationTs, operator);
   }
 
-  /** A creation time for a claim `author` is about to sign: never behind the wall clock, never
-   * equal to this gateway's last stamp, and never behind a claim the store already holds from
-   * `author`. */
-  nextTimestamp(author: string | undefined = this.operatorAuthor): number {
-    const held = author === undefined ? -Infinity : (this.authorClocks.get(author) ?? -Infinity);
-    this.lastMutationTs = Math.max(this.now(), this.lastMutationTs + 1, held + 1);
-    return this.lastMutationTs;
+  /**
+   * The times for a claim `author` is about to sign: `timestamp` from `nextTimestamp(author)`, and
+   * `validFrom` from the wall clock. See `stampOn`.
+   */
+  stamp(author: string | undefined = this.operatorAuthor): Stamp {
+    return stampOn(this, author, this.now());
   }
+
+  /**
+   * The ordering time for a claim `author` is about to sign. For one author it is strictly
+   * increasing: above every claim the store holds, and every time issued, for `author` (within the
+   * safe-integer range). Across authors it follows this gateway's own clock only, so same-moment
+   * writes through one gateway sort in the order they were made, unless an author's own floor
+   * lifts that author's time above the clock. One author's floor never lifts another's. It can run
+   * ahead of the wall clock, so it is never a validity time. Source code signs with `stamp()`,
+   * which calls this; call it directly only from a fixture.
+   * @internal
+   */
+  nextTimestamp(author: string | undefined = this.operatorAuthor): number {
+    this.lastIssued = Math.max(this.now(), this.lastIssued + 1);
+    if (author === undefined) return this.lastIssued;
+    // Strict order ends at the top of the safe range: once the floor has no safe successor, the
+    // time falls back to this gateway's own counter, which never repeats.
+    const floor = this.authorClocks.get(author) ?? -Infinity;
+    const timestamp =
+      floor < Number.MAX_SAFE_INTEGER ? Math.max(this.lastIssued, floor + 1) : this.lastIssued;
+    this.raiseAuthorClock(author, timestamp);
+    return timestamp;
+  }
+  // Only this gateway's own issues move it, never a held timestamp, so no author moves it far.
+  private lastIssued = 0;
 
   // --- the read seam ---------------------------------------------------------------------------
 

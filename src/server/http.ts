@@ -96,6 +96,7 @@ import { refusalKey } from "../gateway/lifecycle.js";
 import type { ChannelStatus } from "../federation/channel.js";
 import type { ConnectionBinding } from "../gateway/gateway.js";
 import { canonicalLeewayJson, parseLeeway, type Leeway } from "../gateway/leeway.js";
+import { withStamp } from "../gateway/stamp.js";
 
 export { type UserDoorOptions } from "./session.js";
 
@@ -2209,16 +2210,18 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
               await gateway.append(
                 missing.reverse().map((container) =>
                   signClaims(
-                    containerClaims(
-                      {
-                        container,
-                        trust: "curated",
-                        posture: "shared",
-                        membership: CONNECTION_AGGREGATOR,
-                        parent: container.slice(0, container.lastIndexOf(":")),
-                      },
-                      gateway.operatorAuthor!,
-                      gateway.nextTimestamp(),
+                    withStamp(gateway.stamp(), (t) =>
+                      containerClaims(
+                        {
+                          container,
+                          trust: "curated",
+                          posture: "shared",
+                          membership: CONNECTION_AGGREGATOR,
+                          parent: container.slice(0, container.lastIndexOf(":")),
+                        },
+                        gateway.operatorAuthor!,
+                        t,
+                      ),
                     ),
                     gateway.options.seed!,
                   ),
@@ -2326,19 +2329,23 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             try {
               await gateway.append([
                 signClaims(
-                  containerClaims(
-                    {
-                      container: target,
-                      trust: rec.trust,
-                      posture: rec.posture,
-                      ...(rec.parent === undefined ? {} : { parent: rec.parent }),
-                      ...(rec.membership === undefined ? {} : { membership: rec.membership }),
-                      ...(rec.membershipAt === undefined ? {} : { membershipAt: rec.membershipAt }),
-                      ...(rec.version === undefined ? {} : { version: rec.version }),
-                      leeway: want,
-                    },
-                    gateway.operatorAuthor!,
-                    gateway.nextTimestamp(),
+                  withStamp(gateway.stamp(), (t) =>
+                    containerClaims(
+                      {
+                        container: target,
+                        trust: rec.trust,
+                        posture: rec.posture,
+                        ...(rec.parent === undefined ? {} : { parent: rec.parent }),
+                        ...(rec.membership === undefined ? {} : { membership: rec.membership }),
+                        ...(rec.membershipAt === undefined
+                          ? {}
+                          : { membershipAt: rec.membershipAt }),
+                        ...(rec.version === undefined ? {} : { version: rec.version }),
+                        leeway: want,
+                      },
+                      gateway.operatorAuthor!,
+                      t,
+                    ),
                   ),
                   gateway.options.seed!,
                 ),

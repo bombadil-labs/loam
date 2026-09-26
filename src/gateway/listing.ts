@@ -39,6 +39,7 @@ import {} from "./leeway.js";
 import { groupPrograms } from "./lifecycle.js";
 import { programOf, type ProgramName } from "./registration.js";
 import type { ResolvedNode } from "../surface/surface.js";
+import { withStamp } from "./stamp.js";
 
 // WHAT A PAGE COSTS. Every page pays three separate costs, and two of them are now independent
 // of the store's size (H8, ticket T163):
@@ -216,27 +217,29 @@ async function ensureListingContainer(
   }
   await gw.append([
     signClaims(
-      containerClaims(
-        {
-          container: name,
-          trust: "curated",
-          posture: "shared",
-          membership,
-          // Latest-wins is per DECLARATION: omitting a knob that stands is deleting it.
-          ...(standing?.parent === undefined ? {} : { parent: standing.parent }),
-          ...(standing?.version === undefined ? {} : { version: standing.version }),
-          ...(standing?.inboxOf === undefined ? {} : { inboxOf: standing.inboxOf }),
-          // A leeway is never undefined on a resolved container, so carrying it unconditionally
-          // would write an explicit sealed pointer onto every container that declared none and
-          // change the bytes of every listing re-declaration. Carry it exactly when one was
-          // DECLARED: a sealed declaration and an absent one no longer resolve identically on a
-          // road that walks the tree for the governing leeway (a container that declared none is
-          // a pure namespace and inherits; one that sealed itself stays sealed), so omitting a
-          // declared sealed pointer here would widen a container that had closed its own door.
-          ...(standing?.leewayDeclared ? { leeway: standing.leeway } : {}),
-        },
-        law.operator,
-        gw.nextTimestamp(law.operator),
+      withStamp(gw.stamp(law.operator), (t) =>
+        containerClaims(
+          {
+            container: name,
+            trust: "curated",
+            posture: "shared",
+            membership,
+            // Latest-wins is per DECLARATION: omitting a knob that stands is deleting it.
+            ...(standing?.parent === undefined ? {} : { parent: standing.parent }),
+            ...(standing?.version === undefined ? {} : { version: standing.version }),
+            ...(standing?.inboxOf === undefined ? {} : { inboxOf: standing.inboxOf }),
+            // A leeway is never undefined on a resolved container, so carrying it unconditionally
+            // would write an explicit sealed pointer onto every container that declared none and
+            // change the bytes of every listing re-declaration. Carry it exactly when one was
+            // DECLARED: a sealed declaration and an absent one no longer resolve identically on a
+            // road that walks the tree for the governing leeway (a container that declared none is
+            // a pure namespace and inherits; one that sealed itself stays sealed), so omitting a
+            // declared sealed pointer here would widen a container that had closed its own door.
+            ...(standing?.leewayDeclared ? { leeway: standing.leeway } : {}),
+          },
+          law.operator,
+          t,
+        ),
       ),
       law.seed,
     ),

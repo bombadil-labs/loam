@@ -18,7 +18,7 @@ import type { HVEntry, Primitive } from "@bombadil/rhizomatic";
 import type { ConnectionBinding, Gateway } from "./gateway.js";
 import { legalNameFor, queryFieldFor, type ClaimPointerSpec, type ResolvedNode } from "./gql.js";
 import { edgeRoles, lensOf, referenceProps, type ReferenceProp } from "./registration.js";
-import { stamped } from "./stamp.js";
+import { withStamp } from "./stamp.js";
 
 // Where a write LANDS (SPEC §58): a bound connection's deltas go into its inbox pool — the pool's
 // own door authorizes them on the pool's own grant chain, so the primary never has to grant the key
@@ -68,12 +68,11 @@ export async function mutateEntityImpl(
   const author = authorForSeed(seed);
   // Strictly monotonic per author: two mutations never tie on timestamp, and a restart with the
   // clock set back cannot sort a later write before an earlier one under `byTimestamp`.
-  const timestamp = gw.nextTimestamp(author);
+  const stamp = gw.stamp(author);
   const deltas = entries.map(([prop, value]) =>
     signClaims(
       {
-        timestamp,
-        validFrom: timestamp,
+        ...stamp,
         author,
         pointers: [
           { role: "subject", target: { kind: "entity", entity: { id: entity, context: prop } } },
@@ -131,9 +130,12 @@ async function retract(
     }
   }
   if (targets.size > 0) {
-    const timestamp = gw.nextTimestamp(author);
+    const stamp = gw.stamp(author);
     const negations = [...targets].map((id) =>
-      signClaims(makeNegationClaims(author, timestamp, id), seed),
+      signClaims(
+        withStamp(stamp, (t) => makeNegationClaims(author, t, id)),
+        seed,
+      ),
     );
     await sink.append(negations);
   }
@@ -270,7 +272,7 @@ export async function linkEntityImpl(
   const author = authorForSeed(seed);
   const delta = signClaims(
     {
-      ...stamped(gw.nextTimestamp()),
+      ...gw.stamp(author),
       author,
       pointers: [
         { role: "subject", target: { kind: "entity", entity: { id: entity, context: field } } },
@@ -395,10 +397,11 @@ export async function linkRefEntityImpl(
     throw new Error("this gateway holds no signing seed and cannot write");
   }
   const ref = referencePropFor(gw, name, prop, binding);
+  const author = authorForSeed(seed);
   const delta = signClaims(
     {
-      ...stamped(gw.nextTimestamp()),
-      author: authorForSeed(seed),
+      ...gw.stamp(author),
+      author,
       pointers: [
         {
           role: ref.role,
@@ -522,7 +525,7 @@ export async function claimEntityImpl(
     return { role: p.role, target: { kind: "primitive" as const, value: p.value as Primitive } };
   });
   const delta = signClaims(
-    { ...stamped(gw.nextTimestamp()), author: authorForSeed(seed), pointers: mapped },
+    { ...gw.stamp(authorForSeed(seed)), author: authorForSeed(seed), pointers: mapped },
     seed,
   );
   await sink.append([delta]);

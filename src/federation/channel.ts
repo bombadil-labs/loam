@@ -55,7 +55,7 @@ import { negatedAt } from "../gateway/negation.js";
 import { freezeMembers } from "../gateway/container-identity.js";
 import type { RendererBinding } from "../gateway/renderers.js";
 import { readForeignRenderers, readPoolRenderers, routeServableOn } from "../gateway/renderers.js";
-import { stamped } from "../gateway/stamp.js";
+import { withStamp } from "../gateway/stamp.js";
 
 /** Where a channel's deltas come from. A live peer, a frozen offer, or a fixture. */
 export interface ChannelSource {
@@ -437,14 +437,16 @@ async function attestArrival(
   // sync obeys the same fan as any other. A carried ref is stamped LATE and says so only by the
   // stamp's own timestamp: the moment is the sync that recorded it, not the sync it arrived on.
   const union = [...new Set([...owed, ...arrived])];
-  const at = ground.nextTimestamp();
+  const at = ground.stamp(gw.operatorAuthor);
   const batch: { refs: string[]; stamp: Delta }[] = [];
   for (let i = 0; i < union.length; i += ARRIVAL_FAN) {
     const refs = union.slice(i, i + ARRIVAL_FAN);
     batch.push({
       refs,
       stamp: signClaims(
-        arrivalClaims({ channel: name, from, arrived: refs }, gw.operatorAuthor!, at),
+        withStamp(at, (t) =>
+          arrivalClaims({ channel: name, from, arrived: refs }, gw.operatorAuthor!, t),
+        ),
         gw.options.seed!,
       ),
     });
@@ -698,10 +700,8 @@ async function bindArrived(
     await ground.federate(
       pending.map(([alias, entity]) =>
         signClaims(
-          manifestExportClaims(
-            { alias, targetEntity: entity, kind: "schema" },
-            operator,
-            ground.nextTimestamp(),
+          withStamp(ground.stamp(operator), (t) =>
+            manifestExportClaims({ alias, targetEntity: entity, kind: "schema" }, operator, t),
           ),
           seed,
         ),
@@ -1114,10 +1114,12 @@ export async function blessChannelAppImpl(
   if (mine.find((r) => r.alias === alias)?.target !== app.deltaId) {
     await ground.federate([
       signClaims(
-        manifestExportClaims(
-          { alias, targetAddress: app.deltaId, kind: "renderer" },
-          operator,
-          ground.nextTimestamp(),
+        withStamp(ground.stamp(operator), (t) =>
+          manifestExportClaims(
+            { alias, targetAddress: app.deltaId, kind: "renderer" },
+            operator,
+            t,
+          ),
         ),
         seed,
       ),
@@ -1734,7 +1736,7 @@ async function syncChannelCommit(
         ...opener(opts),
         receiving: before?.receiving ?? true,
         blessing: before?.blessing ?? opts.bless !== false,
-        lastSyncedAt: gw.nextTimestamp(),
+        lastSyncedAt: gw.now(),
         consecutiveFailures: 0,
         from,
         // Cleared, and only here: the stamps for every owed arrival are in the pool above.
@@ -1967,7 +1969,7 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
           };
           standing.add(container);
           return signClaims(
-            containerClaims(spec, gw.operatorAuthor!, gw.nextTimestamp()),
+            withStamp(gw.stamp(), (t) => containerClaims(spec, gw.operatorAuthor!, t)),
             gw.options.seed!,
           );
         }),
@@ -2022,16 +2024,18 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
       await gw.append(
         missing.reverse().map((container) =>
           signClaims(
-            containerClaims(
-              {
-                container,
-                trust: "curated",
-                posture: "shared",
-                membership: AGGREGATOR,
-                parent: container.slice(0, container.lastIndexOf(":")),
-              },
-              gw.operatorAuthor!,
-              gw.nextTimestamp(),
+            withStamp(gw.stamp(), (t) =>
+              containerClaims(
+                {
+                  container,
+                  trust: "curated",
+                  posture: "shared",
+                  membership: AGGREGATOR,
+                  parent: container.slice(0, container.lastIndexOf(":")),
+                },
+                gw.operatorAuthor!,
+                t,
+              ),
             ),
             seed,
           ),
@@ -2063,10 +2067,12 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
   // (§28); separate because its own ground is what keeps the peer's bytes out of the receiver's
   // store and keeps `drop` a physical purge.
   const poolDeclaration = signClaims(
-    containerClaims(
-      { container: name, trust: "untrusted", posture: "separate", inboxOf: opts.into },
-      gw.operatorAuthor!,
-      gw.nextTimestamp(),
+    withStamp(gw.stamp(), (t) =>
+      containerClaims(
+        { container: name, trust: "untrusted", posture: "separate", inboxOf: opts.into },
+        gw.operatorAuthor!,
+        t,
+      ),
     ),
     gw.options.seed,
   );
@@ -2339,7 +2345,10 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
       if (marker.target.entity.id !== `channel:${name}`) continue;
       if (negated(d.id)) continue;
       await gw.append([
-        signClaims(makeNegationClaims(operator, gw.nextTimestamp(), d.id), gw.options.seed),
+        signClaims(
+          withStamp(gw.stamp(operator), (t) => makeNegationClaims(operator, t, d.id)),
+          gw.options.seed,
+        ),
       ]);
     }
   }
@@ -2408,10 +2417,8 @@ async function stamp(
         `again.`,
     );
   }
-  const claims = channelRecordClaims(
-    { ...status, unreadable: [] },
-    gw.operatorAuthor!,
-    gw.nextTimestamp(),
+  const claims = withStamp(gw.stamp(), (t) =>
+    channelRecordClaims({ ...status, unreadable: [] }, gw.operatorAuthor!, t),
   );
   const delta = signClaims(
     illegible.length === 0
@@ -2587,7 +2594,7 @@ export async function curseChannelLawImpl(
           if (g.reactor.negationsOf(negationId).length > 0) continue; // already lifted
           await g.append([
             signClaims(
-              makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), negationId),
+              withStamp(gw.stamp(), (t) => makeNegationClaims(gw.operatorAuthor!, t, negationId)),
               seed,
             ),
           ]);
@@ -2601,7 +2608,10 @@ export async function curseChannelLawImpl(
       // The substrate's own negation shape. A hand-rolled "negates" pointer is not one — it appends
       // cleanly, changes nothing, and the curse silently keeps standing.
       await gw.append([
-        signClaims(makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), d.deltaId), seed),
+        signClaims(
+          withStamp(gw.stamp(), (t) => makeNegationClaims(gw.operatorAuthor!, t, d.deltaId)),
+          seed,
+        ),
       ]);
     }
     return;
@@ -2658,7 +2668,10 @@ export async function curseChannelLawImpl(
             now: pool.validityNow(),
             sign: async (id: string): Promise<void> => {
               await pool.append([
-                signClaims(makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), id), seed),
+                signClaims(
+                  withStamp(gw.stamp(), (t) => makeNegationClaims(gw.operatorAuthor!, t, id)),
+                  seed,
+                ),
               ]);
             },
           },
@@ -2668,7 +2681,10 @@ export async function curseChannelLawImpl(
       now: gw.validityNow(),
       sign: async (id: string): Promise<void> => {
         await gw.append([
-          signClaims(makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), id), seed),
+          signClaims(
+            withStamp(gw.stamp(), (t) => makeNegationClaims(gw.operatorAuthor!, t, id)),
+            seed,
+          ),
         ]);
       },
     },
@@ -2699,7 +2715,7 @@ export async function curseChannelLawImpl(
   await gw.append([
     signClaims(
       {
-        ...stamped(gw.nextTimestamp()),
+        ...gw.stamp(),
         author: gw.operatorAuthor!,
         pointers: [
           {

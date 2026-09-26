@@ -43,6 +43,7 @@ import {
   rendererContextRefusal,
   type RendererContext,
 } from "./renderer-context.js";
+import { withStamp } from "./stamp.js";
 
 export const CTX_RENDERER = "loam.renderer";
 
@@ -674,12 +675,10 @@ export async function publishRendererImpl(
   // or the network at import is refused HERE, with the reason, and nothing is appended.
   await admitRenderer(spec.bundle, rendererAdmissionBudget(gw));
   const author = authorForSeed(seed);
-  const binding = rendererBindingClaims(
-    spec,
-    versionId,
-    author,
-    internals?.timestamp ?? gw.nextTimestamp(author),
-  );
+  const binding =
+    internals?.timestamp === undefined
+      ? withStamp(gw.stamp(author), (t) => rendererBindingClaims(spec, versionId, author, t))
+      : rendererBindingClaims(spec, versionId, author, internals.timestamp);
   // Taking a ROUTE the same way a blessing takes a schema name (§23.5 is latest-per-route, so the
   // route is a living name too): the negation rides the binding, so striking the binding resurfaces
   // whoever held the route before it.

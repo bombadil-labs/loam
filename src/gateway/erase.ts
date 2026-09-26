@@ -54,6 +54,7 @@ import {
 } from "./slate.js";
 import type { Gateway } from "./gateway.js";
 import type { StoreBackend } from "../store/backend.js";
+import { withStamp } from "./stamp.js";
 
 export const ERASE_ENTITY = "loam:erasure";
 export const CTX_ERASE = "loam.erasure";
@@ -1207,17 +1208,13 @@ export async function eraseImpl(
           ],
         }
       : claims;
+  const operator = gw.operatorAuthor;
   const erasure =
     already ??
     signClaims(
       localClaims(
-        eraseClaims(
-          id,
-          target!.claims.author,
-          gw.operatorAuthor,
-          gw.nextTimestamp(),
-          opts.reason,
-          opts.slate,
+        withStamp(gw.stamp(operator), (t) =>
+          eraseClaims(id, target!.claims.author, operator, t, opts.reason, opts.slate),
         ),
       ),
       seed,
