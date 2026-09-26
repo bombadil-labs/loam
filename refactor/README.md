@@ -107,6 +107,9 @@ Get a fully green baseline first. A red baseline teaches you to ignore red.
 
 ## Where things are
 
+- **The map:** [MAP.md](MAP.md), the state of the refactor at a glance. It is updated in every
+  refactor PR.
+
 - `GLOSSARY.md`: the plain words that replace Loam's idiolect. Apply them as you go.
 
 - `tools/`: the census scripts behind the journal's numbers. See `tools/README.md`.
