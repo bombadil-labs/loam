@@ -262,7 +262,7 @@ export const CHAPTERS = [
       {
         kind: "notYet",
         items: [
-          "Importing an existing conventional database (rows and columns) into a Loam store is described as a future opt-in transform and does not exist. The migration machinery in the tree moves Loam's own facts between Loam's own formats, which is a different job.",
+          "Importing an existing conventional database (rows and columns) into a Loam store is described as a future opt-in transform and does not exist.",
         ],
       },
     ],
@@ -1233,7 +1233,7 @@ export const CHAPTERS = [
       { kind: "heading", text: "When the format changes underneath old facts" },
       {
         kind: "prose",
-        text: "Formats change. When one does, migration carries old facts forward without ever rewriting one: it re-signs the content into the new form at the original timestamp and negates the old claim with a pointer to its replacement and a stated reason. So the history of the retirement is legible, and re-running the migration on an already-current store does nothing at all. It is also not a signing oracle: it can only re-sign what the running key itself authored, and a claim it cannot verify is left exactly as it is.",
+        text: "Formats change, and Loam does not migrate. It reads only the current vocabulary: a retired word is an unknown word, and a store written in an earlier format is refused at boot, loudly, rather than opened empty.",
       },
       { kind: "heading", text: "What did this look like on Tuesday" },
       {
@@ -1293,22 +1293,16 @@ export const CHAPTERS = [
             door: "Gateway",
           },
           {
-            says: "Migration re-signs each changed fact at its original timestamp and negates the old one with a pointer to its replacement and a reason — never a silent rewrite.",
+            says: "Loam has no migration: a store it cannot read is refused at boot, loudly, never opened empty and never carried forward.",
             spec: "spec/20-migration.md",
-            proof: "test/migrate/migrate.test.ts",
-            door: "migrate",
+            proof: "test/gateway/container-compat.test.ts",
+            door: "Gateway",
           },
           {
-            says: "Re-running a migration against an already-current store adds nothing and supersedes nothing.",
+            says: "A retired word is an unknown word: the door refuses it and a reader binds nothing from it.",
             spec: "spec/20-migration.md",
-            proof: "test/migrate/migrate.test.ts",
-            door: "MIGRATIONS",
-          },
-          {
-            says: "Migration is not a signing oracle: a fact it cannot verify is never re-signed under someone else's name.",
-            spec: "spec/20-migration.md",
-            proof: "test/migrate/migrate.test.ts",
-            door: "migrate",
+            proof: "test/server/container-tools.test.ts",
+            door: "Gateway",
           },
           {
             says: "A query can name a past moment and get the reading resolved against the [[ground]] as it stood then, while an ordinary query still reads the present.",

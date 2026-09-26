@@ -178,8 +178,7 @@ export function eraseDefect(
   if (count.spokenBy !== 1 || spokenBy === undefined) {
     return "an erasure carries exactly one string `spoken-by` (the erased delta's author)";
   }
-  // The §29.6 join is OPTIONAL forever — every erasure any store already holds carries none, so
-  // no §20 step is engaged — but a PRESENT one is validated: a malformed join would make the
+  // The §29.6 join is OPTIONAL, but a PRESENT one is validated: a malformed join would make the
   // graveyard's arithmetic unreadable while looking like law.
   if (count.slate > 1 || (count.slate === 1 && slate === undefined)) {
     return `an erasure carries at most one \`slate\` pointer, an entity reference at ${CTX_SLATE}`;

@@ -29,8 +29,6 @@ import {
 import { Gateway, type FederationReport } from "../gateway/gateway.js";
 import type { PublishOutcome } from "../gateway/lifecycle.js";
 import { parseOffer } from "../federation/offer.js";
-import { toWire } from "../federation/wire.js";
-import { migrate } from "../migrate/migrate.js";
 import { pullFrom } from "../federation/pull.js";
 import { sourceFor } from "../federation/channel.js";
 import {
@@ -167,7 +165,6 @@ type CommandName =
   | "register"
   | "pull"
   | "federate"
-  | "migrate"
   | "store"
   | "repair"
   | "artifact"
@@ -335,15 +332,6 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "limit — its module body is evaluated on the serving thread, when you bless it and again the",
       "first time a process is asked for it, with no such limit. Mount a peer's app the way you would",
       "run their program (SPEC §24.5, an open flag).",
-    ],
-  },
-  migrate: {
-    summary: "read an offer, re-express it in the current format, write it back",
-    usage: "loam migrate <file> [options]",
-    flags: new Set(["home", "out"]),
-    notes: [
-      "Definitions are RE-SIGNED, so run it against the home whose operator authored them:",
-      "`loam init --seed <hex>` with the store's original seed first. Without --out, to stdout.",
     ],
   },
   store: {
@@ -2187,62 +2175,6 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
     );
   }
   await gateway.close();
-  return 0;
-}
-
-// Re-express a frozen offer in the current on-wire format (the standing policy: every breaking
-// format change ships a migration). Old deltas in, correctly-formed deltas out — schema
-// definitions re-signed into the current vocabulary, each superseded original negated with a
-// link to its replacement and a reason. Grow-only, so the output carries the whole history.
-// Re-signing needs the seed that authored those definitions: run it against the home whose
-// operator minted the store (`loam init --seed <hex>` first, with the store's original seed).
-function cmdMigrate(args: readonly string[], io: IO): number {
-  const parsed = parseFor("migrate", args);
-  const source = parsed.positionals[0];
-  if (source === undefined) {
-    io.err(
-      "migrate wants an input: `loam migrate <file> [--out <file>]` — a frozen offer " +
-        "(a store's export, or a saved GET /federate body)",
-    );
-    return 2;
-  }
-  if (parsed.positionals.length > 1) {
-    io.err("migrate takes exactly one input");
-    return 2;
-  }
-  let deltas;
-  try {
-    deltas = parseOffer(readFileSync(source, "utf8"));
-  } catch (err) {
-    io.err(`migrate: ${source}: ${err instanceof Error ? err.message : String(err)}`);
-    return 1;
-  }
-  const home = parsed.flags.get("home") ?? defaultHome();
-  let seed: string;
-  try {
-    seed = readSeed(home);
-  } catch {
-    io.err(
-      `migrate: no operator seed in ${home} — the definitions are re-signed, so run\n` +
-        "  `loam init --seed <hex>` with the store's ORIGINAL seed first, then migrate",
-    );
-    return 1;
-  }
-  const { deltas: migrated, report } = migrate(deltas, { seed });
-  const out = JSON.stringify({ deltas: migrated.map(toWire) });
-  const steps =
-    report.applied.length === 0
-      ? "already current — nothing to migrate"
-      : report.applied.map((a) => `${a.id} (${a.superseded} superseded)`).join(", ");
-  const dest = parsed.flags.get("out");
-  if (dest !== undefined) {
-    writeFileSync(dest, out);
-    io.out(
-      `loam: migrated ${source} → ${dest}\n  ${report.before} in, ${report.after} out — ${steps}`,
-    );
-  } else {
-    io.out(out); // to stdout, so `loam migrate old.json > new.json` works
-  }
   return 0;
 }
 
@@ -5497,8 +5429,6 @@ export async function run(
         return await cmdPull(rest, io);
       case "federate":
         return await cmdFederate(rest, io);
-      case "migrate":
-        return cmdMigrate(rest, io);
       case "store":
         return await cmdStore(rest, io);
       case "repair":

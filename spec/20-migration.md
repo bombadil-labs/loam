@@ -47,3 +47,9 @@ the first migration). Lives in `src/migrate/migrate.ts` (`migrate`, `MIGRATIONS`
 `test/migrate/migrate.test.ts` and `test/cli/migrate.test.ts`. Key decision (Myk, 2026-07-12):
 supersede, don't rewrite — re-sign the new form and negate the old with a forward link and a reason,
 so a content-addressed, grow-only store can change formats without losing its history or its soul.
+
+## Retired (greenfield, 2026-09-26)
+
+Loam no longer migrates. Since rhizomatic 0.11 no earlier store or offer can be read, so there is
+nothing to carry forward. The `loam migrate` command, the `MIGRATIONS` chain and every reader that
+honoured a retired word are removed. A retired word is now an unknown word.

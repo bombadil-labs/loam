@@ -149,7 +149,6 @@ import {
   danglingAncestor,
   treeRootsOf,
   everDeclared,
-  LEGACY_POSTURES,
   readContainerTable,
   survivingDeclarationIds,
 } from "../../src/gateway/container.js";
@@ -1787,16 +1786,12 @@ describe("§58 — the container roster", () => {
     await closeAll();
   });
 
-  it("everDeclared asks the BIND test, not the door's", async () => {
-    // A STORE OLDER THAN THE RENAME. The door refuses a retired posture word outright, naming the
-    // migration; the READER still honours one, because until a person runs `loam migrate`,
-    // dropping every legacy container would empty every scope without saying a word. So a legacy
-    // declaration BOUND, and the mint question must remember it — a door test here would report
-    // every dropped legacy container as never declared, and a walk would mint them all back.
-    //
-    // The bytes are written straight to the backend, because the door that refuses them is the
-    // very thing under test. That is what an unmigrated store IS.
-    const legacy = [...LEGACY_POSTURES.keys()][0]!;
+  it("a retired posture word is an unknown word, to the reader and the door alike", async () => {
+    // "wall" named what "separate" names now. It binds nothing: the reader drops the declaration
+    // exactly as it drops any posture it does not know, and the door refuses it with the same
+    // sentence it gives every unknown posture. The bytes go straight to the backend, because the
+    // door would refuse to write them.
+    const legacy = "wall";
     const backend = new MemoryBackend();
     await backend.append([
       signClaims(
@@ -1818,11 +1813,8 @@ describe("§58 — the container roster", () => {
     ]);
     const gw = await Gateway.open(backend, { seed: OPERATOR_SEED });
     const op = gw.operatorAuthor!;
-    expect(recOf(gw, "ada:legacy"), "premise: the reader binds the retired word").toBeDefined();
-    expect(everDeclared(gw.reactor, op, "ada:legacy"), "and the mint question remembers it").toBe(
-      true,
-    );
-    // The other side: the DOOR refuses that same declaration, which is why the two tests differ.
+    expect(recOf(gw, "ada:legacy"), "the reader binds nothing").toBeUndefined();
+    expect(everDeclared(gw.reactor, op, "ada:legacy"), "so nothing was ever declared").toBe(false);
     expect(
       containerDefect(
         [...gw.reactor.snapshot()].find(
@@ -1832,8 +1824,8 @@ describe("§58 — the container roster", () => {
         gw.validityNow(),
         op,
       ),
-      "the door refuses what the reader binds",
-    ).toMatch(/retired word/);
+      "the door gives the unknown-posture refusal",
+    ).toMatch(/exactly one posture: "separate"/);
   });
 
   it("a refusal is the store's own sentence, whole", () => {

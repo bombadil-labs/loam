@@ -278,7 +278,6 @@ export {
   type SupersededBinding,
   type UnboundBinding,
 } from "./runner/runner.js";
-export { migrate, MIGRATIONS, type Migration, type MigrationReport } from "./migrate/migrate.js";
 export { run, main, type IO, type RunOptions } from "./cli/cli.js";
 export { archivePath, initHome, readConfig, storePath, type LoamConfig } from "./cli/config.js";
 export { legalNameFor, queryFieldFor } from "./gateway/gql.js";
