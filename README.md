@@ -745,8 +745,7 @@ GraphQL, mutations, registrations, accounts & capabilities, trust, erasure), `st
 `StoreBackend` drivers — sqlite, archive/mirror, localStorage), `server/` (the HTTP server
 itself — every door, MCP, login and OAuth, the admin pages), `surface/` (surfaces as
 materializations — the GraphQL and REST/OpenAPI doors from one generator seam), `federation/`
-(offer / pull / wire / translate), `runner/` (derived functions), `migrate/` (format migrations —
-old deltas in, new deltas out), `stock/` (the schema shelf `init` and `register --stock` read),
+(offer / pull / wire / translate), `runner/` (derived functions), `stock/` (the schema shelf `init` and `register --stock` read),
 `cli/`, and `browser/` + `client/` (the full in-page store and the
 read-only public client). `test/` mirrors that tree;
 [`demos/`](demos/README.md) holds the [tutorial](https://bombadil-labs.github.io/loam/tutorial.html) and the

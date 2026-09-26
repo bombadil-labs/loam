@@ -132,6 +132,10 @@ level. Loam then consumes it through the barrel and compares its recordings.
    connection and container keys into signed data.
 6. **Peer and admission.** The peer model, the guard pipeline, arrival testimony. Loam's
    containers become peers, and the import cycle breaks.
+   Decide the scope of a channel curse. `curseChannelLawImpl` also strikes a matching binding in
+   the root ground, and current code can still publish one there. First pin a root-binding
+   bystander and the pool binding, at the delta and the served-view levels. The lean is a
+   pool-local curse under the peer model.
 7. **Publish and subscribe.** Per-subscriber lenses, the declared closure rule, a closure audit
    of the exact transferable set and its future additions, signed peer messages, the set digest,
    and a revised HTTP binding. The current HTTP helper does not meet SPEC-6 §4. Loam adopts the
