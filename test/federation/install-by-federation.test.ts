@@ -24,6 +24,7 @@
 // hook. The restart rail below is about the pool's re-attach and its scope, not a cold load.
 
 import { describe, expect, it } from "vitest";
+import { declareHostSizedBill } from "../helpers/pool-bill.js";
 import {
   ALICE_SEED,
   APP,
@@ -1362,6 +1363,9 @@ describe("T209 — a blessing outlives the process that made it", () => {
           },
         );
       const bob = await boot();
+      // This boot bypasses `store()`, so it declares the host-sized bill itself (T253). The
+      // declaration is in bob.sqlite, so the reboot below reads the same bill.
+      await declareHostSizedBill(bob, 9_010);
       const channel = await bob.openChannel({
         into: "friends",
         prefix: "alice",
@@ -1491,6 +1495,8 @@ describe("T209 — the pool's closed door outlives the process that opened it", 
           },
         );
       const bob = await boot();
+      // As in the restart rail above: this boot bypasses `store()`, so it declares the bill (T253).
+      await declareHostSizedBill(bob, 9_010);
       await bob.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
       await bob.publishRenderer({
         route: "own",
