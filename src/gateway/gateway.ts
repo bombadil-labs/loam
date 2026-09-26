@@ -1537,12 +1537,13 @@ export class Gateway {
   }
 
   // The map holds each author's greatest USABLE time. Ordering is monotonic only within the
-  // safe-integer range: above it `t + 1 === t`, so a time there has no successor to stamp, and it
-  // is never stored (storing it would hide a safe time held beside it). Nothing refuses such a
+  // safe-integer range: above it `t + 1` need not be a new number, so a time there is never
+  // stored (storing it would hide a safe time held beside it). At MAX_SAFE_INTEGER itself strict
+  // order ends; see `nextTimestamp`. Nothing refuses such a
   // write, and under a `byTimestamp` Policy that claim can still win: the store accepts any finite
   // signed creation time. It never moves validity.
   private raiseAuthorClock(author: string, t: number): void {
-    if (t <= Number.MAX_SAFE_INTEGER - 1 && t > (this.authorClocks.get(author) ?? -Infinity)) {
+    if (t <= Number.MAX_SAFE_INTEGER && t > (this.authorClocks.get(author) ?? -Infinity)) {
       this.authorClocks.set(author, t);
     }
   }
@@ -1574,7 +1575,11 @@ export class Gateway {
   nextTimestamp(author: string | undefined = this.operatorAuthor): number {
     this.lastIssued = Math.max(this.now(), this.lastIssued + 1);
     if (author === undefined) return this.lastIssued;
-    const timestamp = Math.max(this.lastIssued, (this.authorClocks.get(author) ?? -Infinity) + 1);
+    // Strict order ends at the top of the safe range: once the floor has no safe successor, the
+    // time falls back to this gateway's own counter, which never repeats.
+    const floor = this.authorClocks.get(author) ?? -Infinity;
+    const timestamp =
+      floor < Number.MAX_SAFE_INTEGER ? Math.max(this.lastIssued, floor + 1) : this.lastIssued;
     this.raiseAuthorClock(author, timestamp);
     return timestamp;
   }

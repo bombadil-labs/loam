@@ -306,3 +306,32 @@ describe("one author's ordering floor does not lift another's", () => {
     await gw.close();
   });
 });
+
+describe("strict order ends cleanly at the top of the safe range", () => {
+  it("two stamps after a held MAX_SAFE_INTEGER - 1 never repeat", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(T0);
+    const gw = await Gateway.boot(
+      new MemoryBackend(),
+      assembleGenesis({ operatorSeed: OP_SEED, registrations: [] }),
+    );
+    const A_SEED = "a8".repeat(32);
+    const A = authorForSeed(A_SEED);
+    await gw.append([signClaims(grantClaims(STORE_ENTITY, A, "write", OP, T0), OP_SEED)]);
+    const top = Number.MAX_SAFE_INTEGER - 1;
+    await gw.append([
+      signClaims(
+        { ...observed(FERN, "tag", "at the top", 0, A_SEED).claims, timestamp: top, validFrom: T0 },
+        A_SEED,
+      ),
+    ]);
+
+    const first = gw.stamp(A);
+    const second = gw.stamp(A);
+    expect(first.timestamp).toBe(Number.MAX_SAFE_INTEGER); // still above the held claim
+    expect(second.timestamp).not.toBe(first.timestamp); // never the same stamp twice
+    expect(Number.isSafeInteger(second.timestamp)).toBe(true);
+    expect(second.timestamp).toBeLessThan(first.timestamp); // strict order has ended, as documented
+    await gw.close();
+  });
+});
