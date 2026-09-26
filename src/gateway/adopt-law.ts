@@ -49,7 +49,6 @@ import {
   SCHEMA_SCHEMA,
   contentAddress,
   evalTerm,
-  evalTermRaw,
   loadHyperSchema,
   loadSchema,
   signClaims,
@@ -1964,23 +1963,28 @@ function definitionWinner(
 }
 
 /**
- * Why no schema definition holds for `entity` at `now`: none exists, or the earliest one starts
- * later. A definition from a peer whose clock runs ahead is valid only from its own `validFrom`.
+ * Why no schema definition holds for `entity` at `now`: none ever holds, or the first one holds
+ * from a later time. A definition from a peer whose clock runs ahead is valid only from its own
+ * `validFrom`, and a negation valid only later leaves it live until then.
  */
 export function explainMissingDefinition(dset: DeltaSet, entity: string, now: number): string {
-  const starts: number[] = [];
-  for (const bootstrap of [HYPER_SCHEMA_SCHEMA, SCHEMA_SCHEMA]) {
-    const raw = evalTermRaw(bootstrap.body, dset, entity);
-    if (raw.sort !== "hview") continue;
-    for (const e of raw.hview.props.get("definition") ?? []) {
-      if (e.delta.claims.validFrom > now) starts.push(e.delta.claims.validFrom);
+  // The error path only. Each future validity boundary in the set is a moment the answer can
+  // change, so evaluate there, in order, and report the first moment a definition survives.
+  const boundaries = new Set<number>();
+  for (const d of dset) {
+    for (const t of [d.claims.validFrom, d.claims.validUntil]) {
+      if (t !== undefined && t > now) boundaries.add(t);
     }
   }
-  if (starts.length === 0) return `no surviving schema definition for ${entity}`;
-  return (
-    `the schema definition for ${entity} is valid only from ${Math.min(...starts)}, ` +
-    `and this store reads at ${now}`
-  );
+  for (const t of [...boundaries].sort((a, b) => a - b)) {
+    for (const bootstrap of [HYPER_SCHEMA_SCHEMA, SCHEMA_SCHEMA]) {
+      const at = evalTerm(bootstrap.body, dset, t, entity);
+      if (at.sort === "hview" && (at.hview.props.get("definition") ?? []).length > 0) {
+        return `the schema definition for ${entity} is valid only from ${t}, and this store reads at ${now}`;
+      }
+    }
+  }
+  return `no surviving schema definition for ${entity}`;
 }
 
 /**
