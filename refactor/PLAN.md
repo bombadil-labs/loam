@@ -111,7 +111,11 @@ level. Loam then consumes it through the barrel and compares its recordings.
    `lawfulDeltasAt` take `now` too, so `governedDeltas` replaces their bodies. Five readers still
    filter the snapshot by author by hand (`channel.ts` `readChannels`, `dropChannelCommit`,
    `cursesOf`; `adopt-law.ts` `readLawAdoptions`; `receive-policy.ts`), and move to the governed read
-   one by one. `dataStruck` and `honoredStrikeOn` take
+   one by one. Some law reads ask about history, not the present, and must never filter by
+   validity. `everDeclared` reads `lawfulHistoryAt`, so a name whose declaration expired still
+   cannot be minted again. Erasure law is eternal (decision F3), so erasure and graveyard records
+   (`slate.ts` `findGraveyard`, `readGraveyards`, `strikeOf`) must keep counting after any
+   validity end. The swap must move them to a history read, not to `governedDeltas`. `dataStruck` and `honoredStrikeOn` take
    `now` too, and each needs its own new body. Three caches break when negation depends on time.
    `readContainerTable` is memoized by a count of container law. `Gateway.publicOpen` is cleared on
    ingest and reseat, not at a validity boundary. Several readers keep one predicate across an

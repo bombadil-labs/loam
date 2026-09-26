@@ -623,7 +623,7 @@ function mintableAt(
   missing: readonly string[],
 ): string | undefined {
   const struck = missing.find((container) =>
-    everDeclared(gateway.reactor, gateway.validityNow(), gateway.operatorAuthor, container),
+    everDeclared(gateway.reactor, gateway.operatorAuthor, container),
   );
   if (struck !== undefined) {
     return (

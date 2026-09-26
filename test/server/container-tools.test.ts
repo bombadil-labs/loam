@@ -1753,14 +1753,10 @@ describe("§58 — the container roster", () => {
     await declareTool(base, ada, "ada:journal:notes");
     const op = gateway.operatorAuthor!;
 
-    expect(
-      everDeclared(gateway.reactor, gateway.validityNow(), op, "ada:journal:notes"),
-      "a standing name",
-    ).toBe(true);
-    expect(
-      everDeclared(gateway.reactor, gateway.validityNow(), op, "ada:journal:never"),
-      "a name nobody made",
-    ).toBe(false);
+    expect(everDeclared(gateway.reactor, op, "ada:journal:notes"), "a standing name").toBe(true);
+    expect(everDeclared(gateway.reactor, op, "ada:journal:never"), "a name nobody made").toBe(
+      false,
+    );
 
     // Struck, and still true: that is the whole point — the table forgets it, this does not.
     const ids = survivingDeclarationIds(
@@ -1782,16 +1778,11 @@ describe("§58 — the container roster", () => {
       ),
     );
     expect(recOf(gateway, "ada:journal:notes"), "the table forgets it").toBeUndefined();
-    expect(
-      everDeclared(gateway.reactor, gateway.validityNow(), op, "ada:journal:notes"),
-      "this does not",
-    ).toBe(true);
+    expect(everDeclared(gateway.reactor, op, "ada:journal:notes"), "this does not").toBe(true);
 
     // FAILS CLOSED, and closed here is TRUE. With no operator to weigh law by, a store cannot say
     // a name was never declared — and saying so would be a licence to mint it.
-    expect(
-      everDeclared(gateway.reactor, gateway.validityNow(), undefined, "ada:journal:never"),
-    ).toBe(true);
+    expect(everDeclared(gateway.reactor, undefined, "ada:journal:never")).toBe(true);
 
     await closeAll();
   });
@@ -1828,10 +1819,9 @@ describe("§58 — the container roster", () => {
     const gw = await Gateway.open(backend, { seed: OPERATOR_SEED });
     const op = gw.operatorAuthor!;
     expect(recOf(gw, "ada:legacy"), "premise: the reader binds the retired word").toBeDefined();
-    expect(
-      everDeclared(gw.reactor, gw.validityNow(), op, "ada:legacy"),
-      "and the mint question remembers it",
-    ).toBe(true);
+    expect(everDeclared(gw.reactor, op, "ada:legacy"), "and the mint question remembers it").toBe(
+      true,
+    );
     // The other side: the DOOR refuses that same declaration, which is why the two tests differ.
     expect(
       containerDefect(

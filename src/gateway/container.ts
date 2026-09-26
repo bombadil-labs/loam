@@ -54,7 +54,7 @@ import {
   SIZE_ENVELOPES,
 } from "./envelope.js";
 import { withNegationClosure, withNegationClosureAcross } from "./ingest.js";
-import { lawfulDeltasAt, lawfulSnapshot } from "./registration.js";
+import { lawfulDeltasAt, lawfulHistoryAt, lawfulSnapshot } from "./registration.js";
 import { negatedAt } from "./negation.js";
 import { readTrustPolicyAt, type TrustPolicy } from "./trust.js";
 import { Gateway, type ConnectionBinding, type FederationReport } from "./gateway.js";
@@ -843,7 +843,6 @@ export function survivingDeclarationIds(
  */
 export function everDeclared(
   reactor: Reactor,
-  now: number,
   operator: string | undefined,
   entity: string,
 ): boolean {
@@ -863,10 +862,12 @@ export function everDeclared(
   // a dropped subtree back to its reader. `byTarget` is written by ingest beside the set it
   // indexes and replayed whole by an erase, so it cannot answer absent for a delta the store
   // holds; a Set maintained on this side could.
+  // HISTORY, NOT THE PRESENT. A declaration whose validity has ended was still made, so it still
+  // forbids a re-mint; this read never filters by validity.
   // WELL-FORMED ONLY. Malformed law binds nothing — `computeContainerTable` skips a declaration
   // whose trust or posture the law refuses — so a name that only ever carried one never stood, and
   // reporting it as dropped would refuse a road forever over a container nobody ever had.
-  return lawfulDeltasAt(reactor, now, { entity, context: CTX_CONTAINER }, operator).some(
+  return lawfulHistoryAt(reactor, { entity, context: CTX_CONTAINER }, operator).some(
     (delta) => boundContainer(delta.claims)?.name === entity,
   );
 }

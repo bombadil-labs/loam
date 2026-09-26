@@ -634,7 +634,7 @@ export function readSlates(
   const negated = negatedAt(reactor, validityNow, operator);
   const table = readContainerTable(reactor, validityNow, operator);
   const out: Slate[] = [];
-  for (const delta of lawfulSnapshot(reactor, now, operator)) {
+  for (const delta of lawfulSnapshot(reactor, validityNow, operator)) {
     if (negated(delta.id) || !isSlateRecord(delta.claims)) continue;
     // SHAPE only. A malformed record binds nothing, at the reader as at the door; but a record whose
     // CONTAINER has moved is reported below rather than dropped, because dropping it would silently

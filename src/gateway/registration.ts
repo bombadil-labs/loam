@@ -842,6 +842,7 @@ export interface LawAt {
   readonly context: string;
 }
 
+/** The operator's law filed at `at` that holds at `now`. */
 export function lawfulDeltasAt(
   reactor: Reactor,
   now: number,
@@ -849,6 +850,14 @@ export function lawfulDeltasAt(
   operator?: string,
 ): Delta[] {
   void now; // step-3 limit, as in lawfulSnapshot
+  return lawfulHistoryAt(reactor, at, operator);
+}
+
+/**
+ * Every lawful delta ever filed at `at`, whatever its validity. For a historical question such as
+ * "was this name ever declared", where an expired declaration must still count.
+ */
+export function lawfulHistoryAt(reactor: Reactor, at: LawAt, operator?: string): Delta[] {
   const out: Delta[] = [];
   for (const id of reactor.byTarget(at.entity)) {
     // Unreachable against today's substrate: nothing removes from the reactor's set, and an erase
