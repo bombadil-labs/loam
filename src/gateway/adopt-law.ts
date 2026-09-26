@@ -202,6 +202,9 @@ const byAge = (a: { timestamp: number; deltaId: string }, b: typeof a): number =
  *
  * Malformed rows are LOUD, not skipped: a stranger's manifest gets no silent drops, because a
  * skip is how a crafted manifest hides a row.
+ *
+ * A manifest is frozen history: every row is read whatever its own validity interval. Only the
+ * strikes on rows are read at `now`. This is not a present-validity view of the rows.
  */
 export function readManifest(members: readonly Delta[], now: number): ManifestRow[] {
   const survives = survivalOver(members, now);

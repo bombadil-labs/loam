@@ -150,7 +150,8 @@ export type ConnectionGrantState = "active" | "revoked" | "not yet valid" | "exp
  * What the inbox pool's own write grants say about `key` at `now`, read from the deltas on every
  * request. Each label names what the grants show, and nothing else:
  *   - "active": the door honours a write grant now.
- *   - "revoked": a write grant inside its window is struck by a negation the door honours.
+ *   - "revoked": a write grant inside its window is struck by a negation the door honours. It
+ *     does not say the grant's issuer ever had standing to grant it.
  *   - "not yet valid": a write grant has a window that starts after `now`.
  *   - "expired": a write grant has a window that ended at or before `now`.
  *   - "ungranted": no write grant names the key, or none of the above holds (for example, a grant
