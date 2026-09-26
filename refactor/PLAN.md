@@ -139,8 +139,10 @@ level. Loam then consumes it through the barrel and compares its recordings.
    Decide what time received law is valid from. Today a blessed definition keeps the peer's
    `validFrom`, so law from a peer whose clock runs ahead parks until our clock passes it, and the
    next sync binds it (measured with a 5 s skew). The park reason says "no surviving schema
-   definition", which is false: the definition exists and is valid later. Arrival testimony may
-   be the better start. At least, the reason must name the future start.
+   definition", which is false: the definition exists and is valid later. The reason must name
+   the definition's `validFrom` and the current validity time. The peer's signed validity and
+   arrival testimony stay separate axes. Starting a local adoption at arrival would be a Loam
+   policy, chosen explicitly, never a rewrite of the peer's claim.
 7. **Publish and subscribe.** Per-subscriber lenses, the declared closure rule, a closure audit
    of the exact transferable set and its future additions, signed peer messages, the set digest,
    and a revised HTTP binding. The current HTTP helper does not meet SPEC-6 §4. Loam adopts the
