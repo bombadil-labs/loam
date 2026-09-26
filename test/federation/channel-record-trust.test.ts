@@ -58,6 +58,7 @@ import { grantClaims } from "../../src/gateway/accounts.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { CTX_CHANNEL, channelRecordClaims } from "../../src/federation/channel.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 import { exportOffer } from "../../src/federation/offer.js";
 import { channelLens } from "../../src/gateway/reads.js";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -128,6 +129,19 @@ const newestAt = (gw: Gateway, pool: string): number =>
   Math.max(...recordsFor(gw, pool).map((d) => d.claims.timestamp));
 
 /**
+ * The product's own record claims, ordered at `at` and valid from the wall clock — the two times
+ * `gw.stamp()` gives. `at` runs ahead to win latest-wins; a validity ahead of the read would make
+ * the record simply not hold yet, and every rail below would read the old record back.
+ */
+const recordClaims = (
+  gw: Gateway,
+  status: Parameters<typeof channelRecordClaims>[0],
+  author: string,
+  at: number,
+): Claims =>
+  withStamp({ timestamp: at, validFrom: gw.now() }, (t) => channelRecordClaims(status, author, t));
+
+/**
  * Append a record for `pool` built by the PRODUCT's own `channelRecordClaims`, with the caller's
  * edit applied. A hand-rolled delta would prove the reader against a shape nothing writes.
  */
@@ -139,10 +153,7 @@ async function append(
   at: number,
 ): Promise<Delta> {
   const status = gw.channelStatus(pool)[0] ?? gw.channelsEver(pool)[0]!;
-  const delta = signClaims(
-    channelRecordClaims({ ...status, ...edit }, author.key, at),
-    author.seed,
-  );
+  const delta = signClaims(recordClaims(gw, { ...status, ...edit }, author.key, at), author.seed);
   await gw.append([delta]);
   return delta;
 }
@@ -159,7 +170,7 @@ const THEM = { key: STRANGER, seed: STRANGER_SEED };
  * does would silently be reading the fixture back instead of the write it meant to test.
  */
 async function truncate(gw: Gateway, pool: string, role: string): Promise<void> {
-  const built = channelRecordClaims(gw.channelStatus(pool)[0]!, OPERATOR, gw.nextTimestamp());
+  const built = recordClaims(gw, gw.channelStatus(pool)[0]!, OPERATOR, gw.nextTimestamp());
   await gw.append([
     signClaims(
       { ...built, pointers: built.pointers.filter((p) => p.role !== role) },
@@ -400,7 +411,7 @@ describe("T217 (b) — a record that fails its own shapes is UNREADABLE at the r
   it("a MISSING health field is unreadable, not the never-synced channel it used to read as", async () => {
     const gw = await storeWithChannels();
     const status = gw.channelStatus(BRAM)[0]!;
-    const built = channelRecordClaims(status, OPERATOR, newestAt(gw, BRAM) + 1_000);
+    const built = recordClaims(gw, status, OPERATOR, newestAt(gw, BRAM) + 1_000);
     // The product's own claims MINUS one pointer — the partially legible record, which is the
     // shape that used to be indistinguishable from a real quiet peer: `Number(undefined ?? 0)` is
     // 0, and 0 is exactly what a channel that has never synced carries.
@@ -479,7 +490,7 @@ describe("T217 (b) — a record that fails its own shapes is UNREADABLE at the r
     const full = gw.channelStatus(ALICE)[0]!;
     expect(full.unreadable).toEqual([]);
 
-    const written = channelRecordClaims(full, OPERATOR, newestAt(gw, ALICE) + 1_000);
+    const written = recordClaims(gw, full, OPERATOR, newestAt(gw, ALICE) + 1_000);
     const roles = new Set(written.pointers.map((p) => p.role));
     for (const role of [
       "into",
@@ -661,14 +672,15 @@ describe("T217 (b) — `loam federate list` renders the unreadable record as unr
     // filter is not what this half is about: one field absent, one field the wrong type.
     const ground = await Gateway.open(new SqliteBackend(storePath(home)), { seed: OPERATOR_SEED });
     const at = ground.nextTimestamp() + 1_000_000;
-    const built = channelRecordClaims(ground.channelStatus(BRAM)[0]!, OPERATOR, at);
+    const built = recordClaims(ground, ground.channelStatus(BRAM)[0]!, OPERATOR, at);
     await ground.append([
       signClaims(
         { ...built, pointers: built.pointers.filter((p) => p.role !== "lastSyncedAt") },
         OPERATOR_SEED,
       ),
       signClaims(
-        channelRecordClaims(
+        recordClaims(
+          ground,
           { ...ground.channelStatus("channel:friends:carol")[0]!, lastSyncedAt: "soon" as never },
           OPERATOR,
           at,

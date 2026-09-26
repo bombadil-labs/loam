@@ -45,7 +45,11 @@ async function governedGarden(): Promise<Gateway> {
 }
 
 const declare = (gateway: Gateway, schemas: string[], seed = OPERATOR_SEED, ts = Date.now()) => {
-  const delta = signClaims(publicClaims(schemas, authorForSeed(seed), ts), seed);
+  // Ordered at `ts`, but never valid later than now: a declaration here is meant to hold at once.
+  const delta = signClaims(
+    { ...publicClaims(schemas, authorForSeed(seed), ts), validFrom: Math.min(ts, Date.now()) },
+    seed,
+  );
   return gateway.append([delta]).then(() => delta);
 };
 

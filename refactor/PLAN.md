@@ -101,14 +101,22 @@ level. Loam then consumes it through the barrel and compares its recordings.
    lens binding. Loam replaces hand-written strike walks and law loops where its recordings show
    equal answers. How many go is measured, not promised.
    Loam's duties for this step:
-   - **The step-3 limit.** Loam's negation readers ignore validity. A negation with a future start
-     counts at once, and an expired one still counts. A timed negation of a registration does not
-     change the served surface. Loam writes no timed negation today.
-     `recordings/suppression-time.recording.test.ts` pins this.
-   - **The seams.** Every negation reader calls `negatedAt(reactor, now, author)`
-     (`src/gateway/negation.ts`). The law readers `lawfulSnapshot` and `lawfulDeltasAt` take `now`.
-     The swap edits those three bodies. `dataStruck` and `honoredStrikeOn` take `now` too, and each
-     needs its own new body.
+   - **The step-3 limit (done, PR A).** Loam's negation readers now read validity. A negation
+     counts only while it is valid at the read time. A timed negation of a registration changes
+     the served surface at its own boundary. `recordings/suppression-time.recording.test.ts` pins
+     this: every Loam reader equals `substrateStruck` in all 12 cells.
+   - **The seams (done, PR A).** `negatedAt` calls `reactor.negationPredicate`. `lawfulSnapshot`
+     calls `governedDeltas`. `lawfulDeltasAt` reads the index and filters by validity at `now`.
+     `dataStruck` is a `negationPredicate` over a striker key set. The set is the operator and the
+     subject of each operator grant that is valid at `now` and not struck by the operator.
+     `honoredStrikeOn` calls `negationWitnesses`. Its suppression callback is Loam's `standsFor`.
+     That walk reads raw `negationsOf` and never the reader, so it cannot re-enter it.
+   - **One-id reader audit (PR B).** An absent target is no longer negated. The old
+     `lawfulNegated` said true for an absent target with a held negation. Check each one-id caller
+     of `negatedAt` for a purged target that it used to treat as struck.
+   - **Raw `negationsOf` readers (PR B).** `adopt.ts` `ownStrikes`, `slate.ts` `strikeOf` and
+     `cli.ts` `inertStrike` still walk the raw index. Move each to a governed read, or to a
+     history read where erasure needs it.
    - **Hand-written filters.** The channel, curse and law-adoption readers read `lawfulSnapshot`.
      `receive-policy.ts` still filters by the receiver's key over a private reactor. It asks a
      different question, and moves to the governed read with the receiver as its author set.
@@ -124,10 +132,13 @@ level. Loam then consumes it through the barrel and compares its recordings.
      - Erasure is eternal (decision F3). Erasure and graveyard records (`slate.ts` `findGraveyard`,
        `readGraveyards`, `strikeOf`) must keep counting after any validity end. Move them to a
        history read.
-   - **Caches.** Three break when negation depends on time: `readContainerTable` (memoized by a
-     count of container law), `Gateway.publicOpen` (cleared on ingest and reseat, not at a
-     boundary), and predicates kept across an `await` (`refactor/audit/negation-readers.md`, defect
-     1). Each must rebuild per read time, or be cleared when the validity timer fires.
+   - **Caches.** Four break when negation depends on time. The registration boundary is fixed in
+     PR A: it now includes the validity boundaries of each negation in a registration's chain, and
+     `noteRegistrationTime` notes a negation that reaches a registration. Three stay for PR B:
+     `readContainerTable` (memoized by a count of container law), `Gateway.publicOpen` (cleared
+     on ingest and reseat, not at a boundary), and predicates kept across an `await`
+     (`refactor/audit/negation-readers.md`, defect 1). Each must rebuild per read time, or be
+     cleared when the validity timer fires.
 5. **Principal.** Roots, key binding, succession, delegation, locators. Loam moves user,
    connection and container keys into signed data.
 6. **Peer and admission.** The peer model, the guard pipeline, arrival testimony. Loam's

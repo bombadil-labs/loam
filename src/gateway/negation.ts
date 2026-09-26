@@ -2,17 +2,19 @@ import type { Reactor } from "@bombadil/rhizomatic";
 
 /**
  * Whether a delta is negated at `now`, counting only negations signed by `author` (any author
- * when `author` is undefined), applied down the whole negation chain. One predicate per read:
- * it memoizes, so build a new one after the store changes.
+ * when `author` is undefined), applied down the whole negation chain. A negation counts only
+ * while it is valid at `now`; the target's own validity is not asked. A target the store does not
+ * hold answers false. The reader clears its memo after an accepted ingest.
  */
 export function negatedAt(
   reactor: Reactor,
   now: number,
   author: string | undefined,
 ): (id: string) => boolean {
-  // Step-3 limit (refactor/PLAN.md step 4): negation validity is not read yet, so `now` is unused.
-  void now;
-  return lawfulNegated(reactor, author);
+  return reactor.negationPredicate(
+    now,
+    author === undefined ? () => true : (negation) => negation.claims.author === author,
+  );
 }
 
 // The substrate's negation algebra, over the lawful slice — shared by every constitutional

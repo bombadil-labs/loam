@@ -636,6 +636,7 @@ describe("T64 criterion 8 — the lapse is computed AT THE DOOR, and the clock i
       deadline,
       requestedAt: Date.now(),
       ts: deltaTime + 1, // the slate's own deltas ride DELTA-TIME, as a busy store's would
+      validFrom: Date.now(), // ...and hold from the wall clock, as `gw.stamp()` signs them
     });
     // The slate's own deltas are stamped in DELTA-TIME, so they sit past the deadline too: a door that
     // compared any delta's timestamp against a deadline would lapse this slate on either reading.

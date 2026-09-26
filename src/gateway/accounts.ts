@@ -12,8 +12,6 @@
 // chain — but `authorize` consults exactly one thing: standing at `loam:store`.
 
 import {
-  evalTermRaw,
-  parseTerm,
   type Claims,
   type Delta,
   type HyperSchema,
@@ -224,35 +222,47 @@ export function governedGatherBody(operator: string): Term {
 // grantee's strike must not retire the operator's schema) and wrong for data, where the governed
 // gather honors the wider community — the operator plus any author their surviving grants name. Any
 // operation that FILTERS data by survival wants this one; anything resolving the constitution wants
-// the other. Built on the same `lawfulStrikersJson` predicate the gather masks with, so what a
-// reader resolves and what a filter admits cannot drift. Ungoverned, `drop` is the honest mask:
-// no operator, no constitution, every negation binds.
+// the other. The striker set RESTATES `lawfulStrikersJson(operator, false)` in code: the substrate
+// predicate takes a function, not a Pred, so the gather's mask and this filter are two derivations
+// of one rule, and a change to one must change the other. Ungoverned, every negation binds.
 //
 // Absence is not suppression: an id the store does not hold answers FALSE — it is not something
 // this can say has been struck. Callers weighing a purged source (§11) must ask erasure, not this.
-// One term evaluation per call (H8): build it once per pass and reuse the closure.
+// Build it once per pass and reuse the closure; it clears its memo after an accepted ingest.
 //
-// It counts every held negation, whether or not its validity interval has ended: filtering by
-// validity would read a not-yet-valid delta as retired. Loam writes no expiring negations today.
+// A strike counts only while it is valid at `now`; the target's own validity is not asked.
 export function dataStruck(
   reactor: Reactor,
   now: number,
   operator?: string,
 ): (id: string) => boolean {
-  // Step-3 limit (refactor/PLAN.md step 4): negation validity is not read yet, so `now` is unused.
-  void now;
-  const masked = evalTermRaw(
-    parseTerm({
-      op: "mask",
-      policy: operator === undefined ? "drop" : { trust: lawfulStrikersJson(operator, false) },
-      in: "input",
-    }),
-    reactor.snapshot(),
-  );
-  if (masked.sort !== "dset") throw new Error("a mask always evaluates to a delta set");
-  const surviving = new Set([...masked.set].map((d) => d.id));
-  return (id) => !surviving.has(id) && reactor.get(id) !== undefined;
+  if (operator === undefined) return reactor.negationPredicate(now, () => true);
+  // The trusted strikers, as `lawfulStrikersJson(operator, false)` names them: the operator, plus
+  // the subject of every grant the operator minted that is valid at `now` and survives the
+  // operator's own strikes. Every grant is filed at the store entity, so the index finds them all.
+  const operatorStruck = reactor.negationPredicate(now, (n) => n.claims.author === operator);
+  const strikers = new Set<string>([operator]);
+  for (const id of reactor.byTarget(STORE_ENTITY)) {
+    const d = reactor.get(id);
+    if (d === undefined || d.claims.author !== operator || !validAt(d, now)) continue;
+    const grantShaped = d.claims.pointers.some(
+      (p) =>
+        p.target.kind === "entity" &&
+        p.target.entity.id === STORE_ENTITY &&
+        p.target.entity.context === CTX_GRANTS,
+    );
+    if (!grantShaped || operatorStruck(d.id)) continue;
+    for (const p of d.claims.pointers) {
+      if (p.role === "subject" && p.target.kind === "primitive") {
+        strikers.add(String(p.target.value));
+      }
+    }
+  }
+  return reactor.negationPredicate(now, (n) => strikers.has(n.claims.author));
 }
+
+const validAt = (d: Delta, now: number): boolean =>
+  d.claims.validFrom <= now && (d.claims.validUntil === undefined || now < d.claims.validUntil);
 
 // WHICH strike actually retired `id`, if any — the constitutional question, answered by the same
 // `struck`/`standsFor` walk resolution runs, so a report of WHEN standing ended cannot drift from
@@ -274,17 +284,15 @@ export function honoredStrikeOn(
   id: string,
   operator?: string,
 ): { readonly id: string; readonly timestamp: number } | undefined {
-  // Step-3 limit (refactor/PLAN.md step 4): negation validity is not read yet, so `now` is unused.
-  void now;
   const ctx: Ctx = { reactor, operator };
+  // Standing is still Loam's own walk (`standsFor`), and that walk does not read validity: only the
+  // strike edges themselves are read at `now`.
+  const witnesses = reactor.negationWitnesses(now, (negation) =>
+    operator === undefined ? true : standsFor(ctx, negation, new Set([negation.id])),
+  )(id);
   let earliest: { id: string; timestamp: number } | undefined;
-  for (const negId of reactor.negationsOf(id)) {
-    const branch = new Set<string>([negId]);
-    if (struck(ctx, negId, branch)) continue; // the strike is itself struck: inert
-    const neg = reactor.get(negId);
-    if (neg === undefined) continue;
-    if (operator !== undefined && !standsFor(ctx, neg, branch)) continue; // no standing: inert
-    const candidate = { id: negId, timestamp: neg.claims.timestamp };
+  for (const neg of witnesses) {
+    const candidate = { id: neg.id, timestamp: neg.claims.timestamp };
     if (
       earliest === undefined ||
       candidate.timestamp < earliest.timestamp ||

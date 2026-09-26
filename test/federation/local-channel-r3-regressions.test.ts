@@ -23,6 +23,7 @@ import {
   localChannelEvidence,
   protectedIngressIds,
 } from "../../src/federation/local-channel-events.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
 
@@ -248,7 +249,7 @@ describe("T288 channel declaration identity follows container resolution", () =>
         {
           author: OP,
           timestamp: declarationDelta.claims.timestamp + 100,
-          validFrom: declarationDelta.claims.timestamp + 100,
+          validFrom: gw.now(), // held now; only the ordering time runs ahead
           pointers: [entity("container", channel.name, CTX_CONTAINER)],
         },
         SEED,
@@ -281,7 +282,9 @@ describe("T288 channel declaration identity follows container resolution", () =>
     const declarationDelta = gw.reactor.get(declaration)!;
     const resolved = gw.containers().containers.get(channel.name);
     const pure = signClaims(
-      exclusionClaims(channel.name, OP, declarationDelta.claims.timestamp + 100),
+      withStamp({ timestamp: declarationDelta.claims.timestamp + 100, validFrom: gw.now() }, (t) =>
+        exclusionClaims(channel.name, OP, t),
+      ),
       SEED,
     );
     expect((await gw.federate([pure], { admit: () => true })).accepted).toBe(1);
@@ -305,7 +308,7 @@ describe("T288 channel declaration identity follows container resolution", () =>
       {
         author: OP,
         timestamp: declarationDelta.claims.timestamp + 100,
-        validFrom: declarationDelta.claims.timestamp + 100,
+        validFrom: gw.now(), // held now; only the ordering time runs ahead
         pointers: [
           entity("container", channel.name, CTX_CONTAINER),
           entity("container", "container:unrelated", CTX_CONTAINER_EXCLUDED),

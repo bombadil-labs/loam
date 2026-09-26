@@ -16,6 +16,7 @@ import {
   DeltaSet,
   contentAddress,
   loadHyperSchema,
+  governedDeltas,
   loadSchema,
   parseSchema,
   parseTerm,
@@ -802,9 +803,11 @@ export function parseRegistrationInput(raw: unknown): RegistrationInput {
 // replace it.
 /** The operator's deltas that hold at `now`. */
 export function lawfulSnapshot(reactor: Reactor, now: number, operator?: string): DeltaSet {
-  // Step-3 limit (refactor/PLAN.md step 4): claim validity is not read here yet, so `now` is unused.
-  void now;
-  return lawfulHistory(reactor, operator);
+  return governedDeltas(
+    reactor.snapshot(),
+    now,
+    operator === undefined ? () => true : new Set([operator]),
+  );
 }
 
 /** Every delta the operator ever signed, whatever its validity. For questions about history. */
@@ -858,8 +861,10 @@ export function lawfulDeltasAt(
   at: LawAt,
   operator?: string,
 ): Delta[] {
-  void now; // step-3 limit, as in lawfulSnapshot
-  return lawfulHistoryAt(reactor, at, operator);
+  return lawfulHistoryAt(reactor, at, operator).filter(
+    (d) =>
+      d.claims.validFrom <= now && (d.claims.validUntil === undefined || now < d.claims.validUntil),
+  );
 }
 
 /**
@@ -935,7 +940,9 @@ function survivingCandidates(
   withdrawn?: Candidate[],
   boundary?: Boundary,
 ): Map<string, Candidate[]> {
-  const lawful = lawfulSnapshot(reactor, now, operator);
+  // History, not the snapshot: a claim that starts or stops later must still be seen, so that
+  // `boundary` can name when to read again. Validity is applied per delta below.
+  const lawful = lawfulHistory(reactor, operator);
   const negated = negatedAt(reactor, now, operator);
   const groups = new Map<string, Candidate[]>();
   for (const delta of lawful) {
@@ -952,7 +959,17 @@ function survivingCandidates(
     }
     if (key === undefined) continue;
     if (boundary !== undefined) {
-      for (const t of [validFrom, validUntil]) {
+      // The registration's own interval, and the interval of every negation in its chain: a
+      // timed strike changes what is bound at its own boundary, with nothing written.
+      const times: (number | undefined)[] = [validFrom, validUntil];
+      const chain = [...reactor.negationsOf(delta.id)];
+      for (const negId of chain) {
+        const neg = reactor.get(negId);
+        if (neg === undefined) continue;
+        times.push(neg.claims.validFrom, neg.claims.validUntil);
+        chain.push(...reactor.negationsOf(negId));
+      }
+      for (const t of times) {
         if (t !== undefined && t > now && (boundary.next === undefined || t < boundary.next)) {
           boundary.next = t;
         }

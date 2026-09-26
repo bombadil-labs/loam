@@ -1518,10 +1518,7 @@ export class Gateway {
    * @internal — ingest.ts calls it for every delta it lands
    */
   noteRegistrationTime(d: Delta): void {
-    const files = d.claims.pointers.some(
-      (p) => p.target.kind === "entity" && p.target.entity.context === CTX_REGISTRATION,
-    );
-    if (!files) return;
+    if (!this.touchesRegistration(d)) return;
     const now = this.validityNow();
     for (const t of [d.claims.validFrom, d.claims.validUntil]) {
       if (t === undefined || t <= now) continue;
@@ -1529,6 +1526,18 @@ export class Gateway {
         this.registrationBoundary = t;
       }
     }
+  }
+
+  // A registration claim, or a negation somewhere down a registration's chain.
+  private touchesRegistration(d: Delta, depth = 0): boolean {
+    for (const p of d.claims.pointers) {
+      if (p.target.kind === "entity" && p.target.entity.context === CTX_REGISTRATION) return true;
+      if (p.role === "negates" && p.target.kind === "delta" && depth < 64) {
+        const target = this.reactor.get(p.target.deltaRef.delta);
+        if (target !== undefined && this.touchesRegistration(target, depth + 1)) return true;
+      }
+    }
+    return false;
   }
 
   /** @internal — ingest.ts calls it for every delta it lands */

@@ -34,7 +34,7 @@ import {
   makeNegationClaims,
   signClaims,
   type Delta,
-  type Reactor,
+  Reactor,
 } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -432,6 +432,18 @@ describe("T37 — the indexed answer equals the scanned answer, through every mu
     await gw.close();
   });
 
+  // A stub ground answers the substrate's negation reads with the substrate's OWN code, run over the
+  // stub's index and set: `negationWitnesses` reads `negationsOf` for the index and `set` for bytes.
+  const withSubstrateNegation = (
+    stub: Record<string, unknown> & { get: (id: string) => unknown },
+  ): Reactor => {
+    const ground = Object.assign(Object.create(Reactor.prototype) as object, stub, {
+      set: { get: stub.get },
+      membershipRevision: 0,
+    });
+    return ground as unknown as Reactor;
+  };
+
   it("a strike the store no longer HOLDS retires nothing — the purge hole, pinned directly", () => {
     // Reached with a stub ground, exactly as `closure-cost.test.ts` reaches the same branch: the
     // reactor's negation index can name a strike whose bytes are gone (§11), and no gateway-level
@@ -440,12 +452,12 @@ describe("T37 — the indexed answer equals the scanned answer, through every mu
     // the store does not hold. The indexed shape must answer the same, from the id alone.
     const trust = sign(trustClaims("closed", [], OP, 1000));
     const purged = sign(makeNegationClaims(OP, 1100, trust.id));
-    const stub = {
+    const stub = withSubstrateNegation({
       negationsOf: (id: string) => (id === trust.id ? [purged.id] : []),
       get: (id: string) => (id === trust.id ? trust : undefined), // `purged` is GONE
       snapshot: () => new Set([trust]),
       byTarget: () => [trust.id],
-    } as unknown as Reactor;
+    });
 
     expect(lawfulNegated(stub, OP)(trust.id)).toBe(false); // gone is gone; it does not invent it
     expect(readTrustPolicy(stub, Date.now(), OP).mode).toBe("closed"); // so the declaration still governs
@@ -460,12 +472,12 @@ describe("T37 — the indexed answer equals the scanned answer, through every mu
     //
     // Unreachable against today's substrate, so it is pinned with a stub, as the purge hole is.
     const trust = sign(trustClaims("closed", [], OP, 1000));
-    const stub = {
+    const stub = withSubstrateNegation({
       negationsOf: () => [],
       get: () => undefined, // the set cannot resolve what the index names
       snapshot: () => new Set([trust]),
       byTarget: () => [trust.id],
-    } as unknown as Reactor;
+    });
 
     expect(() =>
       lawfulDeltasAt(stub, Date.now(), { entity: TRUST_ENTITY, context: CTX_TRUST }, OP),

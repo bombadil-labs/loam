@@ -291,7 +291,10 @@ describe("evolution is append: the surface follows the surviving definitions", (
     );
     expect(definition).toBeDefined();
     await gateway.append([
-      signClaims(makeNegationClaims(OPERATOR, Date.now() + 10, definition!.id), OPERATOR_SEED),
+      signClaims(
+        { ...makeNegationClaims(OPERATOR, Date.now() + 10, definition!.id), validFrom: Date.now() },
+        OPERATOR_SEED,
+      ),
     ]);
     await gateway.flush();
 
@@ -474,8 +477,12 @@ describe("evolution is append: the surface follows the surviving definitions", (
     // the gardener publishes a NEWER definition at the operator's own schema entity — under
     // open writes it lands as data; under operator-filtered reads it binds nothing
     const { publishHyperSchemaClaims } = await import("@bombadil/rhizomatic");
+    // Newer by far, and valid now: only its author keeps it from binding.
     const rival = signClaims(
-      publishHyperSchemaClaims(PLANT_V2, "schema:Plant", GARDENER, Date.now() + 9_000_000),
+      {
+        ...publishHyperSchemaClaims(PLANT_V2, "schema:Plant", GARDENER, Date.now() + 9_000_000),
+        validFrom: Date.now(),
+      },
       GARDENER_SEED,
     );
     await expect(gateway.append([rival])).resolves.toMatchObject({ accepted: 1 });
