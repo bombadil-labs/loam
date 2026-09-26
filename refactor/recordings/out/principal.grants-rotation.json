@@ -110,7 +110,9 @@
     },
     "survivingWriteGrantIds": {
       "peer": [],
-      "stranger": [],
+      "stranger": [
+        "#operator→stranger:write@9"
+      ],
       "subadmin": [
         "#writer→subadmin:write@11"
       ],

@@ -313,7 +313,7 @@ describe("recordings: principals", () => {
             .map((d) => [d.id, honoredStrikeOn(r, NOW, d.id, KEY.operator)?.id ?? null]),
         ),
         survivingWriteGrantIds: Object.fromEntries(
-          SUBJECTS.map((w) => [w, survivingWriteGrantIds(r, KEY[w])]),
+          SUBJECTS.map((w) => [w, survivingWriteGrantIds(r, NOW, KEY[w], KEY.operator)]),
         ),
       }));
     }
