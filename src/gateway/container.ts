@@ -2330,32 +2330,46 @@ export function unreachableStoreReport(gw: Gateway): {
    *  needs the name, and deriving one by parsing a refusal message is how a report goes stale. */
   faultEntities: string[];
 } {
-  const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
+  const now = gw.validityNow();
+  const table = readContainerTable(gw.reactor, now, gw.operatorAuthor);
   const faults: string[] = [];
   const kept: string[] = [];
   const faultEntities: string[] = [];
-  // §28.4's knobs must not flip through the survival algebra either (the erasure lens's
-  // finding): strike the earliest declaration while a federated flip survives, and the binding
-  // posture would change separate→shared with the bytes still on disk — dissolving this
-  // guard through a door no validator watches. So the guard remembers: an entity still ALIVE in
-  // the table whose lineage holds a STRUCK separate declaration is treated as separate. Forgetting
-  // the container WHOLE (striking every declaration) still ends the entity and clears the guard —
-  // that is the honest forget, unchanged.
-
-  const struckSeparate = new Set<string>();
+  // §28.4's knobs must not flip through the survival algebra either: strike the earliest
+  // declaration while a later shared one survives, and the posture would change separate→shared
+  // with the bytes still on disk — dissolving this guard through a door no validator watches. So
+  // the guard reads the LINEAGE from history: a separate declaration that is negated now, or whose
+  // own validity has ended, still names a store of its own.
+  //
+  // Both tests are present-time reads, and that loses no case. A negation that has expired or has
+  // not begun leaves the declaration live, so the live table names the container as separate. A
+  // declaration that has not begun has had no store to attach, so it names none yet.
+  //
+  // Expiry is NOT a forget. An entity whose separate declaration merely ended — with or without a
+  // successor — stays named until a detach record covers it. The one honest forget is the explicit
+  // act: negating EVERY declaration ends the entity and clears the guard, unchanged.
+  const lineageSeparate = new Set<string>();
+  const endedSeparate = new Set<string>();
   if (gw.operatorAuthor !== undefined) {
-    const negated = negatedAt(gw.reactor, gw.validityNow(), gw.operatorAuthor);
-    // HISTORY: an expired separate declaration still named a store.
+    const negated = negatedAt(gw.reactor, now, gw.operatorAuthor);
     for (const delta of lawfulHistory(gw.reactor, gw.operatorAuthor)) {
-      if (!negated(delta.id)) continue;
       const name = containerRef(delta.claims, CTX_CONTAINER);
-      if (name !== undefined && primitives(delta.claims, "posture")[0] === "separate") {
-        struckSeparate.add(name);
-      }
+      if (name === undefined || primitives(delta.claims, "posture")[0] !== "separate") continue;
+      const struck = negated(delta.id);
+      const until = delta.claims.validUntil;
+      const ended = until !== undefined && until <= now;
+      if (!struck && !ended) continue;
+      lineageSeparate.add(name);
+      if (!struck) endedSeparate.add(name);
     }
   }
+  // "ended" marks an entity the live table no longer names at all.
+  const named = new Map<string, string>();
   for (const [entity, rec] of table.containers) {
-    if (rec.posture !== "separate" && !struckSeparate.has(entity)) continue;
+    if (rec.posture === "separate" || lineageSeparate.has(entity)) named.set(entity, rec.posture);
+  }
+  for (const entity of endedSeparate) if (!table.containers.has(entity)) named.set(entity, "ended");
+  for (const [entity, posture] of named) {
     const attached = gw.attachedContainers.get(entity);
     if (attached !== undefined && gw.quarantinePools.has(attached)) continue;
     if (table.detached.has(entity)) {
@@ -2364,14 +2378,19 @@ export function unreachableStoreReport(gw: Gateway): {
     }
     faultEntities.push(entity);
     faults.push(
-      rec.posture === "separate"
+      posture === "separate"
         ? `the declared separate container "${entity}" is neither attached nor covered by a detach ` +
             `record — its store may hold bytes outside this sweep. Attach it (openContainer) and ` +
             `re-run, or detach() it on the record to keep it deliberately.`
-        : `container "${entity}" resolves posture "${rec.posture}", but a negated declaration in ` +
-            `its lineage gave it a store of its OWN — which may still hold bytes outside this ` +
-            `sweep (§28.4: the knobs do not flip through the survival algebra). Cover it with a ` +
-            `detach record, or forget the container whole and declare a new name.`,
+        : posture === "ended"
+          ? `container "${entity}" was declared separate, and that declaration's validity has ` +
+            `ended — but an expiry is not a forget, and its store may still hold bytes outside ` +
+            `this sweep. Cover it with a detach record, or negate every declaration of it to ` +
+            `forget it whole.`
+          : `container "${entity}" resolves posture "${posture}", but a negated or ended ` +
+            `declaration in its lineage gave it a store of its OWN — which may still hold bytes ` +
+            `outside this sweep (§28.4: the knobs do not flip through the survival algebra). ` +
+            `Cover it with a detach record, or forget the container whole and declare a new name.`,
     );
   }
   // A surviving detach record whose declaration is gone is a store mid-forget: still parked at
