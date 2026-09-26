@@ -20,7 +20,7 @@ import {
 } from "@bombadil/rhizomatic";
 import { readUserSeed } from "../cli/config.js";
 import { parseOffer } from "../federation/offer.js";
-import { CTX_GRANTS, holdsGrant } from "../gateway/accounts.js";
+import { CTX_GRANTS, holdsGrant, struckAt } from "../gateway/accounts.js";
 import { withBatchNegationClosure } from "../gateway/ingest.js";
 import {
   type Container,
@@ -108,12 +108,14 @@ export interface AdminFederationCtx {
 }
 
 /**
- * Every operator-authored grant delta at the store entity naming `subject` that the operator has not
- * struck at `now` — what the connector revoke strikes in the ground. Only the operator's strikes
- * count, down the whole chain, and only while each is valid at `now`: a stranger's strike, or an
- * operator strike whose window has not begun or has ended, leaves the grant to be struck.
+ * The revoke selection: every UNNEGATED operator-authored grant delta at the store entity naming
+ * `subject`. It is deliberately wider than the grants the door honours now. A grant that has not
+ * started, or whose window has ended, is selected too, so a revoke strikes it before it can start
+ * or be re-read. Only the operator's strikes count, down the whole chain, and only while each is
+ * valid at `now`: a stranger's strike, or an operator strike whose window has not begun or has
+ * ended, leaves the grant to be struck.
  */
-export function survivingOperatorGrantIds(
+export function unnegatedOperatorGrantIds(
   reactor: Reactor,
   now: number,
   operator: string,
@@ -141,6 +143,57 @@ export function survivingOperatorGrantIds(
   return out;
 }
 
+/** What a connection's write standing reads as on the connections panel. */
+export type ConnectionGrantState = "active" | "revoked" | "not yet valid" | "expired" | "ungranted";
+
+/**
+ * What the inbox pool's own write grants say about `key` at `now`, read from the deltas on every
+ * request. Each label names what the grants show, and nothing else:
+ *   - "active": the door honours a write grant now.
+ *   - "revoked": a write grant inside its window is struck by a negation the door honours.
+ *   - "not yet valid": a write grant has a window that starts after `now`.
+ *   - "expired": a write grant has a window that ended at or before `now`.
+ *   - "ungranted": no write grant names the key, or none of the above holds (for example, a grant
+ *     whose author has no standing).
+ * Where several grants disagree, the first label in that order wins.
+ */
+export function connectionGrantState(
+  reactor: Reactor,
+  now: number,
+  operator: string | undefined,
+  key: string,
+): ConnectionGrantState {
+  if (holdsGrant(reactor, now, STORE_ENTITY, key, "write", operator)) return "active";
+  const seen = new Set<ConnectionGrantState>();
+  for (const id of reactor.byTarget(STORE_ENTITY)) {
+    const delta = reactor.get(id);
+    if (delta === undefined) continue;
+    const ptrs = delta.claims.pointers;
+    const atGrants = ptrs.some(
+      (p) =>
+        p.target.kind === "entity" &&
+        p.target.entity.id === STORE_ENTITY &&
+        p.target.entity.context === CTX_GRANTS,
+    );
+    if (!atGrants) continue;
+    let subject: string | undefined;
+    let verb: string | undefined;
+    for (const p of ptrs) {
+      if (p.target.kind !== "primitive") continue;
+      if (p.role === "subject" && typeof p.target.value === "string") subject = p.target.value;
+      if (p.role === "verb" && typeof p.target.value === "string") verb = p.target.value;
+    }
+    if (subject !== key || verb !== "write") continue;
+    const { validFrom, validUntil } = delta.claims;
+    if (now < validFrom) seen.add("not yet valid");
+    else if (validUntil !== undefined && now >= validUntil) seen.add("expired");
+    else if (struckAt(reactor, now, id, operator)) seen.add("revoked");
+  }
+  for (const state of ["revoked", "not yet valid", "expired"] as const)
+    if (seen.has(state)) return state;
+  return "ungranted";
+}
+
 /** The federation/connector door group, in one closure (moved verbatim from admin.ts). */
 export const adminFederation = (ctx: AdminFederationCtx) => {
   const {
@@ -166,39 +219,6 @@ export const adminFederation = (ctx: AdminFederationCtx) => {
     return name.startsWith(prefix) && name.length > prefix.length
       ? name.slice(prefix.length)
       : undefined;
-  };
-
-  // What the inbox pool's own grant deltas say about the key. "Revoked" is claimed only where a
-  // struck write grant proves a connection once stood — the state is read from the deltas on every
-  // request, never remembered by this door.
-  const grantStateOf = (
-    reactor: Reactor,
-    now: number,
-    operator: string | undefined,
-    key: string,
-  ): "active" | "revoked" | "ungranted" => {
-    if (holdsGrant(reactor, now, STORE_ENTITY, key, "write", operator)) return "active";
-    for (const id of reactor.byTarget(STORE_ENTITY)) {
-      const delta = reactor.get(id);
-      if (delta === undefined) continue;
-      const ptrs = delta.claims.pointers;
-      const atGrants = ptrs.some(
-        (p) =>
-          p.target.kind === "entity" &&
-          p.target.entity.id === STORE_ENTITY &&
-          p.target.entity.context === CTX_GRANTS,
-      );
-      if (!atGrants) continue;
-      let subject: string | undefined;
-      let verb: string | undefined;
-      for (const p of ptrs) {
-        if (p.target.kind !== "primitive") continue;
-        if (p.role === "subject" && typeof p.target.value === "string") subject = p.target.value;
-        if (p.role === "verb" && typeof p.target.value === "string") verb = p.target.value;
-      }
-      if (subject === key && verb === "write") return "revoked";
-    }
-    return "ungranted";
   };
 
   // The connector records, read fresh per render. Unreadable is its own state: "cannot determine
@@ -291,7 +311,7 @@ export const adminFederation = (ctx: AdminFederationCtx) => {
     const state =
       pool === undefined
         ? undefined
-        : grantStateOf(pool.reactor, pool.validityNow(), gw.operatorAuthor, key);
+        : connectionGrantState(pool.reactor, pool.validityNow(), gw.operatorAuthor, key);
     const stateWords =
       state === undefined
         ? "its inbox pool is not attached here, so its grant cannot be read from this page"
@@ -299,7 +319,12 @@ export const adminFederation = (ctx: AdminFederationCtx) => {
           ? "active — its writes land"
           : state === "revoked"
             ? "revoked — its next write refuses; everything it wrote is kept, author intact"
-            : "holds no write grant — its next write refuses";
+            : state === "expired"
+              ? "expired — its write grant has ended, so its next write refuses; everything it " +
+                "wrote is kept, author intact"
+              : state === "not yet valid"
+                ? "not yet valid — its write grant has not started, so its next write refuses"
+                : "holds no write grant — its next write refuses";
     const join = joinFor(records, key, user);
     const via =
       join === undefined
@@ -722,7 +747,7 @@ ${flowNote}`;
     if (plan.client !== undefined) {
       const clientId = plan.client.clientId;
       const strike = async (grant: { actor: string }): Promise<void> => {
-        const ids = survivingOperatorGrantIds(
+        const ids = unnegatedOperatorGrantIds(
           gw.reactor,
           gw.validityNow(),
           gw.operatorAuthor!,

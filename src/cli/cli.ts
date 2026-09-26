@@ -2823,9 +2823,14 @@ const survivingRoleClaimIds = (
 
 // Every grant this store's own seed authored for `subject` — the CURRENT holder of a name's seed
 // file, never a historical one (the working spec's §36.3.1.7 names that residual) — split by
-// whether the operator has struck it. `verb` narrows to one action: a grant naming the subject is
-// not the same fact as a grant naming the subject FOR WRITE, and asking the loose question of a
-// pen would read an `admin` grant as write standing the door would then refuse.
+// whether the operator has struck it at `now`. `verb` narrows to one action: a grant naming the
+// subject is not the same fact as a grant naming the subject FOR WRITE, and asking the loose
+// question of a pen would read an `admin` grant as write standing the door would then refuse.
+//
+// This is NOT the door's reading. It counts only the operator's strikes, where the door also
+// honours an effective admin's strike. It does not read the grant's own validity window, where
+// the door counts a grant only inside it. So "surviving" here means "the operator has not struck
+// it", which is the selection a revoke strikes; it is not a claim that the door honours it.
 const grantStanding = (
   reactor: Reactor,
   now: number,

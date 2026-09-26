@@ -179,7 +179,7 @@ describe("T82 — the container and law surfaces are reachable from the package 
 
     // The barrel's readers and their row types, used: an exported alias for a shape nobody can
     // name is the same defect one level up.
-    const rows: ManifestRow[] = loam.readManifest([]);
+    const rows: ManifestRow[] = loam.readManifest([], Date.now());
     expect(rows).toEqual([]);
   });
 

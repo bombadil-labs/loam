@@ -3,8 +3,10 @@
 // sides of every boundary, at three levels that must agree:
 //   - the delta level: the grant and its negation are both held in the store throughout;
 //   - the door: an append signed by the writer is admitted or refused (`authorize`, through ingest);
-//   - the readers beside the door: `holdsGrant`, `grantsHeldBy`, and the revoke panel's selection
-//     `survivingOperatorGrantIds`, which names a grant exactly when the door still honours it.
+//   - the readers beside the door: `holdsGrant`, `grantsHeldBy`, and the revoke selection
+//     `unnegatedOperatorGrantIds` (every unnegated operator grant). The grants here are untimed, so
+//     that selection names a grant exactly when the door still honours it. A timed grant is selected
+//     outside its window too; `step4-last-readers.test.ts` pins that.
 // A bystander writer with an untouched grant writes at every read time.
 //
 // Named gap: the door is driven through `Gateway.append`, not over HTTP. The HTTP write door calls
@@ -15,7 +17,7 @@ import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bomb
 import { grantClaims, grantsHeldBy, holdsGrant } from "../../src/gateway/accounts.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
-import { survivingOperatorGrantIds } from "../../src/server/admin-federation.js";
+import { unnegatedOperatorGrantIds } from "../../src/server/admin-federation.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
@@ -105,7 +107,7 @@ describe("write standing reads a negation of a grant only inside its window", ()
     const { gw, grant } = await store();
     const neg = strike(grant.id, { validFrom: T1, validUntil: T2 });
     await gw.append([neg]);
-    const panel = () => survivingOperatorGrantIds(gw.reactor, gw.validityNow(), OP, GARDENER);
+    const panel = () => unnegatedOperatorGrantIds(gw.reactor, gw.validityNow(), OP, GARDENER);
 
     expect(await readAt(gw, grant, [neg], T1 - 1, 1)).toEqual(allowed(grant));
     expect(panel()).toEqual([grant.id]); // the panel would strike what the door honours
@@ -124,7 +126,7 @@ describe("write standing reads a negation of a grant only inside its window", ()
     const { gw, grant } = await store();
     const neg = strike(grant.id, { validFrom: T1 });
     await gw.append([neg]);
-    const panel = () => survivingOperatorGrantIds(gw.reactor, gw.validityNow(), OP, GARDENER);
+    const panel = () => unnegatedOperatorGrantIds(gw.reactor, gw.validityNow(), OP, GARDENER);
 
     expect(await readAt(gw, grant, [neg], T1 - 1, 1)).toEqual(allowed(grant));
     expect(panel()).toEqual([grant.id]);

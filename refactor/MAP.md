@@ -1,7 +1,7 @@
 # The refactor map
 
-Updated 2026-09-26. Loam main is on `@bombadil/rhizomatic@0.11.0-next.2`. Rhizomatic step 4 is in
-draft (rhizomatic #48).
+Updated 2026-09-26. Loam main is on `@bombadil/rhizomatic@0.11.0-next.3`. Rhizomatic step 4 is
+merged (rhizomatic #48, #49).
 
 The refactor moves in three directions at once:
 
@@ -34,7 +34,7 @@ same PR.
 | 1. Graph | package graph, mechanical check (#38) | census ratchet in CI (#572) | done |
 | 2. Boundaries | files into tier packages (#38) | recordings harness (#573) | done |
 | 3. Time | signed validity, explicit `now` (#43); refresh skip (#44); verified set copies (#46); 0.11.0-next.2 | switch to 0.11 (#585); read time is the wall clock, `stamp()` (#600); unreadable stores refused (#586); next.2 (#604) | done |
-| 4. Suppression, governed reads | `negationPredicate`, `negationWitnesses`, `governedDeltas`, `applyPolicy`, `latestByKey`, governed loaders, the lens binding (schema tier) and shared vectors, merged (#48) and published as 0.11.0-next.3 (#49); helper follow-ups in #50 | seams `negatedAt`, `lawfulSnapshot(now)` (#588, #589, #592); history reads split out; timed recordings and reader audit (#587); the swap landed (#606); caches follow validity, one-id readers audited, strike readers count only in-window, the constitution walk reads negations and grants in their window (Myk, 2026-09-26) (this PR); open: `receive-policy.ts` onto the governed read, erasure and graveyard reads onto history reads | in progress |
+| 4. Suppression, governed reads | `negationPredicate`, `negationWitnesses`, `governedDeltas`, `applyPolicy`, `latestByKey`, governed loaders, the lens binding (schema tier) and shared vectors, merged (#48) and published as 0.11.0-next.3 (#49); helper follow-ups in #50 | seams `negatedAt`, `lawfulSnapshot(now)` (#588, #589, #592); history reads split out; timed recordings and reader audit (#587); the swap landed (#606); caches follow validity, one-id readers audited, strike readers count only in-window, the constitution walk reads negations and grants in their window (Myk, 2026-09-26) (#607); `receive-policy.ts` on the governed read, erasure and graveyard reads are history reads, a drop severs for good, `survivalOver` reads at `now`, honest grant labels (this PR); open: fixtures onto `stamp()` (in flight), latest-wins picks onto `latestByKey`/`applyPolicy` (measured), the `unreachableStoreReport` decision | in progress |
 | 5. Principal | roots, key binding, succession, delegation | principal recording (#590); revoke fix (#591) | next |
 | 6. Peer, admission | peer model, guard pipeline, arrival testimony | curse-scope recording (#597); park reason (#598) | planned |
 | 7. Publish, subscribe | federation: per-subscriber lenses, closure audit, set digest | adopt the revised HTTP binding | planned |

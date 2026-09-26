@@ -119,7 +119,7 @@ describe("recordings: suppression, four readers side by side", () => {
       out[mode] = bothOrders(corpus, (r) => {
         const lawful = lawfulNegated(r, op);
         const struck = dataStruck(r, Date.now(), op);
-        const selfOnly = survivalOver([...r.snapshot()]);
+        const selfOnly = survivalOver([...r.snapshot()], Date.now());
         return Object.fromEntries(
           corpus.map((d) => [
             d.id,

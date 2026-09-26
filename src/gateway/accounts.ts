@@ -394,6 +394,11 @@ function struck(ctx: Ctx, id: string, visited: ReadonlySet<string>): boolean {
   return false;
 }
 
+/** Is `id` struck at `now` by a negation the constitution honours (the door's own reading)? */
+export function struckAt(reactor: Reactor, now: number, id: string, operator?: string): boolean {
+  return struck({ reactor, now, operator }, id, new Set());
+}
+
 // May this negation RETIRE what it strikes? Constitutional resolution honors a strike only
 // from the operator or an effective store admin — a mere writer (or a federated stranger) may
 // assert a negation, but the constitution does not bend to it. (Whether DATA bends to a

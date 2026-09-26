@@ -3,12 +3,13 @@
  * scopes. Source IDs are boundary assertions, not facts inferred from signer identity.
  * No ingestion adapter, signer, ambient ground, dependency interpreter or persistent cache.
  * Decision wire profile is intentionally experimental: one exact context pointer plus JSON.
- * Bindings select one source lineage/reading; curses survive until lawfully negated.
+ * Bindings select one source lineage/reading; a decision counts only inside its own validity
+ * window at `now`, and until the receiver lawfully negates it.
  * Multiple surviving bindings for a relationship refuse, rather than guessing chronology.
  * All input is verified before projection. This bounded in-memory proof is not a
  * production-scale implementation; even unrelated malformed input refuses the batch.
  */
-import { Reactor, computeId, verifyDelta, type Delta } from "@bombadil/rhizomatic";
+import { Reactor, computeId, governedDeltas, verifyDelta, type Delta } from "@bombadil/rhizomatic";
 import { lensOf, readRegistrations, type Registration } from "./registration.js";
 import { negatedAt } from "./negation.js";
 import { selectReceivingSnapshot } from "./receive-snapshot.js";
@@ -133,9 +134,9 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
     }
     const negated = negatedAt(policy, input.now, input.receiver);
     const decisions: Decision[] = [];
-    for (const d of policy.snapshot()) {
-      // Stranger claims are verified but never acquire recipient policy authority.
-      if (d.claims.author !== input.receiver) continue;
+    // The governed read: only the receiver's own decisions, valid at `now`. Stranger claims are
+    // verified but never acquire recipient policy authority.
+    for (const d of governedDeltas(policy.snapshot(), input.now, new Set([input.receiver]))) {
       // A lawfully struck delta is not live input, however malformed; only survivors are parsed.
       if (negated(d.id)) continue;
       const decision = parse(d);
@@ -148,14 +149,19 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
       groups.set(d.relationship, group);
     }
     // A pause pins ONE of the receiver's live bindings, named by id under its own relationship and
-    // reading. A pause on a binding the receiver lawfully struck is inert: the receiver withdrew it.
-    // Every other pause is a decision the projection cannot honour, and it is refused rather than
-    // ignored: the relationship it claims, and the relationship of any binding it names, both
-    // refuse. A claimed relationship with no binding still earns its own refusal row.
+    // reading. A pause on a binding the receiver lawfully struck, or on one outside its own window,
+    // is inert. Every other pause is a decision the projection cannot honour, and it is refused
+    // rather than ignored: the relationship it claims, and the relationship of any binding it names,
+    // both refuse. A claimed relationship with no binding still earns its own refusal row.
     const bindings = decisions.filter((b) => b.kind === "binding");
+    // A binding outside its own validity window is not live at `now`, like a struck one.
+    const lapsed = (d: Delta): boolean =>
+      input.now < d.claims.validFrom ||
+      (d.claims.validUntil !== undefined && input.now >= d.claims.validUntil);
     const withdrawnBinding = (id: string): Decision | undefined => {
       const named = policy.get(id);
-      if (named === undefined || named.claims.author !== input.receiver || !negated(id)) return;
+      if (named === undefined || named.claims.author !== input.receiver) return;
+      if (!negated(id) && !lapsed(named)) return;
       try {
         const parsed = parse(named);
         return parsed?.kind === "binding" ? parsed : undefined;

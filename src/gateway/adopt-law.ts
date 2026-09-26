@@ -203,8 +203,8 @@ const byAge = (a: { timestamp: number; deltaId: string }, b: typeof a): number =
  * Malformed rows are LOUD, not skipped: a stranger's manifest gets no silent drops, because a
  * skip is how a crafted manifest hides a row.
  */
-export function readManifest(members: readonly Delta[]): ManifestRow[] {
-  const survives = survivalOver(members);
+export function readManifest(members: readonly Delta[], now: number): ManifestRow[] {
+  const survives = survivalOver(members, now);
   const latest = new Map<string, ManifestRow>();
   for (const d of members) {
     if (!isManifestRow(d.claims) || !survives(d.id)) continue;
@@ -256,7 +256,10 @@ export function readManifest(members: readonly Delta[]): ManifestRow[] {
 // Recursion is unchanged: a strike retires its target only while it survives itself, so the
 // shipper negating their own retraction revives their law. The scope applies at every rung — a
 // foreign strike on a strike counts for nothing.
-export function survivalOver(members: readonly Delta[]): (id: string) => boolean {
+//
+// A strike counts only inside its own validity window at `now`. The members' own windows are not
+// asked here: this answers "was it taken back", not "does it hold".
+export function survivalOver(members: readonly Delta[], now: number): (id: string) => boolean {
   const byId = new Map(members.map((d) => [d.id, d]));
   const strikes = new Map<string, string[]>();
   for (const d of members) {
@@ -275,9 +278,15 @@ export function survivalOver(members: readonly Delta[]): (id: string) => boolean
     const target = byId.get(id);
     if (target === undefined) return false; // not a member: nothing in this set speaks about it
     memo.set(id, false); // in-progress: surviving (content addressing keeps the chain acyclic)
-    const verdict = (strikes.get(id) ?? []).some(
-      (n) => byId.get(n)?.claims.author === target.claims.author && !negated(n),
-    );
+    const verdict = (strikes.get(id) ?? []).some((n) => {
+      const strike = byId.get(n);
+      return (
+        strike?.claims.author === target.claims.author &&
+        strike.claims.validFrom <= now &&
+        (strike.claims.validUntil === undefined || now < strike.claims.validUntil) &&
+        !negated(n)
+      );
+    });
     memo.set(id, verdict);
     return verdict;
   };
@@ -722,10 +731,11 @@ function sourceOf(
   version: ModuleVersion,
   reading: "blessing" | "exposure" = "blessing",
 ): Source {
-  const livesAtSource = survivalOver(version.members);
+  const now = gw.validityNow();
+  const livesAtSource = survivalOver(version.members, now);
   const container = containerOf(gw, version);
   return {
-    now: gw.validityNow(),
+    now,
     version,
     members: version.members,
     survives: reading === "blessing" ? livesAtSource : () => true,
@@ -1363,8 +1373,11 @@ function withheldResolvers(
  * this manifest say, among the rows this caller trusts?
  */
 function manifestRowsFor(gw: Gateway, src: Source, opts: AdoptLawOptions): ManifestRow[] {
-  if (opts.manifest !== "operator") return readManifest(src.members);
-  return readManifest(src.members.filter((d) => d.claims.author === gw.operatorAuthor));
+  if (opts.manifest !== "operator") return readManifest(src.members, src.now);
+  return readManifest(
+    src.members.filter((d) => d.claims.author === gw.operatorAuthor),
+    src.now,
+  );
 }
 
 /** What lens a renderer will read HERE, and whether that is a settled question yet. */
@@ -1642,7 +1655,7 @@ export async function blessAllImpl(
   opts: BlessAllOptions = {},
 ): Promise<BlessAllReport> {
   const src = sourceOf(gw, version);
-  const rows = readManifest(src.members);
+  const rows = readManifest(src.members, src.now);
   const notes: string[] = [];
   const refused: string[] = [];
   const witnessed: string[] = [];
@@ -1825,7 +1838,7 @@ export function lawFromImpl(gw: Gateway, versions: readonly ModuleVersion[]): La
   const out = new Map<string, { row: LawFromRow; versions: Set<string> }>();
   for (const version of versions) {
     const src = sourceOf(gw, version, "exposure");
-    for (const row of readManifest(src.members)) {
+    for (const row of readManifest(src.members, src.now)) {
       let ex: Export;
       try {
         ex = classify(src, row);
@@ -2002,7 +2015,7 @@ export function classifyExactReceivedSchema(
   registration: string,
   now: number,
 ): ExactReceivedSchema {
-  const survives = survivalOver(received);
+  const survives = survivalOver(received, now);
   const named = received.find((d) => d.id === registration);
   if (named === undefined)
     throw new Error(`registration ${registration} is not among the received`);

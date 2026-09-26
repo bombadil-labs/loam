@@ -189,7 +189,7 @@ export function selectRendererForActivation(
   // attached pool: the projection refuses otherwise.
   const opening = evidence.opening;
   const received = evidence.received;
-  const survives = survivalOver(received);
+  const survives = survivalOver(received, gw.validityNow());
   const pool = gw.channelPools.get(input.channel)?.gateway;
   if (pool?.operatorAuthor === undefined)
     throw refusal("source_unavailable", `${input.channel} has no attached pool`);
