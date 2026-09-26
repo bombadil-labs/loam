@@ -1,0 +1,37 @@
+{
+  "corpus": {
+    "marker:operator": "1e206f630a310b1ef34c4dd9e411a00fbf50c6d385fc83342fb29f9033b39bbe56a5",
+    "marker:stranger": "1e20cd0c85b12446f025ad73942addffea8c4da55f5b6ad434aeeaa4755ea0979342",
+    "operator strikes ada=actor": "1e208d824c0a0cb30091aebe28920e30275f66abbad11e6588670104f31315a0012f",
+    "operator strikes writer:admin": "1e2081e20adcc809f13567de333496fdaa8456fd8d56fb49aa52b5ac7c653a32043f",
+    "operator strikes writer:write": "1e20f6a8344275337e19db84a1b5ef06582079323e5772834f8ea2250002b416ee2d",
+    "operator→peer:admin@20": "1e20bc0bba7fec6aa8179304c7eb6773d314fb4dfe136361d328b2fc5ad593ebc83f",
+    "operator→peer:write@20": "1e2057a905bdb545c3678707b0fd9a2334901c32681e4c96f6a9badef41ad1fd838e",
+    "operator→stranger:write@9": "1e20305d185db1ea7389ade44a1790d20f6532fb76821736d77ddcbfe18d3171a566",
+    "operator→writer:admin@10": "1e20ad03779229edb3a7c3dbec174731d476d6e8ee4fb6b10a4527bc60e54fa3cfb9",
+    "operator→writer:write@10": "1e2062bfa0bedddb3fa8f1a93c8068d3c1f460a55d07775769fc91a3c7817f614626",
+    "role:ada=actor by operator@12": "1e2003f31773516a4d797ca196c1a54934f7cfa8afaf09a85e62652063e3efda83d7",
+    "role:ada=actor by stranger@15": "1e205f877d760148f268fa61bd5773ee2cc2c0f37537b1a742c506ef2f16ec73d29f",
+    "role:ada=operator by operator@11": "1e20a9984ccd6ea099e906145b5f75094fd87cbb0371d006199f63d080956804e84f",
+    "role:bob=operator by stranger@21": "1e20310da55c0e642c45df331eccf43a055b25b0c7ba134cc1a1d3a1c1d1481744b1",
+    "role:cy=operator by stranger@31": "1e2069385b186990ba4f9be1c1f68c76986ce00b4581178f4ebcfa8bdd8b781c5ff8",
+    "role:dee=actor by operator@41": "1e208ead3c5a80cd9e9dfb38e495bbe35b205f88ad0bb018217552f3714ae95da108",
+    "stranger strikes dee=actor": "1e20b0d36f4cffaee864678e3790e6bed8e197c27dd88e96d65ef9c3404a0a4393b1",
+    "user:ada by operator@10": "1e205a8063b54f43b54dbdbb1fd6abb12c3c4ca53382daf82a0ff6effd8f2e3bc7ef",
+    "user:ada by operator@16": "1e20f47e58c79d58f3a0b05f04977a8c03acec4873ed6ec4ed6700e2958347ba0712",
+    "user:ada by stranger@14": "1e20272fdd0ffc59314df62ee5c120a9910bd4021bad80b23511ba5436f84fc8f4e0",
+    "user:bob by stranger@20": "1e2070594a076e3ab01a4d160c750a5b809882edf5b2987bd55d750ff50f849e7068",
+    "user:cy by operator@30": "1e20ae9daebbd9cc46127086654afe63ec94bec497b309127bf10c77d1f52905e057",
+    "user:dee by operator@40": "1e2045b98ad5e97d7e34b95d5f4085a1888064643573e56f63e20046ab360787d2fe",
+    "writer (as admin) strikes stranger:write": "1e2054364bd67bd9cb143671a4a43e24725746ab728bf1c46870869a71eec096d671",
+    "writer→subadmin:write@11": "1e20bbef1d163b9a224bfdf6550a32450093dfbd9ecc3d80b60016e3ffaef15c2890"
+  },
+  "genesis": {
+    "operator": [
+      "1e206f630a310b1ef34c4dd9e411a00fbf50c6d385fc83342fb29f9033b39bbe56a5"
+    ],
+    "stranger": [
+      "1e20cd0c85b12446f025ad73942addffea8c4da55f5b6ad434aeeaa4755ea0979342"
+    ]
+  }
+}

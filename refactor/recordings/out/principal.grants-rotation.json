@@ -1,0 +1,189 @@
+{
+  "admin before rotation": {
+    "authorizeData": {
+      "peer": false,
+      "stranger": false,
+      "subadmin": true,
+      "writer": true
+    },
+    "grantsHeldBy": {
+      "peer": [],
+      "stranger": [],
+      "subadmin": [
+        {
+          "id": "#writer→subadmin:write@11",
+          "verb": "write"
+        }
+      ],
+      "writer": [
+        {
+          "id": "#operator→writer:admin@10",
+          "verb": "admin"
+        }
+      ]
+    },
+    "honoredStrikeOn": {
+      "#operator→stranger:write@9": "#writer (as admin) strikes stranger:write",
+      "#operator→writer:admin@10": null,
+      "#writer→subadmin:write@11": null
+    },
+    "survivingWriteGrantIds": {
+      "peer": [],
+      "stranger": [],
+      "subadmin": [
+        "#writer→subadmin:write@11"
+      ],
+      "writer": []
+    }
+  },
+  "admin rotated, old grant kept": {
+    "authorizeData": {
+      "peer": true,
+      "stranger": false,
+      "subadmin": true,
+      "writer": true
+    },
+    "grantsHeldBy": {
+      "peer": [
+        {
+          "id": "#operator→peer:admin@20",
+          "verb": "admin"
+        }
+      ],
+      "stranger": [],
+      "subadmin": [
+        {
+          "id": "#writer→subadmin:write@11",
+          "verb": "write"
+        }
+      ],
+      "writer": [
+        {
+          "id": "#operator→writer:admin@10",
+          "verb": "admin"
+        }
+      ]
+    },
+    "honoredStrikeOn": {
+      "#operator→peer:admin@20": null,
+      "#operator→stranger:write@9": "#writer (as admin) strikes stranger:write",
+      "#operator→writer:admin@10": null,
+      "#writer→subadmin:write@11": null
+    },
+    "survivingWriteGrantIds": {
+      "peer": [],
+      "stranger": [],
+      "subadmin": [
+        "#writer→subadmin:write@11"
+      ],
+      "writer": []
+    }
+  },
+  "admin rotated, old grant struck": {
+    "authorizeData": {
+      "peer": true,
+      "stranger": true,
+      "subadmin": false,
+      "writer": false
+    },
+    "grantsHeldBy": {
+      "peer": [
+        {
+          "id": "#operator→peer:admin@20",
+          "verb": "admin"
+        }
+      ],
+      "stranger": [
+        {
+          "id": "#operator→stranger:write@9",
+          "verb": "write"
+        }
+      ],
+      "subadmin": [],
+      "writer": []
+    },
+    "honoredStrikeOn": {
+      "#operator→peer:admin@20": null,
+      "#operator→stranger:write@9": null,
+      "#operator→writer:admin@10": "#operator strikes writer:admin",
+      "#writer→subadmin:write@11": null
+    },
+    "survivingWriteGrantIds": {
+      "peer": [],
+      "stranger": [],
+      "subadmin": [
+        "#writer→subadmin:write@11"
+      ],
+      "writer": []
+    }
+  },
+  "writer rotated, old grant kept": {
+    "authorizeData": {
+      "peer": true,
+      "stranger": false,
+      "subadmin": false,
+      "writer": true
+    },
+    "grantsHeldBy": {
+      "peer": [
+        {
+          "id": "#operator→peer:write@20",
+          "verb": "write"
+        }
+      ],
+      "stranger": [],
+      "subadmin": [],
+      "writer": [
+        {
+          "id": "#operator→writer:write@10",
+          "verb": "write"
+        }
+      ]
+    },
+    "honoredStrikeOn": {
+      "#operator→peer:write@20": null,
+      "#operator→writer:write@10": null
+    },
+    "survivingWriteGrantIds": {
+      "peer": [
+        "#operator→peer:write@20"
+      ],
+      "stranger": [],
+      "subadmin": [],
+      "writer": [
+        "#operator→writer:write@10"
+      ]
+    }
+  },
+  "writer rotated, old grant struck": {
+    "authorizeData": {
+      "peer": true,
+      "stranger": false,
+      "subadmin": false,
+      "writer": false
+    },
+    "grantsHeldBy": {
+      "peer": [
+        {
+          "id": "#operator→peer:write@20",
+          "verb": "write"
+        }
+      ],
+      "stranger": [],
+      "subadmin": [],
+      "writer": []
+    },
+    "honoredStrikeOn": {
+      "#operator→peer:write@20": null,
+      "#operator→writer:write@10": "#operator strikes writer:write"
+    },
+    "survivingWriteGrantIds": {
+      "peer": [
+        "#operator→peer:write@20"
+      ],
+      "stranger": [],
+      "subadmin": [],
+      "writer": []
+    }
+  }
+}

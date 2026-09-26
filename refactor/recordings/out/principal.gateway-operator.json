@@ -1,0 +1,54 @@
+{
+  "booted with the operator seed": {
+    "appendSignedByOperatorSeed": "accepted",
+    "appendSignedByStrangerSeed": {
+      "refused": "append rejected: @stranger is not permitted: publishing through this store requires write standing (a surviving grant at loam:store), and no surviving grant says so"
+    },
+    "markersInGround": [
+      "@operator"
+    ],
+    "operatorAuthor": "@operator"
+  },
+  "rebooted with the stranger's genesis": {
+    "appendSignedByOperatorSeed": {
+      "refused": "append rejected: @operator is not permitted: publishing through this store requires write standing (a surviving grant at loam:store), and no surviving grant says so"
+    },
+    "appendSignedByStrangerSeed": "accepted",
+    "markersInGround": [
+      "@stranger",
+      "@operator"
+    ],
+    "operatorAuthor": "@stranger"
+  },
+  "reopened with no seed": {
+    "appendSignedByOperatorSeed": "accepted",
+    "appendSignedByStrangerSeed": "accepted",
+    "markersInGround": [
+      "@operator"
+    ],
+    "operatorAuthor": {
+      "$": "undefined"
+    }
+  },
+  "reopened with the stranger seed": {
+    "appendSignedByOperatorSeed": {
+      "refused": "append rejected: @operator is not permitted: publishing through this store requires write standing (a surviving grant at loam:store), and no surviving grant says so"
+    },
+    "appendSignedByStrangerSeed": "accepted",
+    "markersInGround": [
+      "@operator"
+    ],
+    "operatorAuthor": "@stranger"
+  },
+  "then reopened with the operator seed": {
+    "appendSignedByOperatorSeed": "accepted",
+    "appendSignedByStrangerSeed": {
+      "refused": "append rejected: @stranger is not permitted: publishing through this store requires write standing (a surviving grant at loam:store), and no surviving grant says so"
+    },
+    "markersInGround": [
+      "@stranger",
+      "@operator"
+    ],
+    "operatorAuthor": "@operator"
+  }
+}
