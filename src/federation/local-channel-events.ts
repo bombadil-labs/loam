@@ -23,13 +23,40 @@ export const inLocalContext = (d: Delta, context: string): boolean =>
   d.claims.pointers.some((p) => p.target.kind === "entity" && p.target.entity.context === context);
 export const reservedLocal = (d: Delta): boolean =>
   inLocalContext(d, LOCAL_EVENT) || inLocalContext(d, LOCAL_CONTROL);
+// A verdict is a function of id, claims and signature alone, and claims that recompute to the id
+// are the claims that were signed. So an object that verified once keeps its verdict while its id
+// and signature are unchanged and its claims still recompute: a content hash, not an ed25519
+// check. Deltas are not frozen, which is why the recompute stays: an object mutated since it
+// verified misses the memo and takes the full check.
+const verifiedAs = new WeakMap<Delta, { readonly id: string; readonly sig: string | undefined }>();
+function verified(d: Delta): boolean {
+  const memo = verifiedAs.get(d);
+  if (memo !== undefined && memo.id === d.id && memo.sig === d.sig && computeId(d.claims) === d.id)
+    return true;
+  if (computeId(d.claims) !== d.id || verifyDelta(d) !== "verified") return false;
+  verifiedAs.set(d, { id: d.id, sig: d.sig });
+  return true;
+}
 export function sameVerifiedDelta(a: Delta | undefined, b: Delta): boolean {
-  return (
-    a !== undefined &&
-    computeId(a.claims) === a.id &&
-    verifyDelta(a) === "verified" &&
-    JSON.stringify(toWire(a)) === JSON.stringify(toWire(b))
-  );
+  return a !== undefined && verified(a) && JSON.stringify(toWire(a)) === JSON.stringify(toWire(b));
+}
+/**
+ * Does this offered delta verify? One with the id and signature of a verified held delta, whose
+ * claims recompute to that id, has the held delta's verdict — so a re-offer of what the ground
+ * already holds costs a content hash, not a signature check. Anything else takes the full check,
+ * and the offered object is memoized: the reactor keeps that object, so its later reads hit.
+ */
+export function verifiesAgainstHeld(reactor: Reactor, d: Delta): boolean {
+  const held = reactor.get(d.id);
+  if (
+    held !== undefined &&
+    d.sig !== undefined &&
+    held.sig === d.sig &&
+    verified(held) &&
+    computeId(d.claims) === d.id
+  )
+    return true;
+  return verified(d);
 }
 // Fold one delta into a protected set: a local event or control record protects itself, a control
 // marker remembers its target even after the bytes have gone, and every strike is indexed by what
@@ -123,8 +150,7 @@ export function parseLocalEvent(d: Delta, operator: string | undefined): LocalEv
   if (
     operator === undefined ||
     d.claims.author !== operator ||
-    computeId(d.claims) !== d.id ||
-    verifyDelta(d) !== "verified" ||
+    !verified(d) ||
     !Number.isSafeInteger(d.claims.timestamp) ||
     d.claims.timestamp < 0
   )

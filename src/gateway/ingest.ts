@@ -2,6 +2,7 @@ import { signClaims } from "@bombadil/rhizomatic";
 import {
   protectedIngressIds,
   sameVerifiedDelta,
+  verifiesAgainstHeld,
   parseLocalEvent,
   localEraseTarget,
   openingAgrees,
@@ -703,8 +704,7 @@ export async function federateImpl(
     // downstream passed a door here.
     if (
       protectedIds.has(d.id) ||
-      computeId(d.claims) !== d.id ||
-      verifyDelta(d) !== "verified" ||
+      !verifiesAgainstHeld(gw.reactor, d) ||
       dead.has(d.id) ||
       publicDefect(d.claims) !== undefined ||
       artifactDefect(d.claims) !== undefined ||
