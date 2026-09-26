@@ -10,7 +10,7 @@
 import { signClaims } from "@bombadil/rhizomatic";
 import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
 import type { Gateway } from "./gateway.js";
-import { lawfulNegated } from "./registration.js";
+import { negatedAt } from "./negation.js";
 import { dataStruck } from "./accounts.js";
 
 export const ADOPTION_ENTITY = "loam:adoption";
@@ -115,6 +115,7 @@ export function isAdoption(claims: Claims): boolean {
 // in the ground is read (an optional filter filters — it never empties).
 export function readAdoptions(
   reactor: Reactor,
+  now: number,
   operator?: string,
   opts?: { includeStruck?: boolean },
 ): Adoption[] {
@@ -136,7 +137,7 @@ export function readAdoptions(
     if (opts?.includeStruck === true) return false;
     let f = negatedByAuthor.get(d.claims.author);
     if (f === undefined) {
-      f = lawfulNegated(reactor, d.claims.author);
+      f = negatedAt(reactor, now, d.claims.author);
       negatedByAuthor.set(d.claims.author, f);
     }
     return f(d.id);
@@ -231,8 +232,8 @@ export async function promoteImpl(
   //
   // Asked BEFORE the law/data classification below — a struck delta is refused as struck, never by its
   // kind (§27.8 orders it the same way).
-  const struckAtSource = dataStruck(source.reactor, source.operator);
-  const withdrawn = lawfulNegated(source.reactor, src.claims.author);
+  const struckAtSource = dataStruck(source.reactor, source.validityNow(), source.operator);
+  const withdrawn = negatedAt(source.reactor, source.validityNow(), src.claims.author);
   // Derived, never asserted separately: the strikes named ARE the ones that carry the verdict, so the
   // message cannot drift from the algebra.
   const ownStrikes = source.reactor
@@ -287,10 +288,9 @@ export async function promoteImpl(
   // standing — so this is an asymmetry rather than a leak. Tightening it would be a separate decision
   // (a citation-survival rail belongs beside this bridge, not folded into the survival gate above).
   const bridge = new Map(
-    readAdoptions(gw.reactor, gw.operatorAuthor, { includeStruck: true }).map((a) => [
-      a.sourceDelta,
-      a.adoptedDelta,
-    ]),
+    readAdoptions(gw.reactor, gw.validityNow(), gw.operatorAuthor, { includeStruck: true }).map(
+      (a) => [a.sourceDelta, a.adoptedDelta],
+    ),
   );
   const pointers = src.claims.pointers.map((p) => {
     if (p.target.kind !== "delta") return p;
@@ -335,7 +335,7 @@ export async function promoteImpl(
   // erasure and the promise "an erased adoption stays dead" is unchanged.
   const live = new Map(gw.adoptions().map((a) => [a.sourceDelta, a.adoptedDelta]));
   if (live.get(deltaId) === adopted.id && gw.reactor.get(adopted.id) !== undefined) {
-    const struckHere = dataStruck(gw.reactor, gw.operatorAuthor);
+    const struckHere = dataStruck(gw.reactor, gw.validityNow(), gw.operatorAuthor);
     if (struckHere(adopted.id)) {
       const standing = gw.reactor
         .negationsOf(adopted.id)

@@ -64,7 +64,12 @@ describe("T218 — federate list marks an orphaned channel", () => {
     await gateway.openChannel({ into: "keep", prefix: "alice", source: reaches });
     await gateway.openChannel({ into: "gone", prefix: "bob", source: reaches });
     // Strike "gone" with the operator's own key — the negation the drop-confirm door lands.
-    const ids = survivingDeclarationIds(gateway.reactor, gateway.operatorAuthor!, "gone");
+    const ids = survivingDeclarationIds(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor!,
+      "gone",
+    );
     expect(ids.length).toBeGreaterThan(0);
     await gateway.append(
       ids.map((id) => signClaims(makeNegationClaims(gateway.operatorAuthor!, 5000, id), seed)),

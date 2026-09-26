@@ -13,7 +13,8 @@
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import type { Claims, Reactor } from "@bombadil/rhizomatic";
 import type { Gateway, RequestContext } from "./gateway.js";
-import { lawfulDeltasAt, lawfulNegated, lensOf, type LensName } from "./registration.js";
+import { lawfulDeltasAt, lensOf, type LensName } from "./registration.js";
+import { negatedAt } from "./negation.js";
 
 export const PUBLIC_ENTITY = "loam:public";
 export const CTX_PUBLIC = "loam.public";
@@ -73,10 +74,14 @@ export function publicDefect(claims: Claims): string | undefined {
 // The schemas currently open to tokenless reads: the union of `schema` pointers across ALL
 // surviving lawful declarations. Governed stores only — an ungoverned store answers with the
 // empty set, always.
-export function readPublicSchemas(reactor: Reactor, operator?: string): ReadonlySet<string> {
+export function readPublicSchemas(
+  reactor: Reactor,
+  now: number,
+  operator?: string,
+): ReadonlySet<string> {
   const open = new Set<string>();
   if (operator === undefined) return open;
-  const negated = lawfulNegated(reactor, operator);
+  const negated = negatedAt(reactor, now, operator);
   for (const delta of lawfulDeltasAt(
     reactor,
     { entity: PUBLIC_ENTITY, context: CTX_PUBLIC },

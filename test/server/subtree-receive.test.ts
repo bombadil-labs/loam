@@ -107,7 +107,11 @@ const declare = (
   leeway: Leeway,
   parent?: string,
 ): Promise<unknown> => {
-  const standing = readContainerTable(gw.reactor, gw.operatorAuthor).containers.get(container);
+  const standing = readContainerTable(
+    gw.reactor,
+    gw.validityNow(),
+    gw.operatorAuthor,
+  ).containers.get(container);
   const spec =
     standing === undefined
       ? {
@@ -132,7 +136,8 @@ const declare = (
   ]);
 };
 const leewayOf = (gw: Gateway, container: string): Leeway | undefined =>
-  readContainerTable(gw.reactor, gw.operatorAuthor).containers.get(container)?.leeway;
+  readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor).containers.get(container)
+    ?.leeway;
 
 async function callTool(
   base: string,
@@ -278,9 +283,11 @@ describe("§58 — receive within the subtree", () => {
     const peer = await peerStore();
     expect((await receive(base, ada, "ada:journal:inbox", peer)).isError).toBe(false);
     expect(
-      readContainerTable(gateway.reactor, gateway.operatorAuthor).containers.get(
-        "ada:journal:inbox",
-      )?.parent,
+      readContainerTable(
+        gateway.reactor,
+        gateway.validityNow(),
+        gateway.operatorAuthor,
+      ).containers.get("ada:journal:inbox")?.parent,
     ).toBe("ada:journal");
     const height = async (bearer: string | undefined): Promise<unknown> => {
       const res = await fetch(`${base}/default/graphql`, {
@@ -319,7 +326,11 @@ describe("§58 — receive within the subtree", () => {
     const peer = await peerStore();
     const r = await receive(base, ada, "ada:journal:a:b", peer);
     expect(r.isError, r.text).toBe(false);
-    const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+    const table = readContainerTable(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor,
+    );
     expect(table.containers.get("ada:journal:a")?.parent).toBe("ada:journal");
     expect(table.containers.get("ada:journal:a:b")?.parent).toBe("ada:journal:a");
     const res = await fetch(`${base}/default/graphql`, {
@@ -372,7 +383,11 @@ describe("§58 — receive within the subtree", () => {
     // re-declares it on every later read.
     await gateway.list("Plant", { limit: 1 });
     await declare(gateway, listing("Plant"), SEALED_LEEWAY); // sealed explicitly, copying its record
-    const before = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+    const before = readContainerTable(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor,
+    );
     expect(before.containers.get(listing("Plant"))?.leewayDeclared).toBe(true);
     await gateway.publishRegistration({ ...PLANT, name: "Bed" }, { ...PLANT_POLICY, name: "Bed" }, [
       FERN,
@@ -398,7 +413,11 @@ describe("§58 — receive within the subtree", () => {
       [FERN],
     );
     await gateway.list("Bed", { limit: 1 });
-    const after = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+    const after = readContainerTable(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor,
+    );
     expect(after.containers.get(listing("Plant"))?.leewayDeclared, "sealed stays sealed").toBe(
       true,
     );

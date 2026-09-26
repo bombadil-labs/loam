@@ -134,11 +134,11 @@ describe("recordings: erasure decisions", () => {
     const out: Record<string, unknown> = {};
     for (const [mode, op] of Object.entries(OPERATORS)) {
       out[mode] = bothOrders(CORPUS, (r) => ({
-        refused: readErasures(r, op),
-        refusedBeforeBoot: erasuresIn(r.snapshot(), op),
-        ledger: receiptLedger(r, op),
+        refused: readErasures(r, Date.now(), op),
+        refusedBeforeBoot: erasuresIn(r.snapshot(), Date.now(), op),
+        ledger: receiptLedger(r, Date.now(), op),
         forgottenSince: Object.fromEntries(
-          [0, 20, 23, 29].map((t) => [`since ${t}`, forgottenSince(r, op, t)]),
+          [0, 20, 23, 29].map((t) => [`since ${t}`, forgottenSince(r, Date.now(), op, t)]),
         ),
       }));
     }
@@ -156,8 +156,8 @@ describe("recordings: erasure decisions", () => {
       const r = reactorOf(deltas);
       return {
         lawfulNegated: lawfulNegated(r, KEY.operator)(struckClaim.id),
-        dataStruck: dataStruck(r, KEY.operator)(struckClaim.id),
-        refused: readErasures(r, KEY.operator).has(strikeOnClaim.id),
+        dataStruck: dataStruck(r, Date.now(), KEY.operator)(struckClaim.id),
+        refused: readErasures(r, Date.now(), KEY.operator).has(strikeOnClaim.id),
       };
     };
     await record("erasure.strike-removal", {

@@ -280,7 +280,9 @@ describe("T64 — the RE-ISSUE path must confess what the CUT was allowed to ref
     await gw.append([member]);
     const stood = await standSlate(gw, { members: [member], closes: ["egress"] });
     const report = await gw.cut(stood.container, { now: BEFORE_DEADLINE });
-    expect(graveyardCompleteness(gw.reactor, OP, report.graveyard).readable).toBe(true);
+    expect(graveyardCompleteness(gw.reactor, gw.validityNow(), OP, report.graveyard).readable).toBe(
+      true,
+    );
 
     // The Term row is LOST at the store — the only route left, since `eraseImpl` refuses to erase a
     // standing slate's pinned Term and the cut refuses it as a member. A restore gone wrong, a §25
@@ -288,7 +290,7 @@ describe("T64 — the RE-ISSUE path must confess what the CUT was allowed to ref
     await gw.backend.purge([stood.membershipAt]);
     await gw.reseat();
 
-    const check = graveyardCompleteness(gw.reactor, OP, report.graveyard);
+    const check = graveyardCompleteness(gw.reactor, gw.validityNow(), OP, report.graveyard);
     expect(check.readable).toBe(false);
     expect(check.unreadable).toMatch(/resolves to nothing here/);
     expect(check.holds).toBe(false);
@@ -390,7 +392,7 @@ describe("an erasure negated after a cut: the id stays refused", () => {
     expect(row.tiers.find((v) => v.tier === "primary")!.holds).toBe(false);
     // The graveyard's arithmetic reports the negation rather than reading as an incomplete cut:
     // it records an event that HAPPENED, and negation is a later event.
-    const check = graveyardCompleteness(gw.reactor, OP, report.graveyard);
+    const check = graveyardCompleteness(gw.reactor, gw.validityNow(), OP, report.graveyard);
     expect(check.negated).toEqual([{ member: member.id, negation: negation.id }]);
     expect(check.missing).toEqual([]);
     // THE TWO VERDICTS COME APART HERE, and that is the point: §29.6's sentence read literally is now

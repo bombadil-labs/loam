@@ -63,7 +63,8 @@ import {
   erasureTarget,
 } from "./erase.js";
 import { withNegationClosure } from "./ingest.js";
-import { lawfulNegated, lawfulSnapshot } from "./registration.js";
+import { lawfulSnapshot } from "./registration.js";
+import { negatedAt } from "./negation.js";
 import type { Gateway } from "./gateway.js";
 
 /**
@@ -245,6 +246,7 @@ export const isGraveyard = (claims: Claims): boolean => declaresSlateVocab(claim
 export function slateDefect(
   delta: Delta,
   reactor: Reactor,
+  now: number,
   operator: string | undefined,
 ): string | undefined {
   const claims = delta.claims;
@@ -252,7 +254,7 @@ export function slateDefect(
   if (!isSlateRecord(claims)) return undefined;
   const shape = slateShapeDefect(claims, operator);
   if (shape !== undefined) return shape;
-  return slateStateDefect(claims, reactor, operator!);
+  return slateStateDefect(claims, reactor, now, operator!);
 }
 
 /**
@@ -331,7 +333,12 @@ function slateShapeDefect(claims: Claims, operator: string | undefined): string 
 // is unattached) and is exactly the "slate becomes the hiding place" recursion §24.8 warns about. All
 // three problems vanish at property posture, so the posture is not a preference. Asked at the DOOR
 // only — see `slateShapeDefect` for why the reader must not.
-function slateStateDefect(claims: Claims, reactor: Reactor, operator: string): string | undefined {
+function slateStateDefect(
+  claims: Claims,
+  reactor: Reactor,
+  now: number,
+  operator: string,
+): string | undefined {
   const container = at(claims, "slate", CTX_SLATE)!;
   const pinned = pinsOf(claims)!; // the shape check proved both present
   // The PINNED Term must be published, extensional, and freeze to the PINNED version. All three read
@@ -361,7 +368,7 @@ function slateStateDefect(claims: Claims, reactor: Reactor, operator: string): s
       );
   }
 
-  const table = readContainerTable(reactor, operator);
+  const table = readContainerTable(reactor, now, operator);
   const rec = table.containers.get(container);
   if (rec === undefined) return undefined; // no container yet: inert data, and the cut fails closed
   if (rec.posture !== "shared" || rec.trust !== "curated") {
@@ -604,7 +611,12 @@ export const enforcedBy = (slate: Slate): SlateClosure[] =>
  * `now` is WALL-CLOCK ms and is compared only against `deadline`, never against a delta's own
  * DELTA-TIME timestamp (`nextTimestamp()` is `max(Date.now(), last + 1)` and may run ahead).
  */
-export function readSlates(reactor: Reactor, operator: string | undefined, now: number): Slate[] {
+export function readSlates(
+  reactor: Reactor,
+  validityNow: number,
+  operator: string | undefined,
+  now: number,
+): Slate[] {
   if (operator === undefined) return []; // an ungoverned store has no lawful voice, so no slates
   requireMoment(now, "readSlates");
   // The cheap existence probe first (the `deadSet` discipline, H8): a store holding no slate record
@@ -619,8 +631,8 @@ export function readSlates(reactor: Reactor, operator: string | undefined, now: 
   }
   if (!any) return [];
 
-  const negated = lawfulNegated(reactor, operator);
-  const table = readContainerTable(reactor, operator);
+  const negated = negatedAt(reactor, validityNow, operator);
+  const table = readContainerTable(reactor, validityNow, operator);
   const out: Slate[] = [];
   for (const delta of lawfulSnapshot(reactor, operator)) {
     if (negated(delta.id) || !isSlateRecord(delta.claims)) continue;
@@ -748,7 +760,7 @@ export interface SlateReport extends Omit<Slate, "members" | "closes"> {
  * UNNARROWED ground even for a slate that closes `read`.
  */
 export function slateReportsImpl(gw: Gateway, now: number): SlateReport[] {
-  const slates = readSlates(gw.reactor, gw.operatorAuthor, now);
+  const slates = readSlates(gw.reactor, gw.validityNow(), gw.operatorAuthor, now);
   if (slates.length === 0) return [];
   // ONE SCOPE READ PER CONTAINER AND ONE WALK OF THE GROUND, FOR THE WHOLE LISTING. Asked per
   // slate, this was slates × containers × store, and every inner step re-hashed the ground from
@@ -813,7 +825,7 @@ function affectedFor(
   gw: Gateway,
   slates: readonly { members: ReadonlySet<string>; container: string }[],
 ): { affected: string[]; unknown: string[] }[] {
-  const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+  const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   const names = [...table.containers.keys()].sort();
   const wanted = new Set<string>();
   for (const s of slates) for (const id of s.members) wanted.add(id);
@@ -927,7 +939,7 @@ export interface NegatedHealth {
  * just means someone filed a slate — which is how a field earns the right to be ignored.
  */
 export function slateHealth(gw: Gateway, now: number): SlateHealth {
-  const slates = readSlates(gw.reactor, gw.operatorAuthor, now);
+  const slates = readSlates(gw.reactor, gw.validityNow(), gw.operatorAuthor, now);
   const lapsed = slates.filter((s) => s.lapsed);
   return {
     open: slates.length,
@@ -1046,13 +1058,21 @@ const closureIds = (
 
 /** What EGRESS closure withholds from `offeredDeltas` — the one site, and `openWall` inherits it. */
 export function egressWithheld(gw: Gateway, now: number): Set<string> {
-  return closureIds(gw.reactor, readSlates(gw.reactor, gw.operatorAuthor, now), "egress");
+  return closureIds(
+    gw.reactor,
+    readSlates(gw.reactor, gw.validityNow(), gw.operatorAuthor, now),
+    "egress",
+  );
 }
 
 /** What READ closure withholds from every gather that answers a read DOOR. */
 export function readClosedIds(gw: Gateway, now: number): Set<string> {
   requireMoment(now, "a read door");
-  const closed = closureIds(gw.reactor, readSlates(gw.reactor, gw.operatorAuthor, now), "read");
+  const closed = closureIds(
+    gw.reactor,
+    readSlates(gw.reactor, gw.validityNow(), gw.operatorAuthor, now),
+    "read",
+  );
   // Erased ids are never read, even while a purge has not yet removed their bytes.
   for (const id of erasedFromReading(gw.reactor, gw.operatorAuthor)) closed.add(id);
   return closed;
@@ -1246,7 +1266,9 @@ export async function cutImpl(
     );
   };
 
-  const slate = readSlates(gw.reactor, operator, now).find((s) => s.container === container);
+  const slate = readSlates(gw.reactor, gw.validityNow(), operator, now).find(
+    (s) => s.container === container,
+  );
   if (slate === undefined) {
     throw new Error(
       `cut ${container} refused: no surviving lawful slate record names that container — a slate ` +
@@ -1284,7 +1306,7 @@ export async function cutImpl(
   // legible on a shelf: H7 in the one artifact whose entire purpose is not being H7. The
   // intersection is COMPUTABLE without attaching anything (the wall's at-rest membership Term is in
   // the container table), so it is computed.
-  const table = readContainerTable(gw.reactor, operator);
+  const table = readContainerTable(gw.reactor, gw.validityNow(), operator);
   const accepted = new Set(slate.acceptsIncomplete);
   const notReached: { wall: string; acceptsIncomplete: string }[] = [];
   for (const wall of walls.kept) {
@@ -1319,7 +1341,7 @@ export async function cutImpl(
   // this cut landed — one cut silently disarming another slate's closures, on a door, with nothing
   // reporting it. Refused here rather than tolerated downstream, and `eraseImpl` refuses the same
   // delta for the same reason, which together is what keeps `unresolved` unreachable through a door.
-  for (const other of readSlates(gw.reactor, operator, now)) {
+  for (const other of readSlates(gw.reactor, gw.validityNow(), operator, now)) {
     if (other.record === slate.record) continue;
     if (slate.members.has(other.membershipAt)) {
       refuse(
@@ -1343,7 +1365,7 @@ export async function cutImpl(
   const reFrozen = freezeAgreement(gw.reactor, pinnedTerm, slate.version);
   const present = new Set(evalMembership(gw.reactor, pinnedTerm).map((d) => d.id));
   const priorErasure: { member: string; erasure: string }[] = [];
-  const tombs = standingErasures(gw.reactor, operator);
+  const tombs = standingErasures(gw.reactor, gw.validityNow(), operator);
   for (const id of [...slate.members].sort()) {
     if (present.has(id)) continue;
     const already = tombs.find((t) => erasureTarget(t.claims) === id);
@@ -1440,7 +1462,7 @@ export async function cutImpl(
   const closes = [...slate.closes].sort();
   // The graveyard lands FIRST. A re-run after a crash between the two steps finds the graveyard
   // already standing and simply strikes — exactly one graveyard, idempotent by construction.
-  const existing = findGraveyard(gw.reactor, operator, slate.record);
+  const existing = findGraveyard(gw.reactor, gw.validityNow(), operator, slate.record);
   const graveyard =
     existing ??
     signClaims(
@@ -1471,7 +1493,7 @@ export async function cutImpl(
   if (gw.cutHold !== undefined) await gw.cutHold();
   // The LAST ACT: drop the container by striking its declaration. A property container holds no
   // bytes of its own, so this purges nothing — dropping it is not the cut, it ends it.
-  const declarations = survivingDeclarationIds(gw.reactor, operator, container);
+  const declarations = survivingDeclarationIds(gw.reactor, gw.validityNow(), operator, container);
   if (declarations.length > 0) {
     await gw.append(
       declarations.map((id) => signClaims(retractionOf(id, operator, gw.nextTimestamp()), seed)),
@@ -1607,8 +1629,13 @@ async function tierVerdicts(
   return out;
 }
 
-function findGraveyard(reactor: Reactor, operator: string, record: string): Delta | undefined {
-  const negated = lawfulNegated(reactor, operator);
+function findGraveyard(
+  reactor: Reactor,
+  now: number,
+  operator: string,
+  record: string,
+): Delta | undefined {
+  const negated = negatedAt(reactor, now, operator);
   for (const d of lawfulSnapshot(reactor, operator)) {
     if (negated(d.id) || !isGraveyard(d.claims)) continue;
     const cited = d.claims.pointers.find(
@@ -1635,9 +1662,13 @@ export interface GraveyardRecord {
   readonly priorErasure: readonly { readonly member: string; readonly erasure: string }[];
 }
 
-export function readGraveyards(reactor: Reactor, operator: string | undefined): GraveyardRecord[] {
+export function readGraveyards(
+  reactor: Reactor,
+  now: number,
+  operator: string | undefined,
+): GraveyardRecord[] {
   if (operator === undefined) return [];
-  const negated = lawfulNegated(reactor, operator);
+  const negated = negatedAt(reactor, now, operator);
   const out: GraveyardRecord[] = [];
   for (const d of lawfulSnapshot(reactor, operator)) {
     if (negated(d.id) || !isGraveyard(d.claims)) continue;
@@ -1711,11 +1742,12 @@ export interface CompletenessCheck {
  */
 export function graveyardCompleteness(
   reactor: Reactor,
+  now: number,
   operator: string | undefined,
   graveyardId: string,
 ): CompletenessCheck {
   const blank = { holds: false, cutCompleted: false, members: [], missing: [], negated: [] };
-  const grave = readGraveyards(reactor, operator).find((g) => g.id === graveyardId);
+  const grave = readGraveyards(reactor, now, operator).find((g) => g.id === graveyardId);
   if (grave === undefined || operator === undefined) {
     return {
       ...blank,
@@ -1732,9 +1764,9 @@ export function graveyardCompleteness(
   const members = [...frozen.ids].sort();
   const prior = new Map(grave.priorErasure.map((p) => [p.member, p.erasure]));
   const surviving = new Map(
-    standingErasures(reactor, operator).map((t) => [erasureTarget(t.claims)!, t]),
+    standingErasures(reactor, now, operator).map((t) => [erasureTarget(t.claims)!, t]),
   );
-  const isNegated = lawfulNegated(reactor, operator);
+  const isNegated = negatedAt(reactor, now, operator);
   const missing: string[] = [];
   const negated: { member: string; negation: string }[] = [];
   for (const member of members) {
@@ -1838,16 +1870,21 @@ export async function deriveReceiptImpl(
   opts: { now?: number } = {},
 ): Promise<Receipt> {
   const operator = gw.operatorAuthor;
-  const grave = readGraveyards(gw.reactor, operator).find((g) => g.id === graveyardId);
+  const grave = readGraveyards(gw.reactor, gw.validityNow(), operator).find(
+    (g) => g.id === graveyardId,
+  );
   if (grave === undefined) {
     throw new Error(`no surviving lawful graveyard is held here at ${graveyardId}`);
   }
   const issuedAt = opts.now ?? Date.now();
   const request = gw.reactor.get(grave.record);
-  const completeness = graveyardCompleteness(gw.reactor, operator, graveyardId);
-  const negated = lawfulNegated(gw.reactor, operator);
+  const completeness = graveyardCompleteness(gw.reactor, gw.validityNow(), operator, graveyardId);
+  const negated = negatedAt(gw.reactor, gw.validityNow(), operator);
   const surviving = new Map(
-    standingErasures(gw.reactor, operator).map((t) => [erasureTarget(t.claims)!, t]),
+    standingErasures(gw.reactor, gw.validityNow(), operator).map((t) => [
+      erasureTarget(t.claims)!,
+      t,
+    ]),
   );
   const walls = unreachableStoreReport(gw);
   const members: ReceiptMember[] = [];
@@ -1936,10 +1973,10 @@ export function negatedHealth(gw: Gateway): NegatedHealth {
   const operator = gw.operatorAuthor;
   const empty = { count: 0, present: 0, ids: [], unreadable: [] };
   if (operator === undefined) return empty;
-  const graves = readGraveyards(gw.reactor, operator);
+  const graves = readGraveyards(gw.reactor, gw.validityNow(), operator);
   if (graves.length === 0) return empty;
   const surviving = new Set(
-    standingErasures(gw.reactor, operator).map((t) => erasureTarget(t.claims)!),
+    standingErasures(gw.reactor, gw.validityNow(), operator).map((t) => erasureTarget(t.claims)!),
   );
   const ids = new Set<string>();
   const unreadable: string[] = [];

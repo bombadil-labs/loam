@@ -52,7 +52,7 @@ const declare = (gateway: Gateway, schemas: string[], seed = OPERATOR_SEED, ts =
 describe("the loam.public law", () => {
   it("no declaration: nothing is public", async () => {
     const gateway = await governedGarden();
-    expect(readPublicSchemas(gateway.reactor, OPERATOR).size).toBe(0);
+    expect(readPublicSchemas(gateway.reactor, gateway.validityNow(), OPERATOR).size).toBe(0);
     expect(gateway.hasPublicSurface()).toBe(false);
     await gateway.close();
   });
@@ -60,10 +60,10 @@ describe("the loam.public law", () => {
   it("an operator declaration opens exactly the named schemas; union across declarations", async () => {
     const gateway = await governedGarden();
     await declare(gateway, ["Plant"], OPERATOR_SEED, 10_000);
-    let open = readPublicSchemas(gateway.reactor, OPERATOR);
+    let open = readPublicSchemas(gateway.reactor, gateway.validityNow(), OPERATOR);
     expect([...open]).toEqual(["Plant"]);
     await declare(gateway, ["Ledger"], OPERATOR_SEED, 10_001);
-    open = readPublicSchemas(gateway.reactor, OPERATOR);
+    open = readPublicSchemas(gateway.reactor, gateway.validityNow(), OPERATOR);
     expect(open.has("Plant")).toBe(true);
     expect(open.has("Ledger")).toBe(true);
     await gateway.close();
@@ -77,13 +77,15 @@ describe("the loam.public law", () => {
     await gateway.append([
       signClaims(makeNegationClaims(MALLORY, 10_001, declaration.id), MALLORY_SEED),
     ]);
-    expect(readPublicSchemas(gateway.reactor, OPERATOR).has("Plant")).toBe(true);
+    expect(readPublicSchemas(gateway.reactor, gateway.validityNow(), OPERATOR).has("Plant")).toBe(
+      true,
+    );
 
     // The operator's own strike closes the door.
     await gateway.append([
       signClaims(makeNegationClaims(OPERATOR, 10_002, declaration.id), OPERATOR_SEED),
     ]);
-    expect(readPublicSchemas(gateway.reactor, OPERATOR).size).toBe(0);
+    expect(readPublicSchemas(gateway.reactor, gateway.validityNow(), OPERATOR).size).toBe(0);
     expect(gateway.hasPublicSurface()).toBe(false);
     await gateway.close();
   });
@@ -91,7 +93,7 @@ describe("the loam.public law", () => {
   it("a stranger's declaration binds nothing in a governed store", async () => {
     const gateway = await governedGarden();
     await declare(gateway, ["Plant"], MALLORY_SEED, 10_000);
-    expect(readPublicSchemas(gateway.reactor, OPERATOR).size).toBe(0);
+    expect(readPublicSchemas(gateway.reactor, gateway.validityNow(), OPERATOR).size).toBe(0);
     expect(gateway.hasPublicSurface()).toBe(false);
     await gateway.close();
   });
@@ -102,7 +104,7 @@ describe("the loam.public law", () => {
       signClaims(publicClaims(["Plant"], OPERATOR, 10_000), OPERATOR_SEED),
       signClaims(publicClaims(["Plant"], GARDENER, 10_001), GARDENER_SEED),
     ]);
-    expect(readPublicSchemas(gateway.reactor, undefined).size).toBe(0);
+    expect(readPublicSchemas(gateway.reactor, gateway.validityNow(), undefined).size).toBe(0);
     expect(gateway.hasPublicSurface()).toBe(false);
     await gateway.close();
   });
@@ -170,7 +172,9 @@ describe("the loam.public law", () => {
     const sound = signClaims(publicClaims(["Plant"], OPERATOR, 10_001), OPERATOR_SEED);
     const crossed = await gateway.federate([sound]);
     expect(crossed.accepted).toBe(1);
-    expect(readPublicSchemas(gateway.reactor, OPERATOR).has("Plant")).toBe(true);
+    expect(readPublicSchemas(gateway.reactor, gateway.validityNow(), OPERATOR).has("Plant")).toBe(
+      true,
+    );
     await gateway.close();
   });
 });

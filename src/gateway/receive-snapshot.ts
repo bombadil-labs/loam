@@ -10,13 +10,8 @@ import {
 } from "@bombadil/rhizomatic";
 import { freezeMembers } from "./container-identity.js";
 import { withNegationClosure } from "./ingest.js";
-import {
-  lawfulNegated,
-  lawfulSnapshot,
-  lensOf,
-  readRegistrations,
-  type Registration,
-} from "./registration.js";
+import { lawfulSnapshot, lensOf, readRegistrations, type Registration } from "./registration.js";
+import { negatedAt } from "./negation.js";
 interface Selection {
   source: string;
   registrationId: string;
@@ -101,7 +96,7 @@ export function selectReceivingSnapshot(
   ];
   if (paused) {
     const closed = fromMembers(withNegationClosure({ reactor: source }, members));
-    const negated = lawfulNegated(closed, binding.sourceAuthor);
+    const negated = negatedAt(closed, now, binding.sourceAuthor);
     if (pinnedIds.some(negated)) return { status: "unavailable" };
   }
   return { status: "selected", registration: selected, operand: original };

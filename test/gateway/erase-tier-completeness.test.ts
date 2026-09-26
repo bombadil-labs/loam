@@ -245,7 +245,7 @@ describe("the retry anchor honors negation", () => {
     );
     await gateway.erase(fact.id, { reason: "the subject asked" });
     await strike(gateway, fact.id);
-    expect(readErasures(gateway.reactor, OPERATOR).has(fact.id)).toBe(false); // not standing
+    expect(readErasures(gateway.reactor, gateway.validityNow(), OPERATOR).has(fact.id)).toBe(false); // not standing
     await expect(gateway.append([fact])).rejects.toThrow(/erased/); // and still refused
     await gateway.close();
   });

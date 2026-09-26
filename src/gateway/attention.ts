@@ -25,7 +25,7 @@
 
 import type { Claims, Delta } from "@bombadil/rhizomatic";
 import type { Gateway } from "./gateway.js";
-import { lawfulNegated } from "./registration.js";
+import { negatedAt } from "./negation.js";
 import { CONTAINER_CONTEXTS } from "./container.js";
 
 export const CTX_LOOKED = "loam.looked";
@@ -109,7 +109,7 @@ function latestByKey(
   entityIds: readonly string[],
   accept: (d: Delta) => boolean,
 ): Map<string, Delta> {
-  const negated = lawfulNegated(gw.reactor, gw.operatorAuthor);
+  const negated = negatedAt(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   const held = new Map<string, { at: number; d: Delta }>();
   for (const id of entityIds) {
     for (const deltaId of gw.reactor.byTarget(id)) {

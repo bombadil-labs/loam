@@ -195,7 +195,11 @@ describe("live bound connection authority", () => {
     await gateway.append([
       signClaims(revocationClaims(ancestor.id, OP, gateway.nextTimestamp()), OP_SEED),
     ]);
-    const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+    const table = readContainerTable(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor,
+    );
     expect(table.containers.has(ROOT)).toBe(false);
     expect(table.containers.has(LEAF)).toBe(true);
     expect(openerStands(gateway, first.status)).toBe(true);

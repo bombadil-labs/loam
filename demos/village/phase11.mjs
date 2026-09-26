@@ -40,7 +40,7 @@ try {
   ]);
   await almanac.gateway.flush();
   const still = await flourOf(almanac.base, "person:wren");
-  const definitions = readBindingDefinitions(almanac.gateway.reactor, almanac.operator);
+  const definitions = readBindingDefinitions(almanac.gateway.reactor, almanac.gateway.validityNow(), almanac.operator);
   check(
     "11.1",
     "passive: the blessed recipe sits in the ground; new grist grinds nothing",

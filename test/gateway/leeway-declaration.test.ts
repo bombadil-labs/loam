@@ -98,10 +98,10 @@ const leewayPointerOf = (d: Delta): string | undefined => {
 
 /** What a reader resolves for a container — the OBJECT level. */
 const leewayOf = (gw: Gateway, name: string): Leeway | undefined =>
-  readContainerTable(gw.reactor, gw.operatorAuthor).containers.get(name)?.leeway;
+  readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor).containers.get(name)?.leeway;
 
 const defectsOf = (gw: Gateway): readonly string[] =>
-  readContainerTable(gw.reactor, gw.operatorAuthor).defects;
+  readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor).defects;
 
 describe("§58 — a leeway is a declaration on the container", () => {
   it("SEALED is every switch off — the constant every other case in this file leans on", () => {
@@ -465,7 +465,11 @@ describe("§58 — a listing refresh carries a standing leeway forward", () => {
 
     // The person configures it. Then a sibling lens widens the context union, so the next read
     // MUST re-declare — the moment a carried-forward knob is dropped, if it is dropped.
-    const standing = readContainerTable(gw.reactor, gw.operatorAuthor).containers.get(name)!;
+    const standing = readContainerTable(
+      gw.reactor,
+      gw.validityNow(),
+      gw.operatorAuthor,
+    ).containers.get(name)!;
     await gw.append([
       signClaims(
         containerClaims(
@@ -505,7 +509,11 @@ describe("§58 — a listing refresh carries a standing leeway forward", () => {
     await gw.append([observed(FERN, "height", 30, 1000, GARDENER_SEED)]);
     const name = listingContainerName("Plant");
     await gw.list("Plant", { limit: 1 });
-    const standing = readContainerTable(gw.reactor, gw.operatorAuthor).containers.get(name)!;
+    const standing = readContainerTable(
+      gw.reactor,
+      gw.validityNow(),
+      gw.operatorAuthor,
+    ).containers.get(name)!;
     const base = containerClaims(
       {
         container: name,
@@ -577,7 +585,9 @@ describe("§58 — a listing refresh carries a standing leeway forward", () => {
     expect(declarations).toEqual([]);
     // Two-sided, or the empty list above proves only that leeway is unimplemented: the same
     // refresh DOES write a pointer once the container has something to say.
-    const said = readContainerTable(gw.reactor, gw.operatorAuthor).containers.get(name)!;
+    const said = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor).containers.get(
+      name,
+    )!;
     expect(said.leeway).toMatchObject({ receive: false, publish: false, delegate: "off" });
     await gw.append([
       signClaims(

@@ -150,7 +150,7 @@ try {
     "15.5",
     "the village's open-door declaration is in her ground, and her door is still closed",
     declarationPresent &&
-      readPublicSchemas(laptop.reactor, authorForSeed(herSeed)).size === 0 &&
+      readPublicSchemas(laptop.reactor, laptop.validityNow(), authorForSeed(herSeed)).size === 0 &&
       !laptop.hasPublicSurface(),
   );
 } finally {

@@ -47,7 +47,8 @@
 
 import type { Claims, Reactor } from "@bombadil/rhizomatic";
 import type { Gateway } from "./gateway.js";
-import { lawfulDeltasAt, lawfulNegated } from "./registration.js";
+import { lawfulDeltasAt } from "./registration.js";
+import { negatedAt } from "./negation.js";
 import type { EnvelopeSize } from "./leeway.js";
 
 export const ENVELOPE_ENTITY = "loam:envelope";
@@ -154,11 +155,12 @@ export function envelopeDefect(claims: Claims): string | undefined {
 // someone else's pool, nor widen their own.
 export function readEnvelopePolicy(
   reactor: Reactor,
+  now: number,
   operator?: string,
 ): ReadonlyMap<string, Partial<QuarantineEnvelope>> {
   const resolved = new Map<string, Partial<QuarantineEnvelope>>();
   if (operator === undefined) return resolved;
-  const negated = lawfulNegated(reactor, operator);
+  const negated = negatedAt(reactor, now, operator);
   const latest = new Map<
     string,
     { limits: Partial<QuarantineEnvelope>; timestamp: number; id: string }
@@ -216,10 +218,11 @@ export function readEnvelopePolicy(
 // the tightening an operator writes must not widen something else behind their back.
 export function resolveEnvelope(
   reactor: Reactor,
+  now: number,
   operator: string | undefined,
   pool?: string,
 ): QuarantineEnvelope {
-  const policy = readEnvelopePolicy(reactor, operator);
+  const policy = readEnvelopePolicy(reactor, now, operator);
   const own = pool === undefined ? undefined : policy.get(pool);
   const any = policy.get(ENVELOPE_ANY);
   // A per-pool declaration THIS STORE CAN READ NOTHING FROM — every dimension it names belongs to a

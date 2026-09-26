@@ -506,7 +506,7 @@ export function boundBindingsImpl(
   container: string,
   held?: { readonly key: string; readonly fold: BoundFold },
 ): BoundFold {
-  const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+  const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   const reach = new Set(subtreeUnder(table, container));
   const candidates: Bound[] = [];
   for (const [name, inbox] of gw.connectionInboxes) {
@@ -697,7 +697,7 @@ export const refusalKey = (channel: string, lens: string): string => `${channel}
 // play. That is not the same as "asked and found nothing", and the two must not collapse — the
 // reading below reports a contest only where a policy actually withholds a name.
 function crossOriginBindings(gw: Gateway, rows: readonly Bound[]): ResolvedBindings | undefined {
-  const mode = readBindingPolicy(gw.reactor, gw.operatorAuthor);
+  const mode = readBindingPolicy(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   if (mode === undefined || !rows.some((r) => r.channel !== undefined)) return undefined;
   return interpretBindingPolicy(
     rows
@@ -1071,7 +1071,7 @@ export async function preloadResolversImpl(gw: Gateway): Promise<void> {
   // between "the peer sent code that reaches for the filesystem" and "my store is broken". The write
   // goes through `reportUnmounted` — host-guarded, because a peer that has no `process` still binds,
   // and both peer-chosen strings scrubbed before a person reads them.
-  const bindings = readRenderers(gw.reactor, gw.operatorAuthor);
+  const bindings = readRenderers(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   const refused = await admitRenderers(
     bindings.map((r) => r.bundle),
     rendererAdmissionBudget(gw),
@@ -1183,7 +1183,7 @@ export async function publishRegistrationImpl(
   // serves. The outcome stays honest either way: `bound: false` with the policy named, never a
   // thrown refusal for law that lawfully landed. An UNDECLARED store keeps today's loud collision
   // (criterion 12) — the next line changes nothing for it.
-  const mode = readBindingPolicy(gw.reactor, gw.operatorAuthor);
+  const mode = readBindingPolicy(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   const trialSurvivors =
     mode === undefined
       ? survivors

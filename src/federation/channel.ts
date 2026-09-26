@@ -44,7 +44,8 @@ import {
   manifestExportClaims,
   readManifest,
 } from "../gateway/adopt-law.js";
-import { CTX_REGISTRATION, lawfulNegated, lensOf } from "../gateway/registration.js";
+import { CTX_REGISTRATION, lensOf } from "../gateway/registration.js";
+import { negatedAt } from "../gateway/negation.js";
 import { freezeMembers } from "../gateway/container-identity.js";
 import type { RendererBinding } from "../gateway/renderers.js";
 import { readForeignRenderers, readPoolRenderers, routeServableOn } from "../gateway/renderers.js";
@@ -510,7 +511,7 @@ function readChannels(
   // here uses: a strike retires its target only while it survives itself, and only the operator's
   // strike counts. A stranger's negation of a channel record used to sever the channel on every
   // live reading — the same defect as the forged record below, arriving from the other side.
-  const negated = lawfulNegated(gw.reactor, operator);
+  const negated = negatedAt(gw.reactor, gw.validityNow(), operator);
   const latest = new Map<string, { at: number; status: ChannelStatus }>();
   for (const d of gw.reactor.snapshot()) {
     // THE AUTHOR IS PART OF THE SHAPE. Every record is written by `stamp`, signed as the operator,
@@ -821,7 +822,7 @@ function arrivedBindings(gw: Gateway, ground: Gateway): RendererBinding[] {
   // No operator is no answer, not an empty one: without one, "not the operator's" is every delta in
   // the pool, and the listing would report a peer's law and the receiver's own alike.
   if (operator === undefined) return [];
-  return readForeignRenderers(ground.reactor, operator);
+  return readForeignRenderers(ground.reactor, ground.validityNow(), operator);
 }
 
 /**
@@ -1352,7 +1353,8 @@ function standingPrefixes(gw: Gateway): {
   const standing: { channel: string; prefix: string }[] = [];
   const unresolved: string[] = [];
   const seen = new Set<string>();
-  for (const [name, rec] of readContainerTable(gw.reactor, gw.operatorAuthor).containers) {
+  for (const [name, rec] of readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor)
+    .containers) {
     if (!name.startsWith("channel:")) continue;
     const prefix = recorded.get(name) ?? declaredPrefix(name, rec.inboxOf);
     if (prefix !== undefined) standing.push({ channel: name, prefix });
@@ -1864,7 +1866,7 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
   // Declaring it here is what "name a container to receive into" means — the receiver names it, and
   // naming it brings it into being if it is new. It is `curated` and `shared`: the receiver's own
   // trust domain, a view over their ground, with each peer's pool nested beneath it.
-  const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+  const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   // ASKED OF EVERY CALLER, WHETHER OR NOT THE NAME STANDS. The guards below sat inside the
   // declaring branch, so a container that ALREADY stands skipped them — and a container that
   // outlived the drop of its parent is exactly that: standing, and reachable from no page the
@@ -2309,7 +2311,7 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
     // here would strand exactly the records the reader still believes: a stranger's negation of a
     // real record satisfies "already struck" while the reader goes on serving it.
     const operator = gw.operatorAuthor!;
-    const negated = lawfulNegated(gw.reactor, operator);
+    const negated = negatedAt(gw.reactor, gw.validityNow(), operator);
     for (const d of [...gw.reactor.snapshot()]) {
       if (d.claims.author !== operator) continue;
       const marker = d.claims.pointers.find(
@@ -2474,7 +2476,7 @@ export function keepSyncingImpl(gw: Gateway, opts: { everyMs?: number } = {}): S
     // Read every record ONCE per tick: `channelStatus` walks the whole ground, and asking it per
     // channel made the tick quadratic in the store (H8).
     const records = new Map(gw.channelStatus().map((s) => [s.name, s]));
-    const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+    const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
     for (const channel of [...gw.federationChannels.values()]) {
       // THE CASCADE: a channel whose opener no longer stands is not synced — its record stands,
       // untouched, but nothing it would receive is served and nothing more is pulled. A channel
@@ -2625,12 +2627,17 @@ export async function curseChannelLawImpl(
   // container that owns the law. The root ground is searched too, for a store carrying bindings
   // blessed before the move; a curse must reach law wherever an older store put it.
   const pool = gw.channelPools.get(channel)?.gateway;
-  const grounds: { reactor: Gateway["reactor"]; sign: (id: string) => Promise<void> }[] = [
+  const grounds: {
+    reactor: Gateway["reactor"];
+    now: number;
+    sign: (id: string) => Promise<void>;
+  }[] = [
     ...(pool === undefined
       ? []
       : [
           {
             reactor: pool.reactor,
+            now: pool.validityNow(),
             sign: async (id: string): Promise<void> => {
               await pool.append([
                 signClaims(makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), id), seed),
@@ -2640,6 +2647,7 @@ export async function curseChannelLawImpl(
         ]),
     {
       reactor: gw.reactor,
+      now: gw.validityNow(),
       sign: async (id: string): Promise<void> => {
         await gw.append([
           signClaims(makeNegationClaims(gw.operatorAuthor!, gw.nextTimestamp(), id), seed),
@@ -2654,7 +2662,7 @@ export async function curseChannelLawImpl(
     // live again. Asked that way, a SECOND curse finds nothing to strike and refuses with "not
     // served by this store" while the lens is on the surface and a mounted app is rendering it —
     // H9's shape, and the licence it hands out is "you have nothing to retire".
-    const struckHere = lawfulNegated(g.reactor, gw.operatorAuthor);
+    const struckHere = negatedAt(g.reactor, g.now, gw.operatorAuthor);
     for (const d of g.reactor.snapshot()) {
       if (!isRegistrationBinding(d.claims)) continue;
       if (livesAt(d) !== living) continue;
@@ -2740,7 +2748,7 @@ function replayEverywhere(gw: Gateway): void {
  */
 export function cursesOf(gw: Gateway, channel: string): { living: string; deltaId: string }[] {
   const operator = gw.operatorAuthor;
-  const negated = lawfulNegated(gw.reactor, operator);
+  const negated = negatedAt(gw.reactor, gw.validityNow(), operator);
   const out: { living: string; deltaId: string }[] = [];
   for (const d of gw.reactor.snapshot()) {
     if (operator !== undefined && d.claims.author !== operator) continue;

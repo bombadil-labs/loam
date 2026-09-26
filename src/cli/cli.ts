@@ -1191,6 +1191,7 @@ async function cmdServe(
       // replant what the operator erased.
       const dead = erasuresIn(
         [...(await backend.deltasSince(new Set())), ...(await archive.deltasSince(new Set()))],
+        Date.now(), // no gateway yet, so no validity floor: the wall clock is the read time
         authorForSeed(seed),
       );
       healed = await mirror.heal(dead);
@@ -3517,7 +3518,7 @@ interface GroundGrant {
  * matches on both), so there is no author for it to put on the screen. Constitutional law refuses
  * such a delta at the door; only a store predating that check can hold one.
  */
-function groundGrants(reactor: Reactor, operator: string): GroundGrant[] {
+function groundGrants(reactor: Reactor, now: number, operator: string): GroundGrant[] {
   const out: GroundGrant[] = [];
   for (const id of reactor.byTarget(STORE_ENTITY)) {
     const delta = reactor.get(id);
@@ -3544,7 +3545,7 @@ function groundGrants(reactor: Reactor, operator: string): GroundGrant[] {
     // strike — never supplies the caption. Reading `negationsOf` raw would let a writer's inert
     // strike at t1 mask the operator's lawful one at t2 and under-report the exposure window, which
     // is the one number this ledger exists to get right.
-    const honored = honoredStrikeOn(reactor, id, operator);
+    const honored = honoredStrikeOn(reactor, now, id, operator);
     const defect = constitutionalDefect(delta);
     out.push({
       id,
@@ -3656,7 +3657,7 @@ async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<numbe
   const operator = authorForSeed(seed);
   const rows: LedgerRow[] = [];
   try {
-    const grants = groundGrants(gateway.reactor, operator);
+    const grants = groundGrants(gateway.reactor, gateway.validityNow(), operator);
     // One pass per distinct subject, reusing the door's own derivation rather than re-deriving
     // effectiveness here: two answers to "does this bind" is one too many.
     const binding = new Set<string>();
@@ -4941,9 +4942,11 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
         );
       }
       reportRevived(io, cameBack(), gateway, "already", wasNegation, channelCount);
-      const already = standingErasures(gateway.reactor, gateway.operatorAuthor).find(
-        (t) => erasureTarget(t.claims) === id,
-      );
+      const already = standingErasures(
+        gateway.reactor,
+        gateway.validityNow(),
+        gateway.operatorAuthor,
+      ).find((t) => erasureTarget(t.claims) === id);
       if (already !== undefined) {
         // A receipt exists — but a receipt is a promise, and this run just failed to keep one. The
         // two states read very differently to a compliance officer, so the sweep is ASKED rather
@@ -5302,7 +5305,7 @@ async function cmdErasures(args: readonly string[], io: IO): Promise<number> {
   let standings: StandingReport;
   let outside: string[] = [];
   try {
-    ledger = receiptLedger(gateway.reactor, gateway.operatorAuthor);
+    ledger = receiptLedger(gateway.reactor, gateway.validityNow(), gateway.operatorAuthor);
     pen = await setAsideWarning(gateway);
     // ASKED WHILE THE TIERS ARE STILL OPEN. `openTiers` has the host and every attached pool right
     // here; once this block closes them the screen can only repeat what the receipt says, and a

@@ -118,7 +118,7 @@ describe("B — a delegated operator's own grant never widens the trusted set", 
     // Object level: bob's own strike of a probe claim must NOT bind. His only grant is alice's,
     // and alice is not the store's seed — depth is bounded by AUTHORSHIP, not by the chain's length.
     const probe = plantAndStrike(g.reactor, bobSeed, 200);
-    expect(dataStruck(g.reactor, g.operator)(probe.claim.id)).toBe(false);
+    expect(dataStruck(g.reactor, Date.now(), g.operator)(probe.claim.id)).toBe(false);
     await g.close();
   });
 });
@@ -182,13 +182,13 @@ describe("D — a granted key's strike resolves for a governed reader; an ungran
     const g1 = await ground();
     const bound = plantAndStrike(g1.reactor, aliceSeed, 10);
     expect(g1.reactor.negationsOf(bound.claim.id)).toContain(bound.negation.id); // delta level
-    expect(dataStruck(g1.reactor, g1.operator)(bound.claim.id)).toBe(true); // object level: bound
+    expect(dataStruck(g1.reactor, Date.now(), g1.operator)(bound.claim.id)).toBe(true); // object level: bound
     await g1.close();
 
     const g2 = await ground();
     const unbound = plantAndStrike(g2.reactor, strangerSeed, 20);
     expect(g2.reactor.negationsOf(unbound.claim.id)).toContain(unbound.negation.id); // delta level: present
-    expect(dataStruck(g2.reactor, g2.operator)(unbound.claim.id)).toBe(false); // object level: inert
+    expect(dataStruck(g2.reactor, Date.now(), g2.operator)(unbound.claim.id)).toBe(false); // object level: inert
     await g2.close();
   });
 });
@@ -200,14 +200,14 @@ describe("E — the store's own seed stays trusted, before and after a second op
       return ground();
     })();
     const before = plantAndStrike(g1.reactor, readSeed(home), 30);
-    expect(dataStruck(g1.reactor, g1.operator)(before.claim.id)).toBe(true);
+    expect(dataStruck(g1.reactor, Date.now(), g1.operator)(before.claim.id)).toBe(true);
     await g1.close();
 
     await run(["user", "create", "carl", "--operator", "--home", home], io(), password("pw"));
 
     const g2 = await ground();
     const after = plantAndStrike(g2.reactor, readSeed(home), 40);
-    expect(dataStruck(g2.reactor, g2.operator)(after.claim.id)).toBe(true);
+    expect(dataStruck(g2.reactor, Date.now(), g2.operator)(after.claim.id)).toBe(true);
     await g2.close();
   });
 });
@@ -270,16 +270,20 @@ describe("13b — remove-role strikes the grant too: two-sided at the governed-r
     // Both resolve before eve's role is removed.
     const gBefore = await ground();
     const eveProbe = plantAndStrike(gBefore.reactor, eveSeed, 50);
-    expect(dataStruck(gBefore.reactor, gBefore.operator)(eveProbe.claim.id)).toBe(true);
+    expect(dataStruck(gBefore.reactor, Date.now(), gBefore.operator)(eveProbe.claim.id)).toBe(true);
     await gBefore.close();
 
     await run(["user", "remove-role", "eve", "--role=operator", "--home", home], io());
 
     const gAfter = await ground();
     const eveProbeAfter = plantAndStrike(gAfter.reactor, eveSeed, 60);
-    expect(dataStruck(gAfter.reactor, gAfter.operator)(eveProbeAfter.claim.id)).toBe(false); // eve: gone
+    expect(dataStruck(gAfter.reactor, Date.now(), gAfter.operator)(eveProbeAfter.claim.id)).toBe(
+      false,
+    ); // eve: gone
     const finnProbeAfter = plantAndStrike(gAfter.reactor, finnSeed, 70);
-    expect(dataStruck(gAfter.reactor, gAfter.operator)(finnProbeAfter.claim.id)).toBe(true); // finn: unaffected
+    expect(dataStruck(gAfter.reactor, Date.now(), gAfter.operator)(finnProbeAfter.claim.id)).toBe(
+      true,
+    ); // finn: unaffected
     await gAfter.close();
   });
 });

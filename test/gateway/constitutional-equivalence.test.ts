@@ -245,23 +245,25 @@ function assertIdentical(reactor: Reactor, where: string, operator?: string): vo
   }
 
   // object level — what each reader ANSWERS
-  const trust = readTrustPolicy(reactor, operator);
+  const trust = readTrustPolicy(reactor, Date.now(), operator);
   const trustOracle = scannedTrustPolicy(reactor, TRUST_ENTITY, operator);
   expect({ mode: trust.mode, roster: [...trust.roster].sort() }, `${where}: trust policy`).toEqual(
     trustOracle,
   );
 
-  const budgets = [...readBudgetPolicy(reactor, operator)]
+  const budgets = [...readBudgetPolicy(reactor, Date.now(), operator)]
     .map(([k, v]): [string, number | undefined] => [k, v.maxAppends])
     .sort((a, b) => a[0].localeCompare(b[0]));
   expect(budgets, `${where}: budget policy`).toEqual(scannedBudgets(reactor, operator));
 
-  expect([...readPublicSchemas(reactor, operator)].sort(), `${where}: public schemas`).toEqual(
-    scannedUnion(reactor, PUBLIC_ENTITY, CTX_PUBLIC, "schema", operator),
-  );
-  expect([...readArtifactRoutes(reactor, operator)].sort(), `${where}: artifact routes`).toEqual(
-    scannedUnion(reactor, ARTIFACT_ENTITY, CTX_ARTIFACT, "route", operator),
-  );
+  expect(
+    [...readPublicSchemas(reactor, Date.now(), operator)].sort(),
+    `${where}: public schemas`,
+  ).toEqual(scannedUnion(reactor, PUBLIC_ENTITY, CTX_PUBLIC, "schema", operator));
+  expect(
+    [...readArtifactRoutes(reactor, Date.now(), operator)].sort(),
+    `${where}: artifact routes`,
+  ).toEqual(scannedUnion(reactor, ARTIFACT_ENTITY, CTX_ARTIFACT, "route", operator));
 }
 
 const sign = (c: Parameters<typeof signClaims>[0], seed = OP_SEED): Delta => signClaims(c, seed);
@@ -304,26 +306,26 @@ describe("T37 — the indexed answer equals the scanned answer, through every mu
     const artifact1 = sign(artifactClaims(["board"], OP, 9004));
     await gw.append([trust1, budget1, public1, artifact1]);
     assertIdentical(gw.reactor, "the law arrives", OP);
-    expect(readTrustPolicy(gw.reactor, OP).mode).toBe("roster"); // a floor: it really is in force
+    expect(readTrustPolicy(gw.reactor, gw.validityNow(), OP).mode).toBe("roster"); // a floor: it really is in force
 
     // 2. a second declaration supersedes the first
     const trust2 = sign(trustClaims("closed", [SURVEYOR], OP, 9100));
     const budget2 = sign(budgetClaims(GARDENER, 50, OP, 9101));
     await gw.append([trust2, budget2]);
     assertIdentical(gw.reactor, "a later declaration supersedes", OP);
-    expect(readTrustPolicy(gw.reactor, OP).mode).toBe("closed");
+    expect(readTrustPolicy(gw.reactor, gw.validityNow(), OP).mode).toBe("closed");
 
     // 3. a withdrawal — the operator strikes the live declaration
     const strike = sign(makeNegationClaims(OP, 9200, trust2.id));
     await gw.append([strike]);
     assertIdentical(gw.reactor, "the live declaration is withdrawn", OP);
-    expect(readTrustPolicy(gw.reactor, OP).mode).toBe("roster"); // the earlier one governs again
+    expect(readTrustPolicy(gw.reactor, gw.validityNow(), OP).mode).toBe("roster"); // the earlier one governs again
 
     // 4. a negation of the negation — a struck strike revives its target
     const counter = sign(makeNegationClaims(OP, 9300, strike.id));
     await gw.append([counter]);
     assertIdentical(gw.reactor, "the withdrawal is itself struck", OP);
-    expect(readTrustPolicy(gw.reactor, OP).mode).toBe("closed");
+    expect(readTrustPolicy(gw.reactor, gw.validityNow(), OP).mode).toBe("closed");
 
     // 5+6. A FEDERATED ARRIVAL. Reopen the door first: the store is `closed` at this point, and a
     //      closed store admits nothing — so federating here would land zero deltas and the two
@@ -335,16 +337,16 @@ describe("T37 — the indexed answer equals the scanned answer, through every mu
     const foreign = signClaims(trustClaims("closed", [SURVEYOR], GARDENER, 9400), GARDENER_SEED);
     expect((await gw.federate([foreign])).accepted).toBe(1);
     assertIdentical(gw.reactor, "a stranger's declaration arrives", OP);
-    expect(readTrustPolicy(gw.reactor, OP).mode).toBe("open"); // a stranger cannot close the door
+    expect(readTrustPolicy(gw.reactor, gw.validityNow(), OP).mode).toBe("open"); // a stranger cannot close the door
 
     // 6. a stranger strikes the operator's LIVE law — retires nothing
     const live = sign(trustClaims("roster", [GARDENER], OP, 9450));
     await gw.append([live]);
-    expect(readTrustPolicy(gw.reactor, OP).mode).toBe("roster");
+    expect(readTrustPolicy(gw.reactor, gw.validityNow(), OP).mode).toBe("roster");
     const foreignStrike = signClaims(makeNegationClaims(GARDENER, 9500, live.id), GARDENER_SEED);
     expect((await gw.federate([foreignStrike])).accepted).toBe(1);
     assertIdentical(gw.reactor, "a stranger strikes the operator's law", OP);
-    expect(readTrustPolicy(gw.reactor, OP).mode).toBe("roster"); // unmoved
+    expect(readTrustPolicy(gw.reactor, gw.validityNow(), OP).mode).toBe("roster"); // unmoved
 
     // 6b. ONE ENTITY, TWO CONTEXTS. A container entity is targeted under `loam.container` by its
     //     declaration and under `loam.trust` by its admission axis (§28.6) — the same id in the
@@ -392,14 +394,16 @@ describe("T37 — the indexed answer equals the scanned answer, through every mu
         ids(lawfulDeltasAt(gw.reactor, { entity: at, context: CTX_TRUST }, OP)),
         `one entity, two contexts: the indexed candidates at ${at} differ from the scanned ones`,
       ).toEqual(ids(scannedDeltasAt(gw.reactor, at, CTX_TRUST, OP)));
-      const shipped = readTrustPolicyAt(gw.reactor, at, OP);
+      const shipped = readTrustPolicyAt(gw.reactor, gw.validityNow(), at, OP);
       expect({ mode: shipped.mode, roster: [...shipped.roster].sort() }).toEqual(
         scannedTrustPolicy(gw.reactor, at, OP),
       );
     }
     // The container's own declaration is at the same id and MUST NOT be read as trust law.
-    expect(readTrustPolicyAt(gw.reactor, CAGE, OP).mode).toBe("roster");
-    expect([...readTrustPolicyAt(gw.reactor, CAGE, OP).roster]).toEqual([SURVEYOR]);
+    expect(readTrustPolicyAt(gw.reactor, gw.validityNow(), CAGE, OP).mode).toBe("roster");
+    expect([...readTrustPolicyAt(gw.reactor, gw.validityNow(), CAGE, OP).roster]).toEqual([
+      SURVEYOR,
+    ]);
     expect(gw.reactor.byTarget(CAGE).length).toBeGreaterThan(
       lawfulDeltasAt(gw.reactor, { entity: CAGE, context: CTX_TRUST }, OP).length,
     ); // the index really does hold more at this id than the trust reader may see
@@ -420,10 +424,10 @@ describe("T37 — the indexed answer equals the scanned answer, through every mu
 
     // …and erasing the delta the LIVE answer depends on, which must CHANGE the answer. An index
     // that kept naming an erased delta would keep answering with law the store no longer holds.
-    const before = readTrustPolicy(gw.reactor, OP).mode;
+    const before = readTrustPolicy(gw.reactor, gw.validityNow(), OP).mode;
     await gw.erase(live.id, { reason: "the governing declaration, unsaid" });
     assertIdentical(gw.reactor, "after the governing declaration is erased", OP);
-    expect(readTrustPolicy(gw.reactor, OP).mode).not.toBe(before); // the hole is visible
+    expect(readTrustPolicy(gw.reactor, gw.validityNow(), OP).mode).not.toBe(before); // the hole is visible
 
     await gw.close();
   });
@@ -444,7 +448,7 @@ describe("T37 — the indexed answer equals the scanned answer, through every mu
     } as unknown as Reactor;
 
     expect(lawfulNegated(stub, OP)(trust.id)).toBe(false); // gone is gone; it does not invent it
-    expect(readTrustPolicy(stub, OP).mode).toBe("closed"); // so the declaration still governs
+    expect(readTrustPolicy(stub, Date.now(), OP).mode).toBe("closed"); // so the declaration still governs
   });
 
   it("a ground that disagrees with its own index REFUSES — it does not read law from the gap", () => {
@@ -467,7 +471,7 @@ describe("T37 — the indexed answer equals the scanned answer, through every mu
       /cannot resolve it/,
     );
     // And the refusal reaches the reader — the door does not quietly open.
-    expect(() => readTrustPolicy(stub, OP)).toThrow(/cannot resolve it/);
+    expect(() => readTrustPolicy(stub, Date.now(), OP)).toThrow(/cannot resolve it/);
   });
 
   it("holds for an UNGOVERNED store, where every voice is lawful", async () => {

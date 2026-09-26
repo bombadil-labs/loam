@@ -27,7 +27,8 @@ import {
   type Reactor,
 } from "@bombadil/rhizomatic";
 import type { AppendReceipt, Gateway } from "../gateway/gateway.js";
-import { lawfulNegated, lawfulSnapshot } from "../gateway/registration.js";
+import { lawfulSnapshot } from "../gateway/registration.js";
+import { negatedAt } from "../gateway/negation.js";
 import { dataStruck } from "../gateway/accounts.js";
 import { promotionRefusal } from "../gateway/adopt.js";
 
@@ -160,8 +161,8 @@ const primitive = (claims: Claims, role: string): string | number | boolean | un
 
 // Every surviving lawful translation spec — latest per translation entity, the shared
 // negation algebra, operator-filtered when governed. A malformed spec binds nothing.
-export function readTranslations(reactor: Reactor, operator?: string): Translation[] {
-  const negated = lawfulNegated(reactor, operator);
+export function readTranslations(reactor: Reactor, now: number, operator?: string): Translation[] {
+  const negated = negatedAt(reactor, now, operator);
   const latest = new Map<string, { t: Translation; timestamp: number; id: string }>();
   for (const delta of lawfulSnapshot(reactor, operator)) {
     let entity: string | undefined;
@@ -277,7 +278,7 @@ export async function translate(
   gateway: Gateway,
   opts: { seed: string },
 ): Promise<TranslateReport> {
-  const specs = readTranslations(gateway.reactor, gateway.operator);
+  const specs = readTranslations(gateway.reactor, gateway.validityNow(), gateway.operator);
   const author = authorForSeed(opts.seed);
   // Sources that are struck are not re-rendered: translating a retired fact would resurrect it in
   // the canonical dialect, past every negation that retired it. The standing tested is `dataStruck`
@@ -286,7 +287,7 @@ export async function translate(
   // operator-only standing an author's retraction of their OWN claim would be re-rendered here, in
   // a THIRD author's voice, leaving them nothing to retract; the specs above stay on
   // `lawfulNegated`, because a spec is law.
-  const struck = dataStruck(gateway.reactor, gateway.operator);
+  const struck = dataStruck(gateway.reactor, gateway.validityNow(), gateway.operator);
   const emissions: Delta[] = [];
   let matched = 0;
   let unbound = 0;

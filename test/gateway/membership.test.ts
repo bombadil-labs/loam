@@ -131,7 +131,7 @@ describe("§24.10 the seeding edge takes a membership Term (admit is the degener
       reason: "the scope narrows what a pool sees, never what it forgets",
     });
 
-    expect(readErasures(q.gateway.reactor, OP).has(secret.id)).toBe(true);
+    expect(readErasures(q.gateway.reactor, q.gateway.validityNow(), OP).has(secret.id)).toBe(true);
     expect(holds(q.gateway, secret.id)).toBe(false);
     const atRest = await poolBackend.deltasSince(new Set());
     expect(atRest.some((d) => d.id === secret.id)).toBe(false);

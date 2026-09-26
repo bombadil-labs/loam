@@ -183,7 +183,7 @@ async function ensureListingContainer(
   law: { operator: string; seed: string },
 ): Promise<string> {
   const name = listingContainerName(program);
-  const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+  const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   const standing = table.containers.get(name);
   if (standing !== undefined && (standing.trust !== "curated" || standing.posture !== "shared")) {
     throw new Error(
@@ -555,7 +555,7 @@ export async function listingPageImpl(
     seed: gw.options.seed,
   });
   const inContexts = new Set(contexts);
-  const table = readContainerTable(gw.reactor, gw.operatorAuthor);
+  const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   const after = opts.after;
   // The maintained index cannot drop an entity whose only evidence is erased. A plain container
   // reads only this store's delta set, so this store's held erasures decide: while any is held

@@ -67,7 +67,6 @@ import type { Gateway } from "./gateway.js";
 import { publishRegistrationImpl } from "./lifecycle.js";
 import {
   CTX_REGISTRATION,
-  lawfulNegated,
   lawfulSnapshot,
   lensOf,
   parseClaimTemplates,
@@ -78,6 +77,7 @@ import {
   type ResolverSpecs,
   type ResolverSpec,
 } from "./registration.js";
+import { negatedAt } from "./negation.js";
 import { CTX_RENDERER, publishRendererImpl } from "./renderers.js";
 
 export const CTX_MANIFEST = "loam.manifest";
@@ -819,10 +819,11 @@ function lawAdoptionRecordClaims(spec: RecordSpec, operator: string, timestamp: 
  */
 export function readLawAdoptions(
   reactor: Reactor,
+  now: number,
   operator: string,
   opts?: { includeStruck?: boolean },
 ): LawAdoption[] {
-  const negated = lawfulNegated(reactor, operator);
+  const negated = negatedAt(reactor, now, operator);
   const out: LawAdoption[] = [];
   for (const d of reactor.snapshot()) {
     if (d.claims.author !== operator || !isAdoption(d.claims)) continue;
@@ -1556,7 +1557,9 @@ async function record(
   // catch it). Promote-outputs deliberately reads the LIVE trail, because striking a FACT's record
   // re-opens re-promotion of the value; law is the other way round — the law is already bound, and
   // the only thing a re-run could add is narrative the operator has already refused.
-  const held = readLawAdoptions(gw.reactor, gw.operatorAuthor!, { includeStruck: true }).some(
+  const held = readLawAdoptions(gw.reactor, gw.validityNow(), gw.operatorAuthor!, {
+    includeStruck: true,
+  }).some(
     (r) =>
       r.moduleVersion === src.version.id && r.alias === row.alias && r.lawAddress === ex.address,
   );
@@ -1590,7 +1593,7 @@ async function record(
 // its exposure; only the which-version courtesy is unavailable for it.
 function skewNotes(gw: Gateway, src: Source, row: ManifestRow): string[] {
   const others = new Set<string>();
-  for (const rec of readLawAdoptions(gw.reactor, gw.operatorAuthor!)) {
+  for (const rec of readLawAdoptions(gw.reactor, gw.validityNow(), gw.operatorAuthor!)) {
     if (rec.from !== src.from || rec.alias === row.alias) continue;
     if (rec.moduleVersion !== src.version.id) others.add(rec.moduleVersion);
   }
@@ -1641,7 +1644,7 @@ export async function blessAllImpl(
   // The trail is read ONCE for the whole pre-flight: it walks the ground, and re-reading it per row
   // would make a bulk gesture quadratic in the store (H8). Nothing lands during the pre-flight, so
   // one snapshot of the records is exactly as current as a per-row read would be.
-  const trail = readLawAdoptions(gw.reactor, gw.operatorAuthor!);
+  const trail = readLawAdoptions(gw.reactor, gw.validityNow(), gw.operatorAuthor!);
 
   // PRE-FLIGHT. Classification throws for the whole call on a dangling or malformed row.
   for (const row of rows) {

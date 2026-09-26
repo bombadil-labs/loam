@@ -32,7 +32,11 @@ describe("recordings: time", () => {
     const read = (deltas: readonly Delta[]) =>
       bothOrders(deltas, (reactor) =>
         readLookedImpl(
-          { reactor, operatorAuthor: KEY.operator } as unknown as Gateway,
+          {
+            reactor,
+            operatorAuthor: KEY.operator,
+            validityNow: () => Date.now(),
+          } as unknown as Gateway,
           "ada",
           new Set([KEY.operator]),
           ["home"],
@@ -73,7 +77,11 @@ describe("recordings: time", () => {
       "time.channel-tie",
       bothOrders([on, off], (reactor) =>
         channelStatusImpl(
-          { reactor, operatorAuthor: KEY.operator } as unknown as Gateway,
+          {
+            reactor,
+            operatorAuthor: KEY.operator,
+            validityNow: () => Date.now(),
+          } as unknown as Gateway,
           "garden",
         ).map((c) => ({ name: c.name, receiving: c.receiving })),
       ),
@@ -123,7 +131,7 @@ describe("recordings: time", () => {
       Object.fromEntries(
         [deadline - 1, deadline, deadline + 1].map((now) => [
           `now = deadline ${now - deadline >= 0 ? "+" : ""}${now - deadline}`,
-          readSlates(reactor, KEY.operator, now),
+          readSlates(reactor, Date.now(), KEY.operator, now),
         ]),
       ),
     );

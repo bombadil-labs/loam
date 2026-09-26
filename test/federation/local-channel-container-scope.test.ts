@@ -102,7 +102,9 @@ describe("spec 64: lifecycle events name their parent container", () => {
         target: { kind: "entity", entity: { id: "friends", context: LOCAL_EVENT } },
       });
       // The container table never reads an event as a declaration of "friends".
-      expect(survivingDeclarationIds(gw.reactor, OP, "friends")).not.toContain(d.id);
+      expect(survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, "friends")).not.toContain(
+        d.id,
+      );
     }
     // The erasure marker names the channel from the event pointer, not from the parent pointer.
     const opening = seen.find(

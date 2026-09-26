@@ -380,7 +380,7 @@ describe("T288 exact local lifecycle and independent v1 vocabulary", () => {
     expect(value(status, "from")).toBe(initial.opening.from);
     const declaration = gw.reactor.get(initial.opening.poolDeclaration)!;
     expect(inContext(declaration, "loam.container")).toBe(true);
-    expect(readContainerTable(gw.reactor, OP).containers.has(ch.name)).toBe(true);
+    expect(readContainerTable(gw.reactor, gw.validityNow(), OP).containers.has(ch.name)).toBe(true);
     await gw.setChannel(ch.name, { blessing: false });
     expect(opened(gw, ch.name).opening).toEqual(initial.opening);
     const again = await gw.openChannel({
@@ -1605,8 +1605,8 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     await expect(gw.erase(target.id)).rejects.toThrow();
     expect(gw.reactor.get(predicted.id)).toEqual(predicted);
     expect(await primary.holds(target.id)).toBe(true);
-    expect(readErasures(gw.reactor, OP).has(target.id)).toBe(true);
-    expect(readErasures(pool.reactor, OP).has(target.id)).toBe(true);
+    expect(readErasures(gw.reactor, gw.validityNow(), OP).has(target.id)).toBe(true);
+    expect(readErasures(pool.reactor, pool.validityNow(), OP).has(target.id)).toBe(true);
     expect(pool.reactor.get(predicted.id)).toEqual(predicted);
     expect(opened(gw, ch.name).received).toEqual([]);
     await expect(gw.append([strike(preplant, SEED, 70001)])).rejects.toThrow();
@@ -1617,11 +1617,11 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     const restored = await Gateway.open(root, { seed: SEED, channelBackend: () => restoredPool });
     homes.push(restored);
     await restored.resumeChannels();
-    expect(readErasures(restored.reactor, OP).has(target.id)).toBe(true);
+    expect(readErasures(restored.reactor, restored.validityNow(), OP).has(target.id)).toBe(true);
     expect(opened(restored, ch.name).received).toEqual([]);
     await restored.erase(target.id);
     expect(await root.holds(target.id)).toBe(false);
-    expect(readErasures(restored.reactor, OP).has(target.id)).toBe(true);
+    expect(readErasures(restored.reactor, restored.validityNow(), OP).has(target.id)).toBe(true);
   });
   it.each(["mismatched-marker", "duplicate-marker", "unsupported-kind", "unsupported-negation"])(
     "corrupted restored protected control %s yields unavailable",

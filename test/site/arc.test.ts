@@ -1005,7 +1005,9 @@ describe("checkpoints, revert, and the sweep", () => {
       ctx.seed,
     );
     await ctx.gateway.append([negation]);
-    expect(loam.readErasures(ctx.gateway.reactor, ctx.author).size).toBe(0);
+    expect(loam.readErasures(ctx.gateway.reactor, ctx.gateway.validityNow(), ctx.author).size).toBe(
+      0,
+    );
     await ctx.gateway.close();
 
     // Reverting to that boundary restores the erasure from the blob. The negation is not
@@ -1015,7 +1017,7 @@ describe("checkpoints, revert, and the sweep", () => {
     expect(restored.ok).toBe(true);
     const back = await makeCtx(storage);
     expect(
-      loam.readErasures(back.gateway.reactor, back.author).size,
+      loam.readErasures(back.gateway.reactor, back.gateway.validityNow(), back.author).size,
       "a revert re-asserted a forgetting the operator had withdrawn",
     ).toBe(0);
     await back.gateway.close();
@@ -1089,7 +1091,9 @@ describe("checkpoints, revert, and the sweep", () => {
       ctx.seed,
     );
     await ctx.gateway.append([negation]);
-    expect(loam.readErasures(ctx.gateway.reactor, ctx.author).size).toBe(0);
+    expect(loam.readErasures(ctx.gateway.reactor, ctx.gateway.validityNow(), ctx.author).size).toBe(
+      0,
+    );
     await ctx.gateway.close();
 
     // Revert past both. The receipt stays — and so must its negation, or the store
@@ -1106,7 +1110,7 @@ describe("checkpoints, revert, and the sweep", () => {
 
     const back = await makeCtx(storage);
     expect(
-      loam.readErasures(back.gateway.reactor, back.author).size,
+      loam.readErasures(back.gateway.reactor, back.gateway.validityNow(), back.author).size,
       "a revert re-asserted a forgetting the operator had withdrawn",
     ).toBe(0);
     await back.gateway.close();
@@ -1121,7 +1125,9 @@ describe("checkpoints, revert, and the sweep", () => {
       await playLesson(lesson, ctx);
       if (lesson.id === finale.id) break;
     }
-    const erased = [...loam.readErasures(ctx.gateway.reactor, ctx.author)];
+    const erased = [
+      ...loam.readErasures(ctx.gateway.reactor, ctx.gateway.validityNow(), ctx.author),
+    ];
     expect(erased.length, "the erasure lesson erased nothing").toBeGreaterThan(0);
 
     // A checkpoint taken AFTER the forgetting holds the receipt, and a receipt names the id it
@@ -1286,7 +1292,9 @@ describe("the tutorial's store is a real store", () => {
     }
 
     const text = buildExport(loam, ctx);
-    const erased = [...loam.readErasures(ctx.gateway.reactor, ctx.author)];
+    const erased = [
+      ...loam.readErasures(ctx.gateway.reactor, ctx.gateway.validityNow(), ctx.author),
+    ];
     expect(erased.length, "the finale erased nothing").toBeGreaterThan(0);
 
     // TWO-SIDED, at the bytes of the file the student walks out with: one of those two notes is
@@ -1534,7 +1542,9 @@ describe("the byte-level guards, at the level bytes are spelled", () => {
     // moves turns that rail red and names itself rather than quietly re-pointing this one.
     const sweepStep = finale.steps.find((s) => s.id === "14.3")!;
     expect(sweepStep, "the finale has no 14.3 to ask about the checkpoints").toBeDefined();
-    const erased = [...loam.readErasures(ctx.gateway.reactor, ctx.author)];
+    const erased = [
+      ...loam.readErasures(ctx.gateway.reactor, ctx.gateway.validityNow(), ctx.author),
+    ];
     expect(erased.length, "the finale erased nothing").toBeGreaterThan(0);
 
     // Clean to start with: the arc's own sweep has run, so the verdict says yes.
@@ -1860,7 +1870,9 @@ describe("the fifteen lessons, end to end", () => {
     await playLesson(finale, ctx);
 
     const after = checkpointLessons(storage);
-    const erased = [...loam.readErasures(ctx.gateway.reactor, ctx.author)];
+    const erased = [
+      ...loam.readErasures(ctx.gateway.reactor, ctx.gateway.validityNow(), ctx.author),
+    ];
     expect(erased.length, "the finale erased nothing").toBeGreaterThan(0);
     // TWO-SIDED. The blob that held the words is gone from storage entirely...
     for (const lesson of doomed) {

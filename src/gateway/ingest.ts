@@ -248,7 +248,7 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
   // only parties who can trigger it are parties who could already read the target, so telling them
   // IS the notice; the mechanism and the warning turn out to be the same thing. The federation door
   // shares this ONE predicate and differs only in disclosure (see federateImpl).
-  const slates = readSlates(gw.reactor, gw.operatorAuthor, Date.now());
+  const slates = readSlates(gw.reactor, gw.validityNow(), gw.operatorAuthor, Date.now());
   for (const d of batch) {
     if (computeId(d.claims) !== d.id || verifyDelta(d) !== "verified") {
       throw new Error(
@@ -277,7 +277,7 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
     // enforces capabilities on everyone but the operator. Deployed gateways (step 6) are
     // always governed.
     if (gw.operatorAuthor !== undefined) {
-      const verdict = authorize(gw.reactor, d, gw.operatorAuthor);
+      const verdict = authorize(gw.reactor, gw.validityNow(), d, gw.operatorAuthor);
       if (!verdict.ok) {
         throw new Error(`append rejected: ${verdict.refusal}`);
       }
@@ -289,7 +289,7 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
   // operator sets budgets and is never metered. Checked once for the whole batch, on the state
   // as it stands before it — the same discipline authorize() reads under.
   if (gw.operatorAuthor !== undefined) {
-    const overBudget = budgetRefusal(gw.reactor, gw.operatorAuthor, batch);
+    const overBudget = budgetRefusal(gw.reactor, gw.validityNow(), gw.operatorAuthor, batch);
     if (overBudget !== undefined) {
       throw new Error(`append rejected: ${overBudget}`);
     }
@@ -357,7 +357,7 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
 // closes the offered batch over what this predicate admits (see `federateImpl`) — otherwise a
 // rostered pull takes a post and refuses the off-roster retraction that withdrew it.
 export function admitForImpl(gw: Gateway): (d: Delta) => boolean {
-  const policy = readTrustPolicy(gw.reactor, gw.operatorAuthor);
+  const policy = readTrustPolicy(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   if (policy.mode === "open") return () => true;
   if (policy.mode === "closed") return () => false;
   return (d) => d.claims.author === gw.operatorAuthor || policy.roster.has(d.claims.author);
@@ -694,7 +694,7 @@ export async function federateImpl(
   // is on its way out. It costs nothing to be uniform — this door already returns counts and no
   // message, so a slate refusal is indistinguishable from any other rejection.
   const now = Date.now(); // one moment for the slate check and the stream closure below
-  const slates = readSlates(gw.reactor, gw.operatorAuthor, now);
+  const slates = readSlates(gw.reactor, gw.validityNow(), gw.operatorAuthor, now);
   const lawful: Delta[] = [];
   let admitted: Delta[] = [];
   for (const d of all) {
@@ -713,7 +713,7 @@ export async function federateImpl(
       publicDefect(d.claims) !== undefined ||
       artifactDefect(d.claims) !== undefined ||
       (isErasure(d.claims) && eraseDefect(d, gw.reactor, gw.operatorAuthor) !== undefined) ||
-      slateDefect(d, gw.reactor, gw.operatorAuthor) !== undefined ||
+      slateDefect(d, gw.reactor, gw.validityNow(), gw.operatorAuthor) !== undefined ||
       // A cite refusal belongs with the UNLAWFUL group and not with the un-admitted one: the
       // batch-scoped closure below deliberately readmits negations of what crossed, and a delta this
       // store is staging a removal over must never come back through it. Safe by construction with

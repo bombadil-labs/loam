@@ -110,7 +110,11 @@ const closePeers = async (): Promise<void> => {
 
 /** Re-declare a standing container with a leeway, copying its record, as the admin page would. */
 const declare = (gw: Gateway, container: string, leeway: Leeway): Promise<unknown> => {
-  const standing = readContainerTable(gw.reactor, gw.operatorAuthor).containers.get(container);
+  const standing = readContainerTable(
+    gw.reactor,
+    gw.validityNow(),
+    gw.operatorAuthor,
+  ).containers.get(container);
   if (standing === undefined) throw new Error(`${container} is not declared`);
   return gw.append([
     signClaims(
@@ -259,9 +263,11 @@ describe("§58 — the walls", () => {
       maxMemoryMb: 256,
     });
     // Withdrawn: the container re-declared with no pointer inherits, and nothing above it spoke.
-    const standing = readContainerTable(gateway.reactor, gateway.operatorAuthor).containers.get(
-      "ada:journal",
-    )!;
+    const standing = readContainerTable(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor,
+    ).containers.get("ada:journal")!;
     await gateway.append([
       signClaims(
         containerClaims(
@@ -307,7 +313,11 @@ describe("§58 — the walls", () => {
         OPERATOR_SEED,
       ),
     ]);
-    const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+    const table = readContainerTable(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor,
+    );
     expect(table.containers.get("inbox:loop")?.inboxOf).toBe("inbox:loop");
     // A name that cannot be placed reads SEALED: the floor, never the operator's wider ceiling,
     // so nothing that cannot be placed can widen anything.
@@ -359,7 +369,11 @@ describe("§58 — the walls", () => {
         OPERATOR_SEED,
       ),
     ]);
-    const later = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+    const later = readContainerTable(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor,
+    );
     expect(governingLeeway(later, "ada:plain")?.at).toBe("ada");
     await closeAll();
   });

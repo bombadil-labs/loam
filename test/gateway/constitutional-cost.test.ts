@@ -96,7 +96,7 @@ const READERS: readonly {
 }[] = [
   {
     name: "readTrustPolicy",
-    read: (gw) => readTrustPolicy(gw.reactor, OP),
+    read: (gw) => readTrustPolicy(gw.reactor, gw.validityNow(), OP),
     expect: (a: never) => {
       const p = a as unknown as { mode: string; roster: ReadonlySet<string> };
       expect(p.mode).toBe("roster");
@@ -105,7 +105,7 @@ const READERS: readonly {
   },
   {
     name: "readBudgetPolicy",
-    read: (gw) => readBudgetPolicy(gw.reactor, OP),
+    read: (gw) => readBudgetPolicy(gw.reactor, gw.validityNow(), OP),
     expect: (a: never) => {
       const m = a as unknown as ReadonlyMap<string, { maxAppends?: number }>;
       expect(m.get(GARDENER)?.maxAppends).toBe(500);
@@ -113,12 +113,12 @@ const READERS: readonly {
   },
   {
     name: "readPublicSchemas",
-    read: (gw) => readPublicSchemas(gw.reactor, OP),
+    read: (gw) => readPublicSchemas(gw.reactor, gw.validityNow(), OP),
     expect: (a: never) => expect([...(a as unknown as ReadonlySet<string>)]).toEqual(["Plant"]),
   },
   {
     name: "readArtifactRoutes",
-    read: (gw) => readArtifactRoutes(gw.reactor, OP),
+    read: (gw) => readArtifactRoutes(gw.reactor, gw.validityNow(), OP),
     expect: (a: never) => expect([...(a as unknown as ReadonlySet<string>)]).toEqual(["board"]),
   },
 ];

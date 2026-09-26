@@ -137,7 +137,9 @@ describe("T32 criterion 14 — erasure reaches the generalized wall", () => {
     // Byte-verified on the wall's own tier, and the erasure landed there (the wall remembers
     // the hole and refuses re-entry, exactly as the preset always has).
     expect(await wallStore.holds(secret.id)).toBe(false);
-    expect(readErasures(c.gateway!.reactor, OP).has(secret.id)).toBe(true);
+    expect(readErasures(c.gateway!.reactor, c.gateway!.validityNow(), OP).has(secret.id)).toBe(
+      true,
+    );
     await c.drop();
     await gw.close();
   });

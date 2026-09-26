@@ -9,7 +9,8 @@
  * production-scale implementation; even unrelated malformed input refuses the batch.
  */
 import { Reactor, computeId, verifyDelta, type Delta } from "@bombadil/rhizomatic";
-import { lawfulNegated, lensOf, readRegistrations, type Registration } from "./registration.js";
+import { lensOf, readRegistrations, type Registration } from "./registration.js";
+import { negatedAt } from "./negation.js";
 import { selectReceivingSnapshot } from "./receive-snapshot.js";
 
 interface Input {
@@ -130,7 +131,7 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
       if (!nonempty(source.id) || sources.has(source.id)) throw new Error("source identity");
       sources.set(source.id, reactor(source.deltas));
     }
-    const negated = lawfulNegated(policy, input.receiver);
+    const negated = negatedAt(policy, input.now, input.receiver);
     const decisions: Decision[] = [];
     for (const d of policy.snapshot()) {
       // Stranger claims are verified but never acquire recipient policy authority.

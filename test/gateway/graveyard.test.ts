@@ -80,7 +80,7 @@ describe("T64 criterion 12 — the graveyard is durable, joinable, and its compl
     expect(grave.priorErasure).toEqual([]);
 
     // Every erasure carries its `slate` join.
-    const joined = standingErasures(gw.reactor, OP).filter(
+    const joined = standingErasures(gw.reactor, gw.validityNow(), OP).filter(
       (t) => erasureSlate(t.claims) === stood.container,
     );
     expect(joined.map((t) => erasureTarget(t.claims)).sort()).toEqual(
@@ -88,7 +88,7 @@ describe("T64 criterion 12 — the graveyard is durable, joinable, and its compl
     );
 
     // §29.6's ARITHMETIC, from durable ground alone: no probe, no CutReport.
-    const check = graveyardCompleteness(gw.reactor, OP, grave.id);
+    const check = graveyardCompleteness(gw.reactor, gw.validityNow(), OP, grave.id);
     expect([...check.members].sort()).toEqual(members.map((m) => m.id).sort()); // a walk returning nothing FAILS here
     expect(check.missing).toEqual([]);
     expect(check.negated).toEqual([]);
@@ -115,12 +115,17 @@ describe("T64 criterion 12 — the graveyard is durable, joinable, and its compl
     const tags = await gw.query(`{ plant(entity: "${FERN}") { tag } }`);
     expect((tags.data as { plant: { tag: string[] } }).plant.tag).toEqual(["shade"]);
     // Ask about a graveyard nobody wrote: the arithmetic must answer FALSE rather than vacuously TRUE.
-    const nothing = graveyardCompleteness(gw.reactor, OP, `${report.graveyard.slice(0, -2)}zz`);
+    const nothing = graveyardCompleteness(
+      gw.reactor,
+      gw.validityNow(),
+      OP,
+      `${report.graveyard.slice(0, -2)}zz`,
+    );
     expect(nothing.members).toEqual([]);
     expect(nothing.holds).toBe(false);
     expect(nothing.readable).toBe(false); // not-found is UNREADABLE, never a clean empty proof
     // And the real one still holds, so the negative rail is not just a broken lookup.
-    const real = graveyardCompleteness(gw.reactor, OP, report.graveyard);
+    const real = graveyardCompleteness(gw.reactor, gw.validityNow(), OP, report.graveyard);
     expect(real.holds).toBe(true);
     expect(real.readable).toBe(true);
     expect(real.members).toEqual([member.id]);

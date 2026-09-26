@@ -241,9 +241,11 @@ describe("§58 — the five controls, in words", () => {
       redirect: "manual",
     });
     expect(res.status).toBe(302);
-    const rec = readContainerTable(gateway.reactor, gateway.operatorAuthor).containers.get(
-      "ada:journal",
-    );
+    const rec = readContainerTable(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor,
+    ).containers.get("ada:journal");
     expect(rec?.leewayDeclared, "the person spoke, so the container did").toBe(true);
     expect(rec?.leeway).toEqual({
       receive: true,
@@ -291,9 +293,11 @@ describe("§58 — the five controls, in words", () => {
       redirect: "manual",
     });
     expect(res.status).toBe(302);
-    const rec = readContainerTable(gateway.reactor, gateway.operatorAuthor).containers.get(
-      "bea:notes",
-    );
+    const rec = readContainerTable(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor,
+    ).containers.get("bea:notes");
     expect(rec, "the container stands").toBeDefined();
     expect(rec?.leewayDeclared, "and it declared nothing, so it inherits").toBe(false);
     await closeAll();
@@ -308,7 +312,11 @@ describe("§58 — the five controls, in words", () => {
     // The home is made the way a person makes it, then given a leeway the way its own page would:
     // its record carried forward whole, with the leeway written over it.
     await connect(base, "ada", "elsewhere");
-    const home = readContainerTable(gateway.reactor, gateway.operatorAuthor).containers.get("ada")!;
+    const home = readContainerTable(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor,
+    ).containers.get("ada")!;
     await gateway.append([
       signClaims(
         containerClaims(
@@ -367,9 +375,11 @@ describe("§58 — the five controls, in words", () => {
       redirect: "manual",
     });
     expect(res.status).toBe(302);
-    const rec = readContainerTable(gateway.reactor, gateway.operatorAuthor).containers.get(
-      "ada:journal",
-    );
+    const rec = readContainerTable(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor,
+    ).containers.get("ada:journal");
     expect(rec?.leewayDeclared, "the answer is written down").toBe(true);
     expect(rec?.leeway.receive, "and it is the seal they chose").toBe(false);
     await closeAll();
@@ -437,9 +447,11 @@ describe("§58 — the five controls, in words", () => {
       redirect: "manual",
     });
     expect(saved.status).toBe(303);
-    const rec = readContainerTable(gateway.reactor, gateway.operatorAuthor).containers.get(
-      "ada:journal",
-    );
+    const rec = readContainerTable(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor,
+    ).containers.get("ada:journal");
     expect(rec?.leeway).toEqual({
       receive: false,
       offer: false,
@@ -454,9 +466,11 @@ describe("§58 — the five controls, in words", () => {
     const { base, gateway } = await connectionServer();
     await connect(base, "ada", "journal");
     const inbox = [...gateway.connectionInboxes.keys()][0]!;
-    const before = readContainerTable(gateway.reactor, gateway.operatorAuthor).containers.get(
-      inbox,
-    )!;
+    const before = readContainerTable(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor,
+    ).containers.get(inbox)!;
     expect(before.inboxOf, "premise: it is a pool of ada:journal").toBe("ada:journal");
     const shown = await containerPage(base, "ada", inbox);
     expect(shown.html, "the page reaches it").toContain(inbox);
@@ -480,9 +494,11 @@ describe("§58 — the five controls, in words", () => {
       redirect: "manual",
     });
     expect(refused.status).toBe(409);
-    const after = readContainerTable(gateway.reactor, gateway.operatorAuthor).containers.get(
-      inbox,
-    )!;
+    const after = readContainerTable(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor,
+    ).containers.get(inbox)!;
     expect(after.inboxOf, "the pool keeps its host").toBe("ada:journal");
     expect(after.leewayDeclared, "and declares nothing of its own").toBe(false);
     await closeAll();
@@ -527,9 +543,11 @@ describe("§58 — the five controls, in words", () => {
       }).toString(),
       redirect: "manual",
     });
-    const before = readContainerTable(gateway.reactor, gateway.operatorAuthor).containers.get(
-      "ada:journal",
-    )!;
+    const before = readContainerTable(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor,
+    ).containers.get("ada:journal")!;
     expect(before.parent, "premise: it is a child of the home").toBe("ada");
     expect(before.membership, "premise: it is a shared container with a membership").toBeDefined();
     const shown = await containerPage(base, "ada", "ada:journal");
@@ -549,9 +567,11 @@ describe("§58 — the five controls, in words", () => {
       redirect: "manual",
     });
     expect(saved.status).toBe(303);
-    const after = readContainerTable(gateway.reactor, gateway.operatorAuthor).containers.get(
-      "ada:journal",
-    )!;
+    const after = readContainerTable(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor,
+    ).containers.get("ada:journal")!;
     expect(after.leeway.receive, "the leeway is what changed").toBe(true);
     expect(after.parent, "and the parent rode along").toBe("ada");
     expect(after.membership, "and so did the membership").toEqual(before.membership);
@@ -633,9 +653,11 @@ describe("§58 — the five controls, in words", () => {
     const why = text(await refused.text());
     expect(why, "the sentence names the ceiling").toContain("delegates nothing");
     expect(why).toContain("Nothing was changed");
-    const rec = readContainerTable(gateway.reactor, gateway.operatorAuthor).containers.get(
-      "ada:journal:annex",
-    );
+    const rec = readContainerTable(
+      gateway.reactor,
+      gateway.validityNow(),
+      gateway.operatorAuthor,
+    ).containers.get("ada:journal:annex");
     expect(rec?.leewayDeclared, "and nothing was declared").toBe(false);
     await closeAll();
   });

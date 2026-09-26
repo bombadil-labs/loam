@@ -109,7 +109,7 @@ describe("Gateway.erase: the manifest, the purge, the re-seat, the hole", () => 
     expect(gateway.reactor.get(fact.id)).toBeUndefined();
     expect(heights(gateway).length).toBe(0);
     // …and the erasure is ground: who asked, which id — never what
-    expect(readErasures(gateway.reactor, OPERATOR).has(fact.id)).toBe(true);
+    expect(readErasures(gateway.reactor, gateway.validityNow(), OPERATOR).has(fact.id)).toBe(true);
     await gateway.close();
   });
 
@@ -118,10 +118,10 @@ describe("Gateway.erase: the manifest, the purge, the re-seat, the hole", () => 
     // a hand-built self-erasure by the record's OWN author is refused at the door
     const selfTomb = signClaims(eraseClaims(fact.id, GARDENER, GARDENER, 2000), GARDENER_SEED);
     await expect(gateway.append([selfTomb])).rejects.toThrow(/operator/);
-    expect(readErasures(gateway.reactor, OPERATOR).has(fact.id)).toBe(false);
+    expect(readErasures(gateway.reactor, gateway.validityNow(), OPERATOR).has(fact.id)).toBe(false);
     // the operator honors the request and erases; that binds
     await gateway.erase(fact.id, { reason: "honoring a subject's request" });
-    expect(readErasures(gateway.reactor, OPERATOR).has(fact.id)).toBe(true);
+    expect(readErasures(gateway.reactor, gateway.validityNow(), OPERATOR).has(fact.id)).toBe(true);
     await gateway.close();
   });
 
@@ -144,7 +144,7 @@ describe("Gateway.erase: the manifest, the purge, the re-seat, the hole", () => 
       ),
     );
     await gateway.append([signClaims(makeNegationClaims(OPERATOR, 9000, erasure!.id), OP_SEED)]);
-    expect(readErasures(gateway.reactor, OPERATOR).has(fact.id)).toBe(false); // not standing
+    expect(readErasures(gateway.reactor, gateway.validityNow(), OPERATOR).has(fact.id)).toBe(false); // not standing
     await expect(gateway.append([fact])).rejects.toThrow(/was erased/); // still refused
     expect(heights(gateway).length).toBe(0);
     await gateway.close();
@@ -225,7 +225,7 @@ describe("the door admits only the operator's removal-orders", () => {
     const report = await gateway.federate([lie]);
     expect(report.accepted).toBe(0);
     expect(report.rejected).toBe(1);
-    expect(readErasures(gateway.reactor, OPERATOR).has(fact.id)).toBe(false);
+    expect(readErasures(gateway.reactor, gateway.validityNow(), OPERATOR).has(fact.id)).toBe(false);
     expect(gateway.reactor.get(fact.id)).toBeDefined(); // the record is untouched
     await gateway.close();
   });
@@ -236,7 +236,7 @@ describe("the door admits only the operator's removal-orders", () => {
     const preempt = signClaims(eraseClaims(ghostId, SURVEYOR, SURVEYOR, 2000), SURVEYOR_SEED);
     const report = await gateway.federate([preempt]);
     expect(report.rejected).toBe(1);
-    expect(readErasures(gateway.reactor, OPERATOR).has(ghostId)).toBe(false);
+    expect(readErasures(gateway.reactor, gateway.validityNow(), OPERATOR).has(ghostId)).toBe(false);
     await gateway.close();
   });
 
@@ -247,7 +247,7 @@ describe("the door admits only the operator's removal-orders", () => {
     const honest = signClaims(eraseClaims(fact.id, GARDENER, GARDENER, 2000), GARDENER_SEED);
     const report = await gateway.federate([honest]);
     expect(report.rejected).toBe(1);
-    expect(readErasures(gateway.reactor, OPERATOR).has(fact.id)).toBe(false);
+    expect(readErasures(gateway.reactor, gateway.validityNow(), OPERATOR).has(fact.id)).toBe(false);
     expect(gateway.reactor.get(fact.id)).toBeDefined();
     await gateway.close();
   });
@@ -259,7 +259,7 @@ describe("the door admits only the operator's removal-orders", () => {
       signClaims(eraseClaims(fact.id, GARDENER, OPERATOR, 2000), OP_SEED),
       signClaims(eraseClaims(ghostId, "did:key:zAnon", OPERATOR, 2001), OP_SEED),
     ]);
-    const dead = readErasures(gateway.reactor, OPERATOR);
+    const dead = readErasures(gateway.reactor, gateway.validityNow(), OPERATOR);
     expect(dead.has(fact.id)).toBe(true);
     expect(dead.has(ghostId)).toBe(true); // operator pre-emptive refusal is legitimate
     await gateway.close();
@@ -272,7 +272,7 @@ describe("erasuresIn (pre-boot) matches the running store's verdict", () => {
     const { gateway, fact } = await grove();
     await gateway.erase(fact.id); // operator erasure
     const all1 = [...gateway.reactor.snapshot()];
-    expect(erasuresIn(all1, OPERATOR).has(fact.id)).toBe(true); // dead while the erasure stands
+    expect(erasuresIn(all1, Date.now(), OPERATOR).has(fact.id)).toBe(true); // dead while the erasure stands
     const erasure = all1.find((d) =>
       d.claims.pointers.some(
         (p) => p.target.kind === "delta" && p.target.deltaRef.delta === fact.id,
@@ -281,7 +281,7 @@ describe("erasuresIn (pre-boot) matches the running store's verdict", () => {
     await gateway.append([signClaims(makeNegationClaims(OPERATOR, 9000, erasure!.id), OP_SEED)]);
     const all2 = [...gateway.reactor.snapshot()];
     // negated: the pre-boot reader agrees, so a boot heal would carry (not drop) the record
-    expect(erasuresIn(all2, OPERATOR).has(fact.id)).toBe(false);
+    expect(erasuresIn(all2, Date.now(), OPERATOR).has(fact.id)).toBe(false);
     await gateway.close();
   });
 
@@ -289,8 +289,10 @@ describe("erasuresIn (pre-boot) matches the running store's verdict", () => {
     const { gateway, fact } = await grove();
     await gateway.erase(fact.id);
     const all = [...gateway.reactor.snapshot()];
-    expect(erasuresIn(all, OPERATOR)).toEqual(readErasures(gateway.reactor, OPERATOR));
-    expect(erasuresIn(all, OPERATOR).has(fact.id)).toBe(true);
+    expect(erasuresIn(all, Date.now(), OPERATOR)).toEqual(
+      readErasures(gateway.reactor, gateway.validityNow(), OPERATOR),
+    );
+    expect(erasuresIn(all, Date.now(), OPERATOR).has(fact.id)).toBe(true);
     await gateway.close();
   });
 });

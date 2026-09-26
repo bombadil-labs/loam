@@ -14,7 +14,7 @@ import { chainBreaksAt, openerStands, readContainerTable, receivesNow } from "./
  * the store's own key, at the request of the party the drop was aimed at.
  */
 export function connectionStands(gateway: Gateway, binding: ConnectionBinding): boolean {
-  const table = readContainerTable(gateway.reactor, gateway.operatorAuthor);
+  const table = readContainerTable(gateway.reactor, gateway.validityNow(), gateway.operatorAuthor);
   // THE WHOLE CHAIN, NOT THE NAME. A shared drop strikes only the container it names, so a
   // descendant keeps its own declaration and stands alone: absent from every parent-edge walk the
   // person's pages make, and reachable only by the connection bound to it. Asking the chain means
@@ -40,6 +40,9 @@ export function boundChannelAdmits(
     connectionStands(gateway, binding) &&
     channel.openedFrom === binding.inbox &&
     openerStands(gateway, channel) &&
-    receivesNow(readContainerTable(gateway.reactor, gateway.operatorAuthor), channel.into)
+    receivesNow(
+      readContainerTable(gateway.reactor, gateway.validityNow(), gateway.operatorAuthor),
+      channel.into,
+    )
   );
 }

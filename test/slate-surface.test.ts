@@ -275,7 +275,7 @@ describe("T109 — the slate surface is reachable from the package barrel", () =
     );
     // The door's own verdict is reachable, so a caller can pre-check before `append`: lawful is
     // silence, and any other author than the operator is refused in the door's own voice.
-    expect(slateDefect(record, gw.reactor, OP)).toBeUndefined();
+    expect(slateDefect(record, gw.reactor, gw.validityNow(), OP)).toBeUndefined();
     const IMPOSTOR_SEED = "9b".repeat(32);
     const forged = signClaims(
       slateClaims(
@@ -285,7 +285,7 @@ describe("T109 — the slate surface is reachable from the package barrel", () =
       ),
       IMPOSTOR_SEED,
     );
-    expect(slateDefect(forged, gw.reactor, OP)).toMatch(/operator/);
+    expect(slateDefect(forged, gw.reactor, gw.validityNow(), OP)).toMatch(/operator/);
     await gw.append([record]);
 
     // REVIEW through the door AND through the exported reader — the two must agree, or the barrel
@@ -299,7 +299,7 @@ describe("T109 — the slate surface is reachable from the package barrel", () =
     expect(report.lapsed).toBe(false);
     const duplicates: readonly Duplicate[] = report.duplicates;
     expect(duplicates).toEqual([]);
-    const slates: Slate[] = readSlates(gw.reactor, OP, NOW);
+    const slates: Slate[] = readSlates(gw.reactor, gw.validityNow(), OP, NOW);
     expect(slates).toHaveLength(1);
     expect(slates[0]!.record).toBe(record.id);
     expect([...slates[0]!.members].sort()).toEqual(condemned);
@@ -334,8 +334,13 @@ describe("T109 — the slate surface is reachable from the package barrel", () =
     expect(grave.id).toBe(cut.graveyard);
     expect(grave.container).toBe(CONTAINER);
     expect(grave.memberCount).toBe(2);
-    expect(readGraveyards(gw.reactor, OP)).toEqual(graves);
-    const completeness: CompletenessCheck = graveyardCompleteness(gw.reactor, OP, grave.id);
+    expect(readGraveyards(gw.reactor, gw.validityNow(), OP)).toEqual(graves);
+    const completeness: CompletenessCheck = graveyardCompleteness(
+      gw.reactor,
+      gw.validityNow(),
+      OP,
+      grave.id,
+    );
     expect(completeness.readable).toBe(true);
     expect(completeness.cutCompleted).toBe(true);
     expect(completeness.holds).toBe(true);
