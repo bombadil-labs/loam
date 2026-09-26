@@ -74,6 +74,10 @@ Design:
    evidence.
 4. **A revoked key's earlier acts are judged at the present, until step 6.** Step 6 brings arrival
    testimony. Until then, revoking a key's authority removes the effect of its earlier acts.
+5. **Each user is rooted at their own key.** A user is their own principal: today's user seed
+   becomes that principal's root. The operator's user record names the root and can re-point it to
+   recover a lost key. Connection keys are non-delegable delegations from the user's root, scoped
+   to one container.
 
 ## What stays in force
 

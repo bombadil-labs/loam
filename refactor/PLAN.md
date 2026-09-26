@@ -200,6 +200,27 @@ level. Loam then consumes it through the barrel and compares its recordings.
    a succession; the old key's signature is optional evidence. Until step 6's arrival testimony,
    a revoked key's earlier acts are judged at the present, so revoking its authority removes their
    effect.
+   Loam's design (Myk ruling 5, `README.md`; the substrate contract is rhizomatic SPEC-14, #51):
+   - **The operator.** Loam pins the operator key from local config, as today. It is the root
+     for the store's own rules, and nothing in the delta set can replace it.
+   - **Users.** Each user is a principal rooted at their own key. An operator-signed user record
+     names the user's root. Loam chooses that root through its governed read of operator rules.
+     To recover a lost key, the operator re-points the record to a new root, which binds or
+     succeeds the old key so its history stays associated.
+   - **Connection keys.** Each is a delegation signed by the user's root with
+     `delegable: false` and `scope` set to the container name. The `prefix` policy lets a
+     container scope cover its children (`ada:journal` covers `ada:journal:notes`).
+   - **Grants.** Loam's verbs (write, admin, register, federate) stay Loam vocabulary. Their
+     subject becomes a principal, resolved at the read time through `authorsForPrincipal`, not a
+     bare key.
+   - **Container membership.** Terms that name a key (`author = K`) become `actsFor` terms naming
+     the principal, so a membership follows the user across key changes.
+   - **Retract your own.** It compares against every key associated with the retractor's
+     principal (`associatedKeys`), not the one signing key.
+   - **Revocation.** Delegations are negated under `rootOrSameAuthor`: the user's root can revoke a
+     connection key, and the connection key cannot counter-negate it.
+   - **Rails first.** `recordings/principal.recording.test.ts` pins today's answers. The rotated-key
+     cases in it should move: a rotated user keeps its containers and can retract its own values.
 6. **Peer and admission.** The peer model, the guard pipeline, arrival testimony. Loam's
    containers become peers, and the import cycle breaks.
    Decide the scope of a channel curse. `curseChannelLawImpl` also strikes a matching binding in
