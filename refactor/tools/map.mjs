@@ -25,16 +25,16 @@ const ROWS = [
   },
   {
     step: "4",
-    loam: "Law readers",
+    loam: "Rules readers",
     tier: "schema",
-    what: "governedDeltas, governed loaders",
+    what: "governedDeltas, governed loaders, lens binding",
     status: "doing",
   },
   {
     step: "4",
     loam: "Registrations, latest-wins picks",
     tier: "resolve",
-    what: "applyPolicy, named lens binding",
+    what: "applyPolicy, ordering",
     status: "doing",
   },
   {
@@ -54,7 +54,7 @@ const ROWS = [
   {
     step: "7",
     loam: "Offers, publish lenses, HTTP wire",
-    tier: "publish / subscribe",
+    tier: "federation: publish / subscribe",
     what: "closure rule, set digest",
     status: "planned",
   },
@@ -62,8 +62,8 @@ const ROWS = [
   {
     step: "9",
     loam: "Erasure, receipts, refused ids",
-    tier: "forgetting",
-    what: "forget, probe, receipts",
+    tier: "erasure",
+    what: "erase, probe, orders, receipts",
     status: "planned",
   },
   {
@@ -83,11 +83,11 @@ const ROWS = [
 ];
 
 const KEEPS = [
-  "Doors: GraphQL, REST, MCP",
+  "Endpoints: GraphQL, REST, MCP",
   "CLI and operator workflows",
   "People: users, login, OAuth",
   "Apps, renderers, admin, site",
-  "Policy: whose law, curse scope",
+  "Policy: whose rules, curse scope",
 ];
 
 const STYLE = {

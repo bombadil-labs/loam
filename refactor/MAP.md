@@ -9,7 +9,7 @@ The refactor moves in three directions at once:
   a rhizomatic capability.
 - **Export.** Rhizomatic becomes a monorepo of tier libraries, with one barrel package over them.
   Sol owns it.
-- **Delegate.** Loam calls those tiers and keeps only what is its own: its doors, its people, its
+- **Delegate.** Loam calls those tiers and keeps only what is its own: its endpoints, its people, its
   apps and its policy choices. Claude owns it.
 
 This file and its picture are updated in the same PR as every refactor step. The plan is [PLAN.md](PLAN.md). The
@@ -34,12 +34,12 @@ same PR.
 | 1. Graph | package graph, mechanical check (#38) | census ratchet in CI (#572) | done |
 | 2. Boundaries | files into tier packages (#38) | recordings harness (#573) | done |
 | 3. Time | signed validity, explicit `now` (#43); refresh skip (#44); verified set copies (#46); 0.11.0-next.2 | switch to 0.11 (#585); read time is the wall clock, `stamp()` (#600); unreadable stores refused (#586); next.2 (#604) | done |
-| 4. Suppression, governed reads | `negationPredicate`, `negationWitnesses`, `governedDeltas`, `applyPolicy` in draft (#48); vectors, loaders and lens binding still to come | seams `negatedAt`, `lawfulSnapshot(now)` (#588, #589, #592); history reads split out; timed recordings and reader audit (#587); the swap waits for the prerelease | in progress |
+| 4. Suppression, governed reads | `negationPredicate`, `negationWitnesses`, `governedDeltas`, `applyPolicy` in draft (#48); vectors, governed loaders and the lens binding (schema tier) still to come | seams `negatedAt`, `lawfulSnapshot(now)` (#588, #589, #592); history reads split out; timed recordings and reader audit (#587); the swap waits for the prerelease | in progress |
 | 5. Principal | roots, key binding, succession, delegation | principal recording (#590); revoke fix (#591) | next |
 | 6. Peer, admission | peer model, guard pipeline, arrival testimony | curse-scope recording (#597); park reason (#598) | planned |
-| 7. Publish, subscribe | per-subscriber lenses, closure audit, set digest | adopt the revised HTTP binding | planned |
+| 7. Publish, subscribe | federation: per-subscriber lenses, closure audit, set digest | adopt the revised HTTP binding | planned |
 | 8. Resolve | resolver value ABI | resolvers move out | planned |
-| 9. Forgetting | forget, probe, orders, receipts, sealed payloads | erasure moves onto the substrate | planned |
+| 9. Erasure | erase, probe, orders, receipts, sealed payloads | erasure moves onto the substrate | planned |
 | 10. Derivation | artifact identity, module ABI | derived functions on the new ABI | planned |
 
 ## Measures of delegation
