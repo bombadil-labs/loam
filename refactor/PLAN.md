@@ -135,8 +135,10 @@ level. Loam then consumes it through the barrel and compares its recordings.
      read time. The CLI's grant survival (`grantStanding`) reads the operator's strikes at the
      read time. It is not the door's reading: it ignores an admin's strike and the grant's own
      window, so it names what the operator has not struck, which is what a revoke strikes. Its
-     comment says so. `pen create` still reads "holds a write grant" from it; an expired grant can
-     make that sentence false. Pen records stay raw: nothing else reads them.
+     comment says so. `pen create` refuses a provisioned pen on that selection, but its sentence asks the door
+     (`holdsGrant` at the same read time): it says "holds a write grant" only when the door honours
+     it, and otherwise says the grant is outside its window or struck by an admin
+     (`test/cli/pen-grant-window.test.ts`). Pen records stay raw: nothing else reads them.
      `test/refactor/grant-strike-window.test.ts` pins the door, the readers and the revoke
      selection on both sides of each boundary.
    - **Accuracy (done, PR C).** The revoke selection is named for what it is:
@@ -154,9 +156,15 @@ level. Loam then consumes it through the barrel and compares its recordings.
    - **History reads.** Some reads ask about the past and must never filter by validity. They use
      `lawfulHistory` or `lawfulHistoryAt`, not `governedDeltas`.
      - `everDeclared`: a name whose declaration expired still cannot be minted again.
-     - `unreachableStoreReport`: an expired separate declaration still named a store. Its negation
-       test is a present-time read. Open: decide whether an expired negation still counts as
-       "struck".
+     - `unreachableStoreReport` (done). The guard reads the lineage from history. A separate
+       declaration names a store if it is negated now, or if its own validity has ended. The
+       negation test stays a present-time read, and that loses no case: a negation that has
+       expired or not begun leaves the declaration live, so the live table names the container.
+       Expiry is not a forget (the lead's ruling, 2026-09-26). An expired separate declaration
+       keeps naming its store, with or without a successor, until a detach record covers it.
+       Negating every declaration still clears the guard. A declaration that has not begun had no
+       store to attach, so it names none. `test/refactor/step4-store-guard-window.test.ts` pins
+       each case at the report and at `erase`.
      - Channel listings with severed channels and law-adoption reads with struck records read
        history already.
      - `dropChannelCommit` (done, PR C) reads history, and a drop severs for good. It skips only a
@@ -176,11 +184,15 @@ level. Loam then consumes it through the barrel and compares its recordings.
      answers only until the reactor's next validity boundary. A predicate held across an `await`
      is safe: the substrate's reader clears its memo after an accepted ingest.
      `test/refactor/step4-caches.test.ts` pins all three, at the table and at the door.
-   - **What remains of step 4.** (a) The test fixtures move from `nextTimestamp` to `stamp()` (a
-     separate PR, in flight). (b) Loam's latest-wins picks (registrations, attention) still pick by
-     hand; moving them onto `latestByKey` or `applyPolicy` is measured, not promised. (c) The
-     `unreachableStoreReport` decision above. (d) `pen create`'s "holds a write grant" sentence
-     reads `grantStanding`, which ignores the grant's window.
+   - **Latest-wins picks (decided: they stay Loam's).** The registration, trust, budget,
+     envelope, binding-policy, `tenantOf` and `attention.ts` readers pick by hand. Rhizomatic's
+     `latestByKey` breaks a timestamp tie toward the smaller id and wants a pre-masked input.
+     Loam's readers break a tie toward the larger id (`attention.ts` keeps the first seen), and
+     `recordings/out/time.latest-tie.json` pins Loam's answer. So the readers do not move. Revisit
+     if the substrate grows a tie-direction parameter (rhizomatic #50 is the follow-up).
+   - **Fixtures (done, #609).** Test fixtures sign with `stamp()`, not `nextTimestamp`.
+   - **Step 4 is complete on Loam's side** (#606, #607, #608, #609, and the PR that closed it).
+     Nothing in it is open. The helper follow-ups are rhizomatic's (#50).
 5. **Principal.** Roots, key binding, succession, delegation, locators. Loam moves user,
    connection and container keys into signed data.
    Settled inputs (Myk, 2026-09-26; `README.md` rulings 2 to 4): succession records continuity

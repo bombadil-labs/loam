@@ -3153,9 +3153,25 @@ async function cmdPen(args: readonly string[], io: IO): Promise<number> {
         "write",
       );
       if (standing.surviving.length > 0) {
+        // `grantStanding` names only what the operator has not struck. Whether the author HOLDS
+        // the grant is the door's question — the grant's own window and an admin's strike count
+        // there — so the sentence asks the door, at the same read time.
+        const honoured = holdsGrant(
+          gateway.reactor,
+          gateway.validityNow(),
+          STORE_ENTITY,
+          held,
+          "write",
+          operator,
+        );
         io.err(
-          `pen create: ${name} is already provisioned — ${penSeedPath(home, name)} exists and its ` +
-            `author holds a write grant. Nothing was written. To retire the pen, negate its ` +
+          `pen create: ${name} is already provisioned — ${penSeedPath(home, name)} exists and ` +
+            (honoured
+              ? `its author holds a write grant. `
+              : `the operator has not struck its author's write grant, but the door does not ` +
+                `honour that grant now: it is outside its validity window, or an admin struck ` +
+                `it. `) +
+            `Nothing was written. To retire the pen, negate its ` +
             `grant; to RE-KEY it — the answer to a leaked seed — remove ` +
             `${penSeedPath(home, name)} and run this again: the next run mints a fresh key AND ` +
             `negates the old author's standing, so the leaked key can no longer write. Past ` +
