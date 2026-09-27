@@ -57,8 +57,9 @@ decision for 3e, and this design does not make it.
 The lowerer parses each trust predicate and compares it with the parsed canonical form of
 `lawfulStrikersJson(X, flag)` for the `X` and `flag` it names. A node that matches is lowered.
 
-A near miss fails closed. A near miss is an `inView` whose `term` names `CTX_GRANTS`, or whose
-extract role is `subject`, but whose predicate is not an exact match. The lowerer throws with a
+A near miss fails closed. A near miss is a `mask` trust policy that carries an `inView` whose
+`term` names `CTX_GRANTS`, or whose extract role is `subject`, but that is not an exact match. The
+check looks only at trust policies. An `inView` elsewhere is legal and stays as it is. The lowerer throws with a
 message that names the body. It does not evaluate the near miss unlowered: that would reflect
 `user:` strings as authors.
 
