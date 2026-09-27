@@ -1,0 +1,165 @@
+// A governed read under a grant that names a USER, asked where people meet it: the served View (the
+// warm materialization, the cold gather, and the as-of gather), the listing door, and the erasure
+// audit's reading of the same mask. Each case also asks the delta level: the strike is in the store,
+// so a value missing from the View is missing because the strike BINDS, not because it never came.
+//
+// The grants here are hand-appended; no writer names a user yet (PR 3d-ii C switches them). Pools
+// and validity boundaries are PR B's rails.
+
+import { describe, expect, it } from "vitest";
+import {
+  authorForSeed,
+  makeNegationClaims,
+  signClaims,
+  termCanonicalHex,
+  type Delta,
+  type HView,
+  type HyperSchema,
+} from "@bombadil/rhizomatic";
+import { governedGatherBody, grantClaims } from "../../src/gateway/accounts.js";
+import { readGrounds } from "../../src/gateway/erase.js";
+import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
+import { Gateway } from "../../src/gateway/gateway.js";
+import { listingContainerName } from "../../src/gateway/listing.js";
+import { gatherImpl } from "../../src/gateway/reads.js";
+import { rootClaims, userClaims } from "../../src/server/users.js";
+import { MemoryBackend } from "../../src/store/memory.js";
+import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
+import { PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
+
+const OP_SEED = "5c".repeat(32);
+const OP = authorForSeed(OP_SEED);
+const K1_SEED = "d1".repeat(32);
+const K1 = authorForSeed(K1_SEED);
+const K2_SEED = "d2".repeat(32);
+const K2 = authorForSeed(K2_SEED);
+const X_SEED = "b3".repeat(32);
+
+const MOSS = "plant:moss";
+const GUARDED: HyperSchema = { name: "Guarded", alg: 1, body: governedGatherBody(OP) };
+const op = (claims: Parameters<typeof signClaims>[0]): Delta => signClaims(claims, OP_SEED);
+const strike = (seed: string, target: Delta, t: number): Delta =>
+  signClaims(makeNegationClaims(authorForSeed(seed), t, target.id), seed);
+const heights = (h: HView): unknown[] =>
+  (h.props.get("height") ?? []).map((e) => {
+    const p = e.delta.claims.pointers.find((q) => q.target.kind === "primitive");
+    return p?.target.kind === "primitive" ? p.target.value : undefined;
+  });
+
+// A governed store: the gardener writes; ada (root K1) holds a write grant BY NAME. The lens is a
+// genesis registration, so the erasure audit's table of readings holds it too.
+async function world(): Promise<Gateway> {
+  const gw = await Gateway.boot(
+    new MemoryBackend(),
+    assembleGenesis({
+      operatorSeed: OP_SEED,
+      registrations: [
+        {
+          hyperschema: GUARDED,
+          schema: PLANT_POLICY,
+          roots: [FERN],
+          writable: [...PLANT_WRITABLE],
+        },
+      ],
+    }),
+  );
+  await gw.append([
+    op(grantClaims(STORE_ENTITY, GARDENER, "write", OP, 1)),
+    op(userClaims("ada", OP, 2)),
+    op(rootClaims("ada", K1, OP, 2)),
+    op(grantClaims(STORE_ENTITY, "user:ada", "write", OP, 3)),
+  ]);
+  return gw;
+}
+
+describe("R2: a user-named grant trusts the user's root in the served View", () => {
+  it("ada's root strike binds; a stranger's is inert (warm, cold, delta)", async () => {
+    const gw = await world();
+    const byAda = observed(FERN, "height", 30, 100, GARDENER_SEED);
+    const bystander = observed(FERN, "height", 34, 101, GARDENER_SEED);
+    await gw.append([byAda, bystander]);
+    const adaStrike = strike(K1_SEED, byAda, 200);
+    const strangerStrike = strike(X_SEED, bystander, 201);
+    await gw.federate([adaStrike, strangerStrike]);
+    // delta level: both strikes are held
+    expect(gw.reactor.negationsOf(byAda.id)).toContain(adaStrike.id);
+    expect(gw.reactor.negationsOf(bystander.id)).toContain(strangerStrike.id);
+    // object level, warm (the materialization re-lowers on refresh) and cold
+    const cold = gatherImpl(gw, "Guarded", FERN, gw.validityNow());
+    expect(heights(cold)).toEqual([34]);
+    const live = await gw.query(`{ guarded(entity: "${FERN}") { height } }`);
+    expect(JSON.stringify(live.data)).toContain("34");
+    expect(JSON.stringify(live.data)).not.toContain("30");
+    await gw.close();
+  });
+});
+
+describe("R7: the listing agrees with the point read", () => {
+  it("an entity ada's root struck is absent from both; one a stranger struck is in both", async () => {
+    const gw = await world();
+    const moss = observed(MOSS, "tag", "soft", 1200, GARDENER_SEED);
+    const fern = observed(FERN, "height", 30, 1000, GARDENER_SEED);
+    await gw.append([fern, moss]);
+    await gw.federate([strike(X_SEED, fern, 3000)]);
+    expect((await gw.list("Guarded")).map((n) => n.entity)).toEqual([FERN, MOSS]);
+    await gw.federate([strike(K1_SEED, moss, 3001)]);
+    const listed = (await gw.list("Guarded")).map((n) => n.entity);
+    expect(listed).toEqual([FERN]);
+    expect(heights(gatherImpl(gw, "Guarded", MOSS, gw.validityNow()))).toEqual([]);
+    expect(gw.reactor.get(moss.id)).toBeDefined();
+    const members = gw.containerScope({ containers: [listingContainerName("Guarded")] });
+    expect(members.some((d) => d.id === moss.id)).toBe(false);
+    expect(members.some((d) => d.id === fern.id)).toBe(true);
+    await gw.close();
+  });
+});
+
+describe("R8: the erasure audit reads the governed mask as the door does", () => {
+  it("ada's struck claim is not live to the governed reading; the stranger-struck one is", async () => {
+    const gw = await world();
+    const byAda = observed(FERN, "height", 30, 100, GARDENER_SEED);
+    const bystander = observed(FERN, "height", 34, 101, GARDENER_SEED);
+    await gw.append([byAda, bystander]);
+    await gw.federate([strike(K1_SEED, byAda, 200), strike(X_SEED, bystander, 201)]);
+    const [reading] = readGrounds(gw, [], gw.validityNow());
+    const governed = reading!.masks.find(
+      (m) => m.policy !== null && JSON.stringify(m.policy).includes("inView"),
+    );
+    expect(governed).toBeDefined();
+    expect(governed!.live.has(byAda.id)).toBe(false);
+    expect(governed!.live.has(bystander.id)).toBe(true);
+    await gw.close();
+  });
+});
+
+describe("R9: lowering never touches what is signed or stored (a control)", () => {
+  it("the registered body keeps its canonical bytes, and a listing read writes nothing", async () => {
+    const gw = await world();
+    await gw.append([observed(FERN, "height", 30, 1000, GARDENER_SEED)]);
+    const registered = gw.registered.find((r) => r.hyperschema.name === "Guarded")!;
+    expect(termCanonicalHex(registered.hyperschema.body)).toBe(
+      termCanonicalHex(governedGatherBody(OP)),
+    );
+    await gw.list("Guarded");
+    const size = gw.reactor.size;
+    await gw.list("Guarded");
+    await gw.list("Guarded");
+    expect(gw.reactor.size).toBe(size);
+    await gw.close();
+  });
+});
+
+describe("R15: an as-of read resolves the user as they stood then", () => {
+  it("a re-point signed after asOf, valid from before it, does not reach back", async () => {
+    const gw = await world();
+    const v1 = observed(FERN, "height", 30, 100, GARDENER_SEED);
+    const v2 = observed(FERN, "height", 34, 101, GARDENER_SEED);
+    await gw.append([v1, v2]);
+    await gw.federate([strike(K1_SEED, v1, 200), strike(K2_SEED, v2, 220)]);
+    // Signed at 300, valid from 100: without the as-of cut, a read at 250 would already see K2.
+    await gw.append([op({ ...rootClaims("ada", K2, OP, 300), validFrom: 100 })]);
+    expect(heights(gatherImpl(gw, "Guarded", FERN, gw.validityNow(), 250))).toEqual([34]);
+    expect(heights(gatherImpl(gw, "Guarded", FERN, gw.validityNow()))).toEqual([30]);
+    await gw.close();
+  });
+});

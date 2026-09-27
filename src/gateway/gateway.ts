@@ -29,7 +29,7 @@ import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
 import { stampOn, type Stamp } from "./stamp.js";
 import { declarePrincipalScope } from "./principal.js";
-import { declareUserGround } from "./user-root.js";
+import { declareUserGround, userGroundOf } from "./user-root.js";
 import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
 import {
   blessChannelAppImpl,
@@ -197,6 +197,7 @@ import {
   watchEntityImpl,
 } from "./reads.js";
 import { listImpl, type ListOptions } from "./listing.js";
+import { governedProgram } from "./governed-trust.js";
 
 export interface AppendReceipt {
   readonly accepted: number;
@@ -497,7 +498,15 @@ export class Gateway {
     // blow up when a peer first pulls, in production. Trial-eval it now (empty store → empty
     // dset; the SORT is what we're checking, and that is content-independent).
     if (options.offeredLens !== undefined) {
-      const trial = evalTermRaw(options.offeredLens, reactor.snapshot());
+      const ground = reactor.snapshot();
+      const lens = governedProgram(
+        options.offeredLens,
+        undefined,
+        ground,
+        { raw: true },
+        userGroundOf(reactor),
+      );
+      const trial = evalTermRaw(lens.term, ground);
       if (trial.sort !== "dset") {
         throw new Error("offeredLens must select a delta set (a mask/select term, not a group)");
       }
