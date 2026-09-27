@@ -2,8 +2,11 @@
 // burst of writes inside one tick of a coarse clock (Windows) outruns it. The store reads validity
 // at the wall clock, so a claim signed with `validFrom` in the future is not yet true when the
 // next step reads it, and the step is refused. This rail plays the whole arc with an order clock
-// ten seconds ahead of the wall clock and asserts every step banks. It asserts the store side only;
-// the page side is test/browser/tutorial.test.ts's.
+// ten seconds ahead of the wall clock, for the whole run, and asserts every step banks.
+//
+// Named gap: the browser suite signs at the wall clock and never runs ahead. The page signs
+// through the same `lessons.mjs` / `player.mjs` helpers, so this rail covers its signing code, not
+// its render. `bankCheckpoint`, `answerQuiz` and `skipQuiz` are not driven here; they share `sign()`.
 
 import { describe, expect, it } from "vitest";
 import * as loam from "../../src/browser/index.js";
@@ -15,8 +18,14 @@ const AHEAD = 10_000;
 
 async function aheadCtx(storage: MemStorage): Promise<LessonCtx> {
   const { gateway, seed, author } = await bootTutorialStore(loam, storage);
-  let clock = Date.now() + AHEAD;
-  return { gateway, storage, seed, author, ts: () => (clock = Math.max(Date.now(), clock + 1)) };
+  let clock = 0;
+  return {
+    gateway,
+    storage,
+    seed,
+    author,
+    ts: () => (clock = Math.max(Date.now() + AHEAD, clock + 1)),
+  };
 }
 
 describe("an order clock ahead of the wall clock", () => {
