@@ -1,0 +1,53 @@
+{
+  "after": {
+    "delegationStates": [
+      "expired",
+      "revoked"
+    ],
+    "parent": {
+      "boundTag": [
+        "by-connection"
+      ],
+      "containerScope": [
+        "@subadmin: \"by-connection\"",
+        "@subadmin: \"connection's write before T\"",
+        "@writer: negates",
+        "@writer: principal+kind+key+scope+delegable",
+        "@writer: principal+kind+key+scope+delegable"
+      ],
+      "unboundTag": null
+    },
+    "poolDoor": {
+      "refused": "append rejected: @subadmin is not permitted: publishing through this store requires write standing (a surviving grant at loam:store), and no surviving grant says so"
+    }
+  },
+  "before": {
+    "delegationStates": [
+      "standing",
+      "revoked"
+    ],
+    "parent": {
+      "boundTag": [
+        "by-connection"
+      ],
+      "containerScope": [
+        "@subadmin: \"by-connection\"",
+        "@writer: negates",
+        "@writer: principal+kind+key+scope+delegable",
+        "@writer: principal+kind+key+scope+delegable"
+      ],
+      "unboundTag": null
+    },
+    "poolDoor": "admitted"
+  },
+  "watch": {
+    "framesAtBoundary": {
+      "pool": 0,
+      "root": 0
+    },
+    "initialMembers": {
+      "pool": 2,
+      "root": 0
+    }
+  }
+}

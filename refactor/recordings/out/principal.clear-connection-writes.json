@@ -1,0 +1,39 @@
+{
+  "the connection wrote": {
+    "boundTag": [
+      "by-connection"
+    ],
+    "containerScope": [
+      "@subadmin: \"by-connection\"",
+      "@writer: principal+kind+key+scope+delegable"
+    ],
+    "strikesInPool": [],
+    "unboundTag": null
+  },
+  "the owner clears, bound": {
+    "answered": [
+      "by-connection"
+    ],
+    "boundTag": [
+      "by-connection"
+    ],
+    "containerScope": [
+      "@subadmin: \"by-connection\"",
+      "@writer: principal+kind+key+scope+delegable"
+    ],
+    "strikesInPool": [],
+    "unboundTag": null
+  },
+  "the owner clears, unbound": {
+    "answered": null,
+    "boundTag": [
+      "by-connection"
+    ],
+    "containerScope": [
+      "@subadmin: \"by-connection\"",
+      "@writer: principal+kind+key+scope+delegable"
+    ],
+    "strikesInPool": [],
+    "unboundTag": null
+  }
+}
