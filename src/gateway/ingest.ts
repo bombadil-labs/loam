@@ -335,6 +335,7 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
     // leave stale ids silently exempting future raw-stream writes.
     for (const d of batch) gw.justPersisted.delete(d.id);
     gw.armValidityTimer(); // the batch may name the next boundary
+    if (accepted > 0) gw.notifyUserDependents(); // pools read this ground's users
   }
   // A landing slate that closes `read` ends live subscriptions the way an erase does (SPEC §29.3).
   // `reseat()` already solves precisely this one phase later — "a parked reader must not keep serving
@@ -775,6 +776,7 @@ export async function federateImpl(
     } finally {
       for (const d of admitted) gw.justPersisted.delete(d.id);
       gw.armValidityTimer(); // as at append
+      if (acceptedIds.length > 0) gw.notifyUserDependents(); // as at append
     }
   }
   // As at append: a batch that closes reads (a slate record or an erasure) touches no watched

@@ -462,7 +462,9 @@ function currentIndex(
   membership: Record<string, unknown>,
   contexts: ReadonlySet<string>,
 ): ListingIndex {
-  const key = JSON.stringify(membership);
+  // A governed mask's strikers follow the users this ground reads, which can move with nothing
+  // arriving here (a pool's users are its host's): a new user epoch rebuilds.
+  const key = `${gw.usersEpoch}\u0000${JSON.stringify(membership)}`;
   let perGw = indexes.get(gw);
   if (perGw === undefined) {
     perGw = new Map<string, ListingIndex>();
