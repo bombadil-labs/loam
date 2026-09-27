@@ -20,13 +20,14 @@ import {
 } from "@bombadil/rhizomatic";
 import { readUserSeed } from "../cli/config.js";
 import { parseOffer } from "../federation/offer.js";
-import { CTX_GRANTS, grantSubjects, holdsGrant, struckAt } from "../gateway/accounts.js";
+import { CTX_GRANTS, holdsGrant, struckAt } from "../gateway/accounts.js";
 import { delegationStatesFor } from "../gateway/principal.js";
 import { withBatchNegationClosure } from "../gateway/ingest.js";
 import {
   type Container,
   type ContainerTable,
   type ResolvedContainer,
+  grantRoots,
 } from "../gateway/container.js";
 import { Gateway, type FederationReport } from "../gateway/gateway.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
@@ -192,7 +193,13 @@ export function connectionGrantState(
     else if (struckAt(reactor, now, id, operator)) seen.add("revoked");
   }
   // A connection bound since step 5 writes by DELEGATION rather than by a grant naming its key.
-  for (const state of delegationStatesFor(reactor, now, grantSubjects(reactor), key, operator)) {
+  for (const state of delegationStatesFor(
+    reactor,
+    now,
+    grantRoots(reactor, now, operator),
+    key,
+    operator,
+  )) {
     if (state !== "standing") seen.add(state);
   }
   for (const state of ["revoked", "not yet valid", "expired"] as const)
@@ -832,12 +839,19 @@ ${flowNote}`;
         refuse(
           res,
           503,
-          plan.client !== undefined
-            ? "The connector's tokens are retired, but the write standing in its inbox could " +
+          /whose root cannot be read now/.test(err instanceof Error ? err.message : "")
+            ? (plan.client !== undefined
+                ? "The connector's tokens are retired, but its inbox "
+                : "Its inbox ") +
+                "still lets it write: the owner grant there names a user whose record cannot be " +
+                "read now (it may be struck or erased), so the revoke could not find everything " +
+                "to strike. If that person is gone for good, drop the inbox instead."
+            : plan.client !== undefined
+              ? "The connector's tokens are retired, but the write standing in its inbox could " +
                 "not be struck in your voice — this revoke is incomplete. If your key changed " +
                 "since the connection was made, the store's operator can finish it with " +
                 "`loam grant revoke`."
-            : "The revocation could not land in your voice, so nothing was revoked. If your key " +
+              : "The revocation could not land in your voice, so nothing was revoked. If your key " +
                 "changed since the connection was made, the store's operator can revoke it.",
         );
         return;
@@ -893,7 +907,9 @@ ${flowNote}`;
         res,
         503,
         `This inbox's grant is negated, but the same key's ${failedSiblings.join(", ")} could not be — the ` +
-          "key still writes there. This revoke is incomplete; retry it from that row.",
+          "key still writes there. This revoke is incomplete; retry it from that row. If that " +
+          "inbox's owner grant names a user whose record cannot be read now, drop that inbox " +
+          "instead.",
       );
       return;
     }

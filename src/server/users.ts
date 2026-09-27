@@ -30,10 +30,8 @@ import { DeltaSet, evalTerm } from "@bombadil/rhizomatic";
 import { erasedFromReading } from "../gateway/erase.js";
 import { entityGatherBody } from "../gateway/gather.js";
 
-const CTX_USER = "loam.user";
-export const CTX_ROLE = "loam.role";
-/** The user's current ROOT key (README ruling 5): the principal every key of theirs acts for. */
-export const CTX_ROOT = "loam.root";
+import { CTX_ROLE, CTX_ROOT, CTX_USER, userEntity } from "../gateway/user-root.js";
+export { CTX_ROLE, CTX_ROOT, userEntity };
 
 const AUTHOR = /^ed25519:[0-9a-f]{64}$/;
 
@@ -46,7 +44,6 @@ export const ROLES: readonly UserRole[] = ["operator", "actor"];
  * stated once. `userEntity` does not call this itself: it is a pure formatter, and validating a
  * caller-supplied name before it ever reaches an entity id is the caller's job.
  */
-export const userEntity = (name: string): string => `user:${name}`;
 
 // A user name reaches an entity id, a JSON object key, and an HTML page. Keep it to the characters
 // that are safe in all three, and short enough to read in a provenance trail.

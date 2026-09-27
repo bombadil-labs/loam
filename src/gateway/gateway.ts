@@ -29,6 +29,7 @@ import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
 import { stampOn, type Stamp } from "./stamp.js";
 import { declarePrincipalScope } from "./principal.js";
+import { declareUserGround } from "./user-root.js";
 import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
 import {
   blessChannelAppImpl,
@@ -365,6 +366,17 @@ export const unreadableStoreMessage = (rows: number): string =>
   `and there is no migration. Open it with the Loam release that wrote it, or start a new ` +
   `store. \`loam repair\` lists the rows.`;
 
+// The erased-but-held ids a door reads users through, cached per reactor until it next changes:
+// the door asks on every user-named grant it weighs, and the answer moves only with an ingest.
+const erasedCache = new WeakMap<Reactor, { size: number; ids: ReadonlySet<string> }>();
+function erasedIdsOf(reactor: Reactor, operator: string | undefined): ReadonlySet<string> {
+  const hit = erasedCache.get(reactor);
+  if (hit !== undefined && hit.size === reactor.size) return hit.ids;
+  const ids = erasedFromReading(reactor, operator);
+  erasedCache.set(reactor, { size: reactor.size, ids });
+  return ids;
+}
+
 export class Gateway {
   /** @internal — T19 seam (renderers.ts) */
   registered: Bound[] = [];
@@ -395,6 +407,9 @@ export class Gateway {
   // The scope this ground honors delegations for (principal.ts): an inbox pool's own name, and
   // nothing on any other ground. Declared on the reactor, and again whenever the reactor is replaced.
   private delegationScope: string | undefined = undefined;
+  // The gateway whose user records this ground's grants resolve `user:<name>` against: a pool's
+  // host. Declared on the reactor, and again whenever the reactor is replaced.
+  private userHost: Gateway | undefined = undefined;
   // The resolver memo (SPEC §22.5): (resolver-content-address, bucket-delta-set) → value. Keyed on the
   // surviving bucket, so it invalidates by construction when the ground moves — an erased fact drops
   // from the bucket and its old value can never be served again. A pure cache; safe to clear anytime.
@@ -477,6 +492,7 @@ export class Gateway {
   ) {
     this._reactor = reactor;
     this.operatorAuthor = options.seed === undefined ? undefined : authorForSeed(options.seed);
+    this.declareUsers(reactor);
     // Fail fast on a mis-shaped offered lens: a term that does not select a delta set would only
     // blow up when a peer first pulls, in production. Trial-eval it now (empty store → empty
     // dset; the SORT is what we're checking, and that is content-independent).
@@ -1327,6 +1343,7 @@ export class Gateway {
     }
     this._reactor = reactor;
     if (this.delegationScope !== undefined) declarePrincipalScope(reactor, this.delegationScope);
+    this.declareUsers(reactor);
     this.ingestVia = (d) => this.reactor.ingest(d);
     this.attachPersistence(reactor);
     if (this.registered.length > 0) rebindImpl(this, this.registered);
@@ -1581,6 +1598,31 @@ export class Gateway {
   // orders: a held timestamp is signed by its author, and no read time follows it.
   private seedAuthorClocks(deltas: Iterable<Delta>): void {
     for (const d of deltas) this.noteAuthorTime(d);
+  }
+
+  /**
+   * Resolve this ground's `user:<name>` grant subjects against `host`'s user records. A pool holds
+   * no user records of its own. @internal — container.ts
+   */
+  readUsersFrom(host: Gateway): void {
+    this.userHost = host;
+  }
+
+  // Every reactor this gateway sets reads its users from its user host (a pool's host, or itself),
+  // hiding what that host has erased but not yet purged, exactly as the user View does.
+  private declareUsers(reactor: Reactor): void {
+    declareUserGround(reactor, () => {
+      const host = this.userHost ?? this;
+      return {
+        reactor: host.reactor,
+        erased: () => erasedIdsOf(host.reactor, host.operatorAuthor),
+      };
+    });
+  }
+
+  /** The gateway whose user records this ground reads: its host's, or its own at the root. */
+  userGroundHost(): Gateway {
+    return this.userHost ?? this;
   }
 
   /**
