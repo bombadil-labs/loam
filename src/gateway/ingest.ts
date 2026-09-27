@@ -66,7 +66,7 @@ import {
   slateRefusal,
 } from "./slate.js";
 import { readTrustPolicy } from "./trust.js";
-import { governedProgram } from "./governed-trust.js";
+import { governedProgram, needsLowering } from "./governed-trust.js";
 import { userGroundOf } from "./user-root.js";
 
 // Persist a batch, THEN serve it (the body of `Gateway.append`). The batch is validated whole (one
@@ -638,12 +638,14 @@ export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], v
     () => {
       closed = true;
       gw.channels.delete(channel);
+      gw.userPulses.delete(pulse);
     },
     (_pending, incoming) => incoming, // a slow reader gets the newest membership, nothing stale
   );
   // The reactor has no unsubscribe; the closed flag makes a detached watcher inert (the same
-  // discipline the entity-stream sinks run).
-  gw.reactor.subscribeRaw(() => {
+  // discipline the entity-stream sinks run). A governed Term also reads the users this ground reads,
+  // which a pool's host can move with nothing arriving here, so the gateway pulses it then too.
+  const pulse = (): void => {
     if (closed) return;
     const next = evalRawGoverned(gw, parsed, gw.reactor.snapshot());
     if (next.sort !== "dset") return; // the term's sort is content-independent; unreachable
@@ -652,7 +654,9 @@ export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], v
     if (ids.size === lastIds.size && [...ids].every((id) => lastIds.has(id))) return;
     lastIds = ids;
     channel.push(members);
-  });
+  };
+  gw.reactor.subscribeRaw(pulse);
+  if (needsLowering(parsed, undefined)) gw.userPulses.add(pulse);
   // Registered where teardown can reach it: this subscription is bound to TODAY's reactor, and an
   // erase replaces that reactor — unregistered, the watcher would neither be woken nor ever fire
   // again, freezing on its pre-erase membership with no `done` to notice by.

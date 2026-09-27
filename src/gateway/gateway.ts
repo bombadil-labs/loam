@@ -1368,7 +1368,6 @@ export class Gateway {
     // registrations are this process's own, not the ground's: the replay keeps them by origin.
     this.replayRegistrations();
     this.armValidityTimer(); // the replay re-read the registration boundary
-    this.notifyUserDependents();
   }
 
   // --- federation ------------------------------------------------------------------------------
@@ -1626,8 +1625,8 @@ export class Gateway {
   }
 
   // A pool's governed reads resolve user-named grants against its HOST's users, which its own
-  // reactor never sees change. So the host tells every dependent after each accepted batch, each
-  // validity boundary and each reseat — widely, since a user's root depends on claims, strikes,
+  // reactor never sees change. So the host tells every dependent after each accepted batch and each
+  // validity boundary — widely, since a user's root depends on claims, strikes,
   // counter-strikes, erasures and windows alike — and each dependent re-lowers its views.
   private readonly userDependents = new Set<Gateway>();
 
@@ -1639,7 +1638,11 @@ export class Gateway {
     for (const dependent of this.userDependents) dependent.onUsersMoved();
   }
 
+  /** @internal — ingest.ts: live `watch` evaluations over a governed Term */
+  readonly userPulses = new Set<() => void>();
+
   private onUsersMoved(): void {
+    for (const pulse of [...this.userPulses]) pulse();
     if (this.governedRegistered !== this.registered) {
       this.governedRegistered = this.registered;
       this.governsUsers = this.registered.some((r) =>
