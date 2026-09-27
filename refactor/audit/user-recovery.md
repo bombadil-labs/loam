@@ -31,6 +31,13 @@ exposed. Afterwards:
 - `root`: K2.
 - `attempt`: a random id. It ties the record to the local journal.
 - `supersedes`: the id of the user's previous recovery record, or absent for the first one.
+- `retired`: every key this chain has retired so far, cumulatively: the `retired` of the record it
+  supersedes, plus its own `previous`, minus its own `root`. So each record carries the whole
+  lineage, and erasing an earlier record loses none of it.
+
+The root claim written with a recovery carries the same `retired` set and a `recovery` pointer to
+its record. So even the head's lineage survives the head's own erasure, as long as its root claim is
+held.
 
 **Recovery is durable history.** A recovery record counts from the moment it is held. A negation of
 it changes nothing, and a `validUntil` on it is ignored. Only erasure removes it, because erasure
@@ -86,9 +93,11 @@ root alone once a chain exists.
 
 **A retired key holds no standing.** A key is RETIRED when a record in an unbroken chain names it
 as `previous`, and no descendant in that chain names it as `root`. A key is also retired, for as
-long as the conflict stands, when ANY held recovery record of a BROKEN chain names it as `previous`
-or `root`: a broken history cannot tell which key is the user, so none of the keys it implicates
-stands. Resolving the conflict (the operator erases the wrong record) restores the single chain's
+long as the conflict stands, when a BROKEN chain implicates it: any held recovery record names it
+as `previous`, `root` or in `retired`, or any held recovery root claim for the user names it as its
+key or in `retired`. A broken history cannot tell which key is the user, so none of the keys it
+implicates stands. Because every record and recovery root claim carries the cumulative `retired`
+set, erasing any single record leaves the whole lineage readable in what is still held. Resolving the conflict (the operator erases the wrong record) restores the single chain's
 answer.
 
 `grantHeld` refuses a retired author before any grant is read, whatever the grant names: a literal
@@ -102,7 +111,10 @@ delegations. The fence does not depend on these strikes; they keep the delta rec
 The promise is: a retired key is not the user's root, and holds no standing, without a new operator
 recovery that supersedes the chain head and names it as `root`. The one exception is a deliberate
 operator reset: the operator erases the head and its root claim. After a reset the user has no
-root until the operator writes one, and the erasure records say what was reset.
+root until the operator writes one, and the erasure records say what was reset. A reset removes
+the evidence the fence reads, so after a reset the fence cannot quarantine the reset chain's keys;
+that is what makes it a reset. The operator strikes of the old keys' grants, written by each
+recovery, still stand.
 
 ## The command
 
@@ -161,7 +173,9 @@ Each rail asserts the delta and the door (or the View). Each has a bystander.
 - **E5.** A broken chain fails closed: a second record that does not supersede; an orphan whose
   `supersedes` is not held; a root claim whose `recovery` record is not held. In each the user reads
   as having no root, `keysEverOf` answers the key alone, and `loam user recover` refuses and names
-  the records. In each, K1 also holds a literal write grant, and a counter-negated one: the door
+  the records. Two erasure shapes are included: the only record erased while its root claim stands,
+  and a first record erased while its successor stands; K1 is identified from the held `retired`
+  sets. In each, K1 also holds a literal write grant, and a counter-negated one: the door
   refuses K1, and K1's strike does not bind in a governed read. A bystander key's literal grant
   still writes, and its strike still binds. Erasing the wrong record restores the single chain's
   answer.
