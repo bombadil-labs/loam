@@ -316,6 +316,20 @@ describe("a delegation is revocable by the root and by the operator", () => {
     expect(await door(gw, note(R_SEED, T0 + 41))).toBe("admitted");
   });
 
+  it("the operator's revocation strikes one record: a NEW delegation from R stands", async () => {
+    // Ruling 6 as stated: revocation ends a delegation, not the key. Barring the key for good is
+    // the operator revoking R's own standing, which ends every delegate with it.
+    const { gw, toC } = await delegated();
+    at(T0 + 30);
+    await gw.append([negation(OP_SEED, toC, T0 + 30)]);
+    at(T0 + 40);
+    expect(acts(gw, C)).toBe(false);
+    await gw.append([delegation(R_SEED, C, STORE_ENTITY, false, T0 + 40)]);
+    at(T0 + 50);
+    expect(acts(gw, C)).toBe(true);
+    expect(await door(gw, note(C_SEED, T0 + 50))).toBe("admitted");
+  });
+
   it("the operator cannot undo R's revocation; it can undo its own", async () => {
     const { gw, toC } = await delegated();
     at(T0 + 30);

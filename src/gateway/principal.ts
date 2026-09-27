@@ -2,6 +2,7 @@ import {
   associatedKeys,
   authorsForPrincipal,
   resolvePrincipal,
+  computeId,
   verifyDelta,
   type Delta,
   type Reactor,
@@ -23,6 +24,16 @@ const suppressions = new Map<string, Suppression>();
 
 const negates = (d: Delta): boolean => d.claims.pointers.some((p) => p.role === "negates");
 
+// The door asks this on every write, so a verified signature is cached per held object. The
+// content address is rechecked each time: a mutated object cannot carry an old verdict forward.
+const verified = new WeakMap<Delta, string>();
+function signed(d: Delta): boolean {
+  if (d.sig !== undefined && verified.get(d) === d.sig && computeId(d.claims) === d.id) return true;
+  if (verifyDelta(d) !== "verified") return false;
+  verified.set(d, d.sig!);
+  return true;
+}
+
 /**
  * Who may revoke principal evidence (README ruling 6): the record's own signer — the root, for
  * every delegation Loam honors — or the store's pinned operator. The operator may only REVOKE: its
@@ -39,14 +50,16 @@ export function principalSuppression(operator: string | undefined): Suppression 
     rule = (negation, target) =>
       (negation.claims.author === target.claims.author ||
         (operator !== undefined && negation.claims.author === operator && !negates(target))) &&
-      verifyDelta(negation) === "verified";
+      signed(negation);
     suppressions.set(key, rule);
   }
   return rule;
 }
 
-// Loam's scope rule: SPEC-14's prefix policy, minus the universal edge. A `*`-scoped delegation
-// would carry a delegate into every container, and ruling 6 scopes every delegation to one.
+// Loam's scope rule: SPEC-14's prefix policy, minus the universal edge, which would carry a
+// delegate everywhere. This alone does not hold a delegate to one container: a broad scope still
+// covers every request beneath it, so the one-container rule is kept by what Loam signs and by
+// the scope each door asks with.
 const loamScope = (edgeScope: string, request: string): boolean =>
   edgeScope !== "*" && (edgeScope === request || request.startsWith(`${edgeScope}:`));
 
@@ -86,6 +99,9 @@ export function keyActsFor(
 ): boolean {
   if (key === who.root) return true;
   if (!AUTHOR.test(who.root) || !AUTHOR.test(key)) return false;
+  // Every piece of principal evidence points at the root's entity; a root nothing points at has
+  // delegated nothing, and the door skips the full read for every grant it is not about.
+  if (reactor.byTarget(who.root).length === 0) return false;
   return resolvePrincipal(
     reactor,
     who.root,
