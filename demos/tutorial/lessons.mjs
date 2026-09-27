@@ -46,7 +46,8 @@
 //   - Two copy pins are frozen: a finished quiz card's button says "done", and a sweep that
 //     found nothing says "there was nothing to destroy".
 //
-// AND ONE CLOCK. Every claim this arc writes is hand-signed at `ctx.ts()`. The mutation door is
+// AND ONE CLOCK. Every claim this arc writes is hand-signed at `ctx.ts()`, made valid no later
+// than now (`stampOf`, `heldNow`). The mutation door is
 // registered and the console invites the student through it, but no lesson writes that way:
 // `gateway.nextTimestamp()` and `ctx.ts()` are two monotonic counters, and interleaving them
 // would leave "whose word is latest" decided by a millisecond race — which is a coin flip on
@@ -56,9 +57,11 @@ import {
   CKPT_PREFIX,
   STORE_PREFIX,
   SEED_KEY,
+  heldNow,
   plantTerm,
   readGlossary,
   readProgress,
+  stampOf,
   sweepCheckpoints,
 } from "./player.mjs";
 
@@ -164,16 +167,13 @@ const entity = (role, id, context) => ({
 const prim = (value) => ({ role: "value", target: { kind: "primitive", value } });
 
 const say = (loam, ctx, pointers) =>
-  loam.signClaims(
-    { ...((t) => ({ timestamp: t, validFrom: t }))(ctx.ts()), author: ctx.author, pointers },
-    ctx.seed,
-  );
+  loam.signClaims({ ...stampOf(ctx), author: ctx.author, pointers }, ctx.seed);
 
 /** The same claim, in someone else's hand — signed by their key, refused if it is not theirs. */
 const sayAs = (loam, ctx, seed, pointers) =>
   loam.signClaims(
     {
-      ...((t) => ({ timestamp: t, validFrom: t }))(ctx.ts()),
+      ...stampOf(ctx),
       author: loam.authorForSeed(seed),
       pointers,
     },
@@ -520,7 +520,7 @@ export function buildArc(loam) {
   const grantWriting = (ctx, to) =>
     ctx.gateway.append([
       loam.signClaims(
-        loam.grantClaims(loam.STORE_ENTITY, to, "write", ctx.author, ctx.ts()),
+        heldNow(loam.grantClaims(loam.STORE_ENTITY, to, "write", ctx.author, ctx.ts())),
         ctx.seed,
       ),
     ]);
@@ -879,7 +879,9 @@ act is going to send you a bill for it.`,
             if (note === undefined) return;
             await ctx.gateway.append([
               loam.signClaims(
-                loam.makeNegationClaims(ctx.author, ctx.ts(), note.id, "nobody understood it"),
+                heldNow(
+                  loam.makeNegationClaims(ctx.author, ctx.ts(), note.id, "nobody understood it"),
+                ),
                 ctx.seed,
               ),
             ]);
@@ -1098,7 +1100,7 @@ Rae is a character. You would never hold anybody else's.)`,
               await ctx.gateway.append([
                 loam.signClaims(
                   {
-                    ...((t) => ({ timestamp: t, validFrom: t }))(ctx.ts()),
+                    ...stampOf(ctx),
                     author: RAE_FIRST,
                     pointers: [entity("subject", VIEWING, "note"), prim(FORGED_LINE)],
                   },
@@ -1631,7 +1633,10 @@ change it twice in a minute without losing a single line of anything.`,
             );
             if (permission === undefined) return;
             await ctx.gateway.append([
-              loam.signClaims(loam.revocationClaims(permission.id, ctx.author, ctx.ts()), ctx.seed),
+              loam.signClaims(
+                heldNow(loam.revocationClaims(permission.id, ctx.author, ctx.ts())),
+                ctx.seed,
+              ),
             ]);
           },
           observe: {
