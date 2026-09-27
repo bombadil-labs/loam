@@ -232,12 +232,24 @@ export function resolveUserView(
   if (userNameDefect(name) !== undefined) return undefined;
   // An erased user or role record stops counting at once, even before its bytes are purged. An
   // operator-authored row at this user that does not verify never counts: the indexed readers in
-  // user-root.ts skip it too. Only this entity's own index is checked, never the whole store (H8).
+  // user-root.ts skip it too. So is an operator negation of such a row, or of a negation of one,
+  // that does not verify: a negation is filed at the delta it strikes, not at the user, so it is
+  // found by walking each row's negations. Only this entity's own rows and the negations that reach
+  // them are checked, never the whole store (H8).
   const hidden = new Set(erasedFromReading(reactor, operator));
-  for (const id of reactor.byTarget(userEntity(name))) {
+  const walked = new Set<string>();
+  const check = (id: string): void => {
+    if (walked.has(id)) return;
+    walked.add(id);
     const d = reactor.get(id);
-    if (d !== undefined && d.claims.author === operator && !verified(d)) hidden.add(id);
-  }
+    if (d === undefined || d.claims.author !== operator) return;
+    if (!verified(d)) {
+      hidden.add(id);
+      return;
+    }
+    for (const n of reactor.negationsOf(id)) check(n);
+  };
+  for (const id of reactor.byTarget(userEntity(name))) check(id);
   const snapshot = reactor.snapshot();
   const ground =
     hidden.size === 0 ? snapshot : DeltaSet.from([...snapshot].filter((d) => !hidden.has(d.id)));
