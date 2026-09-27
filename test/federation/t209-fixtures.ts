@@ -30,7 +30,7 @@ import { authorForSeed, contentAddress, type Policy, type Schema } from "@bombad
 import { run } from "../../src/cli/cli.js";
 import { exportOffer } from "../../src/federation/offer.js";
 import { grantClaims } from "../../src/gateway/accounts.js";
-import { declareHostSizedBill } from "../helpers/pool-bill.js";
+import { declareHostSizedBill, HOST_SIZED_BILL_MS } from "../helpers/pool-bill.js";
 import { CTX_MANIFEST } from "../../src/gateway/adopt-law.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -86,7 +86,9 @@ export const store = async (
         ? { grants: [grantClaims(STORE_ENTITY, PEN, "write", BOB, 9_001)] }
         : {}),
     }),
-    opts,
+    // The store's OWN renders run on this budget. The default 500ms own-route clock starts once the
+    // worker is online, and under a loaded suite its setup and module run alone can use it up.
+    { ...opts, renderTimeoutMs: HOST_SIZED_BILL_MS },
   );
   // Every receiver in these suites asserts pool-render SUCCESS through channel apps; the
   // default 500ms bill also clocks worker spawn on the pool path and loses under load (T253).
