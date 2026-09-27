@@ -3618,6 +3618,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
               container,
               connectionKey: actor,
               ownerSeed: owner.seed,
+              ownerName: user,
             });
             return inboxName(container, actor);
           },

@@ -18,7 +18,7 @@ import { STORE_ENTITY } from "../gateway/genesis.js";
 import type { Leeway } from "../gateway/leeway.js";
 import { stampOn, withStamp } from "../gateway/stamp.js";
 import { authoredBy } from "../gateway/membership.js";
-import { rootClaims } from "./users.js";
+import { resolveUserView, rootClaims, userEntity } from "./users.js";
 
 export interface ProvisionRefusal {
   readonly status: number;
@@ -60,12 +60,15 @@ export async function ensureUserKey(
       const operator = gw.operatorAuthor;
       const signer = gw.options.seed;
       const key = authorForSeed(minted);
-      // `stampOn`, not `gw.stamp`: this act runs over any gateway-shaped ground. The grant and the
-      // user's root pointer land together, so a user never holds one without the other.
+      // `stampOn`, not `gw.stamp`: this act runs over any gateway-shaped ground. The grant names the
+      // USER, and stands for whatever root the user holds now; it lands with the root pointer, so a
+      // user never holds one without the other. With no user record the name resolves to nobody, so
+      // then the grant names the key.
+      const known = resolveUserView(gw.reactor, operator, gw.validityNow(), user) !== undefined;
       await gw.append([
         signClaims(
           withStamp(stampOn(gw, operator, Date.now()), (t) =>
-            grantClaims(STORE_ENTITY, key, "write", operator, t),
+            grantClaims(STORE_ENTITY, known ? userEntity(user) : key, "write", operator, t),
           ),
           signer,
         ),

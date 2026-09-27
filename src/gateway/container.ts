@@ -2009,6 +2009,9 @@ export interface BindConnectionOptions {
   readonly connectionKey: string;
   /** The owner's signing seed (their §36 session in the real flow). Authors the connection grant. */
   readonly ownerSeed: string;
+  /** The owner's Loam user name, when known: their admin grant in the inbox then names the user
+   *  and follows their current root. Absent, it names the owner's key. */
+  readonly ownerName?: string;
   /** The inbox pool's own store. Defaults to a fresh in-memory backend. */
   readonly backend?: StoreBackend;
 }
@@ -2307,11 +2310,19 @@ export async function bindConnectionImpl(
   // entity, so this never touches the real store's authority; grantHeld resolves connection-write →
   // owner's delegation → owner-admin → operator. The store operator appears once here
   // (administrative provisioning, §39.1 point 3) and never on the read/write data path.
+  // The grant names the USER when the user's current root is this owner, so it follows the user
+  // across a re-point; otherwise (no name, or a user with no root record) it names the key.
+  const userSubject = opts.ownerName === undefined ? undefined : `${USER_PREFIX}${opts.ownerName}`;
+  const ownerSubject =
+    userSubject !== undefined &&
+    subjectKeyAt(pool.reactor, pool.validityNow(), operator, userSubject) === owner
+      ? userSubject
+      : owner;
   if (!holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, owner, "admin", operator)) {
     await pool.append([
       signClaims(
         withStamp(pool.stamp(operator), (t) =>
-          grantClaims(STORE_ENTITY, owner, "admin", operator, t),
+          grantClaims(STORE_ENTITY, ownerSubject, "admin", operator, t),
         ),
         operatorSeed,
       ),

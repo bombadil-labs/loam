@@ -25,7 +25,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { authorForSeed, signClaims, type Claims } from "@bombadil/rhizomatic";
+import { authorForSeed, Reactor, signClaims, type Claims } from "@bombadil/rhizomatic";
 import { userSeedPath } from "../../src/cli/config.js";
 import { holdsGrant } from "../../src/gateway/accounts.js";
 import { containerClaims } from "../../src/gateway/container.js";
@@ -628,6 +628,9 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     const ground = {
       options: { seed: OPERATOR_SEED },
       operatorAuthor: OPERATOR,
+      // Provisioning reads the ground to decide what its grant names: here, no user record.
+      reactor: new Reactor(),
+      validityNow: () => 1,
       nextTimestamp: () => 1,
       append: (): Promise<void> =>
         failures-- > 0 ? Promise.reject(new Error("no room on the ground")) : Promise.resolve(),

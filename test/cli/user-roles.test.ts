@@ -17,7 +17,7 @@ import { run } from "../../src/cli/cli.js";
 import { readSeed, readUserSeed, storePath, userSeedPath } from "../../src/cli/config.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
-import { grantClaims } from "../../src/gateway/accounts.js";
+import { grantClaims, holdsGrant } from "../../src/gateway/accounts.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import {
@@ -487,18 +487,26 @@ describe("loam user remove-role", () => {
     await g.close();
   });
 
-  it("SEED ABSENT: strikes the role, names the un-struck grant, still succeeds", async () => {
+  it("SEED ABSENT: strikes the role AND the admin grant, which names the user", async () => {
     await run(["user", "create", "yara", "--operator", "--home", home], io(), password("pw"));
+    const seedFile = readUserSeed(home, "yara");
+    if (seedFile.kind !== "present") throw new Error("user create writes a seed file");
+    const yara = authorForSeed(seedFile.seed);
     rmSync(userSeedPath(home, "yara"));
+    let g = await ground();
+    expect(holdsGrant(g.reactor, Date.now(), STORE_ENTITY, yara, "admin", g.operator)).toBe(true);
+    await g.close();
 
     const code = await run(
       ["user", "remove-role", "yara", "--role=operator", "--home", home],
       io(),
     );
     expect(code).toBe(0);
-    expect(out.join("\n")).toMatch(/could not be located/);
-    const g = await ground();
+    // The grant is found by the user's name, so no seed file is needed to strike it.
+    expect(out.join("\n")).not.toMatch(/could not be located/);
+    g = await ground();
     expect(rolesOf(g.reactor, g.operator, Date.now(), "yara").has("operator")).toBe(false);
+    expect(holdsGrant(g.reactor, Date.now(), STORE_ENTITY, yara, "admin", g.operator)).toBe(false);
     await g.close();
   });
 

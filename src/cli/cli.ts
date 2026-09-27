@@ -118,6 +118,7 @@ import {
   type UserRole,
   reservedNameDefect,
 } from "../server/users.js";
+import { subjectKeyAt, USER_PREFIX } from "../gateway/user-root.js";
 import { promptLine, promptSecret } from "./prompt.js";
 import type { StoreBackend } from "../store/backend.js";
 import { ArchiveBackend } from "../store/archive.js";
@@ -2708,7 +2709,7 @@ async function cmdUserCreate(
         );
         mintedRoot = root.id;
         deltas.push(
-          signClaims(grantClaims(STORE_ENTITY, subject, "admin", operator, at + 2), seed),
+          signClaims(grantClaims(STORE_ENTITY, userEntity(name), "admin", operator, at + 2), seed),
           root,
         );
       }
@@ -3022,7 +3023,7 @@ async function cmdUserRole(
           seed,
         );
         deltas.push(
-          signClaims(grantClaims(STORE_ENTITY, subject, "admin", operator, at + 1), seed),
+          signClaims(grantClaims(STORE_ENTITY, userEntity(name), "admin", operator, at + 1), seed),
           assignedRoot,
         );
       }
@@ -3110,15 +3111,21 @@ async function cmdUserRole(
         );
         return 1;
       }
+      // The operator role's admin grant names the USER now (older stores: the key). Only the
+      // admin grant goes: the user's own write grant is not the role's.
+      grantIds = grantStanding(
+        gateway.reactor,
+        gateway.validityNow(),
+        operator,
+        userEntity(name),
+        "admin",
+      ).surviving;
       if (seedRead.kind === "present") {
         const subject = authorForSeed(seedRead.seed);
-        grantIds = survivingGrantClaimIds(
-          gateway.reactor,
-          gateway.validityNow(),
-          operator,
-          subject,
+        grantIds.push(
+          ...survivingGrantClaimIds(gateway.reactor, gateway.validityNow(), operator, subject),
         );
-      } else {
+      } else if (grantIds.length === 0) {
         grantNote =
           ` (its signing grant could not be located — ${userSeedPath(home, name)} is missing — ` +
           `and stays live; it is inert unless someone still holds that lost key)`;
@@ -3860,8 +3867,17 @@ async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<numbe
         : g.struckAt !== undefined
           ? `negated ${new Date(g.struckAt).toISOString()}`
           : `does not bind — ${whyNotBinding(g, operator)}${inert}`;
+      // A grant naming a USER stands for the user's current root: show that key, and the user's row.
+      const named = g.subject.startsWith(USER_PREFIX)
+        ? g.subject.slice(USER_PREFIX.length)
+        : undefined;
+      const key =
+        named === undefined
+          ? g.subject
+          : (subjectKeyAt(gateway.reactor, gateway.validityNow(), operator, g.subject) ??
+            g.subject);
       const common = {
-        author: shortAuthor(g.subject),
+        author: shortAuthor(key),
         verb: g.prefix === undefined ? g.verb : `${g.verb}("${g.prefix}")`,
         granted: new Date(g.at).toISOString(),
         live,
@@ -3870,9 +3886,17 @@ async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<numbe
       };
       // Every identity holding this key gets the row — a key copied into two files holds standing
       // under both names, and naming only the first would hide the second.
-      const holders = identities.filter((i) => i.author === g.subject);
+      const holders = identities.filter((i) =>
+        named === undefined ? i.author === g.subject : i.kind === "user" && i.name === named,
+      );
+      // A grant naming a user is that user's row even when this home holds no file for them: the
+      // grant itself says whose it is.
       if (holders.length === 0) {
-        rows.push({ kind: "unattributed", name: LEDGER_NONE, standing, ...common });
+        rows.push(
+          named === undefined
+            ? { kind: "unattributed", name: LEDGER_NONE, standing, ...common }
+            : { kind: "user", name: named, standing, ...common },
+        );
       }
       for (const h of holders) {
         rows.push({ kind: h.kind, name: h.name, standing: withNote(standing, h.note), ...common });
@@ -3882,6 +3906,7 @@ async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<numbe
     const granted = new Set(grants.map((g) => g.subject));
     for (const i of identities) {
       if (i.author !== undefined && granted.has(i.author)) continue;
+      if (i.kind === "user" && granted.has(`${USER_PREFIX}${i.name}`)) continue;
       // A §58 connection's standing is its POOL's (SPEC §58): the owner-authored write grant in
       // the inbox, never a store-wide one. Ask the pool the same question the door asks, so the
       // two surfaces of one store cannot answer differently about one key.

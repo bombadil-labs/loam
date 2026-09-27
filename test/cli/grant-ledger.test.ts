@@ -454,8 +454,8 @@ describe("T205 (b) — a negated grant is shown negated, never omitted", () => {
     }
     const ivy = authorOfUser("ivy");
     const kit = authorOfUser("kit");
-    expect((await grantIds(ivy)).surviving).toHaveLength(1);
-    expect((await grantIds(kit)).surviving).toHaveLength(1);
+    expect((await grantIds("user:ivy")).surviving).toHaveLength(1);
+    expect((await grantIds("user:kit")).surviving).toHaveLength(1);
 
     expect(
       await run(["user", "remove-role", "ivy", "--role=operator", "--home", home], io()),
@@ -463,11 +463,12 @@ describe("T205 (b) — a negated grant is shown negated, never omitted", () => {
     ).toBe(0);
     clear();
 
-    // DELTA: a real negation of a real grant id on one side, and nothing on the other.
-    expect((await grantIds(ivy)).struck).toHaveLength(1);
-    expect((await grantIds(ivy)).surviving).toHaveLength(0);
-    expect((await grantIds(kit)).struck).toHaveLength(0);
-    expect((await grantIds(kit)).surviving).toHaveLength(1);
+    // DELTA: a real negation of a real grant id on one side, and nothing on the other. The grants
+    // name the USER; the door resolves the name to the key below.
+    expect((await grantIds("user:ivy")).struck).toHaveLength(1);
+    expect((await grantIds("user:ivy")).surviving).toHaveLength(0);
+    expect((await grantIds("user:kit")).struck).toHaveLength(0);
+    expect((await grantIds("user:kit")).surviving).toHaveLength(1);
     // OBJECT, at the door's derivation.
     expect(await heldVerbs(ivy)).toEqual([]);
     expect(await heldVerbs(kit)).toEqual(["admin"]);
