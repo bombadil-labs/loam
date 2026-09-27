@@ -88,6 +88,13 @@ Design:
    quarantine gets its own governing key in step 6. A host may roll them up for convenience, as
    combined views or operations. Each peer still keeps its own admission, arrival counters,
    refusals, erasure obligations and reports.
+8. **Recovery, connections and "your own"** (Myk, 2026-09-27, taking the recommendations):
+   - After a key is recovered, the user's container still shows what the old key wrote. The new
+     key vouches for the old one, and can withdraw that to disown a thief's writes.
+   - "Clear my own data" includes what the user's connection wrote, even after it is revoked.
+   - Revoking a connection hides its earlier writes in the user's container view (ruling 4).
+   - A connection's own strike on data does not count. Only the user's own key strikes; trust
+     never widens to delegated keys.
 
 ## What stays in force
 
