@@ -30,7 +30,14 @@ import { DeltaSet, evalTerm } from "@bombadil/rhizomatic";
 import { erasedFromReading } from "../gateway/erase.js";
 import { entityGatherBody } from "../gateway/gather.js";
 
-import { chainRoot, CTX_ROLE, CTX_ROOT, CTX_USER, userEntity } from "../gateway/user-root.js";
+import {
+  chainRoot,
+  CTX_ROLE,
+  CTX_ROOT,
+  CTX_USER,
+  userEntity,
+  verified,
+} from "../gateway/user-root.js";
 export { CTX_ROLE, CTX_ROOT, userEntity };
 
 const AUTHOR = /^ed25519:[0-9a-f]{64}$/;
@@ -223,8 +230,14 @@ export function resolveUserView(
 ): View | undefined {
   if (operator === undefined) return undefined; // no operator, no constitution, no users
   if (userNameDefect(name) !== undefined) return undefined;
-  // An erased user or role record stops counting at once, even before its bytes are purged.
-  const hidden = erasedFromReading(reactor, operator);
+  // An erased user or role record stops counting at once, even before its bytes are purged. An
+  // operator-authored row at this user that does not verify never counts: the indexed readers in
+  // user-root.ts skip it too. Only this entity's own index is checked, never the whole store (H8).
+  const hidden = new Set(erasedFromReading(reactor, operator));
+  for (const id of reactor.byTarget(userEntity(name))) {
+    const d = reactor.get(id);
+    if (d !== undefined && d.claims.author === operator && !verified(d)) hidden.add(id);
+  }
   const snapshot = reactor.snapshot();
   const ground =
     hidden.size === 0 ? snapshot : DeltaSet.from([...snapshot].filter((d) => !hidden.has(d.id)));
@@ -306,7 +319,7 @@ export function nameStillHeld(
   let notYetValid = false;
   for (const id of reactor.byTarget(entity)) {
     const d = reactor.get(id);
-    if (d === undefined || d.claims.author !== operator) continue;
+    if (d === undefined || d.claims.author !== operator || !verified(d)) continue;
     const aboutPerson = d.claims.pointers.some(
       (p) =>
         p.target.kind === "entity" &&
