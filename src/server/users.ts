@@ -28,7 +28,6 @@ import {
 } from "@bombadil/rhizomatic";
 import { DeltaSet, evalTerm } from "@bombadil/rhizomatic";
 import { erasedFromReading } from "../gateway/erase.js";
-import { negatedAt } from "../gateway/negation.js";
 import { entityGatherBody } from "../gateway/gather.js";
 
 const CTX_USER = "loam.user";
@@ -285,28 +284,26 @@ export function rootOf(
 }
 
 /**
- * The operator's claims about `name` that still stand, by the same rule the user View reads them:
- * held, operator-signed, and not negated at `now` by the operator (recursively, in window). These
- * say what a PERSON holds — roles and a root — so a new person given an erased user's name must
- * not inherit them, and creating a name strikes them. The name record itself is not listed.
+ * Does the ground still HOLD anything the operator said about the person called `name` — their
+ * record, a role or a root — whether struck, lapsed or not yet valid? A name that answers yes
+ * belonged to someone, and giving it to a new person would hand them what is left: a strike can
+ * lapse and revive a role, and the old key's grants and seed file are not at this entity at all.
+ * Only erasure, which removes the bytes, frees a name.
  */
-export function standingPersonClaimIds(
-  reactor: Reactor,
-  operator: string,
-  now: number,
-  name: string,
-): string[] {
-  const negated = negatedAt(reactor, now, operator);
-  const out: string[] = [];
-  for (const id of reactor.byTarget(userEntity(name))) {
+export function nameStillHeld(reactor: Reactor, operator: string, name: string): boolean {
+  const entity = userEntity(name);
+  for (const id of reactor.byTarget(entity)) {
     const d = reactor.get(id);
-    if (d === undefined || d.claims.author !== operator || negated(id)) continue;
-    const held = d.claims.pointers.some(
+    if (d === undefined || d.claims.author !== operator) continue;
+    const aboutPerson = d.claims.pointers.some(
       (p) =>
         p.target.kind === "entity" &&
-        (p.target.entity.context === CTX_ROOT || p.target.entity.context === CTX_ROLE),
+        p.target.entity.id === entity &&
+        (p.target.entity.context === CTX_USER ||
+          p.target.entity.context === CTX_ROLE ||
+          p.target.entity.context === CTX_ROOT),
     );
-    if (held) out.push(id);
+    if (aboutPerson) return true;
   }
-  return out;
+  return false;
 }
