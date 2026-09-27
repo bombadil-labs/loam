@@ -21,6 +21,7 @@ import type { ContestedNameReport } from "../gateway/lifecycle.js";
 import type { Gateway } from "../gateway/gateway.js";
 import type { ContainerAttention } from "../gateway/attention.js";
 import { containerCensusImpl } from "../gateway/container-census.js";
+import { authoredBy } from "../gateway/membership.js";
 
 /** What the door computed for the attention panel: the summary plus the quiet set. */
 export interface AttentionView {
@@ -66,12 +67,6 @@ export type RevokePlan =
       };
     }
   | { readonly act: "refuse"; readonly status: number; readonly message: string };
-
-const authoredBy = (publicKey: string): unknown => ({
-  op: "select",
-  pred: { match: { field: "author", cmp: "eq", const: publicKey } },
-  in: "input",
-});
 
 export interface AdminPagesOpts {
   home: string;

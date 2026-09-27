@@ -17,6 +17,7 @@ import type { Gateway } from "../gateway/gateway.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
 import type { Leeway } from "../gateway/leeway.js";
 import { stampOn, withStamp } from "../gateway/stamp.js";
+import { authoredBy } from "../gateway/membership.js";
 
 export interface ProvisionRefusal {
   readonly status: number;
@@ -25,13 +26,6 @@ export interface ProvisionRefusal {
 
 /** A leaf a person may name under their home: one path segment, never a colon (the separator). */
 export const LEAF_RE = /^[a-z0-9][a-z0-9_-]{0,62}$/i;
-
-/** The membership every provisioned container starts with: what its owner authored. */
-export const authoredBy = (publicKey: string): unknown => ({
-  op: "select",
-  pred: { match: { field: "author", cmp: "eq", const: publicKey } },
-  in: "input",
-});
 
 const said = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 

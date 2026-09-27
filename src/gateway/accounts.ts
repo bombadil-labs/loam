@@ -568,6 +568,23 @@ export function grantsHeldBy(
   author: string,
   operator?: string,
 ): HeldGrant[] {
+  // The STANDING question: what may `author` do. Today a grant's subject is its holder's key, so
+  // this is the literal selection; once a subject can name a user, this resolves it and
+  // `grantsNaming` does not.
+  return grantsNaming(reactor, now, author, operator);
+}
+
+/**
+ * The effective surviving grants whose subject is literally `subject`: the SELECTION question, for
+ * what to list or strike. It never resolves a subject to the keys that act for it, so striking a
+ * connection key's grants can never reach its user's own.
+ */
+export function grantsNaming(
+  reactor: Reactor,
+  now: number,
+  author: string,
+  operator?: string,
+): HeldGrant[] {
   const ctx: Ctx = { reactor, now, operator };
   const out: HeldGrant[] = [];
   for (const d of survivingAt(ctx, STORE_ENTITY, CTX_GRANTS, new Set())) {
