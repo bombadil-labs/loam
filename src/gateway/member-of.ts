@@ -12,7 +12,13 @@
 // separates old writes from new ones across stores is an open decision.
 
 import { keysActingFor } from "./principal.js";
-import { retiredKeysOf, subjectKeyAt, USER_PREFIX, userGroundOf } from "./user-root.js";
+import {
+  retiredKeysOf,
+  subjectKeyAt,
+  USER_PREFIX,
+  userGroundOf,
+  userNameDefect,
+} from "./user-root.js";
 import type { Reactor } from "@bombadil/rhizomatic";
 
 export const MEMBER_OF = "loam.memberOf";
@@ -29,8 +35,6 @@ export const writtenByUser = (user: string, scope: string): unknown => ({
   in: "input",
 });
 
-const USER_NAME = /^[A-Za-z0-9._-]{1,64}$/;
-
 // Why a `loam.memberOf` node's own shape is malformed, or undefined. Only the node's shape: its
 // user's current state is a read-time question, never a validity one.
 function nodeDefect(value: unknown): string | undefined {
@@ -40,7 +44,8 @@ function nodeDefect(value: unknown): string | undefined {
   const keys = Object.keys(value).sort();
   if (keys.join(",") !== "scope,user") return `${MEMBER_OF} takes exactly { user, scope }`;
   const { user, scope } = value as { user: unknown; scope: unknown };
-  if (typeof user !== "string" || !USER_NAME.test(user)) {
+  // The same rule `loam user create` applies, so a membership cannot name a user no one can be.
+  if (typeof user !== "string" || userNameDefect(user) !== undefined) {
     return `${MEMBER_OF}.user must be a user name`;
   }
   if (typeof scope !== "string" || scope.length === 0) {
@@ -83,14 +88,15 @@ const inSet = (authors: readonly string[]): unknown => ({
   match: { field: "author", cmp: "inSet", const: [...authors].sort() },
 });
 
-/** Does this membership JSON carry a `loam.memberOf` node anywhere? */
+/**
+ * Does this membership JSON carry a `loam.memberOf` node anywhere, well-formed or not? An object KEY
+ * is what counts: the same text as a string value (a `const`, say) is ordinary data.
+ */
 export function hasMemberOf(json: unknown): boolean {
-  let found = false;
-  mapNodes(json, () => {
-    found = true;
-    return inSet([]);
-  });
-  return found || JSON.stringify(json ?? null).includes(JSON.stringify(MEMBER_OF));
+  if (Array.isArray(json)) return json.some(hasMemberOf);
+  if (json === null || typeof json !== "object") return false;
+  const rec = json as Record<string, unknown>;
+  return MEMBER_OF in rec || Object.values(rec).some(hasMemberOf);
 }
 
 /**

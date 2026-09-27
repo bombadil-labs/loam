@@ -41,7 +41,7 @@ import { programOf, type ProgramName } from "./registration.js";
 import type { ResolvedNode } from "../surface/surface.js";
 import { withStamp } from "./stamp.js";
 import { USER_PREFIX } from "./user-root.js";
-import { membershipForValidation } from "./member-of.js";
+import { hasMemberOf, membershipForValidation } from "./member-of.js";
 
 // WHAT A PAGE COSTS. Every page pays three separate costs, and two of them are now independent
 // of the store's size (H8, ticket T163):
@@ -337,6 +337,10 @@ const isPlainClaim = (gw: Gateway, d: Delta, feedsTrust: (d: Delta) => boolean):
 // the log moved rebuilds, which is exactly the old cost and never a wrong page. Under the governed
 // body's mask the sub-view selects operator-authored grants, so a stranger's claim never feeds it.
 export function trustFeeder(membership: unknown): ((d: Delta) => boolean) | undefined {
+  // A membership naming a user selects by who acts for that user NOW, which no per-delta fold can
+  // see: every arrival rebuilds. (Listings index schema-derived memberships, which cannot carry the
+  // node; this keeps any future index honest.)
+  if (hasMemberOf(membership)) return undefined;
   const term = parseTerm(membershipForValidation(membership));
   if (term.kind !== "select" || predUnbounded(term.pred)) return undefined;
   const of = term.of;

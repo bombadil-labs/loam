@@ -19,6 +19,7 @@ import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { authoredBy } from "../../src/gateway/membership.js";
 import {
+  hasMemberOf,
   lowerMembershipJson,
   membershipForValidation,
   writtenByUser,
@@ -148,6 +149,25 @@ describe("the node's shape is validated; its user's state is not", () => {
         ]),
       ).rejects.toThrow(/membership/);
     }
+  });
+
+  it("the node's user is held to the user-name rule; a well-formed name with no user is still valid", () => {
+    for (const user of ["Ada", ".ada", "ada/x", ""]) {
+      expect(() => membershipForValidation(writtenByUser(user, SCOPE))).toThrow(/user name/);
+    }
+    expect(() => membershipForValidation(writtenByUser("zed", SCOPE))).not.toThrow();
+  });
+
+  it("the text loam.memberOf as a value is ordinary data, not the node (a control)", async () => {
+    const { gw } = await world();
+    const literal = {
+      op: "select",
+      pred: { match: { field: "author", cmp: "eq", const: "loam.memberOf" } },
+      in: "input",
+    };
+    expect(hasMemberOf(literal)).toBe(false);
+    expect(hasMemberOf(writtenByUser("ada", SCOPE))).toBe(true);
+    expect(freezeAgreement(gw.reactor, literal, "any") ?? "").not.toMatch(/cannot freeze/);
   });
 
   it("a key-named membership lowers to itself (a control)", () => {
