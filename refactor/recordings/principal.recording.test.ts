@@ -62,7 +62,7 @@ import {
   operatorMarkerClaims,
   STORE_ENTITY,
 } from "../../src/gateway/genesis.js";
-import { authoredBy } from "../../src/server/provision.js";
+import { authoredBy } from "../../src/gateway/membership.js";
 import { subtreeOf } from "../../src/server/subtree.js";
 import { resolveUserView, roleClaims, rolesOf, userClaims } from "../../src/server/users.js";
 import { MemoryBackend } from "../../src/store/memory.js";

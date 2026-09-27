@@ -60,7 +60,7 @@ import {
   constitutionalDefect,
   CTX_GRANTS,
   grantClaims,
-  grantsHeldBy,
+  grantsNaming,
   holdsGrant,
   honoredStrikeOn,
   validAt,
@@ -3595,7 +3595,7 @@ interface GroundGrant {
 
 /**
  * Every grant-shaped delta filed at the store entity, whoever signed it. Whether one BINDS is
- * `grantsHeldBy`'s question and is asked separately, because the two answers are different facts: a
+ * `grantsNaming`'s question and is asked separately, because the two answers are different facts: a
  * grant nobody honours is still a row, and a row that quietly vanished is the omission this ledger
  * exists to make impossible.
  *
@@ -3655,7 +3655,7 @@ function groundGrants(reactor: Reactor, now: number, operator: string): GroundGr
  *  - MALFORMED LAW binds nothing for anyone, the operator included, and no re-granting fixes it.
  *  - OUT OF WINDOW: the grant's own [validFrom, validUntil) does not hold at the read time.
  *  - REGISTER is not delegable. An admin may mint `write` and `admin` all day; `register` from any
- *    author but the operator is refused by `grantsHeldBy` no matter how sound its chain, because the
+ *    author but the operator is refused by `grantsNaming` no matter how sound its chain, because the
  *    store signs registrations with the OPERATOR'S key. Saying "no chain reaches the operator" here
  *    would send an operator to repair a chain that is already intact.
  *  - Otherwise the chain really is the answer: whoever signed it holds no effective admin standing.
@@ -3750,7 +3750,7 @@ async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<numbe
     // effectiveness here: two answers to "does this bind" is one too many.
     const binding = new Set<string>();
     for (const subject of new Set(grants.map((g) => g.subject))) {
-      for (const held of grantsHeldBy(gateway.reactor, gateway.validityNow(), subject, operator))
+      for (const held of grantsNaming(gateway.reactor, gateway.validityNow(), subject, operator))
         binding.add(held.id);
     }
     const withNote = (text: string, note?: string): string =>
@@ -4222,12 +4222,13 @@ async function cmdClientRevoke(
     // this command finds the client by, and the retry would answer "no such client" while the
     // grants stand.
     //
-    // The strike set is the DOOR's own resolution (`grantsHeldBy`), not a flat scan: it carries
-    // strike survival transitively and includes standing an effective admin minted, so what this
-    // command strikes is what enforcement honors as of this read. (A grant naming this key whose
+    // The strike set is the effective grants whose subject is literally this key (`grantsNaming`),
+    // not a flat scan: it carries strike survival transitively and includes standing an effective
+    // admin minted. It is never widened to the keys that act for a user, so revoking a connection
+    // cannot strike its user's own grants. (A grant naming this key whose
     // ISSUER's own chain is currently broken survives dormant and unstruck — a property of the
     // admin chain, shared with every revoke surface, not widened here.)
-    const ids = grantsHeldBy(gateway.reactor, gateway.validityNow(), actor, operator).map(
+    const ids = grantsNaming(gateway.reactor, gateway.validityNow(), actor, operator).map(
       (g) => g.id,
     );
     struckCount = ids.length;

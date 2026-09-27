@@ -191,8 +191,8 @@ Each is CONFIRMED in code or in the recording. None is fixed here.
 3. **The container scope carries the pool's law.** The scope of `ada` includes K1's delegation
    grant to C (`tenant+subject+verb`), because the inbox composes into its parent. A reader of
    "ada's data" sees a grant.
-4. **Two copies of `authoredBy`.** `provision.ts:32` and `admin-pages.ts:72` build the same term.
-   The step-5 lowering must change both, or a suggested membership drifts from a provisioned one.
+4. **Two copies of `authoredBy`.** `provision.ts:32` and `admin-pages.ts:72` built the same term.
+   Resolved by #618: one builder in `src/gateway/membership.ts`.
 5. **A recovered user loses a budget and a metronome history** (class G), and B3 to B7 keep
    judging a foreign peer by one key. Neither is decided by the step-5 design.
 6. **The seam is on the hot path.** `grantHeld` allocates one set per grant it reads. That is fine
