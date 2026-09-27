@@ -2227,6 +2227,8 @@ export async function bindConnectionImpl(
   // it sign a fresh one after the person revokes. So every bind asks of THIS owner, signs a fresh
   // delegation when the current key has none, and strikes, in the operator's voice, every other
   // root's standing delegation to this key and every other root's admin grant here.
+  // Write grants naming another root are left alone: only an admin grant carries delegation
+  // (grantHeld). If that ever loosens, this cleanup must strike them too.
   // EVERY held record of another root, struck or not: a strike with its own `validUntil` lapses, and
   // the record would stand again. Skipped only when the operator already struck it for good, so a
   // repeated bind adds nothing.
