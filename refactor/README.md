@@ -103,11 +103,15 @@ Design:
    identify issues on a layer-by-layer basis ... just use your collective judgment." Each such
    decision is recorded below, so the audit can find it. A change that widens what gets PURGED
    still goes to Myk.
-   - **Users are named by a stable id, never by a reusable name.** A new person who takes an
-     erased person's name gets a new id, and inherits nothing. Design: `audit/user-identity.md`.
+   - **`user:ada` is an entity id, read per peer, with no global uniqueness.** Myk corrected an
+     earlier draft (random ids): claims are just claims, and meaning belongs to the governing
+     account of the peer being read, not to a global operator. Reuse is that account's choice;
+     `loam user create` only guards against inheriting standing claims by accident. Design:
+     `audit/user-identity.md`.
    - **A recovered user's history is cut per store, by a barrier.** Before the host commits a
      recovery, every inbox records where it stands, and pauses the old key. A store with no cut
-     shows no history until step 6. Design: `audit/recovery-history.md`.
+     shows no history until step 6. Today the cuts are signed by the host peer's key; after step 6
+     each pool's own key signs its own. Design: `audit/recovery-history.md`.
 
 ## What stays in force
 

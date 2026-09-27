@@ -1,75 +1,42 @@
-# Users are named by a stable id (step 5, before 3g)
+# What `user:ada` means (step 5)
 
-Status: design, for Sol's review. Ruling 9 (delegated to Claude and Sol).
-
-## The problem
-
-Grants, memberships and recovery records name a user as `user:<name>`. A name can be reused.
-If the operator erases ada, and later creates a new person also called "ada", every grant,
-membership and recovery record that still names `user:ada` would stand for the new person. The
-old person's standing would pass to someone else.
+Status: decided under ruling 9, after Myk's correction of 2026-09-29. It replaces an earlier draft
+that minted random ids; that draft was never built.
 
 ## The rule
 
-- Each person has an ID that the operator mints once, at `loam user create`, and never reuses.
-- The ID is `~` followed by 32 lowercase hex digits. A user name can never contain `~`
-  (`userNameDefect`), so the two namespaces cannot collide.
-- Everything about the person is filed at `user:~<id>`: the user record (which carries the name
-  as a label), roles, the root claim, recovery records and lineage claims.
-- Every subject that names a person names the id: grants (`user:~<id>`), memberships
-  (`loam.memberOf.user` becomes the id) and recovery records.
-- The name is only a way to find the id: the credential file, the CLI, and the login page take a
-  name.
+- `user:ada` is an entity id. It happens to be readable; it is not a display name that stands for
+  some other id.
+- Equal entity strings are one entity (SPEC-6 §1: they merge on union). Anyone may point at it.
+- What `user:ada` means is a View: the claims about that entity that the governing account of the
+  peer being read chooses to honor. Two peers may make different governed claims about the same
+  entity, and so render different Views of it. That is one entity seen two ways, not two hidden
+  identities.
+- Authority comes only from who signed a claim. A grant naming `user:ada` in a peer is that peer's
+  account saying "whoever I call ada".
 
-## Name to id
+## Reusing a name
 
-One reader resolves a name: `userIdOf(reactor, operator, name, now, cut?)`.
+- There is no global uniqueness, and no reservation. Claims are just claims.
+- Giving `user:ada` to a new person continues or reassigns that entity in the peer's view. The
+  account's earlier standing claims about it (grants, memberships, roles, root) still bind unless
+  that account strikes or erases them. That is the account's choice, not a hole.
+- `loam user create` guards against doing this by accident: it refuses while standing grants or
+  memberships still name the entity, and says what it found. The account strikes them first, or
+  keeps them on purpose. This is tooling, not a substrate invariant and not a security boundary.
+- A truly distinct person needs a distinct string, chosen when they are created.
+- If the entity already has a recovery chain, giving it to a new person is a recovery to a new key,
+  under the existing rules.
 
-- The operator signs a NAME claim at `username:<name>`, in context `loam.userid`, whose value is
-  the id.
-- The reader takes the latest standing name claim: verified, operator-signed, valid at `now`, not
-  struck by a verified operator strike in force at `now`, not erased. Ties go to the smaller delta
-  id.
-- It then proves the other direction: a standing user record at `user:~<id>` names the same
-  `name`. "Standing" is the same test: a verified operator-signed claim in context `loam.user`,
-  valid at `now`, not struck by a verified operator strike in force at `now`, not erased.
-- An as-of read passes `cut`: only claims and strikes signed by then count, as the #625 user ground
-  does for roots.
-- If either direction fails, the name resolves to no one. This fails closed.
-- The door, the View reader and the CLI all use this one reader.
+## Whose account
 
-## Erasing and reusing a name
-
-- Erasing a person erases the records at their id and their name claim.
-- A new person with the same name gets a new id and a new name claim. Grants, memberships and
-  recovery evidence that name the old id resolve to nothing: no user record stands there.
-- Every user record is ALSO filed at `username:<name>` (context `loam.userrecord`). So
-  `nameStillHeld` finds a previous person's id through their held user record even after the name
-  claim's bytes are purged. `loam user create` refuses a name while any operator claim filed at
-  `username:<name>` is held, whether a name claim or a user record.
-- An id comes from a cryptographic random source (128 bits), so a repeat is overwhelmingly
-  unlikely. `loam user create` also refuses to mint an id the store already holds records for.
-
-## What changes
-
-- `userEntity(name)` becomes `userEntity(id)`, and every caller that has a name resolves it first.
-- The provisioning, CLI (`user create`, `assign-role`, `remove-role`, `recover`) and login paths
-  resolve name to id once, at the start.
-- Bind's `ownerName` becomes `ownerId`, resolved by the server from the session's user.
-- `loam.memberOf.user` takes the id. The node's validator accepts the id form only.
-- Greenfield: stores that name users by name are not read. No migration.
-
-## Rails
-
-Each crosses login, roles, root, grants, memberships and recovery together.
-
-- **I1.** Create ada (id A). Grant by id. Ada logs in, holds her role, writes; her membership
-  selects her writes.
-- **I2.** Erase ada fully. Create a new ada (id B). The old grant naming A gives B nothing; B's
-  login reaches B; B holds none of A's roles; a membership naming A selects none of B's writes;
-  recovery records at A do not apply to B.
-- **I3.** A name claim and a user record that disagree resolve to no one, at the door, in the
-  View reader, and in the CLI.
-- **I4.** An unsigned or non-operator name claim is ignored.
-- **I5.** A membership or grant naming a display name (`user:ada`) is refused at the door as
-  malformed: only the id form is a user subject.
+- There is no global operator. Each peer has its own governing key (SPEC-6 §1: PeerId is the
+  governing public key; additional governors are pinned in that peer's local config). SPEC-14 §1
+  requires the principal root to be pinned outside the evidence.
+- In Loam today, the "operator" argument every reader takes IS that pinned key, for the ground being
+  read. The word is legacy. Step 6 replaces it with "this peer's governing account".
+- Today Loam's inbox pools share the host's key, so they are surfaces of one peer, not separate
+  peers. When a pool becomes its own peer (step 6, ruling 7), following the host's user claims
+  becomes an explicit cross-peer trust policy: it names which peer and account supply user claims,
+  at what read time, and how they are admitted. It is never automatic because entity strings match.
+  The current `userGroundOf` borrows the host implicitly; step 6 makes that input explicit.
