@@ -2080,28 +2080,49 @@ export function survivingWriteGrantIds(
 
 /**
  * Did the operator strike `id` for good: a strike of the operator's, already in force, with no
- * end, and not undone by anyone who could ever undo it — the operator, or a key named by an admin
- * grant someone ELSE issued, held here struck or not (its standing may lapse and return). A key
- * cannot qualify by naming itself, so a connection's counter-strike changes nothing.
+ * end, and not undone by anyone who could ever undo it. Who could: the operator, or a key named by
+ * an admin grant someone ELSE issued, held here struck or not (its standing may lapse and return),
+ * directly or through a user who resolves to it now — or, since a user unreadable now may resolve
+ * to anyone later, any key at all while such a user holds an admin grant here. `ignore` names a key
+ * whose counter-strikes never count (the connection whose inbox this is: its writes are the ones a
+ * bind or revoke must not let steer it).
  */
 export function operatorStruckForGood(
   reactor: Reactor,
   now: number,
   operator: string | undefined,
   id: string,
+  ignore?: string,
 ): boolean {
   if (operator === undefined) return false;
-  const canUndo = (author: string) =>
-    author === operator ||
-    grantSubjects(reactor)
-      .filter(
-        (subject) => subject === author || subjectKeyAt(reactor, now, operator, subject) === author,
-      )
-      .some((subject) =>
-        heldGrantIds(reactor, subject, "admin").some(
-          (g) => reactor.get(g)?.claims.author !== author,
-        ),
-      );
+  // Computed once per call: the grant subjects, what each resolves to now, and whether a held
+  // admin grant someone else issued names each.
+  let facts: { subject: string; key: string | undefined; issuers: string[] }[] | undefined;
+  const subjectFacts = () =>
+    (facts ??= grantSubjects(reactor).map((subject) => ({
+      subject,
+      key: subjectKeyAt(reactor, now, operator, subject),
+      issuers: heldGrantIds(reactor, subject, "admin").flatMap((g) => {
+        const issuer = reactor.get(g)?.claims.author;
+        return issuer === undefined ? [] : [issuer];
+      }),
+    })));
+  const memo = new Map<string, boolean>();
+  const canUndo = (author: string): boolean => {
+    if (author === ignore) return false;
+    if (author === operator) return true;
+    const known = memo.get(author);
+    if (known !== undefined) return known;
+    const answer = subjectFacts().some(
+      (f) =>
+        f.issuers.some((issuer) => issuer !== author) &&
+        (f.subject === author ||
+          f.key === author ||
+          (f.key === undefined && f.subject.startsWith(USER_PREFIX))),
+    );
+    memo.set(author, answer);
+    return answer;
+  };
   return reactor.negationsOf(id).some((n) => {
     const neg = reactor.get(n);
     return (
@@ -2296,7 +2317,8 @@ export async function bindConnectionImpl(
     return key !== undefined && key !== owner;
   });
   const others = grantRoots(pool.reactor, now, operator).filter((root) => root !== owner);
-  const struckForGood = (id: string) => operatorStruckForGood(pool.reactor, now, operator, id);
+  const struckForGood = (id: string) =>
+    operatorStruckForGood(pool.reactor, now, operator, id, opts.connectionKey);
   const stale = [
     ...delegationRecordsFor(pool.reactor, others, opts.connectionKey).map((d) => d.id),
     // EVERY admin grant naming another root, whoever issued it: an admin grant from any effective
@@ -2425,7 +2447,7 @@ export async function revokeConnectionImpl(opts: {
       heldGrantIds(pool.reactor, subject, "admin").some(
         (id) =>
           pool.reactor.get(id)?.claims.author !== opts.connectionKey &&
-          !operatorStruckForGood(pool.reactor, now, pool.operatorAuthor, id),
+          !operatorStruckForGood(pool.reactor, now, pool.operatorAuthor, id, opts.connectionKey),
       ),
   );
   if (unreadable.length > 0) {

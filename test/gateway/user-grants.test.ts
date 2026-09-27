@@ -625,4 +625,64 @@ describe("a pool reads its host's users", () => {
     ).rejects.toThrow(/cannot be read now/);
     await gw.close();
   });
+
+  it("admin held only through an unreadable user can still undo a strike, so revoke refuses", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const T0 = Date.now();
+    vi.setSystemTime(T0);
+    const gw = await store();
+    const xRecord = op(userClaims("x", OP, T0));
+    await gw.append([
+      op(userClaims("ada", OP, T0)),
+      op(rootClaims("ada", K1, OP, T0 + 1)),
+      op(grantClaims(STORE_ENTITY, K1, "write", OP, T0 + 2)),
+      xRecord,
+      op(rootClaims("x", K2, OP, T0 + 3)),
+      op(
+        containerClaims(
+          {
+            container: "home:ada",
+            trust: "curated",
+            posture: "shared",
+            membership: {
+              op: "select",
+              pred: { match: { field: "author", cmp: "eq", const: K1 } },
+              in: "input",
+            },
+          },
+          OP,
+          T0 + 4,
+        ),
+      ),
+    ]);
+    const conn = await gw.bindConnection({
+      container: "home:ada",
+      connectionKey: CONN,
+      ownerSeed: K1_SEED,
+    });
+    const pool = conn.gateway!;
+    vi.setSystemTime(T0 + 100);
+    // K2 is admin here only as user x, through two grants.
+    const g1 = op(grantClaims(STORE_ENTITY, "user:x", "admin", OP, T0 + 10));
+    const g2 = op(grantClaims(STORE_ENTITY, "user:x", "admin", OP, T0 + 11));
+    await pool.append([g1, g2]);
+    // The operator strikes each for good; K2, still admin through the other, undoes each strike.
+    const s1 = op(makeNegationClaims(OP, T0 + 12, g1.id));
+    await pool.append([s1]);
+    await pool.append([signClaims(makeNegationClaims(K2, T0 + 13, s1.id), K2_SEED)]);
+    const s2 = op(makeNegationClaims(OP, T0 + 14, g2.id));
+    await pool.append([s2]);
+    await pool.append([signClaims(makeNegationClaims(K2, T0 + 15, s2.id), K2_SEED)]);
+    // Now x cannot be read for a while.
+    await gw.append([
+      signClaims(
+        { ...makeNegationClaims(OP, T0 + 16, xRecord.id), validUntil: T0 + 10_000 },
+        OP_SEED,
+      ),
+    ]);
+    await expect(
+      gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED }),
+    ).rejects.toThrow(/cannot be read now/);
+    await gw.close();
+  });
 });
