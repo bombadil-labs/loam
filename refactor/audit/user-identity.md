@@ -12,8 +12,10 @@ that minted random ids; that draft was never built.
   peer being read chooses to honor. Two peers may make different governed claims about the same
   entity, and so render different Views of it. That is one entity seen two ways, not two hidden
   identities.
-- Authority comes only from who signed a claim. A grant naming `user:ada` in a peer is that peer's
-  account saying "whoever I call ada".
+- A signature says who signed; it does not by itself grant authority (SPEC-14 §1). A claim binds
+  only under that peer's admission and governed authority policy, rooted in its pinned account. A
+  grant naming `user:ada` that binds in a peer is that peer's governed authority saying "whoever I
+  call ada".
 
 ## Reusing a name
 
@@ -21,9 +23,15 @@ that minted random ids; that draft was never built.
 - Giving `user:ada` to a new person continues or reassigns that entity in the peer's view. The
   account's earlier standing claims about it (grants, memberships, roles, root) still bind unless
   that account strikes or erases them. That is the account's choice, not a hole.
-- `loam user create` guards against doing this by accident: it refuses while standing grants or
-  memberships still name the entity, and says what it found. The account strikes them first, or
-  keeps them on purpose. This is tooling, not a substrate invariant and not a security boundary.
+- `loam user create` guards against doing this by accident, and tells the truth about what remains.
+  It keeps today's check: it refuses while ANY held verified account record, role or root for the
+  entity remains, struck or not yet valid included, because those can revive. It ADDS the claims
+  that name the entity from elsewhere: held grants and memberships naming it, and held recovery
+  records and lineage claims for it. It lists what it found. This is tooling, not a substrate
+  invariant and not a security boundary.
+- A deliberate reuse is its own explicit act, never the side effect of a check that forgot a claim
+  class: either the account erases what it found first, or it recovers the entity to the new
+  person's key under the recovery rules.
 - A truly distinct person needs a distinct string, chosen when they are created.
 - If the entity already has a recovery chain, giving it to a new person is a recovery to a new key,
   under the existing rules.
