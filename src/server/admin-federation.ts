@@ -20,13 +20,14 @@ import {
 } from "@bombadil/rhizomatic";
 import { readUserSeed } from "../cli/config.js";
 import { parseOffer } from "../federation/offer.js";
-import { CTX_GRANTS, grantSubjects, holdsGrant, struckAt } from "../gateway/accounts.js";
+import { CTX_GRANTS, holdsGrant, struckAt } from "../gateway/accounts.js";
 import { delegationStatesFor } from "../gateway/principal.js";
 import { withBatchNegationClosure } from "../gateway/ingest.js";
 import {
   type Container,
   type ContainerTable,
   type ResolvedContainer,
+  grantRoots,
 } from "../gateway/container.js";
 import { Gateway, type FederationReport } from "../gateway/gateway.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
@@ -192,7 +193,13 @@ export function connectionGrantState(
     else if (struckAt(reactor, now, id, operator)) seen.add("revoked");
   }
   // A connection bound since step 5 writes by DELEGATION rather than by a grant naming its key.
-  for (const state of delegationStatesFor(reactor, now, grantSubjects(reactor), key, operator)) {
+  for (const state of delegationStatesFor(
+    reactor,
+    now,
+    grantRoots(reactor, now, operator),
+    key,
+    operator,
+  )) {
     if (state !== "standing") seen.add(state);
   }
   for (const state of ["revoked", "not yet valid", "expired"] as const)

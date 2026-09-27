@@ -504,10 +504,6 @@ function grantHeld(
       if (p.role === "verb" && typeof p.target.value === "string") granted = p.target.value;
     }
     if (subject === undefined) continue;
-    // A subject may name a user (`user:<name>`): it stands for that user's current root, read now.
-    // A user with no standing root holds nothing through it.
-    const key = subjectKeyAt(ctx.reactor, ctx.now, ctx.operator, subject);
-    if (key === undefined) continue;
     // `admin` covers `write`, and NEVER `register`. An admin grant carries no prefix, so "admin
     // covers register" could only ever mean register AT ROOT — the one authority that is not
     // delegable through the verb lattice. An admin who wants to register mints themselves a
@@ -515,6 +511,11 @@ function grantHeld(
     if (verb === "register" ? granted !== "register" : granted !== "admin" && granted !== verb) {
       continue;
     }
+    // A subject may name a user (`user:<name>`): it stands for that user's current root, read now.
+    // A user with no standing root holds nothing through it. Resolved after the verb check, so a
+    // grant that could not answer this question costs no user read.
+    const key = subjectKeyAt(ctx.reactor, ctx.now, ctx.operator, subject);
+    if (key === undefined) continue;
     // A delegated key WRITES for its user and does nothing else (README ruling 6): admin,
     // register, and the issuer checks that recurse through here as admin match the subject's
     // own key exactly. The verb is checked first so a delegate never reaches the seam for them.

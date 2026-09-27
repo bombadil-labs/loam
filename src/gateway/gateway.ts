@@ -481,6 +481,7 @@ export class Gateway {
   ) {
     this._reactor = reactor;
     this.operatorAuthor = options.seed === undefined ? undefined : authorForSeed(options.seed);
+    this.declareUsers(reactor);
     // Fail fast on a mis-shaped offered lens: a term that does not select a delta set would only
     // blow up when a peer first pulls, in production. Trial-eval it now (empty store → empty
     // dset; the SORT is what we're checking, and that is content-independent).
@@ -1331,10 +1332,7 @@ export class Gateway {
     }
     this._reactor = reactor;
     if (this.delegationScope !== undefined) declarePrincipalScope(reactor, this.delegationScope);
-    if (this.userHost !== undefined) {
-      const host = this.userHost;
-      declareUserGround(reactor, () => host.reactor);
-    }
+    this.declareUsers(reactor);
     this.ingestVia = (d) => this.reactor.ingest(d);
     this.attachPersistence(reactor);
     if (this.registered.length > 0) rebindImpl(this, this.registered);
@@ -1597,7 +1595,18 @@ export class Gateway {
    */
   readUsersFrom(host: Gateway): void {
     this.userHost = host;
-    declareUserGround(this._reactor, () => host.reactor);
+  }
+
+  // Every reactor this gateway sets reads its users from its user host (a pool's host, or itself),
+  // hiding what that host has erased but not yet purged, exactly as the user View does.
+  private declareUsers(reactor: Reactor): void {
+    declareUserGround(reactor, () => {
+      const host = this.userHost ?? this;
+      return {
+        reactor: host.reactor,
+        erased: () => erasedFromReading(host.reactor, host.operatorAuthor),
+      };
+    });
   }
 
   /** The gateway whose user records this ground reads: its host's, or its own at the root. */

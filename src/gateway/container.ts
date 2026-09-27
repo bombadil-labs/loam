@@ -73,6 +73,7 @@ import {
   principalScopeOf,
   standingDelegationIdsFor,
 } from "./principal.js";
+import { subjectKeyAt } from "./user-root.js";
 
 export const CTX_CONTAINER = "loam.container";
 export const CTX_CONTAINER_EXCLUDED = "loam.container.excluded";
@@ -2077,6 +2078,19 @@ export function survivingWriteGrantIds(
   return survivingGrantIds(reactor, now, subject, "write", operator);
 }
 
+/**
+ * The keys this ground's grant subjects name right now: a key subject as itself, a `user:<name>`
+ * subject as that user's current root. The roots a delegate here could act for.
+ */
+export function grantRoots(reactor: Reactor, now: number, operator: string | undefined): string[] {
+  const out = new Set<string>();
+  for (const subject of grantSubjects(reactor)) {
+    const key = subjectKeyAt(reactor, now, operator, subject);
+    if (key !== undefined) out.add(key);
+  }
+  return [...out];
+}
+
 /** Every held `verb` grant id naming `subject` at this ground's store entity, struck or not. */
 export function heldGrantIds(reactor: Reactor, subject: string, wanted: string): string[] {
   return survivingGrantIds(reactor, undefined, subject, wanted, undefined);
@@ -2234,7 +2248,13 @@ export async function bindConnectionImpl(
   // the record would stand again. Skipped only when the operator already struck it for good, so a
   // repeated bind adds nothing.
   const now = pool.validityNow();
-  const others = grantSubjects(pool.reactor).filter((root) => root !== owner);
+  // A grant's subject may name a user; what matters is the key it resolves to now. Subjects that
+  // resolve to someone other than the owner (or to no one) are another root's; the owner's own
+  // user-named grant is kept.
+  const otherSubjects = grantSubjects(pool.reactor).filter(
+    (subject) => subjectKeyAt(pool.reactor, now, operator, subject) !== owner,
+  );
+  const others = grantRoots(pool.reactor, now, operator).filter((root) => root !== owner);
   // For good means: the operator's, already in force, with no end, and with no negation of its own
   // held here at all, whether in force now or scheduled to start later.
   const struckForGood = (id: string) =>
@@ -2252,7 +2272,7 @@ export async function bindConnectionImpl(
     // EVERY admin grant naming another root, whoever issued it: an admin grant from any effective
     // admin binds (grantHeld), so filtering by issuer would leave one standing. A strike on an
     // inert one costs a delta and creates nothing.
-    ...others.flatMap((root) => heldGrantIds(pool.reactor, root, "admin")),
+    ...otherSubjects.flatMap((subject) => heldGrantIds(pool.reactor, subject, "admin")),
   ].filter((id) => !struckForGood(id));
   const fresh = !keyActsFor(pool.reactor, now, { root: owner }, opts.connectionKey, name, operator);
   if (fresh || stale.length > 0) {
@@ -2368,7 +2388,7 @@ export async function revokeConnectionImpl(opts: {
       : standingDelegationIdsFor(
           pool.reactor,
           now,
-          grantSubjects(pool.reactor),
+          grantRoots(pool.reactor, now, pool.operatorAuthor),
           opts.connectionKey,
           scope,
           pool.operatorAuthor,

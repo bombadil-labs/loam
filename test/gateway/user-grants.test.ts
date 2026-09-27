@@ -14,11 +14,13 @@ import {
   type Pointer,
 } from "@bombadil/rhizomatic";
 import { grantClaims, grantsHeldBy, grantsNaming, holdsGrant } from "../../src/gateway/accounts.js";
+import { connectionGrantState } from "../../src/server/admin-federation.js";
+import { eraseClaims } from "../../src/gateway/erase.js";
 import { containerClaims, inboxName } from "../../src/gateway/container.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { delegationClaims } from "../../src/gateway/principal.js";
-import { userRootAt } from "../../src/gateway/user-root.js";
+import { declareUserGround, subjectKeyAt, userRootAt } from "../../src/gateway/user-root.js";
 import { rootClaims, rootOf, userClaims } from "../../src/server/users.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
@@ -114,6 +116,67 @@ describe("the door's indexed root reader agrees with the View reader", () => {
     await gw.append([a, b]);
     const winner = a.id < b.id ? K1 : K2;
     expect(both(gw, "ada")).toEqual({ index: winner, view: winner });
+    await gw.close();
+  });
+});
+
+async function adaWithTwoRoots(): Promise<Gateway> {
+  const gw = await store();
+  await gw.append([op(userClaims("ada", OP, 10)), op(rootClaims("ada", K1, OP, 11))]);
+  await gw.append([op(rootClaims("ada", K2, OP, 12))]);
+  return gw;
+}
+const rootsOf = (gw: Gateway) =>
+  [...gw.reactor.byTarget("user:ada")]
+    .map((id) => gw.reactor.get(id)!)
+    .filter((d) => d.claims.pointers.some((p) => p.role === "root"))
+    .sort((a, b) => a.claims.timestamp - b.claims.timestamp);
+
+describe("erasure, and claim shapes, as the View reader sees them", () => {
+  it("an erased latest root falls back to the earlier one in both readers", async () => {
+    const gw = await store();
+    await gw.append([op(userClaims("ada", OP, 10)), op(rootClaims("ada", K1, OP, 11))]);
+    const second = op(rootClaims("ada", K2, OP, 12));
+    await gw.append([second]);
+    await gw.erase(second.id);
+    expect(both(gw, "ada")).toEqual({ index: K1, view: K1 });
+    await gw.close();
+  });
+
+  it("a claim erased but still held counts as gone at the door", async () => {
+    const gw = await store();
+    await gw.append([op(userClaims("ada", OP, 10)), op(rootClaims("ada", K1, OP, 11))]);
+    const second = op(rootClaims("ada", K2, OP, 12));
+    await gw.append([second]);
+    // Stand in for a purge that has not finished: the ground still holds the claim.
+    const reactor = gw.reactor;
+    declareUserGround(reactor, () => ({ reactor, erased: () => new Set([second.id]) }));
+    expect(subjectKeyAt(reactor, gw.validityNow(), OP, "user:ada")).toBe(K1);
+    await gw.close();
+  });
+
+  it("the gateway hides a root claim erased but not yet purged, as the View does", async () => {
+    const gw = await adaWithTwoRoots();
+    // An erasure record lands while the claim's bytes stay held: the state a purge fault leaves.
+    const [, second] = rootsOf(gw);
+    expect(gw.reactor.ingest(op(eraseClaims(second!.id, OP, OP, 30))).status).toBe("accepted");
+    expect(gw.reactor.get(second!.id)).toBeDefined();
+    expect(subjectKeyAt(gw.reactor, gw.validityNow(), OP, "user:ada")).toBe(K1);
+    expect(rootOf(gw.reactor, OP, gw.validityNow(), "ada")).toBe(K1);
+    await gw.close();
+  });
+
+  it("a latest root of the wrong shape resolves to nothing in both readers", async () => {
+    const gw = await store();
+    await gw.append([op(userClaims("ada", OP, 10)), op(rootClaims("ada", K1, OP, 11))]);
+    const odd = rootClaims("ada", K2, OP, 12);
+    await gw.append([
+      op({
+        ...odd,
+        pointers: [...odd.pointers, { role: "note", target: { kind: "primitive", value: "x" } }],
+      }),
+    ]);
+    expect(both(gw, "ada")).toEqual({ index: undefined, view: undefined });
     await gw.close();
   });
 });
@@ -237,6 +300,102 @@ describe("a pool reads its host's users", () => {
       signClaims(delegationClaims(K2, CONN, inboxName("home:ada", CONN), 23), K2_SEED),
     ]);
     expect(await door(pool, observed(FERN, "height", 12, 111, CONN_SEED))).toBe("admitted");
+    await gw.close();
+  });
+
+  it("a re-bind keeps the owner's user-named grant, and revoke finds the delegation through it", async () => {
+    const gw = await store();
+    await gw.append([
+      op(userClaims("ada", OP, 10)),
+      op(rootClaims("ada", K1, OP, 11)),
+      op(grantClaims(STORE_ENTITY, K1, "write", OP, 12)),
+      op(
+        containerClaims(
+          {
+            container: "home:ada",
+            trust: "curated",
+            posture: "shared",
+            membership: {
+              op: "select",
+              pred: { match: { field: "author", cmp: "eq", const: K1 } },
+              in: "input",
+            },
+          },
+          OP,
+          13,
+        ),
+      ),
+    ]);
+    const conn = await gw.bindConnection({
+      container: "home:ada",
+      connectionKey: CONN,
+      ownerSeed: K1_SEED,
+    });
+    const pool = conn.gateway!;
+    const named = op(grantClaims(STORE_ENTITY, "user:ada", "admin", OP, 20));
+    await pool.append([named]);
+    const literal = [...pool.reactor.snapshot()].find(
+      (d) =>
+        d.claims.author === OP &&
+        d.claims.pointers.some(
+          (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === K1,
+        ),
+    )!;
+    await pool.append([op(makeNegationClaims(OP, 21, literal.id))]);
+    await gw.bindConnection({ container: "home:ada", connectionKey: CONN, ownerSeed: K1_SEED });
+    expect(pool.reactor.negationsOf(named.id)).toEqual([]); // the owner's own grant is kept
+    expect(await door(pool, observed(FERN, "height", 13, 112, CONN_SEED))).toBe("admitted");
+    await gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED });
+    expect(await door(pool, observed(FERN, "height", 14, 113, CONN_SEED))).toBe("refused");
+    expect(connectionGrantState(pool.reactor, pool.validityNow(), OP, CONN)).toBe("revoked");
+    await gw.close();
+  });
+
+  it("revoke finds a delegation from a re-pointed root that no grant names literally", async () => {
+    const gw = await store();
+    await gw.append([
+      op(userClaims("ada", OP, 10)),
+      op(rootClaims("ada", K1, OP, 11)),
+      op(grantClaims(STORE_ENTITY, K1, "write", OP, 12)),
+      op(
+        containerClaims(
+          {
+            container: "home:ada",
+            trust: "curated",
+            posture: "shared",
+            membership: {
+              op: "select",
+              pred: { match: { field: "author", cmp: "eq", const: K1 } },
+              in: "input",
+            },
+          },
+          OP,
+          13,
+        ),
+      ),
+    ]);
+    const conn = await gw.bindConnection({
+      container: "home:ada",
+      connectionKey: CONN,
+      ownerSeed: K1_SEED,
+    });
+    const pool = conn.gateway!;
+    await pool.append([op(grantClaims(STORE_ENTITY, "user:ada", "admin", OP, 20))]);
+    const literal = [...pool.reactor.snapshot()].find(
+      (d) =>
+        d.claims.author === OP &&
+        d.claims.pointers.some(
+          (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === K1,
+        ),
+    )!;
+    await pool.append([op(makeNegationClaims(OP, 20, literal.id))]);
+    await gw.append([op(rootClaims("ada", K2, OP, 21))]);
+    await pool.append([
+      signClaims(delegationClaims(K2, CONN, inboxName("home:ada", CONN), 22), K2_SEED),
+    ]);
+    expect(await door(pool, observed(FERN, "height", 15, 114, CONN_SEED))).toBe("admitted");
+    await gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K2_SEED });
+    expect(await door(pool, observed(FERN, "height", 16, 115, CONN_SEED))).toBe("refused");
     await gw.close();
   });
 });
