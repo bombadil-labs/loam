@@ -10,7 +10,8 @@
 //   T: the pool door's verdict on a write by the connection key, the parent reads (the bound
 //   resolution and `containerScope`), the delegation's own state, and how many frames a live
 //   `watch` over the root's container term and over the pool received when the clock crossed T
-//   with nothing written.
+//   with nothing written. Neither term reads delegations, so those counts cannot show whether the
+//   boundary timer fired; PR 3h's rail needs a term that does.
 // - `principal.inbox-revoked`: after `revokeConnection`, the parent reads of the connection's
 //   earlier write, the pool door, and who struck each delegation record in the pool.
 // - `principal.clear-connection-writes`: the owner clears a field only her connection wrote,
