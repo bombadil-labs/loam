@@ -135,3 +135,94 @@ export function subjectKeyAt(
     ground?.erased() ?? NONE,
   );
 }
+
+/**
+ * Could `subject` EVER name `key` here: it is that key, or it names a user for whom this ground
+ * (or its host) holds an operator-signed root claim naming `key` — valid or not yet, struck or not,
+ * since a strike can lapse and a window can open — unless the operator struck it for good. A revoke that must stop `key` for good asks
+ * this, not what the subject names right now.
+ */
+export function subjectCouldName(
+  reactor: Reactor,
+  operator: string | undefined,
+  subject: string,
+  key: string,
+): boolean {
+  if (subject === key) return true;
+  if (operator === undefined || !subject.startsWith(USER_PREFIX)) return false;
+  const ground = userGrounds.get(reactor)?.().reactor ?? reactor;
+  const entity = userEntity(subject.slice(USER_PREFIX.length));
+  for (const id of ground.byTarget(entity)) {
+    const d = ground.get(id);
+    if (d === undefined || d.claims.author !== operator) continue;
+    const atRoot = d.claims.pointers.some(
+      (p) =>
+        p.target.kind === "entity" &&
+        p.target.entity.id === entity &&
+        p.target.entity.context === CTX_ROOT,
+    );
+    const names = d.claims.pointers.some(
+      (p) => p.target.kind === "primitive" && p.target.value === key,
+    );
+    if (!atRoot || !names) continue;
+    // Struck for good by the operator — in force, no end, nothing held against the strike — and
+    // this claim can never name the key again.
+    const dead = ground.negationsOf(id).some((n) => {
+      const neg = ground.get(n);
+      return (
+        neg?.claims.author === operator &&
+        neg.claims.validUntil === undefined &&
+        ground.negationsOf(n).length === 0
+      );
+    });
+    if (!dead) return true;
+  }
+  return false;
+}
+
+/**
+ * Every key `subject` could EVER name here: the subject itself when it is a key, else every key an
+ * operator-signed root claim for that user names — valid or not yet, struck or not — unless the
+ * operator struck that claim for good. What a revoke must account for before it reports success.
+ */
+export function keysSubjectCouldName(
+  reactor: Reactor,
+  operator: string | undefined,
+  subject: string,
+): string[] {
+  if (!subject.startsWith(USER_PREFIX)) return [subject];
+  if (operator === undefined) return [];
+  const ground = userGrounds.get(reactor)?.().reactor ?? reactor;
+  const entity = userEntity(subject.slice(USER_PREFIX.length));
+  const out = new Set<string>();
+  for (const id of ground.byTarget(entity)) {
+    const d = ground.get(id);
+    if (d === undefined || d.claims.author !== operator) continue;
+    const atRoot = d.claims.pointers.some(
+      (p) =>
+        p.target.kind === "entity" &&
+        p.target.entity.id === entity &&
+        p.target.entity.context === CTX_ROOT,
+    );
+    if (!atRoot) continue;
+    const dead = ground.negationsOf(id).some((n) => {
+      const neg = ground.get(n);
+      return (
+        neg?.claims.author === operator &&
+        neg.claims.validUntil === undefined &&
+        ground.negationsOf(n).length === 0
+      );
+    });
+    if (dead) continue;
+    for (const p of d.claims.pointers) {
+      if (
+        p.target.kind === "primitive" &&
+        typeof p.target.value === "string" &&
+        AUTHOR.test(p.target.value)
+      ) {
+        out.add(p.target.value);
+      }
+    }
+  }
+  return [...out];
+}

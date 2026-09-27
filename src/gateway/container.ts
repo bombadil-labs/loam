@@ -73,7 +73,7 @@ import {
   principalScopeOf,
   standingDelegationIdsFor,
 } from "./principal.js";
-import { subjectKeyAt, USER_PREFIX } from "./user-root.js";
+import { keysSubjectCouldName, subjectCouldName, subjectKeyAt, USER_PREFIX } from "./user-root.js";
 
 export const CTX_CONTAINER = "loam.container";
 export const CTX_CONTAINER_EXCLUDED = "loam.container.excluded";
@@ -2138,6 +2138,26 @@ export function operatorStruckForGood(
 }
 
 /**
+ * Is delegation record `d` struck for good: a negation by its own signer or the operator, with no
+ * end, and nothing held against that negation? (principalSuppression honors only those two.)
+ */
+function delegationStruckForGood(
+  reactor: Reactor,
+  operator: string | undefined,
+  d: Delta,
+): boolean {
+  return reactor.negationsOf(d.id).some((n) => {
+    const neg = reactor.get(n);
+    return (
+      neg !== undefined &&
+      (neg.claims.author === d.claims.author || neg.claims.author === operator) &&
+      neg.claims.validUntil === undefined &&
+      reactor.negationsOf(n).length === 0
+    );
+  });
+}
+
+/**
  * The keys this ground's grant subjects name right now: a key subject as itself, a `user:<name>`
  * subject as that user's current root. The roots a delegate here could act for.
  */
@@ -2450,6 +2470,63 @@ export async function revokeConnectionImpl(opts: {
           !operatorStruckForGood(pool.reactor, now, pool.operatorAuthor, id, opts.connectionKey),
       ),
   );
+  // A grant naming a user whose root is, or could become, this very key would let it write with
+  // no delegation to strike: a root claim held here struck for now, or not valid yet, revives
+  // with no new delta. Refuse rather than report a revoke that cannot hold.
+  const naming = grantSubjects(pool.reactor).filter(
+    (subject) =>
+      subject.startsWith(USER_PREFIX) &&
+      subjectCouldName(pool.reactor, pool.operatorAuthor, subject, opts.connectionKey) &&
+      (["write", "admin"] as const).some((verb) =>
+        heldGrantIds(pool.reactor, subject, verb).some(
+          (id) =>
+            pool.reactor.get(id)?.claims.author !== opts.connectionKey &&
+            !operatorStruckForGood(pool.reactor, now, pool.operatorAuthor, id, opts.connectionKey),
+        ),
+      ),
+  );
+  // Authority that may activate LATER: any key a held admin grant here could ever name (a literal
+  // subject struck for a while, or a user's root claim not valid yet or struck for now). A
+  // delegation from such a key to this connection comes alive with no new delta. So every such
+  // delegation not already struck for good is struck now — when this revoke's voice binds on it
+  // (its own signature, or the operator's) — or the revoke refuses before striking anything.
+  const byOperator = owner === pool.operatorAuthor;
+  const candidates = new Set<string>();
+  for (const subject of grantSubjects(pool.reactor)) {
+    const live = heldGrantIds(pool.reactor, subject, "admin").some(
+      (id) =>
+        pool.reactor.get(id)?.claims.author !== opts.connectionKey &&
+        !operatorStruckForGood(pool.reactor, now, pool.operatorAuthor, id, opts.connectionKey),
+    );
+    if (!live) continue;
+    for (const key of keysSubjectCouldName(pool.reactor, pool.operatorAuthor, subject)) {
+      if (key !== opts.connectionKey) candidates.add(key);
+    }
+  }
+  const latentIds: string[] = [];
+  const latent = new Set<string>();
+  for (const key of candidates) {
+    for (const d of delegationRecordsFor(pool.reactor, [key], opts.connectionKey)) {
+      if (delegationStruckForGood(pool.reactor, pool.operatorAuthor, d)) continue;
+      if (key === owner || byOperator) latentIds.push(d.id);
+      else latent.add(key);
+    }
+  }
+  if (latent.size > 0) {
+    throw new Error(
+      `revokeConnection: ${[...latent].join(", ")} signed a delegation to ${opts.connectionKey} ` +
+        `and holds, or may later hold, admin standing here, so a strike in ${owner}'s voice ` +
+        `cannot stop it for good. Nothing was struck. The operator can revoke instead, or drop ` +
+        `this inbox.`,
+    );
+  }
+  if (naming.length > 0) {
+    throw new Error(
+      `revokeConnection: this inbox holds a grant naming ${naming.join(", ")}, a user whose root is ` +
+        `or may become ${opts.connectionKey} itself, so no strike here can stop it for good. ` +
+        `Nothing was struck. Strike that root claim for good, or drop this inbox.`,
+    );
+  }
   if (unreadable.length > 0) {
     throw new Error(
       `revokeConnection: this inbox holds an owner grant naming ${unreadable.join(", ")}, whose ` +
@@ -2460,6 +2537,7 @@ export async function revokeConnectionImpl(opts: {
   }
   const ids = [
     ...survivingWriteGrantIds(pool.reactor, now, opts.connectionKey, pool.operatorAuthor),
+    ...latentIds,
     ...(scope === undefined
       ? []
       : standingDelegationIdsFor(
@@ -2478,7 +2556,7 @@ export async function revokeConnectionImpl(opts: {
     );
   }
   await pool.append(
-    ids.map((id) =>
+    [...new Set(ids)].map((id) =>
       signClaims(
         withStamp(pool.stamp(owner), (t) => revocationClaims(id, owner, t)),
         opts.ownerSeed,

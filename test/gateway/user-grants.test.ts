@@ -420,6 +420,9 @@ describe("a pool reads its host's users", () => {
       signClaims(delegationClaims(K2, CONN, inboxName("home:ada", CONN), 22), K2_SEED),
     ]);
     expect(await door(pool, observed(FERN, "height", 15, 114, CONN_SEED))).toBe("admitted");
+    // K1's old delegation could revive if ada's root ever went back to K1; a re-bind by ada's
+    // current key strikes it for good, as recovery does.
+    await gw.bindConnection({ container: "home:ada", connectionKey: CONN, ownerSeed: K2_SEED });
     await gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K2_SEED });
     expect(await door(pool, observed(FERN, "height", 16, 115, CONN_SEED))).toBe("refused");
     await gw.close();
@@ -684,5 +687,212 @@ describe("a pool reads its host's users", () => {
       gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED }),
     ).rejects.toThrow(/cannot be read now/);
     await gw.close();
+  });
+
+  describe("a user whose root is or may become the connection's own key", () => {
+    async function inbox(T0: number) {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(T0);
+      const gw = await store();
+      const adaRecord = op(userClaims("ada", OP, T0));
+      await gw.append([
+        adaRecord,
+        op(rootClaims("ada", K1, OP, T0 + 1)),
+        op(grantClaims(STORE_ENTITY, K1, "write", OP, T0 + 2)),
+        op(
+          containerClaims(
+            {
+              container: "home:ada",
+              trust: "curated",
+              posture: "shared",
+              membership: {
+                op: "select",
+                pred: { match: { field: "author", cmp: "eq", const: K1 } },
+                in: "input",
+              },
+            },
+            OP,
+            T0 + 3,
+          ),
+        ),
+      ]);
+      const conn = await gw.bindConnection({
+        container: "home:ada",
+        connectionKey: CONN,
+        ownerSeed: K1_SEED,
+      });
+      vi.setSystemTime(T0 + 100);
+      await conn.gateway!.append([op(grantClaims(STORE_ENTITY, "user:ada", "write", OP, T0 + 10))]);
+      return { gw, conn, adaRecord };
+    }
+
+    it("a root claim naming the connection that becomes valid later makes revoke refuse", async () => {
+      const T0 = Date.now();
+      const { gw, conn } = await inbox(T0);
+      await gw.append([op({ ...rootClaims("ada", CONN, OP, T0 + 20), validFrom: T0 + 10_000 })]);
+      await expect(
+        gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED }),
+      ).rejects.toThrow(/may become/);
+      await gw.close();
+    });
+
+    it("a root claim naming the connection while the user is struck for a while makes revoke refuse", async () => {
+      const T0 = Date.now();
+      const { gw, conn, adaRecord } = await inbox(T0);
+      await gw.append([
+        op(rootClaims("ada", CONN, OP, T0 + 20)),
+        signClaims(
+          { ...makeNegationClaims(OP, T0 + 21, adaRecord.id), validUntil: T0 + 10_000 },
+          OP_SEED,
+        ),
+      ]);
+      await expect(
+        gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED }),
+      ).rejects.toThrow(/may become/);
+      await gw.close();
+    });
+
+    it("striking that root claim for good, as the refusal advises, lets revoke proceed", async () => {
+      const T0 = Date.now();
+      const { gw, conn } = await inbox(T0);
+      const bad = op({ ...rootClaims("ada", CONN, OP, T0 + 20), validFrom: T0 + 10_000 });
+      await gw.append([bad]);
+      await gw.append([op(makeNegationClaims(OP, T0 + 30, bad.id))]);
+      await gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED });
+      expect(await door(conn.gateway!, observed(FERN, "height", 31, T0 + 200, CONN_SEED))).toBe(
+        "refused",
+      );
+      await gw.close();
+    });
+
+    it("control: with no root claim naming the connection, revoke proceeds", async () => {
+      const T0 = Date.now();
+      const { gw, conn } = await inbox(T0);
+      await gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED });
+      expect(await door(conn.gateway!, observed(FERN, "height", 30, T0 + 200, CONN_SEED))).toBe(
+        "refused",
+      );
+      await gw.close();
+    });
+  });
+
+  describe("authority that may activate later", () => {
+    async function inbox(T0: number) {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(T0);
+      const gw = await store();
+      await gw.append([
+        op(userClaims("ada", OP, T0)),
+        op(rootClaims("ada", K1, OP, T0 + 1)),
+        op(grantClaims(STORE_ENTITY, K1, "write", OP, T0 + 2)),
+        op(
+          containerClaims(
+            {
+              container: "home:ada",
+              trust: "curated",
+              posture: "shared",
+              membership: {
+                op: "select",
+                pred: { match: { field: "author", cmp: "eq", const: K1 } },
+                in: "input",
+              },
+            },
+            OP,
+            T0 + 3,
+          ),
+        ),
+      ]);
+      const conn = await gw.bindConnection({
+        container: "home:ada",
+        connectionKey: CONN,
+        ownerSeed: K1_SEED,
+      });
+      vi.setSystemTime(T0 + 100);
+      return { gw, conn, pool: conn.gateway! };
+    }
+
+    async function futureRoot(T0: number) {
+      const { gw, conn, pool } = await inbox(T0);
+      // A user-named owner grant, and K2 with write standing that pre-signs a delegation.
+      await pool.append([
+        op(grantClaims(STORE_ENTITY, "user:ada", "admin", OP, T0 + 10)),
+        op(grantClaims(STORE_ENTITY, K2, "write", OP, T0 + 11)),
+      ]);
+      await pool.append([
+        signClaims(delegationClaims(K2, CONN, inboxName("home:ada", CONN), T0 + 12), K2_SEED),
+      ]);
+      // The host already holds ada's re-point to K2, valid only later.
+      await gw.append([op({ ...rootClaims("ada", K2, OP, T0 + 13), validFrom: T0 + 10_000 })]);
+      return { gw, conn, pool };
+    }
+
+    it("a pre-signed delegation from a root a timed re-point selects later makes an owner revoke refuse", async () => {
+      const T0 = Date.now();
+      const { gw, conn, pool } = await futureRoot(T0);
+      const before = pool.reactor.size;
+      await expect(
+        gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED }),
+      ).rejects.toThrow(/may later hold/);
+      expect(pool.reactor.size).toBe(before); // nothing was struck
+      await gw.close();
+    });
+
+    it("once the operator strikes that timed re-point for good, an owner revoke proceeds", async () => {
+      const T0 = Date.now();
+      const { gw, conn, pool } = await futureRoot(T0);
+      const later = [...gw.reactor.byTarget("user:ada")]
+        .map((id) => gw.reactor.get(id)!)
+        .find((d) => d.claims.validFrom === T0 + 10_000)!;
+      await gw.append([op(makeNegationClaims(OP, T0 + 20, later.id))]);
+      await pool.append([
+        // K2's literal write grant is not admin; only the user-named grant could have carried it.
+        op(
+          makeNegationClaims(
+            OP,
+            T0 + 21,
+            [...pool.reactor.snapshot()].find((d) =>
+              d.claims.pointers.some(
+                (p) =>
+                  p.role === "subject" && p.target.kind === "primitive" && p.target.value === K2,
+              ),
+            )!.id,
+          ),
+        ),
+      ]);
+      await gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED });
+      expect(await door(pool, observed(FERN, "height", 41, T0 + 200, CONN_SEED))).toBe("refused");
+      await gw.close();
+    });
+
+    it("the operator's revoke strikes that latent delegation too, so it stays dead after the re-point", async () => {
+      const T0 = Date.now();
+      const { gw, conn, pool } = await futureRoot(T0);
+      await gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: OP_SEED });
+      vi.setSystemTime(T0 + 20_000);
+      expect(await door(pool, observed(FERN, "height", 40, T0 + 20_001, CONN_SEED))).toBe(
+        "refused",
+      );
+      await gw.close();
+    });
+
+    it("a delegation from a key whose admin grant is struck only for a while makes an owner revoke refuse", async () => {
+      const T0 = Date.now();
+      const { gw, conn, pool } = await inbox(T0);
+      const k2Admin = op(grantClaims(STORE_ENTITY, K2, "admin", OP, T0 + 10));
+      await pool.append([k2Admin]);
+      await pool.append([
+        signClaims(delegationClaims(K2, CONN, inboxName("home:ada", CONN), T0 + 11), K2_SEED),
+      ]);
+      await pool.append([
+        signClaims(
+          { ...makeNegationClaims(OP, T0 + 12, k2Admin.id), validUntil: T0 + 10_000 },
+          OP_SEED,
+        ),
+      ]);
+      await expect(
+        gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED }),
+      ).rejects.toThrow(/may later hold/);
+      await gw.close();
+    });
   });
 });
