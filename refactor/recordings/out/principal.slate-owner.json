@@ -1,0 +1,42 @@
+{
+  "after": [
+    {
+      "affected": [
+        "ada"
+      ],
+      "disagreement": null,
+      "enforced": [
+        "cite",
+        "egress"
+      ],
+      "lapsed": false,
+      "members": [
+        "@writer: \"ada's first note\"",
+        "@writer: \"ada's second note\""
+      ],
+      "unresolved": null
+    }
+  ],
+  "before": [
+    {
+      "affected": [
+        "ada"
+      ],
+      "disagreement": null,
+      "enforced": [
+        "cite",
+        "egress"
+      ],
+      "lapsed": false,
+      "members": [
+        "@writer: \"ada's first note\"",
+        "@writer: \"ada's second note\""
+      ],
+      "unresolved": null
+    }
+  ],
+  "firstKeyWrites": {
+    "refused": "append rejected: @writer is not permitted: publishing through this store requires write standing (a surviving grant at loam:store), and no surviving grant says so"
+  },
+  "rotatedWrites": "admitted"
+}

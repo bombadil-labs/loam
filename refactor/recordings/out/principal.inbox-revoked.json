@@ -1,0 +1,37 @@
+{
+  "afterRevoke": {
+    "boundTag": [
+      "by-connection"
+    ],
+    "containerScope": [
+      "@subadmin: \"by-connection\"",
+      "@writer: negates",
+      "@writer: principal+kind+key+scope+delegable"
+    ],
+    "unboundTag": null
+  },
+  "beforeRevoke": {
+    "boundTag": [
+      "by-connection"
+    ],
+    "containerScope": [
+      "@subadmin: \"by-connection\"",
+      "@writer: principal+kind+key+scope+delegable"
+    ],
+    "unboundTag": null
+  },
+  "delegationStates": [
+    "revoked"
+  ],
+  "delegations": [
+    {
+      "author": "@writer",
+      "struckBy": [
+        "@writer"
+      ]
+    }
+  ],
+  "poolDoor": {
+    "refused": "append rejected: @subadmin is not permitted: publishing through this store requires write standing (a surviving grant at loam:store), and no surviving grant says so"
+  }
+}
