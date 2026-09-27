@@ -556,9 +556,10 @@ export interface HeldGrant {
   readonly prefix?: string;
 }
 
-// Every EFFECTIVE surviving grant naming `author` at the store entity — the one derivation both
-// `loam grant list` and the registration door read, so what an operator sees and what a door
-// honours cannot drift. "Effective" is the same discipline `grantHeld` runs: in a governed store a
+// Every EFFECTIVE surviving grant `author` holds at the store entity, as the registration door
+// reads it. It equals `grantsNaming` today only because it delegates to it; once a subject can name
+// a user, this resolves it and the ledger's literal rows may differ. "Effective" is the same
+// discipline `grantHeld` runs: in a governed store a
 // grant binds only if the operator signed it or an effective admin did, and only if it survives
 // strikes that themselves had standing. A revocation therefore removes a row here on the very next
 // read, with nothing to invalidate.

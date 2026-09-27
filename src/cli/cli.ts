@@ -4222,10 +4222,10 @@ async function cmdClientRevoke(
     // this command finds the client by, and the retry would answer "no such client" while the
     // grants stand.
     //
-    // The strike set is the door's own effective-grant resolution, selected by this literal key
-    // (`grantsNaming`), not a flat scan: it carries
-    // strike survival transitively and includes standing an effective admin minted, so what this
-    // command strikes is what enforcement honors as of this read. (A grant naming this key whose
+    // The strike set is the effective grants whose subject is literally this key (`grantsNaming`),
+    // not a flat scan: it carries strike survival transitively and includes standing an effective
+    // admin minted. It is never widened to the keys that act for a user, so revoking a connection
+    // cannot strike its user's own grants. (A grant naming this key whose
     // ISSUER's own chain is currently broken survives dormant and unstruck — a property of the
     // admin chain, shared with every revoke surface, not widened here.)
     const ids = grantsNaming(gateway.reactor, gateway.validityNow(), actor, operator).map(
