@@ -38,35 +38,83 @@ decision for 3e, and this design does not make it.
 
 ## One computation, one lowerer
 
-1. `governedStrikers(input, now, operator, adminsOnly, userGround)` returns a sorted key list. It
-   replaces `dataStrikers`. It evaluates `lawfulGrantsTermJson` over the grants in the input and
-   their negation closure (H1), then maps each subject through `subjectKeyAt`.
-2. `lowerGovernedTrust(term, input, now, ctx)` walks the Term. It finds each `inView` whose `term` is
-   byte-equal to `lawfulGrantsTermJson(X, flag)` for some operator `X`, with field `author` and
-   extract role `subject`. It replaces that `inView` with `match author inSet governedStrikers(...)`
-   for `X` and `flag`. Recognition is by exact structure, not by a marker. Every other node stays.
-   A body that names an operator other than the ground's own lowers with that body's own `X`.
-3. `dataStruck` and `dataStrikeWitnesses` read `governedStrikers` directly. The comment about "two
-   derivations of one rule" goes away: there is one derivation.
+1. `governedStrikers(input, at, operator, adminsOnly, users, mode)` returns a sorted key list: the
+   operator, plus the key or keys each surviving grant's subject names. It replaces `dataStrikers`.
+   It evaluates `lawfulGrantsTermJson` over the grants in the input and their negation closure
+   (H1), then maps each subject:
+   - A subject that is a key names itself.
+   - `user:<name>` in **present mode** names `userRootAt(users, at, ...)`: the one current root.
+   - `user:<name>` in **raw mode** names every root key the user ground's raw read gives (below).
+2. `lowerGovernedTrust(term, input, at, ctx)` walks the Term. It replaces each WHOLE trust
+   predicate that is structurally `lawfulStrikersJson(X, flag)` with
+   `match author inSet governedStrikers(..., X, flag, ...)`. It never replaces the `inView` leaf
+   alone: the strikers include the operator, and the leaf does not.
+3. `dataStruck` and `dataStrikeWitnesses` read `governedStrikers` directly. There is one
+   derivation.
 
-A memo keys the striker list by input identity and size, `now`, operator, flag, and the user
-ground's size. One read computes it once.
+### Recognition
+
+The lowerer parses each trust predicate and compares it with the parsed canonical form of
+`lawfulStrikersJson(X, flag)` for the `X` and `flag` it names. A node that matches is lowered.
+
+A near miss fails closed. A near miss is an `inView` whose `term` names `CTX_GRANTS`, or whose
+extract role is `subject`, but whose predicate is not an exact match. The lowerer throws with a
+message that names the body. It does not evaluate the near miss unlowered: that would reflect
+`user:` strings as authors.
+
+The lowerer also lowers every evaluation body in the registry that it passes on, as
+`lowerPrincipalRegistry` does with `mapEvaluationBodies`. The `lowerTerm` hook returns the lowered
+term and the lowered registry, so a body the term references by name or hash is lowered too.
+Pinned hash keys stay those of the signed bodies.
+
+### Present mode and raw mode
+
+`evalTerm` sites evaluate at `now`. Validity and negations apply there. They take present mode.
+
+`evalTermRaw` sites run select, watch, freeze, trial and audit machinery. There, a raw `inView`
+sees grants that are expired or not yet valid. These sites take raw mode:
+
+- The grants come from `evalTermRaw` of `lawfulGrantsTermJson`, exactly as the raw `inView` sees
+  them today.
+- A user subject expands to every key named by an operator-signed root claim for that user, read
+  with the same raw posture: validity is ignored, and the raw operator mask applies. The user
+  claim must name the user.
+
+So raw mode never narrows what the raw machinery trusts today for a key-named grant. The raw
+expansion of a user is a superset of the root at any one instant.
+
+### The user ground is an explicit input
+
+The lowerer does not read "the host" by itself. The caller passes the user ground:
+
+- A present read passes the live user ground (the host for a pool).
+- An as-of read passes the matching as-of slice of that ground: deltas signed by `asOf`, read with
+  validity at `asOf`. That is the same cut `asOfGroundImpl` makes for the input.
+- A pool's as-of read cuts its host's ground at the same `asOf`.
+
+### No memo across evaluations
+
+The striker list is memoized for one evaluation only, and a new evaluation computes it again. A
+memo keyed by size can survive a same-size reseat or erasure and serve a stale root. If a
+measurement later shows cost, the key will be an explicit revision of the grant and user grounds,
+not a size.
 
 ## The sites
 
 Every site in this list takes the lowerer. The rails below hold each one.
 
-| site | today | change |
+| site | mode | change |
 |---|---|---|
-| `lifecycle.ts` `registerImpl`, `rebindImpl`, `replayRegistrationsImpl`, `matForImpl` | `reactor.register(name, body, roots, now, registry)` | pass `lowerTerm`. It runs on each refresh, `advanceTime` included |
-| `lifecycle.ts` `assertTemplatesVisible`, `assertMaterializable` | trial `evalTermRaw` | lower first, so the trial runs the program that the reads run |
-| `reads.ts` gather: bound, channel pool, as-of, cold | `evalTerm` / `reactor.eval` | lower first, with the input that is evaluated |
-| `reads.ts` `gatherForRetractionImpl`, `resolvePinnedImpl`, subscribe cold path | same | lower first |
-| `ingest.ts` `selectImpl`, `watchImpl` (listing membership) | `evalTermRaw` | lower first |
-| `listing.ts` membership declaration and its `JSON.stringify` compare | holds the mask | NOT lowered. The declaration stays stable, so a read writes nothing (the pulse law) |
-| `listing.ts` `trustFeeder` invalidation | grants and arrivals | also a user-ground root change |
-| `erase.ts` audit gather | `evalTerm(mask(trust ...))` | lower first |
-| `slate.ts`, `server/admin-federation.ts`, `federation/translate.ts`, `adopt.ts` | `dataStruck` / membership eval | through `governedStrikers` or the lowerer |
+| `lifecycle.ts` `registerImpl`, `rebindImpl`, `replayRegistrationsImpl`, `matForImpl` | present | pass `lowerTerm`, with the registry. It runs on each refresh, `advanceTime` included |
+| `lifecycle.ts` `assertTemplatesVisible`, `assertMaterializable` | raw | lower first, so the trial runs the program the reads run |
+| `reads.ts` gather: bound, channel pool, cold | present | lower first, with the evaluated input |
+| `reads.ts` gather as-of | present at `asOf` | lower first, with the as-of user slice |
+| `reads.ts` `gatherForRetractionImpl`, `resolvePinnedImpl`, subscribe cold path | present | lower first |
+| `ingest.ts` `selectImpl`, `watchImpl` (listing membership) | raw | lower first |
+| `listing.ts` membership declaration and its `JSON.stringify` compare | none | NOT lowered. The declaration stays stable, so a read writes nothing (the pulse law) |
+| `listing.ts` `trustFeeder` invalidation | none | also invalidates on a user-ground change |
+| `erase.ts` audit gather | as the site evaluates | lower first |
+| `slate.ts`, `server/admin-federation.ts`, `federation/translate.ts`, `adopt.ts` | as each evaluates | through `governedStrikers` or the lowerer |
 
 The signed hyperschema bytes, `termCanonicalHex`, `termHash`, `groupPrograms`, `boundKey`,
 `schemaLawAddress` and `bodyHash` all see the unlowered body. Nothing that hashes or signs sees a
@@ -74,24 +122,24 @@ lowered one.
 
 ## When the answer moves without an ingest here
 
-The striker list depends on two grounds: the input (the grants) and the user ground (root claims).
-A pool reads its users from its host. So a pool's answer can move in three ways that its own
-reactor does not see:
+The striker list depends on two grounds: the input (the grants) and the user ground. A pool reads
+its users from its host. The host-side dependency is wide: `loam.user` and `loam.root` claims, the
+negations and counter-negations of either, erasure, and every validity boundary in those chains.
 
-1. The host ingests a new root claim for a granted user.
-2. A root claim's `validFrom` or `validUntil` passes in the host.
-3. The operator strikes a root claim in the host.
+The first implementation does not try to be narrow. A Gateway that reads users from a host
+registers as a dependent. The host notifies each dependent on EVERY accepted ingest and on EVERY
+validity boundary it crosses. The dependent then refreshes its current materializations at the new
+`now`, and it invalidates its listing index.
 
-The host already arms a timer on its own validity boundaries (`armValidityTimer`), and it already
-sees its own ingests. The change: a Gateway that reads users from a host registers as a dependent.
-When the host ingests a delta at a `user:*` entity in context `loam.root`, or crosses a boundary of
-such a claim, it notifies each dependent. The dependent refreshes its materializations and its
-listing index at the new `now`. On the host itself, a root-claim ingest already refreshes a governed
-materialization, because a reflective body is broad-dispatch.
+The refresh must keep subscribers. Reseat ends subscriptions. Rebind registers a new generation,
+and the subscribed materializations stay behind. Neither gives R5's frame to an existing
+subscriber. So the dependent calls a rhizomatic `Reactor.refreshAll(now)` (the name is Sol's
+call). It refreshes every current materialization and emits the normal change events. PR B waits
+on a rhizomatic prerelease with that call.
 
-Question for Sol: rhizomatic has no public "refresh every materialization" call. The options are
-(a) the dependent re-registers through its reseat path, or (b) a small rhizomatic API, for example
-`reactor.refreshAll(now)`. We lean (a) for now, because it needs no substrate change.
+On the host itself, a root-claim ingest already refreshes a governed materialization, because a
+reflective body is broad-dispatch. A root-claim boundary is a host boundary, so `advanceTime`
+refreshes it too.
 
 ## Writers (the parked 3d-ii diff)
 
@@ -117,8 +165,9 @@ serves. Each erasure-adjacent rail is two-sided: a named bystander survives.
 - **R4 connection strike (M5).** Alice's connection has a delegation for its inbox. Its strike on
   data in that inbox is inert. Alice's root strike on the same value counts.
 - **R5 pool.** The grant and the strike are in a pool. The root claim is in the host. The pool's
-  governed read honors the strike. After a re-point in the host, the pool's subscription gets a new
-  frame. The rail awaits that frame, and does not race `setImmediate`.
+  governed read honors the strike. After a re-point in the host, an EXISTING subscriber to the
+  pool's materialization gets a new frame. The rail awaits that frame, and does not race
+  `setImmediate`.
 - **R6 boundary.** A root claim starts in the future. Before the boundary, the new root's strike is
   inert. After it, the strike counts with no ingest, in the host and in a pool.
 - **R7 listing agrees with the point read.** An entity that alice's root struck is absent from the
@@ -129,13 +178,27 @@ serves. Each erasure-adjacent rail is two-sided: a named bystander survives.
 - **R10 one derivation.** `dataStruck` equals the lowered read for R2 to R6.
 - **R11 no root.** A grant names a user with no root. It adds no striker. The writer falls back to
   the key.
+- **R12 whole predicate.** The lowered body contains no `inView` over grants, and the operator's
+  own strike still counts. A body that carries the leaf outside the expected `or` throws.
+- **R13 near miss.** A trust predicate that differs from the canonical form in one field (the
+  extract role, the verb, the context) throws when it is lowered. It is never evaluated unlowered.
+- **R14 raw control.** An expired key-named grant's subject is in the raw striker set, before and
+  after lowering. A select or watch over raw input gives the same candidates both ways.
+- **R15 as-of.** At `asOf`, alice's root is K1. After `asOf`, the operator re-points her to K2. An
+  as-of read at `asOf` honors K1's strike and not K2's. A present read honors K2's and not K1's.
+- **R16 no stale memo.** Erase a root claim, then write a new one, so the ground keeps its size.
+  The next read uses the new root.
+- **R17 registry body.** A body that references, by name, a schema carrying the predicate is
+  lowered through the registry. A user-named grantee's strike counts in it.
 
-Every rail runs on the base tree first (`rails-red`). R1 and R9 are controls, and they pass on the
-base. They say so in their text.
+Every rail runs on the base tree first (`rails-red`). R1, R9 and R14 are controls, and they pass on
+the base. They say so in their text.
 
 ## Order
 
-1. PR A: `governedStrikers`, the lowerer, and all sites. R1, R2, R7, R8, R9, R10. The grants in R2
-   are written by the test, because no writer names a user yet.
-2. PR B: the dependent notification, for pools and boundaries. R5, R6.
+1. PR A: `governedStrikers` in both modes, the lowerer, the registry lowering, and all sites. R1,
+   R2, R7 to R10, R12 to R17. The grants in these rails are written by the test, because no writer
+   names a user yet.
+2. PR B: the dependent notification and `refreshAll`, for pools and boundaries. R5, R6. It waits
+   on a rhizomatic prerelease.
 3. PR C: the writers switch (the parked diff). R3, R4, R11, and the owed 3d rails.
