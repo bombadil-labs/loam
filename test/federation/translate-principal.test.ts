@@ -1,9 +1,9 @@
-// The translator's reconciliation retracts renderings signed by ANY key of its principal
-// (`keysEverOf`): a rendering minted under an old key R has since bound is R's to retract. The
-// rail is two-sided, because this widens what the pass negates: the bound old key's rendering is
-// retracted, and a bystander translator's rendering of the same struck source stays live and is
-// counted as stranded. Both are asserted at the delta level (a surviving strike, or none) and in
-// the pass's own report. The object level for renderings is pinned by translate-suppression.test.ts.
+// The translator's reconciliation retracts only renderings its principal OWNS (`keysEverOf`). A
+// SPEC-14 binding is association evidence that any writer can sign about anyone's key, so a
+// translator binding a stranger's key must not make that stranger's renderings its own: they stay
+// live and are counted as stranded. An earlier key becomes the translator's own only through an
+// operator-governed recovery record (step 5, PR 3e). Asserted at the delta level (a surviving
+// strike, or none) and in the pass's own report; the object level is translate-suppression.test.ts.
 
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Delta, type Pointer } from "@bombadil/rhizomatic";
@@ -103,7 +103,7 @@ async function world(): Promise<{ gw: Gateway; source: Delta }> {
   return { gw, source };
 }
 
-describe("the translator retracts what any key of its principal rendered", () => {
+describe("the translator retracts only what its principal owns", () => {
   it("without a binding, R's pass retracts neither K's nor Y's rendering", async () => {
     const { gw, source } = await world();
     const report = await translate(gw, { seed: R_SEED });
@@ -114,13 +114,15 @@ describe("the translator retracts what any key of its principal rendered", () =>
     await gw.close();
   });
 
-  it("once R binds K, R's pass retracts K's rendering and leaves the bystander's live", async () => {
+  it("R's own binding for K does not make K's rendering R's to retract (the adversarial case)", async () => {
     const { gw, source } = await world();
-    await gw.append([binding(K, 6500)]);
+    const bind = binding(K, 6500);
+    await gw.append([bind]);
+    expect(gw.reactor.get(bind.id)).toBeDefined();
     const report = await translate(gw, { seed: R_SEED });
-    expect(report.retracted).toBe(1);
-    expect(report.stranded).toBe(1);
-    expect(isSuppressed(gw, renderingBy(gw, K, source.id).id)).toBe(true);
+    expect(report.retracted ?? 0).toBe(0);
+    expect(report.stranded).toBe(2);
+    expect(isSuppressed(gw, renderingBy(gw, K, source.id).id)).toBe(false);
     expect(isSuppressed(gw, renderingBy(gw, Y, source.id).id)).toBe(false);
     await gw.close();
   });
