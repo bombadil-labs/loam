@@ -109,7 +109,7 @@ describe("loam user create", () => {
     expect(readUserSeed(home, "alice").kind).toBe("absent");
   });
 
-  it("--operator: three deltas (user, role, grant) and a 0600 seed file", async () => {
+  it("--operator: four deltas (user, role, grant, root) and a 0600 seed file", async () => {
     await run(["init", "--home", home], io());
     const before = await deltaCount();
     const code = await run(
@@ -118,7 +118,7 @@ describe("loam user create", () => {
       password("pw"),
     );
     expect(code).toBe(0);
-    expect(await deltaCount()).toBe(before + 3);
+    expect(await deltaCount()).toBe(before + 4);
     expect(readUserSeed(home, "bob").kind).toBe("present");
     if (process.platform !== "win32") {
       expect(statSync(userSeedPath(home, "bob")).mode & 0o777).toBe(0o600);
@@ -320,7 +320,7 @@ describe("loam user assign-role", () => {
     expect(readUserSeed(home, "nate").kind).toBe("absent");
   });
 
-  it("operator: exactly two deltas (role + grant) and mints a seed file", async () => {
+  it("operator: exactly three deltas (role, grant, root) and mints a seed file", async () => {
     await run(["init", "--home", home], io());
     const seed = readSeed(home);
     const operator = authorForSeed(seed);
@@ -332,7 +332,7 @@ describe("loam user assign-role", () => {
       io(),
     );
     expect(code).toBe(0);
-    expect(await deltaCount()).toBe(before + 2);
+    expect(await deltaCount()).toBe(before + 3);
     expect(readUserSeed(home, "olga").kind).toBe("present");
   });
 

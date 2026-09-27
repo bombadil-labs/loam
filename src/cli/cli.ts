@@ -106,6 +106,7 @@ import {
   CTX_ROLE,
   resolveUserView,
   roleClaims,
+  rootClaims,
   rolesOf,
   userClaims,
   userEntity,
@@ -2645,6 +2646,7 @@ async function cmdUserCreate(
         const subject = authorForSeed(mintedKey);
         deltas.push(
           signClaims(grantClaims(STORE_ENTITY, subject, "admin", operator, at + 2), seed),
+          signClaims(rootClaims(name, subject, operator, at + 3), seed),
         );
       }
       await gateway.append(deltas);
@@ -2946,8 +2948,10 @@ async function cmdUserRole(
       if (role === "operator") {
         mintedKey = randomBytes(32).toString("hex");
         const subject = authorForSeed(mintedKey);
+        // A fresh key re-points the user's root to it: the old key keeps its history, not its role.
         deltas.push(
           signClaims(grantClaims(STORE_ENTITY, subject, "admin", operator, at + 1), seed),
+          signClaims(rootClaims(name, subject, operator, at + 2), seed),
         );
       }
       try {
