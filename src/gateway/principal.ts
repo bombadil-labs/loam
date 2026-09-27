@@ -8,6 +8,7 @@ import {
   type Reactor,
   type Suppression,
 } from "@bombadil/rhizomatic";
+import { recoveredFrom, userGroundOf } from "./user-root.js";
 
 /**
  * A Loam principal: the root key it is pinned to. A user's root is their own key (README ruling
@@ -133,17 +134,58 @@ export function keysActingFor(
 
 /**
  * Every key whose deltas count as `who`'s own: the history question, asked where "your own" deltas
- * are selected (clear, unlink, a translator's renderings). Today that is the root alone. A SPEC-14
- * binding is association evidence, not ownership: any key with write standing can sign one naming
- * someone else's key, and "retract your own" must not then reach that person's claims. An earlier
- * key joins here only through an operator-governed recovery record (step 5, PR 3e).
+ * are selected (clear, unlink, a translator's renderings). The root, plus each earlier key a
+ * recovery replaced, when BOTH hold: an unbroken operator recovery chain names the pair (previous
+ * → root), and the later root's SPEC-14 binding for the earlier key is held. A binding alone is only
+ * association evidence, which any writer can sign about anyone's key, so it never makes a key "own".
+ * Read from the host's ground, where recoveries and bindings live; a ground with no host answers
+ * the root alone.
  */
 export function keysEverOf(
-  _reactor: Reactor,
-  _now: number,
+  reactor: Reactor,
   who: PrincipalRef,
+  operator: string | undefined,
 ): ReadonlySet<string> {
-  return new Set([who.root]);
+  const out = new Set<string>([who.root]);
+  if (!AUTHOR.test(who.root)) return out;
+  const users = userGroundOf(reactor);
+  const erased = users.erased();
+  const frontier = [who.root];
+  while (frontier.length > 0) {
+    const key = frontier.pop()!;
+    for (const earlier of recoveredFrom(users.reactor, operator, key, erased)) {
+      if (out.has(earlier) || !bindingHeld(users.reactor, key, earlier, erased)) continue;
+      out.add(earlier);
+      frontier.push(earlier);
+    }
+  }
+  return out;
+}
+
+// Is `root`'s SPEC-14 binding for `key` held (negated or not: history is history)?
+function bindingHeld(
+  reactor: Reactor,
+  root: string,
+  key: string,
+  erased: ReadonlySet<string>,
+): boolean {
+  for (const id of reactor.byTarget(root)) {
+    if (erased.has(id)) continue;
+    const d = reactor.get(id);
+    if (d === undefined || d.claims.author !== root) continue;
+    const at = (role: string) => d.claims.pointers.find((p) => p.role === role)?.target;
+    const kind = at("kind");
+    const named = at("key");
+    if (
+      kind?.kind === "primitive" &&
+      kind.value === "binding" &&
+      named?.kind === "primitive" &&
+      named.value === key
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // The scope a ground's write door asks delegations about. Only a ground that declares one honors a

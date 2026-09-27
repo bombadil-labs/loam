@@ -30,7 +30,7 @@ import { DeltaSet, evalTerm } from "@bombadil/rhizomatic";
 import { erasedFromReading } from "../gateway/erase.js";
 import { entityGatherBody } from "../gateway/gather.js";
 
-import { CTX_ROLE, CTX_ROOT, CTX_USER, userEntity } from "../gateway/user-root.js";
+import { chainRoot, CTX_ROLE, CTX_ROOT, CTX_USER, userEntity } from "../gateway/user-root.js";
 export { CTX_ROLE, CTX_ROOT, userEntity };
 
 const AUTHOR = /^ed25519:[0-9a-f]{64}$/;
@@ -276,7 +276,13 @@ export function rootOf(
   name: string,
 ): string | undefined {
   const view = resolveUserView(reactor, operator, now, name);
-  const root = view === undefined ? undefined : (view as Record<string, View>)[CTX_ROOT];
+  if (view === undefined) return undefined;
+  // Once a user has a recovery chain, only its head's root is eligible. It is derived from the chain
+  // and checked against the operator's standing root claims, never read off the View's latest pick,
+  // which a later claim for a retired key would win.
+  const fenced = chainRoot(reactor, now, operator, name, erasedFromReading(reactor, operator));
+  if (fenced !== undefined) return fenced ?? undefined;
+  const root = (view as Record<string, View>)[CTX_ROOT];
   return typeof root === "string" && AUTHOR.test(root) ? root : undefined;
 }
 

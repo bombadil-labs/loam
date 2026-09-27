@@ -457,7 +457,7 @@ describe("history: keysEverOf", () => {
 
   it("without a binding, R cannot clear what K wrote", async () => {
     const gw = await oldKeyWrote();
-    expect([...keysEverOf(gw.reactor, gw.validityNow(), { root: R })]).toEqual([R]);
+    expect([...keysEverOf(gw.reactor, { root: R }, OP)]).toEqual([R]);
     at(T0 + 20);
     await gw.gqlHooks().clear("Plant", FERN, ["tag"], R_SEED);
     expect(tags(gw)).toEqual(["by-old-key"]);
@@ -475,7 +475,7 @@ describe("history: keysEverOf", () => {
     // delta: the binding is held
     expect(gw.reactor.get(bind.id)).toBeDefined();
     at(T0 + 30);
-    expect([...keysEverOf(gw.reactor, gw.validityNow(), { root: R })]).toEqual([R]);
+    expect([...keysEverOf(gw.reactor, { root: R }, OP)]).toEqual([R]);
     expect(acts(gw, K)).toBe(false);
     // door: R's clear leaves K's value standing
     await gw.gqlHooks().clear("Plant", FERN, ["tag"], R_SEED);
