@@ -17,7 +17,9 @@
 // - `principal.clear-connection-writes`: the owner clears a field only her connection wrote,
 //   unbound and bound. What each call answered, the parent reads, and the strikes in the pool.
 // - `principal.slate-owner`: a slate over ada's writes, before and after her key is replaced by a
-//   fresh write grant for `peer` (the present-day rotation), and whether `peer`'s write joins it.
+//   fresh write grant for `peer` (the present-day rotation), and the root door's verdict on each
+//   key's next write. The slate names its members by id, so it is unchanged by the rotation BY
+//   CONSTRUCTION; it cannot show whether `peer`'s write would join a principal-keyed container.
 //
 // Deliberately not recorded: a slate cannot stand over the owner's container itself, because a
 // slate's container must carry a frozen `membershipAt`/`version`; the slate case condemns ada's
@@ -200,6 +202,7 @@ describe("recordings: a bound connection's inbox", () => {
     const T = c.at + 10_000;
     c.tick();
     const [open] = delegationsIn(pool);
+    if (open === undefined) throw new Error("fixture: the bind signed no delegation in the pool");
     await pool.append([
       signed(
         withStamp(pool.stamp(KEY.writer), (t) => ({
@@ -213,7 +216,7 @@ describe("recordings: a bound connection's inbox", () => {
     c.tick();
     await pool.append([
       signed(
-        withStamp(pool.stamp(KEY.writer), (t) => makeNegationClaims(KEY.writer, t, open!.id)),
+        withStamp(pool.stamp(KEY.writer), (t) => makeNegationClaims(KEY.writer, t, open.id)),
         "writer",
       ),
     ]);
@@ -327,9 +330,12 @@ describe("recordings: a bound connection's inbox", () => {
     await hooks.mutate("Note", "note:ada", { tag: "by-connection" }, SEEDS.subadmin, BINDING);
     const write = [...pool.reactor.snapshot()].find(
       (d) => d.claims.author === KEY.subadmin && prim(d, "value") === "by-connection",
-    )!;
+    );
+    // Recorded, not asserted: a later PR that moves the write out of the pool shows as a diff.
     const strikesInPool = () =>
-      pool.reactor.negationsOf(write.id).map((n) => pool.reactor.get(n)!.claims.author);
+      write === undefined
+        ? "the connection's write is not in the pool"
+        : pool.reactor.negationsOf(write.id).map((n) => pool.reactor.get(n)!.claims.author);
     const steps: Record<string, unknown> = {};
     c.tick();
     steps["the connection wrote"] = { ...resolveParent(gw), strikesInPool: strikesInPool() };
