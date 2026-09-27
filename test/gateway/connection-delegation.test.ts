@@ -453,6 +453,33 @@ describe("revoking a connection negates its delegation", () => {
     await gw.close();
   });
 
+  it("a root the owner lets WRITE in the pool cannot delegate the connection key", async () => {
+    const gw = await home();
+    const conn = await bind(gw, CONN_SEED);
+    const other = await bind(gw, OTHER_SEED);
+    const pool = conn.gateway!;
+    const NEW_SEED = "e8".repeat(32);
+    await gw.bindConnection({ container: "home:ada", connectionKey: CONN, ownerSeed: NEW_SEED });
+    await gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: NEW_SEED });
+    // The new owner lets the old root write here again; that is not delegation power.
+    await pool.append([
+      signClaims(
+        grantClaims(STORE_ENTITY, GARDENER, "write", authorForSeed(NEW_SEED), 1049),
+        NEW_SEED,
+      ),
+    ]);
+    const reissue = signClaims(
+      delegationClaims(GARDENER, CONN, inboxName("home:ada", CONN), 1050),
+      GARDENER_SEED,
+    );
+    expect(await door(pool, reissue)).toBe("admitted"); // a writer may assert it
+    expect(await door(pool, observed(FERN, "height", 29, 1051, CONN_SEED))).toBe("refused");
+    expect(await door(other.gateway!, observed(FERN, "tag", "mist", 1052, OTHER_SEED))).toBe(
+      "admitted",
+    );
+    await gw.close();
+  });
+
   it("a bind strikes a second root's delegation and admin grant, even when the owner's stands", async () => {
     const gw = await home();
     const conn = await bind(gw, CONN_SEED);

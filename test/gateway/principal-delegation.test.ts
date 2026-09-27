@@ -121,8 +121,9 @@ const note = (seed: string, t: number): Delta =>
     seed,
   );
 
-/** A governed store at T0: the operator grants R (named by root) `verb` standing. */
-async function store(verb: "write" | "admin" = "write", others: readonly string[] = []) {
+/** A governed store at T0: the operator grants R (named by root) `verb` standing, admin by
+ *  default, since only an admin grant carries delegation. */
+async function store(verb: "write" | "admin" = "admin", others: readonly string[] = []) {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(T0);
   const gw = await ground(verb, others);
@@ -133,7 +134,7 @@ async function store(verb: "write" | "admin" = "write", others: readonly string[
 }
 
 /** The same ground with no declared scope, as the root store boots. */
-async function ground(verb: "write" | "admin" = "write", others: readonly string[] = []) {
+async function ground(verb: "write" | "admin" = "admin", others: readonly string[] = []) {
   return Gateway.boot(
     new MemoryBackend(),
     assembleGenesis({
@@ -176,6 +177,17 @@ describe("a ground that declares no scope honors no delegate", () => {
     // Control: the same record in a ground that declares the scope admits C.
     root.honorDelegationsAt(STORE_ENTITY);
     expect(await door(root, note(C_SEED, T0 + 22))).toBe("admitted");
+  });
+});
+
+describe("delegating is an admin power", () => {
+  it("a root that may only write cannot hand its standing to a delegate", async () => {
+    const gw = await store("write");
+    at(T0 + 10);
+    await gw.append([delegation(R_SEED, C, STORE_ENTITY, false, T0 + 10)]);
+    at(T0 + 20);
+    expect(await door(gw, note(R_SEED, T0 + 20))).toBe("admitted");
+    expect(await door(gw, note(C_SEED, T0 + 21))).toBe("refused");
   });
 });
 
@@ -300,7 +312,7 @@ describe("a delegated key writes and does nothing else", () => {
 
 describe("a delegation is revocable by the root and by the operator", () => {
   async function delegated() {
-    const gw = await store("write", [X]);
+    const gw = await store("admin", [X]);
     at(T0 + 10);
     const toC = delegation(R_SEED, C, STORE_ENTITY, false, T0 + 10);
     await gw.append([toC]);

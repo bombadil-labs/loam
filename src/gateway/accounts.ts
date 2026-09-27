@@ -515,10 +515,13 @@ function grantHeld(
     // own key exactly. The verb is checked first so a delegate never reaches the seam for them.
     // The scope is the ground's own, not the tenant's: only a ground that declares one (an inbox
     // pool, by its name) honors a delegate, so a delegation copied to another ground grants nothing.
+    // Delegating is issuing, so only an ADMIN grant carries it: a subject that may only write
+    // cannot hand its standing to a delegate.
     if (author !== subject) {
       const scope = principalScopeOf(ctx.reactor);
       if (
         verb !== "write" ||
+        granted !== "admin" ||
         scope === undefined ||
         !keyActsFor(ctx.reactor, ctx.now, { root: subject }, author, scope, ctx.operator)
       ) {
