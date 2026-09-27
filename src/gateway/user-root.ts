@@ -28,11 +28,14 @@ const AUTHOR = /^ed25519:[0-9a-f]{64}$/;
 
 const NONE: ReadonlySet<string> = new Set();
 
-// Recovery evidence decides authority, and a reactor can hold raw-ingested rows no door verified.
-// So every recovery record and lineage claim is signature-checked before use, as the substrate
-// checks principal evidence; a verdict is cached per object, id and signature.
+// Every operator claim at a user entity decides authority (the user's record, roles, root and
+// recovery history), and a reactor can hold raw-ingested rows no door verified. So every reader of
+// those claims signature-checks one before use, as the substrate checks principal evidence; a
+// verdict is cached per object, id and signature. `resolveUserView` hides the same rows from the
+// View, so the indexed readers and the View reader agree.
 const verifiedCache = new WeakMap<Delta, { readonly id: string; readonly sig: string }>();
-function verified(d: Delta): boolean {
+/** Does `d` carry its author's valid signature over its own content address? */
+export function verified(d: Delta): boolean {
   const hit = verifiedCache.get(d);
   if (hit !== undefined && hit.id === d.id && hit.sig === d.sig && computeId(d.claims) === d.id) {
     return true;
@@ -409,6 +412,7 @@ function standingRootClaim(
     if (erased.has(id)) continue;
     const d = reactor.get(id);
     if (d === undefined || d.claims.author !== operator || d.claims.timestamp > cut) continue;
+    if (!verified(d)) continue;
     const { validFrom, validUntil } = d.claims;
     if (now < validFrom || (validUntil !== undefined && now >= validUntil)) continue;
     const filing = d.claims.pointers.filter(
@@ -478,6 +482,7 @@ function latestValues(
     if (erased.has(id)) continue;
     const d = reactor.get(id);
     if (d === undefined || d.claims.author !== operator || d.claims.timestamp > cut) continue;
+    if (!verified(d)) continue;
     const { validFrom, validUntil } = d.claims;
     if (now < validFrom || (validUntil !== undefined && now >= validUntil)) continue;
     const filing = d.claims.pointers.filter(
@@ -607,7 +612,7 @@ export function userRootsRaw(
     if (erased.has(id)) continue;
     const d = reactor.get(id);
     if (d === undefined || d.claims.author !== operator || d.claims.timestamp > cut) continue;
-    if (struck(id)) continue;
+    if (!verified(d) || struck(id)) continue;
     const at = (context: string): boolean =>
       d.claims.pointers.some(
         (p) =>
@@ -668,7 +673,7 @@ export function subjectCouldName(
   const entity = userEntity(subject.slice(USER_PREFIX.length));
   for (const id of ground.byTarget(entity)) {
     const d = ground.get(id);
-    if (d === undefined || d.claims.author !== operator) continue;
+    if (d === undefined || d.claims.author !== operator || !verified(d)) continue;
     const atRoot = d.claims.pointers.some(
       (p) =>
         p.target.kind === "entity" &&
@@ -713,7 +718,7 @@ export function keysSubjectCouldName(
   const out = new Set<string>();
   for (const id of ground.byTarget(entity)) {
     const d = ground.get(id);
-    if (d === undefined || d.claims.author !== operator) continue;
+    if (d === undefined || d.claims.author !== operator || !verified(d)) continue;
     const atRoot = d.claims.pointers.some(
       (p) =>
         p.target.kind === "entity" &&
