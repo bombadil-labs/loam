@@ -36,8 +36,15 @@ cut and one of `committed` or `aborted`. It is written after the host commit (or
 the cut's terminal state. It is durable and does not depend on the recovery record staying visible.
 
 An outcome is DURABLE. The reader counts it whatever strikes it. The erase door refuses to erase an
-outcome on its own: a cut and its outcome are erased together or not at all. Two outcomes that
-contradict each other for one cut make that cut PREPARED: fail closed.
+outcome on its own: a cut and its outcome are erased together or not at all. A PREPARED cut (no
+outcome yet) cannot be erased at all while the host may still commit: its pause holds until an
+outcome lands. Two outcomes that contradict each other for one cut make that cut PREPARED: fail
+closed.
+
+The store's incarnation marker has the same durability. A new store writes its own marker before it
+admits ANY other delta, replay and federation included, so no replayed older marker can be the
+lowest-arrival one. The active marker cannot be erased, and the reader counts it whatever strikes it,
+so an older marker can never become the lowest held one later.
 
 A cut's state in its store:
 
@@ -115,4 +122,7 @@ rail pins it.
   and an erasure of the outcome alone is refused.
 - **H12.** Contradictory outcomes for one cut: the pool pauses K1 and shows no history.
 - **H13.** A pool is dropped and re-created under the same name; its old cut and incarnation claim
-  are replayed into it. They count for nothing there.
+  are replayed into it. Offered BEFORE the new marker lands, they are refused (the store admits
+  nothing until its marker is committed). Offered after, they are inert.
+- **H14.** The active incarnation marker: an erasure is refused, and a strike changes nothing.
+- **H15.** A PREPARED cut: an erasure is refused, and the pause holds until an outcome lands.
