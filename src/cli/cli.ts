@@ -2666,18 +2666,30 @@ async function cmdUserCreate(
       ? rolesOf(gateway.reactor, gateway.operator, gateway.validityNow(), name)
       : new Set<UserRole>();
     // A name that belonged to someone is not given to a new person: a struck role can lapse, and
-    // the old key and its grants live outside the user record. Only erasure frees it.
-    if (
-      !known &&
-      (nameStillHeld(gateway.reactor, operator, name) || readUserSeed(home, name).kind !== "absent")
-    ) {
-      io.err(
-        `user create: the name ${name} still carries a previous person's record, roles, root or ` +
-          `key file, so it will not be given to someone new. Erase that person first, or pick ` +
-          `another name. Nothing was written.`,
-      );
-      await gateway.close();
-      return 2;
+    // the old key and its grants live outside the user record. Only erasure frees it, and the
+    // key file is not erasure's to remove.
+    if (!known) {
+      const trace = nameStillHeld(gateway.reactor, operator, gateway.validityNow(), name);
+      const keyFile = readUserSeed(home, name);
+      const refusal = trace.held
+        ? trace.notYetValid
+          ? `the ground holds ${name}'s record, but it is not valid until later — the host clock ` +
+            `may have stepped back. Wait, or check the clock. Nothing was written.`
+          : `the name ${name} still carries a previous person's record, roles or root ` +
+            `(${trace.ids.join(", ")}). Erase those, or pick another name. Nothing was written.`
+        : keyFile.kind === "present"
+          ? `a key file for ${name} remains at ${userSeedPath(home, name)}. Erasure does not ` +
+            `remove it: move it away by hand if its person is gone, or pick another name. ` +
+            `Nothing was written.`
+          : keyFile.kind === "unreadable"
+            ? `the key file at ${userSeedPath(home, name)} cannot be read (${keyFile.detail}), so ` +
+              `this command cannot tell whether a person still holds it. Nothing was written.`
+            : undefined;
+      if (refusal !== undefined) {
+        io.err(`user create: ${refusal}`);
+        await gateway.close();
+        return 2;
+      }
     }
     if (!known) {
       const at = Date.now();

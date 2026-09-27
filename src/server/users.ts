@@ -290,8 +290,17 @@ export function rootOf(
  * lapse and revive a role, and the old key's grants and seed file are not at this entity at all.
  * Only erasure, which removes the bytes, frees a name.
  */
-export function nameStillHeld(reactor: Reactor, operator: string, name: string): boolean {
+export function nameStillHeld(
+  reactor: Reactor,
+  operator: string,
+  now: number,
+  name: string,
+):
+  | { readonly held: false }
+  | { readonly held: true; readonly notYetValid: boolean; readonly ids: readonly string[] } {
   const entity = userEntity(name);
+  const ids: string[] = [];
+  let notYetValid = false;
   for (const id of reactor.byTarget(entity)) {
     const d = reactor.get(id);
     if (d === undefined || d.claims.author !== operator) continue;
@@ -303,7 +312,9 @@ export function nameStillHeld(reactor: Reactor, operator: string, name: string):
           p.target.entity.context === CTX_ROLE ||
           p.target.entity.context === CTX_ROOT),
     );
-    if (aboutPerson) return true;
+    if (!aboutPerson) continue;
+    ids.push(id);
+    if (d.claims.validFrom > now) notYetValid = true;
   }
-  return false;
+  return ids.length === 0 ? { held: false } : { held: true, notYetValid, ids: ids.sort() };
 }

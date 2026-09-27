@@ -9,7 +9,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   authorForSeed,
   makeNegationClaims,
@@ -142,7 +142,8 @@ describe("every road that mints a user a key names it as their root", () => {
   });
 
   const CHEAP: ScryptParams = { N: 16, r: 1, p: 1, keylen: 16 };
-  const io = () => ({ out: () => undefined, err: () => undefined });
+  const said: string[] = [];
+  const io = () => ({ out: () => undefined, err: (m: string) => void said.push(m) });
   const password = { readSecret: () => Promise.resolve("pw"), scrypt: CHEAP };
   const cliRoot = async (name: string) => {
     const gw = await Gateway.boot(
@@ -229,7 +230,9 @@ describe("every road that mints a user a key names it as their root", () => {
     rmSync(join(home, "credentials.json"), { force: true });
     rmSync(userSeedPath(home, "ada"), { force: true }); // even with the old key file gone
     const size = await withGround((gw) => gw.reactor.size);
+    said.length = 0;
     expect(await run(["user", "create", "ada", "--home", home], io(), password)).toBe(2);
+    expect(said.join("\n")).toMatch(/previous person's record, roles or root \(/);
     expect(await withGround((gw) => gw.reactor.size)).toBe(size);
     expect(
       await withGround((gw) => [...rolesOf(gw.reactor, gw.operator, gw.validityNow(), "ada")]),
@@ -239,7 +242,9 @@ describe("every road that mints a user a key names it as their root", () => {
   it("a key file left without a person also keeps the name from a new person", async () => {
     expect(await run(["init", "--home", home], io())).toBe(0);
     writeUserSeed(home, "ada", "c4".repeat(32));
+    said.length = 0;
     expect(await run(["user", "create", "ada", "--home", home], io(), password)).toBe(2);
+    expect(said.join("\n")).toMatch(/Erasure does not remove it/);
     expect(await cliRoot("ada")).toBeUndefined();
   });
 
@@ -255,4 +260,60 @@ describe("every road that mints a user a key names it as their root", () => {
       expect(await cliRoot("ada")).toBeUndefined();
     },
   );
+
+  it("erasing the person and moving the key file away frees the name", async () => {
+    expect(await run(["init", "--home", home], io())).toBe(0);
+    expect(await run(["user", "create", "ada", "--operator", "--home", home], io(), password)).toBe(
+      0,
+    );
+    await withGround(async (gw) => {
+      const op = gw.operator!;
+      const ids = [...gw.reactor.byTarget("user:ada")].filter(
+        (id) => gw.reactor.get(id)?.claims.author === op,
+      );
+      expect(ids.length).toBeGreaterThanOrEqual(3); // record, role, root
+      for (const id of ids) await gw.erase(id);
+    });
+    rmSync(join(home, "credentials.json"), { force: true });
+    rmSync(userSeedPath(home, "ada"), { force: true });
+    said.length = 0;
+    expect(
+      await run(["user", "create", "ada", "--home", home], io(), password),
+      said.join("\n"),
+    ).toBe(0);
+    expect(
+      await withGround((gw) => [...rolesOf(gw.reactor, gw.operator, gw.validityNow(), "ada")]),
+    ).toEqual(["actor"]);
+  });
+
+  it("a record not valid yet (the clock stepped back) is named as that, not as someone else's", async () => {
+    expect(await run(["init", "--home", home], io())).toBe(0);
+    expect(await run(["user", "create", "ada", "--home", home], io(), password)).toBe(0);
+    rmSync(join(home, "credentials.json"), { force: true });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() - 3_600_000);
+    try {
+      said.length = 0;
+      expect(await run(["user", "create", "ada", "--home", home], io(), password)).toBe(2);
+      expect(said.join("\n")).toMatch(/not valid until later/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a claim about a name that someone other than the operator wrote does not block it", async () => {
+    expect(await run(["init", "--home", home], io())).toBe(0);
+    await withGround(async (gw) => {
+      const op = gw.operator!;
+      await gw.append([
+        signClaims(grantClaims(STORE_ENTITY, WRITER, "write", op, Date.now()), readSeed(home)),
+      ]);
+      await gw.append([signClaims(roleClaims("bob", "operator", WRITER, Date.now()), WRITER_SEED)]);
+    });
+    said.length = 0;
+    expect(
+      await run(["user", "create", "bob", "--home", home], io(), password),
+      said.join("\n"),
+    ).toBe(0);
+  });
 });

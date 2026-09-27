@@ -124,11 +124,15 @@ export function writeUserSeed(home: string, name: string, seed: string): void {
   // Temp then rename: a write that fails part-way leaves the previous key file whole.
   const path = userSeedPath(home, name);
   const temp = `${path}.${process.pid}.tmp`;
-  writeFileSync(temp, `${seed}\n`, { mode: 0o600 });
   try {
+    writeFileSync(temp, `${seed}\n`, { mode: 0o600 });
     renameSync(temp, path);
   } catch (err) {
-    rmSync(temp, { force: true });
+    try {
+      rmSync(temp, { force: true }); // never leave key material behind under another name
+    } catch {
+      /* the original failure is the one to report */
+    }
     throw err;
   }
 }
