@@ -20,12 +20,12 @@ import {
   type Term,
 } from "@bombadil/rhizomatic";
 import { keyActsFor, principalScopeOf } from "./principal.js";
-import { subjectKeyAt } from "./user-root.js";
+import { recoveryDefect, retiredKeysOf, subjectKeyAt, userGroundOf } from "./user-root.js";
 import { STORE_ENTITY } from "./genesis.js";
 import { CTX_GRANTS, dataStrikers, lawfulStrikersJson } from "./governed-trust.js";
 export { CTX_GRANTS, lawfulStrikersJson } from "./governed-trust.js";
 import { entityGatherBody } from "./gather.js";
-import { eraseDefect } from "./erase.js";
+import { eraseDefect, erasedInBatch } from "./erase.js";
 import { publicDefect } from "./public.js";
 import { artifactDefect } from "./artifact.js";
 import { trustDefect } from "./trust.js";
@@ -404,6 +404,18 @@ function tenantOfWith(ctx: Ctx, entity: string, visited: ReadonlySet<string>): s
   return winner?.tenant;
 }
 
+// The keys recoveries retired, read once per question from the ground's users.
+const retiredMemo = new WeakMap<Ctx, ReadonlySet<string>>();
+function retiredIn(ctx: Ctx): ReadonlySet<string> {
+  let hit = retiredMemo.get(ctx);
+  if (hit === undefined) {
+    const users = userGroundOf(ctx.reactor);
+    hit = retiredKeysOf(users.reactor, ctx.operator, users.erased());
+    retiredMemo.set(ctx, hit);
+  }
+  return hit;
+}
+
 function grantHeld(
   ctx: Ctx,
   tenant: string,
@@ -411,6 +423,9 @@ function grantHeld(
   verb: Verb,
   visited: ReadonlySet<string>,
 ): boolean {
+  // A key a recovery retired holds no standing at all: not through its own grants, and not as a
+  // delegate of another root (refactor/audit/user-recovery.md, "The root fence").
+  if (retiredIn(ctx).has(author)) return false;
   for (const d of survivingAt(ctx, tenant, CTX_GRANTS, visited)) {
     let subject: string | undefined;
     let granted: string | undefined;
@@ -432,6 +447,9 @@ function grantHeld(
     // grant that could not answer this question costs no user read.
     const key = subjectKeyAt(ctx.reactor, ctx.now, ctx.operator, subject);
     if (key === undefined) continue;
+    // A key a recovery retired holds no standing, through any grant or delegation, anywhere the
+    // host's users are read (refactor/audit/user-recovery.md, "The root fence").
+    if (retiredIn(ctx).has(key)) continue;
     // A delegated key WRITES for its user and does nothing else (README ruling 6): admin,
     // register, and the issuer checks that recurse through here as admin match the subject's
     // own key exactly. The verb is checked first so a delegate never reaches the seam for them.
@@ -698,6 +716,7 @@ export function authorize(
   now: number,
   delta: Delta,
   operator: string | undefined,
+  batch: readonly Delta[] = [],
 ): { ok: true } | { ok: false; refusal: string } {
   const defect =
     constitutionalDefect(delta) ??
@@ -709,7 +728,11 @@ export function authorize(
     envelopeDefect(delta.claims) ??
     containerDefect(delta, reactor, now, operator) ??
     eraseDefect(delta, reactor, operator) ??
-    slateDefect(delta, reactor, now, operator);
+    slateDefect(delta, reactor, now, operator) ??
+    recoveryDefect(delta, reactor, operator, batch, () => {
+      const users = userGroundOf(reactor);
+      return new Set([...users.erased(), ...erasedInBatch(batch, operator)]);
+    });
   if (defect !== undefined) {
     return { ok: false, refusal: `delta ${delta.id} is malformed law: ${defect}` };
   }

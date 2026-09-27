@@ -1,4 +1,5 @@
 import {
+  associatedKeys,
   authorsForPrincipal,
   resolvePrincipal,
   computeId,
@@ -8,6 +9,7 @@ import {
   type Reactor,
   type Suppression,
 } from "@bombadil/rhizomatic";
+import { recoveredFrom, userGroundOf } from "./user-root.js";
 
 /**
  * A Loam principal: the root key it is pinned to. A user's root is their own key (README ruling
@@ -133,17 +135,51 @@ export function keysActingFor(
 
 /**
  * Every key whose deltas count as `who`'s own: the history question, asked where "your own" deltas
- * are selected (clear, unlink, a translator's renderings). Today that is the root alone. A SPEC-14
- * binding is association evidence, not ownership: any key with write standing can sign one naming
- * someone else's key, and "retract your own" must not then reach that person's claims. An earlier
- * key joins here only through an operator-governed recovery record (step 5, PR 3e).
+ * are selected (clear, unlink, a translator's renderings). The root, plus each earlier key a
+ * recovery replaced, when BOTH hold: an unbroken operator recovery chain names the pair (previous
+ * → root), and the later root's SPEC-14 binding for the earlier key is held. A binding alone is only
+ * association evidence, which any writer can sign about anyone's key, so it never makes a key "own".
+ * Read from the host's ground, where recoveries and bindings live; a ground with no host answers
+ * the root alone.
  */
 export function keysEverOf(
-  _reactor: Reactor,
-  _now: number,
+  reactor: Reactor,
+  now: number,
   who: PrincipalRef,
+  operator: string | undefined,
 ): ReadonlySet<string> {
-  return new Set([who.root]);
+  const out = new Set<string>([who.root]);
+  if (!AUTHOR.test(who.root)) return out;
+  const users = userGroundOf(reactor);
+  const erased = users.erased();
+  const frontier = [who.root];
+  while (frontier.length > 0) {
+    const key = frontier.pop()!;
+    for (const earlier of recoveredFrom(users.reactor, operator, key, erased)) {
+      if (out.has(earlier) || !bindingHeld(users.reactor, now, key, earlier, erased)) continue;
+      out.add(earlier);
+      frontier.push(earlier);
+    }
+  }
+  return out;
+}
+
+// Does `root` hold a SPEC-14 binding for `key` (negated or not: history is history)? Read through
+// the substrate's own association evidence, which parses only the exact binding shape and verifies
+// each binding's signature, so a raw-ingested row that merely looks like one does not count.
+function bindingHeld(
+  reactor: Reactor,
+  now: number,
+  root: string,
+  key: string,
+  erased: ReadonlySet<string>,
+): boolean {
+  return associatedKeys(reactor, root, now, "rootOrSameAuthor").some((row) => {
+    if (row.key !== key || row.via.length !== 1 || erased.has(row.via[0]!)) return false;
+    // A one-step path may also be a succession; only a BINDING is the evidence recovery requires.
+    const kind = reactor.get(row.via[0]!)?.claims.pointers.find((p) => p.role === "kind")?.target;
+    return kind?.kind === "primitive" && kind.value === "binding";
+  });
 }
 
 // The scope a ground's write door asks delegations about. Only a ground that declares one honors a

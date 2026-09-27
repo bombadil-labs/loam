@@ -33,6 +33,7 @@ import {
 } from "@bombadil/rhizomatic";
 import { STORE_ENTITY } from "./genesis.js";
 import {
+  retiredKeysOf,
   USER_PREFIX,
   userGroundOf,
   userRootAt,
@@ -118,6 +119,11 @@ export function governedStrikers(
   if (grants.sort !== "dset")
     throw new Error("the lawful-grants term always evaluates to a delta set");
   const erased = users?.erased();
+  // A key a recovery retired strikes nothing (refactor/audit/user-recovery.md).
+  const retired =
+    users === undefined
+      ? new Set<string>()
+      : retiredKeysOf(users.reactor, operator, erased, users.cut);
   const out = new Set<string>([operator]);
   for (const g of grants.set) {
     for (const subject of reflectedSubjects(g, "subject")) {
@@ -135,6 +141,7 @@ export function governedStrikers(
       }
     }
   }
+  for (const k of retired) if (k !== operator) out.delete(k);
   return [...out].sort();
 }
 
