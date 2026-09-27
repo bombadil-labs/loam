@@ -31,8 +31,9 @@ const NONE: ReadonlySet<string> = new Set();
 // Every operator claim at a user entity decides authority (the user's record, roles, root and
 // recovery history), and a reactor can hold raw-ingested rows no door verified. So every reader of
 // those claims signature-checks one before use, as the substrate checks principal evidence; a
-// verdict is cached per object, id and signature. `resolveUserView` hides the same rows from the
-// View, so the indexed readers and the View reader agree.
+// verdict is cached per object, id and signature. The same holds for an operator negation of such a
+// claim, and for a counter-negation of that: an unsigned one strikes nothing. `resolveUserView`
+// hides the same rows from the View, so the indexed readers and the View reader agree.
 const verifiedCache = new WeakMap<Delta, { readonly id: string; readonly sig: string }>();
 /** Does `d` carry its author's valid signature over its own content address? */
 export function verified(d: Delta): boolean {
@@ -406,7 +407,8 @@ function standingRootClaim(
   const entity = userEntity(name);
   const negated = reactor.negationPredicate(
     now,
-    (n) => n.claims.author === operator && n.claims.timestamp <= cut && !erased.has(n.id),
+    (n) =>
+      n.claims.author === operator && n.claims.timestamp <= cut && !erased.has(n.id) && verified(n),
   );
   for (const id of reactor.byTarget(entity)) {
     if (erased.has(id)) continue;
@@ -475,7 +477,8 @@ function latestValues(
   const entity = userEntity(name);
   const negated = reactor.negationPredicate(
     now,
-    (n) => n.claims.author === operator && n.claims.timestamp <= cut && !erased.has(n.id),
+    (n) =>
+      n.claims.author === operator && n.claims.timestamp <= cut && !erased.has(n.id) && verified(n),
   );
   const best = new Map<string, { timestamp: number; id: string; value: unknown }>();
   for (const id of reactor.byTarget(entity)) {
@@ -600,6 +603,7 @@ export function userRootsRaw(
         !erased.has(n) &&
         neg.claims.author === operator &&
         neg.claims.timestamp <= cut &&
+        verified(neg) &&
         !struck(n)
       );
     });
@@ -690,6 +694,7 @@ export function subjectCouldName(
       const neg = ground.get(n);
       return (
         neg?.claims.author === operator &&
+        verified(neg) &&
         neg.claims.validFrom <= now &&
         neg.claims.validUntil === undefined &&
         ground.negationsOf(n).length === 0
@@ -730,6 +735,7 @@ export function keysSubjectCouldName(
       const neg = ground.get(n);
       return (
         neg?.claims.author === operator &&
+        verified(neg) &&
         neg.claims.validFrom <= now &&
         neg.claims.validUntil === undefined &&
         ground.negationsOf(n).length === 0
