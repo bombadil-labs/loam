@@ -84,18 +84,25 @@ timestamps never order recoveries; `supersedes` does. A user with no chain reads
 `userRootAt`, `rootOf` and `userRootsRaw` all apply this rule. The raw reader answers the head's
 root alone once a chain exists.
 
-**A retired key holds no standing.** A key is RETIRED when a record in any unbroken chain names it
-as `previous`, and no descendant in that chain names it as `root`. `grantHeld` refuses a retired
-author before any grant is read, whatever the grant names: a literal grant, a user-named grant, or
-a delegation. The governed striker set drops retired keys. This holds in every ground that reads the
-host's users, so a pool refuses K1 even before its own strikes land, and a pool that attaches later
-refuses K1 at once. There is no race window after the scan.
+**A retired key holds no standing.** A key is RETIRED when a record in an unbroken chain names it
+as `previous`, and no descendant in that chain names it as `root`. A key is also retired, for as
+long as the conflict stands, when ANY held recovery record of a BROKEN chain names it as `previous`
+or `root`: a broken history cannot tell which key is the user, so none of the keys it implicates
+stands. Resolving the conflict (the operator erases the wrong record) restores the single chain's
+answer.
+
+`grantHeld` refuses a retired author before any grant is read, whatever the grant names: a literal
+grant, a user-named grant, or a delegation. The governed striker set drops retired keys. This holds
+in every ground that reads the host's users, so a pool refuses K1 even before its own strikes land,
+and a pool that attaches later refuses K1 at once. There is no race window after the scan.
 
 The operator also strikes, for good, every other held root claim for the user, and K1's grants and
 delegations. The fence does not depend on these strikes; they keep the delta record honest.
 
 The promise is: a retired key is not the user's root, and holds no standing, without a new operator
-recovery that supersedes the chain head and names it as `root`.
+recovery that supersedes the chain head and names it as `root`. The one exception is a deliberate
+operator reset: the operator erases the head and its root claim. After a reset the user has no
+root until the operator writes one, and the erasure records say what was reset.
 
 ## The command
 
@@ -154,7 +161,10 @@ Each rail asserts the delta and the door (or the View). Each has a bystander.
 - **E5.** A broken chain fails closed: a second record that does not supersede; an orphan whose
   `supersedes` is not held; a root claim whose `recovery` record is not held. In each the user reads
   as having no root, `keysEverOf` answers the key alone, and `loam user recover` refuses and names
-  the records.
+  the records. In each, K1 also holds a literal write grant, and a counter-negated one: the door
+  refuses K1, and K1's strike does not bind in a governed read. A bystander key's literal grant
+  still writes, and its strike still binds. Erasing the wrong record restores the single chain's
+  answer.
 - **E6.** Connections: an inbox bound by K1 is refused. Re-binding by K2 works (the #627 rails).
 - **E7.** Preflight: no standing grant, a present seed without `--replace-seed`, or a broken chain
   is refused, with nothing written and no journal left.
