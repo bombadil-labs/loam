@@ -67,11 +67,24 @@ const entity = (role, id, context) => ({
 });
 const prim = (role, value) => ({ role, target: { kind: "primitive", value } });
 
+// `ctx.ts()` orders the arc's claims and may run ahead of the wall clock in a burst of writes (a
+// coarse clock, as on Windows, makes that common). A claim is valid only from its `validFrom`, and
+// the store reads validity at the wall clock, so a `validFrom` in the future is not yet true when
+// the very next step reads it. The order time stays `ctx.ts()`; the validity time is never later
+// than now.
+/** Both times for a claim the arc is about to sign. */
+export const stampOf = (ctx) => {
+  const timestamp = ctx.ts();
+  return { timestamp, validFrom: Math.min(timestamp, Date.now()) };
+};
+/** A builder's claims, signed at one time, made valid no later than now. */
+export const heldNow = (claims) => ({
+  ...claims,
+  validFrom: Math.min(claims.validFrom, Date.now()),
+});
+
 const sign = (loam, ctx, pointers) =>
-  loam.signClaims(
-    { ...((t) => ({ timestamp: t, validFrom: t }))(ctx.ts()), author: ctx.author, pointers },
-    ctx.seed,
-  );
+  loam.signClaims({ ...stampOf(ctx), author: ctx.author, pointers }, ctx.seed);
 
 /**
  * The student's own LIVE tutorial records. Progress is what THEY did, so four filters, each
