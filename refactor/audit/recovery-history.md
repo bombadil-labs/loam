@@ -15,6 +15,14 @@ the store's own fact: where in its own arrival order the recovery happened. Each
 arrival order, so each store needs its own cut. Step 6 brings arrival testimony; this is the rule
 until then.
 
+## Whose key signs
+
+Today Loam's inbox pools share the host's key: under SPEC-6 §1 they are storage surfaces of ONE
+peer, not separate peers. So today every cut, outcome and incarnation marker is signed by the host
+peer's key, and each is bound to its surface's incarnation. After the step-6 handoff (ruling 7),
+each pool signs its own with its own governing key. "Operator" below means the governing key of
+the peer that holds the surface.
+
 ## The records
 
 **A cut.** An operator-signed claim in one store, filed at the index entity `loam:recoveries` in
