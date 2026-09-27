@@ -23,14 +23,19 @@ old person's standing would pass to someone else.
 
 ## Name to id
 
-One reader resolves a name: `userIdOf(reactor, operator, name, now)`.
+One reader resolves a name: `userIdOf(reactor, operator, name, now, cut?)`.
 
 - The operator signs a NAME claim at `username:<name>`, in context `loam.userid`, whose value is
   the id.
 - The reader takes the latest standing name claim: verified, operator-signed, valid at `now`, not
-  struck by a verified operator strike, not erased. Ties go to the smaller delta id.
-- It then checks the other direction: the user record at `user:~<id>` must name the same `name`.
-  If the two disagree, the name resolves to no one. This fails closed.
+  struck by a verified operator strike in force at `now`, not erased. Ties go to the smaller delta
+  id.
+- It then proves the other direction: a standing user record at `user:~<id>` names the same
+  `name`. "Standing" is the same test: a verified operator-signed claim in context `loam.user`,
+  valid at `now`, not struck by a verified operator strike in force at `now`, not erased.
+- An as-of read passes `cut`: only claims and strikes signed by then count, as the #625 user ground
+  does for roots.
+- If either direction fails, the name resolves to no one. This fails closed.
 - The door, the View reader and the CLI all use this one reader.
 
 ## Erasing and reusing a name
@@ -38,8 +43,10 @@ One reader resolves a name: `userIdOf(reactor, operator, name, now)`.
 - Erasing a person erases the records at their id and their name claim.
 - A new person with the same name gets a new id and a new name claim. Grants, memberships and
   recovery evidence that name the old id resolve to nothing: no user record stands there.
-- `loam user create` keeps refusing a name whose previous person's records are still held
-  (`nameStillHeld`), now read through the name claim and the old id.
+- Every user record is ALSO filed at `username:<name>` (context `loam.userrecord`). So
+  `nameStillHeld` finds a previous person's id through their held user record even after the name
+  claim's bytes are purged. `loam user create` refuses a name while any operator claim filed at
+  `username:<name>` is held, whether a name claim or a user record.
 - The old id is never minted again: ids are random, and 128 bits do not repeat.
 
 ## What changes

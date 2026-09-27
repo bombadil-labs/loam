@@ -17,36 +17,53 @@ until then.
 
 ## The records
 
-**A cut.** An operator-signed claim in one store (an inbox pool, or the host), filed at the index
-entity `loam:recoveries` in context `loam.cut`:
+**A cut.** An operator-signed claim in one store, filed at the index entity `loam:recoveries` in
+context `loam.cut`:
 
-- `attempt` and `recovery`: the attempt id and the id of the recovery record it belongs to. The
-  record is signed before any cut is written, so its id is known.
+- `store`: the store it was written for. That is the inbox pool's own name, or `loam:host` for the
+  host. A cut counts ONLY in the store it names; a copy that reaches another store (a sibling pool
+  shares the operator key) is testimony there, never a usable cut.
+- `attempt` and `recovery`: the attempt id and the id of the recovery record. The record is signed
+  before any cut is written, so its id is known.
 - `key`: K1, the key being retired.
 - `index`: the store's arrival-log length just before the cut was written.
 
-A cut is INERT unless the host holds its recovery record, verified and not erased. A cut whose
-recovery never committed changes nothing.
+**An outcome.** An operator-signed claim in the same store, context `loam.cutoutcome`, naming the
+cut and one of `committed` or `aborted`. It is written after the host commit (or the abort) and is
+the cut's terminal state. It is durable and does not depend on the recovery record staying visible.
+
+A cut's state in its store:
+
+- No outcome, and the host holds the record (verified, unerased): committed. The outcome marker has
+  not landed yet.
+- No outcome, and the host does not hold the record, or cannot be read: PREPARED. This fails closed:
+  the store pauses K1 and shows no history for it.
+- Outcome `committed`: committed, whatever the host shows now.
+- Outcome `aborted`: inert.
 
 ## The barrier
 
-`loam user recover` runs these steps, journaled (the #633 journal gains the roster and the cuts
-written):
+`loam user recover` runs these steps, journaled (the #633 journal gains the roster, the cuts and
+their outcomes):
 
-1. **Freeze the roster.** Read the declared inbox pools that reference the user's keys or
-   containers. Every one must be attachable. If any is not, refuse before anything is written.
-2. **Write the cuts.** In each pool, append the cut. From that moment the pool is PAUSED for K1:
-   its door (append and federate) refuses a delta signed by K1 while a cut for K1 stands whose
-   recovery the host does not yet hold, and which is not withdrawn. So no K1 delta can land between
-   the cut and the commit, and none is wrongly left out of history.
-3. **Recheck the roster.** Read the declared pools again. A pool declared since step 1 gets its cut
-   (back to step 2). The command repeats until the roster is stable.
-4. **Commit on the host.** The #633 atomic append, plus a host cut with `index` the host's arrival
-   length just before the record.
-5. **Abort.** If the host commit provably did not land (#633's read-before-undo), the command
-   withdraws each cut with a permanent operator strike. That ends the pause, and K1 writes again.
+1. **Read the roster.** The declared inbox pools, as a set, and its hash. Every one must be
+   attachable. If any is not, refuse before anything is written.
+2. **Write the cuts.** In each pool, append its cut. From that moment the pool PAUSES K1: its door
+   (append and federate) refuses a delta signed by K1 while a PREPARED cut for K1 stands there.
+3. **Commit on the host, against the roster.** The recovery record carries `roster`, the roster
+   hash. The host door refuses the record if the declared-inbox roster at authorization has a
+   different hash. Host appends are serialized, so no declaration can land between that check and
+   the commit. (The build confirms the gateway serializes appends, or adds that lock.) The same
+   append writes the host's own cut, with `index` the host's arrival length just before the
+   record.
+4. **Write the outcomes.** In each pool, append the `committed` outcome. A pool whose outcome did
+   not land stays in the journal, and the rerun writes it. Until then the pool reads the cut as
+   committed if it can see the record, and fails closed if not.
+5. **Abort.** If the host refused the record (the roster moved), or it provably did not land
+   (#633's read-before-undo), the command writes `aborted` outcomes to the cuts. That ends the
+   pauses. A moved roster starts a new attempt from step 1.
 
-After the commit, the fence refuses K1 everywhere, as today, so the pause is no longer needed.
+After the commit, the fence refuses K1 everywhere, as today.
 
 ## The reader
 
@@ -57,11 +74,12 @@ A delta is ELIGIBLE history for a user in a store when all hold:
 
 - It is signed by a key K1 that an unbroken recovery chain retired, with the operator record and
   K2's binding for K1 held.
-- K2's binding for K1 is NOT withdrawn: a verified strike by K2 on the binding removes the
-  history (ruling 8: the new key can disown a thief's writes). This corrects the #631 reader, which
-  counts a negated binding as history.
-- The store holds a standing cut for that recovery and K1, and the delta's arrival index is below
-  the cut's `index`.
+- K2's binding for K1 is NOT withdrawn at the read's `now`: a verified K2 strike in force on the
+  binding removes the history, and a verified K2 counter-strike in force restores it (ruling 8: the
+  new key can disown a thief's writes). This corrects the #631 reader, which counts a negated
+  binding as history.
+- The store holds a cut naming ITSELF, that recovery and K1, in state committed, and the delta's
+  arrival index is below the cut's `index`.
 - A store with no such cut has no history for that recovery. This fails closed.
 
 Arrival order must be the same after a restart. The sqlite backend replays in insertion order; a
@@ -74,10 +92,15 @@ rail pins it.
 - **H2.** Between a cut and the commit, a K1 delta offered to the pool is refused (append and
   federate). After an abort, K1 writes again and history is unchanged.
 - **H3.** A crash after some cuts and before the commit: the rerun finds the attempt did not land,
-  withdraws the cuts, and the pool is not paused.
+  writes `aborted` outcomes, and the pool is not paused.
 - **H4.** A crash after the commit with a pool's cut missing: that pool shows no history for K1. It
   never shows a post-recovery K1 delta.
-- **H5.** A pool declared during the barrier gets its cut before the commit.
+- **H5.** A pool declared after the roster was read and before the host commit: the host refuses
+  the record, the cuts are aborted, and the rerun covers the new pool.
 - **H6.** A pool that cannot be attached refuses the recovery before anything is written.
-- **H7.** K2 withdraws its binding: K1's history leaves every container.
-- **H8.** After a restart, arrival order and every cut read the same.
+- **H7.** K2 withdraws its binding (a verified strike in force at the read's `now`): K1's history
+  leaves every container. A K2 counter-strike restores it.
+- **H8.** After a restart, arrival order, every cut and every outcome read the same.
+- **H9.** A cut copied into a sibling pool counts there for nothing; the sibling's own cut governs.
+- **H10.** The record is committed, its outcome lands in a pool, and the record is later erased:
+  the pool does not pause K1 again.
