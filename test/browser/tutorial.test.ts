@@ -82,12 +82,19 @@ async function playLesson(
   lesson: ArcLesson,
   opts: { quiz?: "skip" | "wrong" } = {},
 ): Promise<void> {
-  for (let i = 0; i < lesson.steps.length; i++) await page.runPending();
+  // A straight play expects every run to bank. A refused run keeps its button and spends a click,
+  // so without this check the failure surfaces a lesson later as "nothing to click", with the
+  // page's own reason lost.
+  for (let i = 0; i < lesson.steps.length; i++) {
+    await page.runPending();
+    expect(await page.text("#step-refusal"), `lesson ${lesson.id} refused a step`).toBe("");
+  }
   if (lesson.quiz !== null) {
     if (opts.quiz === "wrong") await page.answerFirstQuestion("wrong");
     await page.click("#quiz-skip");
   }
   if (await page.exists("[data-next-lesson]")) await page.click("[data-next-lesson]");
+  else expect((await page.position()).pending, `lesson ${lesson.id} is not done`).toBeNull();
 }
 
 /** Play from the top of the arc up to (and not including) the lesson with this role. */

@@ -24,13 +24,17 @@ const suppressions = new Map<string, Suppression>();
 
 const negates = (d: Delta): boolean => d.claims.pointers.some((p) => p.role === "negates");
 
-// The door asks this on every write, so a verified signature is cached per held object. The
-// content address is rechecked each time: a mutated object cannot carry an old verdict forward.
-const verified = new WeakMap<Delta, string>();
+// The door asks this on every write, so a verified signature is cached per held object, keyed by
+// the id AND the signature it was verified over, with the content address rechecked: an object
+// whose claims, id or signature changed since is verified afresh.
+const verified = new WeakMap<Delta, { readonly id: string; readonly sig: string }>();
 function signed(d: Delta): boolean {
-  if (d.sig !== undefined && verified.get(d) === d.sig && computeId(d.claims) === d.id) return true;
+  const hit = verified.get(d);
+  if (hit !== undefined && hit.id === d.id && hit.sig === d.sig && computeId(d.claims) === d.id) {
+    return true;
+  }
   if (verifyDelta(d) !== "verified") return false;
-  verified.set(d, d.sig!);
+  verified.set(d, { id: d.id, sig: d.sig! });
   return true;
 }
 

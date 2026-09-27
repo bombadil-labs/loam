@@ -17,6 +17,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   authorForSeed,
+  computeId,
   makeNegationClaims,
   signClaims,
   type Delta,
@@ -379,6 +380,22 @@ describe("a delegation is revocable by the root and by the operator", () => {
     expect(gw.reactor.negationsOf(toC.id)).toHaveLength(1);
     expect(acts(gw, C)).toBe(true);
     expect(await door(gw, note(C_SEED, T0 + 40))).toBe("admitted");
+  });
+
+  it("a checked negation rewritten in place, claims and id together, is verified afresh", async () => {
+    const { gw, toC } = await delegated();
+    at(T0 + 30);
+    const revoke = negation(R_SEED, toC, T0 + 30);
+    const counter = negation(R_SEED, revoke, T0 + 31);
+    await gw.append([revoke, counter]);
+    at(T0 + 40);
+    expect(acts(gw, C)).toBe(true); // R's counter is read, its signature checked, and it lifts
+    // The held counter changes in place: new claims, a matching id, the old signature.
+    const held = gw.reactor.get(counter.id)! as { id: string; claims: Delta["claims"] };
+    held.claims = { ...held.claims, timestamp: held.claims.timestamp + 1 };
+    held.id = computeId(held.claims);
+    expect(acts(gw, C)).toBe(false);
+    expect(await door(gw, note(C_SEED, T0 + 41))).toBe("refused");
   });
 
   it("a bystander's negation revokes nothing, even one who holds write standing", async () => {
