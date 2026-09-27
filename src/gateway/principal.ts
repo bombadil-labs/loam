@@ -249,6 +249,22 @@ export function standingDelegationIdsFor(
 }
 
 /**
+ * Every root that has signed a delegation to `key` held here, whatever its standing. Delegations are
+ * filed at their root, not their key, so this walks the log: a revoke asks it, and revokes are rare.
+ */
+export function delegationRootsTo(reactor: Reactor, key: string): string[] {
+  const out = new Set<string>();
+  for (const d of reactor.arrivalLog()) {
+    const at = (role: string) => d.claims.pointers.find((p) => p.role === role)?.target;
+    const kind = at("kind");
+    const named = at("key");
+    if (kind?.kind !== "primitive" || kind.value !== "delegation") continue;
+    if (named?.kind === "primitive" && named.value === key) out.add(d.claims.author);
+  }
+  return [...out];
+}
+
+/**
  * The delegation records naming `key` signed by one of `roots`, read from each root's own index:
  * every SPEC-14 evidence record points at its root's entity. A delegate only ever acts for a root
  * that holds a grant here, so the grant subjects are the roots worth asking about.

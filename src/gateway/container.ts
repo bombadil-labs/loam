@@ -69,6 +69,7 @@ import { withStamp } from "./stamp.js";
 import {
   delegationClaims,
   delegationRecordsFor,
+  delegationRootsTo,
   keyActsFor,
   principalScopeOf,
   standingDelegationIdsFor,
@@ -2489,8 +2490,8 @@ export async function revokeConnectionImpl(opts: {
   const now = pool.validityNow();
   const scope = principalScopeOf(pool.reactor);
   // A grant naming a user whose root cannot be read right now may stand again later, and the
-  // delegations it would carry cannot be found now. Refuse rather than report a revoke that might
-  // not stick.
+  // delegations it would carry cannot be found now. The owner's voice refuses rather than report a
+  // revoke that might not stick; the operator's voice strikes every delegation to this key instead.
   // A held owner-side admin grant counts even if it does not bind now — struck for a while, or
   // waiting on its issuer, it may stand again. Only the operator, the owner side and the connection
   // itself write in an inbox, and the connection cannot mint keys with standing here, so its own
@@ -2538,6 +2539,15 @@ export async function revokeConnectionImpl(opts: {
       if (key !== opts.connectionKey) candidates.add(key);
     }
   }
+  // The operator's voice binds on every delegation, so it closes the rest outright: every root that
+  // ever signed a delegation to this key here, whether or not a grant names it now. A root a user
+  // could be re-pointed to later is among them, which is what makes an unreadable user safe to
+  // revoke in this voice.
+  if (byOperator) {
+    for (const key of delegationRootsTo(pool.reactor, opts.connectionKey)) {
+      if (key !== opts.connectionKey) candidates.add(key);
+    }
+  }
   const latentIds: string[] = [];
   const latent = new Set<string>();
   for (const key of candidates) {
@@ -2562,12 +2572,12 @@ export async function revokeConnectionImpl(opts: {
         `Nothing was struck. Strike that root claim for good, or drop this inbox.`,
     );
   }
-  if (unreadable.length > 0) {
+  if (unreadable.length > 0 && !byOperator) {
     throw new Error(
       `revokeConnection: this inbox holds an owner grant naming ${unreadable.join(", ")}, whose ` +
         `root cannot be read now — that user's record may be struck or erased — so what lets ` +
-        `${opts.connectionKey} write cannot be found in full. Nothing was struck. If that person ` +
-        `is gone for good, drop this inbox instead.`,
+        `${opts.connectionKey} write cannot be found in full from ${owner}'s voice. Nothing was ` +
+        `struck. The operator can revoke instead, or drop this inbox.`,
     );
   }
   const ids = [
