@@ -75,6 +75,7 @@ import {
   standingDelegationIdsFor,
 } from "./principal.js";
 import { keysSubjectCouldName, subjectCouldName, subjectKeyAt, USER_PREFIX } from "./user-root.js";
+import { membershipForValidation } from "./member-of.js";
 
 export const CTX_CONTAINER = "loam.container";
 export const CTX_CONTAINER_EXCLUDED = "loam.container.excluded";
@@ -287,7 +288,7 @@ export function containerDefect(
       return "a container declaration's membership is a Term's canonical JSON in one string primitive";
     }
     try {
-      parseTerm(JSON.parse(memberships[0]));
+      parseTerm(membershipForValidation(JSON.parse(memberships[0])));
     } catch {
       return "a container declaration's membership is a Term's canonical JSON in one string primitive";
     }
@@ -652,7 +653,7 @@ function computeContainerTable(
     if (latest.membershipRaw !== undefined) {
       try {
         const profile: unknown = JSON.parse(latest.membershipRaw);
-        parseTerm(profile); // validation only — consumers take the JSON profile, as select does
+        parseTerm(membershipForValidation(profile)); // validation only — consumers take the JSON profile, as select does
         membership = profile;
       } catch {
         defects.push(

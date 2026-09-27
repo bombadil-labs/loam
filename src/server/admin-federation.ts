@@ -40,6 +40,7 @@ import { withStamp } from "../gateway/stamp.js";
 import { negatedAt } from "../gateway/negation.js";
 import { governedProgram } from "../gateway/governed-trust.js";
 import { userGroundOf } from "../gateway/user-root.js";
+import { lowerMembershipJson } from "../gateway/member-of.js";
 
 // A pasted offer carries real deltas — a store's worth, potentially. Bounded, but generously.
 const FEDERATE_MAX_BODY = 1024 * 1024;
@@ -67,7 +68,7 @@ function membershipTermOf(
   }
   if (raw === undefined) return undefined;
   try {
-    return parseTerm(raw);
+    return parseTerm(lowerMembershipJson(raw, gw.reactor, gw.validityNow(), gw.operatorAuthor));
   } catch {
     return undefined;
   }

@@ -69,6 +69,7 @@ import type { Gateway } from "./gateway.js";
 import { withStamp } from "./stamp.js";
 import { governedProgram } from "./governed-trust.js";
 import { userGroundOf } from "./user-root.js";
+import { hasMemberOf } from "./member-of.js";
 
 /**
  * The entity both new records DECLARE — the marker that tells a slate record and a graveyard apart
@@ -560,6 +561,13 @@ export function freezeAgreement(
 // bring the read-closure narrowing into the membership machinery and jam the cut, §29.3) — the
 // reader takes a bare Reactor for exactly that reason: there is no gateway here to narrow.
 function evalMembership(reactor: Reactor, term: unknown): Delta[] {
+  // A slate freezes its membership's result and checks it again later. A membership that follows a
+  // user's current keys moves with them, so it cannot be frozen: refuse it by name.
+  if (hasMemberOf(term)) {
+    throw new Error(
+      "a slate cannot freeze a membership that follows a user's keys (loam.memberOf)",
+    );
+  }
   const ground = reactor.snapshot();
   const program = governedProgram(
     parseTerm(term),
