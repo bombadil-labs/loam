@@ -2080,8 +2080,9 @@ export function survivingWriteGrantIds(
 
 /**
  * Did the operator strike `id` for good: a strike of the operator's, already in force, with no
- * end, and not undone by anyone who could undo it — the operator, or a key holding admin here, in
- * force now or scheduled. A counter-strike from anyone else binds nothing and changes nothing.
+ * end, and not undone by anyone who could ever undo it — the operator, or a key named by an admin
+ * grant someone ELSE issued, held here struck or not (its standing may lapse and return). A key
+ * cannot qualify by naming itself, so a connection's counter-strike changes nothing.
  */
 export function operatorStruckForGood(
   reactor: Reactor,
@@ -2091,7 +2092,16 @@ export function operatorStruckForGood(
 ): boolean {
   if (operator === undefined) return false;
   const canUndo = (author: string) =>
-    author === operator || holdsGrant(reactor, now, STORE_ENTITY, author, "admin", operator);
+    author === operator ||
+    grantSubjects(reactor)
+      .filter(
+        (subject) => subject === author || subjectKeyAt(reactor, now, operator, subject) === author,
+      )
+      .some((subject) =>
+        heldGrantIds(reactor, subject, "admin").some(
+          (g) => reactor.get(g)?.claims.author !== author,
+        ),
+      );
   return reactor.negationsOf(id).some((n) => {
     const neg = reactor.get(n);
     return (

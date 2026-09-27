@@ -574,4 +574,55 @@ describe("a pool reads its host's users", () => {
     ).rejects.toThrow(/cannot be read now/);
     await gw.close();
   });
+
+  it("a counter-strike by an admin whose standing lapses for a while still revives the grant", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const T0 = Date.now();
+    vi.setSystemTime(T0);
+    const gw = await store();
+    await gw.append([
+      op(userClaims("ada", OP, T0)),
+      op(rootClaims("ada", K1, OP, T0 + 1)),
+      op(grantClaims(STORE_ENTITY, K1, "write", OP, T0 + 2)),
+      op(
+        containerClaims(
+          {
+            container: "home:ada",
+            trust: "curated",
+            posture: "shared",
+            membership: {
+              op: "select",
+              pred: { match: { field: "author", cmp: "eq", const: K1 } },
+              in: "input",
+            },
+          },
+          OP,
+          T0 + 3,
+        ),
+      ),
+    ]);
+    const conn = await gw.bindConnection({
+      container: "home:ada",
+      connectionKey: CONN,
+      ownerSeed: K1_SEED,
+    });
+    const pool = conn.gateway!;
+    vi.setSystemTime(T0 + 100);
+    const k3Admin = op(grantClaims(STORE_ENTITY, K2, "admin", OP, T0 + 10));
+    const ghost = op(grantClaims(STORE_ENTITY, "user:ghost", "admin", OP, T0 + 11));
+    const strike = op(makeNegationClaims(OP, T0 + 12, ghost.id));
+    await pool.append([k3Admin, ghost, strike]);
+    // K2, holding admin, undoes the operator's strike; then K2's own admin is struck for a while.
+    await pool.append([signClaims(makeNegationClaims(K2, T0 + 13, strike.id), K2_SEED)]);
+    await pool.append([
+      signClaims(
+        { ...makeNegationClaims(OP, T0 + 14, k3Admin.id), validUntil: T0 + 10_000 },
+        OP_SEED,
+      ),
+    ]);
+    await expect(
+      gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED }),
+    ).rejects.toThrow(/cannot be read now/);
+    await gw.close();
+  });
 });
