@@ -99,6 +99,18 @@ export function hasMemberOf(json: unknown): boolean {
   return MEMBER_OF in rec || Object.values(rec).some(hasMemberOf);
 }
 
+/** Does this membership JSON carry a `loam.memberOf` node naming `user`? */
+export function namesMemberOf(json: unknown, user: string): boolean {
+  if (Array.isArray(json)) return json.some((j) => namesMemberOf(j, user));
+  if (json === null || typeof json !== "object") return false;
+  const rec = json as Record<string, unknown>;
+  const node = rec[MEMBER_OF] as { user?: unknown } | undefined;
+  if (node !== undefined && node !== null && typeof node === "object" && node.user === user) {
+    return true;
+  }
+  return Object.values(rec).some((v) => namesMemberOf(v, user));
+}
+
 /**
  * The membership as the substrate parser can check it: each well-formed node replaced by an empty
  * author set, so validation never depends on any user's current root. Throws on a malformed node.

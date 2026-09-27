@@ -20,6 +20,7 @@
 import {
   resolveView,
   type Claims,
+  type Delta,
   type HyperSchema,
   type Policy,
   type Reactor,
@@ -35,10 +36,14 @@ import {
   CTX_ROLE,
   CTX_ROOT,
   CTX_USER,
+  CTX_RECOVERY,
+  CTX_LINEAGE,
   userEntity,
   userNameDefect,
   verified,
 } from "../gateway/user-root.js";
+import { CTX_GRANTS } from "../gateway/governed-trust.js";
+import { MEMBER_OF, namesMemberOf } from "../gateway/member-of.js";
 export { CTX_ROLE, CTX_ROOT, userEntity };
 
 const AUTHOR = /^ed25519:[0-9a-f]{64}$/;
@@ -303,11 +308,14 @@ export function rootOf(
 }
 
 /**
- * Does the ground still HOLD anything the operator said about the person called `name` — their
- * record, a role or a root — whether struck, lapsed or not yet valid? A name that answers yes
- * belonged to someone, and giving it to a new person would hand them what is left: a strike can
- * lapse and revive a role, and the old key's grants and seed file are not at this entity at all.
- * Only erasure, which removes the bytes, frees a name.
+ * Does the ground still HOLD anything that would pass to a new person given the entity `user:<name>`?
+ * Everything that can bind or revive counts, struck or not yet valid included, because a strike can
+ * lapse:
+ *   - the governing account's own record, roles, root, recovery records and lineage at the entity;
+ *   - any held, verified grant (loam.grants) whose subject is the entity, whoever issued it;
+ *   - any held, verified container membership that names the user (loam.memberOf).
+ * This is tooling that tells the truth about what remains, not a uniqueness rule: reusing the entity
+ * on purpose is an explicit act (erase what is found, or recover the entity to the new key).
  */
 export function nameStillHeld(
   reactor: Reactor,
@@ -318,8 +326,13 @@ export function nameStillHeld(
   | { readonly held: false }
   | { readonly held: true; readonly notYetValid: boolean; readonly ids: readonly string[] } {
   const entity = userEntity(name);
-  const ids: string[] = [];
+  const ids = new Set<string>();
   let notYetValid = false;
+  const hold = (d: Delta): void => {
+    ids.add(d.id);
+    if (d.claims.validFrom > now) notYetValid = true;
+  };
+  const ACCOUNT = new Set([CTX_USER, CTX_ROLE, CTX_ROOT, CTX_RECOVERY, CTX_LINEAGE]);
   for (const id of reactor.byTarget(entity)) {
     const d = reactor.get(id);
     if (d === undefined || d.claims.author !== operator || !verified(d)) continue;
@@ -327,13 +340,31 @@ export function nameStillHeld(
       (p) =>
         p.target.kind === "entity" &&
         p.target.entity.id === entity &&
-        (p.target.entity.context === CTX_USER ||
-          p.target.entity.context === CTX_ROLE ||
-          p.target.entity.context === CTX_ROOT),
+        p.target.entity.context !== undefined &&
+        ACCOUNT.has(p.target.entity.context),
     );
-    if (!aboutPerson) continue;
-    ids.push(id);
-    if (d.claims.validFrom > now) notYetValid = true;
+    if (aboutPerson) hold(d);
   }
-  return ids.length === 0 ? { held: false } : { held: true, notYetValid, ids: ids.sort() };
+  // Claims that name the entity from elsewhere. Rare (a user is created once), so a walk.
+  for (const d of reactor.arrivalLog()) {
+    if (ids.has(d.id) || !verified(d)) continue;
+    const grant =
+      d.claims.pointers.some(
+        (p) => p.target.kind === "entity" && p.target.entity.context === CTX_GRANTS,
+      ) &&
+      d.claims.pointers.some(
+        (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === entity,
+      );
+    const membership = d.claims.pointers.some((p) => {
+      if (p.target.kind !== "primitive" || typeof p.target.value !== "string") return false;
+      if (!p.target.value.includes(MEMBER_OF)) return false;
+      try {
+        return namesMemberOf(JSON.parse(p.target.value), name);
+      } catch {
+        return false;
+      }
+    });
+    if (grant || membership) hold(d);
+  }
+  return ids.size === 0 ? { held: false } : { held: true, notYetValid, ids: [...ids].sort() };
 }

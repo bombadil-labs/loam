@@ -2698,9 +2698,10 @@ async function cmdUserCreate(
           ? `the ground holds claims about ${name} (${trace.ids.join(", ")}) that are not valid ` +
             `until later — the host clock may have stepped back. Check the clock. Nothing was ` +
             `written.`
-          : `the name ${name} still carries a previous person's record, roles or root ` +
-            `(${trace.ids.join(", ")}). Erase those (or finish an erasure already begun), or ` +
-            `pick another name. Nothing was written.`
+          : `user:${name} is still named by held claims that would pass to a new person: a ` +
+            `record, role, root, recovery, grant or membership (${trace.ids.join(", ")}). ` +
+            `Erase those (or finish an erasure already begun), recover the entity to the new ` +
+            `person's key, or pick another name. Nothing was written.`
         : keyFile.kind === "present"
           ? `a key file for ${name} remains at ${userSeedPath(home, name)}. Erasure does not ` +
             `remove it: move it away by hand if its person is gone, or pick another name. ` +
