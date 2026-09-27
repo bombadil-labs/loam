@@ -6,7 +6,7 @@
 // Nothing reads `rootOf` for standing yet; step 5 PR 3d does. Erasure stays with every store here
 // in its own temp dir or in memory.
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -18,7 +18,7 @@ import {
   type Reactor,
 } from "@bombadil/rhizomatic";
 import { run } from "../../src/cli/cli.js";
-import { readSeed, readUserSeed, storePath } from "../../src/cli/config.js";
+import { readSeed, readUserSeed, storePath, userSeedPath } from "../../src/cli/config.js";
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -163,4 +163,96 @@ describe("every road that mints a user a key names it as their root", () => {
     const seed = readUserSeed(home, "ada");
     expect(await cliRoot("ada")).toBe(authorForSeed((seed as { seed: string }).seed));
   });
+
+  const withGround = async <T>(fn: (gw: Gateway) => T | Promise<T>): Promise<T> => {
+    const gw = await Gateway.boot(
+      new SqliteBackend(storePath(home)),
+      assembleGenesis({ operatorSeed: readSeed(home) }),
+    );
+    try {
+      return await fn(gw);
+    } finally {
+      await gw.close();
+    }
+  };
+
+  it("a re-point outranks an older pointer stamped ahead of the wall clock", async () => {
+    expect(await run(["init", "--home", home], io())).toBe(0);
+    expect(await run(["user", "create", "ada", "--home", home], io(), password)).toBe(0);
+    await withGround(async (gw) => {
+      const op = gw.operator!;
+      await gw.append([
+        // Ordered ahead of the wall clock, valid from now: the shape the store's own stamp makes.
+        signClaims(
+          { ...rootClaims("ada", K1, op, Date.now() + 1_000_000_000), validFrom: Date.now() },
+          readSeed(home),
+        ),
+      ]);
+    });
+    expect(await cliRoot("ada")).toBe(K1);
+    expect(await run(["user", "assign-role", "ada", "--role=operator", "--home", home], io())).toBe(
+      0,
+    );
+    const seed = readUserSeed(home, "ada");
+    expect(await cliRoot("ada")).toBe(authorForSeed((seed as { seed: string }).seed));
+  });
+
+  it("a name created again after its record was struck does not inherit the old root", async () => {
+    expect(await run(["init", "--home", home], io())).toBe(0);
+    expect(await run(["user", "create", "ada", "--operator", "--home", home], io(), password)).toBe(
+      0,
+    );
+    const first = await cliRoot("ada");
+    expect(first).toBeDefined();
+    await withGround(async (gw) => {
+      const op = gw.operator!;
+      const record = [...gw.reactor.snapshot()].find(
+        (d) =>
+          d.claims.author === op &&
+          d.claims.pointers.some(
+            (p) => p.target.kind === "entity" && p.target.entity.context === "loam.user",
+          ),
+      )!;
+      await gw.append([signClaims(makeNegationClaims(op, Date.now(), record.id), readSeed(home))]);
+    });
+    // The person is gone; their credential is removed so the name can be created again.
+    rmSync(join(home, "credentials.json"), { force: true });
+    rmSync(userSeedPath(home, "ada"), { force: true });
+    expect(await run(["user", "create", "ada", "--home", home], io(), password)).toBe(0);
+    expect(await cliRoot("ada")).toBeUndefined();
+    await withGround((gw) => {
+      const op = gw.operator!;
+      const old = rootRecords(gw.reactor, "ada").find(
+        (d) => d.claims.pointers.find((p) => p.role === "root")?.target.kind === "primitive",
+      )!;
+      expect(gw.reactor.negationsOf(old.id).map((n) => gw.reactor.get(n)!.claims.author)).toContain(
+        op,
+      );
+    });
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "a seed that cannot be written leaves no root naming the lost key",
+    async () => {
+      expect(await run(["init", "--home", home], io())).toBe(0);
+      expect(await run(["user", "create", "ada", "--home", home], io(), password)).toBe(0);
+      mkdirSync(userSeedPath(home, "ada")); // the seed write fails: a directory stands there
+      expect(
+        await run(["user", "assign-role", "ada", "--role=operator", "--home", home], io()),
+      ).toBe(1);
+      expect(await cliRoot("ada")).toBeUndefined();
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "an operator created while its seed cannot be written gets no root naming the lost key",
+    async () => {
+      expect(await run(["init", "--home", home], io())).toBe(0);
+      mkdirSync(userSeedPath(home, "ada"));
+      expect(
+        await run(["user", "create", "ada", "--operator", "--home", home], io(), password),
+      ).toBe(1);
+      expect(await cliRoot("ada")).toBeUndefined();
+    },
+  );
 });

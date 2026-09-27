@@ -119,7 +119,9 @@ export function userClaims(name: string, author: string, timestamp: number): Cla
 /**
  * The root pointer: this user's current root key. The operator signs it when it mints the user a
  * key, and signs a new one to re-point a user who lost theirs. The latest unstruck one wins; an
- * earlier one stays in the ground as history.
+ * earlier one stays in the ground as history. Removing a role leaves the root in place: a root is
+ * who the user is, not what they may do. Stamp it with the store's ordering clock (`stamp`), never a
+ * bare wall clock, or an older pointer stamped ahead of that clock would outrank it.
  */
 export function rootClaims(name: string, root: string, author: string, timestamp: number): Claims {
   return {
@@ -279,4 +281,24 @@ export function rootOf(
   const view = resolveUserView(reactor, operator, now, name);
   const root = view === undefined ? undefined : (view as Record<string, View>)[CTX_ROOT];
   return typeof root === "string" && AUTHOR.test(root) ? root : undefined;
+}
+
+/**
+ * The operator's root pointers for `name` that still stand: held, operator-signed, and not struck
+ * by the operator. Read from the user entity's own index. A new person given an erased user's
+ * name must not inherit these, so creating a name strikes them.
+ */
+export function standingRootIds(reactor: Reactor, operator: string, name: string): string[] {
+  const out: string[] = [];
+  for (const id of reactor.byTarget(userEntity(name))) {
+    const d = reactor.get(id);
+    if (d === undefined || d.claims.author !== operator) continue;
+    const atRoot = d.claims.pointers.some(
+      (p) => p.target.kind === "entity" && p.target.entity.context === CTX_ROOT,
+    );
+    if (!atRoot) continue;
+    const struck = reactor.negationsOf(id).some((n) => reactor.get(n)?.claims.author === operator);
+    if (!struck) out.push(id);
+  }
+  return out;
 }

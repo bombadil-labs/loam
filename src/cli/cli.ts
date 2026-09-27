@@ -55,6 +55,7 @@ import type { SlateReport } from "../gateway/slate.js";
 import { programMaskJson } from "../gateway/listing.js";
 import { unreachableStoreReport } from "../gateway/container.js";
 import { assembleGenesis } from "../gateway/genesis.js";
+import { withStamp } from "../gateway/stamp.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
 import {
   constitutionalDefect,
@@ -107,6 +108,7 @@ import {
   resolveUserView,
   roleClaims,
   rootClaims,
+  standingRootIds,
   rolesOf,
   userClaims,
   userEntity,
@@ -2523,6 +2525,33 @@ async function cmdArtifact(args: readonly string[], io: IO): Promise<number> {
 // Home access is the proof of operatorship — the same authority erasure and repair need — so
 // there is no remote way in. See the working spec (.adlc/specs/36-03-*.md) for the full model;
 // comments here name only what would bite a future reader of THIS file.
+/** Strike a root pointer whose key was never saved. True when the strike landed. */
+async function strikeRoot(
+  path: string,
+  seed: string,
+  operator: string,
+  root: string | undefined,
+  io: IO,
+): Promise<boolean> {
+  if (root === undefined) return false;
+  try {
+    const gw = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }));
+    try {
+      await gw.append([
+        signClaims(
+          withStamp(gw.stamp(operator), (t) => makeNegationClaims(operator, t, root)),
+          seed,
+        ),
+      ]);
+      return true;
+    } finally {
+      await gw.close();
+    }
+  } catch {
+    return false;
+  }
+}
+
 async function cmdUser(args: readonly string[], io: IO, options: RunOptions): Promise<number> {
   const parsed = parseFor("user", args);
   const sub = parsed.positionals[0];
@@ -2625,6 +2654,7 @@ async function cmdUserCreate(
   let known: boolean;
   let already: ReadonlySet<UserRole>;
   let mintedKey: string | undefined; // set only when this call just appended a fresh operator grant
+  let mintedRoot: string | undefined; // the root pointer naming that key, struck if its seed is lost
   try {
     // ASK THE GROUND, not only the credential file — the two halves of a user can come apart (a
     // credential removed by hand, or a write that failed after the deltas landed), and appending a
@@ -2640,13 +2670,26 @@ async function cmdUserCreate(
       const deltas: Delta[] = [
         signClaims(userClaims(name, operator, at), seed),
         signClaims(roleClaims(name, role, operator, at + 1), seed),
+        // A name can be reused after its record was erased; the new person must not inherit the
+        // previous one's root.
+        ...standingRootIds(gateway.reactor, operator, name).map((id) =>
+          signClaims(
+            withStamp(gateway.stamp(operator), (t) => makeNegationClaims(operator, t, id)),
+            seed,
+          ),
+        ),
       ];
       if (role === "operator") {
         mintedKey = randomBytes(32).toString("hex");
         const subject = authorForSeed(mintedKey);
+        const root = signClaims(
+          withStamp(gateway.stamp(operator), (t) => rootClaims(name, subject, operator, t)),
+          seed,
+        );
+        mintedRoot = root.id;
         deltas.push(
           signClaims(grantClaims(STORE_ENTITY, subject, "admin", operator, at + 2), seed),
-          signClaims(rootClaims(name, subject, operator, at + 3), seed),
+          root,
         );
       }
       await gateway.append(deltas);
@@ -2701,12 +2744,16 @@ async function cmdUserCreate(
     try {
       writeUserSeed(home, name, mintedKey);
     } catch (err) {
+      const struck = await strikeRoot(path, seed, operator, mintedRoot, io);
       io.err(
         `user create: ${name} now holds operator in the ground, but writing ` +
           `${userSeedPath(home, name)} failed: ${err instanceof Error ? err.message : String(err)}. ` +
           `The grant is live with no local key to use it yet — retry this command once the fault ` +
           `clears, or recover with \`loam user remove-role ${name} --role=operator\` then ` +
-          `\`loam user assign-role ${name} --role=operator\`.`,
+          `\`loam user assign-role ${name} --role=operator\`. ` +
+          (struck
+            ? `The root pointer naming the lost key was struck.`
+            : `The root pointer still names the lost key; the next assign-role re-points it.`),
       );
       return 1;
     }
@@ -2945,13 +2992,18 @@ async function cmdUserRole(
       const at = Date.now();
       const deltas: Delta[] = [signClaims(roleClaims(name, role, operator, at), seed)];
       let mintedKey: string | undefined;
+      let assignedRoot: Delta | undefined;
       if (role === "operator") {
         mintedKey = randomBytes(32).toString("hex");
         const subject = authorForSeed(mintedKey);
         // A fresh key re-points the user's root to it: the old key keeps its history, not its role.
+        assignedRoot = signClaims(
+          withStamp(gateway.stamp(operator), (t) => rootClaims(name, subject, operator, t)),
+          seed,
+        );
         deltas.push(
           signClaims(grantClaims(STORE_ENTITY, subject, "admin", operator, at + 1), seed),
-          signClaims(rootClaims(name, subject, operator, at + 2), seed),
+          assignedRoot,
         );
       }
       try {
@@ -2967,6 +3019,23 @@ async function cmdUserRole(
         try {
           writeUserSeed(home, name, mintedKey);
         } catch (err) {
+          // The root now names a key nobody holds. Strike it, so the pointer falls back.
+          const struck =
+            assignedRoot !== undefined &&
+            (await gateway
+              .append([
+                signClaims(
+                  withStamp(gateway.stamp(operator), (t) =>
+                    makeNegationClaims(operator, t, assignedRoot.id),
+                  ),
+                  seed,
+                ),
+              ])
+              .then(
+                () => true,
+                () => false,
+              ));
+          if (!struck) io.err(`user assign-role: the root pointer still names the lost key.`);
           io.err(
             `user assign-role: ${name} now holds operator in the ground, but writing ` +
               `${userSeedPath(home, name)} failed: ${err instanceof Error ? err.message : String(err)}. ` +
