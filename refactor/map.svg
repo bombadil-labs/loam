@@ -46,16 +46,16 @@
 <rect x="380" y="234" width="380" height="36" rx="7" fill="#dcfce7" stroke="#15803d" stroke-width="1.5"/>
 <text x="392" y="250" font-family='ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif' font-size="13" font-weight="700" fill="#14532d" text-anchor="start">resolve</text>
 <text x="392" y="265" font-family='ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif' font-size="11.5" font-weight="400" fill="#14532d" text-anchor="start">applyPolicy, ordering</text>
-<rect x="24" y="280" width="270" height="36" rx="7" fill="#dbeafe" stroke="#1d4ed8" stroke-width="1.5"/>
-<text x="36" y="303" font-family='ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif' font-size="13" font-weight="500" fill="#1e3a8a" text-anchor="start">Seed file, user and connection keys</text>
-<circle cx="336" cy="298" r="14" fill="#1d4ed8"/>
+<rect x="24" y="280" width="270" height="36" rx="7" fill="#fef3c7" stroke="#b45309" stroke-width="1.5"/>
+<text x="36" y="303" font-family='ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif' font-size="13" font-weight="500" fill="#78350f" text-anchor="start">Seed file, user and connection keys</text>
+<circle cx="336" cy="298" r="14" fill="#b45309"/>
 <text x="336" y="302.5" font-family='ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif' font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
-<line x1="294" y1="298" x2="322" y2="298" stroke="#1d4ed8" stroke-width="1.5"/>
-<line x1="350" y1="298" x2="374" y2="298" stroke="#1d4ed8" stroke-width="1.5"/>
-<path d="M 374 293 L 380 298 L 374 303 Z" fill="#1d4ed8"/>
-<rect x="380" y="280" width="380" height="36" rx="7" fill="#dbeafe" stroke="#1d4ed8" stroke-width="1.5"/>
-<text x="392" y="296" font-family='ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif' font-size="13" font-weight="700" fill="#1e3a8a" text-anchor="start">principal</text>
-<text x="392" y="311" font-family='ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif' font-size="11.5" font-weight="400" fill="#1e3a8a" text-anchor="start">roots, key binding, succession</text>
+<line x1="294" y1="298" x2="322" y2="298" stroke="#b45309" stroke-width="1.5"/>
+<line x1="350" y1="298" x2="374" y2="298" stroke="#b45309" stroke-width="1.5"/>
+<path d="M 374 293 L 380 298 L 374 303 Z" fill="#b45309"/>
+<rect x="380" y="280" width="380" height="36" rx="7" fill="#fef3c7" stroke="#b45309" stroke-width="1.5"/>
+<text x="392" y="296" font-family='ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif' font-size="13" font-weight="700" fill="#78350f" text-anchor="start">principal</text>
+<text x="392" y="311" font-family='ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif' font-size="11.5" font-weight="400" fill="#78350f" text-anchor="start">roots, key binding, succession</text>
 <rect x="24" y="326" width="270" height="36" rx="7" fill="#f4f4f5" stroke="#a1a1aa" stroke-width="1.5"/>
 <text x="36" y="349" font-family='ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif' font-size="13" font-weight="500" fill="#3f3f46" text-anchor="start">Containers, pools, channels</text>
 <circle cx="336" cy="344" r="14" fill="#a1a1aa"/>

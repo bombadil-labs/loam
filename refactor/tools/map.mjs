@@ -42,7 +42,7 @@ const ROWS = [
     loam: "Seed file, user and connection keys",
     tier: "principal",
     what: "roots, key binding, succession",
-    status: "next",
+    status: "doing",
   },
   {
     step: "6",

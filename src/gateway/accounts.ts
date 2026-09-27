@@ -22,7 +22,7 @@ import {
   type Reactor,
   type Term,
 } from "@bombadil/rhizomatic";
-import { keysActingFor } from "./principal.js";
+import { keyActsFor } from "./principal.js";
 import { STORE_ENTITY } from "./genesis.js";
 import { entityGatherBody } from "./gather.js";
 import { eraseDefect } from "./erase.js";
@@ -481,16 +481,22 @@ function grantHeld(
       if (p.role === "subject" && typeof p.target.value === "string") subject = p.target.value;
       if (p.role === "verb" && typeof p.target.value === "string") granted = p.target.value;
     }
-    if (
-      subject === undefined ||
-      !keysActingFor(ctx.reactor, ctx.now, { root: subject }, tenant).has(author)
-    )
-      continue;
+    if (subject === undefined) continue;
     // `admin` covers `write`, and NEVER `register`. An admin grant carries no prefix, so "admin
     // covers register" could only ever mean register AT ROOT — the one authority that is not
     // delegable through the verb lattice. An admin who wants to register mints themselves a
     // prefixed register grant, which is a visible act in the audit rather than an implication.
     if (verb === "register" ? granted !== "register" : granted !== "admin" && granted !== verb) {
+      continue;
+    }
+    // A delegated key WRITES for its user and does nothing else (README ruling 6): admin,
+    // register, and the issuer checks that recurse through here as admin match the subject's
+    // own key exactly. The verb is checked first so a delegate never reaches the seam for them.
+    if (
+      author !== subject &&
+      (verb !== "write" ||
+        !keyActsFor(ctx.reactor, ctx.now, { root: subject }, author, tenant, ctx.operator))
+    ) {
       continue;
     }
     // The grant itself must be effective: minted by the operator, or by an effective admin.

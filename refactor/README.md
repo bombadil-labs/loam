@@ -78,6 +78,12 @@ Design:
    becomes that principal's root. The operator's user record names the root and can re-point it to
    recover a lost key. Connection keys are non-delegable delegations from the user's root, scoped
    to one container.
+6. **A delegated key can only write data.** Issuing grants and admin acts stay with the user's
+   root key. Every delegation is scoped to a container and cannot be passed on. The user's root,
+   the delegate's own signer and the pinned operator can each revoke it. A revocation ends one
+   delegation, not the key: the root can sign a new one. The operator bars a user's delegates for
+   good by revoking the user's own standing. A delegation can also end at its own `validUntil`. Loam uses rhizomatic's delegation, scope and negation records as
+   they are, and adds no new record.
 
 ## What stays in force
 
