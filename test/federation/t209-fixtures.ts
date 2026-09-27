@@ -86,8 +86,8 @@ export const store = async (
         ? { grants: [grantClaims(STORE_ENTITY, PEN, "write", BOB, 9_001)] }
         : {}),
     }),
-    // The store's OWN renders run on this budget; the default 500ms also clocks worker spawn and
-    // loses under a loaded suite, exactly as the pool bill below does (T253).
+    // The store's OWN renders run on this budget. The default 500ms own-route clock starts once the
+    // worker is online, and under a loaded suite its setup and module run alone can use it up.
     { ...opts, renderTimeoutMs: HOST_SIZED_BILL_MS },
   );
   // Every receiver in these suites asserts pool-render SUCCESS through channel apps; the
