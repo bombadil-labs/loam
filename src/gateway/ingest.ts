@@ -757,8 +757,12 @@ export async function federateImpl(
   // break the user's chain. Repeat until nothing more drops, since a dropped record strands its own
   // successors.
   for (;;) {
+    const gone = new Set([
+      ...userGroundOf(gw.reactor).erased(),
+      ...erasedInBatch(admitted, gw.operatorAuthor),
+    ]);
     const kept = admitted.filter(
-      (d) => recoveryDefect(d, gw.reactor, gw.operatorAuthor, admitted) === undefined,
+      (d) => recoveryDefect(d, gw.reactor, gw.operatorAuthor, admitted, () => gone) === undefined,
     );
     if (kept.length === admitted.length) break;
     admitted = kept;

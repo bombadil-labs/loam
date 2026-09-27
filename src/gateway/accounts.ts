@@ -25,7 +25,7 @@ import { STORE_ENTITY } from "./genesis.js";
 import { CTX_GRANTS, dataStrikers, lawfulStrikersJson } from "./governed-trust.js";
 export { CTX_GRANTS, lawfulStrikersJson } from "./governed-trust.js";
 import { entityGatherBody } from "./gather.js";
-import { eraseDefect } from "./erase.js";
+import { eraseDefect, erasedInBatch } from "./erase.js";
 import { publicDefect } from "./public.js";
 import { artifactDefect } from "./artifact.js";
 import { trustDefect } from "./trust.js";
@@ -729,7 +729,10 @@ export function authorize(
     containerDefect(delta, reactor, now, operator) ??
     eraseDefect(delta, reactor, operator) ??
     slateDefect(delta, reactor, now, operator) ??
-    recoveryDefect(delta, reactor, operator, batch);
+    recoveryDefect(delta, reactor, operator, batch, () => {
+      const users = userGroundOf(reactor);
+      return new Set([...users.erased(), ...erasedInBatch(batch, operator)]);
+    });
   if (defect !== undefined) {
     return { ok: false, refusal: `delta ${delta.id} is malformed law: ${defect}` };
   }

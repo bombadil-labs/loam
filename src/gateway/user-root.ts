@@ -284,6 +284,7 @@ export function recoveryDefect(
   reactor: Reactor,
   operator: string | undefined,
   batch: readonly Delta[] = [],
+  gone: () => ReadonlySet<string> = () => NONE,
 ): string | undefined {
   const touches = delta.claims.pointers.some(
     (p) =>
@@ -301,8 +302,11 @@ export function recoveryDefect(
   const kind = context === CTX_RECOVERY ? "record" : "lineage";
   const parsed = parse(delta, kind);
   if (parsed === undefined) return `a malformed recovery ${kind}`;
-  // A record arriving in the same atomic batch counts as held: a recovery lands whole.
+  // A record arriving in the same atomic batch counts as held: a recovery lands whole. A record the
+  // store has erased, or that an erasure in this batch erases, does not, even while its bytes are
+  // still held: the readers already count it as gone, so a successor naming it would be an orphan.
   const heldRecord = (id: string): Parsed | undefined => {
+    if (gone().has(id)) return undefined;
     const held = reactor.get(id);
     const d = held !== undefined && verified(held) ? held : batch.find((b) => b.id === id);
     return d !== undefined && d.claims.author === operator && filedFor(d, CTX_RECOVERY) === name

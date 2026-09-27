@@ -14,6 +14,7 @@ import {
   type Delta,
 } from "@bombadil/rhizomatic";
 import { dataStruck, grantClaims, holdsGrant } from "../../src/gateway/accounts.js";
+import { eraseClaims } from "../../src/gateway/erase.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { governedStrikers } from "../../src/gateway/governed-trust.js";
@@ -119,7 +120,15 @@ async function recover(
 const readers = (gw: Gateway, at?: number) => {
   const now = at ?? gw.validityNow();
   return {
-    index: userRootAt(gw.reactor, now, OP, "ada", new Set(), at ?? Infinity),
+    // The erased-but-held set the Gateway itself reads with, as the door does.
+    index: userRootAt(
+      gw.reactor,
+      now,
+      OP,
+      "ada",
+      userGroundOf(gw.reactor).erased(),
+      at ?? Infinity,
+    ),
     view: at === undefined ? rootOf(gw.reactor, OP, now, "ada") : undefined,
     raw: userRootsRaw(userGroundOf(gw.reactor), OP, "ada"),
   };
@@ -502,6 +511,52 @@ describe("federation lands recovery evidence only with what it names", () => {
     expect(gw.reactor.get(bystander.id)).toBeDefined();
     expect(readers(gw)).toEqual({ index: K2, view: K2, raw: [K2] });
     expect(writes(gw, K2)).toBe(true);
+  });
+});
+
+describe("a record the store has erased is not a predecessor, even while its bytes are held", () => {
+  const successorOf = (r0: Delta) =>
+    op(
+      recoveryClaims(
+        { name: "ada", attempt: "s", previous: K2, root: K0, supersedes: r0.id, retired: [K1, K2] },
+        OP,
+        40,
+      ),
+    );
+
+  it("an erased-but-held predecessor: the successor is refused, and the honest state stands", async () => {
+    const gw = await world();
+    const { record } = await recover(gw, { previous: K1, root: K2, retired: [K1] }, 30);
+    // The erasure record lands while R0's bytes stay held (a purge not yet done).
+    expect(gw.reactor.ingest(op(eraseClaims(record.id, OP, OP, 35))).status).toBe("accepted");
+    expect(gw.reactor.get(record.id)).toBeDefined();
+    // Honest state: the head is gone and its lineage stands, so the history is broken.
+    const before = readers(gw);
+    expect(before).toEqual({ index: undefined, view: undefined, raw: [] });
+    await expect(gw.append([successorOf(record)])).rejects.toThrow(/supersedes a record/);
+    expect(readers(gw)).toEqual(before);
+    expect(writes(gw, B)).toBe(true);
+  });
+
+  it("an append erasing the head and superseding it in one batch is refused whole", async () => {
+    const gw = await world();
+    const { record } = await recover(gw, { previous: K1, root: K2, retired: [K1] }, 30);
+    const erasure = op(eraseClaims(record.id, OP, OP, 35));
+    await expect(gw.append([erasure, successorOf(record)])).rejects.toThrow(/supersedes a record/);
+    expect(gw.reactor.get(erasure.id)).toBeUndefined();
+    expect(readers(gw)).toEqual({ index: K2, view: K2, raw: [K2] });
+  });
+
+  it("federating the same pair lands the erasure and drops the successor: the head is gone, so the chain breaks", async () => {
+    const gw = await world();
+    const { record } = await recover(gw, { previous: K1, root: K2, retired: [K1] }, 30);
+    const erasure = op(eraseClaims(record.id, OP, OP, 35));
+    const successor = successorOf(record);
+    await gw.federate([erasure, successor]);
+    expect(gw.reactor.get(successor.id)).toBeUndefined();
+    // The erasure of the current head breaks the history on purpose; that is the stated outcome.
+    expect(readers(gw).index).toBeUndefined();
+    expect(writes(gw, B)).toBe(true);
   });
 });
 
