@@ -1,5 +1,4 @@
 import {
-  associatedKeys,
   authorsForPrincipal,
   resolvePrincipal,
   computeId,
@@ -133,15 +132,18 @@ export function keysActingFor(
 }
 
 /**
- * Every key ever associated with `who`, as evidence held at `now`: the history question, asked
- * where "your own" deltas are selected, so a recovered principal can still retract what an
- * earlier key wrote. Association comes only from root-signed bindings and successions; rows whose
- * evidence is now negated or expired still count, because history is history.
+ * Every key whose deltas count as `who`'s own: the history question, asked where "your own" deltas
+ * are selected (clear, unlink, a translator's renderings). Today that is the root alone. A SPEC-14
+ * binding is association evidence, not ownership: any key with write standing can sign one naming
+ * someone else's key, and "retract your own" must not then reach that person's claims. An earlier
+ * key joins here only through an operator-governed recovery record (step 5, PR 3e).
  */
-export function keysEverOf(reactor: Reactor, now: number, who: PrincipalRef): ReadonlySet<string> {
-  if (!AUTHOR.test(who.root)) return new Set([who.root]);
-  const rows = associatedKeys(reactor, who.root, now, "rootOrSameAuthor");
-  return new Set([who.root, ...rows.map((row) => row.key)]);
+export function keysEverOf(
+  _reactor: Reactor,
+  _now: number,
+  who: PrincipalRef,
+): ReadonlySet<string> {
+  return new Set([who.root]);
 }
 
 // The scope a ground's write door asks delegations about. Only a ground that declares one honors a

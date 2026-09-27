@@ -463,30 +463,22 @@ describe("history: keysEverOf", () => {
     expect(tags(gw)).toEqual(["by-old-key"]);
   });
 
-  it("R's binding for K makes K history, not authority, and R clears K's value", async () => {
-    const gw = await oldKeyWrote();
-    at(T0 + 20);
-    expect(await door(gw, binding(K, T0 + 20))).toBe("admitted");
-    at(T0 + 30);
-    expect([...keysEverOf(gw.reactor, gw.validityNow(), { root: R })].sort()).toEqual(
-      [R, K].sort(),
-    );
-    // A binding grants no authority (SPEC-14 §2).
-    expect(acts(gw, K)).toBe(false);
-    await gw.gqlHooks().clear("Plant", FERN, ["tag"], R_SEED);
-    expect(tags(gw)).toBeNull();
-  });
-
-  it("a negated binding stays in history", async () => {
+  // A SPEC-14 binding is association evidence, and any key with write standing can sign one naming
+  // someone else's key. "Retract your own" must not follow it, or a writer could clear a stranger's
+  // claims by binding the stranger's key. An earlier key becomes "own" only through an
+  // operator-governed recovery record (step 5, PR 3e).
+  it("R's own binding for K does NOT make K's value R's to clear (the adversarial case)", async () => {
     const gw = await oldKeyWrote();
     at(T0 + 20);
     const bind = binding(K, T0 + 20);
-    await gw.append([bind]);
+    expect(await door(gw, bind)).toBe("admitted");
+    // delta: the binding is held
+    expect(gw.reactor.get(bind.id)).toBeDefined();
     at(T0 + 30);
-    await gw.append([negation(R_SEED, bind, T0 + 30)]);
-    at(T0 + 40);
-    expect(keysEverOf(gw.reactor, gw.validityNow(), { root: R }).has(K)).toBe(true);
+    expect([...keysEverOf(gw.reactor, gw.validityNow(), { root: R })]).toEqual([R]);
+    expect(acts(gw, K)).toBe(false);
+    // door: R's clear leaves K's value standing
     await gw.gqlHooks().clear("Plant", FERN, ["tag"], R_SEED);
-    expect(tags(gw)).toBeNull();
+    expect(tags(gw)).toEqual(["by-old-key"]);
   });
 });
