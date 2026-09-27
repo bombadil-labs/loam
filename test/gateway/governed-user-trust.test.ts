@@ -27,7 +27,7 @@ import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { listingContainerName } from "../../src/gateway/listing.js";
 import { gatherImpl } from "../../src/gateway/reads.js";
-import { rootClaims, userClaims } from "../../src/server/users.js";
+import { rootClaims, rootOf, userClaims } from "../../src/server/users.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
 import { PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
@@ -211,6 +211,65 @@ describe("R18: a root claim erased but still held is gone to the governed read",
         .map((d) => d.id),
     );
     expect([kept.has(v1.id), kept.has(v2.id)]).toEqual([false, true]);
+    await gw.close();
+  });
+});
+
+describe("R7b: re-pointing a user updates a warm listing", () => {
+  it("a strike by the new root, dormant before the re-point, drops the entity after it", async () => {
+    const gw = await world();
+    const moss = observed(MOSS, "tag", "soft", 1200, GARDENER_SEED);
+    await gw.append([observed(FERN, "height", 30, 1000, GARDENER_SEED), moss]);
+    await gw.federate([strike(K2_SEED, moss, 3000)]);
+    // K2 is nobody's root yet: its strike is inert, and the listing is warm with moss in it.
+    expect((await gw.list("Guarded")).map((n) => n.entity)).toEqual([FERN, MOSS]);
+    await gw.append([op(rootClaims("ada", K2, OP, 3100))]);
+    expect((await gw.list("Guarded")).map((n) => n.entity)).toEqual([FERN]);
+    expect(valuesOf(gatherImpl(gw, "Guarded", MOSS, gw.validityNow()), "tag")).toEqual([]);
+    await gw.close();
+  });
+});
+
+describe("R19: an erased strike on a root claim reads as the View reader says (a control)", () => {
+  // The erasure reading hides the TARGET of an erased-but-held strike too, so the root claim stays
+  // hidden until the purge completes: neither reader revives it early.
+  it("the claim the strike retired stays gone through the purge window", async () => {
+    const gw = await world();
+    const v1 = observed(FERN, "height", 30, 100, GARDENER_SEED);
+    const v2 = observed(FERN, "height", 34, 101, GARDENER_SEED);
+    await gw.append([v1, v2]);
+    const toK2 = op(rootClaims("ada", K2, OP, 50));
+    const drop = op(makeNegationClaims(OP, 60, toK2.id));
+    await gw.append([toK2, drop]);
+    await gw.federate([strike(K1_SEED, v1, 200), strike(K2_SEED, v2, 220)]);
+    expect(heights(gatherImpl(gw, "Guarded", FERN, gw.validityNow()))).toEqual([34]);
+    expect(gw.reactor.ingest(op(eraseClaims(drop.id, OP, OP, 400))).status).toBe("accepted");
+    expect(gw.reactor.get(drop.id)).toBeDefined();
+    expect(rootOf(gw.reactor, OP, gw.validityNow(), "ada")).toBe(K1);
+    expect(heights(gatherImpl(gw, "Guarded", FERN, gw.validityNow()))).toEqual([34]);
+    await gw.close();
+  });
+});
+
+describe("R20: an erased-but-held grant stops counting in dataStruck, as in the governed read", () => {
+  it("the grantee's strike no longer binds either way; ada's still does", async () => {
+    const gw = await world();
+    const X = authorForSeed(X_SEED);
+    const toX = op(grantClaims(STORE_ENTITY, X, "write", OP, 4));
+    await gw.append([toX]);
+    const d = observed(FERN, "height", 30, 100, GARDENER_SEED);
+    const bystander = observed(FERN, "height", 34, 101, GARDENER_SEED);
+    await gw.append([d, bystander]);
+    await gw.federate([strike(X_SEED, d, 200), strike(K1_SEED, bystander, 201)]);
+    const now = () => gw.validityNow();
+    expect(heights(gatherImpl(gw, "Guarded", FERN, now()))).toEqual([]);
+    expect(dataStruck(gw.reactor, now(), OP)(d.id)).toBe(true);
+    // The erasure record for the grant lands while its bytes stay held.
+    expect(gw.reactor.ingest(op(eraseClaims(toX.id, OP, OP, 400))).status).toBe("accepted");
+    expect(gw.reactor.get(toX.id)).toBeDefined();
+    expect(heights(gatherImpl(gw, "Guarded", FERN, now()))).toEqual([30]);
+    expect(dataStruck(gw.reactor, now(), OP)(d.id)).toBe(false);
+    expect(dataStruck(gw.reactor, now(), OP)(bystander.id)).toBe(true);
     await gw.close();
   });
 });

@@ -9,7 +9,8 @@
 // Two modes, because rhizomatic has two evaluators. `evalTerm` is `evalTermRaw` over the input
 // filtered to what is valid at `now`; its grants resolve users to the one root at `now`. Raw
 // evaluation ignores validity, so its grants expand a user to every root the operator named and
-// did not strike (`userRootsRaw`) — never narrower than what the raw machinery trusted before.
+// did not strike (`userRootsRaw`), read in the same raw posture as the grants. A key-named grant
+// trusts exactly what it trusted before lowering, in either mode.
 //
 // A predicate that LOOKS governed but is not byte-for-byte canonical fails closed: evaluated
 // unlowered it would reflect `user:` strings as authors. Only mask trust policies are checked; an
@@ -139,14 +140,15 @@ export function governedStrikers(
 
 /**
  * The deltas that decide which grants survive in `reactor`: every grant (all are filed at the store
- * entity) with its whole negation closure (H1). Evaluating the grants term over this set answers
- * as it would over the whole store, from the index rather than a scan.
+ * entity) with its whole negation closure (H1), less `hidden`. Evaluating the grants term over this
+ * set answers as it would over the whole store less `hidden`, from the index rather than a scan.
  */
-export function grantGround(reactor: Reactor): DeltaSet {
+export function grantGround(reactor: Reactor, hidden: ReadonlySet<string> = NO_IDS): DeltaSet {
   const scope = new Map<string, Delta>();
   const take = (id: string): void => {
+    if (hidden.has(id) || scope.has(id)) return;
     const d = reactor.get(id);
-    if (d === undefined || scope.has(id)) return;
+    if (d === undefined) return;
     scope.set(id, d);
     for (const n of reactor.negationsOf(id)) take(n);
   };
@@ -154,10 +156,27 @@ export function grantGround(reactor: Reactor): DeltaSet {
   return DeltaSet.from(scope.values());
 }
 
-/** The strikers a reactor's own data answers to at `now`. */
+const NO_IDS: ReadonlySet<string> = new Set();
+
+// What a door read withholds from a reactor's ground at `now` (erased-but-held deltas, and a
+// slate's read closure: `readClosedIds`). The Gateway declares it, because the readers live above
+// this module. A governed read evaluates over the ground less these, so the strikers that answer
+// "is this struck as data" must be computed over the same ground.
+const readHidden = new WeakMap<Reactor, (now: number) => ReadonlySet<string>>();
+
+/** Declare what a door read of `reactor` withholds at a given instant. */
+export function declareReadHidden(
+  reactor: Reactor,
+  hidden: (now: number) => ReadonlySet<string>,
+): void {
+  readHidden.set(reactor, hidden);
+}
+
+/** The strikers a reactor's own data answers to at `now`, over the ground a door reads. */
 export function dataStrikers(reactor: Reactor, now: number, operator: string): Set<string> {
+  const hidden = readHidden.get(reactor)?.(now) ?? NO_IDS;
   return new Set(
-    governedStrikers(grantGround(reactor), { now }, operator, false, userGroundOf(reactor)),
+    governedStrikers(grantGround(reactor, hidden), { now }, operator, false, userGroundOf(reactor)),
   );
 }
 

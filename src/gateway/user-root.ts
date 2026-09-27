@@ -40,7 +40,7 @@ function latestValues(
   const entity = userEntity(name);
   const negated = reactor.negationPredicate(
     now,
-    (n) => n.claims.author === operator && n.claims.timestamp <= cut,
+    (n) => n.claims.author === operator && n.claims.timestamp <= cut && !erased.has(n.id),
   );
   const best = new Map<string, { timestamp: number; id: string; value: unknown }>();
   for (const id of reactor.byTarget(entity)) {
@@ -131,7 +131,9 @@ export function userGroundOf(reactor: Reactor): UserGround {
  * Every root key `name` could be read as under RAW evaluation, which ignores validity: the keys
  * named by the operator's root claims for that user, less any the operator struck (a strike
  * counts while it survives its own strikes, whatever its window). Empty unless some such operator
- * claim still names the user. The raw machinery trusts a superset of any one instant's root.
+ * claim still names the user. This is the raw posture the grants themselves get: validity ignored,
+ * every surviving operator strike binding. It is NOT a superset of the present root — a strike that
+ * has lapsed counts here and not at `now`.
  */
 export function userRootsRaw(
   ground: UserGround,
