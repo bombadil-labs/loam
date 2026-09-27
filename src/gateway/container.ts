@@ -2246,13 +2246,10 @@ export async function bindConnectionImpl(
     });
   const stale = [
     ...delegationRecordsFor(pool.reactor, others, opts.connectionKey).map((d) => d.id),
-    // Only the operator's admin grants make an owner; a grant-shaped delta anyone else wrote is
-    // inert here and not worth a strike.
-    ...others.flatMap((root) =>
-      heldGrantIds(pool.reactor, root, "admin").filter(
-        (id) => pool.reactor.get(id)?.claims.author === operator,
-      ),
-    ),
+    // EVERY admin grant naming another root, whoever issued it: an admin grant from any effective
+    // admin binds (grantHeld), so filtering by issuer would leave one standing. A strike on an
+    // inert one costs a delta and creates nothing.
+    ...others.flatMap((root) => heldGrantIds(pool.reactor, root, "admin")),
   ].filter((id) => !struckForGood(id));
   const fresh = !keyActsFor(pool.reactor, now, { root: owner }, opts.connectionKey, name, operator);
   if (fresh || stale.length > 0) {

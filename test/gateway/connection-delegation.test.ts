@@ -425,6 +425,34 @@ describe("revoking a connection negates its delegation", () => {
     await gw.close();
   });
 
+  it("an admin grant the NEW owner gave the old root is struck too, whoever issued it", async () => {
+    const gw = await home();
+    const conn = await bind(gw, CONN_SEED);
+    const other = await bind(gw, OTHER_SEED);
+    const pool = conn.gateway!;
+    const NEW_SEED = "e7".repeat(32);
+    const NEW = authorForSeed(NEW_SEED);
+    // The new key already holds operator admin here, and gave the old root admin of its own.
+    await pool.append([signClaims(grantClaims(STORE_ENTITY, NEW, "admin", OP, 1044), OP_SEED)]);
+    const fromNew = signClaims(grantClaims(STORE_ENTITY, GARDENER, "admin", NEW, 1045), NEW_SEED);
+    await pool.append([fromNew]);
+    await gw.bindConnection({ container: "home:ada", connectionKey: CONN, ownerSeed: NEW_SEED });
+    expect(
+      pool.reactor.negationsOf(fromNew.id).map((n) => pool.reactor.get(n)!.claims.author),
+    ).toEqual([OP]);
+    await gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: NEW_SEED });
+    const reissue = signClaims(
+      delegationClaims(GARDENER, CONN, inboxName("home:ada", CONN), 1046),
+      GARDENER_SEED,
+    );
+    expect(await door(pool, reissue)).toBe("refused");
+    expect(await door(pool, observed(FERN, "height", 28, 1047, CONN_SEED))).toBe("refused");
+    expect(await door(other.gateway!, observed(FERN, "tag", "hail", 1048, OTHER_SEED))).toBe(
+      "admitted",
+    );
+    await gw.close();
+  });
+
   it("a bind strikes a second root's delegation and admin grant, even when the owner's stands", async () => {
     const gw = await home();
     const conn = await bind(gw, CONN_SEED);
