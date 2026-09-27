@@ -91,4 +91,32 @@ describe("a connection's own strike on its delegation", () => {
     await other.gateway!.append([observed(FERN, "tag", "shade", 1400, OTHER_SEED)]); // bystander
     await gw.close();
   });
+
+  it("a connection bound before delegations cannot hide its write grant either", async () => {
+    const gw = await home();
+    const conn = await bind(gw, CONN_SEED);
+    const other = await bind(gw, OTHER_SEED);
+    const pool = conn.gateway!;
+    // An older bind: the owner's write grant names the key directly.
+    const LEGACY_SEED = "d9".repeat(32);
+    const legacy = signClaims(
+      grantClaims(STORE_ENTITY, authorForSeed(LEGACY_SEED), "write", GARDENER, 1500),
+      GARDENER_SEED,
+    );
+    await pool.append([legacy]);
+    await pool.append([observed(FERN, "height", 4, 1510, LEGACY_SEED)]); // control: it may write
+    await pool.append([
+      signClaims(makeNegationClaims(authorForSeed(LEGACY_SEED), 1520, legacy.id), LEGACY_SEED),
+    ]);
+    await pool.append([observed(FERN, "height", 5, 1530, LEGACY_SEED)]); // its strike did not count
+    await gw.revokeConnection({
+      inbox: conn,
+      connectionKey: authorForSeed(LEGACY_SEED),
+      ownerSeed: GARDENER_SEED,
+    });
+    await expect(pool.append([observed(FERN, "height", 6, 1540, LEGACY_SEED)])).rejects.toThrow();
+    await pool.append([observed(FERN, "height", 7, 1550, CONN_SEED)]); // this pool's own key stands
+    await other.gateway!.append([observed(FERN, "tag", "sun", 1560, OTHER_SEED)]); // bystander
+    await gw.close();
+  });
 });

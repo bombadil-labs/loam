@@ -3885,6 +3885,7 @@ async function cmdGrantRevoke(
   const struckGround: string[] = [];
   const struckPools: string[] = [];
   const unreachablePools: string[] = [];
+  const unrevokedPools: string[] = [];
   try {
     // BOTH HALVES, and the report below says which ones happened. The store-wide grant is the
     // pre-§58 shape (nothing lands one now); the pool grant is what a bound connection actually
@@ -3911,16 +3912,26 @@ async function cmdGrantRevoke(
         unreachablePools.push(grant.inbox);
         return;
       }
+      const revoke = (ownerSeed: string) =>
+        gateway.revokeConnection({ inbox: handle, connectionKey: grant.actor, ownerSeed });
       try {
-        await gateway.revokeConnection({
-          inbox: handle,
-          connectionKey: grant.actor,
-          ownerSeed: owner.seed,
+        // The person's own voice first. If their seed was replaced since the bind, the new key
+        // has no standing in the pool and did not sign what lets the connection write, so its
+        // strike is refused or does not bind. This command holds the operator seed, and the
+        // operator may strike any delegation in its store, so it strikes in that voice instead.
+        await revoke(owner.seed).catch((err: unknown) => {
+          const said = err instanceof Error ? err.message : String(err);
+          if (/nothing in this inbox lets/.test(said)) throw err;
+          return revoke(seed);
         });
         struckPools.push(grant.inbox);
-      } catch {
-        // No surviving write grant names the key there: already revoked, or never provisioned.
-        // Nothing to strike is not a failure, and the report below claims nothing either way.
+      } catch (err) {
+        // Nothing lets the key write there — already revoked, or never provisioned — is not a
+        // failure, and the report claims nothing either way. Any other refusal means the key may
+        // still write there, and the report must say so.
+        const said = err instanceof Error ? err.message : String(err);
+        if (!/nothing in this inbox lets/.test(said))
+          unrevokedPools.push(`${grant.inbox} (${said})`);
       }
     };
     const outcome = await revokeConnector(home, clientId, strike, (m) => io.err(`loam: ${m}`));
@@ -3969,6 +3980,13 @@ async function cmdGrantRevoke(
             `loam: could not reach ${unreachablePools.join(", ")} — the connection's own write ` +
               `grant still stands there. Revoke it from that inbox's row on the admin page.`,
           );
+        }
+        if (unrevokedPools.length > 0) {
+          io.err(
+            `loam: the connection may still write in ${unrevokedPools.join("; ")}. ` +
+              `Revoke it from that inbox's row on the admin page.`,
+          );
+          return 1;
         }
         {
           // Same boot-materialization trap as the mint above: the strike is in the file, and a

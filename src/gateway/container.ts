@@ -66,7 +66,12 @@ import { negatedAt } from "./negation.js";
 import { readTrustPolicyAt, type TrustPolicy } from "./trust.js";
 import { Gateway, type ConnectionBinding, type FederationReport } from "./gateway.js";
 import { withStamp } from "./stamp.js";
-import { delegationClaims, principalScopeOf, standingDelegationIdsFor } from "./principal.js";
+import {
+  delegationClaims,
+  keyActsFor,
+  principalScopeOf,
+  standingDelegationIdsFor,
+} from "./principal.js";
 
 export const CTX_CONTAINER = "loam.container";
 export const CTX_CONTAINER_EXCLUDED = "loam.container.excluded";
@@ -2198,20 +2203,38 @@ export async function bindConnectionImpl(
       ),
     ]);
   }
+  // Asked of THIS owner. After the person's seed is replaced, a delegation their old key signed
+  // still lets the connection write, but the new key cannot revoke it (only a record's signer or
+  // the operator can). So the bind signs a fresh delegation from the current key, and the
+  // operator strikes the older one: one standing delegation per connection, always the person's.
   if (
-    !holdsGrant(
+    !keyActsFor(
       pool.reactor,
       pool.validityNow(),
-      STORE_ENTITY,
+      { root: owner },
       opts.connectionKey,
-      "write",
+      name,
       operator,
     )
   ) {
+    const older = standingDelegationIdsFor(
+      pool.reactor,
+      pool.validityNow(),
+      grantSubjects(pool.reactor).filter((root) => root !== owner),
+      opts.connectionKey,
+      name,
+      operator,
+    );
     await pool.append([
       signClaims(
         withStamp(pool.stamp(owner), (t) => delegationClaims(owner, opts.connectionKey, name, t)),
         opts.ownerSeed,
+      ),
+      ...older.map((id) =>
+        signClaims(
+          withStamp(pool.stamp(operator), (t) => revocationClaims(id, operator, t)),
+          operatorSeed,
+        ),
       ),
     ]);
   }
@@ -2342,7 +2365,7 @@ export async function revokeConnectionImpl(opts: {
   ) {
     throw new Error(
       `revokeConnection: the strikes landed but ${opts.connectionKey} still writes here — ` +
-        `${owner} is neither the signer of its authority nor this store's operator`,
+        `${owner} did not sign what lets it write, and is not this store's operator`,
     );
   }
 }

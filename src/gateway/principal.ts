@@ -61,12 +61,12 @@ export function principalSuppression(operator: string | undefined): Suppression 
   return rule;
 }
 
-// Loam's scope rule: SPEC-14's prefix policy, minus the universal edge, which would carry a
-// delegate everywhere. This alone does not hold a delegate to one container: a broad scope still
-// covers every request beneath it, so the one-container rule is kept by what Loam signs and by
-// the scope each door asks with.
+// Loam's scope rule: EXACT, and never the universal edge. A delegation reaches the one ground whose
+// declared scope it names (an inbox pool, by its own name) and no other: not a child, not a sibling
+// that shares its prefix. Every child container has its own pool, so prefix coverage could only
+// carry a hand-signed ancestor scope into pools it was never meant for (README ruling 6).
 const loamScope = (edgeScope: string, request: string): boolean =>
-  edgeScope !== "*" && (edgeScope === request || request.startsWith(`${edgeScope}:`));
+  edgeScope !== "*" && edgeScope === request;
 
 const readOptions = (now: number, scope: string, operator: string | undefined) =>
   ({
@@ -88,7 +88,7 @@ const sealed = (reactor: Reactor, id: string): boolean =>
 /**
  * Does `key` act for `who` at `now` within `scope`? The root always does. Any other key needs the
  * one delegation shape Loam honors (README ruling 6): from the root, `delegable: false`, scoped
- * to something other than `*`, covering `scope` by prefix, valid at `now`, and unrevoked. Every
+ * to exactly `scope` (never `*`), valid at `now`, and unrevoked. Every
  * edge must be sealed, and SPEC-14 ends a chain at a sealed edge, so the path is one edge long.
  * SPEC-14 would also honor a delegable edge, the chain behind it, or a universal scope; Loam
  * refuses all three on the read, so a hand-signed record cannot widen a delegate past its scope.

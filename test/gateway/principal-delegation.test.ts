@@ -12,7 +12,6 @@
 //     connection path (bind, inbox-name scope, revoke) is test/gateway/connection-delegation.test.ts.
 //   - A delegate's writes are not "yours" to clear: `keysEverOf` follows association (bindings),
 //     not authority (delegations). Provisioning will sign a binding beside each delegation.
-//   - The admin page's accept set (`admin.ts`) has no rail of its own; it asks the seam below.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -197,13 +196,13 @@ describe("a delegated key writes for its user, within its scope", () => {
     ).toEqual([R, C].sort());
   });
 
-  it("the scope is a prefix boundary: a narrower or sibling scope does not reach the store door", async () => {
+  it("the scope is exact: a child, a sibling, and the universal request all miss", async () => {
     const gw = await store();
     at(T0 + 10);
     await gw.append([delegation(R_SEED, C, "loam:store:ada", false, T0 + 10)]);
     at(T0 + 20);
     expect(acts(gw, C, "loam:store:ada")).toBe(true);
-    expect(acts(gw, C, "loam:store:ada:notes")).toBe(true);
+    expect(acts(gw, C, "loam:store:ada:notes")).toBe(false);
     expect(acts(gw, C, "loam:store:adam")).toBe(false);
     expect(acts(gw, C, "*")).toBe(false);
     expect(acts(gw, C)).toBe(false);

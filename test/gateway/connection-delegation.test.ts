@@ -1,7 +1,9 @@
 // A bound connection writes by DELEGATION (README ruling 6): the owner's root signs a sealed
 // delegation to the connection key, scoped to the inbox pool's own name, in the pool's own ground.
 // Each case asks two levels: the delta (what record the pool holds, and what strikes it) and the door
-// (a write signed by the key is admitted or refused). Every revoke case keeps a bystander connection
+// (a write signed by the key is admitted or refused). Who may revoke is the caller's decision (the
+// admin page checks the session user; the CLI holds the operator seed); `revokeConnection` only
+// picks a voice that binds, so no case here drives an unauthorized caller. Every revoke case keeps a bystander connection
 // that still writes, so a revoke that reached too far is seen.
 //
 import { createHash } from "node:crypto";
@@ -9,8 +11,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
+import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
+import { delegationClaims } from "../../src/gateway/principal.js";
 import { containerClaims, inboxName } from "../../src/gateway/container.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -28,6 +31,7 @@ const CONN = authorForSeed(CONN_SEED);
 const OTHER_SEED = "d8".repeat(32);
 const OTHER = authorForSeed(OTHER_SEED);
 const STRANGER_SEED = "d9".repeat(32);
+const STRANGER = authorForSeed(STRANGER_SEED);
 
 const genesis = () =>
   assembleGenesis({
@@ -166,6 +170,52 @@ describe("the delegation grants nothing outside its own inbox", () => {
   });
 });
 
+describe("a scope is read exactly", () => {
+  it("an owner-signed delegation scoped to an ANCESTOR of two inboxes is honored in neither", async () => {
+    const gw = await home();
+    const ada = (await bind(gw, CONN_SEED, "home:ada")).gateway!;
+    const bea = (await bind(gw, OTHER_SEED, "home:bea")).gateway!;
+    const broad = signClaims(
+      delegationClaims(GARDENER, STRANGER, "inbox:home", 1021),
+      GARDENER_SEED,
+    );
+    for (const pool of [ada, bea]) {
+      expect(await door(pool, broad)).toBe("admitted");
+      expect(await door(pool, observed(FERN, "height", 17, 1022, STRANGER_SEED))).toBe("refused");
+    }
+    // Control: the same owner, the same key, the exact pool name: honored in that pool only.
+    const exact = signClaims(
+      delegationClaims(GARDENER, STRANGER, inboxName("home:ada", CONN), 1023),
+      GARDENER_SEED,
+    );
+    await ada.append([exact]);
+    await bea.append([exact]);
+    expect(await door(ada, observed(FERN, "height", 18, 1024, STRANGER_SEED))).toBe("admitted");
+    expect(await door(bea, observed(FERN, "height", 19, 1025, STRANGER_SEED))).toBe("refused");
+    await gw.close();
+  });
+});
+
+describe("the admin panel's label reads only root-signed delegations", () => {
+  it("a delegation-shaped record another pool writer signed, then struck, leaves the key ungranted", async () => {
+    const gw = await home();
+    const conn = await bind(gw, CONN_SEED);
+    const pool = conn.gateway!;
+    await pool.append([
+      signClaims(grantClaims(STORE_ENTITY, OTHER, "write", GARDENER, 1026), GARDENER_SEED),
+    ]);
+    // OTHER signs a record claiming to be GARDENER's delegation to STRANGER, then strikes it.
+    const forged = signClaims(
+      { ...delegationClaims(GARDENER, STRANGER, inboxName("home:ada", CONN), 1027), author: OTHER },
+      OTHER_SEED,
+    );
+    await pool.append([forged]);
+    await pool.append([signClaims(makeNegationClaims(OTHER, 1028, forged.id), OTHER_SEED)]);
+    expect(connectionGrantState(pool.reactor, pool.validityNow(), OP, STRANGER)).toBe("ungranted");
+    await gw.close();
+  });
+});
+
 describe("revoking a connection negates its delegation", () => {
   it("the owner's revoke strikes the delegation; the key is refused; a bystander still writes", async () => {
     const gw = await home();
@@ -183,38 +233,62 @@ describe("revoking a connection negates its delegation", () => {
     await gw.close();
   });
 
-  it("the operator's revoke binds too", async () => {
+  it("the operator's revoke binds too, and reaches only that connection", async () => {
     const gw = await home();
     const conn = await bind(gw, CONN_SEED);
+    const other = await bind(gw, OTHER_SEED);
+    const [d] = delegationsOf(conn.gateway!, CONN);
     await gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: OP_SEED });
+    expect(conn.gateway!.reactor.negationsOf(d!.id)).toHaveLength(1);
     expect(await door(conn.gateway!, observed(FERN, "height", 7, 1007, CONN_SEED))).toBe("refused");
-    await gw.close();
-  });
-
-  it("a stranger's revoke is refused at the door, and the connection still writes", async () => {
-    const gw = await home();
-    const conn = await bind(gw, CONN_SEED);
-    await expect(
-      gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: STRANGER_SEED }),
-    ).rejects.toThrow(/append rejected/);
-    expect(await door(conn.gateway!, observed(FERN, "height", 8, 1008, CONN_SEED))).toBe(
+    expect(await door(other.gateway!, observed(FERN, "tag", "sun", 1019, OTHER_SEED))).toBe(
       "admitted",
     );
     await gw.close();
   });
 
-  it("a pool writer who neither signed the delegation nor runs the store is told it did not bind", async () => {
+  it("the operator's revoke still finds the delegation after the owner's own grant is struck", async () => {
     const gw = await home();
     const conn = await bind(gw, CONN_SEED);
+    const other = await bind(gw, OTHER_SEED, "home:bea");
     const pool = conn.gateway!;
-    // OTHER may write here, so its strike lands; the suppression rule does not honor it.
-    await pool.append([
-      signClaims(grantClaims(STORE_ENTITY, OTHER, "write", GARDENER, 1015), GARDENER_SEED),
-    ]);
-    await expect(
-      gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: OTHER_SEED }),
-    ).rejects.toThrow(/still writes here/);
-    expect(await door(pool, observed(FERN, "height", 14, 1016, CONN_SEED))).toBe("admitted");
+    const ownerGrant = [...pool.reactor.snapshot()].find(
+      (x) => prim(x, "subject") === GARDENER && prim(x, "verb") === "admin",
+    )!;
+    await pool.append([signClaims(makeNegationClaims(OP, 1020, ownerGrant.id), OP_SEED)]);
+    const [d] = delegationsOf(pool, CONN);
+    await gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: OP_SEED });
+    expect(pool.reactor.negationsOf(d!.id)).toHaveLength(1);
+    expect(await door(other.gateway!, observed(FERN, "tag", "dew", 1030, OTHER_SEED))).toBe(
+      "admitted",
+    );
+    await gw.close();
+  });
+
+  it("after the owner's seed is replaced, a re-bind signs afresh, strikes the old, and the new key revokes", async () => {
+    const gw = await home();
+    const conn = await bind(gw, CONN_SEED);
+    const other = await bind(gw, OTHER_SEED);
+    const pool = conn.gateway!;
+    // The person's seed is replaced (a role change mints a new one) and they consent again.
+    const NEW_SEED = "e1".repeat(32);
+    await gw.bindConnection({ container: "home:ada", connectionKey: CONN, ownerSeed: NEW_SEED });
+    const both = delegationsOf(pool, CONN);
+    // The re-bind signed a fresh delegation from the new key, and the operator struck the old one.
+    const old = both.find((d) => d.claims.author === GARDENER)!;
+    expect(pool.reactor.negationsOf(old.id).map((n) => pool.reactor.get(n)!.claims.author)).toEqual(
+      [OP],
+    );
+    expect(both.map((d) => d.claims.author).sort()).toEqual(
+      [GARDENER, authorForSeed(NEW_SEED)].sort(),
+    );
+    await gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: NEW_SEED });
+    for (const d of both) expect(pool.reactor.negationsOf(d.id)).toHaveLength(1);
+    expect(await door(pool, observed(FERN, "height", 8, 1008, CONN_SEED))).toBe("refused");
+    expect(connectionGrantState(pool.reactor, pool.validityNow(), OP, CONN)).toBe("revoked");
+    expect(await door(other.gateway!, observed(FERN, "tag", "fog", 1029, OTHER_SEED))).toBe(
+      "admitted",
+    );
     await gw.close();
   });
 
