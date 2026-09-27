@@ -107,8 +107,28 @@ interface Parsed {
   readonly retired: readonly string[];
 }
 
-// Every held operator claim filed at `user:<name>` in `context`, signed by the cut and not erased.
-// Validity and negations are not asked: recovery is durable history.
+// The user a claim is filed for in `context`, when it carries BOTH filings the record shape
+// requires: exactly one at `user:<name>` and exactly one at the index entity, in that same context.
+// A claim missing either is not recovery evidence for any reader, so the per-user reader and the
+// store-wide one always see the same claims.
+function filedFor(d: Delta, context: string): string | undefined {
+  let user: string | undefined;
+  let users = 0;
+  let index = 0;
+  for (const p of d.claims.pointers) {
+    if (p.target.kind !== "entity") continue;
+    const { id, context: c } = p.target.entity;
+    if (id === RECOVERIES && c === context) index += 1;
+    else if (id.startsWith(USER_PREFIX) && c === context) {
+      users += 1;
+      user = id.slice(USER_PREFIX.length);
+    }
+  }
+  return users === 1 && index === 1 ? user : undefined;
+}
+
+// Every held operator claim that is recovery evidence for `name` in `context`, signed by the cut and
+// not erased. Validity and negations are not asked: recovery is durable history.
 function heldAt(
   reactor: Reactor,
   operator: string,
@@ -117,36 +137,42 @@ function heldAt(
   erased: ReadonlySet<string>,
   cut: number,
 ): Delta[] {
-  const entity = userEntity(name);
   const out: Delta[] = [];
-  for (const id of reactor.byTarget(entity)) {
+  for (const id of reactor.byTarget(userEntity(name))) {
     if (erased.has(id)) continue;
     const d = reactor.get(id);
     if (d === undefined || d.claims.author !== operator || d.claims.timestamp > cut) continue;
-    const at = d.claims.pointers.some(
-      (p) =>
-        p.target.kind === "entity" &&
-        p.target.entity.id === entity &&
-        p.target.entity.context === context,
-    );
-    if (at) out.push(d);
+    if (filedFor(d, context) === name) out.push(d);
   }
   return out;
+}
+
+// Every key a claim names, well-formed or not: what a broken history quarantines.
+function namedKeys(d: Delta): string[] {
+  return d.claims.pointers.flatMap((p) =>
+    p.target.kind === "primitive" &&
+    typeof p.target.value === "string" &&
+    AUTHOR.test(p.target.value)
+      ? [p.target.value]
+      : [],
+  );
 }
 
 // A record or lineage claim's fields, or undefined when it is malformed.
 function parse(d: Delta, kind: "record" | "lineage"): Parsed | undefined {
   const one = new Map<string, string>();
   const retired: string[] = [];
+  const allowed =
+    kind === "record" ? ["previous", "root", "attempt", "supersedes"] : ["recovery", "root"];
   for (const p of d.claims.pointers) {
     if (p.target.kind === "entity") continue;
     if (p.target.kind !== "primitive" || typeof p.target.value !== "string") return undefined;
     if (p.role === "retired") {
-      if (!AUTHOR.test(p.target.value)) return undefined;
+      if (!AUTHOR.test(p.target.value) || retired.includes(p.target.value)) return undefined;
       retired.push(p.target.value);
       continue;
     }
-    if (one.has(p.role)) return undefined;
+    if (!allowed.includes(p.role) || one.has(p.role)) return undefined;
     one.set(p.role, p.target.value);
   }
   const root = one.get("root");
@@ -161,8 +187,21 @@ function parse(d: Delta, kind: "record" | "lineage"): Parsed | undefined {
     root,
     ...(one.has("supersedes") ? { supersedes: one.get("supersedes")! } : {}),
     ...(one.has("recovery") ? { recovery: one.get("recovery")! } : {}),
-    retired,
+    retired: [...retired].sort(),
   };
+}
+
+const sameSet = (a: readonly string[], b: Iterable<string>): boolean => {
+  const bs = [...new Set(b)].sort();
+  return a.length === bs.length && a.every((k, i) => k === bs[i]);
+};
+
+// The retired set a record must carry: its predecessor's, plus its own previous, minus its root.
+function expectedRetired(record: Parsed, predecessor: Parsed | undefined): Set<string> {
+  const out = new Set(predecessor?.retired ?? []);
+  if (record.previous !== undefined) out.add(record.previous);
+  out.delete(record.root);
+  return out;
 }
 
 /** A user's recovery history: none, one chain (its head's root and the keys it retired), or broken. */
@@ -183,38 +222,89 @@ export function recoveryChain(
   const recordDeltas = heldAt(reactor, operator, name, CTX_RECOVERY, erased, cut);
   const lineageDeltas = heldAt(reactor, operator, name, CTX_LINEAGE, erased, cut);
   if (recordDeltas.length === 0 && lineageDeltas.length === 0) return { kind: "none" };
+  const implicated = new Set<string>();
+  for (const d of [...recordDeltas, ...lineageDeltas])
+    for (const k of namedKeys(d)) implicated.add(k);
+  const broken = { kind: "broken", implicated } as const;
   const records = recordDeltas.map((d) => parse(d, "record"));
   const lineages = lineageDeltas.map((d) => parse(d, "lineage"));
-  const implicated = new Set<string>();
-  for (const r of [...records, ...lineages]) {
-    if (r === undefined) continue;
-    implicated.add(r.root);
-    if (r.previous !== undefined) implicated.add(r.previous);
-    for (const k of r.retired) implicated.add(k);
-  }
-  const broken = { kind: "broken", implicated } as const;
   if (records.some((r) => r === undefined) || lineages.some((l) => l === undefined)) return broken;
-  const held = records as Parsed[];
-  const ids = new Set(held.map((r) => r.id));
-  const firsts = held.filter((r) => r.supersedes === undefined);
+  const byId = new Map((records as Parsed[]).map((r) => [r.id, r]));
+  const firsts = [...byId.values()].filter((r) => r.supersedes === undefined);
   const next = new Map<string, Parsed>();
-  for (const r of held) {
+  for (const r of byId.values()) {
     if (r.supersedes === undefined) continue;
-    if (!ids.has(r.supersedes) || next.has(r.supersedes)) return broken;
+    if (!byId.has(r.supersedes) || next.has(r.supersedes)) return broken;
     next.set(r.supersedes, r);
   }
   if (firsts.length !== 1) return broken;
-  if ((lineages as Parsed[]).some((l) => !ids.has(l.recovery!))) return broken;
-  const retired = new Set<string>();
-  let head: Parsed = firsts[0]!;
-  for (;;) {
-    if (head.previous !== undefined) retired.add(head.previous);
-    retired.delete(head.root);
-    const after = next.get(head.id);
-    if (after === undefined) break;
-    head = after;
+  // Each record's cumulative retired set must follow from its held predecessor, and each lineage
+  // claim must repeat its record: the evidence a later erasure leaves behind has to be true.
+  for (const r of byId.values()) {
+    const pred = r.supersedes === undefined ? undefined : byId.get(r.supersedes);
+    if (!sameSet(r.retired, expectedRetired(r, pred))) return broken;
   }
-  return { kind: "chain", root: head.root, retired };
+  for (const l of lineages as Parsed[]) {
+    const r = byId.get(l.recovery!);
+    if (r === undefined || r.root !== l.root || !sameSet(l.retired, r.retired)) return broken;
+  }
+  let head: Parsed = firsts[0]!;
+  for (let after = next.get(head.id); after !== undefined; after = next.get(head.id)) head = after;
+  return { kind: "chain", root: head.root, retired: new Set(head.retired) };
+}
+
+/**
+ * Why `delta` is not admissible as recovery evidence, or undefined. The door refuses a malformed
+ * operator recovery record or lineage claim, and one whose cumulative retired set does not follow
+ * from the record it names: once that record is erased, the successor is all the evidence left, so
+ * it must have been true when it arrived.
+ */
+export function recoveryDefect(
+  delta: Delta,
+  reactor: Reactor,
+  operator: string | undefined,
+  batch: readonly Delta[] = [],
+): string | undefined {
+  const touches = delta.claims.pointers.some(
+    (p) =>
+      p.target.kind === "entity" &&
+      (p.target.entity.id === RECOVERIES ||
+        p.target.entity.context === CTX_RECOVERY ||
+        p.target.entity.context === CTX_LINEAGE),
+  );
+  if (!touches || operator === undefined || delta.claims.author !== operator) return undefined;
+  const context = filedFor(delta, CTX_RECOVERY) !== undefined ? CTX_RECOVERY : CTX_LINEAGE;
+  const name = filedFor(delta, context);
+  if (name === undefined) {
+    return "a recovery record or lineage claim is filed exactly once at its user and once at loam:recoveries, in one context";
+  }
+  const kind = context === CTX_RECOVERY ? "record" : "lineage";
+  const parsed = parse(delta, kind);
+  if (parsed === undefined) return `a malformed recovery ${kind}`;
+  // A record arriving in the same atomic batch counts as held: a recovery lands whole.
+  const heldRecord = (id: string): Parsed | undefined => {
+    const d = reactor.get(id) ?? batch.find((b) => b.id === id);
+    return d !== undefined && d.claims.author === operator && filedFor(d, CTX_RECOVERY) === name
+      ? parse(d, "record")
+      : undefined;
+  };
+  if (kind === "record") {
+    const pred = parsed.supersedes === undefined ? undefined : heldRecord(parsed.supersedes);
+    if (parsed.supersedes !== undefined && pred === undefined) {
+      return "a recovery record supersedes a record this store does not hold for that user";
+    }
+    if (!sameSet(parsed.retired, expectedRetired(parsed, pred))) {
+      return "a recovery record's retired set must be its predecessor's, plus its previous root, minus its root";
+    }
+    return undefined;
+  }
+  const record = heldRecord(parsed.recovery!);
+  if (record === undefined)
+    return "a lineage claim names a recovery record this store does not hold";
+  if (record.root !== parsed.root || !sameSet(parsed.retired, record.retired)) {
+    return "a lineage claim must repeat its record's root and retired set";
+  }
+  return undefined;
 }
 
 /**
@@ -233,11 +323,8 @@ export function retiredKeysOf(
     if (erased.has(id)) continue;
     const d = reactor.get(id);
     if (d === undefined || d.claims.author !== operator || d.claims.timestamp > cut) continue;
-    for (const p of d.claims.pointers) {
-      if (p.target.kind === "entity" && p.target.entity.id.startsWith(USER_PREFIX)) {
-        names.add(p.target.entity.id.slice(USER_PREFIX.length));
-      }
-    }
+    const name = filedFor(d, CTX_RECOVERY) ?? filedFor(d, CTX_LINEAGE);
+    if (name !== undefined) names.add(name);
   }
   const out = new Set<string>();
   for (const name of names) {
@@ -265,16 +352,10 @@ export function recoveredFrom(
     if (erased.has(id)) continue;
     const d = reactor.get(id);
     if (d === undefined || d.claims.author !== operator) continue;
-    const r = parse(d, "record");
-    if (r === undefined || r.root !== root || r.previous === undefined) continue;
-    const user = d.claims.pointers.find(
-      (p) =>
-        p.target.kind === "entity" &&
-        p.target.entity.context === CTX_RECOVERY &&
-        p.target.entity.id.startsWith(USER_PREFIX),
-    );
-    if (user?.target.kind !== "entity") continue;
-    const name = user.target.entity.id.slice(USER_PREFIX.length);
+    const name = filedFor(d, CTX_RECOVERY);
+    const r = name === undefined ? undefined : parse(d, "record");
+    if (name === undefined || r === undefined || r.root !== root || r.previous === undefined)
+      continue;
     // Only an unbroken chain carries lineage: a broken history names no one's past.
     if (recoveryChain(reactor, operator, name, erased).kind === "chain") out.add(r.previous);
   }

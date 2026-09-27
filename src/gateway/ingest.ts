@@ -67,7 +67,7 @@ import {
 } from "./slate.js";
 import { readTrustPolicy } from "./trust.js";
 import { governedProgram, needsLowering } from "./governed-trust.js";
-import { userGroundOf } from "./user-root.js";
+import { recoveryDefect, userGroundOf } from "./user-root.js";
 
 // Persist a batch, THEN serve it (the body of `Gateway.append`). The batch is validated whole (one
 // bad delta refuses the lot); it lands in the backend before the reactor sees it, so nothing a
@@ -279,7 +279,7 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
     // enforces capabilities on everyone but the operator. Deployed gateways (step 6) are
     // always governed.
     if (gw.operatorAuthor !== undefined) {
-      const verdict = authorize(gw.reactor, gw.validityNow(), d, gw.operatorAuthor);
+      const verdict = authorize(gw.reactor, gw.validityNow(), d, gw.operatorAuthor, batch);
       if (!verdict.ok) {
         throw new Error(`append rejected: ${verdict.refusal}`);
       }
@@ -727,6 +727,7 @@ export async function federateImpl(
       artifactDefect(d.claims) !== undefined ||
       (isErasure(d.claims) && eraseDefect(d, gw.reactor, gw.operatorAuthor) !== undefined) ||
       slateDefect(d, gw.reactor, gw.validityNow(), gw.operatorAuthor) !== undefined ||
+      recoveryDefect(d, gw.reactor, gw.operatorAuthor, all) !== undefined ||
       // A cite refusal belongs with the UNLAWFUL group and not with the un-admitted one: the
       // batch-scoped closure below deliberately readmits negations of what crossed, and a delta this
       // store is staging a removal over must never come back through it. Safe by construction with

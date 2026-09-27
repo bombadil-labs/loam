@@ -7,6 +7,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   authorForSeed,
+  makeDelta,
   makeNegationClaims,
   signClaims,
   type Claims,
@@ -16,7 +17,7 @@ import { dataStruck, grantClaims, holdsGrant } from "../../src/gateway/accounts.
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { governedStrikers } from "../../src/gateway/governed-trust.js";
-import { keysEverOf } from "../../src/gateway/principal.js";
+import { delegationClaims, keysEverOf } from "../../src/gateway/principal.js";
 import {
   lineageClaims,
   recoveryClaims,
@@ -193,7 +194,9 @@ describe("E4: recovery is durable history", () => {
     await gw.append([binding(K2_SEED, K1, 32)]);
     await gw.append([op(makeNegationClaims(OP, 33, record.id))]);
     expect(readers(gw)).toEqual({ index: K2, view: K2, raw: [K2] });
-    expect([...keysEverOf(gw.reactor, { root: K2 }, OP)].sort()).toEqual([K1, K2].sort());
+    expect([...keysEverOf(gw.reactor, gw.validityNow(), { root: K2 }, OP)].sort()).toEqual(
+      [K1, K2].sort(),
+    );
     expect(writes(gw, K1)).toBe(false);
   });
 
@@ -225,15 +228,17 @@ describe("E2: ownership needs the operator record AND the new root's binding", (
     await gw.append([byK1, byB]);
     await recover(gw, { previous: K1, root: K2, retired: [K1] }, 30);
     // the record alone is not ownership
-    expect([...keysEverOf(gw.reactor, { root: K2 }, OP)]).toEqual([K2]);
+    expect([...keysEverOf(gw.reactor, gw.validityNow(), { root: K2 }, OP)]).toEqual([K2]);
     await gw.append([binding(K2_SEED, K1, 32)]);
-    expect([...keysEverOf(gw.reactor, { root: K2 }, OP)].sort()).toEqual([K1, K2].sort());
+    expect([...keysEverOf(gw.reactor, gw.validityNow(), { root: K2 }, OP)].sort()).toEqual(
+      [K1, K2].sort(),
+    );
     await gw.gqlHooks().clear("Plant", FERN, ["tag"], K2_SEED);
     expect(gw.reactor.negationsOf(byK1.id).length).toBeGreaterThan(0);
     expect(gw.reactor.negationsOf(byB.id)).toEqual([]);
     // Mallory binds bea's key: no operator record names that pair, so it is not Mallory's own.
     await gw.append([binding(M_SEED, B, 40)]);
-    expect([...keysEverOf(gw.reactor, { root: M }, OP)]).toEqual([M]);
+    expect([...keysEverOf(gw.reactor, gw.validityNow(), { root: M }, OP)]).toEqual([M]);
     await gw.gqlHooks().clear("Plant", FERN, ["tag"], M_SEED);
     expect(gw.reactor.negationsOf(byB.id)).toEqual([]);
   });
@@ -245,12 +250,61 @@ describe("E5: a broken recovery history fails closed, and quarantines every key 
       await recover(gw, { previous: K1, root: K2, retired: [K1] }, 30);
       await recover(gw, { previous: K2, root: K0, retired: [K2] }, 40);
     },
-    "an orphan whose supersedes is not held": async (gw) => {
-      await recover(
-        gw,
-        { previous: K1, root: K2, supersedes: "no-such-record", retired: [K1] },
+    "an orphan whose supersedes is not held (the door refuses it; it arrives raw)": async (gw) => {
+      const orphan = op(
+        recoveryClaims(
+          {
+            name: "ada",
+            attempt: "o",
+            previous: K1,
+            root: K2,
+            supersedes: "no-such-record",
+            retired: [K1],
+          },
+          OP,
+          30,
+        ),
+      );
+      await expect(gw.append([orphan])).rejects.toThrow(
+        /supersedes a record this store does not hold/,
+      );
+      expect(gw.reactor.ingest(orphan).status).toBe("accepted");
+    },
+    "a malformed operator record naming K1 (the door refuses it; it arrives raw)": async (gw) => {
+      const good = recoveryClaims(
+        { name: "ada", attempt: "m", previous: K1, root: K2, retired: [K1] },
+        OP,
         30,
       );
+      const malformed = op({
+        ...good,
+        pointers: good.pointers.map((p) =>
+          p.role === "root"
+            ? { role: "root", target: { kind: "primitive", value: "not-a-key" } }
+            : p,
+        ),
+      });
+      await expect(gw.append([malformed])).rejects.toThrow(/malformed recovery record/);
+      expect(gw.reactor.ingest(malformed).status).toBe("accepted");
+    },
+    "a successor whose retired set omits K1 (the door refuses it; it arrives raw)": async (gw) => {
+      const first = await recover(gw, { previous: K1, root: K2, retired: [K1] }, 30);
+      const wrong = op(
+        recoveryClaims(
+          {
+            name: "ada",
+            attempt: "w",
+            previous: K2,
+            root: K0,
+            supersedes: first.record.id,
+            retired: [K2],
+          },
+          OP,
+          40,
+        ),
+      );
+      await expect(gw.append([wrong])).rejects.toThrow(/retired set must be its predecessor/);
+      expect(gw.reactor.ingest(wrong).status).toBe("accepted");
     },
     "the only record erased while its lineage claim stands": async (gw) => {
       const { record } = await recover(gw, { previous: K1, root: K2, retired: [K1] }, 30);
@@ -289,7 +343,7 @@ describe("E5: a broken recovery history fails closed, and quarantines every key 
       expect(readers(gw).index).toBeUndefined();
       expect(readers(gw).view).toBeUndefined();
       expect(readers(gw).raw).toEqual([]);
-      expect([...keysEverOf(gw.reactor, { root: K2 }, OP)]).toEqual([K2]);
+      expect([...keysEverOf(gw.reactor, gw.validityNow(), { root: K2 }, OP)]).toEqual([K2]);
       // door: K1 refused; the bystander writes
       expect(writes(gw, K1)).toBe(false);
       expect(writes(gw, B)).toBe(true);
@@ -330,6 +384,56 @@ const k1RootClaim = (gw: Gateway): Delta =>
       ),
     )!;
 
+describe("the shapes a door refuses are refused, and no reader disagrees about them", () => {
+  it("a record without its loam:recoveries filing is refused, and raw it is evidence for NO reader", async () => {
+    const gw = await world();
+    const full = recoveryClaims(
+      { name: "ada", attempt: "i", previous: K1, root: K2, retired: [K1] },
+      OP,
+      30,
+    );
+    const unindexed = op({ ...full, pointers: full.pointers.filter((p) => p.role !== "index") });
+    await expect(gw.append([unindexed])).rejects.toThrow(/filed exactly once at its user and once/);
+    expect(gw.reactor.ingest(unindexed).status).toBe("accepted");
+    // No reader sees a chain: the root is K1's plain claim, and K1 stands everywhere alike.
+    expect(readers(gw)).toEqual({ index: K1, view: K1, raw: [K1] });
+    expect(writes(gw, K1)).toBe(true);
+  });
+
+  it("an unsigned binding-shaped row does not make K1 K2's own", async () => {
+    const gw = await world();
+    await recover(gw, { previous: K1, root: K2, retired: [K1] }, 30);
+    const signed = binding(K2_SEED, K1, 32);
+    const unsigned = makeDelta(binding(K2_SEED, K1, 33).claims);
+    expect(gw.reactor.ingest(unsigned).status).toBe("accepted");
+    expect([...keysEverOf(gw.reactor, gw.validityNow(), { root: K2 }, OP)]).toEqual([K2]);
+    await gw.append([signed]);
+    expect([...keysEverOf(gw.reactor, gw.validityNow(), { root: K2 }, OP)].sort()).toEqual(
+      [K1, K2].sort(),
+    );
+  });
+});
+
+describe("a retired key holds no standing as a delegate either", () => {
+  it("K2's delegation to retired K1 in a pool gives K1 nothing; a bystander delegate writes", async () => {
+    const host = await world();
+    await recover(host, { previous: K1, root: K2, retired: [K1] }, 30);
+    const pool = await Gateway.open(new MemoryBackend(), { seed: OP_SEED });
+    open.push(pool);
+    const scope = "inbox:test";
+    pool.readUsersFrom(host);
+    pool.honorDelegationsAt(scope);
+    await pool.append([op(grantClaims(STORE_ENTITY, "user:ada", "admin", OP, 40))]);
+    await pool.federate([
+      signClaims(delegationClaims(K2, K1, scope, 41), K2_SEED),
+      signClaims(delegationClaims(K2, B, scope, 42), K2_SEED),
+    ]);
+    const now = pool.validityNow();
+    expect(holdsGrant(pool.reactor, now, STORE_ENTITY, K1, "write", OP)).toBe(false);
+    expect(holdsGrant(pool.reactor, now, STORE_ENTITY, B, "write", OP)).toBe(true);
+  });
+});
+
 describe("resets", () => {
   it("erasing only the head record and its lineage is NOT a completed reset: the plain K2 claim reads", async () => {
     const gw = await world();
@@ -359,10 +463,12 @@ describe("E11: a pool reads its host's recovery evidence", () => {
     open.push(pool);
     await pool.append([op(grantClaims(STORE_ENTITY, K1, "write", OP, 40))]);
     // no host yet: the pool's own ground holds no recovery
-    expect([...keysEverOf(pool.reactor, { root: K2 }, OP)]).toEqual([K2]);
+    expect([...keysEverOf(pool.reactor, pool.validityNow(), { root: K2 }, OP)]).toEqual([K2]);
     expect(holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, K1, "write", OP)).toBe(true);
     pool.readUsersFrom(host);
-    expect([...keysEverOf(pool.reactor, { root: K2 }, OP)].sort()).toEqual([K1, K2].sort());
+    expect([...keysEverOf(pool.reactor, pool.validityNow(), { root: K2 }, OP)].sort()).toEqual(
+      [K1, K2].sort(),
+    );
     expect(holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, K1, "write", OP)).toBe(false);
   });
 });

@@ -20,7 +20,7 @@ import {
   type Term,
 } from "@bombadil/rhizomatic";
 import { keyActsFor, principalScopeOf } from "./principal.js";
-import { retiredKeysOf, subjectKeyAt, userGroundOf } from "./user-root.js";
+import { recoveryDefect, retiredKeysOf, subjectKeyAt, userGroundOf } from "./user-root.js";
 import { STORE_ENTITY } from "./genesis.js";
 import { CTX_GRANTS, dataStrikers, lawfulStrikersJson } from "./governed-trust.js";
 export { CTX_GRANTS, lawfulStrikersJson } from "./governed-trust.js";
@@ -423,6 +423,9 @@ function grantHeld(
   verb: Verb,
   visited: ReadonlySet<string>,
 ): boolean {
+  // A key a recovery retired holds no standing at all: not through its own grants, and not as a
+  // delegate of another root (refactor/audit/user-recovery.md, "The root fence").
+  if (retiredIn(ctx).has(author)) return false;
   for (const d of survivingAt(ctx, tenant, CTX_GRANTS, visited)) {
     let subject: string | undefined;
     let granted: string | undefined;
@@ -713,6 +716,7 @@ export function authorize(
   now: number,
   delta: Delta,
   operator: string | undefined,
+  batch: readonly Delta[] = [],
 ): { ok: true } | { ok: false; refusal: string } {
   const defect =
     constitutionalDefect(delta) ??
@@ -724,7 +728,8 @@ export function authorize(
     envelopeDefect(delta.claims) ??
     containerDefect(delta, reactor, now, operator) ??
     eraseDefect(delta, reactor, operator) ??
-    slateDefect(delta, reactor, now, operator);
+    slateDefect(delta, reactor, now, operator) ??
+    recoveryDefect(delta, reactor, operator, batch);
   if (defect !== undefined) {
     return { ok: false, refusal: `delta ${delta.id} is malformed law: ${defect}` };
   }

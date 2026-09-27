@@ -1,4 +1,5 @@
 import {
+  associatedKeys,
   authorsForPrincipal,
   resolvePrincipal,
   computeId,
@@ -143,6 +144,7 @@ export function keysActingFor(
  */
 export function keysEverOf(
   reactor: Reactor,
+  now: number,
   who: PrincipalRef,
   operator: string | undefined,
 ): ReadonlySet<string> {
@@ -154,7 +156,7 @@ export function keysEverOf(
   while (frontier.length > 0) {
     const key = frontier.pop()!;
     for (const earlier of recoveredFrom(users.reactor, operator, key, erased)) {
-      if (out.has(earlier) || !bindingHeld(users.reactor, key, earlier, erased)) continue;
+      if (out.has(earlier) || !bindingHeld(users.reactor, now, key, earlier, erased)) continue;
       out.add(earlier);
       frontier.push(earlier);
     }
@@ -162,30 +164,19 @@ export function keysEverOf(
   return out;
 }
 
-// Is `root`'s SPEC-14 binding for `key` held (negated or not: history is history)?
+// Does `root` hold a SPEC-14 binding for `key` (negated or not: history is history)? Read through
+// the substrate's own association evidence, which parses only the exact binding shape and verifies
+// each binding's signature, so a raw-ingested row that merely looks like one does not count.
 function bindingHeld(
   reactor: Reactor,
+  now: number,
   root: string,
   key: string,
   erased: ReadonlySet<string>,
 ): boolean {
-  for (const id of reactor.byTarget(root)) {
-    if (erased.has(id)) continue;
-    const d = reactor.get(id);
-    if (d === undefined || d.claims.author !== root) continue;
-    const at = (role: string) => d.claims.pointers.find((p) => p.role === role)?.target;
-    const kind = at("kind");
-    const named = at("key");
-    if (
-      kind?.kind === "primitive" &&
-      kind.value === "binding" &&
-      named?.kind === "primitive" &&
-      named.value === key
-    ) {
-      return true;
-    }
-  }
-  return false;
+  return associatedKeys(reactor, root, now, "rootOrSameAuthor").some(
+    (row) => row.key === key && row.via.length === 1 && !erased.has(row.via[0]!),
+  );
 }
 
 // The scope a ground's write door asks delegations about. Only a ground that declares one honors a

@@ -373,7 +373,12 @@ export async function translate(
   // Runs whether or not any spec survives: a retired spec must not strand the renderings it made.
   const retractions: Delta[] = [];
   // A rendering is ours when any key of the translator's principal signed it.
-  const mine = keysEverOf(gateway.reactor, { root: author }, gateway.operator);
+  const mine = keysEverOf(
+    gateway.reactor,
+    gateway.validityNow(),
+    { root: author },
+    gateway.operator,
+  );
   let stranded = 0;
   for (const held of gateway.reactor.snapshot()) {
     if (struck(held.id)) continue;

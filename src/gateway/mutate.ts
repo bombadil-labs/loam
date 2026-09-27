@@ -123,7 +123,7 @@ async function retract(
   // lands beside them there.
   const hview = gw.gatherForRetraction(name, entity, binding);
   // "Your own" is every key of the caller's principal, not only the key signing this retraction.
-  const mine = keysEverOf(gw.reactor, { root: author }, gw.operatorAuthor);
+  const mine = keysEverOf(gw.reactor, gw.validityNow(), { root: author }, gw.operatorAuthor);
   const targets = new Set<string>();
   for (const [field, entries] of hview.props) {
     for (const entry of entries) {
