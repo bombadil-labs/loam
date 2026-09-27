@@ -96,6 +96,19 @@ Design:
    - A connection's own strike on data does not count. Only the user's own key strikes; trust
      never widens to delegated keys.
 
+## Delegated decisions (Myk, 2026-09-29, in chat)
+
+9. **Claude and Sol decide open refactor questions together.** Myk: "make the best choices you can
+   that maintain the spirit of the project, and we will do a big audit after this migration to
+   identify issues on a layer-by-layer basis ... just use your collective judgment." Each such
+   decision is recorded below, so the audit can find it. A change that widens what gets PURGED
+   still goes to Myk.
+   - **Users are named by a stable id, never by a reusable name.** A new person who takes an
+     erased person's name gets a new id, and inherits nothing. Design: `audit/user-identity.md`.
+   - **A recovered user's history is cut per store, by a barrier.** Before the host commits a
+     recovery, every inbox records where it stands, and pauses the old key. A store with no cut
+     shows no history until step 6. Design: `audit/recovery-history.md`.
+
 ## What stays in force
 
 - `npm run check` is the green bar: format, lint, typecheck, build and every test. Read the counts.
