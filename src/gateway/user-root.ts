@@ -21,6 +21,20 @@ export const CTX_ROLE = "loam.role";
 /** The user's current ROOT key (README ruling 5): the principal every key of theirs acts for. */
 export const CTX_ROOT = "loam.root";
 
+// A user name reaches an entity id, a JSON object key, and an HTML page. Keep it to the characters
+// that are safe in all three, and short enough to read in a provenance trail.
+const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
+export function userNameDefect(name: string): string | undefined {
+  if (!NAME.test(name)) {
+    return (
+      `"${name}" is not a user name: use 1–64 characters of a–z, 0–9, dot, dash or underscore, ` +
+      `starting with a letter or digit`
+    );
+  }
+  return undefined;
+}
+
 export const USER_PREFIX = "user:";
 export const userEntity = (name: string): string => `${USER_PREFIX}${name}`;
 

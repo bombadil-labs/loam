@@ -68,6 +68,7 @@ import {
 import { readTrustPolicy } from "./trust.js";
 import { governedProgram, needsLowering } from "./governed-trust.js";
 import { recoveryDefect, userGroundOf } from "./user-root.js";
+import { hasMemberOf, lowerMembershipJson } from "./member-of.js";
 
 // Persist a batch, THEN serve it (the body of `Gateway.append`). The batch is validated whole (one
 // bad delta refuses the lot); it lands in the backend before the reactor sees it, so nothing a
@@ -576,6 +577,11 @@ function evalRawGoverned(gw: Gateway, term: Term, input: DeltaSet): EvalResult {
   return evalTermRaw(program.term, input);
 }
 
+// A membership naming a user (`loam.memberOf`) lowered to the authors acting for that user now.
+function lowerMembership(gw: Gateway, term: unknown): unknown {
+  return lowerMembershipJson(term, gw.reactor, gw.validityNow(), gw.operatorAuthor);
+}
+
 // Membership is a query, first-class (SPEC §27.6, the body of `Gateway.select`): evaluate a
 // rhizomatic Term — the JSON `op` profile — over this store's SURVIVING ground, once. The Term
 // must select a DELTA SET (`difference`/`intersect` compose here, at the Term layer, to any
@@ -587,7 +593,7 @@ function evalRawGoverned(gw: Gateway, term: Term, input: DeltaSet): EvalResult {
 // gets neither, by design: `select` is membership machinery, and the erasure cut reads through it,
 // so it hands back exactly what the Term selected, no more.
 export function selectImpl(gw: Gateway, term: unknown): Delta[] {
-  const parsed = parseTerm(term);
+  const parsed = parseTerm(lowerMembership(gw, term));
   const result = evalRawGoverned(gw, parsed, gw.reactor.snapshot());
   if (result.sort !== "dset") {
     throw new Error(
@@ -603,7 +609,9 @@ export function selectImpl(gw: Gateway, term: unknown): Delta[] {
 // entity streams ride — leaving the stream detaches immediately, a slow reader coalesces to the
 // newest membership. §27.6's "nearly free": every pulse re-evaluates the one Term.
 export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], void, unknown> {
-  const parsed = parseTerm(term);
+  // Lowered again on every pulse: a membership naming a user moves when the user's keys do.
+  const program = () => parseTerm(lowerMembership(gw, term));
+  const parsed = program();
   const initial = evalRawGoverned(gw, parsed, gw.reactor.snapshot());
   if (initial.sort !== "dset") {
     throw new Error(
@@ -647,7 +655,7 @@ export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], v
   // which a pool's host can move with nothing arriving here, so the gateway pulses it then too.
   const pulse = (): void => {
     if (closed) return;
-    const next = evalRawGoverned(gw, parsed, gw.reactor.snapshot());
+    const next = evalRawGoverned(gw, program(), gw.reactor.snapshot());
     if (next.sort !== "dset") return; // the term's sort is content-independent; unreachable
     const members = live([...next.set]);
     const ids = new Set(members.map((d) => d.id));
@@ -656,7 +664,7 @@ export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], v
     channel.push(members);
   };
   gw.reactor.subscribeRaw(pulse);
-  if (needsLowering(parsed, undefined)) gw.userPulses.add(pulse);
+  if (needsLowering(parsed, undefined) || hasMemberOf(term)) gw.userPulses.add(pulse);
   // Registered where teardown can reach it: this subscription is bound to TODAY's reactor, and an
   // erase replaces that reactor — unregistered, the watcher would neither be woken nor ever fire
   // again, freezing on its pre-erase membership with no `done` to notice by.

@@ -110,6 +110,7 @@ import {
   adminPages,
 } from "./admin-pages.js";
 import { withStamp } from "../gateway/stamp.js";
+import { membershipForValidation } from "../gateway/member-of.js";
 
 const MAX_BODY = 8 * 1024; // tokens, a name, a membership Term; nothing here needs more
 // A registration carries a hyperschema body and a resolution schema — real JSON, not a name.
@@ -691,7 +692,7 @@ this lens does not gather; the lens may read ground this container does not hold
         return;
       }
       try {
-        parseTerm(membership);
+        parseTerm(membershipForValidation(membership));
       } catch {
         refuse(
           res,

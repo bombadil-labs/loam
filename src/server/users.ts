@@ -36,6 +36,7 @@ import {
   CTX_ROOT,
   CTX_USER,
   userEntity,
+  userNameDefect,
   verified,
 } from "../gateway/user-root.js";
 export { CTX_ROLE, CTX_ROOT, userEntity };
@@ -52,19 +53,9 @@ export const ROLES: readonly UserRole[] = ["operator", "actor"];
  * caller-supplied name before it ever reaches an entity id is the caller's job.
  */
 
-// A user name reaches an entity id, a JSON object key, and an HTML page. Keep it to the characters
-// that are safe in all three, and short enough to read in a provenance trail.
-const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
-
-export function userNameDefect(name: string): string | undefined {
-  if (!NAME.test(name)) {
-    return (
-      `"${name}" is not a user name: use 1–64 characters of a–z, 0–9, dot, dash or underscore, ` +
-      `starting with a letter or digit`
-    );
-  }
-  return undefined;
-}
+// The rule itself lives with the user's other at-rest vocabulary (gateway/user-root.ts), where the
+// gateway's membership validator reads it too.
+export { userNameDefect } from "../gateway/user-root.js";
 
 // THE POOL TOKENS ARE RESERVED, AT MINTING ONLY.
 //
