@@ -2673,10 +2673,12 @@ async function cmdUserCreate(
       const keyFile = readUserSeed(home, name);
       const refusal = trace.held
         ? trace.notYetValid
-          ? `the ground holds ${name}'s record, but it is not valid until later — the host clock ` +
-            `may have stepped back. Wait, or check the clock. Nothing was written.`
+          ? `the ground holds claims about ${name} (${trace.ids.join(", ")}) that are not valid ` +
+            `until later — the host clock may have stepped back. Check the clock. Nothing was ` +
+            `written.`
           : `the name ${name} still carries a previous person's record, roles or root ` +
-            `(${trace.ids.join(", ")}). Erase those, or pick another name. Nothing was written.`
+            `(${trace.ids.join(", ")}). Erase those (or finish an erasure already begun), or ` +
+            `pick another name. Nothing was written.`
         : keyFile.kind === "present"
           ? `a key file for ${name} remains at ${userSeedPath(home, name)}. Erasure does not ` +
             `remove it: move it away by hand if its person is gone, or pick another name. ` +

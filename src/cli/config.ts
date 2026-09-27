@@ -125,7 +125,8 @@ export function writeUserSeed(home: string, name: string, seed: string): void {
   const path = userSeedPath(home, name);
   const temp = `${path}.${process.pid}.tmp`;
   try {
-    writeFileSync(temp, `${seed}\n`, { mode: 0o600 });
+    rmSync(temp, { force: true }); // a stale temp would keep its own, looser mode
+    writeFileSync(temp, `${seed}\n`, { mode: 0o600, flag: "wx" });
     renameSync(temp, path);
   } catch (err) {
     try {
