@@ -702,13 +702,16 @@ describe("E6 and E9: inboxes", () => {
     expect(await recoverUser(direct({}))).toBe(1); // PENDING
     const k2 = seedKey("ada")!;
     await ground(async (gw, op) => {
-      const claim = [...gw.reactor.byTarget("user:ada")].find((id) =>
-        gw.reactor
-          .get(id)!
-          .claims.pointers.some(
+      // The ROOT claim (context loam.root), not the lineage claim, which also names K2.
+      const claim = [...gw.reactor.byTarget("user:ada")].find((id) => {
+        const ptrs = gw.reactor.get(id)!.claims.pointers;
+        return (
+          ptrs.some((p) => p.target.kind === "entity" && p.target.entity.context === "loam.root") &&
+          ptrs.some(
             (p) => p.role === "root" && p.target.kind === "primitive" && p.target.value === k2,
-          ),
-      )!;
+          )
+        );
+      })!;
       await gw.append([
         signClaims(
           withStamp(gw.stamp(op), (t) => makeNegationClaims(op, t, claim)),
