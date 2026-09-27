@@ -231,7 +231,13 @@ function expectedRetired(record: Parsed, predecessor: Parsed | undefined): Set<s
 /** A user's recovery history: none, one chain (its head's root and the keys it retired), or broken. */
 export type RecoveryChain =
   | { readonly kind: "none" }
-  | { readonly kind: "chain"; readonly root: string; readonly retired: ReadonlySet<string> }
+  | {
+      readonly kind: "chain";
+      /** The head record's id: what the next recovery supersedes. */
+      readonly head: string;
+      readonly root: string;
+      readonly retired: ReadonlySet<string>;
+    }
   | { readonly kind: "broken"; readonly implicated: ReadonlySet<string> };
 
 /** Read `name`'s recovery history as it stood at `cut`, with `erased` counted as gone. */
@@ -274,7 +280,7 @@ export function recoveryChain(
   }
   let head: Parsed = firsts[0]!;
   for (let after = next.get(head.id); after !== undefined; after = next.get(head.id)) head = after;
-  return { kind: "chain", root: head.root, retired: new Set(head.retired) };
+  return { kind: "chain", head: head.id, root: head.root, retired: new Set(head.retired) };
 }
 
 /**

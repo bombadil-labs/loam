@@ -118,6 +118,7 @@ import {
   type UserRole,
   reservedNameDefect,
 } from "../server/users.js";
+import { recoverUser } from "./user-recover.js";
 import { subjectKeyAt, USER_PREFIX } from "../gateway/user-root.js";
 import { promptLine, promptSecret } from "./prompt.js";
 import type { StoreBackend } from "../store/backend.js";
@@ -386,9 +387,9 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
   },
   user: {
     summary: "provision a login user and manage role assignments (SPEC §36)",
-    usage: "loam user create|assign-role|remove-role <name> [options]",
-    flags: new Set(["home", "store", "role", "operator"]),
-    booleans: new Set(["operator"]),
+    usage: "loam user create|assign-role|remove-role|recover <name> [options]",
+    flags: new Set(["home", "store", "role", "operator", "replace-seed"]),
+    booleans: new Set(["operator", "replace-seed"]),
     notes: [
       "subcommands:",
       "  create <name> [--operator]        ask for a password twice, write the credential, plant",
@@ -396,12 +397,17 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "  assign-role <name> --role=<role>  grant a role (operator | actor); operator additionally",
       "                                     mints a signing key and trusts it with a grant",
       "  remove-role <name> --role=<role>  negate a role (and, for operator, its signing grant)",
+      "  recover <name> [--replace-seed]   move a user to a new key: the old key keeps no standing,",
+      "                                     what it wrote stays the user's own, and connections",
+      "                                     must be re-authorized. --replace-seed archives a key",
+      "                                     file still present; a failed run resumes when rerun",
       "",
       "PROOF OF OPERATORSHIP IS HOME ACCESS, ALONE. Every one of these commands signs with",
       "<home>/operator.seed — the same file `loam init`/`loam serve` read. There is no remote path",
       "that mints or changes a role; a browser session, however privileged, cannot call these.",
       "",
-      "RECOVERY. Losing a user's own signing key is not losing the role: run `remove-role <name>",
+      "RECOVERY. A user who lost their key, or whose key was exposed: `recover <name>`. Older path:",
+      "losing a user's own signing key is not losing the role: run `remove-role <name>",
       "--role=operator` (it negates the grant too, when the key file can still name it — a fault",
       "reading that file refuses the whole command rather than guessing) then `assign-role <name>",
       "--role=operator` again, which mints a fresh key and files a fresh grant. Even the LAST",
@@ -2556,10 +2562,11 @@ async function strikeRoot(
 async function cmdUser(args: readonly string[], io: IO, options: RunOptions): Promise<number> {
   const parsed = parseFor("user", args);
   const sub = parsed.positionals[0];
-  if (sub !== "create" && sub !== "assign-role" && sub !== "remove-role") {
+  if (sub !== "create" && sub !== "assign-role" && sub !== "remove-role" && sub !== "recover") {
     io.err(
       "user wants a subcommand: `loam user create <name> [--operator]`, " +
-        "`loam user assign-role <name> --role=<role>`, or `loam user remove-role <name> --role=<role>`",
+        "`loam user assign-role <name> --role=<role>`, `loam user remove-role <name> --role=<role>`, " +
+        "or `loam user recover <name> [--replace-seed]`",
     );
     return 2;
   }
@@ -2590,6 +2597,17 @@ async function cmdUser(args: readonly string[], io: IO, options: RunOptions): Pr
   }
   const home = parsed.flags.get("home") ?? defaultHome();
   if (sub === "create") return cmdUserCreate(name, parsed, home, io, options);
+  if (sub === "recover") {
+    return recoverUser({
+      home,
+      name,
+      replaceSeed: parsed.booleans.has("replace-seed"),
+      storePath: storePath(home, parsed.flags.get("store")),
+      io,
+      openBackend: (path) => openStore(path, io),
+      channelBackend: channelBackendFor(home, io),
+    });
+  }
   return cmdUserRole(name, parsed, home, io, sub === "assign-role" ? "assign" : "remove");
 }
 
