@@ -40,6 +40,7 @@ import { CTX_GRANTS, grantsNaming } from "../gateway/accounts.js";
 import { keysEverOf } from "../gateway/principal.js";
 import { withStamp } from "../gateway/stamp.js";
 import { readContainerTable } from "../gateway/container.js";
+import { readClosedIds } from "../gateway/slate.js";
 import { assembleGenesis } from "../gateway/genesis.js";
 import { Gateway } from "../gateway/gateway.js";
 import {
@@ -87,6 +88,8 @@ interface Journal {
   readonly bound: boolean;
   /** Every key the chain has retired, as of this attempt: whose inbox standing still needs striking. */
   readonly retired: readonly string[];
+  /** The journal of a landed attempt this one abandons, restored if this one never commits. */
+  readonly predecessor?: Journal;
 }
 
 const journalPath = (home: string, name: string): string => `${userSeedPath(home, name)}.recovery`;
@@ -156,9 +159,14 @@ function moveNoClobber(from: string, to: string): void {
 
 // Is `id` struck for good by the operator at `now`: a strike already in force, with no end, itself
 // unstruck? A strike that starts later is not yet one.
-function struckForGood(reactor: Reactor, operator: string, id: string, now: number): boolean {
-  // Only a strike the readers honor counts: verified, and not erased.
-  const erased = userGroundOf(reactor).erased();
+function struckForGood(
+  reactor: Reactor,
+  operator: string,
+  id: string,
+  now: number,
+  erased: ReadonlySet<string>,
+): boolean {
+  // Only a strike the readers honor counts: verified, and not erased in THIS ground.
   return reactor.negationsOf(id).some((n) => {
     const neg = reactor.get(n);
     return (
@@ -218,7 +226,18 @@ function otherRootClaims(reactor: Reactor, operator: string, name: string, keep:
 // is never a validity time.
 const strikes = (gw: Gateway, operator: string, seed: string, ids: readonly string[]): Delta[] =>
   [...new Set(ids)]
-    .filter((id) => !struckForGood(gw.reactor, operator, id, gw.validityNow()))
+    .filter(
+      (id) =>
+        !struckForGood(
+          gw.reactor,
+          operator,
+          id,
+          gw.validityNow(),
+          // The ground's own withheld set (its erased-but-held deltas among them): an inbox's
+          // erasures are its own, not its host's.
+          readClosedIds(gw, gw.validityNow()),
+        ),
+    )
     .map((id) =>
       signClaims(
         withStamp(gw.stamp(operator), (t) => makeNegationClaims(operator, t, id)),
@@ -356,6 +375,7 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
       pools: [],
       bound: previous === undefined,
       retired: [...retired],
+      ...(superseding === undefined ? {} : { predecessor: superseding }),
     } satisfies Journal);
     if (superseding === undefined) writeDurable(journalPath(home, name), next);
     else {
@@ -443,7 +463,10 @@ function rollback(o: RecoverOptions, j: Journal): void {
     rmSync(path, { force: true });
   if (j.archive !== undefined && existsSync(j.archive) && !existsSync(path))
     moveNoClobber(j.archive, path);
-  rmSync(journalPath(o.home, o.name), { force: true });
+  // An abandoning attempt that never landed hands the journal back to the attempt it abandoned,
+  // whose work is still pending.
+  if (j.predecessor !== undefined) updateJournal(o.home, o.name, j.predecessor);
+  else rmSync(journalPath(o.home, o.name), { force: true });
 }
 
 // Finish an attempt from its journal: decide whether it landed, then the pools and the binding.
@@ -560,11 +583,13 @@ async function resume(
       }
     }
     // Report completion only if the readers agree: the chain's head names this attempt's key.
-    const chain = recoveryChain(gw.reactor, operator, name, userGroundOf(gw.reactor).erased());
-    if (chain.kind !== "chain" || chain.root !== j.root) {
+    const erased = userGroundOf(gw.reactor).erased();
+    const chain = recoveryChain(gw.reactor, operator, name, erased);
+    const current = userRootAt(gw.reactor, gw.validityNow(), operator, name, erased);
+    if (chain.kind !== "chain" || chain.root !== j.root || current !== j.root) {
       io.err(
         `user recover: this attempt landed, but ${name}'s recovery history does not now name ` +
-          `${j.root} as root (${chain.kind === "broken" ? "the history is broken" : "a different recovery leads"}). ` +
+          `${j.root} as root (${chain.kind !== "chain" ? "the history is broken or gone" : chain.root !== j.root ? "a different recovery leads" : "no standing root claim names it"}). ` +
           `The journal is kept at ${journalPath(home, name)}. Nothing is reported as done.`,
       );
       return 1;

@@ -640,6 +640,89 @@ describe("E6 and E9: inboxes", () => {
     expect(out.join("\n")).not.toMatch(/now signs with/);
     expect(existsSync(journal("ada"))).toBe(true);
   });
+
+  it("an abandon whose new attempt fails before it commits hands the journal back to the old attempt", async () => {
+    await adaAndBea();
+    await bindAdasConnection();
+    expect(await recoverUser(direct({}))).toBe(1); // PENDING: K2's inbox work unfinished
+    const k2Journal = readFileSync(journal("ada"), "utf8");
+    rmSync(userSeedPath(home, "ada"));
+    expect(
+      await recoverUser(
+        direct({ abandonAttempt: true, openBackend: faulty({ append: "before" }) }),
+      ),
+    ).toBe(1);
+    expect(readFileSync(journal("ada"), "utf8")).toBe(k2Journal);
+    err.length = 0;
+    expect(await recoverUser(direct({}))).toBe(1);
+    expect(err.join("\n")).toMatch(/--abandon-attempt/);
+  });
+
+  it("an erased strike in the inbox is not a strike: recovery lands a fresh one", async () => {
+    const { k1 } = await adaAndBea();
+    const pool = await bindAdasConnection();
+    const [delegation, erasedStrike] = await ground(async (gw, op) => {
+      const g = gw.connectionInboxes.get(pool)!.gateway!;
+      const seed = readSeed(home);
+      const d = [...g.reactor.arrivalLog()].find(
+        (x) =>
+          x.claims.author === k1 &&
+          x.claims.pointers.some(
+            (p) => p.target.kind === "primitive" && p.target.value === "delegation",
+          ),
+      )!;
+      const strike = signClaims(
+        withStamp(g.stamp(op), (t) => makeNegationClaims(op, t, d.id)),
+        seed,
+      );
+      await g.append([strike]);
+      await g.append([
+        signClaims(
+          withStamp(g.stamp(op), (t) => eraseClaims(strike.id, op, op, t)),
+          seed,
+        ),
+      ]);
+      return [d.id, strike.id] as const;
+    });
+    expect(await recoverUser(direct({ channelBackend: channelBackendFor(home, io) }))).toBe(0);
+    await ground((gw, op) => {
+      const g = gw.connectionInboxes.get(pool)!.gateway!;
+      const fresh = g.reactor
+        .negationsOf(delegation)
+        .filter((n) => n !== erasedStrike)
+        .map((n) => g.reactor.get(n)!)
+        .filter((n) => n.claims.author === op && n.claims.validFrom <= Date.now());
+      expect(fresh.length).toBeGreaterThan(0);
+    });
+  });
+
+  it("a struck root claim while the attempt is pending: the rerun claims nothing", async () => {
+    await adaAndBea();
+    await bindAdasConnection();
+    expect(await recoverUser(direct({}))).toBe(1); // PENDING
+    const k2 = seedKey("ada")!;
+    await ground(async (gw, op) => {
+      const claim = [...gw.reactor.byTarget("user:ada")].find((id) =>
+        gw.reactor
+          .get(id)!
+          .claims.pointers.some(
+            (p) => p.role === "root" && p.target.kind === "primitive" && p.target.value === k2,
+          ),
+      )!;
+      await gw.append([
+        signClaims(
+          withStamp(gw.stamp(op), (t) => makeNegationClaims(op, t, claim)),
+          readSeed(home),
+        ),
+      ]);
+    });
+    out.length = 0;
+    err.length = 0;
+    expect(await recoverUser(direct({ channelBackend: channelBackendFor(home, io) }))).toBe(1);
+    expect(err.join("\n")).toMatch(/no standing root claim names it/);
+    expect(out.join("\n")).not.toMatch(/now signs with/);
+    expect(existsSync(journal("ada"))).toBe(true);
+  });
 });
 
 describe("E10: a user with no root gets one, and no binding", () => {
