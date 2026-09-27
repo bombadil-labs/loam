@@ -833,9 +833,12 @@ ${flowNote}`;
           res,
           503,
           plan.client !== undefined
-            ? "The connector's tokens are retired, but the write grant in its inbox could not " +
-                "be negated — this revoke is incomplete. Retry it."
-            : "The revocation could not land, so nothing was revoked.",
+            ? "The connector's tokens are retired, but the write standing in its inbox could " +
+                "not be struck in your voice — this revoke is incomplete. If your key changed " +
+                "since the connection was made, the store's operator can finish it with " +
+                "`loam grant revoke`."
+            : "The revocation could not land in your voice, so nothing was revoked. If your key " +
+                "changed since the connection was made, the store's operator can revoke it.",
         );
         return;
       }

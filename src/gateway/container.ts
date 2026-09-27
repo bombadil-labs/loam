@@ -2072,6 +2072,17 @@ export function survivingWriteGrantIds(
   subject: string,
   operator: string | undefined,
 ): string[] {
+  return survivingGrantIds(reactor, now, subject, "write", operator);
+}
+
+/** The surviving `verb` grant ids naming `subject` at this ground's store entity. */
+export function survivingGrantIds(
+  reactor: Reactor,
+  now: number,
+  subject: string,
+  wanted: string,
+  operator: string | undefined,
+): string[] {
   const out: string[] = [];
   for (const id of reactor.byTarget(STORE_ENTITY)) {
     const delta = reactor.get(id);
@@ -2091,7 +2102,7 @@ export function survivingWriteGrantIds(
       if (p.role === "subject" && typeof p.target.value === "string") subj = p.target.value;
       if (p.role === "verb" && typeof p.target.value === "string") verb = p.target.value;
     }
-    if (subj !== subject || verb !== "write") continue;
+    if (subj !== subject || verb !== wanted) continue;
     if (honoredStrikeOn(reactor, now, id, operator) !== undefined) continue; // already struck
     out.push(id);
   }
@@ -2203,34 +2214,32 @@ export async function bindConnectionImpl(
       ),
     ]);
   }
-  // Asked of THIS owner. After the person's seed is replaced, a delegation their old key signed
-  // still lets the connection write, but the new key cannot revoke it (only a record's signer or
-  // the operator can). So the bind signs a fresh delegation from the current key, and the
-  // operator strikes the older one: one standing delegation per connection, always the person's.
-  if (
-    !keyActsFor(
-      pool.reactor,
-      pool.validityNow(),
-      { root: owner },
-      opts.connectionKey,
-      name,
-      operator,
-    )
-  ) {
-    const older = standingDelegationIdsFor(
-      pool.reactor,
-      pool.validityNow(),
-      grantSubjects(pool.reactor).filter((root) => root !== owner),
-      opts.connectionKey,
-      name,
-      operator,
-    );
+  // ONE OWNER PER POOL. The pool's name carries the connection key, and a key belongs to one
+  // person, so any other root here is that person's REPLACED seed. After a replacement the old key
+  // would keep two powers: its delegation still lets the connection write, and its admin grant lets
+  // it sign a fresh one after the person revokes. So every bind asks of THIS owner, signs a fresh
+  // delegation when the current key has none, and strikes, in the operator's voice, every other
+  // root's standing delegation to this key and every other root's admin grant here.
+  const now = pool.validityNow();
+  const others = grantSubjects(pool.reactor).filter((root) => root !== owner);
+  const stale = [
+    ...standingDelegationIdsFor(pool.reactor, now, others, opts.connectionKey, name, operator),
+    ...others.flatMap((root) => survivingGrantIds(pool.reactor, now, root, "admin", operator)),
+  ];
+  const fresh = !keyActsFor(pool.reactor, now, { root: owner }, opts.connectionKey, name, operator);
+  if (fresh || stale.length > 0) {
     await pool.append([
-      signClaims(
-        withStamp(pool.stamp(owner), (t) => delegationClaims(owner, opts.connectionKey, name, t)),
-        opts.ownerSeed,
-      ),
-      ...older.map((id) =>
+      ...(fresh
+        ? [
+            signClaims(
+              withStamp(pool.stamp(owner), (t) =>
+                delegationClaims(owner, opts.connectionKey, name, t),
+              ),
+              opts.ownerSeed,
+            ),
+          ]
+        : []),
+      ...stale.map((id) =>
         signClaims(
           withStamp(pool.stamp(operator), (t) => revocationClaims(id, operator, t)),
           operatorSeed,

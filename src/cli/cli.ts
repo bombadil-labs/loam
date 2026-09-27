@@ -3919,10 +3919,14 @@ async function cmdGrantRevoke(
         // has no standing in the pool and did not sign what lets the connection write, so its
         // strike is refused or does not bind. This command holds the operator seed, and the
         // operator may strike any delegation in its store, so it strikes in that voice instead.
-        await revoke(owner.seed).catch((err: unknown) => {
-          const said = err instanceof Error ? err.message : String(err);
-          if (/nothing in this inbox lets/.test(said)) throw err;
-          return revoke(seed);
+        const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+        await revoke(owner.seed).catch(async (first: unknown) => {
+          if (/nothing in this inbox lets/.test(message(first))) throw first;
+          // If the operator's retry finds nothing left to strike, the FIRST failure is the truth
+          // about this pool: something the strike could not reach may still let the key write.
+          await revoke(seed).catch((second: unknown) => {
+            throw /nothing in this inbox lets/.test(message(second)) ? first : second;
+          });
         });
         struckPools.push(grant.inbox);
       } catch (err) {

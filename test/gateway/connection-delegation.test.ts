@@ -292,6 +292,53 @@ describe("revoking a connection negates its delegation", () => {
     await gw.close();
   });
 
+  it("after a replacement, the OLD key cannot reissue a delegation, even after the new owner revokes", async () => {
+    const gw = await home();
+    const conn = await bind(gw, CONN_SEED);
+    const other = await bind(gw, OTHER_SEED);
+    const pool = conn.gateway!;
+    const NEW_SEED = "e2".repeat(32);
+    await gw.bindConnection({ container: "home:ada", connectionKey: CONN, ownerSeed: NEW_SEED });
+    // The old key lost its admin standing here, so its fresh delegation is refused at the door.
+    const reissue = (t: number) =>
+      signClaims(delegationClaims(GARDENER, CONN, inboxName("home:ada", CONN), t), GARDENER_SEED);
+    expect(await door(pool, reissue(1031))).toBe("refused");
+    await gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: NEW_SEED });
+    expect(await door(pool, reissue(1032))).toBe("refused");
+    // Arriving raw, as federation would carry it, the reissue still grants nothing: its root holds
+    // no standing grant here any more.
+    expect(pool.reactor.ingest(reissue(1033)).status).toBe("accepted");
+    expect(await door(pool, observed(FERN, "height", 20, 1034, CONN_SEED))).toBe("refused");
+    expect(await door(other.gateway!, observed(FERN, "tag", "rime", 1035, OTHER_SEED))).toBe(
+      "admitted",
+    );
+    await gw.close();
+  });
+
+  it("a bind strikes a second root's delegation and admin grant, even when the owner's stands", async () => {
+    const gw = await home();
+    const conn = await bind(gw, CONN_SEED);
+    const pool = conn.gateway!;
+    const SECOND_SEED = "e3".repeat(32);
+    const SECOND = authorForSeed(SECOND_SEED);
+    const admin = signClaims(grantClaims(STORE_ENTITY, SECOND, "admin", OP, 1036), OP_SEED);
+    const extra = signClaims(
+      delegationClaims(SECOND, CONN, inboxName("home:ada", CONN), 1037),
+      SECOND_SEED,
+    );
+    await pool.append([admin]);
+    await pool.append([extra]);
+    await bind(gw, CONN_SEED); // the owner's delegation stands; the bind still cleans up
+    const by = (id: string) =>
+      pool.reactor.negationsOf(id).map((n) => pool.reactor.get(n)!.claims.author);
+    expect(by(extra.id)).toEqual([OP]);
+    expect(by(admin.id)).toEqual([OP]);
+    const [own] = delegationsOf(pool, CONN).filter((d) => d.claims.author === GARDENER);
+    expect(pool.reactor.negationsOf(own!.id)).toEqual([]); // the owner's own is untouched
+    expect(await door(pool, observed(FERN, "height", 21, 1038, CONN_SEED))).toBe("admitted");
+    await gw.close();
+  });
+
   it("a pool bound before delegations, holding a write grant, still revokes", async () => {
     const gw = await home();
     const conn = await bind(gw, CONN_SEED);
