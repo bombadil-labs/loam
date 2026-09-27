@@ -29,6 +29,7 @@ import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
 import { stampOn, type Stamp } from "./stamp.js";
 import { declarePrincipalScope } from "./principal.js";
+import { declareUserGround } from "./user-root.js";
 import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
 import {
   blessChannelAppImpl,
@@ -395,6 +396,9 @@ export class Gateway {
   // The scope this ground honors delegations for (principal.ts): an inbox pool's own name, and
   // nothing on any other ground. Declared on the reactor, and again whenever the reactor is replaced.
   private delegationScope: string | undefined = undefined;
+  // The gateway whose user records this ground's grants resolve `user:<name>` against: a pool's
+  // host. Declared on the reactor, and again whenever the reactor is replaced.
+  private userHost: Gateway | undefined = undefined;
   // The resolver memo (SPEC §22.5): (resolver-content-address, bucket-delta-set) → value. Keyed on the
   // surviving bucket, so it invalidates by construction when the ground moves — an erased fact drops
   // from the bucket and its old value can never be served again. A pure cache; safe to clear anytime.
@@ -1327,6 +1331,10 @@ export class Gateway {
     }
     this._reactor = reactor;
     if (this.delegationScope !== undefined) declarePrincipalScope(reactor, this.delegationScope);
+    if (this.userHost !== undefined) {
+      const host = this.userHost;
+      declareUserGround(reactor, () => host.reactor);
+    }
     this.ingestVia = (d) => this.reactor.ingest(d);
     this.attachPersistence(reactor);
     if (this.registered.length > 0) rebindImpl(this, this.registered);
@@ -1581,6 +1589,20 @@ export class Gateway {
   // orders: a held timestamp is signed by its author, and no read time follows it.
   private seedAuthorClocks(deltas: Iterable<Delta>): void {
     for (const d of deltas) this.noteAuthorTime(d);
+  }
+
+  /**
+   * Resolve this ground's `user:<name>` grant subjects against `host`'s user records. A pool holds
+   * no user records of its own. @internal — container.ts
+   */
+  readUsersFrom(host: Gateway): void {
+    this.userHost = host;
+    declareUserGround(this._reactor, () => host.reactor);
+  }
+
+  /** The gateway whose user records this ground reads: its host's, or its own at the root. */
+  userGroundHost(): Gateway {
+    return this.userHost ?? this;
   }
 
   /**

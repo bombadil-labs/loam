@@ -1,0 +1,242 @@
+// A grant may name a Loam USER (`user:<name>`) rather than a key; the door resolves it to the
+// user's current root at read time (step 5, PLAN). Asked at two levels: the resolution itself
+// (`userRootAt`, the door's indexed reader, held equal to `rootOf`, the View reader) and the door
+// (an append signed by a key is admitted or refused; `holdsGrant` and the grant readers).
+//
+// Nothing writes user-named grants yet (step 5 PR 3d-ii does); every one here is hand-appended.
+
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  authorForSeed,
+  makeNegationClaims,
+  signClaims,
+  type Delta,
+  type Pointer,
+} from "@bombadil/rhizomatic";
+import { grantClaims, grantsHeldBy, grantsNaming, holdsGrant } from "../../src/gateway/accounts.js";
+import { containerClaims, inboxName } from "../../src/gateway/container.js";
+import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
+import { Gateway } from "../../src/gateway/gateway.js";
+import { delegationClaims } from "../../src/gateway/principal.js";
+import { userRootAt } from "../../src/gateway/user-root.js";
+import { rootClaims, rootOf, userClaims } from "../../src/server/users.js";
+import { MemoryBackend } from "../../src/store/memory.js";
+import { FERN, observed } from "../spike/garden.js";
+import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
+
+const OP_SEED = "5c".repeat(32);
+const OP = authorForSeed(OP_SEED);
+const K1_SEED = "a1".repeat(32);
+const K1 = authorForSeed(K1_SEED);
+const K2_SEED = "a2".repeat(32);
+const K2 = authorForSeed(K2_SEED);
+const X_SEED = "b3".repeat(32);
+const X = authorForSeed(X_SEED);
+const CONN_SEED = "c4".repeat(32);
+const CONN = authorForSeed(CONN_SEED);
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+async function store(): Promise<Gateway> {
+  return Gateway.boot(
+    new MemoryBackend(),
+    assembleGenesis({
+      operatorSeed: OP_SEED,
+      registrations: [
+        { hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN], writable: [...PLANT_WRITABLE] },
+      ],
+    }),
+  );
+}
+
+const op = (claims: Parameters<typeof signClaims>[0]) => signClaims(claims, OP_SEED);
+const both = (gw: Gateway, name: string) => {
+  const now = gw.validityNow();
+  return { index: userRootAt(gw.reactor, now, OP, name), view: rootOf(gw.reactor, OP, now, name) };
+};
+
+async function door(ground: Gateway, d: Delta): Promise<"admitted" | "refused"> {
+  try {
+    await ground.append([d]);
+    return "admitted";
+  } catch {
+    return "refused";
+  }
+}
+
+describe("the door's indexed root reader agrees with the View reader", () => {
+  it("across record, re-point, strike, forgery, a non-key value and a struck record", async () => {
+    const gw = await store();
+    const seen: unknown[] = [];
+    const look = () => seen.push(both(gw, "ada"));
+    look(); // nothing
+    await gw.append([op(rootClaims("ada", K1, OP, 10))]);
+    look(); // a root with no user record
+    const record = op(userClaims("ada", OP, 11));
+    await gw.append([record]);
+    look(); // K1
+    const second = op(rootClaims("ada", K2, OP, 12));
+    await gw.append([second]);
+    look(); // K2
+    await gw.append([op(makeNegationClaims(OP, 13, second.id))]);
+    look(); // back to K1
+    await gw.append([signClaims(grantClaims(STORE_ENTITY, X, "write", OP, 14), OP_SEED)]);
+    await gw.append([signClaims(rootClaims("ada", X, X, 15), X_SEED)]);
+    look(); // a writer's forged root: still K1
+    await gw.append([op(rootClaims("ada", "user:ada", OP, 16))]);
+    look(); // latest names no key: none
+    await gw.append([op(makeNegationClaims(OP, 17, record.id))]);
+    look(); // record struck: none
+    for (const s of seen) {
+      const { index, view } = s as { index: unknown; view: unknown };
+      expect(index).toBe(view);
+    }
+    expect(seen.map((s) => (s as { index: unknown }).index)).toEqual([
+      undefined,
+      undefined,
+      K1,
+      K2,
+      K1,
+      K1,
+      undefined,
+      undefined,
+    ]);
+    await gw.close();
+  });
+
+  it("an equal timestamp goes to the smaller id, in both readers", async () => {
+    const gw = await store();
+    await gw.append([op(userClaims("ada", OP, 10))]);
+    const a = op(rootClaims("ada", K1, OP, 20));
+    const b = op(rootClaims("ada", K2, OP, 20));
+    await gw.append([a, b]);
+    const winner = a.id < b.id ? K1 : K2;
+    expect(both(gw, "ada")).toEqual({ index: winner, view: winner });
+    await gw.close();
+  });
+});
+
+describe("a grant that names a user stands for the user's current root", () => {
+  async function adaGranted() {
+    const gw = await store();
+    await gw.append([
+      op(userClaims("ada", OP, 10)),
+      op(rootClaims("ada", K1, OP, 11)),
+      op(grantClaims(STORE_ENTITY, "user:ada", "write", OP, 12)),
+    ]);
+    return gw;
+  }
+
+  it("ada's root writes; a bystander does not; the grant reads under the root, not literally", async () => {
+    const gw = await adaGranted();
+    expect(await door(gw, observed(FERN, "height", 1, 100, K1_SEED))).toBe("admitted");
+    expect(await door(gw, observed(FERN, "height", 2, 101, X_SEED))).toBe("refused");
+    const now = gw.validityNow();
+    expect(grantsHeldBy(gw.reactor, now, K1, OP).map((g) => g.verb)).toEqual(["write"]);
+    expect(grantsNaming(gw.reactor, now, K1, OP)).toEqual([]); // selection stays literal
+    expect(grantsNaming(gw.reactor, now, "user:ada", OP).map((g) => g.verb)).toEqual(["write"]);
+    await gw.close();
+  });
+
+  it("re-pointing ada's root moves the grant: the new key writes, the old key does not", async () => {
+    const gw = await adaGranted();
+    await gw.append([op(rootClaims("ada", K2, OP, 13))]);
+    expect(await door(gw, observed(FERN, "height", 3, 102, K2_SEED))).toBe("admitted");
+    expect(await door(gw, observed(FERN, "height", 4, 103, K1_SEED))).toBe("refused");
+    expect(holdsGrant(gw.reactor, gw.validityNow(), STORE_ENTITY, K1, "write", OP)).toBe(false);
+    await gw.close();
+  });
+
+  it("a user with no standing record or root holds nothing through the grant", async () => {
+    const gw = await store();
+    await gw.append([op(grantClaims(STORE_ENTITY, "user:ada", "write", OP, 12))]);
+    expect(await door(gw, observed(FERN, "height", 5, 104, K1_SEED))).toBe("refused");
+    await gw.append([op(rootClaims("ada", K1, OP, 13))]); // a root, but no user record
+    expect(await door(gw, observed(FERN, "height", 6, 105, K1_SEED))).toBe("refused");
+    await gw.close();
+  });
+
+  it("striking ada's user record ends the grant's standing at once", async () => {
+    const gw = await adaGranted();
+    const record = [...gw.reactor.snapshot()].find((d) =>
+      d.claims.pointers.some(
+        (p: Pointer) => p.target.kind === "entity" && p.target.entity.context === "loam.user",
+      ),
+    )!;
+    await gw.append([op(makeNegationClaims(OP, 20, record.id))]);
+    expect(await door(gw, observed(FERN, "height", 7, 106, K1_SEED))).toBe("refused");
+    await gw.close();
+  });
+
+  it("an admin grant naming ada lets her root issue grants that bind", async () => {
+    const gw = await store();
+    await gw.append([
+      op(userClaims("ada", OP, 10)),
+      op(rootClaims("ada", K1, OP, 11)),
+      op(grantClaims(STORE_ENTITY, "user:ada", "admin", OP, 12)),
+    ]);
+    expect(await door(gw, signClaims(grantClaims(STORE_ENTITY, X, "write", K1, 13), K1_SEED))).toBe(
+      "admitted",
+    );
+    expect(await door(gw, observed(FERN, "height", 8, 107, X_SEED))).toBe("admitted");
+    await gw.close();
+  });
+});
+
+describe("a pool reads its host's users", () => {
+  it("an inbox owner named as a user follows a re-point at the host", async () => {
+    const gw = await store();
+    await gw.append([
+      op(userClaims("ada", OP, 10)),
+      op(rootClaims("ada", K1, OP, 11)),
+      op(grantClaims(STORE_ENTITY, K1, "write", OP, 12)),
+      op(
+        containerClaims(
+          {
+            container: "home:ada",
+            trust: "curated",
+            posture: "shared",
+            membership: {
+              op: "select",
+              pred: { match: { field: "author", cmp: "eq", const: K1 } },
+              in: "input",
+            },
+          },
+          OP,
+          13,
+        ),
+      ),
+    ]);
+    const conn = await gw.bindConnection({
+      container: "home:ada",
+      connectionKey: CONN,
+      ownerSeed: K1_SEED,
+    });
+    const pool = conn.gateway!;
+    // The pool's owner grant now names the user, not the key.
+    await pool.append([op(grantClaims(STORE_ENTITY, "user:ada", "admin", OP, 20))]);
+    expect(await door(pool, observed(FERN, "height", 9, 108, CONN_SEED))).toBe("admitted");
+    // Re-pointing ada at the HOST reaches the pool: K1's delegation no longer carries standing
+    // through the user-named grant. (The key-literal owner grant bind wrote is struck first, so
+    // only the user-named grant is left to consult.)
+    const literal = [...pool.reactor.snapshot()].find(
+      (d) =>
+        d.claims.author === OP &&
+        d.claims.pointers.some(
+          (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === K1,
+        ),
+    )!;
+    await pool.append([op(makeNegationClaims(OP, 21, literal.id))]);
+    expect(await door(pool, observed(FERN, "height", 10, 109, CONN_SEED))).toBe("admitted");
+    await gw.append([op(rootClaims("ada", K2, OP, 22))]);
+    expect(await door(pool, observed(FERN, "height", 11, 110, CONN_SEED))).toBe("refused");
+    // Control: a delegation from ada's NEW root lets the connection write again.
+    await pool.append([
+      signClaims(delegationClaims(K2, CONN, inboxName("home:ada", CONN), 23), K2_SEED),
+    ]);
+    expect(await door(pool, observed(FERN, "height", 12, 111, CONN_SEED))).toBe("admitted");
+    await gw.close();
+  });
+});

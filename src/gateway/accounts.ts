@@ -23,6 +23,7 @@ import {
   type Term,
 } from "@bombadil/rhizomatic";
 import { keyActsFor, principalScopeOf } from "./principal.js";
+import { subjectKeyAt } from "./user-root.js";
 import { STORE_ENTITY } from "./genesis.js";
 import { entityGatherBody } from "./gather.js";
 import { eraseDefect } from "./erase.js";
@@ -503,6 +504,10 @@ function grantHeld(
       if (p.role === "verb" && typeof p.target.value === "string") granted = p.target.value;
     }
     if (subject === undefined) continue;
+    // A subject may name a user (`user:<name>`): it stands for that user's current root, read now.
+    // A user with no standing root holds nothing through it.
+    const key = subjectKeyAt(ctx.reactor, ctx.now, ctx.operator, subject);
+    if (key === undefined) continue;
     // `admin` covers `write`, and NEVER `register`. An admin grant carries no prefix, so "admin
     // covers register" could only ever mean register AT ROOT — the one authority that is not
     // delegable through the verb lattice. An admin who wants to register mints themselves a
@@ -517,13 +522,13 @@ function grantHeld(
     // pool, by its name) honors a delegate, so a delegation copied to another ground grants nothing.
     // Delegating is issuing, so only an ADMIN grant carries it: a subject that may only write
     // cannot hand its standing to a delegate.
-    if (author !== subject) {
+    if (author !== key) {
       const scope = principalScopeOf(ctx.reactor);
       if (
         verb !== "write" ||
         granted !== "admin" ||
         scope === undefined ||
-        !keyActsFor(ctx.reactor, ctx.now, { root: subject }, author, scope, ctx.operator)
+        !keyActsFor(ctx.reactor, ctx.now, { root: key }, author, scope, ctx.operator)
       ) {
         continue;
       }
@@ -569,10 +574,14 @@ export function grantsHeldBy(
   author: string,
   operator?: string,
 ): HeldGrant[] {
-  // The STANDING question: what may `author` do. Today a grant's subject is its holder's key, so
-  // this is the literal selection; once a subject can name a user, this resolves it and
-  // `grantsNaming` does not.
-  return grantsNaming(reactor, now, author, operator);
+  // The STANDING question: what may `author` do. A subject that names a user counts for the
+  // user's current root; `grantsNaming` never resolves one.
+  return effectiveGrants(
+    reactor,
+    now,
+    operator,
+    (subject) => subjectKeyAt(reactor, now, operator, subject) === author,
+  );
 }
 
 /**
@@ -585,6 +594,15 @@ export function grantsNaming(
   now: number,
   author: string,
   operator?: string,
+): HeldGrant[] {
+  return effectiveGrants(reactor, now, operator, (subject) => subject === author);
+}
+
+function effectiveGrants(
+  reactor: Reactor,
+  now: number,
+  operator: string | undefined,
+  names: (subject: string) => boolean,
 ): HeldGrant[] {
   const ctx: Ctx = { reactor, now, operator };
   const out: HeldGrant[] = [];
@@ -599,7 +617,9 @@ export function grantsNaming(
       if (p.role === "verb") verb = p.target.value;
       if (p.role === "prefix") prefix = p.target.value;
     }
-    if (subject !== author || verb === undefined || !VERBS.has(verb)) continue;
+    if (subject === undefined || !names(subject) || verb === undefined || !VERBS.has(verb)) {
+      continue;
+    }
     if (operator !== undefined && d.claims.author !== operator) {
       // ONLY THE OPERATOR MINTS REGISTER STANDING. `write` and `admin` are delegable through the
       // admin chain, as they always have been. `register` is not, and the asymmetry is deliberate:

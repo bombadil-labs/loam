@@ -1667,6 +1667,7 @@ async function openSeparate(
     ...(probationary && gw.options.pens !== undefined ? { pens: gw.options.pens } : {}),
   });
   pool.attachedTo = gw;
+  pool.readUsersFrom(gw.userGroundHost());
   // A probationary pool KNOWS it is one, for the renderer door's sequestered frame (SPEC §24.7).
   if (probationary) {
     pool.probation = spec.entity === undefined ? {} : { container: spec.entity };
