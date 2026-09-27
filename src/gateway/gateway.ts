@@ -28,6 +28,7 @@ import { graphql, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
 import { stampOn, type Stamp } from "./stamp.js";
+import { declarePrincipalScope } from "./principal.js";
 import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
 import {
   blessChannelAppImpl,
@@ -391,6 +392,9 @@ export class Gateway {
   // every separate container so a nested pool's row is attributable even under a non-enveloped one.
   /** @internal — T34 seam (container.ts, envelope.ts) */
   poolHandle: string | undefined = undefined;
+  // The scope this ground honors delegations for (principal.ts): an inbox pool's own name, and
+  // nothing on any other ground. Declared on the reactor, and again whenever the reactor is replaced.
+  private delegationScope: string | undefined = undefined;
   // The resolver memo (SPEC §22.5): (resolver-content-address, bucket-delta-set) → value. Keyed on the
   // surviving bucket, so it invalidates by construction when the ground moves — an erased fact drops
   // from the bucket and its old value can never be served again. A pure cache; safe to clear anytime.
@@ -1322,6 +1326,7 @@ export class Gateway {
       }
     }
     this._reactor = reactor;
+    if (this.delegationScope !== undefined) declarePrincipalScope(reactor, this.delegationScope);
     this.ingestVia = (d) => this.reactor.ingest(d);
     this.attachPersistence(reactor);
     if (this.registered.length > 0) rebindImpl(this, this.registered);
@@ -1576,6 +1581,16 @@ export class Gateway {
   // orders: a held timestamp is signed by its author, and no read time follows it.
   private seedAuthorClocks(deltas: Iterable<Delta>): void {
     for (const d of deltas) this.noteAuthorTime(d);
+  }
+
+  /**
+   * Honor delegations on this ground, for `scope` only (README ruling 6). Called on an inbox pool
+   * with its own name; no other ground calls it, so no other ground honors a delegate.
+   * @internal — container.ts
+   */
+  honorDelegationsAt(scope: string): void {
+    this.delegationScope = scope;
+    declarePrincipalScope(this._reactor, scope);
   }
 
   /**

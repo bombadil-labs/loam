@@ -35,6 +35,7 @@ import { isRepairable } from "../store/quarantine.js";
 import {
   CTX_GRANTS,
   grantClaims,
+  grantSubjects,
   holdsGrant,
   honoredStrikeOn,
   revocationClaims,
@@ -65,6 +66,13 @@ import { negatedAt } from "./negation.js";
 import { readTrustPolicyAt, type TrustPolicy } from "./trust.js";
 import { Gateway, type ConnectionBinding, type FederationReport } from "./gateway.js";
 import { withStamp } from "./stamp.js";
+import {
+  delegationClaims,
+  delegationRecordsFor,
+  keyActsFor,
+  principalScopeOf,
+  standingDelegationIdsFor,
+} from "./principal.js";
 
 export const CTX_CONTAINER = "loam.container";
 export const CTX_CONTAINER_EXCLUDED = "loam.container.excluded";
@@ -2065,6 +2073,23 @@ export function survivingWriteGrantIds(
   subject: string,
   operator: string | undefined,
 ): string[] {
+  return survivingGrantIds(reactor, now, subject, "write", operator);
+}
+
+/** Every held `verb` grant id naming `subject` at this ground's store entity, struck or not. */
+export function heldGrantIds(reactor: Reactor, subject: string, wanted: string): string[] {
+  return survivingGrantIds(reactor, undefined, subject, wanted, undefined);
+}
+
+/** The surviving `verb` grant ids naming `subject` at this ground's store entity. With no `now`,
+ *  every held one, struck or not. */
+export function survivingGrantIds(
+  reactor: Reactor,
+  now: number | undefined,
+  subject: string,
+  wanted: string,
+  operator: string | undefined,
+): string[] {
   const out: string[] = [];
   for (const id of reactor.byTarget(STORE_ENTITY)) {
     const delta = reactor.get(id);
@@ -2084,8 +2109,8 @@ export function survivingWriteGrantIds(
       if (p.role === "subject" && typeof p.target.value === "string") subj = p.target.value;
       if (p.role === "verb" && typeof p.target.value === "string") verb = p.target.value;
     }
-    if (subj !== subject || verb !== "write") continue;
-    if (honoredStrikeOn(reactor, now, id, operator) !== undefined) continue; // already struck
+    if (subj !== subject || verb !== wanted) continue;
+    if (now !== undefined && honoredStrikeOn(reactor, now, id, operator) !== undefined) continue;
     out.push(id);
   }
   return out;
@@ -2178,12 +2203,14 @@ export async function bindConnectionImpl(
       ...(backend !== undefined ? { backend } : {}),
     }));
   const pool = inbox.gateway!;
+  pool.honorDelegationsAt(name);
 
-  // The grant chain, in the pool's OWN ground (decision 2): the operator authors the owner's ADMIN
-  // grant, then the OWNER authors the connection's WRITE grant. The pool is its own gateway with its
-  // own store entity, so this never touches the real store's authority; grantHeld resolves
-  // connection-write → owner-admin → operator. The store operator appears once here (administrative
-  // provisioning, §39.1 point 3) and never on the read/write data path.
+  // The authority chain, in the pool's OWN ground (decision 2): the operator authors the owner's
+  // ADMIN grant, then the OWNER — the user's root — signs a sealed DELEGATION to the connection key,
+  // scoped to this pool's name (README ruling 6). The pool is its own gateway with its own store
+  // entity, so this never touches the real store's authority; grantHeld resolves connection-write →
+  // owner's delegation → owner-admin → operator. The store operator appears once here
+  // (administrative provisioning, §39.1 point 3) and never on the read/write data path.
   if (!holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, owner, "admin", operator)) {
     await pool.append([
       signClaims(
@@ -2194,22 +2221,56 @@ export async function bindConnectionImpl(
       ),
     ]);
   }
-  if (
-    !holdsGrant(
-      pool.reactor,
-      pool.validityNow(),
-      STORE_ENTITY,
-      opts.connectionKey,
-      "write",
-      operator,
-    )
-  ) {
+  // ONE OWNER PER POOL. The pool's name carries the connection key, and a key belongs to one
+  // person, so any other root here is that person's REPLACED seed. After a replacement the old key
+  // would keep two powers: its delegation still lets the connection write, and its admin grant lets
+  // it sign a fresh one after the person revokes. So every bind asks of THIS owner, signs a fresh
+  // delegation when the current key has none, and strikes, in the operator's voice, every other
+  // root's standing delegation to this key and every other root's admin grant here.
+  // Write grants naming another root are left alone: only an admin grant carries delegation
+  // (grantHeld). If that ever loosens, this cleanup must strike them too.
+  // EVERY held record of another root, struck or not: a strike with its own `validUntil` lapses, and
+  // the record would stand again. Skipped only when the operator already struck it for good, so a
+  // repeated bind adds nothing.
+  const now = pool.validityNow();
+  const others = grantSubjects(pool.reactor).filter((root) => root !== owner);
+  // For good means: the operator's, already in force, with no end, and with no negation of its own
+  // held here at all, whether in force now or scheduled to start later.
+  const struckForGood = (id: string) =>
+    pool.reactor.negationsOf(id).some((n) => {
+      const neg = pool.reactor.get(n);
+      return (
+        neg?.claims.author === operator &&
+        neg.claims.validFrom <= now &&
+        neg.claims.validUntil === undefined &&
+        pool.reactor.negationsOf(n).length === 0
+      );
+    });
+  const stale = [
+    ...delegationRecordsFor(pool.reactor, others, opts.connectionKey).map((d) => d.id),
+    // EVERY admin grant naming another root, whoever issued it: an admin grant from any effective
+    // admin binds (grantHeld), so filtering by issuer would leave one standing. A strike on an
+    // inert one costs a delta and creates nothing.
+    ...others.flatMap((root) => heldGrantIds(pool.reactor, root, "admin")),
+  ].filter((id) => !struckForGood(id));
+  const fresh = !keyActsFor(pool.reactor, now, { root: owner }, opts.connectionKey, name, operator);
+  if (fresh || stale.length > 0) {
     await pool.append([
-      signClaims(
-        withStamp(pool.stamp(owner), (t) =>
-          grantClaims(STORE_ENTITY, opts.connectionKey, "write", owner, t),
+      ...(fresh
+        ? [
+            signClaims(
+              withStamp(pool.stamp(owner), (t) =>
+                delegationClaims(owner, opts.connectionKey, name, t),
+              ),
+              opts.ownerSeed,
+            ),
+          ]
+        : []),
+      ...stale.map((id) =>
+        signClaims(
+          withStamp(pool.stamp(operator), (t) => revocationClaims(id, operator, t)),
+          operatorSeed,
         ),
-        opts.ownerSeed,
       ),
     ]);
   }
@@ -2274,6 +2335,7 @@ export async function resumeInboxesImpl(gw: Gateway): Promise<void> {
     if (backend === undefined) continue;
     try {
       const handle = await openContainerImpl(gw, { name, backend });
+      handle.gateway?.honorDelegationsAt(name);
       gw.connectionInboxes.set(name, inboxHandle(gw, name, handle));
     } catch {
       continue; // left unattached, deliberately; see above
@@ -2281,9 +2343,11 @@ export async function resumeInboxesImpl(gw: Gateway): Promise<void> {
   }
 }
 
-// Revoke a connection: strike its WRITE grant in the inbox pool, owner-authored (§39.3c). The door
-// then refuses new writes signed by that key; past deltas keep their author and stay readable, and
-// other connections are untouched — one-connection blast radius, two-sided by construction.
+// Revoke a connection, owner-authored (§39.3c): negate the delegation that lets its key act for the
+// owner, and strike any write grant naming the key, which a pool bound before delegations still
+// holds. The door then refuses new writes signed by that key; past deltas keep their author and stay
+// readable, and other connections are untouched — one-connection blast radius, two-sided by
+// construction.
 export async function revokeConnectionImpl(opts: {
   inbox: Container;
   connectionKey: string;
@@ -2294,25 +2358,52 @@ export async function revokeConnectionImpl(opts: {
     throw new Error("revokeConnection: the inbox has no pool of its own — nothing to revoke (§39)");
   }
   const owner = authorForSeed(opts.ownerSeed);
-  const grantIds = survivingWriteGrantIds(
-    pool.reactor,
-    pool.validityNow(),
-    opts.connectionKey,
-    pool.operatorAuthor,
-  );
-  if (grantIds.length === 0) {
+  const now = pool.validityNow();
+  const scope = principalScopeOf(pool.reactor);
+  const ids = [
+    ...survivingWriteGrantIds(pool.reactor, now, opts.connectionKey, pool.operatorAuthor),
+    ...(scope === undefined
+      ? []
+      : standingDelegationIdsFor(
+          pool.reactor,
+          now,
+          grantSubjects(pool.reactor),
+          opts.connectionKey,
+          scope,
+          pool.operatorAuthor,
+        )),
+  ];
+  if (ids.length === 0) {
     throw new Error(
-      `revokeConnection: no surviving write grant names ${opts.connectionKey} in this inbox`,
+      `revokeConnection: nothing in this inbox lets ${opts.connectionKey} write — no surviving ` +
+        `write grant and no standing delegation names it`,
     );
   }
   await pool.append(
-    grantIds.map((id) =>
+    ids.map((id) =>
       signClaims(
         withStamp(pool.stamp(owner), (t) => revocationClaims(id, owner, t)),
         opts.ownerSeed,
       ),
     ),
   );
+  // The strikes landed; whether they BIND is the suppression rule's call (the signer or the
+  // operator only). Report success only once the door refuses the key.
+  if (
+    holdsGrant(
+      pool.reactor,
+      pool.validityNow(),
+      STORE_ENTITY,
+      opts.connectionKey,
+      "write",
+      pool.operatorAuthor,
+    )
+  ) {
+    throw new Error(
+      `revokeConnection: the strikes landed but ${opts.connectionKey} still writes here — ` +
+        `${owner} did not sign what lets it write, and is not this store's operator`,
+    );
+  }
 }
 
 // --- the erase completeness guard (SPEC §24.8 × the mint) ----------------------------------------

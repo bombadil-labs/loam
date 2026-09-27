@@ -20,7 +20,8 @@ import {
 } from "@bombadil/rhizomatic";
 import { readUserSeed } from "../cli/config.js";
 import { parseOffer } from "../federation/offer.js";
-import { CTX_GRANTS, holdsGrant, struckAt } from "../gateway/accounts.js";
+import { CTX_GRANTS, grantSubjects, holdsGrant, struckAt } from "../gateway/accounts.js";
+import { delegationStatesFor } from "../gateway/principal.js";
 import { withBatchNegationClosure } from "../gateway/ingest.js";
 import {
   type Container,
@@ -147,8 +148,8 @@ export function unnegatedOperatorGrantIds(
 export type ConnectionGrantState = "active" | "revoked" | "not yet valid" | "expired" | "ungranted";
 
 /**
- * What the inbox pool's own write grants say about `key` at `now`, read from the deltas on every
- * request. Each label names what the grants show, and nothing else:
+ * What the inbox pool's own write grants and delegations say about `key` at `now`, read from the
+ * deltas on every request. Each label names what those records show, and nothing else:
  *   - "active": the door honours a write grant now.
  *   - "revoked": a write grant inside its window is struck by a negation the door honours. It
  *     does not say the grant's issuer ever had standing to grant it.
@@ -189,6 +190,10 @@ export function connectionGrantState(
     if (now < validFrom) seen.add("not yet valid");
     else if (validUntil !== undefined && now >= validUntil) seen.add("expired");
     else if (struckAt(reactor, now, id, operator)) seen.add("revoked");
+  }
+  // A connection bound since step 5 writes by DELEGATION rather than by a grant naming its key.
+  for (const state of delegationStatesFor(reactor, now, grantSubjects(reactor), key, operator)) {
+    if (state !== "standing") seen.add(state);
   }
   for (const state of ["revoked", "not yet valid", "expired"] as const)
     if (seen.has(state)) return state;
@@ -828,9 +833,12 @@ ${flowNote}`;
           res,
           503,
           plan.client !== undefined
-            ? "The connector's tokens are retired, but the write grant in its inbox could not " +
-                "be negated — this revoke is incomplete. Retry it."
-            : "The revocation could not land, so nothing was revoked.",
+            ? "The connector's tokens are retired, but the write standing in its inbox could " +
+                "not be struck in your voice — this revoke is incomplete. If your key changed " +
+                "since the connection was made, the store's operator can finish it with " +
+                "`loam grant revoke`."
+            : "The revocation could not land in your voice, so nothing was revoked. If your key " +
+                "changed since the connection was made, the store's operator can revoke it.",
         );
         return;
       }

@@ -212,8 +212,9 @@ level. Loam then consumes it through the barrel and compares its recordings.
      carry over: a recovered user re-authorizes any connection they want to keep. The recovery
      rails pin this.
    - **Connection keys.** Each is a delegation signed by the user's root with
-     `delegable: false` and `scope` set to the container name. The `prefix` policy lets a
-     container scope cover its children (`ada:journal` covers `ada:journal:notes`).
+     `delegable: false` and `scope` set to its inbox pool's own name. Loam reads scopes EXACTLY:
+     only the pool whose name the scope equals honors it. (An earlier draft used `prefix` so a
+     container covered its children; each child has its own pool, so prefix only widened reach.)
    - **Grants and memberships name the Loam user, never a root.** At the read time, Loam resolves
      the user to their current root through the governed operator read, then asks
      `authorsForPrincipal` (or lowers the membership to an `actsFor` term over that root). So a

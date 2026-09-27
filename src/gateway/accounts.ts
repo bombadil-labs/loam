@@ -22,7 +22,7 @@ import {
   type Reactor,
   type Term,
 } from "@bombadil/rhizomatic";
-import { keyActsFor } from "./principal.js";
+import { keyActsFor, principalScopeOf } from "./principal.js";
 import { STORE_ENTITY } from "./genesis.js";
 import { entityGatherBody } from "./gather.js";
 import { eraseDefect } from "./erase.js";
@@ -409,6 +409,27 @@ function standsFor(ctx: Ctx, delta: Delta, visited: ReadonlySet<string>): boolea
   return grantHeld(ctx, STORE_ENTITY, delta.claims.author, "admin", visited);
 }
 
+/** Every subject any grant at the store entity names, struck or not: the roots a delegate here
+ *  could act for. */
+export function grantSubjects(reactor: Reactor): string[] {
+  const out = new Set<string>();
+  for (const id of reactor.byTarget(STORE_ENTITY)) {
+    const d = reactor.get(id);
+    if (d === undefined) continue;
+    const filed = d.claims.pointers.some(
+      (p) =>
+        p.target.kind === "entity" &&
+        p.target.entity.id === STORE_ENTITY &&
+        p.target.entity.context === CTX_GRANTS,
+    );
+    const subject = d.claims.pointers.find((p) => p.role === "subject")?.target;
+    if (filed && subject?.kind === "primitive" && typeof subject.value === "string") {
+      out.add(subject.value);
+    }
+  }
+  return [...out];
+}
+
 // The surviving deltas filed at `entity` under `context`: valid now, and not struck.
 function survivingAt(
   ctx: Ctx,
@@ -492,12 +513,20 @@ function grantHeld(
     // A delegated key WRITES for its user and does nothing else (README ruling 6): admin,
     // register, and the issuer checks that recurse through here as admin match the subject's
     // own key exactly. The verb is checked first so a delegate never reaches the seam for them.
-    if (
-      author !== subject &&
-      (verb !== "write" ||
-        !keyActsFor(ctx.reactor, ctx.now, { root: subject }, author, tenant, ctx.operator))
-    ) {
-      continue;
+    // The scope is the ground's own, not the tenant's: only a ground that declares one (an inbox
+    // pool, by its name) honors a delegate, so a delegation copied to another ground grants nothing.
+    // Delegating is issuing, so only an ADMIN grant carries it: a subject that may only write
+    // cannot hand its standing to a delegate.
+    if (author !== subject) {
+      const scope = principalScopeOf(ctx.reactor);
+      if (
+        verb !== "write" ||
+        granted !== "admin" ||
+        scope === undefined ||
+        !keyActsFor(ctx.reactor, ctx.now, { root: subject }, author, scope, ctx.operator)
+      ) {
+        continue;
+      }
     }
     // The grant itself must be effective: minted by the operator, or by an effective admin.
     if (ctx.operator !== undefined && d.claims.author !== ctx.operator) {

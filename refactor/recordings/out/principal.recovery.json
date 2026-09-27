@@ -15,7 +15,7 @@
       "membershipGathers": [
         "@writer: ada's write, first key",
         "@writer: first-key",
-        "@writer: tenant+subject+verb"
+        "@writer: principal+kind+key+scope+delegable"
       ],
       "tableNames": [
         "ada",
@@ -44,7 +44,7 @@
     "container": {
       "membershipGathers": [
         "@writer: first-key",
-        "@writer: tenant+subject+verb"
+        "@writer: principal+kind+key+scope+delegable"
       ],
       "tableNames": [
         "ada",
