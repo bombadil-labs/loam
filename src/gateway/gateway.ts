@@ -198,7 +198,7 @@ import {
   watchEntityImpl,
 } from "./reads.js";
 import { listImpl, type ListOptions } from "./listing.js";
-import { declareReadHidden, governedProgram } from "./governed-trust.js";
+import { declareReadHidden, governedProgram, needsLowering } from "./governed-trust.js";
 
 export interface AppendReceipt {
   readonly accepted: number;
@@ -1537,6 +1537,7 @@ export class Gateway {
     this.reactor.advanceTime(this.validityNow());
     if (crossed) this.replayRegistrations();
     this.armValidityTimer();
+    this.notifyUserDependents();
   }
 
   // Each author's newest held claim time. A Schema that orders `byTimestamp` needs an author's
@@ -1615,8 +1616,45 @@ export class Gateway {
    * no user records of its own. @internal — container.ts
    */
   readUsersFrom(host: Gateway): void {
+    if (this.userHost === host) return;
+    this.userHost?.userDependents.delete(this);
     this.userHost = host;
+    if (host !== this) host.userDependents.add(this);
+    // Views built before this call read this ground's own (empty) users; read the host's now.
+    this.onUsersMoved();
   }
+
+  // A pool's governed reads resolve user-named grants against its HOST's users, which its own
+  // reactor never sees change. So the host tells every dependent after each accepted batch and each
+  // validity boundary — widely, since a user's root depends on claims, strikes,
+  // counter-strikes, erasures and windows alike — and each dependent re-lowers its views.
+  private readonly userDependents = new Set<Gateway>();
+
+  /** Bumped whenever the users this ground reads may have moved; the listing index keys on it. */
+  usersEpoch = 0;
+
+  /** @internal — ingest.ts, after each batch it lands */
+  notifyUserDependents(): void {
+    for (const dependent of this.userDependents) dependent.onUsersMoved();
+  }
+
+  /** @internal — ingest.ts: live `watch` evaluations over a governed Term */
+  readonly userPulses = new Set<() => void>();
+
+  private onUsersMoved(): void {
+    for (const pulse of [...this.userPulses]) pulse();
+    if (this.governedRegistered !== this.registered) {
+      this.governedRegistered = this.registered;
+      this.governsUsers = this.registered.some((r) =>
+        needsLowering(r.hyperschema.body, this.registry),
+      );
+    }
+    if (!this.governsUsers) return;
+    this.usersEpoch += 1;
+    this.reactor.refreshAll(this.validityNow());
+  }
+  private governedRegistered: Bound[] | undefined;
+  private governsUsers = false;
 
   // Every reactor this gateway sets reads its users from its user host (a pool's host, or itself),
   // hiding what that host has erased but not yet purged, exactly as the user View does.
@@ -2073,6 +2111,8 @@ export class Gateway {
   // Close ends every live subscription (a parked reader wakes with done, never hangs), then
   // always releases the backend, even when a latched write failure has to be surfaced.
   async close(): Promise<void> {
+    this.userHost?.userDependents.delete(this);
+    this.userDependents.clear();
     if (this.validityTimer !== undefined) clearTimeout(this.validityTimer);
     this.validityTimer = undefined;
     for (const channel of [...this.channels]) await channel.return();

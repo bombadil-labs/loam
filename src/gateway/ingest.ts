@@ -66,7 +66,7 @@ import {
   slateRefusal,
 } from "./slate.js";
 import { readTrustPolicy } from "./trust.js";
-import { governedProgram } from "./governed-trust.js";
+import { governedProgram, needsLowering } from "./governed-trust.js";
 import { userGroundOf } from "./user-root.js";
 
 // Persist a batch, THEN serve it (the body of `Gateway.append`). The batch is validated whole (one
@@ -335,6 +335,7 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
     // leave stale ids silently exempting future raw-stream writes.
     for (const d of batch) gw.justPersisted.delete(d.id);
     gw.armValidityTimer(); // the batch may name the next boundary
+    if (accepted > 0) gw.notifyUserDependents(); // pools read this ground's users
   }
   // A landing slate that closes `read` ends live subscriptions the way an erase does (SPEC §29.3).
   // `reseat()` already solves precisely this one phase later — "a parked reader must not keep serving
@@ -637,12 +638,14 @@ export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], v
     () => {
       closed = true;
       gw.channels.delete(channel);
+      gw.userPulses.delete(pulse);
     },
     (_pending, incoming) => incoming, // a slow reader gets the newest membership, nothing stale
   );
   // The reactor has no unsubscribe; the closed flag makes a detached watcher inert (the same
-  // discipline the entity-stream sinks run).
-  gw.reactor.subscribeRaw(() => {
+  // discipline the entity-stream sinks run). A governed Term also reads the users this ground reads,
+  // which a pool's host can move with nothing arriving here, so the gateway pulses it then too.
+  const pulse = (): void => {
     if (closed) return;
     const next = evalRawGoverned(gw, parsed, gw.reactor.snapshot());
     if (next.sort !== "dset") return; // the term's sort is content-independent; unreachable
@@ -651,7 +654,9 @@ export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], v
     if (ids.size === lastIds.size && [...ids].every((id) => lastIds.has(id))) return;
     lastIds = ids;
     channel.push(members);
-  });
+  };
+  gw.reactor.subscribeRaw(pulse);
+  if (needsLowering(parsed, undefined)) gw.userPulses.add(pulse);
   // Registered where teardown can reach it: this subscription is bound to TODAY's reactor, and an
   // erase replaces that reactor — unregistered, the watcher would neither be woken nor ever fire
   // again, freezing on its pre-erase membership with no `done` to notice by.
@@ -775,6 +780,7 @@ export async function federateImpl(
     } finally {
       for (const d of admitted) gw.justPersisted.delete(d.id);
       gw.armValidityTimer(); // as at append
+      if (acceptedIds.length > 0) gw.notifyUserDependents(); // as at append
     }
   }
   // As at append: a batch that closes reads (a slate record or an erasure) touches no watched
