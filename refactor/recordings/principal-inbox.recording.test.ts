@@ -42,7 +42,7 @@ import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { delegationClaims, delegationStatesFor } from "../../src/gateway/principal.js";
 import { frozenMembershipTerm, slateClaims } from "../../src/gateway/slate.js";
 import { withStamp } from "../../src/gateway/stamp.js";
-import { authoredBy } from "../../src/server/provision.js";
+import { authoredBy } from "../../src/gateway/membership.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { KEY, nameOf, record, SEEDS, signed, type Who } from "./corpus.js";
 
