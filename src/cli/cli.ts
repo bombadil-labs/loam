@@ -55,6 +55,7 @@ import type { SlateReport } from "../gateway/slate.js";
 import { programMaskJson } from "../gateway/listing.js";
 import { unreachableStoreReport } from "../gateway/container.js";
 import { assembleGenesis } from "../gateway/genesis.js";
+import { withStamp } from "../gateway/stamp.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
 import {
   constitutionalDefect,
@@ -106,6 +107,8 @@ import {
   CTX_ROLE,
   resolveUserView,
   roleClaims,
+  rootClaims,
+  nameStillHeld,
   rolesOf,
   userClaims,
   userEntity,
@@ -2522,6 +2525,33 @@ async function cmdArtifact(args: readonly string[], io: IO): Promise<number> {
 // Home access is the proof of operatorship — the same authority erasure and repair need — so
 // there is no remote way in. See the working spec (.adlc/specs/36-03-*.md) for the full model;
 // comments here name only what would bite a future reader of THIS file.
+/** Strike a root pointer whose key was never saved. True when the strike landed. */
+async function strikeRoot(
+  path: string,
+  seed: string,
+  operator: string,
+  root: string | undefined,
+  io: IO,
+): Promise<boolean> {
+  if (root === undefined) return false;
+  try {
+    const gw = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }));
+    try {
+      await gw.append([
+        signClaims(
+          withStamp(gw.stamp(operator), (t) => makeNegationClaims(operator, t, root)),
+          seed,
+        ),
+      ]);
+      return true;
+    } finally {
+      await gw.close();
+    }
+  } catch {
+    return false;
+  }
+}
+
 async function cmdUser(args: readonly string[], io: IO, options: RunOptions): Promise<number> {
   const parsed = parseFor("user", args);
   const sub = parsed.positionals[0];
@@ -2624,6 +2654,7 @@ async function cmdUserCreate(
   let known: boolean;
   let already: ReadonlySet<UserRole>;
   let mintedKey: string | undefined; // set only when this call just appended a fresh operator grant
+  let mintedRoot: string | undefined; // the root pointer naming that key, struck if its seed is lost
   try {
     // ASK THE GROUND, not only the credential file — the two halves of a user can come apart (a
     // credential removed by hand, or a write that failed after the deltas landed), and appending a
@@ -2634,6 +2665,34 @@ async function cmdUserCreate(
     already = known
       ? rolesOf(gateway.reactor, gateway.operator, gateway.validityNow(), name)
       : new Set<UserRole>();
+    // A name that belonged to someone is not given to a new person: a struck role can lapse, and
+    // the old key and its grants live outside the user record. Only erasure frees it, and the
+    // key file is not erasure's to remove.
+    if (!known) {
+      const trace = nameStillHeld(gateway.reactor, operator, gateway.validityNow(), name);
+      const keyFile = readUserSeed(home, name);
+      const refusal = trace.held
+        ? trace.notYetValid
+          ? `the ground holds claims about ${name} (${trace.ids.join(", ")}) that are not valid ` +
+            `until later — the host clock may have stepped back. Check the clock. Nothing was ` +
+            `written.`
+          : `the name ${name} still carries a previous person's record, roles or root ` +
+            `(${trace.ids.join(", ")}). Erase those (or finish an erasure already begun), or ` +
+            `pick another name. Nothing was written.`
+        : keyFile.kind === "present"
+          ? `a key file for ${name} remains at ${userSeedPath(home, name)}. Erasure does not ` +
+            `remove it: move it away by hand if its person is gone, or pick another name. ` +
+            `Nothing was written.`
+          : keyFile.kind === "unreadable"
+            ? `the key file at ${userSeedPath(home, name)} cannot be read (${keyFile.detail}), so ` +
+              `this command cannot tell whether a person still holds it. Nothing was written.`
+            : undefined;
+      if (refusal !== undefined) {
+        io.err(`user create: ${refusal}`);
+        await gateway.close();
+        return 2;
+      }
+    }
     if (!known) {
       const at = Date.now();
       const deltas: Delta[] = [
@@ -2643,8 +2702,14 @@ async function cmdUserCreate(
       if (role === "operator") {
         mintedKey = randomBytes(32).toString("hex");
         const subject = authorForSeed(mintedKey);
+        const root = signClaims(
+          withStamp(gateway.stamp(operator), (t) => rootClaims(name, subject, operator, t)),
+          seed,
+        );
+        mintedRoot = root.id;
         deltas.push(
           signClaims(grantClaims(STORE_ENTITY, subject, "admin", operator, at + 2), seed),
+          root,
         );
       }
       await gateway.append(deltas);
@@ -2699,12 +2764,16 @@ async function cmdUserCreate(
     try {
       writeUserSeed(home, name, mintedKey);
     } catch (err) {
+      const struck = await strikeRoot(path, seed, operator, mintedRoot, io);
       io.err(
         `user create: ${name} now holds operator in the ground, but writing ` +
           `${userSeedPath(home, name)} failed: ${err instanceof Error ? err.message : String(err)}. ` +
           `The grant is live with no local key to use it yet — retry this command once the fault ` +
           `clears, or recover with \`loam user remove-role ${name} --role=operator\` then ` +
-          `\`loam user assign-role ${name} --role=operator\`.`,
+          `\`loam user assign-role ${name} --role=operator\`. ` +
+          (struck
+            ? `The root pointer naming the lost key was struck.`
+            : `The root pointer still names the lost key; \`remove-role\` then \`assign-role\` re-points it.`),
       );
       return 1;
     }
@@ -2943,11 +3012,18 @@ async function cmdUserRole(
       const at = Date.now();
       const deltas: Delta[] = [signClaims(roleClaims(name, role, operator, at), seed)];
       let mintedKey: string | undefined;
+      let assignedRoot: Delta | undefined;
       if (role === "operator") {
         mintedKey = randomBytes(32).toString("hex");
         const subject = authorForSeed(mintedKey);
+        // A fresh key re-points the user's root to it: the old key keeps its history, not its role.
+        assignedRoot = signClaims(
+          withStamp(gateway.stamp(operator), (t) => rootClaims(name, subject, operator, t)),
+          seed,
+        );
         deltas.push(
           signClaims(grantClaims(STORE_ENTITY, subject, "admin", operator, at + 1), seed),
+          assignedRoot,
         );
       }
       try {
@@ -2963,6 +3039,23 @@ async function cmdUserRole(
         try {
           writeUserSeed(home, name, mintedKey);
         } catch (err) {
+          // The root now names a key nobody holds. Strike it, so the pointer falls back.
+          const struck =
+            assignedRoot !== undefined &&
+            (await gateway
+              .append([
+                signClaims(
+                  withStamp(gateway.stamp(operator), (t) =>
+                    makeNegationClaims(operator, t, assignedRoot.id),
+                  ),
+                  seed,
+                ),
+              ])
+              .then(
+                () => true,
+                () => false,
+              ));
+          if (!struck) io.err(`user assign-role: the root pointer still names the lost key.`);
           io.err(
             `user assign-role: ${name} now holds operator in the ground, but writing ` +
               `${userSeedPath(home, name)} failed: ${err instanceof Error ? err.message : String(err)}. ` +

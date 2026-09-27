@@ -32,6 +32,10 @@ import { entityGatherBody } from "../gateway/gather.js";
 
 const CTX_USER = "loam.user";
 export const CTX_ROLE = "loam.role";
+/** The user's current ROOT key (README ruling 5): the principal every key of theirs acts for. */
+export const CTX_ROOT = "loam.root";
+
+const AUTHOR = /^ed25519:[0-9a-f]{64}$/;
 
 /** The roles §36 ships. Anything else is a future ticket, and refused rather than guessed at. */
 export type UserRole = "operator" | "actor";
@@ -112,6 +116,28 @@ export function userClaims(name: string, author: string, timestamp: number): Cla
   };
 }
 
+/**
+ * The root pointer: this user's current root key. The operator signs it when it mints the user a
+ * key, and signs a new one to re-point a user who lost theirs. The latest unstruck one wins; an
+ * earlier one stays in the ground as history. Removing a role leaves the root in place: a root is
+ * who the user is, not what they may do. Stamp it with the store's ordering clock (`stamp`), never a
+ * bare wall clock, or an older pointer stamped ahead of that clock would outrank it.
+ */
+export function rootClaims(name: string, root: string, author: string, timestamp: number): Claims {
+  return {
+    timestamp,
+    validFrom: timestamp,
+    author,
+    pointers: [
+      {
+        role: "user",
+        target: { kind: "entity", entity: { id: userEntity(name), context: CTX_ROOT } },
+      },
+      { role: "root", target: { kind: "primitive", value: root } },
+    ],
+  };
+}
+
 /** The role binding: this user holds this role on this store. */
 export function roleClaims(
   name: string,
@@ -182,6 +208,7 @@ const USER_SCHEMA: Schema = {
   props: new Map<string, Policy>([
     [CTX_USER, pickLatest],
     [CTX_ROLE, allRoles],
+    [CTX_ROOT, pickLatest],
   ]),
   default: pickLatest,
 };
@@ -238,4 +265,56 @@ export function rolesOf(
     if (known !== undefined) roles.add(known);
   }
   return roles;
+}
+
+/**
+ * The root key `name` currently acts from, read through the same operator-only View as the user's
+ * name and roles. Undefined when the user does not exist, or the ground names no root that is a
+ * well-formed key: absence is absence, never a guess from a seed file.
+ */
+export function rootOf(
+  reactor: Reactor,
+  operator: string | undefined,
+  now: number,
+  name: string,
+): string | undefined {
+  const view = resolveUserView(reactor, operator, now, name);
+  const root = view === undefined ? undefined : (view as Record<string, View>)[CTX_ROOT];
+  return typeof root === "string" && AUTHOR.test(root) ? root : undefined;
+}
+
+/**
+ * Does the ground still HOLD anything the operator said about the person called `name` — their
+ * record, a role or a root — whether struck, lapsed or not yet valid? A name that answers yes
+ * belonged to someone, and giving it to a new person would hand them what is left: a strike can
+ * lapse and revive a role, and the old key's grants and seed file are not at this entity at all.
+ * Only erasure, which removes the bytes, frees a name.
+ */
+export function nameStillHeld(
+  reactor: Reactor,
+  operator: string,
+  now: number,
+  name: string,
+):
+  | { readonly held: false }
+  | { readonly held: true; readonly notYetValid: boolean; readonly ids: readonly string[] } {
+  const entity = userEntity(name);
+  const ids: string[] = [];
+  let notYetValid = false;
+  for (const id of reactor.byTarget(entity)) {
+    const d = reactor.get(id);
+    if (d === undefined || d.claims.author !== operator) continue;
+    const aboutPerson = d.claims.pointers.some(
+      (p) =>
+        p.target.kind === "entity" &&
+        p.target.entity.id === entity &&
+        (p.target.entity.context === CTX_USER ||
+          p.target.entity.context === CTX_ROLE ||
+          p.target.entity.context === CTX_ROOT),
+    );
+    if (!aboutPerson) continue;
+    ids.push(id);
+    if (d.claims.validFrom > now) notYetValid = true;
+  }
+  return ids.length === 0 ? { held: false } : { held: true, notYetValid, ids: ids.sort() };
 }
