@@ -470,6 +470,14 @@ describe("a pool reads its host's users", () => {
     await expect(
       gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED }),
     ).rejects.toThrow(/cannot be read now/);
+    // Striking the owner grant itself for a while does not let revoke claim success: it stands
+    // again when the strike lapses.
+    await pool.append([
+      signClaims({ ...makeNegationClaims(OP, T0 + 21, named.id), validUntil: T0 + 1000 }, OP_SEED),
+    ]);
+    await expect(
+      gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED }),
+    ).rejects.toThrow(/cannot be read now/);
     await gw.close();
   });
 
@@ -502,7 +510,11 @@ describe("a pool reads its host's users", () => {
       ownerSeed: K1_SEED,
     });
     const pool = conn.gateway!;
-    // The connection may write, so its grant-shaped deltas land; they bind nothing.
+    // The connection may write, so its grant-shaped deltas land; they bind nothing. It even names
+    // itself admin first, to vouch for its own grant — the chain still reaches no operator.
+    expect(
+      await door(pool, signClaims(grantClaims(STORE_ENTITY, CONN, "admin", CONN, 29), CONN_SEED)),
+    ).toBe("admitted");
     for (const verb of ["write", "admin"] as const) {
       expect(
         await door(

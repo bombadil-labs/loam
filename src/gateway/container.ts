@@ -2079,6 +2079,50 @@ export function survivingWriteGrantIds(
 }
 
 /**
+ * Did the operator strike `id` for good: a strike of the operator's, already in force, with no
+ * end, and with no negation of its own held here at all, whether in force now or scheduled?
+ */
+export function operatorStruckForGood(
+  reactor: Reactor,
+  now: number,
+  operator: string | undefined,
+  id: string,
+): boolean {
+  return reactor.negationsOf(id).some((n) => {
+    const neg = reactor.get(n);
+    return (
+      operator !== undefined &&
+      neg?.claims.author === operator &&
+      neg.claims.validFrom <= now &&
+      neg.claims.validUntil === undefined &&
+      reactor.negationsOf(n).length === 0
+    );
+  });
+}
+
+/**
+ * Could the admin grant `id` EVER bind here, now or after a strike or window lapses? Not if the
+ * operator struck it for good, and not unless its issuer is the operator or holds, itself, an admin
+ * grant that could ever bind. The chain is followed to its end, so a key cannot vouch for itself.
+ */
+export function adminGrantCouldBind(
+  reactor: Reactor,
+  now: number,
+  operator: string | undefined,
+  id: string,
+  visited: ReadonlySet<string> = new Set(),
+): boolean {
+  if (visited.has(id) || operatorStruckForGood(reactor, now, operator, id)) return false;
+  const issuer = reactor.get(id)?.claims.author;
+  if (issuer === undefined) return false;
+  if (issuer === operator) return true;
+  const seen = new Set(visited).add(id);
+  return heldGrantIds(reactor, issuer, "admin").some((g) =>
+    adminGrantCouldBind(reactor, now, operator, g, seen),
+  );
+}
+
+/**
  * The keys this ground's grant subjects name right now: a key subject as itself, a `user:<name>`
  * subject as that user's current root. The roots a delegate here could act for.
  */
@@ -2258,18 +2302,7 @@ export async function bindConnectionImpl(
     return key !== undefined && key !== owner;
   });
   const others = grantRoots(pool.reactor, now, operator).filter((root) => root !== owner);
-  // For good means: the operator's, already in force, with no end, and with no negation of its own
-  // held here at all, whether in force now or scheduled to start later.
-  const struckForGood = (id: string) =>
-    pool.reactor.negationsOf(id).some((n) => {
-      const neg = pool.reactor.get(n);
-      return (
-        neg?.claims.author === operator &&
-        neg.claims.validFrom <= now &&
-        neg.claims.validUntil === undefined &&
-        pool.reactor.negationsOf(n).length === 0
-      );
-    });
+  const struckForGood = (id: string) => operatorStruckForGood(pool.reactor, now, operator, id);
   const stale = [
     ...delegationRecordsFor(pool.reactor, others, opts.connectionKey).map((d) => d.id),
     // EVERY admin grant naming another root, whoever issued it: an admin grant from any effective
@@ -2387,21 +2420,16 @@ export async function revokeConnectionImpl(opts: {
   // A grant naming a user whose root cannot be read right now may stand again later, and the
   // delegations it would carry cannot be found now. Refuse rather than report a revoke that might
   // not stick.
-  // Only a grant that could BIND counts: a surviving admin grant from the operator or an effective
-  // admin. A grant-shaped delta anyone else wrote confers nothing and must not be able to block a
-  // revoke — the connection being revoked can write one.
+  // Only a grant that could EVER bind counts — struck for now, or waiting on its issuer, it may
+  // stand again later. A grant-shaped delta whose chain of issuers reaches no operator confers
+  // nothing and must not be able to block a revoke — the connection being revoked can write one.
   const unreadable = grantSubjects(pool.reactor).filter(
     (subject) =>
       subject.startsWith(USER_PREFIX) &&
       subjectKeyAt(pool.reactor, now, pool.operatorAuthor, subject) === undefined &&
-      survivingGrantIds(pool.reactor, now, subject, "admin", pool.operatorAuthor).some((id) => {
-        const issuer = pool.reactor.get(id)?.claims.author;
-        return (
-          issuer !== undefined &&
-          (issuer === pool.operatorAuthor ||
-            holdsGrant(pool.reactor, now, STORE_ENTITY, issuer, "admin", pool.operatorAuthor))
-        );
-      }),
+      heldGrantIds(pool.reactor, subject, "admin").some((id) =>
+        adminGrantCouldBind(pool.reactor, now, pool.operatorAuthor, id),
+      ),
   );
   if (unreadable.length > 0) {
     throw new Error(

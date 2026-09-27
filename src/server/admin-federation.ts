@@ -907,7 +907,9 @@ ${flowNote}`;
         res,
         503,
         `This inbox's grant is negated, but the same key's ${failedSiblings.join(", ")} could not be — the ` +
-          "key still writes there. This revoke is incomplete; retry it from that row.",
+          "key still writes there. This revoke is incomplete; retry it from that row. If that " +
+          "inbox's owner grant names a user whose record cannot be read now, drop that inbox " +
+          "instead.",
       );
       return;
     }
