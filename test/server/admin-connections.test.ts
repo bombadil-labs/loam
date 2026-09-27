@@ -21,7 +21,7 @@ import { stamped, type Stamp } from "../../src/gateway/stamp.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import { hashPassword, writeCredentials, type ScryptParams } from "../../src/server/credentials.js";
-import { roleClaims, userClaims } from "../../src/server/users.js";
+import { roleClaims, rootClaims, userClaims } from "../../src/server/users.js";
 import { PRESESSION_COOKIE, SESSION_COOKIE } from "../../src/server/session.js";
 import { containerClaims } from "../../src/gateway/container.js";
 import { grantClaims } from "../../src/gateway/accounts.js";
@@ -346,6 +346,8 @@ async function connectorServer(): Promise<{
   let ts = 9001;
   await gateway.append([signClaims(userClaims("myk", OPERATOR, ts++), OPERATOR_SEED)]);
   await gateway.append([signClaims(roleClaims("myk", "operator", OPERATOR, ts++), OPERATOR_SEED)]);
+  // A named owner binds only as their current root, so myk's user record names MYK as the root.
+  await gateway.append([signClaims(rootClaims("myk", MYK, OPERATOR, ts++), OPERATOR_SEED)]);
   await gateway.append([
     signClaims(
       containerClaims(

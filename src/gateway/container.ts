@@ -2009,6 +2009,9 @@ export interface BindConnectionOptions {
   readonly connectionKey: string;
   /** The owner's signing seed (their §36 session in the real flow). Authors the connection grant. */
   readonly ownerSeed: string;
+  /** The owner's Loam user name, when known: their admin grant in the inbox then names the user
+   *  and follows their current root. Absent, it names the owner's key. */
+  readonly ownerName?: string;
   /** The inbox pool's own store. Defaults to a fresh in-memory backend. */
   readonly backend?: StoreBackend;
 }
@@ -2230,6 +2233,25 @@ export async function bindConnectionImpl(
   const operator = gw.operatorAuthor!;
   const owner = authorForSeed(opts.ownerSeed);
   const name = inboxName(opts.container, opts.connectionKey);
+  // A named owner must BE that user's current root, read through the operator's governed user
+  // record. After a re-point the old key is no longer the user; after the operator strikes the
+  // root the user has no key at all. Either way a seed file must not mint a fresh writable inbox:
+  // refuse before anything is written. Only a caller that names no user binds by key.
+  const userSubject = opts.ownerName === undefined ? undefined : `${USER_PREFIX}${opts.ownerName}`;
+  const currentRoot =
+    userSubject === undefined
+      ? undefined
+      : subjectKeyAt(gw.reactor, gw.validityNow(), operator, userSubject);
+  if (userSubject !== undefined && currentRoot !== owner) {
+    throw new Error(
+      currentRoot === undefined
+        ? `${opts.ownerName} has no current key in this store's user record, so the connection ` +
+            `was not bound — nothing was written. The operator must give them a key first.`
+        : `${opts.ownerName}'s current key is not the one this home holds for them, so the ` +
+            `connection was not bound — nothing was written. The seed file is out of date: the ` +
+            `user's key was replaced, and the new key must authorize its connections itself.`,
+    );
+  }
 
   // Durable (decision 3): a live handle for a STANDING declaration resumes — its grant chain is
   // re-verified below, idempotently, so a pool re-attached at boot is provisioned exactly like one
@@ -2307,11 +2329,14 @@ export async function bindConnectionImpl(
   // entity, so this never touches the real store's authority; grantHeld resolves connection-write →
   // owner's delegation → owner-admin → operator. The store operator appears once here
   // (administrative provisioning, §39.1 point 3) and never on the read/write data path.
+  // A named owner is the user's current root (checked above), so the grant names the USER and
+  // follows them across a re-point; a caller that names no user gets a grant naming the key.
+  const ownerSubject = userSubject ?? owner;
   if (!holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, owner, "admin", operator)) {
     await pool.append([
       signClaims(
         withStamp(pool.stamp(operator), (t) =>
-          grantClaims(STORE_ENTITY, owner, "admin", operator, t),
+          grantClaims(STORE_ENTITY, ownerSubject, "admin", operator, t),
         ),
         operatorSeed,
       ),
@@ -2338,7 +2363,15 @@ export async function bindConnectionImpl(
     // is not known to be someone else: leave their grant, never strike it for good on a guess.
     return key !== undefined && key !== owner;
   });
-  const others = grantRoots(pool.reactor, now, operator).filter((root) => root !== owner);
+  // A user-named grant resolves to the user's CURRENT root, but every root that name could ever
+  // name may hold a delegation to this key — the old root after a re-point is exactly the replaced
+  // seed above — so each is another root here unless it is the owner.
+  const couldBe = grantSubjects(pool.reactor)
+    .filter((subject) => subject.startsWith(USER_PREFIX))
+    .flatMap((subject) => keysSubjectCouldName(pool.reactor, now, operator, subject));
+  const others = [...new Set([...grantRoots(pool.reactor, now, operator), ...couldBe])].filter(
+    (root) => root !== owner && root !== opts.connectionKey,
+  );
   const struckForGood = (id: string) =>
     operatorStruckForGood(pool.reactor, now, operator, id, opts.connectionKey);
   const stale = [

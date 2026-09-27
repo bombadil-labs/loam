@@ -17,10 +17,10 @@ import { run } from "../../src/cli/cli.js";
 import { readSeed, readUserSeed, storePath } from "../../src/cli/config.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
-import { dataStruck, grantClaims } from "../../src/gateway/accounts.js";
+import { dataStruck, grantClaims, holdsGrant } from "../../src/gateway/accounts.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
-import { roleClaims, userClaims } from "../../src/server/users.js";
+import { roleClaims, rootOf, userClaims } from "../../src/server/users.js";
 import type { ScryptParams } from "../../src/server/credentials.js";
 
 let home: string;
@@ -154,20 +154,29 @@ describe("C — two operators are distinguishable in the ground", () => {
       .find((d) =>
         d.claims.pointers.some(
           (p) =>
-            p.role === "subject" && p.target.kind === "primitive" && p.target.value === aliceKey,
+            p.role === "subject" &&
+            p.target.kind === "primitive" &&
+            p.target.value === "user:alice",
         ),
       );
     const bobGrant = g.reactor
       .arrivalLog()
       .find((d) =>
         d.claims.pointers.some(
-          (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === bobKey,
+          (p) =>
+            p.role === "subject" && p.target.kind === "primitive" && p.target.value === "user:bob",
         ),
       );
     expect(aliceGrant).toBeDefined();
     expect(bobGrant).toBeDefined();
     expect(aliceGrant!.claims.author).toBe(operator);
     expect(bobGrant!.claims.author).toBe(operator);
+    // The grants name the users; the door resolves each to that user's own key, and not the other.
+    const now = Date.now();
+    expect(holdsGrant(g.reactor, now, STORE_ENTITY, aliceKey, "admin", operator)).toBe(true);
+    expect(holdsGrant(g.reactor, now, STORE_ENTITY, bobKey, "admin", operator)).toBe(true);
+    expect(rootOf(g.reactor, operator, now, "alice")).toBe(aliceKey);
+    expect(rootOf(g.reactor, operator, now, "bob")).toBe(bobKey);
     await g.close();
   });
 });
