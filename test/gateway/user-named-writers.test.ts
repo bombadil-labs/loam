@@ -121,11 +121,35 @@ describe("bind names the owner by user when their root is the owner's key", () =
     await gw.close();
   });
 
-  it("R11: a user with no root binds by key (the legacy fallback)", async () => {
+  it("R11: a named user with no current root is refused; a caller naming no user binds by key", async () => {
     const gw = await home();
-    const noRoot = await bind(gw, CONN_SEED, "bea");
-    expect(adminSubjects(noRoot)).toEqual([GARDENER]);
-    expect(await door(noRoot, observed(FERN, "height", 1, 1000, CONN_SEED))).toBe("admitted");
+    const before = gw.reactor.size;
+    await expect(bind(gw, CONN_SEED, "bea")).rejects.toThrow(/has no current key/);
+    expect(gw.reactor.size).toBe(before);
+    expect([...gw.connectionInboxes.keys()]).toEqual([]);
+    const byKey = await bind(gw, CONN_SEED);
+    expect(adminSubjects(byKey)).toEqual([GARDENER]);
+    expect(await door(byKey, observed(FERN, "height", 1, 1000, CONN_SEED))).toBe("admitted");
+    await gw.close();
+  });
+
+  it("a root the operator struck is no key: its old seed cannot bind by the user's name", async () => {
+    const gw = await home();
+    const adaRoot = [...gw.reactor.snapshot()].find(
+      (d) =>
+        d.claims.author === OP &&
+        d.claims.pointers.some(
+          (p) => p.target.kind === "primitive" && p.target.value === GARDENER,
+        ) &&
+        d.claims.pointers.some(
+          (p) => p.target.kind === "entity" && p.target.entity.id === "user:ada",
+        ),
+    )!;
+    await gw.append([op(makeNegationClaims(OP, 900, adaRoot.id))]);
+    const before = gw.reactor.size;
+    await expect(bind(gw, CONN_SEED, "ada")).rejects.toThrow(/has no current key/);
+    expect(gw.reactor.size).toBe(before);
+    expect([...gw.connectionInboxes.keys()]).toEqual([]);
     await gw.close();
   });
 

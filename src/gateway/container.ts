@@ -2233,19 +2233,23 @@ export async function bindConnectionImpl(
   const operator = gw.operatorAuthor!;
   const owner = authorForSeed(opts.ownerSeed);
   const name = inboxName(opts.container, opts.connectionKey);
-  // A named owner must BE that user's current root. After a re-point the old key is no longer the
-  // user, and a stale seed file must not mint it a fresh writable inbox: refuse before anything is
-  // written. A user with no readable root (an older store) binds by key, as before.
+  // A named owner must BE that user's current root, read through the operator's governed user
+  // record. After a re-point the old key is no longer the user; after the operator strikes the
+  // root the user has no key at all. Either way a seed file must not mint a fresh writable inbox:
+  // refuse before anything is written. Only a caller that names no user binds by key.
   const userSubject = opts.ownerName === undefined ? undefined : `${USER_PREFIX}${opts.ownerName}`;
   const currentRoot =
     userSubject === undefined
       ? undefined
       : subjectKeyAt(gw.reactor, gw.validityNow(), operator, userSubject);
-  if (currentRoot !== undefined && currentRoot !== owner) {
+  if (userSubject !== undefined && currentRoot !== owner) {
     throw new Error(
-      `${opts.ownerName}'s current key is not the one this home holds for them, so the ` +
-        `connection was not bound — nothing was written. The seed file is out of date: the ` +
-        `user's key was replaced, and the new key must authorize its connections itself.`,
+      currentRoot === undefined
+        ? `${opts.ownerName} has no current key in this store's user record, so the connection ` +
+            `was not bound — nothing was written. The operator must give them a key first.`
+        : `${opts.ownerName}'s current key is not the one this home holds for them, so the ` +
+            `connection was not bound — nothing was written. The seed file is out of date: the ` +
+            `user's key was replaced, and the new key must authorize its connections itself.`,
     );
   }
 
@@ -2325,9 +2329,9 @@ export async function bindConnectionImpl(
   // entity, so this never touches the real store's authority; grantHeld resolves connection-write →
   // owner's delegation → owner-admin → operator. The store operator appears once here
   // (administrative provisioning, §39.1 point 3) and never on the read/write data path.
-  // The grant names the USER when the user's current root is this owner (checked above), so it
-  // follows the user across a re-point; with no name, or no readable root, it names the key.
-  const ownerSubject = currentRoot === owner && userSubject !== undefined ? userSubject : owner;
+  // A named owner is the user's current root (checked above), so the grant names the USER and
+  // follows them across a re-point; a caller that names no user gets a grant naming the key.
+  const ownerSubject = userSubject ?? owner;
   if (!holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, owner, "admin", operator)) {
     await pool.append([
       signClaims(
