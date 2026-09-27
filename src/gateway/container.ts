@@ -2233,6 +2233,21 @@ export async function bindConnectionImpl(
   const operator = gw.operatorAuthor!;
   const owner = authorForSeed(opts.ownerSeed);
   const name = inboxName(opts.container, opts.connectionKey);
+  // A named owner must BE that user's current root. After a re-point the old key is no longer the
+  // user, and a stale seed file must not mint it a fresh writable inbox: refuse before anything is
+  // written. A user with no readable root (an older store) binds by key, as before.
+  const userSubject = opts.ownerName === undefined ? undefined : `${USER_PREFIX}${opts.ownerName}`;
+  const currentRoot =
+    userSubject === undefined
+      ? undefined
+      : subjectKeyAt(gw.reactor, gw.validityNow(), operator, userSubject);
+  if (currentRoot !== undefined && currentRoot !== owner) {
+    throw new Error(
+      `${opts.ownerName}'s current key is not the one this home holds for them, so the ` +
+        `connection was not bound — nothing was written. The seed file is out of date: the ` +
+        `user's key was replaced, and the new key must authorize its connections itself.`,
+    );
+  }
 
   // Durable (decision 3): a live handle for a STANDING declaration resumes — its grant chain is
   // re-verified below, idempotently, so a pool re-attached at boot is provisioned exactly like one
@@ -2310,14 +2325,9 @@ export async function bindConnectionImpl(
   // entity, so this never touches the real store's authority; grantHeld resolves connection-write →
   // owner's delegation → owner-admin → operator. The store operator appears once here
   // (administrative provisioning, §39.1 point 3) and never on the read/write data path.
-  // The grant names the USER when the user's current root is this owner, so it follows the user
-  // across a re-point; otherwise (no name, or a user with no root record) it names the key.
-  const userSubject = opts.ownerName === undefined ? undefined : `${USER_PREFIX}${opts.ownerName}`;
-  const ownerSubject =
-    userSubject !== undefined &&
-    subjectKeyAt(pool.reactor, pool.validityNow(), operator, userSubject) === owner
-      ? userSubject
-      : owner;
+  // The grant names the USER when the user's current root is this owner (checked above), so it
+  // follows the user across a re-point; with no name, or no readable root, it names the key.
+  const ownerSubject = currentRoot === owner && userSubject !== undefined ? userSubject : owner;
   if (!holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, owner, "admin", operator)) {
     await pool.append([
       signClaims(
@@ -2349,7 +2359,15 @@ export async function bindConnectionImpl(
     // is not known to be someone else: leave their grant, never strike it for good on a guess.
     return key !== undefined && key !== owner;
   });
-  const others = grantRoots(pool.reactor, now, operator).filter((root) => root !== owner);
+  // A user-named grant resolves to the user's CURRENT root, but every root that name could ever
+  // name may hold a delegation to this key — the old root after a re-point is exactly the replaced
+  // seed above — so each is another root here unless it is the owner.
+  const couldBe = grantSubjects(pool.reactor)
+    .filter((subject) => subject.startsWith(USER_PREFIX))
+    .flatMap((subject) => keysSubjectCouldName(pool.reactor, now, operator, subject));
+  const others = [...new Set([...grantRoots(pool.reactor, now, operator), ...couldBe])].filter(
+    (root) => root !== owner && root !== opts.connectionKey,
+  );
   const struckForGood = (id: string) =>
     operatorStruckForGood(pool.reactor, now, operator, id, opts.connectionKey);
   const stale = [

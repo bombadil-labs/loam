@@ -121,17 +121,76 @@ describe("bind names the owner by user when their root is the owner's key", () =
     await gw.close();
   });
 
-  it("R11: a user with no root, or a root that is not the owner, gets the key (the fallback)", async () => {
+  it("R11: a user with no root binds by key (the legacy fallback)", async () => {
     const gw = await home();
     const noRoot = await bind(gw, CONN_SEED, "bea");
     expect(adminSubjects(noRoot)).toEqual([GARDENER]);
-    const gw2 = await home();
-    await gw2.append([op(rootClaims("ada", K2, OP, 700))]);
-    const otherRoot = await bind(gw2, CONN_SEED, "ada");
-    expect(adminSubjects(otherRoot)).toEqual([GARDENER]);
-    expect(await door(otherRoot, observed(FERN, "height", 1, 1000, CONN_SEED))).toBe("admitted");
+    expect(await door(noRoot, observed(FERN, "height", 1, 1000, CONN_SEED))).toBe("admitted");
     await gw.close();
-    await gw2.close();
+  });
+
+  it("a stale key for a named user cannot bind a new inbox; the current root can", async () => {
+    const gw = await home();
+    await gw.append([op(rootClaims("ada", K2, OP, 700))]);
+    const before = gw.reactor.size;
+    await expect(bind(gw, CONN_SEED, "ada")).rejects.toThrow(/current key is not the one/);
+    // nothing was written, and no inbox is held
+    expect(gw.reactor.size).toBe(before);
+    expect([...gw.connectionInboxes.keys()]).toEqual([]);
+    // bystander: ada's current root binds, by name, and its connection writes
+    const inbox = (
+      await gw.bindConnection({
+        container: "home:ada",
+        connectionKey: CONN,
+        ownerSeed: K2_SEED,
+        ownerName: "ada",
+      })
+    ).entity!;
+    const pool = gw.connectionInboxes.get(inbox)!.gateway!;
+    expect(adminSubjects(pool)).toEqual(["user:ada"]);
+    expect(await door(pool, observed(FERN, "height", 1, 1000, CONN_SEED))).toBe("admitted");
+    await gw.close();
+  });
+});
+
+describe("after a re-point, the new root re-binds and can revoke", () => {
+  it("the re-bind strikes the old root's delegation; the new root's revoke then succeeds", async () => {
+    const gw = await home();
+    const conn = await bind(gw, CONN_SEED, "ada");
+    const bystander = await bind(gw, OTHER_SEED, "ada");
+    await gw.append([op(rootClaims("ada", K2, OP, 800))]);
+    const inbox = (
+      await gw.bindConnection({
+        container: "home:ada",
+        connectionKey: CONN,
+        ownerSeed: K2_SEED,
+        ownerName: "ada",
+      })
+    ).entity!;
+    const handle = gw.connectionInboxes.get(inbox)!;
+    // delta: the old root's delegation to CONN is struck in the operator's voice
+    const old = [...conn.reactor.snapshot()].filter(
+      (d) =>
+        d.claims.author === GARDENER &&
+        d.claims.pointers.some((p) => p.target.kind === "primitive" && p.target.value === CONN),
+    );
+    expect(old.length).toBeGreaterThan(0);
+    for (const d of old) expect(conn.reactor.negationsOf(d.id).length).toBeGreaterThan(0);
+    // door: the new root's revoke succeeds, and the connection stops writing
+    await gw.revokeConnection({ inbox: handle, connectionKey: CONN, ownerSeed: K2_SEED });
+    expect(await door(conn, observed(FERN, "height", 9, 1009, CONN_SEED))).toBe("refused");
+    // bystander: a connection nobody revoked, re-bound by the new root, still writes
+    const again = (
+      await gw.bindConnection({
+        container: "home:ada",
+        connectionKey: authorForSeed(OTHER_SEED),
+        ownerSeed: K2_SEED,
+        ownerName: "ada",
+      })
+    ).entity!;
+    expect(gw.connectionInboxes.get(again)!.gateway).toBe(bystander);
+    expect(await door(bystander, observed(FERN, "height", 8, 1008, OTHER_SEED))).toBe("admitted");
+    await gw.close();
   });
 });
 

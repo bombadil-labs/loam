@@ -3111,20 +3111,13 @@ async function cmdUserRole(
         );
         return 1;
       }
-      // The operator role's admin grant names the USER now (older stores: the key). Only the
-      // admin grant goes: the user's own write grant is not the role's.
-      grantIds = grantStanding(
-        gateway.reactor,
-        gateway.validityNow(),
-        operator,
-        userEntity(name),
-        "admin",
-      ).surviving;
+      // The operator role's admin grant names the USER now (older stores: the key). Only ADMIN
+      // grants go, under either subject: a write grant is the user's own standing, not the role's.
+      const now = gateway.validityNow();
+      grantIds = grantStanding(gateway.reactor, now, operator, userEntity(name), "admin").surviving;
       if (seedRead.kind === "present") {
         const subject = authorForSeed(seedRead.seed);
-        grantIds.push(
-          ...survivingGrantClaimIds(gateway.reactor, gateway.validityNow(), operator, subject),
-        );
+        grantIds.push(...grantStanding(gateway.reactor, now, operator, subject, "admin").surviving);
       } else if (grantIds.length === 0) {
         grantNote =
           ` (its signing grant could not be located — ${userSeedPath(home, name)} is missing — ` +

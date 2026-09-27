@@ -487,6 +487,38 @@ describe("loam user remove-role", () => {
     await g.close();
   });
 
+  it("removes only ADMIN standing: a key-named write grant survives, a key-named admin goes", async () => {
+    await run(["user", "create", "zara", "--operator", "--home", home], io(), password("pw"));
+    const seedFile = readUserSeed(home, "zara");
+    if (seedFile.kind !== "present") throw new Error("user create writes a seed file");
+    const zara = authorForSeed(seedFile.seed);
+    const opSeed = readSeed(home);
+    const operator = authorForSeed(opSeed);
+    const writeGrant = signClaims(grantClaims(STORE_ENTITY, zara, "write", operator, 50), opSeed);
+    const oldAdmin = signClaims(grantClaims(STORE_ENTITY, zara, "admin", operator, 51), opSeed);
+    let g = await ground();
+    const gw = g as unknown as { close: () => Promise<void> };
+    await gw.close();
+    const writer = await Gateway.boot(
+      new SqliteBackend(storePath(home)),
+      assembleGenesis({ operatorSeed: opSeed }),
+    );
+    await writer.append([writeGrant, oldAdmin]);
+    await writer.close();
+
+    expect(
+      await run(["user", "remove-role", "zara", "--role=operator", "--home", home], io()),
+    ).toBe(0);
+    g = await ground();
+    // delta: the literal admin grant is struck, the literal write grant is not
+    expect(g.reactor.negationsOf(oldAdmin.id).length).toBeGreaterThan(0);
+    expect(g.reactor.negationsOf(writeGrant.id)).toEqual([]);
+    // door: admin gone under either subject, write still held
+    expect(holdsGrant(g.reactor, Date.now(), STORE_ENTITY, zara, "admin", operator)).toBe(false);
+    expect(holdsGrant(g.reactor, Date.now(), STORE_ENTITY, zara, "write", operator)).toBe(true);
+    await g.close();
+  });
+
   it("SEED ABSENT: strikes the role AND the admin grant, which names the user", async () => {
     await run(["user", "create", "yara", "--operator", "--home", home], io(), password("pw"));
     const seedFile = readUserSeed(home, "yara");
