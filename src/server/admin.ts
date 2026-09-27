@@ -110,8 +110,7 @@ import {
   adminPages,
 } from "./admin-pages.js";
 import { withStamp } from "../gateway/stamp.js";
-import { keysActingFor } from "../gateway/principal.js";
-import { STORE_ENTITY } from "../gateway/genesis.js";
+import { keysActingFor, principalScopeOf } from "../gateway/principal.js";
 
 const MAX_BODY = 8 * 1024; // tokens, a name, a membership Term; nothing here needs more
 // A registration carries a hyperschema body and a resolution schema — real JSON, not a name.
@@ -245,14 +244,13 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     if (gw.operatorAuthor !== undefined) accept.add(gw.operatorAuthor);
     if (seed.kind === "present") {
       const who = { root: authorForSeed(seed.seed) };
-      for (const key of keysActingFor(
-        gw.reactor,
-        gw.validityNow(),
-        who,
-        STORE_ENTITY,
-        gw.operatorAuthor,
-      ))
-        accept.add(key);
+      // The door's own question: delegates count only where this ground declares a scope.
+      const scope = principalScopeOf(gw.reactor);
+      const keys =
+        scope === undefined
+          ? [who.root]
+          : keysActingFor(gw.reactor, gw.validityNow(), who, scope, gw.operatorAuthor);
+      for (const key of keys) accept.add(key);
     }
     const attention = {
       summary: attentionSummaryImpl(gw, session.user, accept, { containers: [...reach] }),

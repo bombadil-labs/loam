@@ -242,8 +242,8 @@ describe("§39 criterion 6 — two connections are distinguishable at the delta 
   });
 });
 
-describe("§39 criterion 7 — the connection grant and a store grant coexist, neither confused", () => {
-  it("the connection grant is owner-authored, subject=connection key, verb=write, in the inbox ground", async () => {
+describe("§39 criterion 7 — the connection's delegation and a store grant coexist, neither confused", () => {
+  it("the connection's authority is an owner-signed sealed delegation scoped to its inbox, in the inbox ground", async () => {
     const gw = await boot();
     await gw.append([
       declare(
@@ -254,35 +254,31 @@ describe("§39 criterion 7 — the connection grant and a store grant coexist, n
     const inbox = await bind(gw, "alice:folklore", CONN_SEED);
     const pool = inbox.gateway!;
 
-    // The connection grant lives in the INBOX pool's own ground. Assert its SHAPE and AUTHOR — it is
-    // preceded by the pool genesis and the operator's owner-admin grant, so it is not the pool's
-    // first delta.
-    const grants = [...pool.reactor.snapshot()].filter((d) =>
-      d.claims.pointers.some(
-        (p) =>
-          p.target.kind === "entity" &&
-          p.target.entity.id === STORE_ENTITY &&
-          p.target.entity.context === CTX_GRANTS,
-      ),
-    );
-    const subjectVerb = (d: Delta): { subject?: string; verb?: string } => {
-      let subject: string | undefined;
-      let verb: string | undefined;
-      for (const p of d.claims.pointers) {
-        if (p.target.kind !== "primitive") continue;
-        if (p.role === "subject" && typeof p.target.value === "string") subject = p.target.value;
-        if (p.role === "verb" && typeof p.target.value === "string") verb = p.target.value;
-      }
-      return {
-        ...(subject !== undefined ? { subject } : {}),
-        ...(verb !== undefined ? { verb } : {}),
-      };
+    // The connection's authority lives in the INBOX pool's own ground: an owner-signed, sealed
+    // delegation scoped to this pool's name (README ruling 6). It is preceded by the pool genesis and
+    // the operator's owner-admin grant, so it is not the pool's first delta. No grant names the key.
+    const prim = (d: Delta, role: string) => {
+      const t = d.claims.pointers.find((p) => p.role === role)?.target;
+      return t?.kind === "primitive" ? t.value : undefined;
     };
-    const connGrant = grants.find((d) => subjectVerb(d).subject === CONN);
-    expect(connGrant).toBeDefined();
-    expect(subjectVerb(connGrant!).verb).toBe("write");
-    expect(connGrant!.claims.author).toBe(OWNER); // owner-authored authority
-    // The connection's write standing resolves through the chain (connection-write → owner-admin).
+    const delegations = [...pool.reactor.snapshot()].filter(
+      (d) => prim(d, "kind") === "delegation" && prim(d, "key") === CONN,
+    );
+    expect(delegations).toHaveLength(1);
+    expect(delegations[0]!.claims.author).toBe(OWNER); // owner-authored authority
+    expect(prim(delegations[0]!, "scope")).toBe(inbox.entity);
+    expect(prim(delegations[0]!, "delegable")).toBe(false);
+    const grantsNamingConn = [...pool.reactor.snapshot()].filter(
+      (d) =>
+        d.claims.pointers.some(
+          (p) =>
+            p.target.kind === "entity" &&
+            p.target.entity.id === STORE_ENTITY &&
+            p.target.entity.context === CTX_GRANTS,
+        ) && prim(d, "subject") === CONN,
+    );
+    expect(grantsNamingConn).toEqual([]);
+    // The connection's write standing resolves through the chain (delegation → owner-admin).
     expect(holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, CONN, "write", OP)).toBe(
       true,
     );

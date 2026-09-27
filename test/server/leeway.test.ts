@@ -71,12 +71,7 @@ import {
   ENVELOPE_ANY,
   envelopeClaims,
 } from "../../src/gateway/envelope.js";
-import {
-  containerClaims,
-  inboxName,
-  readContainerTable,
-  survivingWriteGrantIds,
-} from "../../src/gateway/container.js";
+import { containerClaims, inboxName, readContainerTable } from "../../src/gateway/container.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { SEALED_LEEWAY, type Leeway, type Terms } from "../../src/gateway/leeway.js";
@@ -588,18 +583,26 @@ describe("§58 — leeway fits its parent's terms, and cascades", () => {
     expect((await receive(base, ada, "ada:journal:inbox", peer)).isError).toBe(false);
     expect((await receive(base, bea, "bea:notes:inbox", peer)).isError).toBe(false);
     expect(await servesPeer(base, ada, "ada:journal:inbox:peer")).toBe(true);
-    // Revoke ada's connection: strike its write grant in its own pool, as the revoke road does.
+    // Revoke ada's connection: negate the delegation that lets it write in its own pool. The
+    // operator may revoke any delegation in its store (README ruling 6).
     const grant = grantOf(connectorsHome, "ada");
     const pool = poolOf(gateway, inboxName("ada:journal", grant.actor));
-    const grants = survivingWriteGrantIds(
-      pool.reactor,
-      pool.validityNow(),
-      grant.actor,
-      pool.operatorAuthor,
-    );
+    const grants = [...pool.reactor.snapshot()]
+      .filter((d) => {
+        const at = (role: string) => d.claims.pointers.find((p) => p.role === role)?.target;
+        const kind = at("kind");
+        const key = at("key");
+        return (
+          kind?.kind === "primitive" &&
+          kind.value === "delegation" &&
+          key?.kind === "primitive" &&
+          key.value === grant.actor
+        );
+      })
+      .map((d) => d.id);
     expect(
       grants.length,
-      "premise: the connection holds a write grant in its pool",
+      "premise: a delegation lets the connection write in its pool",
     ).toBeGreaterThan(0);
     await pool.append(
       grants.map((id) =>

@@ -4,6 +4,7 @@ import {
   resolvePrincipal,
   computeId,
   verifyDelta,
+  type Claims,
   type Delta,
   type Reactor,
   type Suppression,
@@ -141,4 +142,133 @@ export function keysEverOf(reactor: Reactor, now: number, who: PrincipalRef): Re
   if (!AUTHOR.test(who.root)) return new Set([who.root]);
   const rows = associatedKeys(reactor, who.root, now, "rootOrSameAuthor");
   return new Set([who.root, ...rows.map((row) => row.key)]);
+}
+
+// The scope a ground's write door asks delegations about. Only a ground that declares one honors a
+// delegate at all: an inbox pool declares its own name, and the root store declares none, so a
+// delegation record copied anywhere else grants nothing. Keyed by reactor because every road into a
+// ground reaches it through its reactor; a gateway that replaces its reactor declares again.
+const declaredScopes = new WeakMap<Reactor, string>();
+
+/** Declare `scope` as the one scope `reactor`'s ground honors delegations for. */
+export function declarePrincipalScope(reactor: Reactor, scope: string): void {
+  declaredScopes.set(reactor, scope);
+}
+
+/** The scope `reactor`'s ground honors delegations for, or undefined: it honors none. */
+export function principalScopeOf(reactor: Reactor): string | undefined {
+  return declaredScopes.get(reactor);
+}
+
+const prim = (role: string, value: string | boolean) =>
+  ({ role, target: { kind: "primitive", value } }) as const;
+
+/**
+ * The one delegation shape Loam signs (README ruling 6): from `root` to `key`, for `scope`, sealed.
+ * A SPEC-14 §2 evidence record: one `principal` pointer at the root, one `kind`, and the listed roles.
+ */
+export function delegationClaims(root: string, key: string, scope: string, t: number): Claims {
+  return {
+    timestamp: t,
+    validFrom: t,
+    author: root,
+    pointers: [
+      {
+        role: "principal",
+        target: { kind: "entity", entity: { id: root, context: "rhizomatic.principal" } },
+      },
+      prim("kind", "delegation"),
+      prim("key", key),
+      prim("scope", scope),
+      prim("delegable", false),
+    ],
+  };
+}
+
+/**
+ * The delegation records that make `key` act for `who` in `scope` right now: what a revocation
+ * must strike so the key stops acting. Empty when the key does not act by delegation.
+ */
+export function standingDelegationIds(
+  reactor: Reactor,
+  now: number,
+  who: PrincipalRef,
+  key: string,
+  scope: string,
+  operator: string | undefined,
+): string[] {
+  if (key === who.root || !AUTHOR.test(who.root) || !AUTHOR.test(key)) return [];
+  const paths = resolvePrincipal(
+    reactor,
+    who.root,
+    key,
+    readOptions(now, scope, operator),
+  ).authorityPaths;
+  return [...new Set(paths.filter((p) => p.every((id) => sealed(reactor, id))).flat())].sort();
+}
+
+/**
+ * What each delegation record from one of `roots` naming `key` in this ground says at `now`: "revoked" when a negation
+ * the suppression rule honors strikes it, "not yet valid" or "expired" by its own window, and
+ * "standing" otherwise. A label reads the record only; it does not say its signer could delegate.
+ */
+export function delegationStatesFor(
+  reactor: Reactor,
+  now: number,
+  roots: Iterable<string>,
+  key: string,
+  operator: string | undefined,
+): ("revoked" | "not yet valid" | "expired" | "standing")[] {
+  const negated = reactor.negationPredicate(now, principalSuppression(operator));
+  const out: ("revoked" | "not yet valid" | "expired" | "standing")[] = [];
+  for (const d of delegationRecordsFor(reactor, roots, key)) {
+    const { validFrom, validUntil } = d.claims;
+    if (now < validFrom) out.push("not yet valid");
+    else if (validUntil !== undefined && now >= validUntil) out.push("expired");
+    else out.push(negated(d.id) ? "revoked" : "standing");
+  }
+  return out;
+}
+
+/**
+ * `standingDelegationIds` for each of `roots` that delegated to `key` in this ground: the records a
+ * revocation of the key must strike, whoever signed them. Empty when the key acts by none.
+ */
+export function standingDelegationIdsFor(
+  reactor: Reactor,
+  now: number,
+  roots: Iterable<string>,
+  key: string,
+  scope: string,
+  operator: string | undefined,
+): string[] {
+  const ids = [...roots].flatMap((root) =>
+    standingDelegationIds(reactor, now, { root }, key, scope, operator),
+  );
+  return [...new Set(ids)].sort();
+}
+
+/**
+ * The delegation records naming `key` signed by one of `roots`, read from each root's own index:
+ * every SPEC-14 evidence record points at its root's entity. A delegate only ever acts for a root
+ * that holds a grant here, so the grant subjects are the roots worth asking about.
+ */
+export function delegationRecordsFor(
+  reactor: Reactor,
+  roots: Iterable<string>,
+  key: string,
+): Delta[] {
+  const out: Delta[] = [];
+  for (const root of new Set(roots)) {
+    for (const id of reactor.byTarget(root)) {
+      const d = reactor.get(id);
+      if (d === undefined || d.claims.author !== root) continue;
+      const at = (role: string) => d.claims.pointers.find((p) => p.role === role)?.target;
+      const kind = at("kind");
+      const named = at("key");
+      if (kind?.kind !== "primitive" || kind.value !== "delegation") continue;
+      if (named?.kind === "primitive" && named.value === key) out.push(d);
+    }
+  }
+  return out;
 }

@@ -5,11 +5,11 @@
 // (`keyActsFor` / `keysActingFor` / `keysEverOf` over the reactor) and the door — an append signed
 // by the key is admitted or refused — or, for history, what a Plant view shows after a clear.
 //
-// Named gaps, each closed by the next step-5 PR unless it says otherwise:
+// Named gaps:
 //   - The door is driven through `Gateway.append`, not over HTTP; the HTTP door calls the same
 //     `authorize`, and no later PR changes that.
-//   - Connections are not yet provisioned as delegations, so every delegation here is written by
-//     hand, and the container-to-scope spelling is not yet settled: the door asks at the tenant.
+//   - Delegations here are written by hand into a ground that declares the store scope. The
+//     connection path (bind, inbox-name scope, revoke) is test/gateway/connection-delegation.test.ts.
 //   - A delegate's writes are not "yours" to clear: `keysEverOf` follows association (bindings),
 //     not authority (delegations). Provisioning will sign a binding beside each delegation.
 //   - The admin page's accept set (`admin.ts`) has no rail of its own; it asks the seam below.
@@ -126,6 +126,15 @@ const note = (seed: string, t: number): Delta =>
 async function store(verb: "write" | "admin" = "write", others: readonly string[] = []) {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(T0);
+  const gw = await ground(verb, others);
+  // These cases are about a delegation's SHAPE, so the ground declares the store scope they ask
+  // at. Only an inbox pool declares one in production; see "a ground that declares no scope".
+  gw.honorDelegationsAt(STORE_ENTITY);
+  return gw;
+}
+
+/** The same ground with no declared scope, as the root store boots. */
+async function ground(verb: "write" | "admin" = "write", others: readonly string[] = []) {
   return Gateway.boot(
     new MemoryBackend(),
     assembleGenesis({
@@ -154,6 +163,22 @@ async function door(gw: Gateway, d: Delta): Promise<"admitted" | "refused"> {
 
 const acts = (gw: Gateway, key: string, scope: string = STORE_ENTITY) =>
   keyActsFor(gw.reactor, gw.validityNow(), { root: R }, key, scope, gw.operatorAuthor);
+
+describe("a ground that declares no scope honors no delegate", () => {
+  it("the root store's door refuses a delegate the same record would admit in a declaring ground", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(T0);
+    const root = await ground();
+    at(T0 + 10);
+    await root.append([delegation(R_SEED, C, STORE_ENTITY, false, T0 + 10)]);
+    at(T0 + 20);
+    expect(await door(root, note(C_SEED, T0 + 20))).toBe("refused");
+    expect(await door(root, note(R_SEED, T0 + 21))).toBe("admitted");
+    // Control: the same record in a ground that declares the scope admits C.
+    root.honorDelegationsAt(STORE_ENTITY);
+    expect(await door(root, note(C_SEED, T0 + 22))).toBe("admitted");
+  });
+});
 
 describe("a delegated key writes for its user, within its scope", () => {
   it("a store-scoped delegation admits C's write; the root, not a bystander, stands beside it", async () => {

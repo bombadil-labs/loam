@@ -1,5 +1,5 @@
-// A connection cannot make itself unrevocable. Its own strike on its write grant does not count for
-// standing, so it must not hide that grant from the owner's revoke either. Asked at both levels: the
+// A connection cannot make itself unrevocable. Its own strike on the delegation that lets it write
+// does not count, so it must not hide that delegation from the owner's revoke either. Asked at both levels: the
 // revoke succeeds, and a write signed by the connection key is then refused. The bystander is a
 // second connection in the same container, which still writes.
 
@@ -62,7 +62,7 @@ const bind = async (gw: Gateway, seed: string) => {
   return gw.connectionInboxes.get(inbox)!;
 };
 
-describe("a connection's own strike on its write grant", () => {
+describe("a connection's own strike on its delegation", () => {
   it("does not stop the owner revoking it", async () => {
     const gw = await home();
     const conn = await bind(gw, CONN_SEED);
@@ -74,7 +74,7 @@ describe("a connection's own strike on its write grant", () => {
       (d) =>
         d.claims.author !== authorForSeed(CONN_SEED) &&
         JSON.stringify(d.claims).includes(authorForSeed(CONN_SEED)) &&
-        JSON.stringify(d.claims).includes('"write"'),
+        JSON.stringify(d.claims).includes('"delegation"'),
     )!;
     expect(grant).toBeDefined();
     await pool.append([

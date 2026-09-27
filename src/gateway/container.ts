@@ -35,6 +35,7 @@ import { isRepairable } from "../store/quarantine.js";
 import {
   CTX_GRANTS,
   grantClaims,
+  grantSubjects,
   holdsGrant,
   honoredStrikeOn,
   revocationClaims,
@@ -65,6 +66,7 @@ import { negatedAt } from "./negation.js";
 import { readTrustPolicyAt, type TrustPolicy } from "./trust.js";
 import { Gateway, type ConnectionBinding, type FederationReport } from "./gateway.js";
 import { withStamp } from "./stamp.js";
+import { delegationClaims, principalScopeOf, standingDelegationIdsFor } from "./principal.js";
 
 export const CTX_CONTAINER = "loam.container";
 export const CTX_CONTAINER_EXCLUDED = "loam.container.excluded";
@@ -2178,12 +2180,14 @@ export async function bindConnectionImpl(
       ...(backend !== undefined ? { backend } : {}),
     }));
   const pool = inbox.gateway!;
+  pool.honorDelegationsAt(name);
 
-  // The grant chain, in the pool's OWN ground (decision 2): the operator authors the owner's ADMIN
-  // grant, then the OWNER authors the connection's WRITE grant. The pool is its own gateway with its
-  // own store entity, so this never touches the real store's authority; grantHeld resolves
-  // connection-write → owner-admin → operator. The store operator appears once here (administrative
-  // provisioning, §39.1 point 3) and never on the read/write data path.
+  // The authority chain, in the pool's OWN ground (decision 2): the operator authors the owner's
+  // ADMIN grant, then the OWNER — the user's root — signs a sealed DELEGATION to the connection key,
+  // scoped to this pool's name (README ruling 6). The pool is its own gateway with its own store
+  // entity, so this never touches the real store's authority; grantHeld resolves connection-write →
+  // owner's delegation → owner-admin → operator. The store operator appears once here
+  // (administrative provisioning, §39.1 point 3) and never on the read/write data path.
   if (!holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, owner, "admin", operator)) {
     await pool.append([
       signClaims(
@@ -2206,9 +2210,7 @@ export async function bindConnectionImpl(
   ) {
     await pool.append([
       signClaims(
-        withStamp(pool.stamp(owner), (t) =>
-          grantClaims(STORE_ENTITY, opts.connectionKey, "write", owner, t),
-        ),
+        withStamp(pool.stamp(owner), (t) => delegationClaims(owner, opts.connectionKey, name, t)),
         opts.ownerSeed,
       ),
     ]);
@@ -2274,6 +2276,7 @@ export async function resumeInboxesImpl(gw: Gateway): Promise<void> {
     if (backend === undefined) continue;
     try {
       const handle = await openContainerImpl(gw, { name, backend });
+      handle.gateway?.honorDelegationsAt(name);
       gw.connectionInboxes.set(name, inboxHandle(gw, name, handle));
     } catch {
       continue; // left unattached, deliberately; see above
@@ -2281,9 +2284,11 @@ export async function resumeInboxesImpl(gw: Gateway): Promise<void> {
   }
 }
 
-// Revoke a connection: strike its WRITE grant in the inbox pool, owner-authored (§39.3c). The door
-// then refuses new writes signed by that key; past deltas keep their author and stay readable, and
-// other connections are untouched — one-connection blast radius, two-sided by construction.
+// Revoke a connection, owner-authored (§39.3c): negate the delegation that lets its key act for the
+// owner, and strike any write grant naming the key, which a pool bound before delegations still
+// holds. The door then refuses new writes signed by that key; past deltas keep their author and stay
+// readable, and other connections are untouched — one-connection blast radius, two-sided by
+// construction.
 export async function revokeConnectionImpl(opts: {
   inbox: Container;
   connectionKey: string;
@@ -2294,25 +2299,52 @@ export async function revokeConnectionImpl(opts: {
     throw new Error("revokeConnection: the inbox has no pool of its own — nothing to revoke (§39)");
   }
   const owner = authorForSeed(opts.ownerSeed);
-  const grantIds = survivingWriteGrantIds(
-    pool.reactor,
-    pool.validityNow(),
-    opts.connectionKey,
-    pool.operatorAuthor,
-  );
-  if (grantIds.length === 0) {
+  const now = pool.validityNow();
+  const scope = principalScopeOf(pool.reactor);
+  const ids = [
+    ...survivingWriteGrantIds(pool.reactor, now, opts.connectionKey, pool.operatorAuthor),
+    ...(scope === undefined
+      ? []
+      : standingDelegationIdsFor(
+          pool.reactor,
+          now,
+          grantSubjects(pool.reactor),
+          opts.connectionKey,
+          scope,
+          pool.operatorAuthor,
+        )),
+  ];
+  if (ids.length === 0) {
     throw new Error(
-      `revokeConnection: no surviving write grant names ${opts.connectionKey} in this inbox`,
+      `revokeConnection: nothing in this inbox lets ${opts.connectionKey} write — no surviving ` +
+        `write grant and no standing delegation names it`,
     );
   }
   await pool.append(
-    grantIds.map((id) =>
+    ids.map((id) =>
       signClaims(
         withStamp(pool.stamp(owner), (t) => revocationClaims(id, owner, t)),
         opts.ownerSeed,
       ),
     ),
   );
+  // The strikes landed; whether they BIND is the suppression rule's call (the signer or the
+  // operator only). Report success only once the door refuses the key.
+  if (
+    holdsGrant(
+      pool.reactor,
+      pool.validityNow(),
+      STORE_ENTITY,
+      opts.connectionKey,
+      "write",
+      pool.operatorAuthor,
+    )
+  ) {
+    throw new Error(
+      `revokeConnection: the strikes landed but ${opts.connectionKey} still writes here — ` +
+        `${owner} is neither the signer of its authority nor this store's operator`,
+    );
+  }
 }
 
 // --- the erase completeness guard (SPEC §24.8 × the mint) ----------------------------------------
