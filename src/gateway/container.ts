@@ -2232,14 +2232,27 @@ export async function bindConnectionImpl(
   // repeated bind adds nothing.
   const now = pool.validityNow();
   const others = grantSubjects(pool.reactor).filter((root) => root !== owner);
+  // For good means: the operator's, already in force, with no end, and with no negation of its own
+  // held here at all, whether in force now or scheduled to start later.
   const struckForGood = (id: string) =>
     pool.reactor.negationsOf(id).some((n) => {
       const neg = pool.reactor.get(n);
-      return neg?.claims.author === operator && neg.claims.validUntil === undefined;
+      return (
+        neg?.claims.author === operator &&
+        neg.claims.validFrom <= now &&
+        neg.claims.validUntil === undefined &&
+        pool.reactor.negationsOf(n).length === 0
+      );
     });
   const stale = [
     ...delegationRecordsFor(pool.reactor, others, opts.connectionKey).map((d) => d.id),
-    ...others.flatMap((root) => heldGrantIds(pool.reactor, root, "admin")),
+    // Only the operator's admin grants make an owner; a grant-shaped delta anyone else wrote is
+    // inert here and not worth a strike.
+    ...others.flatMap((root) =>
+      heldGrantIds(pool.reactor, root, "admin").filter(
+        (id) => pool.reactor.get(id)?.claims.author === operator,
+      ),
+    ),
   ].filter((id) => !struckForGood(id));
   const fresh = !keyActsFor(pool.reactor, now, { root: owner }, opts.connectionKey, name, operator);
   if (fresh || stale.length > 0) {
