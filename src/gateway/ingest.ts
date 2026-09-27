@@ -39,7 +39,10 @@ import {
   parseTerm,
   verifyDelta,
   type Delta,
+  type DeltaSet,
+  type EvalResult,
   type Reactor,
+  type Term,
 } from "@bombadil/rhizomatic";
 import { authorize } from "./accounts.js";
 import { budgetRefusal } from "./budget.js";
@@ -63,6 +66,8 @@ import {
   slateRefusal,
 } from "./slate.js";
 import { readTrustPolicy } from "./trust.js";
+import { governedProgram } from "./governed-trust.js";
+import { userGroundOf } from "./user-root.js";
 
 // Persist a batch, THEN serve it (the body of `Gateway.append`). The batch is validated whole (one
 // bad delta refuses the lot); it lands in the backend before the reactor sees it, so nothing a
@@ -554,13 +559,20 @@ export function offeredDeltasImpl(gw: Gateway): Delta[] {
     lens === undefined
       ? [...gw.reactor.snapshot()]
       : (() => {
-          const result = evalTermRaw(lens, gw.reactor.snapshot());
+          const result = evalRawGoverned(gw, lens, gw.reactor.snapshot());
           if (result.sort !== "dset") throw new Error("an offered lens must select a delta set");
           return withNegationClosure(gw, [...result.set]);
         })();
   const withheld = egressWithheld(gw, Date.now());
   const served = withoutErased(gw, offered);
   return withheld.size === 0 ? served : served.filter((d) => !withheld.has(d.id));
+}
+
+// Raw membership machinery runs the LOWERED program too (governed-trust.ts), in raw mode: a
+// governed trust policy trusts the keys its grants name, never the text of a `user:` subject.
+function evalRawGoverned(gw: Gateway, term: Term, input: DeltaSet): EvalResult {
+  const program = governedProgram(term, undefined, input, { raw: true }, userGroundOf(gw.reactor));
+  return evalTermRaw(program.term, input);
 }
 
 // Membership is a query, first-class (SPEC §27.6, the body of `Gateway.select`): evaluate a
@@ -575,7 +587,7 @@ export function offeredDeltasImpl(gw: Gateway): Delta[] {
 // so it hands back exactly what the Term selected, no more.
 export function selectImpl(gw: Gateway, term: unknown): Delta[] {
   const parsed = parseTerm(term);
-  const result = evalTermRaw(parsed, gw.reactor.snapshot());
+  const result = evalRawGoverned(gw, parsed, gw.reactor.snapshot());
   if (result.sort !== "dset") {
     throw new Error(
       `select: the membership term must evaluate to a delta set (dset), not a ${result.sort} — ` +
@@ -591,7 +603,7 @@ export function selectImpl(gw: Gateway, term: unknown): Delta[] {
 // newest membership. §27.6's "nearly free": every pulse re-evaluates the one Term.
 export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], void, unknown> {
   const parsed = parseTerm(term);
-  const initial = evalTermRaw(parsed, gw.reactor.snapshot());
+  const initial = evalRawGoverned(gw, parsed, gw.reactor.snapshot());
   if (initial.sort !== "dset") {
     throw new Error(
       `watch: the membership term must evaluate to a delta set (dset), not a ${initial.sort}`,
@@ -632,7 +644,7 @@ export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], v
   // discipline the entity-stream sinks run).
   gw.reactor.subscribeRaw(() => {
     if (closed) return;
-    const next = evalTermRaw(parsed, gw.reactor.snapshot());
+    const next = evalRawGoverned(gw, parsed, gw.reactor.snapshot());
     if (next.sort !== "dset") return; // the term's sort is content-independent; unreachable
     const members = live([...next.set]);
     const ids = new Set(members.map((d) => d.id));

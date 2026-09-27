@@ -9,7 +9,6 @@
 // agree; test/gateway/user-grants.test.ts holds them to it.
 
 import type { Reactor } from "@bombadil/rhizomatic";
-import { negatedAt } from "./negation.js";
 
 export const CTX_USER = "loam.user";
 export const CTX_ROLE = "loam.role";
@@ -36,14 +35,18 @@ function latestValues(
   operator: string,
   name: string,
   erased: ReadonlySet<string>,
+  cut: number,
 ): Map<string, unknown> {
   const entity = userEntity(name);
-  const negated = negatedAt(reactor, now, operator);
+  const negated = reactor.negationPredicate(
+    now,
+    (n) => n.claims.author === operator && n.claims.timestamp <= cut && !erased.has(n.id),
+  );
   const best = new Map<string, { timestamp: number; id: string; value: unknown }>();
   for (const id of reactor.byTarget(entity)) {
     if (erased.has(id)) continue;
     const d = reactor.get(id);
-    if (d === undefined || d.claims.author !== operator) continue;
+    if (d === undefined || d.claims.author !== operator || d.claims.timestamp > cut) continue;
     const { validFrom, validUntil } = d.claims;
     if (now < validFrom || (validUntil !== undefined && now >= validUntil)) continue;
     const filing = d.claims.pointers.filter(
@@ -85,7 +88,8 @@ function latestValues(
  * The root key `name` acts from at `now` in this ground, or undefined: no operator, no standing
  * user record naming them, or no root that is a well-formed key. Absence is absence; a caller
  * holding a grant that names this user gets no standing from it. `erased` holds ids erased but
- * not yet purged, which count as gone, as they do for the View reader.
+ * not yet purged, which count as gone, as they do for the View reader. `cut` reads the ground as
+ * it stood at an as-of instant: only deltas signed by then, claims and strikes alike.
  */
 export function userRootAt(
   reactor: Reactor,
@@ -93,9 +97,10 @@ export function userRootAt(
   operator: string | undefined,
   name: string,
   erased: ReadonlySet<string> = NONE,
+  cut = Infinity,
 ): string | undefined {
   if (operator === undefined) return undefined;
-  const values = latestValues(reactor, now, operator, name, erased);
+  const values = latestValues(reactor, now, operator, name, erased, cut);
   if (values.get(CTX_USER) !== name) return undefined;
   const root = values.get(CTX_ROOT);
   return typeof root === "string" && AUTHOR.test(root) ? root : undefined;
@@ -107,12 +112,78 @@ export function userRootAt(
 export interface UserGround {
   readonly reactor: Reactor;
   readonly erased: () => ReadonlySet<string>;
+  /** An as-of read's instant: the ground holds only what was signed by then. */
+  readonly cut?: number;
 }
 const userGrounds = new WeakMap<Reactor, () => UserGround>();
 
 /** Declare where `reactor`'s grants naming users read those users. */
 export function declareUserGround(reactor: Reactor, ground: () => UserGround): void {
   userGrounds.set(reactor, ground);
+}
+
+/** Where `reactor` reads its users: the declared ground, else itself. */
+export function userGroundOf(reactor: Reactor): UserGround {
+  return userGrounds.get(reactor)?.() ?? { reactor, erased: () => NONE };
+}
+
+/**
+ * Every root key `name` could be read as under RAW evaluation, which ignores validity: the keys
+ * named by the operator's root claims for that user, less any the operator struck (a strike
+ * counts while it survives its own strikes, whatever its window). Empty unless some such operator
+ * claim still names the user. This is the raw posture the grants themselves get: validity ignored,
+ * every surviving operator strike binding. It is NOT a superset of the present root — a strike that
+ * has lapsed counts here and not at `now`.
+ */
+export function userRootsRaw(
+  ground: UserGround,
+  operator: string | undefined,
+  name: string,
+): string[] {
+  if (operator === undefined) return [];
+  const { reactor } = ground;
+  const erased = ground.erased();
+  const cut = ground.cut ?? Infinity;
+  const entity = userEntity(name);
+  const memo = new Map<string, boolean>();
+  const struck = (id: string): boolean => {
+    const known = memo.get(id);
+    if (known !== undefined) return known;
+    memo.set(id, false);
+    const verdict = reactor.negationsOf(id).some((n) => {
+      const neg = reactor.get(n);
+      return (
+        neg !== undefined &&
+        !erased.has(n) &&
+        neg.claims.author === operator &&
+        neg.claims.timestamp <= cut &&
+        !struck(n)
+      );
+    });
+    memo.set(id, verdict);
+    return verdict;
+  };
+  let named = false;
+  const roots = new Set<string>();
+  for (const id of reactor.byTarget(entity)) {
+    if (erased.has(id)) continue;
+    const d = reactor.get(id);
+    if (d === undefined || d.claims.author !== operator || d.claims.timestamp > cut) continue;
+    if (struck(id)) continue;
+    const at = (context: string): boolean =>
+      d.claims.pointers.some(
+        (p) =>
+          p.target.kind === "entity" &&
+          p.target.entity.id === entity &&
+          p.target.entity.context === context,
+      );
+    const values = d.claims.pointers.flatMap((p) =>
+      p.target.kind === "primitive" && typeof p.target.value === "string" ? [p.target.value] : [],
+    );
+    if (at(CTX_USER) && values.includes(name)) named = true;
+    if (at(CTX_ROOT)) for (const v of values) if (AUTHOR.test(v)) roots.add(v);
+  }
+  return named ? [...roots].sort() : [];
 }
 
 /**
@@ -126,13 +197,14 @@ export function subjectKeyAt(
   subject: string,
 ): string | undefined {
   if (!subject.startsWith(USER_PREFIX)) return subject;
-  const ground = userGrounds.get(reactor)?.();
+  const ground = userGroundOf(reactor);
   return userRootAt(
-    ground?.reactor ?? reactor,
+    ground.reactor,
     now,
     operator,
     subject.slice(USER_PREFIX.length),
-    ground?.erased() ?? NONE,
+    ground.erased(),
+    ground.cut,
   );
 }
 

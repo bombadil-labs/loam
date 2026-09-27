@@ -55,6 +55,8 @@ import {
 import type { Gateway } from "./gateway.js";
 import type { StoreBackend } from "../store/backend.js";
 import { withStamp } from "./stamp.js";
+import { governedProgram } from "./governed-trust.js";
+import { userGroundOf } from "./user-root.js";
 
 export const ERASE_ENTITY = "loam:erasure";
 export const CTX_ERASE = "loam.erasure";
@@ -623,7 +625,9 @@ export function readGrounds(
       for (const id of live) mask.live.add(id);
       continue;
     }
-    const masked = evalTerm(parseTerm({ op: "mask", policy: mask.policy, in: "input" }), over, now);
+    const maskTerm = parseTerm({ op: "mask", policy: mask.policy, in: "input" });
+    const program = governedProgram(maskTerm, undefined, over, { now }, userGroundOf(gw.reactor));
+    const masked = evalTerm(program.term, over, now);
     if (masked.sort !== "dset") throw new Error("a mask always evaluates to a delta set");
     for (const delta of masked.set) mask.live.add(delta.id);
   }

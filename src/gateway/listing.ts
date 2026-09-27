@@ -40,6 +40,7 @@ import { groupPrograms } from "./lifecycle.js";
 import { programOf, type ProgramName } from "./registration.js";
 import type { ResolvedNode } from "../surface/surface.js";
 import { withStamp } from "./stamp.js";
+import { USER_PREFIX } from "./user-root.js";
 
 // WHAT A PAGE COSTS. Every page pays three separate costs, and two of them are now independent
 // of the store's size (H8, ticket T163):
@@ -310,10 +311,16 @@ function addPointedEntities(d: Delta, contexts: ReadonlySet<string>, into: Set<s
 }
 
 // Plain claim: cannot remove or revive a member (see the block comment above). `feedsTrust` is the
-// mask's own ground-dependence — see `trustFeeder`.
+// mask's own ground-dependence — see `trustFeeder`. A claim at a user record is never plain: a
+// governed mask trusts the root a user-named grant resolves to (governed-trust.ts), so re-pointing
+// a user can make a dormant strike bind.
 const isPlainClaim = (gw: Gateway, d: Delta, feedsTrust: (d: Delta) => boolean): boolean =>
   !isContainerLaw(d, gw.operatorAuthor) &&
-  d.claims.pointers.every((p) => p.target.kind !== "delta") &&
+  d.claims.pointers.every(
+    (p) =>
+      p.target.kind !== "delta" &&
+      !(p.target.kind === "entity" && p.target.entity.id.startsWith(USER_PREFIX)),
+  ) &&
   gw.reactor.negationsOf(d.id).length === 0 &&
   !feedsTrust(d);
 

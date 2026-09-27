@@ -65,6 +65,10 @@ import {
 } from "./binding-policy.js";
 import { loadResolvers } from "./resolvers.js";
 import { stamped, withStamp, type Stamp } from "./stamp.js";
+import { governedHook, governedProgram } from "./governed-trust.js";
+import { userGroundOf } from "./user-root.js";
+
+const RAW = { raw: true } as const;
 
 // Every claim template must be VISIBLE to its own schema: substitute sentinels for the arg
 // holes, build the specimen delta, and require that at least one entity the template touches
@@ -100,7 +104,8 @@ function assertTemplatesVisible(
       ...new Set(pointers.flatMap((p) => (p.target.kind === "entity" ? [p.target.entity.id] : []))),
     ];
     const seen = sentinels.some((root) => {
-      const result = evalTermRaw(schema.body, ground, root, registry);
+      const program = governedProgram(schema.body, registry, ground, RAW, undefined);
+      const result = evalTermRaw(program.term, ground, root, program.registry);
       if (result.sort !== "hview") return false;
       for (const entries of result.hview.props.values()) {
         if (entries.some((e) => e.delta.id === specimen.id)) return true;
@@ -121,7 +126,9 @@ function assertTemplatesVisible(
 // sort of a term is content-independent (the offeredLens trick), so trial-eval it empty and
 // refuse a dset-sort body before it can persist, half-bind, or corrupt a boot.
 function assertMaterializable(schema: HyperSchema, registry: SchemaRegistry): void {
-  const trial = evalTermRaw(schema.body, DeltaSet.from([]), "loam:trial", registry);
+  const empty = DeltaSet.from([]);
+  const program = governedProgram(schema.body, registry, empty, RAW, undefined);
+  const trial = evalTermRaw(program.term, empty, "loam:trial", program.registry);
   if (trial.sort !== "hview") {
     throw new Error(
       `schema ${schema.name}: its body must yield a hyperview (a group over the gathered ` +
@@ -265,7 +272,14 @@ export function matForImpl(
       }
       gw.publicLazyMats.add(matName);
     }
-    gw.reactor.register(matName, def.hyperschema.body, [entity], gw.validityNow(), gw.registry);
+    gw.reactor.register(
+      matName,
+      def.hyperschema.body,
+      [entity],
+      gw.validityNow(),
+      gw.registry,
+      governedHook(def.hyperschema.body, gw.registry, () => userGroundOf(gw.reactor)),
+    );
     gw.lazyMats.add(matName);
   }
   return matName;
@@ -373,6 +387,7 @@ export function rebindImpl(gw: Gateway, next: Bound[]): void {
       program.roots,
       gw.validityNow(),
       registry,
+      governedHook(program.hyperschema.body, registry, () => userGroundOf(gw.reactor)),
     );
   }
   gw.lazyMats.clear(); // generation-stale by construction — new watches re-create their own
@@ -967,6 +982,7 @@ export function replayRegistrationsImpl(gw: Gateway): void {
         program.roots,
         gw.validityNow(),
         registry,
+        governedHook(program.hyperschema.body, registry, () => userGroundOf(gw.reactor)),
       );
     }
     gw.registered = accepted;
@@ -1025,6 +1041,7 @@ export function registerImpl(
     program.roots,
     gw.validityNow(),
     registry,
+    governedHook(hyperschema.body, registry, () => userGroundOf(gw.reactor)),
   );
   gw.registered = next;
   gw.registry = registry;

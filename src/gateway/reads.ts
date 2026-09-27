@@ -18,7 +18,10 @@ import {
   hviewCanonicalHex,
   resolveView,
   viewCanonicalHex,
+  type EvalResult,
   type HView,
+  type SchemaRegistry,
+  type Term,
   type MaterializationChange,
   type View,
 } from "@bombadil/rhizomatic";
@@ -34,6 +37,8 @@ import type { PatchNode, ResolvedNode } from "./gql.js";
 import type { Registered } from "./gql.js";
 import { lensOf, type ResolverSpecs } from "./registration.js";
 import { applyResolvers, decorateChildren } from "./resolvers.js";
+import { governedProgram, grantGround } from "./governed-trust.js";
+import { userGroundOf } from "./user-root.js";
 
 const toError = (err: unknown): Error => (err instanceof Error ? err : new Error(String(err)));
 
@@ -103,6 +108,48 @@ export function annotateImpl(
 // An `asOf` read (SPEC §26) can use NEITHER warm path — the materialization IS the present by
 // construction — so it takes the one honest path: evaluate the same body over the ground as it
 // stood at T (groundAsOf). Same gather, a narrower ground; nothing about resolution is time-cased.
+// Every governed read runs the LOWERED program (governed-trust.ts): the signed body with its trust
+// predicate resolved to explicit keys over the same input, so a grant naming a user trusts that
+// user's root. The users are this gateway's (a pool reads its host's); an as-of read passes `cut`,
+// and reads them as they stood then.
+function evalGoverned(
+  gw: Gateway,
+  body: Term,
+  input: DeltaSet,
+  now: number,
+  entity: string,
+  registry: SchemaRegistry | undefined,
+  cut?: number,
+): EvalResult {
+  const users = userGroundOf(gw.reactor);
+  const program = governedProgram(
+    body,
+    registry,
+    input,
+    { now },
+    cut === undefined ? users : { ...users, cut },
+  );
+  return evalTerm(program.term, input, now, entity, program.registry);
+}
+
+// The same over the reactor's own set, whose grants the index finds without a scan.
+function evalGovernedLive(
+  gw: Gateway,
+  body: Term,
+  now: number,
+  entity: string,
+  registry: SchemaRegistry | undefined,
+): EvalResult {
+  const program = governedProgram(
+    body,
+    registry,
+    grantGround(gw.reactor),
+    { now },
+    userGroundOf(gw.reactor),
+  );
+  return gw.reactor.eval(program.term, now, entity, program.registry);
+}
+
 // READ CLOSURE IS A GATHER-LEVEL NARROWING, and this is one of its five named sites (SPEC §29.3).
 // The `now` is REQUIRED here, not optional: a lapse computed at the door means every door that
 // honours `read` needs the moment, and an optional one defaulting to anything at all would serve a
@@ -135,12 +182,14 @@ export function gatherImpl(
     // one of its pools resolves here and nowhere else, and an `expand` inside it finds its
     // sibling readings in the same fold rather than in the root's.
     const surface = gw.boundSurface(binding);
-    const result = evalTerm(
+    const result = evalGoverned(
+      gw,
       gw.def(name, binding).hyperschema.body,
       boundGroundFor(gw, binding, now, asOf),
       asOf ?? gw.validityNow(now),
       entity,
       surface.registry,
+      asOf,
     );
     if (result.sort !== "hview") throw new Error(`schema ${name} does not evaluate to a hyperview`);
     return result.hview;
@@ -165,12 +214,14 @@ export function gatherImpl(
   // explicit (T190).
   const scoped = channelGroundFor(gw, name, now, asOf);
   if (scoped !== undefined) {
-    const result = evalTerm(
+    const result = evalGoverned(
+      gw,
       gw.def(name).hyperschema.body,
       scoped,
       asOf ?? gw.validityNow(now),
       entity,
       gw.registry,
+      asOf,
     );
     if (result.sort !== "hview") throw new Error(`schema ${name} does not evaluate to a hyperview`);
     return result.hview;
@@ -181,7 +232,7 @@ export function gatherImpl(
     const ground = asOfGroundImpl(gw, asOf, closed);
     // An as-of read reconstructs the past on both axes: what had been said by `asOf`, and what
     // held at `asOf`.
-    const result = evalTerm(def.hyperschema.body, ground, asOf, entity, gw.registry);
+    const result = evalGoverned(gw, def.hyperschema.body, ground, asOf, entity, gw.registry, asOf);
     if (result.sort !== "hview") {
       throw new Error(`schema ${name} does not evaluate to a hyperview`);
     }
@@ -208,8 +259,9 @@ export function gatherImpl(
   const def = gw.def(name);
   const result =
     closed.size === 0
-      ? gw.reactor.eval(def.hyperschema.body, gw.validityNow(now), entity, gw.registry)
-      : evalTerm(
+      ? evalGovernedLive(gw, def.hyperschema.body, gw.validityNow(now), entity, gw.registry)
+      : evalGoverned(
+          gw,
           def.hyperschema.body,
           readGround(gw, now),
           gw.validityNow(now),
@@ -384,8 +436,9 @@ export function gatherForRetractionImpl(
   // its container's registry, where a lens that lives only in a pool is known.
   const result =
     binding === undefined
-      ? gw.reactor.eval(def.hyperschema.body, gw.validityNow(now), entity, gw.registry)
-      : evalTerm(
+      ? evalGovernedLive(gw, def.hyperschema.body, gw.validityNow(now), entity, gw.registry)
+      : evalGoverned(
+          gw,
           def.hyperschema.body,
           DeltaSet.from(gw.connectionScope({ bound: binding.container })),
           gw.validityNow(now),
@@ -503,29 +556,34 @@ export function resolvePinnedImpl(
   // old lens over the connection's scope, never over the store's own ground.
   const result =
     binding !== undefined
-      ? evalTerm(
+      ? evalGoverned(
+          gw,
           reg.hyperschema.body,
           boundGroundFor(gw, binding, now, asOf),
           asOf ?? gw.validityNow(now),
           entity,
           gw.registry,
+          asOf,
         )
       : asOf === undefined
         ? closed.size === 0
-          ? gw.reactor.eval(reg.hyperschema.body, gw.validityNow(now), entity, gw.registry)
-          : evalTerm(
+          ? evalGovernedLive(gw, reg.hyperschema.body, gw.validityNow(now), entity, gw.registry)
+          : evalGoverned(
+              gw,
               reg.hyperschema.body,
               readGround(gw, now),
               gw.validityNow(now),
               entity,
               gw.registry,
             )
-        : evalTerm(
+        : evalGoverned(
+            gw,
             reg.hyperschema.body,
             asOfGroundImpl(gw, asOf, closed),
             asOf,
             entity,
             gw.registry,
+            asOf,
           );
   if (result.sort !== "hview") {
     throw new Error(`schema ${reg.hyperschema.name} does not evaluate to a hyperview`);
@@ -605,7 +663,8 @@ export function watchEntityImpl(
       closed.size === 0
         ? gw.reactor.materializedView(matName, entity)
         : (() => {
-            const result = evalTerm(
+            const result = evalGoverned(
+              gw,
               bound.hyperschema.body,
               readGround(gw, now),
               gw.validityNow(now),

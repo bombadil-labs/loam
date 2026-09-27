@@ -67,6 +67,8 @@ import { lawfulDeltasAt, lawfulHistory } from "./registration.js";
 import { negatedAt } from "./negation.js";
 import type { Gateway } from "./gateway.js";
 import { withStamp } from "./stamp.js";
+import { governedProgram } from "./governed-trust.js";
+import { userGroundOf } from "./user-root.js";
 
 /**
  * The entity both new records DECLARE — the marker that tells a slate record and a graveyard apart
@@ -558,7 +560,15 @@ export function freezeAgreement(
 // bring the read-closure narrowing into the membership machinery and jam the cut, §29.3) — the
 // reader takes a bare Reactor for exactly that reason: there is no gateway here to narrow.
 function evalMembership(reactor: Reactor, term: unknown): Delta[] {
-  const result = evalTermRaw(parseTerm(term), reactor.snapshot());
+  const ground = reactor.snapshot();
+  const program = governedProgram(
+    parseTerm(term),
+    undefined,
+    ground,
+    { raw: true },
+    userGroundOf(reactor),
+  );
+  const result = evalTermRaw(program.term, ground);
   if (result.sort !== "dset") throw new Error("a membership Term must select a delta set");
   return [...result.set];
 }

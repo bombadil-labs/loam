@@ -38,6 +38,8 @@ import { escapeHtml, page } from "./session.js";
 import { ADMIN_PATH, ADMIN_REVOKE_PATH, adminPages, type RevokePlan } from "./admin-pages.js";
 import { withStamp } from "../gateway/stamp.js";
 import { negatedAt } from "../gateway/negation.js";
+import { governedProgram } from "../gateway/governed-trust.js";
+import { userGroundOf } from "../gateway/user-root.js";
 
 // A pasted offer carries real deltas — a store's worth, potentially. Bounded, but generously.
 const FEDERATE_MAX_BODY = 1024 * 1024;
@@ -468,7 +470,15 @@ ${flowNote}`;
           );
           return;
         }
-        const result = evalTermRaw(term, DeltaSet.from(deltas));
+        const offer = DeltaSet.from(deltas);
+        const program = governedProgram(
+          term,
+          undefined,
+          offer,
+          { raw: true },
+          userGroundOf(gw.reactor),
+        );
+        const result = evalTermRaw(program.term, offer);
         if (result.sort !== "dset") {
           refuse(
             res,

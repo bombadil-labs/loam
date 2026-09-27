@@ -12,9 +12,6 @@
 // chain — but `authorize` consults exactly one thing: standing at `loam:store`.
 
 import {
-  DeltaSet,
-  evalTerm,
-  parseTerm,
   type Claims,
   type Delta,
   type HyperSchema,
@@ -25,6 +22,8 @@ import {
 import { keyActsFor, principalScopeOf } from "./principal.js";
 import { subjectKeyAt } from "./user-root.js";
 import { STORE_ENTITY } from "./genesis.js";
+import { CTX_GRANTS, dataStrikers, lawfulStrikersJson } from "./governed-trust.js";
+export { CTX_GRANTS, lawfulStrikersJson } from "./governed-trust.js";
 import { entityGatherBody } from "./gather.js";
 import { eraseDefect } from "./erase.js";
 import { publicDefect } from "./public.js";
@@ -38,7 +37,6 @@ import { slateDefect } from "./slate.js";
 
 export const CTX_TENANT = "loam.tenant";
 export const CTX_MEMBERS = "loam.members";
-export const CTX_GRANTS = "loam.grants";
 // `write` publishes, `admin` additionally mints grants and retires constitution, `register` (T174)
 // shapes the store — but only inside the entity-namespace PREFIX its own grant names — and
 // `federate` (T188) opens and tends federation channels, but only on the CONTAINER its own grant
@@ -178,62 +176,6 @@ export const TENANT: HyperSchema = { name: "Tenant", alg: 1, body: entityGatherB
 // a federated pull ever admits deltas authored by that key. Closing it means narrowing this term,
 // which moves the bytes of an exported gather body; the rail that would close it asserts a register
 // grantee's ingested strike is inert in a governed read.
-// The operator's surviving grants, as a Term: grant-shaped deltas the operator minted (admin grants
-// only, when asked), after masking by the operator's own negations — a stranger cannot shrink the
-// trusted set by negating a grant delta. `lawfulStrikersJson` reflects over it and `dataStruck`
-// evaluates it, so the two read one definition.
-function lawfulGrantsTermJson(operator: string, adminsOnly: boolean): unknown {
-  const operatorMinted = { match: { field: "author", cmp: "eq", const: operator } };
-  const grantShaped = {
-    hasPointer: { targetEntity: STORE_ENTITY, context: { exact: CTX_GRANTS } },
-  };
-  const adminVerbed = {
-    hasPointer: { role: { exact: "verb" }, targetValue: { vcmp: { cmp: "eq", value: "admin" } } },
-  };
-  return {
-    op: "select",
-    pred: {
-      and: [grantShaped, adminsOnly ? { and: [operatorMinted, adminVerbed] } : operatorMinted],
-    },
-    in: {
-      op: "mask",
-      policy: { trust: { match: { field: "author", cmp: "eq", const: operator } } },
-      in: "input",
-    },
-  };
-}
-
-/** @internal — the data-strike trust predicate, exported for its parity rail */
-export function lawfulStrikersJson(operator: string, adminsOnly: boolean): unknown {
-  return {
-    or: [
-      { match: { field: "author", cmp: "eq", const: operator } },
-      {
-        inView: {
-          term: lawfulGrantsTermJson(operator, adminsOnly),
-          field: "author",
-          extract: { role: "subject" },
-        },
-      },
-    ],
-  };
-}
-
-// The strings an `inView` extract reflects from one pointer role, exactly as the substrate's
-// `extractReflected` does: an entity id, a delta id, or a STRING primitive. Any other primitive
-// names no author.
-function reflectedSubjects(d: Delta, role: string): string[] {
-  const out: string[] = [];
-  for (const p of d.claims.pointers) {
-    if (p.role !== role) continue;
-    const t = p.target;
-    if (t.kind === "entity") out.push(t.entity.id);
-    else if (t.kind === "delta") out.push(t.deltaRef.delta);
-    else if (typeof t.value === "string") out.push(t.value);
-  }
-  return out;
-}
-
 // The canonical gather with a TRUST-AWARE negation mask: data negations bind only from the
 // operator and the operator's grantees. A federated stranger's strike is inert here — the
 // heckler's veto ends where this body begins.
@@ -246,9 +188,9 @@ export function governedGatherBody(operator: string): Term {
 // grantee's strike must not retire the operator's schema) and wrong for data, where the governed
 // gather honors the wider community — the operator plus any author their surviving grants name. Any
 // operation that FILTERS data by survival wants this one; anything resolving the constitution wants
-// the other. The striker set RESTATES `lawfulStrikersJson(operator, false)` in code: the substrate
-// predicate takes a function, not a Pred, so the gather's mask and this filter are two derivations
-// of one rule, and a change to one must change the other. Ungoverned, every negation binds.
+// the other. The strikers are `governedStrikers` (governed-trust.ts), the same set every governed
+// read lowers its mask to, so this filter and the gather cannot drift. Ungoverned, every negation
+// binds.
 //
 // Absence is not suppression: an id the store does not hold answers FALSE — it is not something
 // this can say has been struck. Callers weighing a purged source (§11) must ask erasure, not this.
@@ -273,32 +215,6 @@ export function dataStrikeWitnesses(
   if (operator === undefined) return reactor.negationWitnesses(now, () => true);
   const strikers = dataStrikers(reactor, now, operator);
   return reactor.negationWitnesses(now, (n) => strikers.has(n.claims.author));
-}
-
-// The trusted strikers, read from the same Term the gather's mask reflects over: the operator,
-// plus the subject of every surviving operator grant valid at `now`.
-function dataStrikers(reactor: Reactor, now: number, operator: string): Set<string> {
-  // Every grant is filed at the store entity, so the index finds the candidates. The term's mask
-  // must see every negation that can reach them, so the candidates carry their whole negation
-  // closure (H1); nothing else in the store can change which grants survive.
-  const scope = new Map<string, Delta>();
-  const take = (id: string): void => {
-    const d = reactor.get(id);
-    if (d === undefined || scope.has(id)) return;
-    scope.set(id, d);
-    for (const n of reactor.negationsOf(id)) take(n);
-  };
-  for (const id of reactor.byTarget(STORE_ENTITY)) take(id);
-  const grants = evalTerm(
-    parseTerm(lawfulGrantsTermJson(operator, false)),
-    DeltaSet.from(scope.values()),
-    now,
-  );
-  if (grants.sort !== "dset")
-    throw new Error("the lawful-grants term always evaluates to a delta set");
-  const strikers = new Set<string>([operator]);
-  for (const g of grants.set) for (const s of reflectedSubjects(g, "subject")) strikers.add(s);
-  return strikers;
 }
 
 // WHICH strike actually retired `id`, if any — the constitutional question, answered by the same
