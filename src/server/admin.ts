@@ -244,7 +244,8 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     if (gw.operatorAuthor !== undefined) accept.add(gw.operatorAuthor);
     if (seed.kind === "present") {
       const who = { root: authorForSeed(seed.seed) };
-      for (const key of keysActingFor(gw.reactor, gw.validityNow(), who, "*")) accept.add(key);
+      for (const key of keysActingFor(gw.reactor, gw.validityNow(), who, "*", gw.operatorAuthor))
+        accept.add(key);
     }
     const attention = {
       summary: attentionSummaryImpl(gw, session.user, accept, { containers: [...reach] }),
