@@ -469,7 +469,50 @@ describe("a pool reads its host's users", () => {
     expect(pool.reactor.negationsOf(named.id)).toEqual([]);
     await expect(
       gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED }),
-    ).rejects.toThrow(/cannot be read right now/);
+    ).rejects.toThrow(/cannot be read now/);
+    await gw.close();
+  });
+
+  it("a connection cannot block its own revoke by filing grants that bind nothing", async () => {
+    const gw = await store();
+    await gw.append([
+      op(userClaims("ada", OP, 10)),
+      op(rootClaims("ada", K1, OP, 11)),
+      op(grantClaims(STORE_ENTITY, K1, "write", OP, 12)),
+      op(
+        containerClaims(
+          {
+            container: "home:ada",
+            trust: "curated",
+            posture: "shared",
+            membership: {
+              op: "select",
+              pred: { match: { field: "author", cmp: "eq", const: K1 } },
+              in: "input",
+            },
+          },
+          OP,
+          13,
+        ),
+      ),
+    ]);
+    const conn = await gw.bindConnection({
+      container: "home:ada",
+      connectionKey: CONN,
+      ownerSeed: K1_SEED,
+    });
+    const pool = conn.gateway!;
+    // The connection may write, so its grant-shaped deltas land; they bind nothing.
+    for (const verb of ["write", "admin"] as const) {
+      expect(
+        await door(
+          pool,
+          signClaims(grantClaims(STORE_ENTITY, "user:ghost", verb, CONN, 30), CONN_SEED),
+        ),
+      ).toBe("admitted");
+    }
+    await gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED });
+    expect(await door(pool, observed(FERN, "height", 17, 116, CONN_SEED))).toBe("refused");
     await gw.close();
   });
 });

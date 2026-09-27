@@ -2387,16 +2387,28 @@ export async function revokeConnectionImpl(opts: {
   // A grant naming a user whose root cannot be read right now may stand again later, and the
   // delegations it would carry cannot be found now. Refuse rather than report a revoke that might
   // not stick.
+  // Only a grant that could BIND counts: a surviving admin grant from the operator or an effective
+  // admin. A grant-shaped delta anyone else wrote confers nothing and must not be able to block a
+  // revoke — the connection being revoked can write one.
   const unreadable = grantSubjects(pool.reactor).filter(
     (subject) =>
       subject.startsWith(USER_PREFIX) &&
-      subjectKeyAt(pool.reactor, now, pool.operatorAuthor, subject) === undefined,
+      subjectKeyAt(pool.reactor, now, pool.operatorAuthor, subject) === undefined &&
+      survivingGrantIds(pool.reactor, now, subject, "admin", pool.operatorAuthor).some((id) => {
+        const issuer = pool.reactor.get(id)?.claims.author;
+        return (
+          issuer !== undefined &&
+          (issuer === pool.operatorAuthor ||
+            holdsGrant(pool.reactor, now, STORE_ENTITY, issuer, "admin", pool.operatorAuthor))
+        );
+      }),
   );
   if (unreadable.length > 0) {
     throw new Error(
-      `revokeConnection: this inbox holds grants naming ${unreadable.join(", ")}, whose root ` +
-        `cannot be read right now, so what lets ${opts.connectionKey} write cannot be found in ` +
-        `full. Nothing was struck.`,
+      `revokeConnection: this inbox holds an owner grant naming ${unreadable.join(", ")}, whose ` +
+        `root cannot be read now — that user's record may be struck or erased — so what lets ` +
+        `${opts.connectionKey} write cannot be found in full. Nothing was struck. If that person ` +
+        `is gone for good, drop this inbox instead.`,
     );
   }
   const ids = [
