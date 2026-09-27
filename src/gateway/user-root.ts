@@ -139,11 +139,13 @@ export function subjectKeyAt(
 /**
  * Could `subject` EVER name `key` here: it is that key, or it names a user for whom this ground
  * (or its host) holds an operator-signed root claim naming `key` — valid or not yet, struck or not,
- * since a strike can lapse and a window can open — unless the operator struck it for good. A revoke that must stop `key` for good asks
+ * since a strike can lapse and a window can open — unless the operator struck it for good (a strike already in force, with no end, nothing held
+ * against it). A revoke that must stop `key` for good asks
  * this, not what the subject names right now.
  */
 export function subjectCouldName(
   reactor: Reactor,
+  now: number,
   operator: string | undefined,
   subject: string,
   key: string,
@@ -171,6 +173,7 @@ export function subjectCouldName(
       const neg = ground.get(n);
       return (
         neg?.claims.author === operator &&
+        neg.claims.validFrom <= now &&
         neg.claims.validUntil === undefined &&
         ground.negationsOf(n).length === 0
       );
@@ -187,6 +190,7 @@ export function subjectCouldName(
  */
 export function keysSubjectCouldName(
   reactor: Reactor,
+  now: number,
   operator: string | undefined,
   subject: string,
 ): string[] {
@@ -209,6 +213,7 @@ export function keysSubjectCouldName(
       const neg = ground.get(n);
       return (
         neg?.claims.author === operator &&
+        neg.claims.validFrom <= now &&
         neg.claims.validUntil === undefined &&
         ground.negationsOf(n).length === 0
       );

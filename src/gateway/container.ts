@@ -2138,11 +2138,12 @@ export function operatorStruckForGood(
 }
 
 /**
- * Is delegation record `d` struck for good: a negation by its own signer or the operator, with no
- * end, and nothing held against that negation? (principalSuppression honors only those two.)
+ * Is delegation record `d` struck for good: a negation by its own signer or the operator, already in
+ * force, with no end, and nothing held against that negation? (principalSuppression honors only those two.)
  */
 function delegationStruckForGood(
   reactor: Reactor,
+  now: number,
   operator: string | undefined,
   d: Delta,
 ): boolean {
@@ -2151,6 +2152,7 @@ function delegationStruckForGood(
     return (
       neg !== undefined &&
       (neg.claims.author === d.claims.author || neg.claims.author === operator) &&
+      neg.claims.validFrom <= now &&
       neg.claims.validUntil === undefined &&
       reactor.negationsOf(n).length === 0
     );
@@ -2476,7 +2478,7 @@ export async function revokeConnectionImpl(opts: {
   const naming = grantSubjects(pool.reactor).filter(
     (subject) =>
       subject.startsWith(USER_PREFIX) &&
-      subjectCouldName(pool.reactor, pool.operatorAuthor, subject, opts.connectionKey) &&
+      subjectCouldName(pool.reactor, now, pool.operatorAuthor, subject, opts.connectionKey) &&
       (["write", "admin"] as const).some((verb) =>
         heldGrantIds(pool.reactor, subject, verb).some(
           (id) =>
@@ -2499,7 +2501,7 @@ export async function revokeConnectionImpl(opts: {
         !operatorStruckForGood(pool.reactor, now, pool.operatorAuthor, id, opts.connectionKey),
     );
     if (!live) continue;
-    for (const key of keysSubjectCouldName(pool.reactor, pool.operatorAuthor, subject)) {
+    for (const key of keysSubjectCouldName(pool.reactor, now, pool.operatorAuthor, subject)) {
       if (key !== opts.connectionKey) candidates.add(key);
     }
   }
@@ -2507,7 +2509,7 @@ export async function revokeConnectionImpl(opts: {
   const latent = new Set<string>();
   for (const key of candidates) {
     for (const d of delegationRecordsFor(pool.reactor, [key], opts.connectionKey)) {
-      if (delegationStruckForGood(pool.reactor, pool.operatorAuthor, d)) continue;
+      if (delegationStruckForGood(pool.reactor, now, pool.operatorAuthor, d)) continue;
       if (key === owner || byOperator) latentIds.push(d.id);
       else latent.add(key);
     }

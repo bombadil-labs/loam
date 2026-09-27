@@ -895,4 +895,111 @@ describe("a pool reads its host's users", () => {
       await gw.close();
     });
   });
+
+  describe("a strike that has not started is not a strike yet", () => {
+    async function inbox(T0: number) {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(T0);
+      const gw = await store();
+      await gw.append([
+        op(userClaims("ada", OP, T0)),
+        op(rootClaims("ada", K1, OP, T0 + 1)),
+        op(grantClaims(STORE_ENTITY, K1, "write", OP, T0 + 2)),
+        op(
+          containerClaims(
+            {
+              container: "home:ada",
+              trust: "curated",
+              posture: "shared",
+              membership: {
+                op: "select",
+                pred: { match: { field: "author", cmp: "eq", const: K1 } },
+                in: "input",
+              },
+            },
+            OP,
+            T0 + 3,
+          ),
+        ),
+      ]);
+      const conn = await gw.bindConnection({
+        container: "home:ada",
+        connectionKey: CONN,
+        ownerSeed: K1_SEED,
+      });
+      vi.setSystemTime(T0 + 10);
+      return { gw, conn, pool: conn.gateway! };
+    }
+    const outcome = async (gw: Gateway, conn: Awaited<ReturnType<typeof inbox>>["conn"]) => {
+      try {
+        await gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED });
+        return "revoked";
+      } catch {
+        return "refused";
+      }
+    };
+
+    it("a future-start strike on a latent delegation counts only once it starts", async () => {
+      const T0 = Date.now();
+      const results: string[] = [];
+      for (const at of [T0 + 20, T0 + 2000]) {
+        const { gw, conn, pool } = await inbox(T0);
+        await pool.append([
+          op(grantClaims(STORE_ENTITY, "user:ada", "admin", OP, T0 + 4)),
+          op(grantClaims(STORE_ENTITY, K2, "write", OP, T0 + 5)),
+        ]);
+        const d = signClaims(
+          delegationClaims(K2, CONN, inboxName("home:ada", CONN), T0 + 6),
+          K2_SEED,
+        );
+        await pool.append([d]);
+        await pool.append([op({ ...makeNegationClaims(OP, T0 + 7, d.id), validFrom: T0 + 2000 })]);
+        await gw.append([op({ ...rootClaims("ada", K2, OP, T0 + 8), validFrom: T0 + 1000 })]);
+        vi.setSystemTime(at);
+        results.push(await outcome(gw, conn));
+        await gw.close();
+      }
+      expect(results).toEqual(["refused", "revoked"]);
+    });
+
+    it("a future-start strike on a timed re-point counts only once it starts", async () => {
+      const T0 = Date.now();
+      const results: string[] = [];
+      for (const at of [T0 + 20, T0 + 2000]) {
+        const { gw, conn, pool } = await inbox(T0);
+        await pool.append([
+          op(grantClaims(STORE_ENTITY, "user:ada", "admin", OP, T0 + 4)),
+          op(grantClaims(STORE_ENTITY, K2, "write", OP, T0 + 5)),
+        ]);
+        await pool.append([
+          signClaims(delegationClaims(K2, CONN, inboxName("home:ada", CONN), T0 + 6), K2_SEED),
+        ]);
+        const repoint = op({ ...rootClaims("ada", K2, OP, T0 + 7), validFrom: T0 + 1000 });
+        await gw.append([repoint]);
+        await gw.append([
+          op({ ...makeNegationClaims(OP, T0 + 8, repoint.id), validFrom: T0 + 2000 }),
+        ]);
+        vi.setSystemTime(at);
+        results.push(await outcome(gw, conn));
+        await gw.close();
+      }
+      expect(results).toEqual(["refused", "revoked"]);
+    });
+
+    it("a future-start strike on a root claim naming the connection counts only once it starts", async () => {
+      const T0 = Date.now();
+      const results: string[] = [];
+      for (const at of [T0 + 20, T0 + 2000]) {
+        const { gw, conn, pool } = await inbox(T0);
+        await pool.append([op(grantClaims(STORE_ENTITY, "user:ada", "write", OP, T0 + 4))]);
+        const bad = op({ ...rootClaims("ada", CONN, OP, T0 + 5), validFrom: T0 + 1000 });
+        await gw.append([bad]);
+        await gw.append([op({ ...makeNegationClaims(OP, T0 + 6, bad.id), validFrom: T0 + 2000 })]);
+        vi.setSystemTime(at);
+        results.push(await outcome(gw, conn));
+        await gw.close();
+      }
+      expect(results).toEqual(["refused", "revoked"]);
+    });
+  });
 });
