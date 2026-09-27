@@ -36,9 +36,11 @@ import {
   type Delta,
   type Reactor,
 } from "@bombadil/rhizomatic";
-import { CTX_GRANTS } from "../gateway/accounts.js";
+import { CTX_GRANTS, grantsNaming } from "../gateway/accounts.js";
+import { keysEverOf } from "../gateway/principal.js";
+import { withStamp } from "../gateway/stamp.js";
 import { readContainerTable } from "../gateway/container.js";
-import { assembleGenesis, STORE_ENTITY } from "../gateway/genesis.js";
+import { assembleGenesis } from "../gateway/genesis.js";
 import { Gateway } from "../gateway/gateway.js";
 import {
   CTX_ROOT,
@@ -51,7 +53,7 @@ import {
 } from "../gateway/user-root.js";
 import { rootClaims, resolveUserView } from "../server/users.js";
 import type { StoreBackend } from "../store/backend.js";
-import { readSeed, readUserSeed, userSeedPath, writeUserSeed } from "./config.js";
+import { readSeed, readUserSeed, userSeedPath } from "./config.js";
 
 export interface RecoverIO {
   out(line: string): void;
@@ -68,6 +70,8 @@ export interface RecoverOptions {
   readonly openBackend: (path: string) => StoreBackend;
   /** Opens an inbox pool's backend, so the pools this store holds are attached and reachable. */
   readonly channelBackend?: (pool: string) => StoreBackend;
+  /** Discard a landed attempt whose new key file is lost, and recover again to a fresh key. */
+  readonly abandonAttempt?: boolean;
   /** Test seam: called once the journal is durable and before any seed file moves. */
   readonly afterJournal?: () => void;
 }
@@ -104,9 +108,22 @@ function syncDir(path: string): void {
     } finally {
       closeSync(fd);
     }
-  } catch {
-    // A platform that cannot open a directory for fsync (Windows) has no directory entry to sync.
+  } catch (err) {
+    // Windows cannot open a directory for fsync; there the rename is its own commit. Anywhere else
+    // a failed directory sync is a real fault, and the caller must stop before moving a key file.
+    if (process.platform !== "win32") throw err;
   }
+}
+
+// Write a key file durably and never over an existing one: the bytes fsynced under a temp name,
+// linked into place (which refuses an existing target), the temp removed, the directory fsynced.
+function writeSeedDurable(path: string, seed: string, attempt: string): void {
+  const temp = `${path}.${attempt}.tmp`;
+  rmSync(temp, { force: true });
+  writeDurable(temp, `${seed}\n`);
+  linkSync(temp, path);
+  unlinkSync(temp);
+  syncDir(path);
 }
 
 // Replace the journal with a new state: write beside it, then rename over it (atomic), so a crash
@@ -134,41 +151,36 @@ function moveNoClobber(from: string, to: string): void {
   syncDir(to);
 }
 
-// Is `id` struck for good by the operator: a strike with no end, itself unstruck?
-function struckForGood(reactor: Reactor, operator: string, id: string): boolean {
+// Is `id` struck for good by the operator at `now`: a strike already in force, with no end, itself
+// unstruck? A strike that starts later is not yet one.
+function struckForGood(reactor: Reactor, operator: string, id: string, now: number): boolean {
   return reactor.negationsOf(id).some((n) => {
     const neg = reactor.get(n);
     return (
       neg?.claims.author === operator &&
+      neg.claims.validFrom <= now &&
       neg.claims.validUntil === undefined &&
       reactor.negationsOf(n).length === 0
     );
   });
 }
 
-// What `key` holds in `reactor` that a recovery strikes: every grant naming it, and every
-// delegation it signed. The fence already denies it standing; these strikes keep the record honest.
+// What `key` holds in `reactor` that a recovery strikes: every grant naming it, filed at any
+// entity, and every delegation it signed. The fence already denies it standing; these strikes keep
+// the record honest. Recovery is rare, so this walks the whole log rather than one index.
 function standingOf(reactor: Reactor, key: string): string[] {
   const out: string[] = [];
-  for (const id of reactor.byTarget(STORE_ENTITY)) {
-    const d = reactor.get(id);
-    if (d === undefined) continue;
+  for (const d of reactor.arrivalLog()) {
     const grant = d.claims.pointers.some(
-      (p) =>
-        p.target.kind === "entity" &&
-        p.target.entity.id === STORE_ENTITY &&
-        p.target.entity.context === CTX_GRANTS,
+      (p) => p.target.kind === "entity" && p.target.entity.context === CTX_GRANTS,
     );
     const names = d.claims.pointers.some(
       (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === key,
     );
-    if (grant && names) out.push(id);
-  }
-  for (const id of reactor.byTarget(key)) {
-    const d = reactor.get(id);
-    if (d === undefined || d.claims.author !== key) continue;
     const kind = d.claims.pointers.find((p) => p.role === "kind")?.target;
-    if (kind?.kind === "primitive" && kind.value === "delegation") out.push(id);
+    const delegation =
+      d.claims.author === key && kind?.kind === "primitive" && kind.value === "delegation";
+    if ((grant && names) || delegation) out.push(d.id);
   }
   return out;
 }
@@ -194,10 +206,17 @@ function otherRootClaims(reactor: Reactor, operator: string, name: string, keep:
   return out;
 }
 
+// Strikes for good, valid from now: the stamp's ordering timestamp may run ahead of the clock, and
+// is never a validity time.
 const strikes = (gw: Gateway, operator: string, seed: string, ids: readonly string[]): Delta[] =>
   [...new Set(ids)]
-    .filter((id) => !struckForGood(gw.reactor, operator, id))
-    .map((id) => signClaims(makeNegationClaims(operator, gw.stamp(operator).timestamp, id), seed));
+    .filter((id) => !struckForGood(gw.reactor, operator, id, gw.validityNow()))
+    .map((id) =>
+      signClaims(
+        withStamp(gw.stamp(operator), (t) => makeNegationClaims(operator, t, id)),
+        seed,
+      ),
+    );
 
 function bindingClaims(root: string, key: string, t: number): Claims {
   return {
@@ -270,24 +289,16 @@ export async function recoverUser(o: RecoverOptions): Promise<number> {
           `cannot say which one it follows. Erase the wrong record first. Nothing was written.`,
       );
     }
-    // 2. The standing preflight: the new key must be able to write once it is the root.
-    const standing = [...gw.reactor.byTarget(STORE_ENTITY)].some((id) => {
-      const d = gw.reactor.get(id);
-      if (d === undefined || d.claims.author !== operator) return false;
-      const subject = d.claims.pointers.find((p) => p.role === "subject")?.target;
-      const verb = d.claims.pointers.find((p) => p.role === "verb")?.target;
-      return (
-        subject?.kind === "primitive" &&
-        subject.value === userEntity(name) &&
-        verb?.kind === "primitive" &&
-        (verb.value === "write" || verb.value === "admin") &&
-        !struckForGood(gw.reactor, operator, id)
-      );
-    });
+    // 2. The standing preflight: once the new key is the root, a grant naming the user must give it
+    // write NOW. Asked through the door's own reading of effective grants (validity, strikes, the
+    // issuer chain), not by finding a row.
+    const standing = grantsNaming(gw.reactor, now, userEntity(name), operator).some(
+      (g) => g.verb === "write" || g.verb === "admin",
+    );
     if (!standing) {
       return refuse(
-        `${name} holds no write or admin grant by name, so a new key could not write. Grant ` +
-          `${name} standing first. Nothing was written.`,
+        `${name} holds no effective write or admin grant by name, so a new key could not write. ` +
+          `Grant ${name} standing first. Nothing was written.`,
       );
     }
     const previous = userRootAt(gw.reactor, now, operator, name, users.erased());
@@ -297,18 +308,22 @@ export async function recoverUser(o: RecoverOptions): Promise<number> {
     const retired = new Set(chain.kind === "chain" ? chain.retired : []);
     if (previous !== undefined) retired.add(previous);
     retired.delete(root);
+    // Every signed claim takes its validity from the stamp's `validFrom` (now) and only its
+    // ordering from `timestamp`, which may run ahead of the clock (#600).
     const record = signClaims(
-      recoveryClaims(
-        {
-          name,
-          ...(previous === undefined ? {} : { previous }),
-          root,
-          attempt,
-          ...(chain.kind === "chain" ? { supersedes: chain.head } : {}),
-          retired: [...retired],
-        },
-        operator,
-        gw.stamp(operator).timestamp,
+      withStamp(gw.stamp(operator), (t) =>
+        recoveryClaims(
+          {
+            name,
+            ...(previous === undefined ? {} : { previous }),
+            root,
+            attempt,
+            ...(chain.kind === "chain" ? { supersedes: chain.head } : {}),
+            retired: [...retired],
+          },
+          operator,
+          t,
+        ),
       ),
       opSeed,
     );
@@ -330,15 +345,21 @@ export async function recoverUser(o: RecoverOptions): Promise<number> {
     );
     o.afterJournal?.();
     if (archive !== undefined) moveNoClobber(userSeedPath(home, name), archive);
-    writeUserSeed(home, name, newSeed);
+    // The new key file is durable BEFORE the record commits: a record naming a key whose secret a
+    // crash lost would leave the user with a root no one holds.
+    writeSeedDurable(userSeedPath(home, name), newSeed, attempt);
 
     // 4. One atomic operator append.
-    const t = gw.stamp(operator).timestamp;
     const lineage = signClaims(
-      lineageClaims({ name, recovery: record.id, root, retired: [...retired] }, operator, t),
+      withStamp(gw.stamp(operator), (t) =>
+        lineageClaims({ name, recovery: record.id, root, retired: [...retired] }, operator, t),
+      ),
       opSeed,
     );
-    const rootClaim = signClaims(rootClaims(name, root, operator, t), opSeed);
+    const rootClaim = signClaims(
+      withStamp(gw.stamp(operator), (t) => rootClaims(name, root, operator, t)),
+      opSeed,
+    );
     const struck = strikes(gw, operator, opSeed, [
       ...otherRootClaims(gw.reactor, operator, name, root),
       ...(previous === undefined ? [] : standingOf(gw.reactor, previous)),
@@ -428,9 +449,22 @@ async function resume(
     }
     const seedRead = readUserSeed(home, name);
     if (seedRead.kind !== "present" || authorForSeed(seedRead.seed) !== j.root) {
+      // The record names a key whose secret is not here. If it is truly lost, the remedy is a new
+      // recovery that supersedes this one, to a fresh key.
+      if (o.abandonAttempt) {
+        rmSync(journalPath(home, name), { force: true });
+        io.out(
+          `user recover: the key ${j.root} named by the last recovery is abandoned; recovering ` +
+            `${name} again to a new key.`,
+        );
+        await gw.close().catch(() => {});
+        return recoverUser({ ...o, abandonAttempt: false, replaceSeed: true });
+      }
       io.err(
         `user recover: ${name}'s recovery landed, but ${userSeedPath(home, name)} does not hold its ` +
-          `new key. Recovery is PENDING; restore that file and run this again.`,
+          `new key ${j.root}. Recovery is PENDING. If that file can be restored, restore it and run ` +
+          `this again. If its secret is lost, run \`loam user recover ${name} --abandon-attempt\` ` +
+          `to recover ${name} again to a new key.`,
       );
       return 1;
     }
@@ -465,11 +499,23 @@ async function resume(
         }
       }
     }
-    // The binding, signed by the new key.
+    // The binding, signed by the new key. An earlier run may have landed it and then failed to say
+    // so; a binding already held is not signed again.
+    if (
+      !journal.bound &&
+      j.previous !== undefined &&
+      keysEverOf(gw.reactor, gw.validityNow(), { root: j.root }, operator).has(j.previous)
+    ) {
+      journal = { ...journal, bound: true };
+      updateJournal(home, name, journal);
+    }
     if (!journal.bound && j.previous !== undefined) {
       try {
         await gw.append([
-          signClaims(bindingClaims(j.root, j.previous, gw.stamp(j.root).timestamp), seedRead.seed),
+          signClaims(
+            withStamp(gw.stamp(j.root), (t) => bindingClaims(j.root, j.previous!, t)),
+            seedRead.seed,
+          ),
         ]);
         journal = { ...journal, bound: true };
         updateJournal(home, name, journal);

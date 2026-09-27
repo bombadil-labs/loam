@@ -7,7 +7,13 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
+import {
+  authorForSeed,
+  makeNegationClaims,
+  signClaims,
+  type Claims,
+  type Delta,
+} from "@bombadil/rhizomatic";
 import { channelBackendFor, run } from "../../src/cli/cli.js";
 import { readSeed, readUserSeed, storePath, userSeedPath } from "../../src/cli/config.js";
 import { recoverUser, type RecoverOptions } from "../../src/cli/user-recover.js";
@@ -79,6 +85,7 @@ async function adaAndBea(): Promise<{ k1: string; bea: string }> {
 function faulty(mode: {
   append?: "before" | "after";
   reopen?: "fail";
+  binding?: "after";
 }): RecoverOptions["openBackend"] {
   let opens = 0;
   let appendsFailed = false;
@@ -88,6 +95,22 @@ function faulty(mode: {
     const real = new SqliteBackend(path);
     return new Proxy(real, {
       get(target, prop, receiver) {
+        if (prop === "append" && mode.binding === "after") {
+          return async (deltas: Iterable<Delta>) => {
+            const batch = [...deltas];
+            const binds = batch.some((d) =>
+              d.claims.pointers.some(
+                (p) =>
+                  p.role === "kind" &&
+                  p.target.kind === "primitive" &&
+                  p.target.value === "binding",
+              ),
+            );
+            const n = await target.append(batch);
+            if (binds) throw new Error("the store failed after writing the binding");
+            return n;
+          };
+        }
         if (prop === "append" && mode.append !== undefined && !appendsFailed) {
           return async (deltas: Iterable<Delta>) => {
             const batch = [...deltas];
@@ -183,7 +206,7 @@ describe("E7: refusals write nothing", () => {
     expect(await run(["user", "create", "cy", "--home", home], io, password)).toBe(0);
     const size = await ground((gw) => gw.reactor.size);
     expect(await run(["user", "recover", "cy", "--home", home], io)).toBe(2);
-    expect(err.join("\n")).toMatch(/no write or admin grant by name/);
+    expect(err.join("\n")).toMatch(/no effective write or admin grant by name/);
     expect(existsSync(journal("cy"))).toBe(false);
     expect(await ground((gw) => gw.reactor.size)).toBe(size);
   });
@@ -246,6 +269,151 @@ describe("E8: the journal, the key files, and the append that may or may not hav
     // and then a clean run recovers
     expect(await recoverUser(direct({}))).toBe(0);
     expect(await rootOfAda()).toBe(seedKey("ada"));
+  });
+});
+
+describe("the second append, the new key file, and clocks", () => {
+  const bindingsBy = (key: string) =>
+    ground(
+      (gw) =>
+        [...gw.reactor.arrivalLog()].filter(
+          (d) =>
+            d.claims.author === key &&
+            d.claims.pointers.some(
+              (p) =>
+                p.role === "kind" && p.target.kind === "primitive" && p.target.value === "binding",
+            ),
+        ).length,
+    );
+
+  it("a binding written and then reported failed is not signed twice on the rerun", async () => {
+    const { k1 } = await adaAndBea();
+    expect(await recoverUser(direct({ openBackend: faulty({ binding: "after" }) }))).toBe(1);
+    expect(err.join("\n")).toMatch(/PENDING: the binding/);
+    const k2 = seedKey("ada")!;
+    expect(await bindingsBy(k2)).toBe(1);
+    expect(await recoverUser(direct({}))).toBe(0);
+    expect(await bindingsBy(k2)).toBe(1);
+    expect(existsSync(journal("ada"))).toBe(false);
+    expect(
+      await ground((gw, op) => keysEverOf(gw.reactor, gw.validityNow(), { root: k2 }, op).has(k1)),
+    ).toBe(true);
+  });
+
+  it("a lost new key file after the record landed: PENDING, then --abandon-attempt recovers again", async () => {
+    await adaAndBea();
+    expect(await recoverUser(direct({ openBackend: faulty({ binding: "after" }) }))).toBe(1);
+    const k2 = seedKey("ada")!;
+    rmSync(userSeedPath(home, "ada"));
+    err.length = 0;
+    expect(await recoverUser(direct({}))).toBe(1);
+    expect(err.join("\n")).toMatch(/--abandon-attempt/);
+    expect(await recoverUser(direct({ abandonAttempt: true }))).toBe(0);
+    const k3 = seedKey("ada")!;
+    expect(k3).not.toBe(k2);
+    expect(await rootOfAda()).toBe(k3);
+    expect(await holds(k3, "admin")).toBe(true);
+    expect(await holds(k2, "admin")).toBe(false);
+  });
+
+  it("an operator ordering floor ahead of the clock does not delay the recovery's validity", async () => {
+    const { k1 } = await adaAndBea();
+    // An operator claim ordered an hour ahead: every later operator stamp orders after it.
+    await ground(async (gw, op) => {
+      const t = Date.now();
+      await gw.append([
+        signClaims({ ...userClaims("fut", op, t + 3_600_000), validFrom: t }, readSeed(home)),
+      ]);
+    });
+    expect(await run(["user", "recover", "ada", "--replace-seed", "--home", home], io)).toBe(0);
+    const k2 = seedKey("ada")!;
+    expect(await holds(k2, "admin")).toBe(true);
+    expect(await holds(k1, "admin")).toBe(false);
+    await ground((gw, op) => {
+      const now = Date.now();
+      const ahead = [...gw.reactor.arrivalLog()].filter(
+        (d) => d.claims.author === op && d.claims.timestamp > now,
+      );
+      expect(ahead.length).toBeGreaterThan(1);
+      for (const d of ahead) expect(d.claims.validFrom).toBeLessThanOrEqual(now);
+    });
+  });
+});
+
+describe("the standing preflight asks what is effective now", () => {
+  async function adaWithGrant(adjust: (g: Claims, t: number) => Claims) {
+    expect(await run(["init", "--home", home], io)).toBe(0);
+    const seed = readSeed(home);
+    const op = authorForSeed(seed);
+    await ground(async (gw) => {
+      const t = Date.now();
+      await gw.append([signClaims(userClaims("ada", op, t - 10_000), seed)]);
+      await gw.append([
+        signClaims(adjust(grantClaims(STORE_ENTITY, "user:ada", "admin", op, t - 5_000), t), seed),
+      ]);
+    });
+  }
+  const refusedWithNothing = async () => {
+    const size = await ground((gw) => gw.reactor.size);
+    expect(await recoverUser(direct({ replaceSeed: false }))).toBe(2);
+    expect(err.join("\n")).toMatch(/no effective write or admin grant/);
+    expect(existsSync(journal("ada"))).toBe(false);
+    expect(await ground((gw) => gw.reactor.size)).toBe(size);
+  };
+  it("an expired grant", async () => {
+    await adaWithGrant((g, t) => ({ ...g, validUntil: t - 1_000 }));
+    await refusedWithNothing();
+  });
+  it("a grant that starts later", async () => {
+    await adaWithGrant((g, t) => ({ ...g, timestamp: t, validFrom: t + 3_600_000 }));
+    await refusedWithNothing();
+  });
+  it("a grant under a timed strike in force now", async () => {
+    await adaWithGrant((g) => g);
+    await ground(async (gw, op) => {
+      const t = Date.now();
+      const g = [...gw.reactor.arrivalLog()].find((d) =>
+        d.claims.pointers.some(
+          (p) => p.target.kind === "primitive" && p.target.value === "user:ada",
+        ),
+      )!;
+      await gw.append([
+        signClaims(
+          { ...makeNegationClaims(op, t, g.id), validUntil: t + 3_600_000 },
+          readSeed(home),
+        ),
+      ]);
+    });
+    await refusedWithNothing();
+  });
+});
+
+describe("what the recovery strikes of the old key", () => {
+  it("a K1 grant filed at another entity is struck; a strike that starts later does not count as done", async () => {
+    const { k1 } = await adaAndBea();
+    const [elsewhere, later] = await ground(async (gw, op) => {
+      const seed = readSeed(home);
+      const t = Date.now();
+      const a = signClaims(grantClaims("tenant:garden", k1, "write", op, t), seed);
+      const b = signClaims(grantClaims(STORE_ENTITY, k1, "write", op, t + 1), seed);
+      await gw.append([a, b]);
+      // A strike of `b` that starts in an hour: not yet a strike.
+      await gw.append([
+        signClaims({ ...makeNegationClaims(op, t + 2, b.id), validFrom: t + 3_600_000 }, seed),
+      ]);
+      return [a.id, b.id] as const;
+    });
+    expect(await run(["user", "recover", "ada", "--replace-seed", "--home", home], io)).toBe(0);
+    await ground((gw, op) => {
+      const now = Date.now();
+      const inForce = (id: string) =>
+        gw.reactor.negationsOf(id).some((n) => {
+          const d = gw.reactor.get(n)!;
+          return d.claims.author === op && d.claims.validFrom <= now;
+        });
+      expect(inForce(elsewhere)).toBe(true);
+      expect(inForce(later)).toBe(true);
+    });
   });
 });
 
