@@ -752,6 +752,17 @@ export async function federateImpl(
   if (erasesErasure.size > 0) admitted = admitted.filter((d) => !erasesErasure.has(d.id));
   const erasedHere = erasedInBatch(admitted, gw.operatorAuthor);
   if (erasedHere.size > 0) admitted = admitted.filter((d) => !erasedHere.has(d.id));
+  // Recovery evidence is judged against what actually lands: a record or lineage claim whose
+  // predecessor the predicate turned away (or this door refused) would persist as an orphan and
+  // break the user's chain. Repeat until nothing more drops, since a dropped record strands its own
+  // successors.
+  for (;;) {
+    const kept = admitted.filter(
+      (d) => recoveryDefect(d, gw.reactor, gw.operatorAuthor, admitted) === undefined,
+    );
+    if (kept.length === admitted.length) break;
+    admitted = kept;
+  }
   // Counted per offered delta rather than inferred from set sizes: the closure keys by id, so a peer
   // that offers the same delta twice would otherwise be reported as one refusal that never happened.
   const crossed = new Set(admitted.map((d) => d.id));

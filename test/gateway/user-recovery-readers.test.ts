@@ -414,6 +414,97 @@ describe("the shapes a door refuses are refused, and no reader disagrees about t
   });
 });
 
+describe("evidence the readers must not take at face value", () => {
+  it("a one-step succession is not the binding recovery requires", async () => {
+    const gw = await world();
+    await recover(gw, { previous: K1, root: K2, retired: [K1] }, 30);
+    const succession = signClaims(
+      {
+        timestamp: 32,
+        validFrom: 32,
+        author: K2,
+        pointers: [
+          {
+            role: "principal",
+            target: { kind: "entity", entity: { id: K2, context: "rhizomatic.principal" } },
+          },
+          { role: "kind", target: { kind: "primitive", value: "succession" } },
+          { role: "previous", target: { kind: "primitive", value: K2 } },
+          { role: "key", target: { kind: "primitive", value: K1 } },
+        ],
+      },
+      K2_SEED,
+    );
+    await gw.append([succession]);
+    expect([...keysEverOf(gw.reactor, gw.validityNow(), { root: K2 }, OP)]).toEqual([K2]);
+    await gw.append([binding(K2_SEED, K1, 33)]);
+    expect([...keysEverOf(gw.reactor, gw.validityNow(), { root: K2 }, OP)].sort()).toEqual(
+      [K1, K2].sort(),
+    );
+  });
+
+  it("an unsigned recovery record and lineage claim, ingested raw, change no standing", async () => {
+    const gw = await world();
+    const record = makeDelta(
+      recoveryClaims({ name: "ada", attempt: "u", previous: K1, root: K2, retired: [K1] }, OP, 30),
+    );
+    const lineage = makeDelta(
+      lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30),
+    );
+    expect(gw.reactor.ingest(record).status).toBe("accepted");
+    expect(gw.reactor.ingest(lineage).status).toBe("accepted");
+    expect(readers(gw)).toEqual({ index: K1, view: K1, raw: [K1] });
+    expect(writes(gw, K1)).toBe(true);
+    expect(writes(gw, B)).toBe(true);
+  });
+});
+
+describe("federation lands recovery evidence only with what it names", () => {
+  it("a successor whose predecessor the caller turned away does not land, and the chain stands", async () => {
+    const gw = await world();
+    const first = await recover(gw, { previous: K1, root: K2, retired: [K1] }, 30);
+    const r1 = op(
+      recoveryClaims(
+        {
+          name: "ada",
+          attempt: "f1",
+          previous: K2,
+          root: K0,
+          supersedes: first.record.id,
+          retired: [K1, K2],
+        },
+        OP,
+        40,
+      ),
+    );
+    const r2 = op(
+      recoveryClaims(
+        {
+          name: "ada",
+          attempt: "f2",
+          previous: K0,
+          root: K2,
+          supersedes: r1.id,
+          retired: [K0, K1],
+        },
+        OP,
+        41,
+      ),
+    );
+    const l2 = op(
+      lineageClaims({ name: "ada", recovery: r2.id, root: K2, retired: [K0, K1] }, OP, 41),
+    );
+    const bystander = observed(FERN, "tag", "fed", 42, B_SEED);
+    await gw.federate([r1, r2, l2, bystander], { admit: (d) => d.id !== r1.id });
+    expect(gw.reactor.get(r1.id)).toBeUndefined();
+    expect(gw.reactor.get(r2.id)).toBeUndefined();
+    expect(gw.reactor.get(l2.id)).toBeUndefined();
+    expect(gw.reactor.get(bystander.id)).toBeDefined();
+    expect(readers(gw)).toEqual({ index: K2, view: K2, raw: [K2] });
+    expect(writes(gw, K2)).toBe(true);
+  });
+});
+
 describe("a retired key holds no standing as a delegate either", () => {
   it("K2's delegation to retired K1 in a pool gives K1 nothing; a bystander delegate writes", async () => {
     const host = await world();

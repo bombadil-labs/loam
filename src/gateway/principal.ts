@@ -174,9 +174,12 @@ function bindingHeld(
   key: string,
   erased: ReadonlySet<string>,
 ): boolean {
-  return associatedKeys(reactor, root, now, "rootOrSameAuthor").some(
-    (row) => row.key === key && row.via.length === 1 && !erased.has(row.via[0]!),
-  );
+  return associatedKeys(reactor, root, now, "rootOrSameAuthor").some((row) => {
+    if (row.key !== key || row.via.length !== 1 || erased.has(row.via[0]!)) return false;
+    // A one-step path may also be a succession; only a BINDING is the evidence recovery requires.
+    const kind = reactor.get(row.via[0]!)?.claims.pointers.find((p) => p.role === "kind")?.target;
+    return kind?.kind === "primitive" && kind.value === "binding";
+  });
 }
 
 // The scope a ground's write door asks delegations about. Only a ground that declares one honors a

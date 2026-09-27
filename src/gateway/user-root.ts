@@ -8,7 +8,13 @@
 // by the operator, the latest by timestamp winning with a tie going to the smaller id. The two must
 // agree; test/gateway/user-grants.test.ts holds them to it.
 
-import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
+import {
+  computeId,
+  verifyDelta,
+  type Claims,
+  type Delta,
+  type Reactor,
+} from "@bombadil/rhizomatic";
 
 export const CTX_USER = "loam.user";
 export const CTX_ROLE = "loam.role";
@@ -21,6 +27,20 @@ export const userEntity = (name: string): string => `${USER_PREFIX}${name}`;
 const AUTHOR = /^ed25519:[0-9a-f]{64}$/;
 
 const NONE: ReadonlySet<string> = new Set();
+
+// Recovery evidence decides authority, and a reactor can hold raw-ingested rows no door verified.
+// So every recovery record and lineage claim is signature-checked before use, as the substrate
+// checks principal evidence; a verdict is cached per object, id and signature.
+const verifiedCache = new WeakMap<Delta, { readonly id: string; readonly sig: string }>();
+function verified(d: Delta): boolean {
+  const hit = verifiedCache.get(d);
+  if (hit !== undefined && hit.id === d.id && hit.sig === d.sig && computeId(d.claims) === d.id) {
+    return true;
+  }
+  if (verifyDelta(d) !== "verified") return false;
+  verifiedCache.set(d, { id: d.id, sig: d.sig! });
+  return true;
+}
 
 // --- recovery (step 5, PR 3e; refactor/audit/user-recovery.md) ---------------------------------
 //
@@ -142,7 +162,7 @@ function heldAt(
     if (erased.has(id)) continue;
     const d = reactor.get(id);
     if (d === undefined || d.claims.author !== operator || d.claims.timestamp > cut) continue;
-    if (filedFor(d, context) === name) out.push(d);
+    if (filedFor(d, context) === name && verified(d)) out.push(d);
   }
   return out;
 }
@@ -283,7 +303,8 @@ export function recoveryDefect(
   if (parsed === undefined) return `a malformed recovery ${kind}`;
   // A record arriving in the same atomic batch counts as held: a recovery lands whole.
   const heldRecord = (id: string): Parsed | undefined => {
-    const d = reactor.get(id) ?? batch.find((b) => b.id === id);
+    const held = reactor.get(id);
+    const d = held !== undefined && verified(held) ? held : batch.find((b) => b.id === id);
     return d !== undefined && d.claims.author === operator && filedFor(d, CTX_RECOVERY) === name
       ? parse(d, "record")
       : undefined;
@@ -323,6 +344,7 @@ export function retiredKeysOf(
     if (erased.has(id)) continue;
     const d = reactor.get(id);
     if (d === undefined || d.claims.author !== operator || d.claims.timestamp > cut) continue;
+    if (!verified(d)) continue;
     const name = filedFor(d, CTX_RECOVERY) ?? filedFor(d, CTX_LINEAGE);
     if (name !== undefined) names.add(name);
   }
@@ -352,7 +374,7 @@ export function recoveredFrom(
     if (erased.has(id)) continue;
     const d = reactor.get(id);
     if (d === undefined || d.claims.author !== operator) continue;
-    const name = filedFor(d, CTX_RECOVERY);
+    const name = verified(d) ? filedFor(d, CTX_RECOVERY) : undefined;
     const r = name === undefined ? undefined : parse(d, "record");
     if (name === undefined || r === undefined || r.root !== root || r.previous === undefined)
       continue;
