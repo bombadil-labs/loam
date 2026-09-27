@@ -2080,7 +2080,8 @@ export function survivingWriteGrantIds(
 
 /**
  * Did the operator strike `id` for good: a strike of the operator's, already in force, with no
- * end, and with no negation of its own held here at all, whether in force now or scheduled?
+ * end, and not undone by anyone who could undo it — the operator, or a key holding admin here, in
+ * force now or scheduled. A counter-strike from anyone else binds nothing and changes nothing.
  */
 export function operatorStruckForGood(
   reactor: Reactor,
@@ -2088,38 +2089,21 @@ export function operatorStruckForGood(
   operator: string | undefined,
   id: string,
 ): boolean {
+  if (operator === undefined) return false;
+  const canUndo = (author: string) =>
+    author === operator || holdsGrant(reactor, now, STORE_ENTITY, author, "admin", operator);
   return reactor.negationsOf(id).some((n) => {
     const neg = reactor.get(n);
     return (
-      operator !== undefined &&
       neg?.claims.author === operator &&
       neg.claims.validFrom <= now &&
       neg.claims.validUntil === undefined &&
-      reactor.negationsOf(n).length === 0
+      !reactor.negationsOf(n).some((m) => {
+        const author = reactor.get(m)?.claims.author;
+        return author !== undefined && canUndo(author);
+      })
     );
   });
-}
-
-/**
- * Could the admin grant `id` EVER bind here, now or after a strike or window lapses? Not if the
- * operator struck it for good, and not unless its issuer is the operator or holds, itself, an admin
- * grant that could ever bind. The chain is followed to its end, so a key cannot vouch for itself.
- */
-export function adminGrantCouldBind(
-  reactor: Reactor,
-  now: number,
-  operator: string | undefined,
-  id: string,
-  visited: ReadonlySet<string> = new Set(),
-): boolean {
-  if (visited.has(id) || operatorStruckForGood(reactor, now, operator, id)) return false;
-  const issuer = reactor.get(id)?.claims.author;
-  if (issuer === undefined) return false;
-  if (issuer === operator) return true;
-  const seen = new Set(visited).add(id);
-  return heldGrantIds(reactor, issuer, "admin").some((g) =>
-    adminGrantCouldBind(reactor, now, operator, g, seen),
-  );
 }
 
 /**
@@ -2420,15 +2404,18 @@ export async function revokeConnectionImpl(opts: {
   // A grant naming a user whose root cannot be read right now may stand again later, and the
   // delegations it would carry cannot be found now. Refuse rather than report a revoke that might
   // not stick.
-  // Only a grant that could EVER bind counts — struck for now, or waiting on its issuer, it may
-  // stand again later. A grant-shaped delta whose chain of issuers reaches no operator confers
-  // nothing and must not be able to block a revoke — the connection being revoked can write one.
+  // A held owner-side admin grant counts even if it does not bind now — struck for a while, or
+  // waiting on its issuer, it may stand again. Only the operator, the owner side and the connection
+  // itself write in an inbox, and the connection cannot mint keys with standing here, so its own
+  // grant-shaped deltas are the ones to ignore: it must not be able to block its own revoke.
   const unreadable = grantSubjects(pool.reactor).filter(
     (subject) =>
       subject.startsWith(USER_PREFIX) &&
       subjectKeyAt(pool.reactor, now, pool.operatorAuthor, subject) === undefined &&
-      heldGrantIds(pool.reactor, subject, "admin").some((id) =>
-        adminGrantCouldBind(pool.reactor, now, pool.operatorAuthor, id),
+      heldGrantIds(pool.reactor, subject, "admin").some(
+        (id) =>
+          pool.reactor.get(id)?.claims.author !== opts.connectionKey &&
+          !operatorStruckForGood(pool.reactor, now, pool.operatorAuthor, id),
       ),
   );
   if (unreadable.length > 0) {

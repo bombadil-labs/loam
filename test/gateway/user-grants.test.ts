@@ -523,8 +523,55 @@ describe("a pool reads its host's users", () => {
         ),
       ).toBe("admitted");
     }
+    // An owner-side grant for a ghost the operator struck for good stays dead, even when the
+    // connection counter-strikes that strike.
+    const ghost = op(grantClaims(STORE_ENTITY, "user:ghost", "admin", OP, 31));
+    const forGood = op(makeNegationClaims(OP, 32, ghost.id));
+    await pool.append([ghost, forGood]);
+    expect(await door(pool, signClaims(makeNegationClaims(CONN, 33, forGood.id), CONN_SEED))).toBe(
+      "admitted",
+    );
     await gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED });
     expect(await door(pool, observed(FERN, "height", 17, 116, CONN_SEED))).toBe("refused");
+    await gw.close();
+  });
+
+  it("an owner-issued grant naming an unreadable user still makes revoke refuse", async () => {
+    const gw = await store();
+    await gw.append([
+      op(userClaims("ada", OP, 10)),
+      op(rootClaims("ada", K1, OP, 11)),
+      op(grantClaims(STORE_ENTITY, K1, "write", OP, 12)),
+      op(
+        containerClaims(
+          {
+            container: "home:ada",
+            trust: "curated",
+            posture: "shared",
+            membership: {
+              op: "select",
+              pred: { match: { field: "author", cmp: "eq", const: K1 } },
+              in: "input",
+            },
+          },
+          OP,
+          13,
+        ),
+      ),
+    ]);
+    const conn = await gw.bindConnection({
+      container: "home:ada",
+      connectionKey: CONN,
+      ownerSeed: K1_SEED,
+    });
+    const pool = conn.gateway!;
+    // The owner (not the operator) names bob admin; bob has no readable root here.
+    await pool.append([
+      signClaims(grantClaims(STORE_ENTITY, "user:bob", "admin", K1, 40), K1_SEED),
+    ]);
+    await expect(
+      gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED }),
+    ).rejects.toThrow(/cannot be read now/);
     await gw.close();
   });
 });
