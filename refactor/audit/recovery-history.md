@@ -20,9 +20,12 @@ until then.
 **A cut.** An operator-signed claim in one store, filed at the index entity `loam:recoveries` in
 context `loam.cut`:
 
-- `store`: the store it was written for. That is the inbox pool's own name, or `loam:host` for the
-  host. A cut counts ONLY in the store it names; a copy that reaches another store (a sibling pool
-  shares the operator key) is testimony there, never a usable cut.
+- `store`: the store INCARNATION it was written for. Each pool, when it is created, writes one
+  operator-signed incarnation claim with a random id; the host has one too. A store's incarnation
+  is the incarnation claim with the lowest arrival index it holds, so a replayed older claim never
+  replaces it. A cut counts ONLY in the store whose incarnation it names. A copy that reaches a
+  sibling pool, or a later pool re-created under the same name, is testimony there, never a
+  usable cut. (Step 6 replaces the incarnation id with the pool's own key.)
 - `attempt` and `recovery`: the attempt id and the id of the recovery record. The record is signed
   before any cut is written, so its id is known.
 - `key`: K1, the key being retired.
@@ -31,6 +34,10 @@ context `loam.cut`:
 **An outcome.** An operator-signed claim in the same store, context `loam.cutoutcome`, naming the
 cut and one of `committed` or `aborted`. It is written after the host commit (or the abort) and is
 the cut's terminal state. It is durable and does not depend on the recovery record staying visible.
+
+An outcome is DURABLE. The reader counts it whatever strikes it. The erase door refuses to erase an
+outcome on its own: a cut and its outcome are erased together or not at all. Two outcomes that
+contradict each other for one cut make that cut PREPARED: fail closed.
 
 A cut's state in its store:
 
@@ -104,3 +111,8 @@ rail pins it.
 - **H9.** A cut copied into a sibling pool counts there for nothing; the sibling's own cut governs.
 - **H10.** The record is committed, its outcome lands in a pool, and the record is later erased:
   the pool does not pause K1 again.
+- **H11.** After the record is erased, a strike on the pool's `committed` outcome changes nothing,
+  and an erasure of the outcome alone is refused.
+- **H12.** Contradictory outcomes for one cut: the pool pauses K1 and shows no history.
+- **H13.** A pool is dropped and re-created under the same name; its old cut and incarnation claim
+  are replayed into it. They count for nothing there.

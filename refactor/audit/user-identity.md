@@ -47,7 +47,8 @@ One reader resolves a name: `userIdOf(reactor, operator, name, now, cut?)`.
   `nameStillHeld` finds a previous person's id through their held user record even after the name
   claim's bytes are purged. `loam user create` refuses a name while any operator claim filed at
   `username:<name>` is held, whether a name claim or a user record.
-- The old id is never minted again: ids are random, and 128 bits do not repeat.
+- An id comes from a cryptographic random source (128 bits), so a repeat is overwhelmingly
+  unlikely. `loam user create` also refuses to mint an id the store already holds records for.
 
 ## What changes
 
