@@ -8,10 +8,9 @@ The operator runs `loam user recover ada` in the operator's home. Ada has lost h
 exposed. Afterwards:
 
 - Ada signs with a new key, K2. Every grant that names `user:ada` now stands for K2.
-- K1 loses its standing here. Recovery strikes every grant naming `user:ada`'s old root through the
-  user (they move to K2), every grant naming K1 itself, and every delegation K1 signed, in the host
-  and in every attached inbox pool. A pool that is not attached is named in the report, because
-  recovery cannot reach it.
+- Every key Ada's recovery chain retired, K1 included, holds no standing here: not in the host, not
+  in any inbox pool, and not in a pool that attaches later. The door enforces this, so it holds from
+  the moment the recovery lands.
 - What K1 wrote stays readable, and it is still Ada's own. Ada can clear it and retract it.
 - Her connections do not carry over. She re-authorizes each one she wants to keep.
 
@@ -38,10 +37,24 @@ it changes nothing, and a `validUntil` on it is ignored. Only erasure removes it
 removes the bytes. To reverse a recovery, the operator runs a new one that supersedes it.
 
 **The chain.** A user's recovery records must form one chain: one first record, and each other
-record superseding exactly the one before it. Two records with no `supersedes`, or two superseding
-the same record, are competing heads. With competing heads, the user reads as having no root, and
-`keysEverOf` answers the key alone. This fails closed. `loam user recover` refuses too, and names
-the records. The operator resolves it by erasing the wrong record.
+record superseding exactly the one before it. The chain is BROKEN, and fails closed, when any of
+these holds:
+
+- two records have no `supersedes` (two first records);
+- two records supersede the same record (competing heads);
+- a record's `supersedes` names an id that is not held (an orphan: the record it names was erased,
+  or never arrived);
+- a root claim written by a recovery names, in its `recovery` pointer, a record that is not held
+  (the head was erased while its root claim stands).
+
+With a broken chain the user reads as having no root, and `keysEverOf` answers the key alone.
+`loam user recover` refuses and names the records.
+
+**Erasing a recovery record.** Erasure is the operator's act, and it removes bytes; this design does
+not narrow what the operator may erase. It makes every erasure it can see fail closed: an erased
+first or middle record orphans its successor, and an erased head leaves its root claim pointing at
+nothing. An operator who erases a head AND its root claim has reversed the recovery on purpose; the
+erasure records say so, and the user then has no root until the operator writes one.
 
 **K2's binding.** A SPEC-14 binding `{principal: K2, kind: binding, key: K1}`, signed by K2. It is
 held in the host only.
@@ -50,92 +63,113 @@ held in the host only.
 
 `keysEverOf(K)` is K plus each K1 where both are true:
 
-1. A record in a user's recovery chain names K1 as `previous` and K as `root`.
+1. A record in an unbroken recovery chain names K1 as `previous` and K as `root`.
 2. K's SPEC-14 binding for K1 is held (negated or not: history is history).
 
 It follows the chain back: if K1 was itself a recovered root, its predecessors join by the same
 rule. It reads the HOST's ground, also from a pool (the host is the user ground the pool declares).
-A pool with no host, or a user with competing heads, answers K alone. This fails closed.
+A pool with no host, or a user with a broken chain, answers K alone. This fails closed.
 
 A writer who binds a stranger's key gains nothing: no operator record names that pair. The #629
 rails stay green.
 
 ## The root fence
 
-The fence is causal, not timed. A key is RETIRED for a user when a record in the user's chain names
-it as `previous`, and no record LATER IN THE CHAIN (a descendant, by `supersedes`) names it as
-`root`. Signed timestamps play no part. An ordinary root claim never lifts a retirement.
+**The head's root is the only eligible root.** Once a user has a recovery chain, the root is the
+chain head's `root`, and only if a standing operator root claim names that key (read at the read's
+as-of cut). No other root claim is eligible, whatever its timestamp, strikes or counter-strikes. So
+an older K0 claim cannot revive when K2's claim is struck: the root then reads as none. Signed
+timestamps never order recoveries; `supersedes` does. A user with no chain reads roots as today.
 
-The root readers apply the fence FIRST, then pick the latest. `userRootAt`, `rootOf` and
-`userRootsRaw` all drop every root claim that names a retired key, and only then choose among the
-rest by timestamp. A fenced K1 claim with a later timestamp therefore cannot hide an eligible K2
-claim. The raw reader drops them too, so raw machinery never trusts a retired key.
+`userRootAt`, `rootOf` and `userRootsRaw` all apply this rule. The raw reader answers the head's
+root alone once a chain exists.
 
-The operator also strikes, for good, every held root claim naming K1. The fence does not depend on
-those strikes; they keep the delta record honest.
+**A retired key holds no standing.** A key is RETIRED when a record in any unbroken chain names it
+as `previous`, and no descendant in that chain names it as `root`. `grantHeld` refuses a retired
+author before any grant is read, whatever the grant names: a literal grant, a user-named grant, or
+a delegation. The governed striker set drops retired keys. This holds in every ground that reads the
+host's users, so a pool refuses K1 even before its own strikes land, and a pool that attaches later
+refuses K1 at once. There is no race window after the scan.
 
-The promise is: K1 is not Ada's root again without a new operator recovery that supersedes this one
-and names K1 as `root`.
+The operator also strikes, for good, every other held root claim for the user, and K1's grants and
+delegations. The fence does not depend on these strikes; they keep the delta record honest.
+
+The promise is: a retired key is not the user's root, and holds no standing, without a new operator
+recovery that supersedes the chain head and names it as `root`.
 
 ## The command
 
-1. **Preconditions.** The operator seed is readable. A standing user record for `<name>` exists.
-   The user's recovery chain has one head. K1 is the current root, or absent.
+1. **Preconditions, before anything is written.** The operator seed is readable. A standing user
+   record for `<name>` exists. The user's recovery chain, if any, is unbroken. If a seed file is
+   present, `--replace-seed` is passed; otherwise refuse. A refusal here leaves no journal and no
+   file change.
 2. **Standing preflight.** Refuse unless a user-named `write` or `admin` grant stands for the user,
    so K2 can write after the re-point. Without one, report and change nothing. For a user with no
    K1, the report says "root created" and says whether the key can write.
 3. **Journal first.** Mint K2 in memory. Write `<name>.recovery` (0600, `wx`, fsync, then fsync the
    directory): `{attempt, previous: K1, root: K2 public key, archive: <name>.replaced-<attempt>,
    phase: "begun"}`. No seed file moves before this is durable.
-4. **Seed file.** If a seed is present, refuse unless `--replace-seed` is passed. With the flag,
-   rename the old file to the journal's archive name. The rename refuses an existing target and
-   keeps 0600. Write K2's seed with the existing `wx`+rename writer.
+4. **Seed file.** Rename the old seed, if any, to the journal's archive name. The rename refuses an
+   existing target and keeps 0600. Write K2's seed with the existing `wx`+rename writer.
 5. **First append, by the operator, atomic:** the recovery record (with `attempt` and
-   `supersedes`), K2's root claim, permanent strikes of every held root claim naming K1, and
-   permanent strikes of K1's standing in the host: every grant naming K1 and every delegation K1
-   signed.
+   `supersedes`); K2's root claim, with a `recovery` pointer to the record; permanent strikes of
+   every other held root claim for the user; and permanent strikes of K1's host grants and
+   delegations. From this moment the fence holds everywhere.
 6. **After an append error, read before undoing.** The append may have committed before the error
    reached the command. So the command re-reads the store for a recovery record with this
-   `attempt`. If it is there, the attempt committed: continue at step 7. If it is not, undo: remove
-   K2's seed, rename the archive back, remove the journal, and report that nothing changed.
-7. **Pools.** In each attached inbox pool, the operator strikes, for good, every grant naming K1
-   and every delegation K1 signed. The report names each pool not attached.
+   `attempt`.
+   - The read succeeds and the record is there: the attempt committed. Continue at step 7.
+   - The read succeeds and the record is not there: undo. Remove K2's seed, rename the archive back,
+     remove the journal, and report that nothing changed.
+   - The read fails or is indeterminate: change nothing. Leave the seed files and the journal as
+     they are, and report "pending". A rerun decides.
+7. **Pools (hygiene).** In each attached inbox pool, the operator strikes, for good, K1's grants and
+   delegations. The journal records each pool done. A pool whose append fails, or that is declared
+   but not attached, stays in the journal as pending. The fence already refuses K1 there.
 8. **Second append, by K2:** the binding. It needs K2's write standing, which exists only after
-   step 5, so it is a separate batch. Then the journal is set to `phase: "bound"`, and then removed.
-9. **Rerun.** If a journal is present, the command resumes that exact attempt. It reads the store
-   for that `attempt`. If it committed, it finishes steps 7 and 8. If it did not, it undoes as in
-   step 6. It never starts a new attempt while a journal exists.
-10. **Report.** It states the new root; the old root retired; the standing struck, by host and pool;
-    the binding written or pending; that connections must be re-authorized; and where the old seed
-    was archived.
+   step 5, so it is a separate batch. The journal records it.
+9. **Complete or pending.** The journal is removed only when the binding and every declared pool are
+   done. Otherwise the report says "recovery landed; pending: <pools>, <binding>", and a rerun
+   retries exactly those from the journal. It never starts a new attempt while a journal exists.
+10. **Report.** It states the new root; the retired keys; the standing struck, by host and pool;
+    what is still pending; that connections must be re-authorized; and where the old seed was
+    archived.
 
 ## Rails
 
 Each rail asserts the delta and the door (or the View). Each has a bystander.
 
-- **E1.** After recovery, K2 writes and holds admin through user-named grants. K1 is refused: a
-  literal write grant naming K1 is struck, and K1's delegation in an attached pool is struck. A
+- **E1.** After recovery, K2 writes and holds admin through user-named grants. K1 is refused at the
+  door in the host and in an attached pool, through a literal grant and through a delegation. A
   literal grant naming a bystander key survives, and that key still writes.
 - **E2.** Ownership: K2 clears a value K1 wrote. A bystander's value on the same field stays. A
   writer who binds the bystander's key still cannot clear it (the #629 case, again).
-- **E3.** The fence. The root stays K2 after each of these: a counter-strike of a retired K1 claim;
-  a new operator K1 root claim; a late-arriving old K1 claim; a K1 claim with a future timestamp; a
-  second recovery record that does not supersede the first. A recovery record that supersedes the
-  first and names K1 as `root` makes K1 the root. `userRootAt`, `rootOf` and `userRootsRaw` agree
-  on each case.
+- **E3.** The fence. The root stays K2 after each of: a counter-strike of a K1 claim; a new operator
+  K1 root claim; a late K1 claim; a K1 claim with a future timestamp. With K0 at 10, K1 at 20 and
+  the recovery K1→K2 at 30, striking K2's root claim leaves NO root: K0 does not revive. A
+  superseding recovery naming K1 as `root` makes K1 the root. An as-of read before the recovery
+  still reads K1 (a control). `userRootAt`, `rootOf` and `userRootsRaw` agree on each case.
 - **E4.** Durability: a negation of the recovery record, and a record written with `validUntil`,
   change neither the fence nor `keysEverOf`.
-- **E5.** Competing heads: the user reads as having no root, `keysEverOf` answers the key alone,
-  and `loam user recover` refuses and names the records.
+- **E5.** A broken chain fails closed: a second record that does not supersede; an orphan whose
+  `supersedes` is not held; a root claim whose `recovery` record is not held. In each the user reads
+  as having no root, `keysEverOf` answers the key alone, and `loam user recover` refuses and names
+  the records.
 - **E6.** Connections: an inbox bound by K1 is refused. Re-binding by K2 works (the #627 rails).
-- **E7.** Preflight: a user with no standing grant is refused, and nothing is written.
-- **E8.** Seed and journal: refusal without `--replace-seed`. A failure BEFORE the append commits
-  restores the archived seed and leaves no journal. A failure AFTER the append commits (the backend
-  writes, then throws) resumes: the rerun writes only the pool strikes and the binding. A crash
-  after the journal and before the archive rename leaves a journal that the rerun rolls back.
-- **E9.** A user with no root gets one, no binding, and the report says whether the key can write.
-- **E10.** Pools: a pool's `keysEverOf` reads the host's recovery evidence. A pool with no host
-  answers the root alone.
+- **E7.** Preflight: no standing grant, a present seed without `--replace-seed`, or a broken chain
+  is refused, with nothing written and no journal left.
+- **E8.** Seed and journal:
+  - a failure BEFORE the append commits restores the archived seed and leaves no journal;
+  - a failure AFTER the append commits (the backend writes, then throws) resumes;
+  - an indeterminate read after an append error leaves everything and reports "pending";
+  - a crash after the journal and before the archive rename leaves a journal that the rerun rolls
+    back.
+- **E9.** Pools: a failed pool append leaves the recovery "pending" and K1 still refused there; a
+  rerun completes it. A detached pool refuses K1 as soon as it attaches, and a rerun then strikes
+  its records.
+- **E10.** A user with no root gets one, no binding, and the report says whether the key can write.
+- **E11.** A pool's `keysEverOf` reads the host's recovery evidence. A pool with no host answers the
+  root alone.
 
 ## Not in 3e
 
