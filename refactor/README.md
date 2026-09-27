@@ -84,6 +84,10 @@ Design:
    delegation, not the key: the root can sign a new one. The operator bars a user's delegates for
    good by revoking the user's own standing. A delegation can also end at its own `validUntil`. Loam uses rhizomatic's delegation, scope and negation records as
    they are, and adds no new record.
+7. **Each peer has its own key.** A container is a peer, so each container pool and the
+   quarantine gets its own governing key in step 6. A host may roll them up for convenience, as
+   combined views or operations. Each peer still keeps its own admission, arrival counters,
+   refusals, erasure obligations and reports.
 
 ## What stays in force
 
