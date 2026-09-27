@@ -116,23 +116,19 @@ describe("R10: a grant naming a user trusts that user's root, in dataStruck and 
   it("ada's root strike binds; a stranger's does not; the subject text is no author", () => {
     const byRoot = observed(FERN, "height", 1, 100, X_SEED);
     const byStranger = observed(FERN, "height", 2, 101, K1_SEED);
-    const byText = observed(FERN, "height", 3, 102, K1_SEED);
     const r = reactorOf([
       ...ada(),
       grant("user:ada", 2),
       byRoot,
       byStranger,
-      byText,
       strike(K1_SEED, byRoot, 200),
       strike(X_SEED, byStranger, 201),
     ]);
-    // A delta authored by the literal text "user:ada" cannot be signed; the lowered set is asked
-    // directly for it below.
+    // No delta can be signed by the text "user:ada", so the lowered set itself is asked below.
     const live = kept(r, { now: NOW }, true);
     const struck = dataStruck(r, NOW, OP);
     expect([live.has(byRoot.id), struck(byRoot.id)]).toEqual([false, true]);
     expect([live.has(byStranger.id), struck(byStranger.id)]).toEqual([true, false]);
-    expect(live.has(byText.id)).toBe(true);
     const lowered = JSON.stringify(
       termToJson(lowerGovernedTerm(MASK(), r.snapshot(), { now: NOW }, userGroundOf(r))),
     );
@@ -231,7 +227,9 @@ describe("R14: raw mode never narrows what the raw machinery trusts (a control)"
     // and present evaluation, where the grant has lapsed, keeps it
     expect(kept(r, { now: NOW }, true).has(target.id)).toBe(true);
   });
+});
 
+describe("R14b: raw mode expands a user to every root", () => {
   it("raw mode expands a user to every root the operator named and did not strike", () => {
     const byK1 = observed(FERN, "height", 1, 100, X_SEED);
     const byK2 = observed(FERN, "height", 2, 101, X_SEED);

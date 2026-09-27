@@ -16,8 +16,13 @@ import {
   type HView,
   type HyperSchema,
 } from "@bombadil/rhizomatic";
-import { governedGatherBody, grantClaims } from "../../src/gateway/accounts.js";
-import { readGrounds } from "../../src/gateway/erase.js";
+import {
+  dataStruck,
+  governedGatherBody,
+  grantClaims,
+  lawfulStrikersJson,
+} from "../../src/gateway/accounts.js";
+import { eraseClaims, readGrounds } from "../../src/gateway/erase.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { listingContainerName } from "../../src/gateway/listing.js";
@@ -40,11 +45,12 @@ const GUARDED: HyperSchema = { name: "Guarded", alg: 1, body: governedGatherBody
 const op = (claims: Parameters<typeof signClaims>[0]): Delta => signClaims(claims, OP_SEED);
 const strike = (seed: string, target: Delta, t: number): Delta =>
   signClaims(makeNegationClaims(authorForSeed(seed), t, target.id), seed);
-const heights = (h: HView): unknown[] =>
-  (h.props.get("height") ?? []).map((e) => {
+const valuesOf = (h: HView, prop: string): unknown[] =>
+  (h.props.get(prop) ?? []).map((e) => {
     const p = e.delta.claims.pointers.find((q) => q.target.kind === "primitive");
     return p?.target.kind === "primitive" ? p.target.value : undefined;
   });
+const heights = (h: HView): unknown[] => valuesOf(h, "height");
 
 // A governed store: the gardener writes; ada (root K1) holds a write grant BY NAME. The lens is a
 // genesis registration, so the erasure audit's table of readings holds it too.
@@ -75,8 +81,9 @@ async function world(): Promise<Gateway> {
 describe("R2: a user-named grant trusts the user's root in the served View", () => {
   it("ada's root strike binds; a stranger's is inert (warm, cold, delta)", async () => {
     const gw = await world();
-    const byAda = observed(FERN, "height", 30, 100, GARDENER_SEED);
-    const bystander = observed(FERN, "height", 34, 101, GARDENER_SEED);
+    // ada strikes the LATER value, so a warm read that ignored her strike would serve it (pickLatest).
+    const byAda = observed(FERN, "height", 30, 101, GARDENER_SEED);
+    const bystander = observed(FERN, "height", 34, 100, GARDENER_SEED);
     await gw.append([byAda, bystander]);
     const adaStrike = strike(K1_SEED, byAda, 200);
     const strangerStrike = strike(X_SEED, bystander, 201);
@@ -105,7 +112,8 @@ describe("R7: the listing agrees with the point read", () => {
     await gw.federate([strike(K1_SEED, moss, 3001)]);
     const listed = (await gw.list("Guarded")).map((n) => n.entity);
     expect(listed).toEqual([FERN]);
-    expect(heights(gatherImpl(gw, "Guarded", MOSS, gw.validityNow()))).toEqual([]);
+    expect(valuesOf(gatherImpl(gw, "Guarded", MOSS, gw.validityNow()), "tag")).toEqual([]);
+    expect(heights(gatherImpl(gw, "Guarded", FERN, gw.validityNow()))).toEqual([30]);
     expect(gw.reactor.get(moss.id)).toBeDefined();
     const members = gw.containerScope({ containers: [listingContainerName("Guarded")] });
     expect(members.some((d) => d.id === moss.id)).toBe(false);
@@ -160,6 +168,49 @@ describe("R15: an as-of read resolves the user as they stood then", () => {
     await gw.append([op({ ...rootClaims("ada", K2, OP, 300), validFrom: 100 })]);
     expect(heights(gatherImpl(gw, "Guarded", FERN, gw.validityNow(), 250))).toEqual([34]);
     expect(heights(gatherImpl(gw, "Guarded", FERN, gw.validityNow()))).toEqual([30]);
+    await gw.close();
+  });
+});
+
+describe("R15b: the as-of cut applies to the operator's strikes too", () => {
+  it("a strike on a root claim, signed after asOf, does not reach back", async () => {
+    const gw = await world();
+    const v1 = observed(FERN, "height", 30, 100, GARDENER_SEED);
+    const v2 = observed(FERN, "height", 34, 101, GARDENER_SEED);
+    await gw.append([v1, v2]);
+    const toK2 = op(rootClaims("ada", K2, OP, 150));
+    await gw.append([toK2]);
+    await gw.federate([strike(K1_SEED, v1, 200), strike(K2_SEED, v2, 220)]);
+    // Signed at 300, valid from 100: a cut that filtered claims but not strikes would drop K2 at 250.
+    await gw.append([op({ ...makeNegationClaims(OP, 300, toK2.id), validFrom: 100 })]);
+    expect(heights(gatherImpl(gw, "Guarded", FERN, gw.validityNow(), 250))).toEqual([30]);
+    expect(heights(gatherImpl(gw, "Guarded", FERN, gw.validityNow()))).toEqual([34]);
+    await gw.close();
+  });
+});
+
+describe("R18: a root claim erased but still held is gone to the governed read", () => {
+  it("present and raw both fall back to the earlier root", async () => {
+    const gw = await world();
+    const v1 = observed(FERN, "height", 30, 100, GARDENER_SEED);
+    const v2 = observed(FERN, "height", 34, 101, GARDENER_SEED);
+    await gw.append([v1, v2]);
+    const toK2 = op(rootClaims("ada", K2, OP, 50));
+    await gw.append([toK2]);
+    await gw.federate([strike(K1_SEED, v1, 200), strike(K2_SEED, v2, 220)]);
+    // The erasure record lands while the claim's bytes stay held: the state a purge fault leaves.
+    expect(gw.reactor.ingest(op(eraseClaims(toK2.id, OP, OP, 400))).status).toBe("accepted");
+    expect(gw.reactor.get(toK2.id)).toBeDefined();
+    expect(heights(gatherImpl(gw, "Guarded", FERN, gw.validityNow()))).toEqual([34]);
+    expect(dataStruck(gw.reactor, gw.validityNow(), OP)(v1.id)).toBe(true);
+    expect(dataStruck(gw.reactor, gw.validityNow(), OP)(v2.id)).toBe(false);
+    // raw membership machinery: K2 is not among the raw roots either
+    const kept = new Set(
+      gw
+        .select({ op: "mask", policy: { trust: lawfulStrikersJson(OP, false) }, in: "input" })
+        .map((d) => d.id),
+    );
+    expect([kept.has(v1.id), kept.has(v2.id)]).toEqual([false, true]);
     await gw.close();
   });
 });
