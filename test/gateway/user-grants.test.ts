@@ -166,6 +166,32 @@ describe("erasure, and claim shapes, as the View reader sees them", () => {
     await gw.close();
   });
 
+  it("a latest root under another role, or as an entity, reads as its value in both readers", async () => {
+    const gw = await store();
+    await gw.append([op(userClaims("ada", OP, 10)), op(rootClaims("ada", K1, OP, 11))]);
+    const base = rootClaims("ada", K2, OP, 12);
+    const filing = base.pointers.filter((p) => p.target.kind === "entity");
+    await gw.append([
+      op({
+        ...base,
+        pointers: [...filing, { role: "key", target: { kind: "primitive", value: K2 } }],
+      }),
+    ]);
+    expect(both(gw, "ada")).toEqual({ index: K2, view: K2 });
+    const later = rootClaims("ada", K1, OP, 13);
+    await gw.append([
+      op({
+        ...later,
+        pointers: [
+          ...filing,
+          { role: "root", target: { kind: "entity", entity: { id: K1, context: "k" } } },
+        ],
+      }),
+    ]);
+    expect(both(gw, "ada")).toEqual({ index: K1, view: K1 });
+    await gw.close();
+  });
+
   it("a latest root of the wrong shape resolves to nothing in both readers", async () => {
     const gw = await store();
     await gw.append([op(userClaims("ada", OP, 10)), op(rootClaims("ada", K1, OP, 11))]);
@@ -396,6 +422,54 @@ describe("a pool reads its host's users", () => {
     expect(await door(pool, observed(FERN, "height", 15, 114, CONN_SEED))).toBe("admitted");
     await gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K2_SEED });
     expect(await door(pool, observed(FERN, "height", 16, 115, CONN_SEED))).toBe("refused");
+    await gw.close();
+  });
+
+  it("a user unreadable for a while keeps their grant at bind, and revoke refuses to guess", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const T0 = Date.now();
+    vi.setSystemTime(T0);
+    const gw = await store();
+    const record = op(userClaims("ada", OP, T0));
+    await gw.append([
+      record,
+      op(rootClaims("ada", K1, OP, T0 + 1)),
+      op(grantClaims(STORE_ENTITY, K1, "write", OP, T0 + 2)),
+      op(
+        containerClaims(
+          {
+            container: "home:ada",
+            trust: "curated",
+            posture: "shared",
+            membership: {
+              op: "select",
+              pred: { match: { field: "author", cmp: "eq", const: K1 } },
+              in: "input",
+            },
+          },
+          OP,
+          T0 + 3,
+        ),
+      ),
+    ]);
+    const conn = await gw.bindConnection({
+      container: "home:ada",
+      connectionKey: CONN,
+      ownerSeed: K1_SEED,
+    });
+    const pool = conn.gateway!;
+    const named = op(grantClaims(STORE_ENTITY, "user:ada", "admin", OP, T0 + 10));
+    await pool.append([named]);
+    // Ada's record is struck until T0+1000: for now her root cannot be read.
+    vi.setSystemTime(T0 + 20);
+    await gw.append([
+      signClaims({ ...makeNegationClaims(OP, T0 + 20, record.id), validUntil: T0 + 1000 }, OP_SEED),
+    ]);
+    await gw.bindConnection({ container: "home:ada", connectionKey: CONN, ownerSeed: K1_SEED });
+    expect(pool.reactor.negationsOf(named.id)).toEqual([]);
+    await expect(
+      gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED }),
+    ).rejects.toThrow(/cannot be read right now/);
     await gw.close();
   });
 });

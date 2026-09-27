@@ -366,6 +366,17 @@ export const unreadableStoreMessage = (rows: number): string =>
   `and there is no migration. Open it with the Loam release that wrote it, or start a new ` +
   `store. \`loam repair\` lists the rows.`;
 
+// The erased-but-held ids a door reads users through, cached per reactor until it next changes:
+// the door asks on every user-named grant it weighs, and the answer moves only with an ingest.
+const erasedCache = new WeakMap<Reactor, { size: number; ids: ReadonlySet<string> }>();
+function erasedIdsOf(reactor: Reactor, operator: string | undefined): ReadonlySet<string> {
+  const hit = erasedCache.get(reactor);
+  if (hit !== undefined && hit.size === reactor.size) return hit.ids;
+  const ids = erasedFromReading(reactor, operator);
+  erasedCache.set(reactor, { size: reactor.size, ids });
+  return ids;
+}
+
 export class Gateway {
   /** @internal — T19 seam (renderers.ts) */
   registered: Bound[] = [];
@@ -1604,7 +1615,7 @@ export class Gateway {
       const host = this.userHost ?? this;
       return {
         reactor: host.reactor,
-        erased: () => erasedFromReading(host.reactor, host.operatorAuthor),
+        erased: () => erasedIdsOf(host.reactor, host.operatorAuthor),
       };
     });
   }

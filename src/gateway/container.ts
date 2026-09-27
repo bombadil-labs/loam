@@ -73,7 +73,7 @@ import {
   principalScopeOf,
   standingDelegationIdsFor,
 } from "./principal.js";
-import { subjectKeyAt } from "./user-root.js";
+import { subjectKeyAt, USER_PREFIX } from "./user-root.js";
 
 export const CTX_CONTAINER = "loam.container";
 export const CTX_CONTAINER_EXCLUDED = "loam.container.excluded";
@@ -2251,9 +2251,12 @@ export async function bindConnectionImpl(
   // A grant's subject may name a user; what matters is the key it resolves to now. Subjects that
   // resolve to someone other than the owner (or to no one) are another root's; the owner's own
   // user-named grant is kept.
-  const otherSubjects = grantSubjects(pool.reactor).filter(
-    (subject) => subjectKeyAt(pool.reactor, now, operator, subject) !== owner,
-  );
+  const otherSubjects = grantSubjects(pool.reactor).filter((subject) => {
+    const key = subjectKeyAt(pool.reactor, now, operator, subject);
+    // A user whose root cannot be read right now (a strike that may lapse, a root not valid yet)
+    // is not known to be someone else: leave their grant, never strike it for good on a guess.
+    return key !== undefined && key !== owner;
+  });
   const others = grantRoots(pool.reactor, now, operator).filter((root) => root !== owner);
   // For good means: the operator's, already in force, with no end, and with no negation of its own
   // held here at all, whether in force now or scheduled to start later.
@@ -2381,6 +2384,21 @@ export async function revokeConnectionImpl(opts: {
   const owner = authorForSeed(opts.ownerSeed);
   const now = pool.validityNow();
   const scope = principalScopeOf(pool.reactor);
+  // A grant naming a user whose root cannot be read right now may stand again later, and the
+  // delegations it would carry cannot be found now. Refuse rather than report a revoke that might
+  // not stick.
+  const unreadable = grantSubjects(pool.reactor).filter(
+    (subject) =>
+      subject.startsWith(USER_PREFIX) &&
+      subjectKeyAt(pool.reactor, now, pool.operatorAuthor, subject) === undefined,
+  );
+  if (unreadable.length > 0) {
+    throw new Error(
+      `revokeConnection: this inbox holds grants naming ${unreadable.join(", ")}, whose root ` +
+        `cannot be read right now, so what lets ${opts.connectionKey} write cannot be found in ` +
+        `full. Nothing was struck.`,
+    );
+  }
   const ids = [
     ...survivingWriteGrantIds(pool.reactor, now, opts.connectionKey, pool.operatorAuthor),
     ...(scope === undefined

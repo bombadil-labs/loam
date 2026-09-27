@@ -27,7 +27,7 @@ const NONE: ReadonlySet<string> = new Set();
  * The value each context's latest standing operator claim at `user:<name>` holds. Standing:
  * operator-signed, filed at that entity in that context, valid at `now`, not negated by the
  * operator, not erased. The latest by timestamp wins, a tie going to the smaller id, BEFORE its
- * shape is read, as the View's pick does: a latest claim of the wrong shape resolves to nothing
+ * value is read, as the View's pick does: a latest claim with no single value resolves to nothing
  * rather than letting an older one through.
  */
 function latestValues(
@@ -49,8 +49,19 @@ function latestValues(
     const filing = d.claims.pointers.filter(
       (p) => p.target.kind === "entity" && p.target.entity.id === entity,
     );
+    // The View's value for a claim: its single non-filing pointer, whatever its role, rendered as
+    // the resolver renders it (a primitive's value, an entity's or delta's id). Anything else is
+    // not a single value, and resolves to nothing.
     const rest = d.claims.pointers.filter((p) => !filing.includes(p));
-    const only = rest.length === 1 && rest[0]!.target.kind === "primitive" ? rest[0]! : undefined;
+    const target = rest.length === 1 ? rest[0]!.target : undefined;
+    const rendered =
+      target?.kind === "primitive"
+        ? target.value
+        : target?.kind === "entity"
+          ? target.entity.id
+          : target?.kind === "delta"
+            ? target.deltaRef.delta
+            : undefined;
     for (const p of filing) {
       if (p.target.kind !== "entity") continue;
       const context = p.target.entity.context;
@@ -64,12 +75,7 @@ function latestValues(
       ) {
         continue;
       }
-      const role = context === CTX_ROOT ? "root" : context === CTX_USER ? "name" : undefined;
-      const value =
-        only !== undefined && only.role === role && only.target.kind === "primitive"
-          ? only.target.value
-          : undefined;
-      best.set(context, { timestamp: t, id, value });
+      best.set(context, { timestamp: t, id, value: rendered });
     }
   }
   return new Map([...best].map(([context, b]) => [context, b.value]));
