@@ -3,6 +3,7 @@ import {
   authorsForPrincipal,
   resolvePrincipal,
   verifyDelta,
+  type Delta,
   type Reactor,
   type Suppression,
 } from "@bombadil/rhizomatic";
@@ -20,12 +21,16 @@ const AUTHOR = /^ed25519:[0-9a-f]{64}$/;
 
 const suppressions = new Map<string, Suppression>();
 
+const negates = (d: Delta): boolean => d.claims.pointers.some((p) => p.role === "negates");
+
 /**
  * Who may revoke principal evidence (README ruling 6): the record's own signer — the root, for
- * every delegation Loam honors — or the store's pinned operator. The negation's signature must
- * verify; an unsigned negation revokes nothing. The rule never reads the root, so one callback
- * serves every principal and a membership lowering can share it across roots. Memoized per
- * operator so the reactor sees one stable callback.
+ * every delegation Loam honors — or the store's pinned operator. The operator may only REVOKE: its
+ * signature counts against evidence, never against another negation, or it could undo the root's
+ * own revocation and hand the delegate back. The negation's signature must verify; an unsigned
+ * negation revokes nothing. The rule never reads the root, so one callback serves every principal
+ * and a membership lowering can share it across roots. Memoized per operator so the reactor sees
+ * one stable callback.
  */
 export function principalSuppression(operator: string | undefined): Suppression {
   const key = operator ?? "";
@@ -33,28 +38,43 @@ export function principalSuppression(operator: string | undefined): Suppression 
   if (rule === undefined) {
     rule = (negation, target) =>
       (negation.claims.author === target.claims.author ||
-        (operator !== undefined && negation.claims.author === operator)) &&
+        (operator !== undefined && negation.claims.author === operator && !negates(target))) &&
       verifyDelta(negation) === "verified";
     suppressions.set(key, rule);
   }
   return rule;
 }
 
+// Loam's scope rule: SPEC-14's prefix policy, minus the universal edge. A `*`-scoped delegation
+// would carry a delegate into every container, and ruling 6 scopes every delegation to one.
+const loamScope = (edgeScope: string, request: string): boolean =>
+  edgeScope !== "*" && (edgeScope === request || request.startsWith(`${edgeScope}:`));
+
 const readOptions = (now: number, scope: string, operator: string | undefined) =>
   ({
     at: now,
     now,
     scope,
-    scopePolicy: "prefix",
+    scopePolicy: loamScope,
     suppression: principalSuppression(operator),
   }) as const;
 
+// Is `id` a delegation that says it cannot be passed on? Its bytes are held: the path came from them.
+const sealed = (reactor: Reactor, id: string): boolean =>
+  reactor
+    .get(id)
+    ?.claims.pointers.some(
+      (p) => p.role === "delegable" && p.target.kind === "primitive" && p.target.value === false,
+    ) === true;
+
 /**
- * Does `key` act for `who` at `now` within `scope`? The root always does. Any other key needs a
- * DIRECT delegation from the root, valid at `now`, unrevoked, whose scope covers `scope` under the
- * prefix policy: a delegation cannot be passed on (ruling 6), so a key reached through a second
- * edge does not count even when the first edge says `delegable`. What the key may then DO is the
- * caller's question — a delegate satisfies write standing and nothing else.
+ * Does `key` act for `who` at `now` within `scope`? The root always does. Any other key needs the
+ * one delegation shape Loam honors (README ruling 6): from the root, `delegable: false`, scoped
+ * to something other than `*`, covering `scope` by prefix, valid at `now`, and unrevoked. Every
+ * edge must be sealed, and SPEC-14 ends a chain at a sealed edge, so the path is one edge long.
+ * SPEC-14 would also honor a delegable edge, the chain behind it, or a universal scope; Loam
+ * refuses all three on the read, so a hand-signed record cannot widen a delegate past its scope.
+ * What the key may then DO is the caller's question — a delegate satisfies write standing only.
  */
 export function keyActsFor(
   reactor: Reactor,
@@ -71,13 +91,13 @@ export function keyActsFor(
     who.root,
     key,
     readOptions(now, scope, operator),
-  ).authorityPaths.some((path) => path.length === 1);
+  ).authorityPaths.some((path) => path.every((id) => sealed(reactor, id)));
 }
 
 /**
  * Every key that acts for `who` at `now` within `scope`, by `keyActsFor`'s rule: the present
  * question, asked where a user's accepted keys are listed. `"*"` asks for authority in every
- * scope, which only a `*`-scoped delegation grants.
+ * scope, which no delegation Loam honors grants: that request answers the root alone.
  */
 export function keysActingFor(
   reactor: Reactor,
