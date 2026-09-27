@@ -28,6 +28,7 @@ import {
 } from "@bombadil/rhizomatic";
 import { DeltaSet, evalTerm } from "@bombadil/rhizomatic";
 import { erasedFromReading } from "../gateway/erase.js";
+import { negatedAt } from "../gateway/negation.js";
 import { entityGatherBody } from "../gateway/gather.js";
 
 const CTX_USER = "loam.user";
@@ -284,21 +285,28 @@ export function rootOf(
 }
 
 /**
- * The operator's root pointers for `name` that still stand: held, operator-signed, and not struck
- * by the operator. Read from the user entity's own index. A new person given an erased user's
- * name must not inherit these, so creating a name strikes them.
+ * The operator's claims about `name` that still stand, by the same rule the user View reads them:
+ * held, operator-signed, and not negated at `now` by the operator (recursively, in window). These
+ * say what a PERSON holds — roles and a root — so a new person given an erased user's name must
+ * not inherit them, and creating a name strikes them. The name record itself is not listed.
  */
-export function standingRootIds(reactor: Reactor, operator: string, name: string): string[] {
+export function standingPersonClaimIds(
+  reactor: Reactor,
+  operator: string,
+  now: number,
+  name: string,
+): string[] {
+  const negated = negatedAt(reactor, now, operator);
   const out: string[] = [];
   for (const id of reactor.byTarget(userEntity(name))) {
     const d = reactor.get(id);
-    if (d === undefined || d.claims.author !== operator) continue;
-    const atRoot = d.claims.pointers.some(
-      (p) => p.target.kind === "entity" && p.target.entity.context === CTX_ROOT,
+    if (d === undefined || d.claims.author !== operator || negated(id)) continue;
+    const held = d.claims.pointers.some(
+      (p) =>
+        p.target.kind === "entity" &&
+        (p.target.entity.context === CTX_ROOT || p.target.entity.context === CTX_ROLE),
     );
-    if (!atRoot) continue;
-    const struck = reactor.negationsOf(id).some((n) => reactor.get(n)?.claims.author === operator);
-    if (!struck) out.push(id);
+    if (held) out.push(id);
   }
   return out;
 }

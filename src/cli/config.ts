@@ -13,8 +13,10 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -119,7 +121,16 @@ export const userSeedPath = (home: string, name: string): string => join(home, `
  * file is not itself a source of truth, the ground's grant is, so nothing worth keeping is ever
  * destroyed by replacing it. */
 export function writeUserSeed(home: string, name: string, seed: string): void {
-  writeFileSync(userSeedPath(home, name), `${seed}\n`, { mode: 0o600 });
+  // Temp then rename: a write that fails part-way leaves the previous key file whole.
+  const path = userSeedPath(home, name);
+  const temp = `${path}.${process.pid}.tmp`;
+  writeFileSync(temp, `${seed}\n`, { mode: 0o600 });
+  try {
+    renameSync(temp, path);
+  } catch (err) {
+    rmSync(temp, { force: true });
+    throw err;
+  }
 }
 
 /**

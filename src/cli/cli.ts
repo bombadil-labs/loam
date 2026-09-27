@@ -108,7 +108,7 @@ import {
   resolveUserView,
   roleClaims,
   rootClaims,
-  standingRootIds,
+  standingPersonClaimIds,
   rolesOf,
   userClaims,
   userEntity,
@@ -2671,12 +2671,13 @@ async function cmdUserCreate(
         signClaims(userClaims(name, operator, at), seed),
         signClaims(roleClaims(name, role, operator, at + 1), seed),
         // A name can be reused after its record was erased; the new person must not inherit the
-        // previous one's root.
-        ...standingRootIds(gateway.reactor, operator, name).map((id) =>
-          signClaims(
-            withStamp(gateway.stamp(operator), (t) => makeNegationClaims(operator, t, id)),
-            seed,
-          ),
+        // previous one's roles or root.
+        ...standingPersonClaimIds(gateway.reactor, operator, gateway.validityNow(), name).map(
+          (id) =>
+            signClaims(
+              withStamp(gateway.stamp(operator), (t) => makeNegationClaims(operator, t, id)),
+              seed,
+            ),
         ),
       ];
       if (role === "operator") {
@@ -2753,7 +2754,7 @@ async function cmdUserCreate(
           `\`loam user assign-role ${name} --role=operator\`. ` +
           (struck
             ? `The root pointer naming the lost key was struck.`
-            : `The root pointer still names the lost key; the next assign-role re-points it.`),
+            : `The root pointer still names the lost key; \`remove-role\` then \`assign-role\` re-points it.`),
       );
       return 1;
     }

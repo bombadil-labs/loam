@@ -23,7 +23,14 @@ import { grantClaims } from "../../src/gateway/accounts.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { ensureUserKey } from "../../src/server/provision.js";
-import { CTX_ROOT, rootClaims, rootOf, roleClaims, userClaims } from "../../src/server/users.js";
+import {
+  CTX_ROOT,
+  rolesOf,
+  rootClaims,
+  rootOf,
+  roleClaims,
+  userClaims,
+} from "../../src/server/users.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import type { ScryptParams } from "../../src/server/credentials.js";
@@ -220,6 +227,10 @@ describe("every road that mints a user a key names it as their root", () => {
     rmSync(userSeedPath(home, "ada"), { force: true });
     expect(await run(["user", "create", "ada", "--home", home], io(), password)).toBe(0);
     expect(await cliRoot("ada")).toBeUndefined();
+    // Nor the old roles: the new person holds only the one they were created with.
+    expect(
+      await withGround((gw) => [...rolesOf(gw.reactor, gw.operator, gw.validityNow(), "ada")]),
+    ).toEqual(["actor"]);
     await withGround((gw) => {
       const op = gw.operator!;
       const old = rootRecords(gw.reactor, "ada").find(
@@ -255,4 +266,31 @@ describe("every road that mints a user a key names it as their root", () => {
       expect(await cliRoot("ada")).toBeUndefined();
     },
   );
+
+  it("a root whose strike was itself struck stands again, and a re-created name strikes it anew", async () => {
+    expect(await run(["init", "--home", home], io())).toBe(0);
+    expect(await run(["user", "create", "ada", "--operator", "--home", home], io(), password)).toBe(
+      0,
+    );
+    await withGround(async (gw) => {
+      const op = gw.operator!;
+      const opSeed = readSeed(home);
+      const [root] = rootRecords(gw.reactor, "ada");
+      const strike = signClaims(makeNegationClaims(op, Date.now(), root!.id), opSeed);
+      await gw.append([strike]);
+      await gw.append([signClaims(makeNegationClaims(op, Date.now() + 1, strike.id), opSeed)]);
+      const record = [...gw.reactor.snapshot()].find(
+        (d) =>
+          d.claims.author === op &&
+          d.claims.pointers.some(
+            (p) => p.target.kind === "entity" && p.target.entity.context === "loam.user",
+          ),
+      )!;
+      await gw.append([signClaims(makeNegationClaims(op, Date.now() + 2, record.id), opSeed)]);
+    });
+    rmSync(join(home, "credentials.json"), { force: true });
+    rmSync(userSeedPath(home, "ada"), { force: true });
+    expect(await run(["user", "create", "ada", "--home", home], io(), password)).toBe(0);
+    expect(await cliRoot("ada")).toBeUndefined();
+  });
 });
