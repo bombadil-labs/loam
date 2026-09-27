@@ -68,6 +68,7 @@ import { Gateway, type ConnectionBinding, type FederationReport } from "./gatewa
 import { withStamp } from "./stamp.js";
 import {
   delegationClaims,
+  delegationRecordsFor,
   keyActsFor,
   principalScopeOf,
   standingDelegationIdsFor,
@@ -2075,10 +2076,16 @@ export function survivingWriteGrantIds(
   return survivingGrantIds(reactor, now, subject, "write", operator);
 }
 
-/** The surviving `verb` grant ids naming `subject` at this ground's store entity. */
+/** Every held `verb` grant id naming `subject` at this ground's store entity, struck or not. */
+export function heldGrantIds(reactor: Reactor, subject: string, wanted: string): string[] {
+  return survivingGrantIds(reactor, undefined, subject, wanted, undefined);
+}
+
+/** The surviving `verb` grant ids naming `subject` at this ground's store entity. With no `now`,
+ *  every held one, struck or not. */
 export function survivingGrantIds(
   reactor: Reactor,
-  now: number,
+  now: number | undefined,
   subject: string,
   wanted: string,
   operator: string | undefined,
@@ -2103,7 +2110,7 @@ export function survivingGrantIds(
       if (p.role === "verb" && typeof p.target.value === "string") verb = p.target.value;
     }
     if (subj !== subject || verb !== wanted) continue;
-    if (honoredStrikeOn(reactor, now, id, operator) !== undefined) continue; // already struck
+    if (now !== undefined && honoredStrikeOn(reactor, now, id, operator) !== undefined) continue;
     out.push(id);
   }
   return out;
@@ -2220,12 +2227,20 @@ export async function bindConnectionImpl(
   // it sign a fresh one after the person revokes. So every bind asks of THIS owner, signs a fresh
   // delegation when the current key has none, and strikes, in the operator's voice, every other
   // root's standing delegation to this key and every other root's admin grant here.
+  // EVERY held record of another root, struck or not: a strike with its own `validUntil` lapses, and
+  // the record would stand again. Skipped only when the operator already struck it for good, so a
+  // repeated bind adds nothing.
   const now = pool.validityNow();
   const others = grantSubjects(pool.reactor).filter((root) => root !== owner);
+  const struckForGood = (id: string) =>
+    pool.reactor.negationsOf(id).some((n) => {
+      const neg = pool.reactor.get(n);
+      return neg?.claims.author === operator && neg.claims.validUntil === undefined;
+    });
   const stale = [
-    ...standingDelegationIdsFor(pool.reactor, now, others, opts.connectionKey, name, operator),
-    ...others.flatMap((root) => survivingGrantIds(pool.reactor, now, root, "admin", operator)),
-  ];
+    ...delegationRecordsFor(pool.reactor, others, opts.connectionKey).map((d) => d.id),
+    ...others.flatMap((root) => heldGrantIds(pool.reactor, root, "admin")),
+  ].filter((id) => !struckForGood(id));
   const fresh = !keyActsFor(pool.reactor, now, { root: owner }, opts.connectionKey, name, operator);
   if (fresh || stale.length > 0) {
     await pool.append([

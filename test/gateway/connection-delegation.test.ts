@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { delegationClaims } from "../../src/gateway/principal.js";
@@ -45,6 +45,10 @@ const genesis = () =>
 function disk(): { root: StoreBackend; channelBackend: (name: string) => StoreBackend } {
   return { root: new MemoryBackend(), channelBackend: () => new MemoryBackend() };
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 const temps: string[] = [];
 afterAll(() => {
@@ -312,6 +316,50 @@ describe("revoking a connection negates its delegation", () => {
     expect(await door(other.gateway!, observed(FERN, "tag", "rime", 1035, OTHER_SEED))).toBe(
       "admitted",
     );
+    await gw.close();
+  });
+
+  it("a strike with an end does not let a replaced root back in once it lapses", async () => {
+    const T0 = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(T0);
+    const gw = await home();
+    const conn = await bind(gw, CONN_SEED);
+    const pool = conn.gateway!;
+    const T1 = T0 + 1_000;
+    // The operator strikes the old owner's admin grant and delegation, but only over [T0+10, T1).
+    const timed = (id: string) =>
+      signClaims({ ...makeNegationClaims(OP, T0 + 10, id), validUntil: T1 }, OP_SEED);
+    const oldAdmin = [...pool.reactor.snapshot()].find(
+      (x) => prim(x, "subject") === GARDENER && prim(x, "verb") === "admin",
+    )!;
+    const [oldDelegation] = delegationsOf(pool, CONN);
+    vi.setSystemTime(T0 + 10);
+    await pool.append([timed(oldAdmin.id), timed(oldDelegation!.id)]);
+    // Inside the window the person's replaced seed re-binds, then revokes.
+    vi.setSystemTime(T0 + 20);
+    const NEW_SEED = "e4".repeat(32);
+    await gw.bindConnection({ container: "home:ada", connectionKey: CONN, ownerSeed: NEW_SEED });
+    const forGood = (id: string) =>
+      pool.reactor
+        .negationsOf(id)
+        .map((n) => pool.reactor.get(n)!.claims)
+        .filter((c) => c.author === OP && c.validUntil === undefined).length;
+    expect(forGood(oldAdmin.id)).toBe(1);
+    expect(forGood(oldDelegation!.id)).toBe(1);
+    await gw.bindConnection({ container: "home:ada", connectionKey: CONN, ownerSeed: NEW_SEED });
+    expect(forGood(oldAdmin.id)).toBe(1); // a repeated bind adds no second strike
+    await gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: NEW_SEED });
+    // After the timed strikes lapse, the old root has neither write nor delegation authority.
+    vi.setSystemTime(T1 + 10);
+    expect(await door(pool, observed(FERN, "height", 22, T1 + 10, GARDENER_SEED))).toBe("refused");
+    const reissue = signClaims(
+      delegationClaims(GARDENER, CONN, inboxName("home:ada", CONN), T1 + 11),
+      GARDENER_SEED,
+    );
+    expect(await door(pool, reissue)).toBe("refused");
+    expect(pool.reactor.ingest(reissue).status).toBe("accepted");
+    expect(await door(pool, observed(FERN, "height", 23, T1 + 12, CONN_SEED))).toBe("refused");
     await gw.close();
   });
 
