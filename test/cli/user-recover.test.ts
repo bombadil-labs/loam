@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   authorForSeed,
+  makeDelta,
   makeNegationClaims,
   signClaims,
   type Claims,
@@ -19,10 +20,12 @@ import { readSeed, readUserSeed, storePath, userSeedPath } from "../../src/cli/c
 import { recoverUser, type RecoverOptions } from "../../src/cli/user-recover.js";
 import { grantClaims, holdsGrant } from "../../src/gateway/accounts.js";
 import { containerClaims } from "../../src/gateway/container.js";
+import { eraseClaims } from "../../src/gateway/erase.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { keysEverOf } from "../../src/gateway/principal.js";
-import { userGroundOf, userRootAt } from "../../src/gateway/user-root.js";
+import { recoveryClaims, userGroundOf, userRootAt } from "../../src/gateway/user-root.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 import { userClaims } from "../../src/server/users.js";
 import type { StoreBackend } from "../../src/store/backend.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
@@ -388,6 +391,30 @@ describe("the standing preflight asks what is effective now", () => {
   });
 });
 
+describe("an unsigned strike is not a strike", () => {
+  it("an unsigned operator-named strike on K1's grant does not stop the recovery from striking it", async () => {
+    const { k1 } = await adaAndBea();
+    const grant = await ground(async (gw, op) => {
+      const g = signClaims(
+        grantClaims(STORE_ENTITY, k1, "write", op, gw.stamp(op).timestamp),
+        readSeed(home),
+      );
+      await gw.append([g]);
+      // Held raw, unsigned: a door would refuse it; the store still holds it.
+      await gw.backend.append([makeDelta(makeNegationClaims(op, gw.stamp(op).timestamp, g.id))]);
+      return g.id;
+    });
+    expect(await run(["user", "recover", "ada", "--replace-seed", "--home", home], io)).toBe(0);
+    await ground((gw, op) => {
+      const signedInForce = gw.reactor.negationsOf(grant).some((n) => {
+        const d = gw.reactor.get(n)!;
+        return d.claims.author === op && d.sig !== undefined && d.claims.validFrom <= Date.now();
+      });
+      expect(signedInForce).toBe(true);
+    });
+  });
+});
+
 describe("what the recovery strikes of the old key", () => {
   it("a K1 grant filed at another entity is struck; a strike that starts later does not count as done", async () => {
     const { k1 } = await adaAndBea();
@@ -517,6 +544,101 @@ describe("E6 and E9: inboxes", () => {
     err.length = 0;
     expect(await recoverUser(direct({ channelBackend: channelBackendFor(home, io) }))).toBe(0);
     expect(existsSync(journal("ada"))).toBe(false);
+  });
+
+  const delegationsIn = (pool: string, key: string) =>
+    ground((gw) => {
+      const g = gw.connectionInboxes.get(pool)!.gateway!;
+      return [...g.reactor.arrivalLog()]
+        .filter(
+          (d) =>
+            d.claims.author === key &&
+            d.claims.pointers.some(
+              (p) =>
+                p.role === "kind" &&
+                p.target.kind === "primitive" &&
+                p.target.value === "delegation",
+            ),
+        )
+        .map((d) => g.reactor.negationsOf(d.id).length > 0);
+    });
+
+  it("a record erased after it landed: the rerun says so, keeps the journal, and claims nothing", async () => {
+    await adaAndBea();
+    await bindAdasConnection();
+    expect(await recoverUser(direct({}))).toBe(1); // the inbox is not attached: PENDING
+    const j = JSON.parse(readFileSync(journal("ada"), "utf8")) as { record: string };
+    await ground(async (gw, op) => {
+      await gw.append([
+        signClaims(eraseClaims(j.record, op, op, gw.stamp(op).timestamp), readSeed(home)),
+      ]);
+    });
+    out.length = 0;
+    err.length = 0;
+    expect(await recoverUser(direct({ channelBackend: channelBackendFor(home, io) }))).toBe(1);
+    expect(err.join("\n")).toMatch(/landed and was then erased/);
+    expect(out.join("\n")).not.toMatch(/now signs with/);
+    expect(existsSync(journal("ada"))).toBe(true);
+  });
+
+  it("an abandon whose new attempt is refused keeps the old journal", async () => {
+    await adaAndBea();
+    await bindAdasConnection();
+    expect(await recoverUser(direct({}))).toBe(1); // PENDING
+    const before = readFileSync(journal("ada"), "utf8");
+    rmSync(userSeedPath(home, "ada"));
+    // The new attempt's preflight will refuse: ada's grant by name is struck.
+    await ground(async (gw, op) => {
+      const g = [...gw.reactor.arrivalLog()].find((d) =>
+        d.claims.pointers.some(
+          (p) => p.target.kind === "primitive" && p.target.value === "user:ada",
+        ),
+      )!;
+      await gw.append([
+        signClaims(makeNegationClaims(op, gw.stamp(op).timestamp, g.id), readSeed(home)),
+      ]);
+    });
+    expect(await recoverUser(direct({ abandonAttempt: true }))).toBe(2);
+    expect(readFileSync(journal("ada"), "utf8")).toBe(before);
+  });
+
+  it("an abandon finishes the predecessor's inbox cleanup as well as its own", async () => {
+    const { k1 } = await adaAndBea();
+    const pool = await bindAdasConnection();
+    expect(await recoverUser(direct({}))).toBe(1); // the inbox not attached: K1's delegation unstruck
+    expect(await delegationsIn(pool, k1)).toEqual([false]);
+    rmSync(userSeedPath(home, "ada"));
+    expect(
+      await recoverUser(
+        direct({ abandonAttempt: true, channelBackend: channelBackendFor(home, io) }),
+      ),
+    ).toBe(0);
+    expect(await delegationsIn(pool, k1)).toEqual([true]);
+    expect(existsSync(journal("ada"))).toBe(false);
+  });
+
+  it("a history broken after the attempt landed: the rerun claims nothing and keeps the journal", async () => {
+    await adaAndBea();
+    await bindAdasConnection();
+    expect(await recoverUser(direct({}))).toBe(1); // PENDING
+    // A competing first record breaks ada's chain; this attempt's record is still held and unerased.
+    await ground(async (gw, op) => {
+      const other = authorForSeed("e9".repeat(32));
+      await gw.append([
+        signClaims(
+          withStamp(gw.stamp(op), (t) =>
+            recoveryClaims({ name: "ada", attempt: "rival", root: other, retired: [] }, op, t),
+          ),
+          readSeed(home),
+        ),
+      ]);
+    });
+    out.length = 0;
+    err.length = 0;
+    expect(await recoverUser(direct({ channelBackend: channelBackendFor(home, io) }))).toBe(1);
+    expect(err.join("\n")).toMatch(/does not now name/);
+    expect(out.join("\n")).not.toMatch(/now signs with/);
+    expect(existsSync(journal("ada"))).toBe(true);
   });
 });
 

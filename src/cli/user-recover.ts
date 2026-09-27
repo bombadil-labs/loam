@@ -44,6 +44,7 @@ import { assembleGenesis } from "../gateway/genesis.js";
 import { Gateway } from "../gateway/gateway.js";
 import {
   CTX_ROOT,
+  verified,
   lineageClaims,
   recoveryChain,
   recoveryClaims,
@@ -84,6 +85,8 @@ interface Journal {
   readonly archive?: string;
   readonly pools: readonly string[];
   readonly bound: boolean;
+  /** Every key the chain has retired, as of this attempt: whose inbox standing still needs striking. */
+  readonly retired: readonly string[];
 }
 
 const journalPath = (home: string, name: string): string => `${userSeedPath(home, name)}.recovery`;
@@ -154,10 +157,15 @@ function moveNoClobber(from: string, to: string): void {
 // Is `id` struck for good by the operator at `now`: a strike already in force, with no end, itself
 // unstruck? A strike that starts later is not yet one.
 function struckForGood(reactor: Reactor, operator: string, id: string, now: number): boolean {
+  // Only a strike the readers honor counts: verified, and not erased.
+  const erased = userGroundOf(reactor).erased();
   return reactor.negationsOf(id).some((n) => {
     const neg = reactor.get(n);
     return (
-      neg?.claims.author === operator &&
+      neg !== undefined &&
+      !erased.has(n) &&
+      verified(neg) &&
+      neg.claims.author === operator &&
       neg.claims.validFrom <= now &&
       neg.claims.validUntil === undefined &&
       reactor.negationsOf(n).length === 0
@@ -242,6 +250,13 @@ async function boot(o: RecoverOptions, seed: string): Promise<Gateway> {
 
 /** Run `loam user recover`. Returns the process exit code. */
 export async function recoverUser(o: RecoverOptions): Promise<number> {
+  return recover(o, undefined);
+}
+
+// `superseding` is the journal of a landed attempt being abandoned. It stays in place until this
+// attempt's journal atomically replaces it, so a refusal or a crash before then leaves it as the
+// account of the unfinished work; the retired set it carries is swept again by this attempt.
+async function recover(o: RecoverOptions, superseding: Journal | undefined): Promise<number> {
   const { home, name, io } = o;
   const refuse = (line: string, code = 2) => {
     io.err(`user recover: ${line}`);
@@ -259,7 +274,8 @@ export async function recoverUser(o: RecoverOptions): Promise<number> {
   }
   const operator = authorForSeed(opSeed);
   const journal = readJournal(home, name);
-  if (journal !== undefined) return resume(o, opSeed, operator, journal);
+  if (journal !== undefined && superseding === undefined)
+    return resume(o, opSeed, operator, journal);
 
   // 1. Refusals, before anything is written.
   const seedRead = readUserSeed(home, name);
@@ -331,18 +347,25 @@ export async function recoverUser(o: RecoverOptions): Promise<number> {
       seedRead.kind === "present" ? `${userSeedPath(home, name)}.replaced-${attempt}` : undefined;
 
     // 3. The journal first, durable.
-    writeDurable(
-      journalPath(home, name),
-      JSON.stringify({
-        attempt,
-        ...(previous === undefined ? {} : { previous }),
-        root,
-        record: record.id,
-        ...(archive === undefined ? {} : { archive }),
-        pools: [],
-        bound: previous === undefined,
-      } satisfies Journal),
-    );
+    const next = JSON.stringify({
+      attempt,
+      ...(previous === undefined ? {} : { previous }),
+      root,
+      record: record.id,
+      ...(archive === undefined ? {} : { archive }),
+      pools: [],
+      bound: previous === undefined,
+      retired: [...retired],
+    } satisfies Journal);
+    if (superseding === undefined) writeDurable(journalPath(home, name), next);
+    else {
+      // Replace the abandoned attempt's journal atomically: before the rename it still stands.
+      const temp = `${journalPath(home, name)}.next`;
+      rmSync(temp, { force: true });
+      writeDurable(temp, next);
+      renameSync(temp, journalPath(home, name));
+      syncDir(journalPath(home, name));
+    }
     o.afterJournal?.();
     if (archive !== undefined) moveNoClobber(userSeedPath(home, name), archive);
     // The new key file is durable BEFORE the record commits: a record naming a key whose secret a
@@ -362,7 +385,7 @@ export async function recoverUser(o: RecoverOptions): Promise<number> {
     );
     const struck = strikes(gw, operator, opSeed, [
       ...otherRootClaims(gw.reactor, operator, name, root),
-      ...(previous === undefined ? [] : standingOf(gw.reactor, previous)),
+      ...[...retired].flatMap((key) => standingOf(gw.reactor, key)),
     ]);
     try {
       await gw.append([record, lineage, rootClaim, ...struck]);
@@ -389,6 +412,8 @@ async function afterAppendError(
   try {
     const gw = await boot(o, opSeed);
     try {
+      // The bytes decide whether the append committed; erased-but-held still committed, and resume
+      // reports what the readers make of it.
       committed = gw.reactor.get(journal.record) !== undefined;
     } finally {
       await gw.close().catch(() => {});
@@ -440,7 +465,19 @@ async function resume(
     return 1;
   }
   try {
-    if (gw.reactor.get(j.record) === undefined) {
+    const held = gw.reactor.get(j.record) !== undefined;
+    if (held && userGroundOf(gw.reactor).erased().has(j.record)) {
+      // It landed, and the operator has since erased it: the readers no longer see this recovery.
+      // Nothing here is rolled back, and nothing is reported as done.
+      io.err(
+        `user recover: ${name}'s recovery record ${j.record} landed and was then erased, so it is ` +
+          `not in force. This attempt cannot finish. The journal is kept at ${journalPath(home, name)} ` +
+          `as the account of it. Resolve ${name}'s recovery history (\`loam store\` shows it), then ` +
+          `remove the journal and recover again.`,
+      );
+      return 1;
+    }
+    if (!held) {
       rollback(o, j);
       io.err(
         `user recover: an earlier attempt for ${name} did not land. It is rolled back; nothing changed. Run this again to recover.`,
@@ -452,13 +489,12 @@ async function resume(
       // The record names a key whose secret is not here. If it is truly lost, the remedy is a new
       // recovery that supersedes this one, to a fresh key.
       if (o.abandonAttempt) {
-        rmSync(journalPath(home, name), { force: true });
         io.out(
           `user recover: the key ${j.root} named by the last recovery is abandoned; recovering ` +
             `${name} again to a new key.`,
         );
         await gw.close().catch(() => {});
-        return recoverUser({ ...o, abandonAttempt: false, replaceSeed: true });
+        return recover({ ...o, abandonAttempt: false, replaceSeed: true }, j);
       }
       io.err(
         `user recover: ${name}'s recovery landed, but ${userSeedPath(home, name)} does not hold its ` +
@@ -471,7 +507,7 @@ async function resume(
     let journal = j;
     // 6. Pools: strike the old key's standing in each attached inbox; name the ones not attached.
     const pending: string[] = [];
-    if (j.previous !== undefined) {
+    if (j.retired.length > 0) {
       // An inbox the store declares but has not attached cannot be reached; the fence already
       // refuses the old key there, and this recovery stays pending until it is struck.
       const table = readContainerTable(gw.reactor, gw.validityNow(), operator);
@@ -488,7 +524,7 @@ async function resume(
           pending.push(pool);
           continue;
         }
-        const ids = standingOf(ground.reactor, j.previous);
+        const ids = j.retired.flatMap((key) => standingOf(ground.reactor, key));
         try {
           const deltas = strikes(ground, operator, opSeed, ids);
           if (deltas.length > 0) await ground.append(deltas);
@@ -522,6 +558,16 @@ async function resume(
       } catch (err) {
         pending.push(`the binding (${err instanceof Error ? err.message : String(err)})`);
       }
+    }
+    // Report completion only if the readers agree: the chain's head names this attempt's key.
+    const chain = recoveryChain(gw.reactor, operator, name, userGroundOf(gw.reactor).erased());
+    if (chain.kind !== "chain" || chain.root !== j.root) {
+      io.err(
+        `user recover: this attempt landed, but ${name}'s recovery history does not now name ` +
+          `${j.root} as root (${chain.kind === "broken" ? "the history is broken" : "a different recovery leads"}). ` +
+          `The journal is kept at ${journalPath(home, name)}. Nothing is reported as done.`,
+      );
+      return 1;
     }
     const lines = [
       `${name} now signs with ${j.root}.`,
