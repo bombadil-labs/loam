@@ -5,12 +5,8 @@
       "revoked"
     ],
     "parent": {
-      "boundTag": [
-        "by-connection"
-      ],
+      "boundTag": null,
       "containerScope": [
-        "@subadmin: \"by-connection\"",
-        "@subadmin: \"connection's write before T\"",
         "@writer: negates",
         "@writer: principal+kind+key+scope+delegable",
         "@writer: principal+kind+key+scope+delegable"

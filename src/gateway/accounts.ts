@@ -517,7 +517,7 @@ export function grantsHeldBy(
     now,
     operator,
     (subject) => subjectKeyAt(reactor, now, operator, subject) === author,
-  );
+  ).map(withoutSubject);
 }
 
 /**
@@ -531,17 +531,25 @@ export function grantsNaming(
   author: string,
   operator?: string,
 ): HeldGrant[] {
-  return effectiveGrants(reactor, now, operator, (subject) => subject === author);
+  return effectiveGrants(reactor, now, operator, (subject) => subject === author).map(
+    withoutSubject,
+  );
 }
+
+const withoutSubject = (g: HeldGrant & { readonly subject: string }): HeldGrant => ({
+  id: g.id,
+  verb: g.verb,
+  ...(g.prefix === undefined ? {} : { prefix: g.prefix }),
+});
 
 function effectiveGrants(
   reactor: Reactor,
   now: number,
   operator: string | undefined,
   names: (subject: string) => boolean,
-): HeldGrant[] {
+): (HeldGrant & { readonly subject: string })[] {
   const ctx: Ctx = { reactor, now, operator };
-  const out: HeldGrant[] = [];
+  const out: (HeldGrant & { readonly subject: string })[] = [];
   for (const d of survivingAt(ctx, STORE_ENTITY, CTX_GRANTS, new Set())) {
     if (constitutionalDefect(d) !== undefined) continue; // malformed law binds nothing
     let subject: string | undefined;
@@ -569,11 +577,21 @@ function effectiveGrants(
     }
     out.push({
       id: d.id,
+      subject,
       verb: verb as Verb,
       ...(prefix === undefined ? {} : { prefix }),
     });
   }
   return out;
+}
+
+/** Every effective surviving grant at the store entity, whatever it names, with its subject. */
+export function effectiveGrantsAt(
+  reactor: Reactor,
+  now: number,
+  operator?: string,
+): (HeldGrant & { readonly subject: string })[] {
+  return effectiveGrants(reactor, now, operator, () => true);
 }
 
 // The namespaces `author` may register inside, right now. Empty means no register standing at all,

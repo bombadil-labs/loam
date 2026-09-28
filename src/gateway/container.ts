@@ -34,6 +34,7 @@ import { MemoryBackend } from "../store/memory.js";
 import { isRepairable } from "../store/quarantine.js";
 import {
   CTX_GRANTS,
+  effectiveGrantsAt,
   grantClaims,
   grantSubjects,
   holdsGrant,
@@ -71,11 +72,12 @@ import {
   delegationRecordsFor,
   delegationRootsTo,
   keyActsFor,
+  keysActingFor,
   principalScopeOf,
   standingDelegationIdsFor,
 } from "./principal.js";
 import { keysSubjectCouldName, subjectCouldName, subjectKeyAt, USER_PREFIX } from "./user-root.js";
-import { membershipForValidation } from "./member-of.js";
+import { memberOf, membershipForValidation } from "./member-of.js";
 
 export const CTX_CONTAINER = "loam.container";
 export const CTX_CONTAINER_EXCLUDED = "loam.container.excluded";
@@ -957,6 +959,20 @@ export function containerScopeImpl(
     return { deltas: gw.select(term), ground: gw };
   };
 
+  // A connection inbox composes into its parent by AUTHORITY (README ruling 8, M3): only what its
+  // owner, and the keys acting for the owner in this pool, wrote. A revoked or expired connection's
+  // writes stay in the pool (drop() and forensics read it whole) and leave the parent's view. A pool
+  // whose owner cannot be read fails the read, as an unattached one does (H9).
+  const contributionOf = (name: string): { deltas: Delta[]; ground: Gateway } => {
+    const all = membersOf(name);
+    if (!name.startsWith("inbox:") || name === gw.poolHandle) return all;
+    const owner = poolOwner(all.ground);
+    if ("refusal" in owner) {
+      throw new Error(`containerScope refused: the inbox "${name}" ${owner.refusal}`);
+    }
+    return { deltas: all.ground.select(ownerTerm(all.ground, owner, name)), ground: all.ground };
+  };
+
   // The gather is the requested ACTIVE containers PLUS every active inbox pool bound to one of them
   // (SPEC §39): an inbox is a separate container whose declaration marks its parent with `inboxOf`,
   // and a connection's writes land in that pool. The pool stays a container in its own right — drop()
@@ -983,7 +999,8 @@ export function containerScopeImpl(
   // one of their grounds may hold the strike — the snapshot is point-in-time, the primary is live.
   const contributions = new Map<Gateway, Map<string, Delta>>();
   for (const name of toGather) {
-    const { deltas, ground } = membersOf(name);
+    const { deltas, ground } =
+      table.containers.get(name)!.inboxOf === undefined ? membersOf(name) : contributionOf(name);
     const per = contributions.get(ground) ?? new Map<string, Delta>();
     for (const d of deltas) if (!per.has(d.id)) per.set(d.id, d);
     contributions.set(ground, per);
@@ -2017,6 +2034,79 @@ async function openSeparate(
 
 // --- the connection binding (SPEC §39: a connection binds to a container) ------------------------
 
+/** The one owner an inbox pool's effective admin grants name: a user, or a key. */
+export interface PoolOwner {
+  readonly key: string;
+  readonly user?: string;
+}
+
+/**
+ * The owner of the inbox pool `pool`: the one principal its effective admin grants name. Grants are
+ * counted by the owner they RESOLVE to, so two grants for one owner name one owner. None, several,
+ * or a user subject that resolves to no key is a refusal: a pool must never compose as if its owner
+ * were someone.
+ */
+export function poolOwner(pool: Gateway): PoolOwner | { readonly refusal: string } {
+  const operator = pool.operatorAuthor;
+  const now = pool.validityNow();
+  const owners = new Map<string, PoolOwner>();
+  for (const g of effectiveGrantsAt(pool.reactor, now, operator)) {
+    if (g.verb !== "admin") continue;
+    const key = subjectKeyAt(pool.reactor, now, operator, g.subject);
+    if (key === undefined) {
+      return { refusal: `names its owner ${g.subject}, who resolves to no current key` };
+    }
+    const user = g.subject.startsWith(USER_PREFIX)
+      ? g.subject.slice(USER_PREFIX.length)
+      : undefined;
+    const known = owners.get(key);
+    if (known?.user !== undefined && user !== undefined && known.user !== user) {
+      return { refusal: `names two users, ${known.user} and ${user}, for one key` };
+    }
+    const named = known?.user ?? user;
+    owners.set(key, named === undefined ? { key } : { key, user: named });
+  }
+  if (owners.size !== 1) {
+    return {
+      refusal:
+        owners.size === 0
+          ? "has no owner: no effective admin grant stands in it"
+          : `names ${owners.size} owners in its admin grants`,
+    };
+  }
+  return [...owners.values()][0]!;
+}
+
+// What an inbox pool contributes for `owner`: a user's present authority and history in this pool
+// (`loam.memberOf`, lowered by the pool's select), or a key and the keys acting for it here. The
+// pool operator's own claims compose too: they are its law (erasures, strikes, grants), never data
+// written for the owner, and a parent read must keep binding them (H1).
+function ownerTerm(pool: Gateway, owner: PoolOwner, name: string): unknown {
+  const byOwner =
+    owner.user !== undefined
+      ? memberOf(owner.user, name)
+      : {
+          match: {
+            field: "author",
+            cmp: "inSet",
+            const: [
+              ...keysActingFor(
+                pool.reactor,
+                pool.validityNow(),
+                { root: owner.key },
+                name,
+                pool.operatorAuthor,
+              ),
+            ].sort(),
+          },
+        };
+  const pred =
+    pool.operatorAuthor === undefined
+      ? byOwner
+      : { or: [byOwner, { match: { field: "author", cmp: "eq", const: pool.operatorAuthor } }] };
+  return { op: "select", pred, in: "input" };
+}
+
 export interface BindConnectionOptions {
   /** The parent container this connection is bound to. Its gather composes the inbox pool. */
   readonly container: string;
@@ -2489,7 +2579,8 @@ export async function resumeInboxesImpl(gw: Gateway): Promise<void> {
 // Revoke a connection, owner-authored (§39.3c): negate the delegation that lets its key act for the
 // owner, and strike any write grant naming the key, which a pool bound before delegations still
 // holds. The door then refuses new writes signed by that key; past deltas keep their author and stay
-// readable, and other connections are untouched — one-connection blast radius, two-sided by
+// in the pool, and leave the parent's view, since the parent composes a pool by its owner's
+// authority. Other connections are untouched — one-connection blast radius, two-sided by
 // construction.
 export async function revokeConnectionImpl(opts: {
   inbox: Container;

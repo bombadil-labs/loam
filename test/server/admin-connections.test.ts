@@ -249,13 +249,15 @@ describe("§40 criterion 12 — the connections panel (bare bound connections)",
     expect(forged.status).toBe(403);
     await pool1.append([noteBy(CONN_SEED, gateway.stamp(CONN), "still writable")]);
 
-    // The confirm page tells the truth before anything happens: refuse-next-write, keep the past.
+    // The confirm page tells the truth before anything happens: refuse the next write; the past
+    // stays in the inbox and leaves the container's view.
     const confirm = await postAdmin(base, "/admin/revoke", ada, {
       form_token: tokenOf(dashboard),
       name: inboxes.one,
     });
     const confirmHtml = await confirm.text();
-    expect(confirmHtml).toContain("keep");
+    expect(confirmHtml).toContain("stays in its inbox");
+    expect(confirmHtml).toContain("leaves the view of");
     expect(confirmHtml).toContain(CONN);
 
     // The full flow revokes.
@@ -264,8 +266,9 @@ describe("§40 criterion 12 — the connections panel (bare bound connections)",
     const doneHtml = await done.text();
     expect(doneHtml).toContain("Revoked");
 
-    // DELTA level, two-sided (§39.3c): the next write refuses; the sibling still writes; the past
-    // delta keeps its author and stays in the gather.
+    // Two-sided (§39.3c): the next write refuses; the sibling still writes. DELTA level: the past
+    // delta keeps its author in the pool. OBJECT level: it leaves the parent's gather (M3), and the
+    // sibling's write is in it.
     await expect(
       pool1.append([noteBy(CONN_SEED, gateway.stamp(CONN), "after the revoke")]),
     ).rejects.toThrow();
@@ -273,7 +276,8 @@ describe("§40 criterion 12 — the connections panel (bare bound connections)",
     await pool2.append([w2]);
     expect(pool2.reactor.get(w2.id)).toBeDefined();
     expect(pool1.reactor.get(past.id)!.claims.author).toBe(CONN);
-    expect(gateway.connectionScope({ bound: "ada" }).map((d) => d.id)).toContain(past.id);
+    const scope = gateway.connectionScope({ bound: "ada" }).map((d) => d.id);
+    expect([scope.includes(past.id), scope.includes(w2.id)]).toEqual([false, true]);
 
     // OBJECT level: the panel now shows the revoked state ON THAT ROW (the tree's own "active"
     // state words must not satisfy this), the sibling row stays active, and the revoked row STAYS

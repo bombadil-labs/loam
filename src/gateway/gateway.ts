@@ -1242,7 +1242,8 @@ export class Gateway {
   }
 
   // Revoke a connection (SPEC §39.3c): strike its owner-authored write grant in the inbox. New writes
-  // signed by that key refuse; its past deltas keep their author and stay readable.
+  // signed by that key refuse; its past deltas keep their author, stay in the inbox, and leave the
+  // parent's view (the parent composes a pool by its owner's authority).
   async revokeConnection(opts: {
     inbox: Container;
     connectionKey: string;
@@ -1555,6 +1556,10 @@ export class Gateway {
     this.reactor.advanceTime(this.validityNow());
     if (crossed) this.replayRegistrations();
     this.armValidityTimer();
+    // A watch over a Term that reads delegations or roots (`loam.memberOf`) was lowered at its last
+    // evaluation; a window that closes here moves it with nothing written, and `advanceTime` fires no
+    // subscriber. So this ground's own pulses re-evaluate, as its dependents' do.
+    for (const pulse of [...this.userPulses]) pulse();
     this.notifyUserDependents();
   }
 

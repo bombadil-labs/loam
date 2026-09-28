@@ -10,8 +10,8 @@
 // THE CONNECTIONS PANEL reads the subtree's inbox pools from the live container table and joins
 // them, when the server has a connector flow, with `oauth.json` — client name, generation, live
 // tokens, phase 15's own read. Revoke is two-sided by §39.3c and it says so: the connection's NEXT
-// write refuses, everything it already wrote keeps its author and stays readable, and any sibling
-// connection is untouched. Where the row is a connector's, the revoke drives phase 15's
+// write refuses, everything it already wrote keeps its author and stays in its inbox while leaving
+// the container's view, and any sibling connection is untouched. Where the row is a connector's, the revoke drives phase 15's
 // `revokeConnector` FIRST (the generation bump is what kills a live bearer) and then strikes the
 // inbox grant; a failure between the two is reported as exactly the half that happened.
 //

@@ -47,8 +47,8 @@ lawfully erased anything in that window, `_forgotten` says so, and when — neve
 **Who said that?** Claude holds its own signing key. When it files a note, the ground records
 that *Claude's connection* said it, not you, and the signature travels with the fact forever. And
 it lands in the connection's own **inbox** inside the container you chose at consent — never in
-your primary ground, and never anywhere you did not name. Disconnect it and every line stays,
-still signed as its. Today you read those signatures on the admin page and in the store's own
+your primary ground, and never anywhere you did not name. Disconnect it and every line stays in
+its inbox, still signed as its, and leaves your container's view. Today you read those signatures on the admin page and in the store's own
 ledger (`loam grant list`); teaching the read surface to answer "who said this" from chat is
 queued work.
 
@@ -138,7 +138,7 @@ what standing they hold. "Nothing here" and "not signed in" deserve different re
 shows the containers under your own name: what arrived since you last looked and from whom, the
 channels receiving into them, the connections bound there, the schemas. What Claude files lands
 in its inbox inside the container you chose, so the page counts it under your name — and one row
-revokes that one connection, leaving every word it wrote in place. The whole store, wherever it
+revokes that one connection: every word it wrote stays in its inbox and leaves your view. The whole store, wherever it
 is, is the command line's (`loam store`, `loam federate list`, `loam grant list`).
 
 **A connection reads what it can see.** Claude reads the container it is bound to — your claims
