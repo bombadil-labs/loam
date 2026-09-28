@@ -19,14 +19,8 @@ import type { Leeway } from "../gateway/leeway.js";
 import { stampOn, withStamp } from "../gateway/stamp.js";
 import { authoredBy } from "../gateway/membership.js";
 import { writtenByUser } from "../gateway/member-of.js";
-import {
-  recoveryChain,
-  subjectKeyAt,
-  USER_PREFIX,
-  userGroundOf,
-  userRootsRaw,
-} from "../gateway/user-root.js";
-import { resolveUserView, rootClaims, userEntity } from "./users.js";
+import { subjectKeyAt, USER_PREFIX, userGroundOf } from "../gateway/user-root.js";
+import { keyEvidenceHeld, resolveUserView, rootClaims, userEntity } from "./users.js";
 
 export interface ProvisionRefusal {
   readonly status: number;
@@ -132,10 +126,10 @@ export async function ensureUserKey(
  * The membership of a container `owner` owns, read through the same ground the memberOf lowering
  * reads users from. It names the user (`loam.memberOf`) when the user resolves by name to the very
  * key `owner.seed` signs with: it then follows their current root, the keys that act for them in
- * `scope`, and a recovery. A name bound to no key here (no root claim, no recovery history: a user
- * keyed before root claims, or none at all) keeps the key form, as its grant does. A name bound to a
- * key that is not this one, or to none (a broken history), is refused: the key form would pin the
- * container to a key the user no longer holds.
+ * `scope`, and a recovery. A name with no key evidence held here (`keyEvidenceHeld`: a user keyed
+ * before root claims, or none at all) keeps the key form, as its grant does. Any other name that
+ * does not resolve to this key is refused, whatever state its evidence is in (struck, expired, not
+ * yet valid, a broken history): the key form would pin the container to a key the user may not hold.
  */
 export function ownedMembership(
   gw: Gateway,
@@ -148,10 +142,9 @@ export function ownedMembership(
   if (subjectKeyAt(gw.reactor, now, operator, `${USER_PREFIX}${owner.user}`) === key) {
     return { membership: writtenByUser(owner.user, scope) };
   }
-  const ground = userGroundOf(gw.reactor);
   const bound =
-    userRootsRaw(ground, operator, owner.user).length > 0 ||
-    recoveryChain(ground.reactor, operator, owner.user, ground.erased()).kind !== "none";
+    operator !== undefined &&
+    keyEvidenceHeld(userGroundOf(gw.reactor).reactor, operator, owner.user);
   return bound
     ? {
         refusal:

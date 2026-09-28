@@ -7,7 +7,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { authorForSeed, type Delta } from "@bombadil/rhizomatic";
+import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
+import { CTX_ROOT } from "../../src/gateway/user-root.js";
+import { rootClaims } from "../../src/server/users.js";
 import { channelBackendFor, run } from "../../src/cli/cli.js";
 import { readSeed, readUserSeed, storePath, writeUserSeed } from "../../src/cli/config.js";
 import { recoverUser } from "../../src/cli/user-recover.js";
@@ -127,6 +129,45 @@ describe("provisioned containers name their user", () => {
       expect(refused?.status).toBe(409);
       expect(faults.join("\n")).toMatch(/not their current key/);
       expect(gw.containers().containers.has("ada:old")).toBe(false);
+    });
+  });
+
+  it("a struck or not-yet-valid root claim still binds the name: the key file is refused", async () => {
+    expect(await run(["init", "--home", home], io)).toBe(0);
+    expect(await run(["user", "create", "ada", "--operator", "--home", home], io, password)).toBe(
+      0,
+    );
+    const k1Seed = seedOf("ada");
+    await ground(async (gw) => {
+      const op = gw.operator!;
+      const seed = readSeed(home);
+      const root = gw.reactor
+        .arrivalLog()
+        .find(
+          (d) =>
+            d.claims.author === op &&
+            d.claims.pointers.some(
+              (p) => p.target.kind === "entity" && p.target.entity.context === CTX_ROOT,
+            ),
+        )!;
+      await gw.append([signClaims(makeNegationClaims(op, gw.stamp(op).timestamp, root.id), seed)]);
+      expect(ownedMembership(gw, { user: "ada", seed: k1Seed }, "ada:old")).toHaveProperty(
+        "refusal",
+      );
+    });
+    // A name whose only root claim is not yet valid.
+    const bea = "be".repeat(32);
+    writeUserSeed(home, "bea", bea);
+    await ground(async (gw) => {
+      const op = gw.operator!;
+      const later = Date.now() + 3_600_000;
+      await gw.append([
+        signClaims(
+          { ...rootClaims("bea", authorForSeed(bea), op, later), validFrom: later },
+          readSeed(home),
+        ),
+      ]);
+      expect(ownedMembership(gw, { user: "bea", seed: bea }, "bea")).toHaveProperty("refusal");
     });
   });
 

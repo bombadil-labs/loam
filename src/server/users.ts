@@ -329,6 +329,33 @@ function membershipNames(text: string, user: string): boolean {
 }
 
 /**
+ * Does the ground hold any evidence binding `user:<name>` to a key: an operator root claim, recovery
+ * record or lineage claim at the entity, verified and held, in ANY state (struck, expired, not yet
+ * valid, erased but not yet purged)? A name with none is bound to no key here. A user record alone
+ * binds no key: a user keyed before root claims has only a record and a key file.
+ */
+export function keyEvidenceHeld(reactor: Reactor, operator: string, name: string): boolean {
+  const entity = userEntity(name);
+  const BINDS = new Set([CTX_ROOT, CTX_RECOVERY, CTX_LINEAGE]);
+  for (const id of reactor.byTarget(entity)) {
+    const d = reactor.get(id);
+    if (d === undefined || d.claims.author !== operator || !verified(d)) continue;
+    if (
+      d.claims.pointers.some(
+        (p) =>
+          p.target.kind === "entity" &&
+          p.target.entity.id === entity &&
+          p.target.entity.context !== undefined &&
+          BINDS.has(p.target.entity.context),
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Does the ground still HOLD anything that would pass to a new person given the entity `user:<name>`?
  * Everything that can bind or revive counts, struck or not yet valid included, because a strike can
  * lapse:
