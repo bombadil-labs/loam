@@ -202,6 +202,8 @@ describe("store-bound cuts and durable records", () => {
     await other.federate([cut]);
     expect(other.reactor.get(cut.id)).toBeDefined();
     expect(paused(other).has(K1)).toBe(false);
+    await other.append([op(eraseClaims(cut.id, OP, OP, 70))]);
+    expect(refusedIds(other.reactor, OP).has(cut.id)).toBe(true);
   });
 
   it("H10/H11: after the committed outcome lands, erasing the record does not re-pause; a strike on the outcome changes nothing; the outcome alone cannot be erased", async () => {
@@ -311,6 +313,18 @@ describe("the cut readers, against erasure, position and a shared root", () => {
     await gw.federate([late]);
     expect(members(gw).has(late.id)).toBe(false);
     expect(members(gw).has(byK1.id)).toBe(false);
+    expect(paused(gw).has(K1)).toBe(true);
+  });
+
+  it("S3: a wrong-position cut with a committed outcome cannot be erased as a pair; its pause holds", async () => {
+    const { gw } = await world();
+    const { cut } = await recover(gw, { outcome: "committed", position: 999 });
+    const outcome = gw.reactor
+      .arrivalLog()
+      .find((d) => d.claims.pointers.some((p) => p.role === "outcome"))!;
+    await expect(
+      gw.append([op(eraseClaims(cut.id, OP, OP, 90)), op(eraseClaims(outcome.id, OP, OP, 90))]),
+    ).rejects.toThrow(/prepared recovery cut cannot be erased/);
     expect(paused(gw).has(K1)).toBe(true);
   });
 

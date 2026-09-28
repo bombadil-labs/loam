@@ -171,6 +171,21 @@ export function cutState(
     : "prepared";
 }
 
+// A cut's state as every reader and the erase door see it: a cut that did not arrive at the position
+// it names is PREPARED unless aborted, whatever outcome claims it committed.
+function effectiveState(
+  reactor: Reactor,
+  operator: string,
+  cut: Delta,
+  erased: ReadonlySet<string>,
+): CutState {
+  const state = cutState(reactor, operator, cut, erased);
+  const at = arrivalIndex(reactor, cut.id);
+  return state === "aborted" || (at !== undefined && field(cut, "position") === String(at))
+    ? state
+    : "prepared";
+}
+
 export interface Cut {
   readonly delta: Delta;
   readonly recovery: string;
@@ -196,18 +211,14 @@ export function cutsHere(
   if (here === undefined) return [];
   const out: Cut[] = [];
   for (const d of held(reactor, operator, CTX_CUT, erased)) {
-    const [store, recovery, key, position] = ["store", "recovery", "key", "position"].map((r) =>
-      field(d, r),
-    );
+    const [store, recovery, key] = ["store", "recovery", "key"].map((r) => field(d, r));
     if (store !== here || recovery === undefined || key === undefined) continue;
-    const at = arrivalIndex(reactor, d.id)!;
-    const state = cutState(reactor, operator, d, erased);
     out.push({
       delta: d,
       recovery,
       key,
-      index: at,
-      state: position === String(at) || state === "aborted" ? state : "prepared",
+      index: arrivalIndex(reactor, d.id)!,
+      state: effectiveState(reactor, operator, d, erased),
     });
   }
   return out;
@@ -270,7 +281,11 @@ export function cutErasureDefect(
       : undefined;
   }
   if (inContext(target, CTX_CUT)) {
-    if (cutState(reactor, operator, target, erased) === "prepared") {
+    // A cut naming another incarnation counts for nothing here, so nothing here depends on it.
+    const here = activeIncarnation(reactor, operator, erased);
+    if (here === undefined || field(target, "store") !== field(here, "incarnation"))
+      return undefined;
+    if (effectiveState(reactor, operator, target, erased) === "prepared") {
       return "a prepared recovery cut cannot be erased while the host may still commit";
     }
     const outcome = held(reactor, operator, CTX_CUT_OUTCOME, erased).find(
