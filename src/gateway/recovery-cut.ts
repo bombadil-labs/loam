@@ -199,12 +199,19 @@ export function cutState(
   }
   if (outcomes.size > 1) return "prepared"; // contradictory outcomes: fail closed
   const [only] = outcomes;
-  if (only === "committed" || only === "aborted") return only;
-  if (only !== undefined) return "prepared";
-  // No outcome yet: committed only if the host holds the recovery record, verified and unerased.
+  if (only === "aborted") return only;
+  // A cut that arrived after its record, in the store that holds both, came too late to draw the
+  // line: whatever the key wrote between them would count. It never commits, whatever an outcome says.
   const recovery = field(cut, "recovery");
   const users = userGroundOf(reactor);
   const record = recovery === undefined ? undefined : users.reactor.get(recovery);
+  if (record !== undefined && users.reactor === reactor) {
+    const [r, c] = [arrivalIndex(reactor, record.id), arrivalIndex(reactor, cut.id)];
+    if (r !== undefined && c !== undefined && r < c) return "prepared";
+  }
+  if (only === "committed") return only;
+  if (only !== undefined) return "prepared";
+  // No outcome yet: committed only if the host holds the recovery record, verified and unerased.
   return record !== undefined && verified(record) && !users.erased().has(record.id)
     ? "committed"
     : "prepared";
@@ -349,5 +356,44 @@ export function coversRecovery(
       field(d, "store") === here &&
       field(d, "recovery") === recovery &&
       field(d, "key") === key,
+  );
+}
+
+/**
+ * Why `batch` is refused for a cut in it, or undefined. A cut for this store must arrive before its
+ * recovery record: a cut written once the record is held here, or in the ground this store reads
+ * users from, would count what the retired key wrote in between.
+ */
+export function lateCutDefect(
+  reactor: Reactor,
+  operator: string | undefined,
+  batch: readonly Delta[],
+  erased: ReadonlySet<string>,
+): string | undefined {
+  if (operator === undefined) return undefined;
+  const here = incarnationId(reactor, operator, erased);
+  const users = userGroundOf(reactor).reactor;
+  for (const d of batch) {
+    if (reactor.get(d.id) !== undefined || d.claims.author !== operator) continue;
+    if (!inContext(d, CTX_CUT) || field(d, "store") !== here) continue;
+    const recovery = field(d, "recovery");
+    if (recovery !== undefined && users.get(recovery) !== undefined) {
+      return `a recovery cut must arrive before its record, and ${recovery} is already held here`;
+    }
+  }
+  return undefined;
+}
+
+/** Is `d` a cut naming this store's incarnation? Only this store's own append may write one. */
+export function cutForHere(
+  reactor: Reactor,
+  operator: string | undefined,
+  d: Delta,
+  erased: ReadonlySet<string>,
+): boolean {
+  return (
+    operator !== undefined &&
+    inContext(d, CTX_CUT) &&
+    field(d, "store") === incarnationId(reactor, operator, erased)
   );
 }

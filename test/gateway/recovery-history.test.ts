@@ -357,6 +357,66 @@ describe("the cut readers, against erasure, restart and a shared root", () => {
     }
   });
 
+  it("S5: a cut after a federated record: the door refuses it; planted, it commits nothing", async () => {
+    const { gw, byK1 } = await world();
+    const record = op(
+      recoveryClaims({ name: "ada", attempt: "f", previous: K1, root: K2, retired: [K1] }, OP, 30),
+    );
+    await gw.federate([
+      record,
+      op(lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30)),
+      op(rootClaims("ada", K2, OP, 30)),
+    ]);
+    expect(gw.reactor.get(record.id)).toBeDefined();
+    const late = observed(FERN, "height", 9, 5, K1_SEED); // after the record, backdated
+    await gw.federate([late]);
+    expect(gw.reactor.get(late.id)).toBeDefined();
+    const cut = op(
+      cutClaims({ store: incarnationOf(gw), attempt: "f", recovery: record.id, key: K1 }, OP, 40),
+    );
+    await expect(gw.append([cut])).rejects.toThrow(/must arrive before its record/);
+    expect(gw.reactor.ingest(cut).status).toBe("accepted"); // planted past the door
+    await gw.append([op(outcomeClaims(cut.id, "committed", OP, 41))]);
+    await gw.federate([
+      signClaims(
+        {
+          timestamp: 42,
+          validFrom: 42,
+          author: K2,
+          pointers: [
+            {
+              role: "principal",
+              target: { kind: "entity", entity: { id: K2, context: "rhizomatic.principal" } },
+            },
+            { role: "kind", target: { kind: "primitive", value: "binding" } },
+            { role: "key", target: { kind: "primitive", value: K1 } },
+          ],
+        },
+        K2_SEED,
+      ),
+    ]);
+    expect(cutsHere(gw.reactor, OP, refusedIds(gw.reactor, OP)).map((c) => c.state)).toEqual([
+      "prepared",
+    ]);
+    const m = members(gw);
+    expect([m.has(late.id), m.has(byK1.id)]).toEqual([false, false]);
+  });
+
+  it("S5: federate drops a cut that names this store; a cut for another store is kept, inert", async () => {
+    const { gw } = await world();
+    const mine = op(
+      cutClaims({ store: incarnationOf(gw), attempt: "g", recovery: "r", key: K1 }, OP, 40),
+    );
+    const theirs = op(
+      cutClaims({ store: "elsewhere", attempt: "g", recovery: "r", key: K1 }, OP, 40),
+    );
+    await gw.federate([mine, theirs]);
+    expect(
+      [gw.reactor.get(mine.id), gw.reactor.get(theirs.id)].map((d) => d !== undefined),
+    ).toEqual([false, true]);
+    expect(paused(gw).has(K1)).toBe(false);
+  });
+
   it("S3: a held aborted cut resubmitted with the record does not cover it", async () => {
     const { gw } = await world();
     const { record, cut } = await recover(gw, { land: false });
@@ -373,24 +433,40 @@ describe("the cut readers, against erasure, restart and a shared root", () => {
 
   it("S3: two committed cuts for one recovery and key: the earlier one bounds the history", async () => {
     const { gw, byK1 } = await world();
-    const { record } = await recover(gw, { outcome: "committed" });
-    const late = observed(FERN, "height", 9, 5, K1_SEED); // backdated, after the first cut
-    await gw.federate([late]);
-    const again = op(
-      cutClaims(
-        {
-          store: incarnationOf(gw),
-          attempt: "b",
-          recovery: record.id,
-          key: K1,
-        },
-        OP,
-        95,
-      ),
+    const record = op(
+      recoveryClaims({ name: "ada", attempt: "a", previous: K1, root: K2, retired: [K1] }, OP, 30),
     );
-    await gw.append([again, op(outcomeClaims(again.id, "committed", OP, 96))]);
+    const cutFor = (attempt: string, t: number) =>
+      op(cutClaims({ store: incarnationOf(gw), attempt, recovery: record.id, key: K1 }, OP, t));
+    await gw.append([cutFor("a", 28)]);
+    const between = observed(FERN, "height", 9, 5, K1_SEED); // the pause would refuse it: planted
+    expect(gw.reactor.ingest(between).status).toBe("accepted");
+    await gw.append([cutFor("b", 29)]);
+    await gw.append([
+      record,
+      op(lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30)),
+      op(rootClaims("ada", K2, OP, 30)),
+    ]);
+    await gw.federate([
+      signClaims(
+        {
+          timestamp: 32,
+          validFrom: 32,
+          author: K2,
+          pointers: [
+            {
+              role: "principal",
+              target: { kind: "entity", entity: { id: K2, context: "rhizomatic.principal" } },
+            },
+            { role: "kind", target: { kind: "primitive", value: "binding" } },
+            { role: "key", target: { kind: "primitive", value: K1 } },
+          ],
+        },
+        K2_SEED,
+      ),
+    ]);
     const m = members(gw);
-    expect([m.has(byK1.id), m.has(late.id)]).toEqual([true, false]);
+    expect([m.has(byK1.id), m.has(between.id)]).toEqual([true, false]);
   });
 
   it("S4: two users sharing a root do not share one's history", async () => {

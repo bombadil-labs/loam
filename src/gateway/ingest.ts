@@ -70,7 +70,13 @@ import { governedProgram, needsLowering } from "./governed-trust.js";
 import { recordPrevious, recoveryDefect, userGroundOf } from "./user-root.js";
 import { hasMemberOf, lowerMembershipJson } from "./member-of.js";
 import { attachedPool, declaredInboxes, readContainerTable } from "./container.js";
-import { coversRecovery, isStoreLocal, pausedKeys } from "./recovery-cut.js";
+import {
+  coversRecovery,
+  cutForHere,
+  isStoreLocal,
+  lateCutDefect,
+  pausedKeys,
+} from "./recovery-cut.js";
 
 // Persist a batch, THEN serve it (the body of `Gateway.append`). The batch is validated whole (one
 // bad delta refuses the lot); it lands in the backend before the reactor sees it, so nothing a
@@ -325,6 +331,8 @@ async function appendAdmitted(
   if (gw.operatorAuthor !== undefined) {
     const op = gw.operatorAuthor;
     const refused = refusedIds(gw.reactor, op);
+    const late = lateCutDefect(gw.reactor, op, batch, refused);
+    if (late !== undefined) throw new Error(`append rejected: ${late}`);
     for (const d of batch) {
       const previous = d.claims.author === op ? recordPrevious(d) : undefined;
       if (previous === undefined) continue;
@@ -846,6 +854,9 @@ async function federateAdmitted(
       slateDefect(d, gw.reactor, gw.validityNow(), gw.operatorAuthor) !== undefined ||
       recoveryDefect(d, gw.reactor, gw.operatorAuthor, all) !== undefined ||
       paused.has(d.claims.author) ||
+      // A cut for this store is written by this store's own append, before its record; one that
+      // arrives by federation could come after the record and count what came between.
+      cutForHere(gw.reactor, gw.operatorAuthor, d, dead) ||
       // A cite refusal belongs with the UNLAWFUL group and not with the un-admitted one: the
       // batch-scoped closure below deliberately readmits negations of what crossed, and a delta this
       // store is staging a removal over must never come back through it. Safe by construction with

@@ -38,6 +38,12 @@ context `loam.cut`:
   before any cut is written, so its id is known.
 - `key`: K1, the key being retired.
 
+A cut must arrive BEFORE its recovery record wherever both are held. A cut that arrives after
+the record came too late: whatever K1 wrote between them would count. So the append door refuses a
+cut whose record is already held, and the federate door drops a cut naming this store (only this
+store's own append writes one). In the store that holds both, a cut that arrived after its record
+stays prepared, whatever an outcome says.
+
 The cut's own arrival in the store is the line. It carries no position: an erasure purge renumbers
 arrival indexes on the next boot, and a stated number would then disagree with the store. (#640
 removed an earlier `index` field for this reason.)
