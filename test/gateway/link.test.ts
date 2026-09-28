@@ -23,6 +23,7 @@ import {
   governedBootstrap,
   pickLatest,
 } from "./fixtures.js";
+import { isStoreLocal } from "../../src/gateway/recovery-cut.js";
 
 const KEEPER_SEED = "c3".repeat(32);
 const BED = "bed:shade";
@@ -118,7 +119,7 @@ describe("link / sever (§14 edge verbs): assert and retract an edge, named", ()
     const settled = new Set([...world, ...governedBootstrap(KEEPER_SEED)].map((d) => d.id));
     await gateway.query(link(BED, "plants", FERN), undefined, { actor: GARDENER_SEED });
     await gateway.flush();
-    const fresh = await backend.deltasSince(settled);
+    const fresh = (await backend.deltasSince(settled)).filter((d) => !isStoreLocal(d)); // the store's own incarnation marker is not a write
     expect(fresh).toHaveLength(1);
     const edge = fresh[0]!;
     expect(verifyDelta(edge)).toBe("verified");

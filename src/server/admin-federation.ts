@@ -8,6 +8,7 @@
 // Nothing in this module imports admin.ts, so there is no cycle: the door imports this group and
 // wires its `connectionsPanelHtml` into the page factory.
 
+import { refusedIds } from "../gateway/erase.js";
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import {
   evalTermRaw,
@@ -68,7 +69,15 @@ function membershipTermOf(
   }
   if (raw === undefined) return undefined;
   try {
-    return parseTerm(lowerMembershipJson(raw, gw.reactor, gw.validityNow(), gw.operatorAuthor));
+    return parseTerm(
+      lowerMembershipJson(
+        raw,
+        gw.reactor,
+        gw.validityNow(),
+        gw.operatorAuthor,
+        refusedIds(gw.reactor, gw.operatorAuthor),
+      ),
+    );
   } catch {
     return undefined;
   }

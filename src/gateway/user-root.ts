@@ -313,9 +313,9 @@ export function recoveryDefect(
   const touches = delta.claims.pointers.some(
     (p) =>
       p.target.kind === "entity" &&
-      (p.target.entity.id === RECOVERIES ||
-        p.target.entity.context === CTX_RECOVERY ||
-        p.target.entity.context === CTX_LINEAGE),
+      // Only this door's two contexts: other records share the index entity (cuts, outcomes and
+      // incarnation markers, recovery-cut.ts) and are judged there.
+      (p.target.entity.context === CTX_RECOVERY || p.target.entity.context === CTX_LINEAGE),
   );
   if (!touches || operator === undefined || delta.claims.author !== operator) return undefined;
   const context = filedFor(delta, CTX_RECOVERY) !== undefined ? CTX_RECOVERY : CTX_LINEAGE;
@@ -410,6 +410,36 @@ export function recoveredFrom(
     if (recoveryChain(reactor, operator, name, erased).kind === "chain") out.add(r.previous);
   }
   return [...out];
+}
+
+/**
+ * The recoveries in `user`'s unbroken chain whose new ROOT is `root`: each record's id and the key it
+ * retired. What the history reader pairs a cut with. Keyed by the user as well as the root: two users
+ * may share a root, and one's recoveries are not the other's history.
+ */
+export function recoveriesOf(
+  reactor: Reactor,
+  operator: string | undefined,
+  user: string,
+  root: string,
+  erased: ReadonlySet<string> = NONE,
+): { readonly record: string; readonly previous: string }[] {
+  if (operator === undefined) return [];
+  const out: { record: string; previous: string }[] = [];
+  for (const id of reactor.byTarget(RECOVERIES)) {
+    if (erased.has(id)) continue;
+    const d = reactor.get(id);
+    if (d === undefined || d.claims.author !== operator || !verified(d)) continue;
+    const name = filedFor(d, CTX_RECOVERY);
+    const r = name === undefined ? undefined : parse(d, "record");
+    if (name !== user || r === undefined || r.root !== root || r.previous === undefined) {
+      continue;
+    }
+    if (recoveryChain(reactor, operator, name, erased).kind === "chain") {
+      out.push({ record: d.id, previous: r.previous });
+    }
+  }
+  return out;
 }
 
 // Is there a standing operator root claim for `name` naming `key` at `now`: valid, not negated by

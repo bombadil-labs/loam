@@ -10,6 +10,7 @@
 // exposes.
 
 import {
+  signClaims,
   Reactor,
   SchemaRegistry,
   authorForSeed,
@@ -199,6 +200,7 @@ import {
 } from "./reads.js";
 import { listImpl, type ListOptions } from "./listing.js";
 import { declareReadHidden, governedProgram, needsLowering } from "./governed-trust.js";
+import { activeIncarnation, incarnationClaims, mintIncarnation } from "./recovery-cut.js";
 
 export interface AppendReceipt {
   readonly accepted: number;
@@ -548,6 +550,7 @@ export class Gateway {
   // If a governed store's own read quarantined that marker, the store cannot know its own
   // constitution, and that is a failure the operator must see, not one to boot past.
   static async open(backend: StoreBackend, options: GatewayOptions = {}): Promise<Gateway> {
+    const seed = options.seed;
     const reactor = new Reactor();
     const replayed = await backend.deltasSince(new Set());
     for (const d of replayed) {
@@ -560,11 +563,11 @@ export class Gateway {
     // unreadable rows and still open; boot refuses such a store (see `boot`).
     const unreadableRows =
       replayed.length === 0 && isRepairable(backend) ? (await backend.quarantine()).length : 0;
-    if (options.seed !== undefined && isRepairable(backend)) {
+    if (seed !== undefined && isRepairable(backend)) {
       // The marker is a deterministic, content-addressed delta (genesis.ts), so its id is known
       // from the operator alone. Quarantined (present but unreadable) is the loud case; simply
       // ABSENT is fine — a fresh store has not been booted yet, and boot() will plant it.
-      const markerId = computeId(operatorMarkerClaims(authorForSeed(options.seed)));
+      const markerId = computeId(operatorMarkerClaims(authorForSeed(seed)));
       const quarantined = await backend.quarantine();
       if (quarantined.some((row) => row.key === markerId || row.key.endsWith(markerId))) {
         throw new Error(
@@ -573,6 +576,21 @@ export class Gateway {
             `(re-admit if transient, else this store's genesis must be replanted).`,
         );
       }
+    }
+    // A governed store writes its own incarnation marker before it admits anything else, so a
+    // replayed marker from an earlier incarnation can never be the lowest-arrival one
+    // (recovery-history.md). Written straight to the backend and the reactor: no door runs yet.
+    if (
+      seed !== undefined &&
+      unreadableRows === 0 &&
+      activeIncarnation(reactor, authorForSeed(seed), new Set()) === undefined
+    ) {
+      const operator = authorForSeed(seed);
+      // Its time never matters (the reader orders markers by arrival), so no clock is read.
+      const t = Math.max(1, ...replayed.map((d) => d.claims.timestamp + 1));
+      const marker = signClaims(incarnationClaims(mintIncarnation(), operator, t), seed);
+      await backend.append([marker]);
+      reactor.ingest(marker);
     }
     const gateway = new Gateway(backend, reactor, options);
     gateway.unreadableRows = unreadableRows;

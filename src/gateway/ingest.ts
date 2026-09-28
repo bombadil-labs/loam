@@ -69,6 +69,7 @@ import { readTrustPolicy } from "./trust.js";
 import { governedProgram, needsLowering } from "./governed-trust.js";
 import { recoveryDefect, userGroundOf } from "./user-root.js";
 import { hasMemberOf, lowerMembershipJson } from "./member-of.js";
+import { isStoreLocal, pausedKeys } from "./recovery-cut.js";
 
 // Persist a batch, THEN serve it (the body of `Gateway.append`). The batch is validated whole (one
 // bad delta refuses the lot); it lands in the backend before the reactor sees it, so nothing a
@@ -566,7 +567,8 @@ export function offeredDeltasImpl(gw: Gateway): Delta[] {
           return withNegationClosure(gw, [...result.set]);
         })();
   const withheld = egressWithheld(gw, Date.now());
-  const served = withoutErased(gw, offered);
+  // A store's own incarnation marker, cuts and outcomes are facts about this store only.
+  const served = withoutErased(gw, offered).filter((d) => !isStoreLocal(d));
   return withheld.size === 0 ? served : served.filter((d) => !withheld.has(d.id));
 }
 
@@ -579,7 +581,13 @@ function evalRawGoverned(gw: Gateway, term: Term, input: DeltaSet): EvalResult {
 
 // A membership naming a user (`loam.memberOf`) lowered to the authors acting for that user now.
 function lowerMembership(gw: Gateway, term: unknown): unknown {
-  return lowerMembershipJson(term, gw.reactor, gw.validityNow(), gw.operatorAuthor);
+  return lowerMembershipJson(
+    term,
+    gw.reactor,
+    gw.validityNow(),
+    gw.operatorAuthor,
+    refusedIds(gw.reactor, gw.operatorAuthor),
+  );
 }
 
 // Membership is a query, first-class (SPEC §27.6, the body of `Gateway.select`): evaluate a
@@ -709,6 +717,7 @@ export async function federateImpl(
   // An erased id is refused re-entry forever (SPEC §11), even past an explicit admit override, even
   // after its erasure is negated. An erasure in this same offer binds once it is admitted, below.
   const dead = refusedIds(gw.reactor, gw.operatorAuthor);
+  const paused = pausedKeys(gw.reactor, gw.operatorAuthor, dead);
   // The SAME cite predicate the append door runs (SPEC §29.3) — one rule, two sites, because all
   // seven findings of 2026-07-21 were one-rule-N-sites-one-drifts with the federation site as the
   // one that drifted. Here the disclosure discipline INVERTS: a peer pushing a citation may have no
@@ -733,9 +742,10 @@ export async function federateImpl(
       dead.has(d.id) ||
       publicDefect(d.claims) !== undefined ||
       artifactDefect(d.claims) !== undefined ||
-      (isErasure(d.claims) && eraseDefect(d, gw.reactor, gw.operatorAuthor) !== undefined) ||
+      (isErasure(d.claims) && eraseDefect(d, gw.reactor, gw.operatorAuthor, all) !== undefined) ||
       slateDefect(d, gw.reactor, gw.validityNow(), gw.operatorAuthor) !== undefined ||
       recoveryDefect(d, gw.reactor, gw.operatorAuthor, all) !== undefined ||
+      paused.has(d.claims.author) ||
       // A cite refusal belongs with the UNLAWFUL group and not with the un-admitted one: the
       // batch-scoped closure below deliberately readmits negations of what crossed, and a delta this
       // store is staging a removal over must never come back through it. Safe by construction with
@@ -762,15 +772,19 @@ export async function federateImpl(
   if (erasedHere.size > 0) admitted = admitted.filter((d) => !erasedHere.has(d.id));
   // Recovery evidence is judged against what actually lands: a record or lineage claim whose
   // predecessor the predicate turned away (or this door refused) would persist as an orphan and
-  // break the user's chain. Repeat until nothing more drops, since a dropped record strands its own
-  // successors.
+  // break the user's chain. So is an erasure: one that is lawful only beside its partner (a cut and
+  // its outcome) must not land alone. Repeat until nothing more drops, since a dropped record
+  // strands its own successors.
   for (;;) {
     const gone = new Set([
       ...userGroundOf(gw.reactor).erased(),
       ...erasedInBatch(admitted, gw.operatorAuthor),
     ]);
     const kept = admitted.filter(
-      (d) => recoveryDefect(d, gw.reactor, gw.operatorAuthor, admitted, () => gone) === undefined,
+      (d) =>
+        recoveryDefect(d, gw.reactor, gw.operatorAuthor, admitted, () => gone) === undefined &&
+        (!isErasure(d.claims) ||
+          eraseDefect(d, gw.reactor, gw.operatorAuthor, admitted) === undefined),
     );
     if (kept.length === admitted.length) break;
     admitted = kept;

@@ -1075,9 +1075,10 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     // Reopened, the later incarnation's reactor shows the seed and its own receipts only; the
     // earlier opening's receipts name the mirror's byte, and the store is asked at the bytes.
     const reopened = await gw.erase(opening.id).catch((e: Error) => e.message);
-    // Two bytes: the peer's, and the earlier pool's own marker, which the mirror also kept and
-    // the later pool cannot resolve. Unresolvable is unaccounted, so both count until a heal.
-    expect(reopened).toMatch(/holds 2 byte\(s\) that no receipt of that incarnation names/);
+    // Three bytes: the peer's, and the earlier pool's own two markers (its opening marker and its
+    // incarnation marker), which the mirror also kept and the later pool cannot resolve.
+    // Unresolvable is unaccounted, so all count until a heal.
+    expect(reopened).toMatch(/holds 3 byte\(s\) that no receipt of that incarnation names/);
     expect(gw.reactor.get(opening.id)).toBeDefined();
     // Erasing the earlier receipt by hand forgets the attribution, not the byte: the store's
     // inventory still accounts for it, and the opening's erase still refuses.
@@ -1085,7 +1086,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     expect(gw.reactor.get(receipt.id)).toBeUndefined();
     expect(first.mirrors.get(ch.name)!.some((d) => d.id === fact(1).id)).toBe(true);
     const receiptless = await gw.erase(opening.id).catch((e: Error) => e.message);
-    expect(receiptless).toMatch(/holds 2 byte\(s\) that no receipt of that incarnation names/);
+    expect(receiptless).toMatch(/holds 3 byte\(s\) that no receipt of that incarnation names/);
     expect(gw.reactor.get(opening.id)).toBeDefined();
     await expect(gw.dropChannel(ch.name)).rejects.toThrow(
       /bytes that no read named .* heal its store while nothing is attached/,

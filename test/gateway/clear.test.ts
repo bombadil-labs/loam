@@ -15,6 +15,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, SURVEYOR_SEED } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE, garden, governedBootstrap } from "./fixtures.js";
+import { isStoreLocal } from "../../src/gateway/recovery-cut.js";
 
 const KEEPER_SEED = "c3".repeat(32);
 
@@ -122,7 +123,7 @@ describe("clear (§14): retraction is the dual of resolution", () => {
     const settled = new Set([...garden, ...governedBootstrap(KEEPER_SEED)].map((d) => d.id));
     await gateway.query(clear(FERN, ["height"]), undefined, { actor: GARDENER_SEED });
     await gateway.flush();
-    const fresh = await backend.deltasSince(settled);
+    const fresh = (await backend.deltasSince(settled)).filter((d) => !isStoreLocal(d)); // the store's own incarnation marker is not a write
     // the gardener contributed exactly one height (30) → exactly one negation, theirs, verified.
     expect(fresh).toHaveLength(1);
     const neg = fresh[0]!;

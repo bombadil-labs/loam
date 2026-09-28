@@ -25,7 +25,7 @@ import { STORE_ENTITY } from "./genesis.js";
 import { CTX_GRANTS, dataStrikers, lawfulStrikersJson } from "./governed-trust.js";
 export { CTX_GRANTS, lawfulStrikersJson } from "./governed-trust.js";
 import { entityGatherBody } from "./gather.js";
-import { eraseDefect, erasedInBatch } from "./erase.js";
+import { eraseDefect, erasedInBatch, refusedIds } from "./erase.js";
 import { publicDefect } from "./public.js";
 import { artifactDefect } from "./artifact.js";
 import { trustDefect } from "./trust.js";
@@ -34,6 +34,7 @@ import { budgetDefect } from "./budget.js";
 import { envelopeDefect } from "./envelope.js";
 import { containerDefect } from "./container.js";
 import { slateDefect } from "./slate.js";
+import { pausedKeys } from "./recovery-cut.js";
 
 export const CTX_TENANT = "loam.tenant";
 export const CTX_MEMBERS = "loam.members";
@@ -727,7 +728,7 @@ export function authorize(
     budgetDefect(delta.claims) ??
     envelopeDefect(delta.claims) ??
     containerDefect(delta, reactor, now, operator) ??
-    eraseDefect(delta, reactor, operator) ??
+    eraseDefect(delta, reactor, operator, batch) ??
     slateDefect(delta, reactor, now, operator) ??
     recoveryDefect(delta, reactor, operator, batch, () => {
       const users = userGroundOf(reactor);
@@ -735,7 +736,17 @@ export function authorize(
     });
   if (defect !== undefined) {
     return { ok: false, refusal: `delta ${delta.id} is malformed law: ${defect}` };
+  } // A key a PREPARED recovery cut pauses writes nothing here until the cut has an outcome
+  // (recovery-history.md), so nothing it signs can slip between the cut and the host commit.
+  if (pausedKeys(reactor, operator, refusedIds(reactor, operator)).has(delta.claims.author)) {
+    return {
+      ok: false,
+      refusal:
+        `${delta.claims.author} is paused here by a recovery in progress: ` +
+        `it writes again only if that recovery is aborted`,
+    };
   }
+
   const author = delta.claims.author;
   if (operator === undefined || author === operator) return { ok: true };
   if (grantHeld({ reactor, now, operator }, STORE_ENTITY, author, "write", new Set())) {
