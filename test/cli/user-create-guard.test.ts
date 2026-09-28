@@ -12,7 +12,7 @@ import { authorForSeed, makeNegationClaims, signClaims, type Claims } from "@bom
 import { run } from "../../src/cli/cli.js";
 import { readSeed, storePath } from "../../src/cli/config.js";
 import { grantClaims } from "../../src/gateway/accounts.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims, termClaims } from "../../src/gateway/container.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { writtenByUser } from "../../src/gateway/member-of.js";
@@ -116,6 +116,41 @@ describe("user create refuses what would pass to a new person", () => {
         ];
       }),
     );
+  });
+});
+
+describe("only real membership carriers count", () => {
+  it("a published membership cited by a declaration refuses", async () => {
+    const [term] = await plant((op, t) => [termClaims(writtenByUser("ada", "inbox:x"), op, t)]);
+    const [declaration] = await plant((op, t) => [
+      containerClaims(
+        { container: "home:ada", trust: "curated", posture: "shared", membershipAt: term! },
+        op,
+        t,
+      ),
+    ]);
+    await refused([declaration!, term!]);
+  });
+
+  it("the same JSON as an ordinary note's value does not refuse (a control)", async () => {
+    await plant((op, t) => [
+      {
+        timestamp: t,
+        validFrom: t,
+        author: op,
+        pointers: [
+          { role: "about", target: { kind: "entity", entity: { id: "notes:1", context: "note" } } },
+          {
+            role: "note",
+            target: {
+              kind: "primitive",
+              value: JSON.stringify({ "loam.memberOf": { user: "ada", scope: "inbox:x" } }),
+            },
+          },
+        ],
+      },
+    ]);
+    expect(await run(["user", "create", "ada", "--home", home], io, password)).toBe(0);
   });
 });
 

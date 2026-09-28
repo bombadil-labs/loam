@@ -27,7 +27,7 @@ import {
   type Schema,
   type View,
 } from "@bombadil/rhizomatic";
-import { DeltaSet, evalTerm } from "@bombadil/rhizomatic";
+import { DeltaSet, evalTerm, parseTerm } from "@bombadil/rhizomatic";
 import { erasedFromReading } from "../gateway/erase.js";
 import { entityGatherBody } from "../gateway/gather.js";
 
@@ -43,7 +43,7 @@ import {
   verified,
 } from "../gateway/user-root.js";
 import { CTX_GRANTS } from "../gateway/governed-trust.js";
-import { MEMBER_OF, namesMemberOf } from "../gateway/member-of.js";
+import { membershipForValidation, namesMemberOf } from "../gateway/member-of.js";
 export { CTX_ROLE, CTX_ROOT, userEntity };
 
 const AUTHOR = /^ed25519:[0-9a-f]{64}$/;
@@ -307,6 +307,18 @@ export function rootOf(
   return typeof root === "string" && AUTHOR.test(root) ? root : undefined;
 }
 
+// Does `text` parse as a valid membership Term with a well-formed `loam.memberOf` node naming `user`?
+function membershipNames(text: string, user: string): boolean {
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+    parseTerm(membershipForValidation(json)); // a real Term, every node well formed
+  } catch {
+    return false;
+  }
+  return namesMemberOf(json, user);
+}
+
 /**
  * Does the ground still HOLD anything that would pass to a new person given the entity `user:<name>`?
  * Everything that can bind or revive counts, struck or not yet valid included, because a strike can
@@ -346,8 +358,12 @@ export function nameStillHeld(
     if (aboutPerson) hold(d);
   }
   // Claims that name the entity from elsewhere. Rare (a user is created once), so a walk.
+  // A membership counts only where one can serve: the inline `membership` of a declaration, or the
+  // published `term` a declaration cites by `membershipAt`, and only when it parses as a valid
+  // membership Term. The same text inside any other claim is just data.
+  const cited = new Map<string, Delta>();
   for (const d of reactor.arrivalLog()) {
-    if (ids.has(d.id) || !verified(d)) continue;
+    if (!verified(d)) continue;
     const grant =
       d.claims.pointers.some(
         (p) => p.target.kind === "entity" && p.target.entity.context === CTX_GRANTS,
@@ -355,16 +371,25 @@ export function nameStillHeld(
       d.claims.pointers.some(
         (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === entity,
       );
-    const membership = d.claims.pointers.some((p) => {
-      if (p.target.kind !== "primitive" || typeof p.target.value !== "string") return false;
-      if (!p.target.value.includes(MEMBER_OF)) return false;
-      try {
-        return namesMemberOf(JSON.parse(p.target.value), name);
-      } catch {
-        return false;
-      }
-    });
-    if (grant || membership) hold(d);
+    if (grant) hold(d);
+    for (const p of d.claims.pointers) {
+      if (p.target.kind !== "primitive" || typeof p.target.value !== "string") continue;
+      if (p.role === "membership" && membershipNames(p.target.value, name)) hold(d);
+      if (p.role === "membershipAt") cited.set(p.target.value, d);
+    }
+  }
+  for (const [id, declaration] of cited) {
+    const published = reactor.get(id);
+    if (published === undefined || !verified(published)) continue;
+    const term = published.claims.pointers.find((p) => p.role === "term")?.target;
+    if (
+      term?.kind === "primitive" &&
+      typeof term.value === "string" &&
+      membershipNames(term.value, name)
+    ) {
+      hold(declaration);
+      hold(published);
+    }
   }
   return ids.size === 0 ? { held: false } : { held: true, notYetValid, ids: [...ids].sort() };
 }
