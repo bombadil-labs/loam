@@ -163,6 +163,22 @@ describe("an owner's clear fans out to her connections' writes", () => {
     expect(strikesOf(one.pool, stray.id)).toEqual([]);
   });
 
+  it("one delta held in two owned pools is struck in each, bound or unbound", async () => {
+    for (const bound of [true, false]) {
+      const { gw, bind } = await world();
+      const first = await bind("ada", "conn");
+      const second = await bind("ada", "conn2");
+      const d = observed(FERN, "height", 6, first.pool.stamp(key("ada")).timestamp, seed("ada"));
+      await first.pool.append([d]);
+      await second.pool.append([d]);
+      await clear(gw, "ada", bound ? first.binding : undefined);
+      expect([strikesOf(first.pool, d.id), strikesOf(second.pool, d.id)]).toEqual([
+        [key("ada")],
+        [key("ada")],
+      ]);
+    }
+  });
+
   it("remove fans out too, with its value predicate", async () => {
     const { gw, bind } = await world();
     const ada = await bind("ada", "conn");

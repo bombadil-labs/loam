@@ -167,7 +167,10 @@ async function retract(
     for (const [field, entries] of view.props) {
       for (const entry of entries) {
         const d = entry.delta;
-        if (targets.has(d.id) || pool.ground.reactor.get(d.id) === undefined) continue;
+        // Judged per ground: the same signed delta may be held in several, and a strike counts only
+        // where it lands. This pool is gathered after the first strike, so one struck here reads as
+        // negated and is not struck twice.
+        if (pool.ground.reactor.get(d.id) === undefined) continue;
         if (own.has(d.claims.author) && !entry.negated && keep(field, entry)) ids.add(d.id);
       }
     }
