@@ -5,7 +5,7 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const UPDATED = "2026-09-26";
+const UPDATED = "2026-09-30";
 
 // done | doing | next | planned | retired
 const ROWS = [

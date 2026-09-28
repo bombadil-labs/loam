@@ -476,7 +476,7 @@ describe("§39 criterion 12 — the degenerate case (Charlie's root heap) works 
 });
 
 describe("§39 criterion 13 — revocation is two-sided", () => {
-  it("after the grant is struck the write refuses; a second connection still lands; past writes keep their author", async () => {
+  it("after the grant is struck the write refuses; a second connection still lands; past writes keep their author in the pool and leave the parent", async () => {
     const gw = await boot();
     await gw.append([
       declare(
@@ -499,9 +499,11 @@ describe("§39 criterion 13 — revocation is two-sided", () => {
     const w2 = observed(FERN, "height", 43, gw.stamp(CONN2), CONN2_SEED);
     await inbox2.gateway!.append([w2]);
     expect(inbox2.gateway!.reactor.get(w2.id)).toBeDefined();
-    // Every delta the revoked connection wrote keeps its author and stays readable.
+    // Every delta the revoked connection wrote keeps its author in its pool (delta level), and
+    // leaves the parent's gather, where the second connection's write stands (object level, M3).
     expect(inbox1.gateway!.reactor.get(past.id)!.claims.author).toBe(CONN);
-    expect(gw.connectionScope({ bound: "alice:folklore" }).map((d) => d.id)).toContain(past.id);
+    const scope = gw.connectionScope({ bound: "alice:folklore" }).map((d) => d.id);
+    expect([scope.includes(past.id), scope.includes(w2.id)]).toEqual([false, true]);
     await gw.close();
   });
 });

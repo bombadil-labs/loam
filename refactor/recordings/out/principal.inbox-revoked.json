@@ -1,10 +1,7 @@
 {
   "afterRevoke": {
-    "boundTag": [
-      "by-connection"
-    ],
+    "boundTag": null,
     "containerScope": [
-      "@subadmin: \"by-connection\"",
       "@writer: negates",
       "@writer: principal+kind+key+scope+delegable"
     ],

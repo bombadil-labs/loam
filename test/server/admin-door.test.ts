@@ -135,7 +135,12 @@ async function adminServer(
   await gateway.append([note]);
   // The inbox pool is ATTACHED (as a real bound connection's would be), so ada's root gather
   // composes it rather than refusing. `ada-vault` stays deliberately unattached — the H9 rail.
-  await gateway.openContainer({ name: INBOX });
+  const inbox = await gateway.openContainer({ name: INBOX });
+  // A real inbox carries its owner's admin grant (bindConnection writes it): the parent composes
+  // the pool by that owner's authority, and a pool with no owner fails the read.
+  await inbox.gateway!.append([
+    signClaims(grantClaims(STORE_ENTITY, KEYS.ada, "admin", OPERATOR, ts++), OPERATOR_SEED),
+  ]);
 
   const home = mkdtempSync(join(tmpdir(), "loam-admin-"));
   homes.push(home);

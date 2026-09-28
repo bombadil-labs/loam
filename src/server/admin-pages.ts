@@ -832,8 +832,9 @@ ${hiddenPair(formToken, name)}
       "confirm the revoke",
       `<h1>Revoke <code>${escapeHtml(plan.key)}</code>?</h1>
 <p>It writes into <code>${escapeHtml(plan.bound)}</code>. Revoking refuses its next write.</p>
-${clientLine}${siblingsLine}${othersLine}<p>Everything it already wrote is kept, author intact — a revocation closes the door and does not
-rewrite history. Every other key's connection is untouched. To forget its inbox whole, drop it from
+${clientLine}${siblingsLine}${othersLine}<p>Everything it already wrote stays in its inbox, author intact, and leaves the view of
+<code>${escapeHtml(plan.bound)}</code>: a revoked connection no longer speaks for you there. A revocation
+closes the door and does not rewrite history. Every other key's connection is untouched. To forget its inbox whole, drop it from
 <a href="${escapeHtml(detailHref(name))}">its own page</a>.</p>
 <form method="post" action="${ADMIN_REVOKE_CONFIRM_PATH}">
 ${hiddenPair(formToken, name)}
