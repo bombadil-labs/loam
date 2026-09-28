@@ -134,6 +134,8 @@ Design:
      and no transport. Step 7 builds those, beside publish and subscribe and the HTTP binding. A
      registry or a locator never changes a principal's authority: the answer is the same for the
      same pinned root, held deltas, read time, scope and suppression rule (SPEC-14 §6).
+     Step 6 needs no locator. It reaches an already identified peer through an out-of-band
+     transport endpoint, and it keeps that peer's authenticated key and provenance.
 
 ## What stays in force
 
