@@ -7,8 +7,10 @@ version of rhizomatic as a monorepo of tier libraries, with Loam as its testbed.
 owns the rhizomatic repo; Claude owns this one and never edits rhizomatic. For Loam's refactor
 work, Myk suspended ADLC: ignore its gates, the rail freeze, the gate ledger and the ticket
 ceremony. Frozen tests may change. The work is greenfield: wire changes ship no migration.
-`npm run check` stays the green bar. Everything below still describes how Loam worked before the
-refactor; where it conflicts with `refactor/README.md`, the README wins for refactor work.
+`npm run check` stays the green bar. **Reviews go to the dedicated Loam review thread** (GPT-6-Sol,
+see "Threads" in the README); Sol's work thread gets only requests and "ready" notices. Everything
+below still describes how Loam worked before the refactor; where it conflicts with
+`refactor/README.md`, the README wins for refactor work.
 
 Loam is a general database built on [rhizomatic](https://github.com/bombadil-labs/rhizomatic); the
 design is in **[SPEC.md](SPEC.md)** and the usage in **[README.md](README.md)** — read them before

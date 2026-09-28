@@ -12,8 +12,23 @@ itself gets a new version of its algorithm. Rhizomatic becomes a monorepo of tie
   and Haskell witnesses. Sol publishes rhizomatic releases and prereleases.
 - **Claude owns the `loam` repo.** Claude never edits rhizomatic. Sol never edits Loam.
 - **Myk decides** every change to what the system promises.
-- Durable requests to Sol go as GitHub issues on `bombadil-labs/rhizomatic`. Conversation goes
-  through the T3 thread "Coordinate Loam Refactor Workflow" in the rhizomatic project.
+- Durable requests to Sol go as GitHub issues on `bombadil-labs/rhizomatic`.
+
+## Threads (Myk, 2026-09-28)
+
+Each repo has one WORK thread and one REVIEW thread in T3 Code:
+
+- **Loam work:** Claude (Opus), the thread in the loam project that builds Loam.
+- **Loam review:** a dedicated GPT-6-Sol thread, high effort, full access, in the loam project
+  ("Loam review — independent reviewer for Claude's Loam work"). Claude sends each Loam PR there
+  for review, and merges on green CI after that thread approves.
+- **Rhizomatic work:** Sol (GPT-6-Sol), the thread in the rhizomatic project that builds
+  rhizomatic.
+- **Rhizomatic review:** a Claude (Opus) thread that Sol delegates its own reviews to.
+
+The two work threads message each other only for REQUESTS (a prerelease, an API question) and to
+NOTIFY that something is ready. Neither reviews the other's PRs. The old joint thread "Coordinate
+Loam Refactor Workflow" is retired.
 - Before a Loam PR that needs new rhizomatic code, ask Sol for a prerelease. Loam pins it, so CI
   resolves it.
 - `bombadil-labs/kyber-ng` is an Elixir app. It will consume the Elixir witness later, as Loam
@@ -163,5 +178,6 @@ Get a fully green baseline first. A red baseline teaches you to ignore red.
 - `GLOSSARY.md`: the plain words that replace Loam's idiolect. Apply them as you go.
 
 - `tools/`: the census scripts behind the journal's numbers. See `tools/README.md`.
-- `audit/`: Loam's side of the audit.
+- `audit/`: Loam's side of the audit, and the step 6 build plan: `step6-inventory.md`,
+  `step6-handoff.md` and `step6-staging-open.md`.
 - `recordings/`: the recording harness and its outputs.
