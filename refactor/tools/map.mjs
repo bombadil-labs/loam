@@ -5,7 +5,7 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const UPDATED = "2026-09-30";
+const UPDATED = "2026-09-28";
 
 // done | doing | next | planned | retired
 const ROWS = [
@@ -42,14 +42,14 @@ const ROWS = [
     loam: "Seed file, user and connection keys",
     tier: "principal",
     what: "roots, key binding, succession",
-    status: "doing",
+    status: "done",
   },
   {
     step: "6",
     loam: "Containers, pools, channels",
     tier: "federation",
     what: "peers, admission, arrival",
-    status: "planned",
+    status: "next",
   },
   {
     step: "7",
