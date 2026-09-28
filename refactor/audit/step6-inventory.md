@@ -80,11 +80,11 @@ Each finding carries one or two of the contract's four tags:
 |---|---|---|---|---|
 | ingest.ts:352-375 `appendAdmitted`, recovery barrier: `liveCutIds`, `refusedIds` on each pool with `gw.operatorAuthor` | inbox and channel pools | pool | yes (record, manifest: host) | the pool's own door reads the same cuts with the pool key | own pool law |
 | ingest.ts:289/862 `refusedIds`, :296/871 `readSlates`, :888/934 `eraseDefect`, :889 `slateDefect`, :918/928 `erasedInBatch`, when the gateway is a pool | any child | host (erasure and slates are the host's power) | no | pattern 2 | peer-local erasure state |
-| ingest.ts:890/932 `recoveryDefect` at a pool door | any child | host, through `usersGovernor` | yes | UNSURE: pools hold no recovery records today | host user ground |
+| ingest.ts:890/932 `recoveryDefect` at a pool door | any child | host, through `usersGovernor` | yes | VERIFIED: recovery and lineage records are not store-local, so they reach unscoped pools (quarantine, channel, separate) by reseed; inbox pools do not get them. With a pool key, `recoveryDefect` judges only pool-authored records, so host records pass unchecked | host user ground |
 | ingest.ts:325 `authorize` and :459-462 `admitForImpl` at a pool door | quarantine and channel pools | pool for its own policy; the seeding edge must admit the host's key | no | pattern 1 | own pool law; selected host law (seeded trust) |
 | container.ts:1204-1225 `openerStands`: `holdsGrant(inbox, …, gw.operatorAuthor)` | inbox | pool | no | reached from connection-authority.ts, the http door, renderer selection | own pool law |
 | the same `openerStands` read through `keepSyncingImpl` (channel.ts:2524), `boundBindingsImpl` (lifecycle.ts:548), `openChannel`'s protected-opener check (channel.ts:2128) | inbox | pool | no | also syncing and serving | own pool law |
-| http.ts:543-593 `registerStanding` / `federateStanding` at a container mount | quarantine or separate pool | host (seeded grants) | no | UNSURE | selected host law |
+| http.ts:543-593 `registerStanding` / `federateStanding` at a container mount | quarantine or separate pool | host (seeded grants) | no | VERIFIED: a quarantine pool is served as a mount (mounts.ts tier 3); it reads host-seeded grants and grants appended at its own door, and with a pool key it stops honouring the seeded ones | selected host law |
 | user-recover.ts:290-301 `signCut`: incarnation and refused set on a pool with the host key; the cut is signed by the host seed | inbox and channel pools | pool | yes | pattern 4 | own pool law |
 | user-recover.ts:308-358 `settleCuts`: outcomes on a pool with the host key and seed | inbox and channel pools | pool | yes | pattern 4 | own pool law |
 | erase.ts:1491-1515 `eraseReplicaImpl` gates: `eraseDefect`, `localEraseTarget` with the pool key on a host-signed erasure | any child | host | no | pattern 2 | peer-local erasure state |
@@ -95,16 +95,16 @@ Each finding carries one or two of the contract's four tags:
 |---|---|---|---|---|
 | channel.ts:840-844 `arrivedBindings`: `readForeignRenderers(ground, …, gw.operatorAuthor)` | channel pool | exclude the pool key (its blessings) AND the host key (seeded twins) | no | feeds the apps report and bless-app | own pool law; selected host law |
 | slate.ts:1086-1095 `readClosedIds` on a pool (every reactor, through `declareReadHidden`) | any child | host | no | slates are ordinary host deltas in the offer, so they reach seeded pools | peer-local erasure state |
-| reads.ts:337 `channelGroundFor`: `erasedInScope(…, gw.operatorAuthor, scope)` | channel pool | host for fan-out; the pool's key for its own local-control erasures | no | UNSURE about the split | peer-local erasure state |
+| reads.ts:337 `channelGroundFor`: `erasedInScope(…, gw.operatorAuthor, scope)` | channel pool | host for fan-out; the pool's key for its own local-control erasures | no | VERIFIED, DIFFERENT: this read runs on the HOST over the composed scope, so the host key is right here. Every erasure a channel pool holds today is host-signed (seeded, or fan-out); a pool issues none of its own. The step-6 break is in `eraseReplicaImpl` (admission table) | peer-local erasure state |
 | reads.ts:364 `boundGroundFor`: the same over inbox pools | inbox | host for fan-out | no | | peer-local erasure state |
 | listing.ts:598 `withoutErasedScope`: the same | any child | host for fan-out | no | | peer-local erasure state |
-| reads.ts:461-472 `gatherPoolForRetraction`: governed evaluation embeds the host key in lens bodies (`lawfulStrikersJson`) | inbox and channel pools | pool for pool grants | yes, fine | UNSURE | own pool law |
+| reads.ts:461-472 `gatherPoolForRetraction`: governed evaluation embeds the host key in lens bodies (`lawfulStrikersJson`) | inbox and channel pools | pool for pool grants | yes, fine | VERIFIED for governed lens bodies: the body embeds the host operator (`governedGatherBody`) and the input is the pool's log, so pool-signed owner grants and strikes stop counting, and struck entries read as live | own pool law |
 | ingest.ts:589-592/616 `deadSet` / `withoutErased` on a pool gateway | any child | host | no | a nested pool's offer or reseed | peer-local erasure state |
 | container.ts:906/929 `containerScopeImpl` inside a pool: host-seeded declarations with the pool key | quarantine and channel pools | host | no | pattern 1: blessed lenses that scope the parent fail | selected host law |
 | container.ts:1796-1809 reseed, then `pool.replayRegistrations()` with the pool key | quarantine and channel pools | host (seeded rows) | no | pattern 1 | selected host law |
 | admin-federation.ts:338 `connectionRowHtml` → `connectionGrantState` (:180 `holdsGrant`, :204 `struckAt`, :209-211 `grantRoots`, `delegationStatesFor`) with the host key | inbox | pool | no | the connections panel | own pool law |
 | http.ts:1383-1390 `whoamiFor` → `writeStanding`: `holdsGrant(pool, …, gateway.operatorAuthor)` | inbox | pool | no | whoami | own pool law |
-| http.ts:3532 users door on a container mount: `rolesOf(pool.reactor, pool.operatorAuthor)` | any child | host | yes | UNSURE: only an embedder reaches it | host user ground |
+| http.ts:3532 users door on a container mount: `rolesOf(pool.reactor, pool.operatorAuthor)` | any child | host | yes | VERIFIED, embedder only: the CLI mounts users on `default`; an embedder that resolves `users.mount` to a pool reads the pool's seeded user copies | host user ground |
 | cli.ts:3940-3950 `cmdGrantList`: `holdsGrant(inbox, …, host)` | inbox | pool | no | the ledger | own pool law |
 | erase.ts:661 `readGrounds` → `maskReadings(pool)` | any child | pool (correct), but seeded registrations drop out | no | pattern 1 | own pool law; selected host law |
 
@@ -121,7 +121,7 @@ Each finding carries one or two of the contract's four tags:
 | erase.ts:1009 `liveOpening`: `pool.reactor.get(id)?.claims.author === gw.operatorAuthor` | channel pool | pool | no | decides "the pool's own byte" | own pool law |
 | erase.ts:1424 `erasureStandings`, recursing into `quarantinePools`: `readErasures(gw = pool, …)` | any child | host | no | otherwise every pool reads "owed" forever | peer-local erasure state |
 | ingest.ts:245 `appendLocalErasure` → `localEraseTarget(…, gw.operatorAuthor)` from `eraseReplicaImpl` | any child | host | no | | peer-local erasure state |
-| container.ts:1658 `openSeparateImpl`: `readErasures(gw, …)` when `gw` is itself a pool | nested child | host | no | UNSURE | peer-local erasure state |
+| container.ts:1658 `openSeparateImpl`: `readErasures(gw, …)` when `gw` is itself a pool | nested child | host | no | VERIFIED, reachable: nested pools exist (the erasure fan-out and quarantine envelope tests); with its own key the outer pool reads no erasures, and nested debt never settles | peer-local erasure state |
 
 ### Other
 
@@ -131,7 +131,7 @@ Each finding carries one or two of the contract's four tags:
 | container.ts:2630 `revokeConnectionImpl`: `byOperator = owner === pool.operatorAuthor`; cli.ts:4061-4068 `cmdGrantRevoke` falls back to the host seed | inbox | pool | no | revocation voice (pattern 4) | own pool law |
 | admin-federation.ts:633, :648-654, :895-901 `planRevoke` and the revoke handler: `holdsGrant(pool, …, gw.operatorAuthor)` | inbox | pool | no | revoke plan | own pool law |
 | user-recover.ts:716-726 commit leg: `strikes(inbox, host)`, signed by the host seed | inbox | pool | yes | stripping a retired key's standing (pattern 4) | own pool law |
-| adopt.ts:253-256 `promoteImpl`: `dataStrikeWitnesses(source, …, source.operator)` | any child | UNSURE: the comment assumes the host's review strike binds in the pool | no | promotion | UNSURE: own pool law |
+| adopt.ts:253-256 `promoteImpl`: `dataStrikeWitnesses(source, …, source.operator)` | any child | VERIFIED: the review strikes are host-signed (the operator's, and a grantee's under a host-seeded grant); with a pool key neither binds, and a rejected output becomes promotable. Inbox pools stay correct | no | promotion | own pool law; selected host law |
 
 Already correct: every pool read keyed by the pool itself in lifecycle.ts (:456, :530-534, :552,
 :800), renderer-selection.ts:278, renderers.ts:397/:763, adopt-law.ts:1378-1381, container.ts
