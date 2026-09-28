@@ -194,7 +194,8 @@ level. Loam then consumes it through the barrel and compares its recordings.
    - **Step 4 is complete on Loam's side** (#606, #607, #608, #609, and the PR that closed it).
      Nothing in it is open. The helper follow-ups are rhizomatic's (#50).
 5. **Principal.** Roots, key binding, succession, delegation, locator evidence. Registry
-   discovery and locator transport moved to step 7 (README, ruling 9). Loam moves user, connection and container keys into signed data.
+   discovery and locator transport moved to step 7 (README, ruling 9). Loam moves user,
+   connection and container keys into signed data.
    Settled inputs (Myk, 2026-09-26; `README.md` rulings 2 to 4): succession records continuity
    only, and authority comes from a separate delegation. The pinned principal root must authorize
    a succession; the old key's signature is optional evidence. Until step 6's arrival testimony,
