@@ -178,6 +178,37 @@ describe("only a governing declaration carries a membership (controls)", () => {
     expect(await run(["user", "create", "ada", "--home", home], io, password)).toBe(0);
   });
 
+  it("a declaration that also carries a detach is a detach, and does not refuse", async () => {
+    await plant((op, t) => {
+      const declared = containerClaims(
+        {
+          container: "home:ada",
+          trust: "curated",
+          posture: "shared",
+          membership: writtenByUser("ada", "inbox:x"),
+        },
+        op,
+        t,
+      );
+      return [
+        {
+          ...declared,
+          pointers: [
+            ...declared.pointers,
+            {
+              role: "container",
+              target: {
+                kind: "entity",
+                entity: { id: "home:ada", context: "loam.container.detached" },
+              },
+            },
+          ],
+        },
+      ];
+    });
+    expect(await run(["user", "create", "ada", "--home", home], io, password)).toBe(0);
+  });
+
   it("a declaration by someone other than the governing account does not refuse", async () => {
     const seed = readSeed(home);
     const gw = await Gateway.boot(
