@@ -381,8 +381,8 @@ export function nameStillHeld(
         (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === entity,
       );
     if (grant) hold(d);
-    // Only a container DECLARATION can serve a membership: its shape is checked by the same
-    // validator the door runs, so a claim that merely carries the role is data.
+    // Only a container DECLARATION can serve a membership, by the container reader's own test
+    // (`isDeclaration`), so a claim that merely carries the role is data.
     if (!isDeclaration(operator, d)) continue;
     for (const p of d.claims.pointers) {
       if (p.target.kind !== "primitive" || typeof p.target.value !== "string") continue;
