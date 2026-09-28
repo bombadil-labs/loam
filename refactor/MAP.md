@@ -1,7 +1,8 @@
 # The refactor map
 
-Updated 2026-09-26. Loam main is on `@bombadil/rhizomatic@0.11.0-next.3`. Rhizomatic step 4 is
-merged (rhizomatic #48, #49).
+Updated 2026-09-28. Loam main is on `@bombadil/rhizomatic@0.11.0-next.5`. Step 5 is done in both
+repos. Step 6 is in progress: Loam's preparation is merged, and Loam waits for Sol's step 6
+prerelease (rhizomatic #53).
 
 The refactor moves in three directions at once:
 
@@ -34,9 +35,9 @@ same PR.
 | 1. Graph | package graph, mechanical check (#38) | census ratchet in CI (#572) | done |
 | 2. Boundaries | files into tier packages (#38) | recordings harness (#573) | done |
 | 3. Time | signed validity, explicit `now` (#43); refresh skip (#44); verified set copies (#46); 0.11.0-next.2 | switch to 0.11 (#585); read time is the wall clock, `stamp()` (#600); unreadable stores refused (#586); next.2 (#604) | done |
-| 4. Suppression, governed reads | `negationPredicate`, `negationWitnesses`, `governedDeltas`, `applyPolicy`, `latestByKey`, governed loaders, the lens binding (schema tier) and shared vectors, merged (#48) and published as 0.11.0-next.3 (#49); helper follow-ups in #50 | seams `negatedAt`, `lawfulSnapshot(now)` (#588, #589, #592); history reads split out; timed recordings and reader audit (#587); the swap landed (#606); caches follow validity, one-id readers audited, strike readers count only in-window, the constitution walk reads negations and grants in their window (Myk, 2026-09-26) (#607); `receive-policy.ts` on the governed read, erasure and graveyard reads are history reads, a drop severs for good, `survivalOver` reads at `now`, honest grant labels (#608); fixtures sign with `stamp()` (#609); the store guard fails closed on an expired separate declaration, `pen create` asks the door, latest-wins picks stay Loam's because the tie direction differs (this PR) | done |
-| 5. Principal | SPEC-14 evidence records, `authorsForPrincipal`, `associatedKeys`, the `actsFor` predicate, the guarded live resolver; 0.11.0-next.4 (#51) | principal recording (#590); revoke fix (#591); the seam and the audit (#612); on next.4: a delegate writes only, cannot pass it on, and the root or the operator revokes it (Myk, 2026-09-26) (#615); a connection writes by a sealed delegation scoped to its inbox, the root store honors no delegate (#617); grants name users (#625-#627); `loam user recover` and its readers (#630-#634); memberships name users (#635); identity is per peer (#637); the recovery-history barrier with cut manifests (#639, #640); provisioned containers name their user (#641); an inbox composes into its parent by its owner's authority (#642); an owner's clear reaches her connections' writes (#643); one signer per ground, seed reads 62 → 5 (#644, #645) | done |
-| 6. Peer, admission | peer model, guard pipeline, arrival testimony | curse-scope recording (#597); park reason (#598) | planned |
+| 4. Suppression, governed reads | `negationPredicate`, `negationWitnesses`, `governedDeltas`, `applyPolicy`, `latestByKey`, governed loaders, the lens binding (schema tier) and shared vectors, merged (#48) and published as 0.11.0-next.3 (#49); helper follow-ups in #50 | seams `negatedAt`, `lawfulSnapshot(now)` (#588, #589, #592); history reads split out; timed recordings and reader audit (#587); the swap landed (#606); caches follow validity, one-id readers audited, strike readers count only in-window, the constitution walk reads negations and grants in their window (Myk, 2026-09-26) (#607); `receive-policy.ts` on the governed read, erasure and graveyard reads are history reads, a drop severs for good, `survivalOver` reads at `now`, honest grant labels (#608); fixtures sign with `stamp()` (#609); the store guard fails closed on an expired separate declaration, `pen create` asks the door, latest-wins picks stay Loam's because the tie direction differs (#610) | done |
+| 5. Principal | SPEC-14 evidence records, `authorsForPrincipal`, `associatedKeys`, the `actsFor` predicate, the guarded live resolver; 0.11.0-next.4 (#51, #52); negation and materialization refresh fixes, 0.11.0-next.5 (#54, #55, #56) | principal recording (#590); revoke fix (#591); the seam and the audit (#612); on next.4: a delegate writes only, cannot pass it on, and the root or the operator revokes it (Myk, 2026-09-26) (#615); a connection writes by a sealed delegation scoped to its inbox, the root store honors no delegate (#617); grants name users (#625-#627); `loam user recover` and its readers (#630-#634); memberships name users (#635); identity is per peer (#637); the recovery-history barrier with cut manifests (#639, #640); provisioned containers name their user (#641); an inbox composes into its parent by its owner's authority (#642); an owner's clear reaches her connections' writes (#643); one signer per ground, seed reads 62 → 5 (#644, #645) | done |
+| 6. Peer, admission | peer, admission and arrival contract, in draft (#53); the typed handoff API and a prerelease are next | curse-scope recording (#597); park reason (#598); the inventory of host-author reads (#647, #650); the handoff working spec (#648); inbox grants read with the pool's key (#649); the read-only staging open (#651). The handoff build waits for the prerelease. | in progress |
 | 7. Publish, subscribe | federation: per-subscriber lenses, closure audit, set digest | adopt the revised HTTP binding | planned |
 | 8. Resolve | resolver value ABI | resolvers move out | planned |
 | 9. Erasure | erase, probe, orders, receipts, sealed payloads | erasure moves onto the substrate | planned |
@@ -50,7 +51,7 @@ The census ratchet counts coupling in Loam's source. A count may only fall.
 | --- | --- | --- |
 | Direct `reactor.snapshot()` references | 48 | 42 |
 | Wall-clock reads in core code | 20 | 15 |
-| Operator-seed reads | 63 | 63 |
+| Operator-seed reads | 63 | 5 |
 | Files in import cycles | 22 | 22 |
 | Largest import cycle | 20 | 20 |
 
@@ -60,5 +61,5 @@ Other results so far:
 - A write on a store of 4,000 deltas went from 441 ms to 10 ms (#603, #604, rhizomatic #46).
 - The step 4 swap changes 3 seam bodies (`negatedAt`, `lawfulSnapshot`, `lawfulDeltasAt`) and gives `dataStruck` and `honoredStrikeOn` new bodies, instead of editing about 60 call sites.
 
-The import cycle breaks at step 6, when containers become peers. The seed reads fall at step 5,
-when keys become signed data.
+The import cycle breaks at step 6, when containers become peers. The seed reads fell at step 5,
+when each ground got its own signer (#644, #645).
