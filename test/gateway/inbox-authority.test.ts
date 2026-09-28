@@ -101,6 +101,26 @@ describe("inbox composition by authority", () => {
     });
   }
 
+  it("a revoked connection's past strike of a parent claim still crosses; its own claims do not", async () => {
+    const { gw, bind, scope } = await home();
+    const one = await bind(CONN_SEED);
+    const primary = observed(FERN, "height", 30, gw.stamp(ADA).timestamp, ADA_SEED);
+    await gw.append([primary]);
+    const claim = await writeIn(one.pool, CONN_SEED, 8);
+    const strike = signClaims(
+      makeNegationClaims(CONN, one.pool.stamp(CONN).timestamp, primary.id),
+      CONN_SEED,
+    );
+    await one.pool.append([strike]);
+    await gw.revokeConnection({
+      inbox: gw.connectionInboxes.get(one.name)!,
+      connectionKey: CONN,
+      ownerSeed: ADA_SEED,
+    });
+    const s = scope();
+    expect([s.has(primary.id), s.has(strike.id), s.has(claim.id)]).toEqual([true, true, false]);
+  });
+
   it("the owner's own write in a pool composes; a stranger's does not", async () => {
     const { bind, scope } = await home();
     const one = await bind(CONN_SEED);

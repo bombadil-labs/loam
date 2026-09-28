@@ -959,10 +959,12 @@ export function containerScopeImpl(
     return { deltas: gw.select(term), ground: gw };
   };
 
-  // A connection inbox composes into its parent by AUTHORITY (README ruling 8, M3): only what its
+  // A connection inbox composes into its parent by AUTHORITY (README ruling 8, M3): the CLAIMS its
   // owner, and the keys acting for the owner in this pool, wrote. A revoked or expired connection's
-  // writes stay in the pool (drop() and forensics read it whole) and leave the parent's view. A pool
-  // whose owner cannot be read fails the read, as an unattached one does (H9).
+  // claims stay in the pool (drop() and forensics read it whole) and leave the parent's view. Its
+  // past STRIKES of claims the parent admits still cross: the union negation closure below admits a
+  // strike whatever its author (H1; §39 criterion 10). A pool whose owner cannot be read fails the
+  // read, as an unattached one does (H9).
   const contributionOf = (name: string): { deltas: Delta[]; ground: Gateway } => {
     const all = membersOf(name);
     if (!name.startsWith("inbox:") || name === gw.poolHandle) return all;
