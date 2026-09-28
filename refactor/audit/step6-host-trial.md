@@ -16,6 +16,26 @@ notice. That notice is not the handoff-ready notice.
   commit. A write on a 4,000-delta store is about 10 ms today (#603, rhizomatic #46). A merge
   waits for an incremental image.
 
+## Which stores the trial opens
+
+The trial starts from a fresh, empty store. Loam needs no legacy import (greenfield, Myk,
+2026-09-25). The recordings and tests already build each store from a new `MemoryBackend` or a
+new sqlite file in a temp dir.
+
+- **The seam's read has three results.** `readImage` reports `empty`, `image` or
+  `rows-without-image`. The last one fails closed.
+- **A new store.** Loam creates the empty peer image first, by compare-and-set. The adapter
+  checks, in the same transaction, that the store holds no rows. Then everything enters through the
+  door with a local origin, the incarnation marker included.
+- **A trial store with an image.** `openSinglePeer` decodes the image directly. The image holds
+  the full admitted DeltaSet, all arrival records, the refusals, the counters and the active
+  obligations. Nothing is replayed from raw rows as admission (`step6-staging-open.md`).
+- **The image is the authority over the rows.** The sqlite adapter keeps delta rows for serving.
+  Before it exposes them, it checks them against the image's admitted ids. A missing or corrupt
+  admitted row fails closed. An extra raw row is not admitted.
+- **A store with rows and no image.** The trial path refuses to open it, and names the reason.
+  It never makes up arrival times or refusals from old rows. That store stays on today's path.
+
 ## What the prerelease provides (agreed with Sol, 2026-09-28)
 
 - An atomic mode for local append (see "Settled with Sol").
@@ -58,15 +78,23 @@ An ungoverned store skips `authorize`, the barrier and the budget.
 `Gateway.federate` (gateway.ts:1478) → `federateImpl` (ingest.ts:797) → `admitting` →
 `federateAdmitted` (:839). This door filters per delta and drops instead of throwing.
 
-- It runs the same lawful checks as append, then the trust-policy admit (`admitForImpl`, :458).
-- It has no write-standing check and no budget.
+- It does NOT run the same checks as append. Its per-delta filter (:882-903) is: protected
+  ingress, `verifiesAgainstHeld`, refused re-entry, `publicDefect`, `artifactDefect`,
+  `eraseDefect` (reads the batch), `slateDefect`, `recoveryDefect` (reads the batch), a paused
+  author, a cut for this store, a cut manifest, and the slate cite. Then the admit predicate:
+  the caller's `admit`, or the trust policy (`admitForImpl`, :458).
+- It never calls `authorize`. So it runs no constitutional, trust, binding-policy, envelope,
+  container or budget check, and no write-standing check. A signed malformed grant that append
+  refuses can cross this door under an explicit `admit`. The trial keeps each door's checks as
+  they are, and does not widen or narrow either one.
 - Batch passes follow: negation closure (:910), erasures of erasures (:917), erased in the batch
   (:919), and a fixpoint that removes orphans (:925-938).
 - The report gives counts only, with no reason per delta, by design (:866).
-- **No sending peer.** `federateImpl` takes no sender. Its callers know a URL and a token:
-  `pullFrom` (federation/pull.ts:175), the CLI pull (cli.ts:2213), admin federation
-  (server/admin-federation.ts:503), the erase fan-out (erase.ts:1513), and a scratch store
-  (server/admin.ts:435).
+- **No sending peer.** `federateImpl` takes no sender, and no caller knows a sender key.
+  `pullFrom` (federation/pull.ts:175) knows a URL and a token. The CLI import (cli.ts:2217) has
+  only a file or a URL. Admin federation (server/admin-federation.ts:503), the erase fan-out
+  (erase.ts:1513) and the scratch store (server/admin.ts:435) have neither. So every federation
+  arrival in the trial is unattributed, until a caller supplies an authenticated PeerId.
 - **No trusted receive time.** Author clocks are signed claim times.
 
 ## State that overlaps the substrate's
@@ -74,7 +102,7 @@ An ungoverned store skips `authorize`, the barrier and the budget.
 | Loam today | Where it lives | Substrate counterpart |
 | --- | --- | --- |
 | arrival order, `arrivalLog()` | in memory, rebuilt from backend order (sqlite `seq`) | arrival records with sequence, time and sender |
-| refused ids, `refusedIds` | derived from erasures on every call (erase.ts:237) | persisted `refusedIds` and refusal events |
+| refused ids, `refusedIds` | derived from erasures on every call (erase.ts:246) | persisted `refusedIds` and refusal events |
 | erasure standings (`owed`, `unasked`) | computed on demand (erase.ts:1404) | persisted purge obligations |
 | per-author budget | operator deltas; "used" counted over the reactor | `quotaUsed`, `capacity` |
 
@@ -82,7 +110,8 @@ During the trial both sides compute these. Any disagreement is a finding.
 
 ## Writes that do not pass the doors
 
-- `Gateway.open` writes the incarnation marker to the backend directly (gateway.ts:600).
+- `Gateway.open` writes the incarnation marker to the backend directly (gateway.ts:609-610). In the
+  trial it enters through the door.
 - Replay on open and on `reseat` ingests from the backend (gateway.ts:572, 1354).
 - Derived emissions arrive through the raw stream with no door (`attachPersistence`,
   gateway.ts:543).
@@ -94,10 +123,17 @@ image around the planner.
 
 ## Shared code with pools
 
-A pool is a `Gateway.open` instance with `attachedTo` set (container.ts:1698). It runs the same
-doors. So the trial gates on the host (`attachedTo === undefined`). The host's recovery barrier
-and `erasureStandings` read pool state, and pool reseed calls `pool.federate`. Those stay as they
-are.
+A pool is a `Gateway.open` instance (container.ts:1698). It runs the same doors. Its
+`attachedTo` is set only AFTER `Gateway.open` returns (:1702), and the admin scratch gateway
+(server/admin.ts:410) never sets it. So `attachedTo === undefined` does not identify the host.
+
+The trial uses an explicit opt-in instead. The caller passes the peer image store as an option
+to `Gateway.open` and `Gateway.boot`. Only a gateway given that store takes the substrate path.
+The container code, the channel code and the admin scratch store never pass it, so pools,
+quarantine and scratch gateways stay on today's path from their first line. A rail pins this.
+
+The host's recovery barrier and `erasureStandings` read pool state, and pool reseed calls
+`pool.federate`. Those stay as they are.
 
 ## Settled with Sol (2026-09-28)
 
@@ -121,7 +157,12 @@ are.
 - A two-sided refusal rail: an erased id is refused at both doors, and a live bystander is
   admitted.
 - The substrate's refused set and Loam's `refusedIds` agree on a store with erasures.
-- A pool append and a pool federate write no substrate image.
 - An append refused by a batch-level check leaves the image byte-identical.
 - An atomic append with one failing candidate commits no image and no delta row.
 - A federation receive with no known sender records an unattributed arrival, never a PeerId.
+- A store with rows and no image is refused on the trial path, and its bytes do not change.
+- Two concurrent empty-image creations: exactly one commits.
+- Empty-image creation over a store that already holds a row refuses, and writes nothing.
+- A reopen with an admitted row missing fails closed. An extra raw row is not served.
+- A pool, a quarantine pool and the admin scratch gateway write no image, even when the host
+  was opened with one.
