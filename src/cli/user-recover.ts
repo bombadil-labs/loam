@@ -10,9 +10,10 @@
 //   4. The cuts (recovery-history.md): one in every declared inbox pool, each journaled before it
 //      is written. From its cut on, a pool pauses the old key. A pool that is not attached refuses
 //      the recovery in step 1, because it could not be cut.
-//   5. One atomic operator append: the host's own cut, the record (carrying the roster hash, so the
-//      door refuses it if a pool was declared since step 1), its lineage, the new root claim, and
-//      strikes of the old key's standing in the host. From here the fence holds everywhere.
+//   5. One atomic operator append: the host's own cut, the record, its lineage, the new root claim,
+//      and strikes of the old key's standing in the host. The door admits the record only if this
+//      store and every declared pool hold a live cut for it, so a pool declared since step 1
+//      refuses the commit. From here the fence holds everywhere.
 //   6. The outcomes: `committed` beside every cut once the record landed, `aborted` once it provably
 //      did not. An abort lands before the key files roll back, so no pool stays paused unjournaled.
 //   7. After an append error, READ before undoing: the append may have committed. A read that
@@ -45,14 +46,14 @@ import {
 import { CTX_GRANTS, grantsNaming } from "../gateway/accounts.js";
 import { keysEverOf } from "../gateway/principal.js";
 import { withStamp } from "../gateway/stamp.js";
-import { declaredInboxes, readContainerTable } from "../gateway/container.js";
+import { attachedPool, declaredInboxes, readContainerTable } from "../gateway/container.js";
 import { refusedIds } from "../gateway/erase.js";
 import {
   cutClaims,
-  hasOutcome,
+  cutsHere,
   incarnationId,
   outcomeClaims,
-  rosterHash,
+  outcomesOf,
   type Outcome,
 } from "../gateway/recovery-cut.js";
 import { readClosedIds } from "../gateway/slate.js";
@@ -300,8 +301,10 @@ function signCut(
   );
 }
 
-// Write the outcome beside every cut of this attempt that a ground holds and has none yet. Returns
-// what could not be reached, so the caller reports it and keeps the journal.
+// Settle every cut of this attempt that a store holds: write `outcome` beside a cut with none, and
+// report a cut whose outcome says otherwise as a conflict, never as settled. A committed attempt must
+// then read committed in every store it cut. Returns what is not settled, so the caller reports it
+// and keeps the journal.
 async function settleCuts(
   gw: Gateway,
   operator: string,
@@ -311,30 +314,49 @@ async function settleCuts(
 ): Promise<string[]> {
   const pending: string[] = [];
   for (const [pool, ids] of Object.entries(j.cuts ?? {})) {
-    const ground = pool === HOST ? gw : gw.connectionInboxes.get(pool)?.gateway;
+    const where = pool === HOST ? "the host" : pool;
+    const ground = pool === HOST ? gw : attachedPool(gw, pool);
     if (ground === undefined) {
-      pending.push(`the ${outcome} outcome in ${pool} (not attached)`);
+      pending.push(`the ${outcome} outcome in ${where} (not attached)`);
       continue;
     }
     const erased = refusedIds(ground.reactor, operator);
-    const open = ids.filter(
-      (id) =>
-        ground.reactor.get(id) !== undefined && !hasOutcome(ground.reactor, operator, id, erased),
-    );
-    if (open.length === 0) continue;
+    const open: string[] = [];
+    let conflict = false;
+    for (const id of ids) {
+      if (ground.reactor.get(id) === undefined || erased.has(id)) continue;
+      const outs = outcomesOf(ground.reactor, operator, id, erased);
+      if (outs.size === 0) open.push(id);
+      else if (outs.size > 1 || !outs.has(outcome)) {
+        conflict = true;
+        pending.push(
+          `a conflict in ${where}: cut ${id} reads ${[...outs].sort().join(" and ")}, not ${outcome}`,
+        );
+      }
+    }
     try {
-      await ground.append(
-        open.map((id) =>
-          signClaims(
-            withStamp(ground.stamp(operator), (t) => outcomeClaims(id, outcome, operator, t)),
-            seed,
+      if (open.length > 0) {
+        await ground.append(
+          open.map((id) =>
+            signClaims(
+              withStamp(ground.stamp(operator), (t) => outcomeClaims(id, outcome, operator, t)),
+              seed,
+            ),
           ),
-        ),
-      );
+        );
+      }
     } catch (err) {
       pending.push(
-        `the ${outcome} outcome in ${pool === HOST ? "the host" : pool} (${err instanceof Error ? err.message : String(err)})`,
+        `the ${outcome} outcome in ${where} (${err instanceof Error ? err.message : String(err)})`,
       );
+      continue;
+    }
+    const committed = cutsHere(ground.reactor, operator, refusedIds(ground.reactor, operator)).some(
+      (c) =>
+        c.recovery === j.record && c.key === j.previous && c.positioned && c.state === "committed",
+    );
+    if (outcome === "committed" && !conflict && !committed) {
+      pending.push(`the cut in ${where}, which does not read committed`);
     }
   }
   return pending;
@@ -420,12 +442,10 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
     // reachable now. A first root retires no key and cuts nothing.
     const roster =
       previous === undefined ? [] : declaredInboxes(readContainerTable(gw.reactor, now, operator));
-    const unreachable = roster.filter(
-      (pool) => gw.connectionInboxes.get(pool)?.gateway === undefined,
-    );
+    const unreachable = roster.filter((pool) => attachedPool(gw, pool) === undefined);
     if (unreachable.length > 0) {
       return refuse(
-        `the inbox pools ${unreachable.join(", ")} are declared but not attached, so this recovery ` +
+        `the pools ${unreachable.join(", ")} are declared but not attached, so this recovery ` +
           `cannot cut them, and ${previous} could keep writing there unseen. Attach them first. ` +
           `Nothing was written.`,
       );
@@ -448,7 +468,6 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
             attempt,
             ...(chain.kind === "chain" ? { supersedes: chain.head } : {}),
             retired: [...retired],
-            ...(previous === undefined ? {} : { roster: rosterHash(roster) }),
           },
           operator,
           t,
@@ -498,7 +517,7 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
     };
     if (previous !== undefined) {
       for (const pool of roster) {
-        const ground = gw.connectionInboxes.get(pool)!.gateway!;
+        const ground = attachedPool(gw, pool)!;
         try {
           await ground.append([cut(ground, pool)]);
         } catch (err) {

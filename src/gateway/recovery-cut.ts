@@ -15,8 +15,6 @@
 // "Operator" here means the governing key of the peer that holds this store (user-identity.md).
 // Today inbox pools share the host's key; after step 6 each pool signs its own.
 
-import { sha256 } from "@noble/hashes/sha2.js";
-import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
 import { RECOVERIES, userGroundOf, verified } from "./user-root.js";
 
@@ -157,14 +155,35 @@ export function incarnationId(
   return d === undefined ? undefined : field(d, "incarnation");
 }
 
-/** Does `cut` have an outcome held here (whichever it says)? */
-export function hasOutcome(
+/** The outcomes held here for `cut`, as written (none, one, or contradictory). */
+export function outcomesOf(
   reactor: Reactor,
   operator: string,
   cut: string,
   erased: ReadonlySet<string>,
+): ReadonlySet<string> {
+  return new Set(
+    held(reactor, operator, CTX_CUT_OUTCOME, erased)
+      .filter((o) => field(o, "cut") === cut)
+      .map((o) => field(o, "outcome") ?? ""),
+  );
+}
+
+/**
+ * Does this store hold a live cut for `recovery` retiring `key`: one naming this incarnation,
+ * arrived at its position, and not aborted? What a retiring recovery needs in every store before it
+ * commits.
+ */
+export function holdsLiveCut(
+  reactor: Reactor,
+  operator: string,
+  recovery: string,
+  key: string,
+  erased: ReadonlySet<string>,
 ): boolean {
-  return held(reactor, operator, CTX_CUT_OUTCOME, erased).some((o) => field(o, "cut") === cut);
+  return cutsHere(reactor, operator, erased).some(
+    (c) => c.recovery === recovery && c.key === key && c.positioned && c.state !== "aborted",
+  );
 }
 
 export type CutState = "prepared" | "committed" | "aborted";
@@ -213,6 +232,8 @@ export interface Cut {
   readonly recovery: string;
   readonly key: string;
   readonly index: number;
+  /** Did it arrive at the position it names? A cut that did not stays PREPARED unless aborted. */
+  readonly positioned: boolean;
   readonly state: CutState;
 }
 
@@ -240,6 +261,7 @@ export function cutsHere(
       recovery,
       key,
       index: arrivalIndex(reactor, d.id)!,
+      positioned: field(d, "position") === String(arrivalIndex(reactor, d.id)),
       state: effectiveState(reactor, operator, d, erased),
     });
   }
@@ -362,6 +384,26 @@ export function cutPositionDefect(
   return undefined;
 }
 
-/** The hash a recovery record carries of the inbox pools its cuts were written to. */
-export const rosterHash = (pools: Iterable<string>): string =>
-  bytesToHex(sha256(utf8ToBytes(JSON.stringify([...new Set(pools)].sort()))));
+/**
+ * Does this store cover `recovery` retiring `key`: a live cut held here, or one in `batch` naming
+ * this incarnation (the append door has already checked its position)?
+ */
+export function coversRecovery(
+  reactor: Reactor,
+  operator: string,
+  batch: readonly Delta[],
+  recovery: string,
+  key: string,
+  erased: ReadonlySet<string>,
+): boolean {
+  if (holdsLiveCut(reactor, operator, recovery, key, erased)) return true;
+  const here = incarnationId(reactor, operator, erased);
+  return batch.some(
+    (d) =>
+      d.claims.author === operator &&
+      inContext(d, CTX_CUT) &&
+      field(d, "store") === here &&
+      field(d, "recovery") === recovery &&
+      field(d, "key") === key,
+  );
+}

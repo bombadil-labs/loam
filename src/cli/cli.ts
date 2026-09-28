@@ -751,11 +751,61 @@ function servingProbe(
   home: string,
   store: string,
 ): { said: string; certain: boolean; url?: string } | undefined {
-  const file = servingFile(home);
+  return liveRecordProbe(servingFile(home), store, "a server", "serving");
+}
+
+// WHO IS RECOVERING A USER ON THIS STORE. `loam user recover` writes its cuts into every pool and
+// then commits against them, so it must be the store's only writer for its whole run: it refuses
+// while a server serves the store, and holds this record so a server cannot start mid-recovery.
+const recoveringFile = (home: string): string => join(home, "recovering.json");
+
+// Hold the recovering record for this run, or say who holds it. Written exclusively. A record whose
+// pid is provably dead is replaced; any other (a live run on any store of this home, or a record that
+// cannot be read) refuses, because a maybe must not pass as a no.
+function claimRecovering(home: string, store: string): string | undefined {
+  const file = recoveringFile(home);
+  const record = `${JSON.stringify({ pid: process.pid, store: resolve(store), startedAt: Date.now() })}\n`;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      writeFileSync(file, record, { flag: "wx" });
+      return undefined;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+    }
+    let pid: unknown;
+    try {
+      pid = (JSON.parse(readFileSync(file, "utf8")) as { pid?: unknown }).pid;
+    } catch {
+      return `${file} exists and does not read as a recovery record`;
+    }
+    if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) {
+      return `${file} exists and does not read as a recovery record`;
+    }
+    try {
+      process.kill(pid, 0);
+      return `a recovery is running on this home right now (pid ${pid})`;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ESRCH") {
+        return `a recovery may be running on this home (pid ${pid})`;
+      }
+    }
+    rmSync(file, { force: true }); // a crashed run's record
+  }
+  return `${file} could not be claimed`;
+}
+
+// One live-record probe for both records: silent only for no record, a record on another store, or
+// a provably dead pid. Anything else is a yes or a maybe, and a maybe must not pass as a no.
+function liveRecordProbe(
+  file: string,
+  store: string,
+  who: string,
+  doing: string,
+): { said: string; certain: boolean; url?: string } | undefined {
   const uncertain = {
     said:
-      `a server may be serving this store — ${file} exists but does not read as a serving ` +
-      `record, and a maybe must not pass as a no`,
+      `${who} may be ${doing} this store — ${file} exists but does not read as its record, and a ` +
+      `maybe must not pass as a no`,
     certain: false,
   };
   let raw: string;
@@ -794,7 +844,7 @@ function servingProbe(
   }
   const url = typeof record.url === "string" ? record.url : undefined;
   return {
-    said: `a server is serving this store right now (pid ${record.pid}${url === undefined ? "" : `, ${url}`})`,
+    said: `${who} is ${doing} this store right now (pid ${record.pid}${url === undefined ? "" : `, ${url}`})`,
     certain: true,
     ...(url === undefined ? {} : { url }),
   };
@@ -1196,6 +1246,14 @@ async function cmdServe(
   if (init.created) io.out(`loam: initialized ${home}\n  operator ${init.operator}`);
   const seed = readSeed(home);
   const path = storePath(home, parsed.flags.get("store"));
+  const recovering = liveRecordProbe(recoveringFile(home), path, "a recovery", "running on");
+  if (recovering !== undefined) {
+    io.err(
+      `serve: ${recovering.said}. It must be the store's only writer until it ends, so this ` +
+        `server does not start. Run serve again when it is done.`,
+    );
+    return 2;
+  }
 
   // The optional cold store (--archive, or `archive` in config.json): the sqlite primary gains
   // an archive mirror, healed BEFORE boot — boot reads the backend once, so a lost sqlite is
@@ -2600,16 +2658,35 @@ async function cmdUser(args: readonly string[], io: IO, options: RunOptions): Pr
   const home = parsed.flags.get("home") ?? defaultHome();
   if (sub === "create") return cmdUserCreate(name, parsed, home, io, options);
   if (sub === "recover") {
-    return recoverUser({
-      home,
-      name,
-      replaceSeed: parsed.booleans.has("replace-seed"),
-      abandonAttempt: parsed.booleans.has("abandon-attempt"),
-      storePath: storePath(home, parsed.flags.get("store")),
-      io,
-      openBackend: (path) => openStore(path, io),
-      channelBackend: channelBackendFor(home, io),
-    });
+    const path = storePath(home, parsed.flags.get("store"));
+    const serving = servingProbe(home, path);
+    if (serving !== undefined) {
+      io.err(
+        `user recover: ${serving.said}. A recovery must be this store's only writer, because its ` +
+          `cuts and its commit must see every pool the store declares. Stop the server, then run ` +
+          `this again. Nothing was written.`,
+      );
+      return 2;
+    }
+    const lease = claimRecovering(home, path);
+    if (lease !== undefined) {
+      io.err(`user recover: ${lease}. Nothing was written.`);
+      return 2;
+    }
+    try {
+      return await recoverUser({
+        home,
+        name,
+        replaceSeed: parsed.booleans.has("replace-seed"),
+        abandonAttempt: parsed.booleans.has("abandon-attempt"),
+        storePath: path,
+        io,
+        openBackend: (p) => openStore(p, io),
+        channelBackend: channelBackendFor(home, io),
+      });
+    } finally {
+      rmSync(recoveringFile(home), { force: true });
+    }
   }
   return cmdUserRole(name, parsed, home, io, sub === "assign-role" ? "assign" : "remove");
 }

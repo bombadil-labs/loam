@@ -118,11 +118,14 @@ async function recover(
     K2_SEED,
   );
   if (opts.land !== false) {
-    await gw.append([
+    const commit = [
       record,
       op(lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30)),
       op(rootClaims("ada", K2, OP, 30)),
-    ]);
+    ];
+    // The door admits the record only behind a live cut, so a planted bad cut's record is planted too.
+    if (opts.position === undefined) await gw.append(commit);
+    else for (const d of commit) expect(gw.reactor.ingest(d).status).toBe("accepted");
     await gw.append([binding]);
   }
   if (opts.outcome !== undefined)
@@ -151,17 +154,45 @@ describe("H1: history before the cut, nothing after it", () => {
     expect([m.has(byK1.id), m.has(late.id), m.has(byB.id)]).toEqual([true, false, false]);
   });
 
-  it("with no cut in the store, the history is not shown (fails closed)", async () => {
+  it("the append door refuses a retiring record with no cut; planted past it, no history shows", async () => {
     const { gw, byK1 } = await world();
     const record = op(
       recoveryClaims({ name: "ada", attempt: "n", previous: K1, root: K2, retired: [K1] }, OP, 30),
     );
-    await gw.append([
+    const commit = [
       record,
       op(lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30)),
       op(rootClaims("ada", K2, OP, 30)),
-    ]);
+    ];
+    await expect(gw.append(commit)).rejects.toThrow(/holds no live cut for it/);
+    expect(gw.reactor.get(record.id)).toBeUndefined();
+    for (const d of commit) expect(gw.reactor.ingest(d).status).toBe("accepted");
     expect(members(gw).has(byK1.id)).toBe(false);
+  });
+
+  it("the append door refuses a retiring record whose only cut is not at its position", async () => {
+    const { gw } = await world();
+    const { record } = await recover(gw, { land: false, position: 999 });
+    await expect(
+      gw.append([
+        record,
+        op(lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30)),
+        op(rootClaims("ada", K2, OP, 30)),
+      ]),
+    ).rejects.toThrow(/holds no live cut for it/);
+  });
+
+  it("the append door refuses a retiring record whose only cut is aborted", async () => {
+    const { gw } = await world();
+    const { record, cut } = await recover(gw, { land: false });
+    await gw.append([op(outcomeClaims(cut.id, "aborted", OP, 31))]);
+    await expect(
+      gw.append([
+        record,
+        op(lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30)),
+        op(rootClaims("ada", K2, OP, 30)),
+      ]),
+    ).rejects.toThrow(/holds no live cut for it/);
   });
 });
 

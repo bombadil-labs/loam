@@ -2,11 +2,13 @@
 // H8; H6 is in user-recover.test.ts). Each case reads both levels: the cut and outcome records each
 // store holds, and what the door and the pause make of them.
 
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
+import { withHostCut } from "../helpers/recovery-cut.js";
 import { channelBackendFor, run } from "../../src/cli/cli.js";
 import { readSeed, readUserSeed, storePath, userSeedPath } from "../../src/cli/config.js";
 import { recoverUser, type RecoverOptions } from "../../src/cli/user-recover.js";
@@ -14,8 +16,14 @@ import { containerClaims } from "../../src/gateway/container.js";
 import { refusedIds } from "../../src/gateway/erase.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
-import { cutsHere, hasOutcome, pausedKeys } from "../../src/gateway/recovery-cut.js";
-import { userGroundOf, userRootAt } from "../../src/gateway/user-root.js";
+import { cutsHere, outcomeClaims, outcomesOf, pausedKeys } from "../../src/gateway/recovery-cut.js";
+import {
+  lineageClaims,
+  recoveryClaims,
+  userGroundOf,
+  userRootAt,
+} from "../../src/gateway/user-root.js";
+import { rootClaims } from "../../src/server/users.js";
 import type { StoreBackend } from "../../src/store/backend.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import type { ScryptParams } from "../../src/server/credentials.js";
@@ -113,7 +121,7 @@ function cutsOf(g: Gateway, op: string, key: string) {
     .filter((c) => c.key === key)
     .map((c) => ({
       state: c.state,
-      outcome: hasOutcome(g.reactor, op, c.delta.id, erased),
+      outcome: [...outcomesOf(g.reactor, op, c.delta.id, erased)].sort().join(",") || "none",
     }));
 }
 const pool = (gw: Gateway, name: string): Gateway => gw.connectionInboxes.get(name)!.gateway!;
@@ -125,7 +133,7 @@ describe("the recovery barrier", () => {
     expect(await recoverUser(direct())).toBe(0);
     await ground((gw, op) => {
       for (const g of [gw, pool(gw, p)]) {
-        expect(cutsOf(g, op, k1)).toEqual([{ state: "committed", outcome: true }]);
+        expect(cutsOf(g, op, k1)).toEqual([{ state: "committed", outcome: "committed" }]);
         expect(paused(g, op).has(k1)).toBe(false);
       }
     });
@@ -144,7 +152,7 @@ describe("the recovery barrier", () => {
     ).rejects.toThrow(/machine stopped/);
     expect(existsSync(journal())).toBe(true);
     await ground((gw, op) => {
-      expect(cutsOf(pool(gw, p), op, k1)).toEqual([{ state: "prepared", outcome: false }]);
+      expect(cutsOf(pool(gw, p), op, k1)).toEqual([{ state: "prepared", outcome: "none" }]);
       expect(paused(pool(gw, p), op).has(k1)).toBe(true);
       expect(cutsOf(gw, op, k1)).toEqual([]); // the host cut rides in the commit, which never ran
     });
@@ -156,7 +164,7 @@ describe("the recovery barrier", () => {
       expect(
         userRootAt(gw.reactor, gw.validityNow(), op, "ada", userGroundOf(gw.reactor).erased()),
       ).toBe(k1);
-      expect(cutsOf(pool(gw, p), op, k1)).toEqual([{ state: "aborted", outcome: true }]);
+      expect(cutsOf(pool(gw, p), op, k1)).toEqual([{ state: "aborted", outcome: "aborted" }]);
       expect(paused(pool(gw, p), op).has(k1)).toBe(false);
     });
   });
@@ -171,13 +179,13 @@ describe("the recovery barrier", () => {
     expect(await recoverUser(direct({ channelBackend: once }))).toBe(1);
     expect(err.join("\n")).toMatch(/PENDING/);
     await ground((gw, op) => {
-      expect(cutsOf(pool(gw, p), op, k1)).toEqual([{ state: "committed", outcome: false }]);
+      expect(cutsOf(pool(gw, p), op, k1)).toEqual([{ state: "committed", outcome: "none" }]);
       expect(paused(pool(gw, p), op).has(k1)).toBe(false);
-      expect(cutsOf(gw, op, k1)).toEqual([{ state: "committed", outcome: true }]);
+      expect(cutsOf(gw, op, k1)).toEqual([{ state: "committed", outcome: "committed" }]);
     });
     expect(await recoverUser(direct())).toBe(0);
     await ground((gw, op) => {
-      expect(cutsOf(pool(gw, p), op, k1)).toEqual([{ state: "committed", outcome: true }]);
+      expect(cutsOf(pool(gw, p), op, k1)).toEqual([{ state: "committed", outcome: "committed" }]);
     });
   });
 
@@ -198,11 +206,11 @@ describe("the recovery barrier", () => {
       ]);
     };
     expect(await recoverUser(direct({ afterCuts: declare }))).toBe(1);
-    expect(err.join("\n")).toMatch(/other inbox pools/);
+    expect(err.join("\n")).toMatch(/holds no live cut for it \(or is not attached\)/);
     expect(existsSync(journal())).toBe(false);
     expect(seedKey()).toBe(k1);
     await ground((gw, op) => {
-      expect(cutsOf(pool(gw, p), op, k1)).toEqual([{ state: "aborted", outcome: true }]);
+      expect(cutsOf(pool(gw, p), op, k1)).toEqual([{ state: "aborted", outcome: "aborted" }]);
       expect(paused(pool(gw, p), op).has(k1)).toBe(false);
     });
     err.length = 0;
@@ -210,7 +218,7 @@ describe("the recovery barrier", () => {
     await ground((gw, op) => {
       for (const g of [gw, pool(gw, p), pool(gw, late)]) {
         expect(cutsOf(g, op, k1).filter((c) => c.state === "committed")).toEqual([
-          { state: "committed", outcome: true },
+          { state: "committed", outcome: "committed" },
         ]);
       }
     });
@@ -235,5 +243,106 @@ describe("the recovery barrier", () => {
     const first = await read();
     expect(first.every((s) => s.cuts.length === 1)).toBe(true);
     expect(await read()).toEqual(first);
+  });
+
+  it("the host door refuses a retiring record whose pools hold no cut, even with the host's own", async () => {
+    const { k1, pool: p } = await world();
+    const seed = readSeed(home);
+    await ground(async (gw, op) => {
+      const k2 = authorForSeed("d2".repeat(32));
+      const t = gw.stamp(op).timestamp;
+      const record = signClaims(
+        recoveryClaims({ name: "ada", attempt: "x", previous: k1, root: k2, retired: [k1] }, op, t),
+        seed,
+      );
+      const commit = [
+        record,
+        signClaims(
+          lineageClaims({ name: "ada", recovery: record.id, root: k2, retired: [k1] }, op, t),
+          seed,
+        ),
+        signClaims(rootClaims("ada", k2, op, t), seed),
+      ];
+      await expect(gw.append(withHostCut(gw, seed, commit))).rejects.toThrow(
+        new RegExp(`${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} holds no live cut`),
+      );
+      expect(gw.reactor.get(record.id)).toBeUndefined();
+      expect(
+        userRootAt(gw.reactor, gw.validityNow(), op, "ada", userGroundOf(gw.reactor).erased()),
+      ).toBe(k1);
+    });
+  });
+
+  it("a contrary outcome is a conflict: the rerun reports it, keeps the journal, and claims nothing", async () => {
+    const { k1, pool: p } = await world();
+    const real = channelBackendFor(home, io);
+    let opens = 0;
+    const once = (name: string): StoreBackend =>
+      (opens++ === 0 ? real(name) : undefined) as unknown as StoreBackend;
+    expect(await recoverUser(direct({ channelBackend: once }))).toBe(1); // the pool's outcome waits
+    await ground(async (gw, op) => {
+      const g = pool(gw, p);
+      const [cut] = cutsHere(g.reactor, op, refusedIds(g.reactor, op)).filter((c) => c.key === k1);
+      await g.append([
+        signClaims(
+          outcomeClaims(cut!.delta.id, "aborted", op, g.stamp(op).timestamp),
+          readSeed(home),
+        ),
+      ]);
+    });
+    out.length = 0;
+    err.length = 0;
+    expect(await recoverUser(direct())).toBe(1);
+    expect(err.join("\n")).toMatch(/a conflict in .*reads aborted, not committed/);
+    expect(out.join("\n")).toMatch(/now signs with/); // the landing is reported, never completion
+    expect(existsSync(journal())).toBe(true);
+    await ground((gw, op) => {
+      expect(cutsOf(pool(gw, p), op, k1)).toEqual([{ state: "aborted", outcome: "aborted" }]);
+    });
+  });
+});
+
+describe("one writer per store for a recovery", () => {
+  const recoverCli = () => run(["user", "recover", "ada", "--replace-seed", "--home", home], io);
+  const serving = (pid: number) =>
+    writeFileSync(
+      join(home, "serving.json"),
+      `${JSON.stringify({ pid, url: "http://127.0.0.1:1", store: storePath(home) })}\n`,
+    );
+  const deadPid = (): number => spawnSync(process.execPath, ["-e", ""]).pid;
+
+  it("recover refuses while a live server serves the store, and writes nothing", async () => {
+    const { k1 } = await world();
+    serving(process.pid);
+    expect(await recoverCli()).toBe(2);
+    expect(err.join("\n")).toMatch(/is serving this store right now.*only writer/);
+    expect(existsSync(journal())).toBe(false);
+    expect(seedKey()).toBe(k1);
+    expect(existsSync(join(home, "recovering.json"))).toBe(false);
+  });
+
+  it("a crashed server's record does not block recover", async () => {
+    const { k1 } = await world();
+    serving(deadPid());
+    expect(await recoverCli()).toBe(0);
+    expect(seedKey()).not.toBe(k1);
+    expect(existsSync(join(home, "recovering.json"))).toBe(false);
+  });
+
+  it("a live recovery refuses a second recovery and a server start", async () => {
+    await world();
+    writeFileSync(
+      join(home, "recovering.json"),
+      `${JSON.stringify({ pid: process.pid, store: storePath(home) })}\n`,
+    );
+    expect(await recoverCli()).toBe(2);
+    expect(err.join("\n")).toMatch(/a recovery is running on this home/);
+    err.length = 0;
+    expect(
+      await run(["serve", "--http", "--token", "t", "--port", "0", "--home", home], io, {
+        detach: true,
+      }),
+    ).toBe(2);
+    expect(err.join("\n")).toMatch(/a recovery is running on this store/);
   });
 });

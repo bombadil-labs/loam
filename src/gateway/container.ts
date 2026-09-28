@@ -1159,7 +1159,12 @@ function narrowTerms(own: Terms, allowed: Terms, depth = 0): Terms {
  * fold and the doors ask again, exactly as the open request asked. An absent leeway is every
  * switch off, here as everywhere.
  */
-/** The inbox pools the table declares and has not detached: a recovery cuts each one. */
+/** The attached gateway of pool `name` (a connection inbox or a channel pool), or undefined. */
+export function attachedPool(gw: Gateway, name: string): Gateway | undefined {
+  return gw.connectionInboxes.get(name)?.gateway ?? gw.channelPools.get(name)?.gateway;
+}
+
+/** The pools the table declares and has not detached: a recovery cuts each one. */
 export function declaredInboxes(table: ContainerTable): string[] {
   return [...table.containers]
     .filter(([pool, rec]) => rec.inboxOf !== undefined && !table.detached.has(pool))

@@ -67,10 +67,10 @@ import {
 } from "./slate.js";
 import { readTrustPolicy } from "./trust.js";
 import { governedProgram, needsLowering } from "./governed-trust.js";
-import { recordRoster, recoveryDefect, userGroundOf } from "./user-root.js";
+import { recordPrevious, recoveryDefect, userGroundOf } from "./user-root.js";
 import { hasMemberOf, lowerMembershipJson } from "./member-of.js";
-import { declaredInboxes, readContainerTable } from "./container.js";
-import { cutPositionDefect, isStoreLocal, pausedKeys, rosterHash } from "./recovery-cut.js";
+import { attachedPool, declaredInboxes, readContainerTable } from "./container.js";
+import { coversRecovery, cutPositionDefect, isStoreLocal, pausedKeys } from "./recovery-cut.js";
 
 // Persist a batch, THEN serve it (the body of `Gateway.append`). The batch is validated whole (one
 // bad delta refuses the lot); it lands in the backend before the reactor sees it, so nothing a
@@ -255,7 +255,7 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
 
 // Admission is serialized per gateway. A batch is checked against the state it finds, then awaits
 // the backend, then ingests; two unserialized batches could each pass a check that reads the same
-// state (a pause, a budget, a recovery roster) and both land. Only check, write and ingest run under
+// state (a pause, a budget, a recovery barrier) and both land. Only check, write and ingest run under
 // the lock: closing streams after it may await a reader, and a reader may append.
 const admissions = new WeakMap<Gateway, Promise<unknown>>();
 function admitting<T>(gw: Gateway, fn: () => Promise<T>): Promise<T> {
@@ -319,24 +319,32 @@ async function appendAdmitted(
       }
     }
   }
-  // Recovery barrier (recovery-history.md). Both read the state this batch lands on, and the
-  // admission lock keeps it still: a cut lands at the position it names, and a recovery record
-  // commits only against the inbox roster its cuts were written to.
+  // Recovery barrier (recovery-history.md), read under the admission lock so nothing lands between
+  // the check and the commit. A cut lands at the position it names. A record that retires a key
+  // commits only behind its barrier: this store and every declared pool hold a live cut for it.
   if (gw.operatorAuthor !== undefined) {
-    const refused = refusedIds(gw.reactor, gw.operatorAuthor);
-    const cutDefect = cutPositionDefect(gw.reactor, gw.operatorAuthor, batch, refused);
+    const op = gw.operatorAuthor;
+    const refused = refusedIds(gw.reactor, op);
+    const cutDefect = cutPositionDefect(gw.reactor, op, batch, refused);
     if (cutDefect !== undefined) throw new Error(`append rejected: ${cutDefect}`);
-    const records = batch.filter(
-      (d) => d.claims.author === gw.operatorAuthor && recordRoster(d) !== undefined,
-    );
-    if (records.length > 0) {
-      const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
-      const current = rosterHash(declaredInboxes(table));
-      const moved = records.find((d) => recordRoster(d) !== current);
-      if (moved !== undefined) {
+    for (const d of batch) {
+      const previous = d.claims.author === op ? recordPrevious(d) : undefined;
+      if (previous === undefined) continue;
+      const uncut = [
+        ...(coversRecovery(gw.reactor, op, batch, d.id, previous, refused) ? [] : ["this store"]),
+        ...declaredInboxes(readContainerTable(gw.reactor, gw.validityNow(), op)).filter((pool) => {
+          const g = attachedPool(gw, pool);
+          return (
+            g === undefined ||
+            !coversRecovery(g.reactor, op, [], d.id, previous, refusedIds(g.reactor, op))
+          );
+        }),
+      ];
+      if (uncut.length > 0) {
         throw new Error(
-          `append rejected: recovery ${moved.id} was prepared for other inbox pools than this ` +
-            `store declares now; its cuts do not cover them`,
+          `append rejected: recovery ${d.id} retires ${previous}, and ${uncut.join(", ")} ` +
+            `holds no live cut for it (or is not attached), so ${previous} could write there ` +
+            `unseen. \`loam user recover\` writes the cuts first.`,
         );
       }
     }
