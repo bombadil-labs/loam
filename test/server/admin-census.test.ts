@@ -148,7 +148,8 @@ describe("§55(c) — the detail page carries the census; the dashboard tree doe
     // back into the gather — primary-held, so the primary's bucket, never stolen by the copy.
     expect(html).toContain('data-census-linked="6"');
     expect(html).toContain('data-census-dark="2"');
-    expect(html).toContain('data-census-vocabulary="5"');
+    // Six: the five before, plus the inbox pool's own incarnation marker (recovery-history.md).
+    expect(html).toContain('data-census-vocabulary="6"');
     // The full opening tags, not only the attributes: a mangled bracket inside the template
     // still carries the attribute text, and a person reads tags, not substrings.
     expect(html).toContain("<li data-census-physical=");

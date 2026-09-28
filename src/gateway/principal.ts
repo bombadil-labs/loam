@@ -167,7 +167,7 @@ export function keysEverOf(
 // Does `root` hold a SPEC-14 binding for `key` (negated or not: history is history)? Read through
 // the substrate's own association evidence, which parses only the exact binding shape and verifies
 // each binding's signature, so a raw-ingested row that merely looks like one does not count.
-function bindingHeld(
+export function bindingHeld(
   reactor: Reactor,
   now: number,
   root: string,
@@ -175,7 +175,12 @@ function bindingHeld(
   erased: ReadonlySet<string>,
 ): boolean {
   return associatedKeys(reactor, root, now, "rootOrSameAuthor").some((row) => {
-    if (row.key !== key || row.via.length !== 1 || erased.has(row.via[0]!)) return false;
+    // Ruling 8: the new root can withdraw its binding to disown a thief's writes. A binding struck at
+    // `now` (by the substrate's verified root-or-same-author rule, counter-strikes included) is not
+    // history any more.
+    if (row.key !== key || row.via.length !== 1 || row.negated || erased.has(row.via[0]!)) {
+      return false;
+    }
     // A one-step path may also be a succession; only a BINDING is the evidence recovery requires.
     const kind = reactor.get(row.via[0]!)?.claims.pointers.find((p) => p.role === "kind")?.target;
     return kind?.kind === "primitive" && kind.value === "binding";

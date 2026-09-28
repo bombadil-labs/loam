@@ -17,6 +17,7 @@ import {
   governedBootstrap,
   pickLatest,
 } from "./fixtures.js";
+import { isStoreLocal } from "../../src/gateway/recovery-cut.js";
 
 const KEEPER_SEED = "c3".repeat(32);
 const KEEPER = authorForSeed(KEEPER_SEED);
@@ -43,7 +44,7 @@ describe("mutate: args → signed deltas → append", () => {
     // the delta itself: signed by the gateway's keeper, shaped as a property claim, persisted
     await gateway.flush();
     const settled = [...garden, ...governedBootstrap(KEEPER_SEED)].map((d) => d.id);
-    const persisted = await backend.deltasSince(new Set(settled));
+    const persisted = (await backend.deltasSince(new Set(settled))).filter((d) => !isStoreLocal(d));
     expect(persisted).toHaveLength(1);
     const written = persisted[0]!;
     expect(verifyDelta(written)).toBe("verified");
@@ -76,7 +77,7 @@ describe("mutate: args → signed deltas → append", () => {
     expect(plant.tag).toEqual(["shade", "fronds"]); // untouched props stay resolved
     await gateway.flush();
     const settled = [...garden, ...governedBootstrap(KEEPER_SEED)].map((d) => d.id);
-    const fresh = await backend.deltasSince(new Set(settled));
+    const fresh = (await backend.deltasSince(new Set(settled))).filter((d) => !isStoreLocal(d));
     expect(fresh).toHaveLength(2);
     await gateway.close();
   });
@@ -176,7 +177,7 @@ describe("mutate: the deltas survive like any others", () => {
     }`);
     expect(result.errors).toBeUndefined();
     expect((result.data as { plant: { leaf_count: number } }).plant.leaf_count).toBe(12);
-    const persisted = await backend.deltasSince(new Set());
+    const persisted = (await backend.deltasSince(new Set())).filter((d) => !isStoreLocal(d));
     const subject = persisted[0]!.claims.pointers.find((p) => p.role === "subject");
     expect(subject?.target.kind === "entity" && subject.target.entity.context).toBe("leaf-count");
     await gateway.close();

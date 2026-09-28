@@ -69,6 +69,7 @@ import { readTrustPolicy } from "./trust.js";
 import { governedProgram, needsLowering } from "./governed-trust.js";
 import { recoveryDefect, userGroundOf } from "./user-root.js";
 import { hasMemberOf, lowerMembershipJson } from "./member-of.js";
+import { isStoreLocal, pausedKeys } from "./recovery-cut.js";
 
 // Persist a batch, THEN serve it (the body of `Gateway.append`). The batch is validated whole (one
 // bad delta refuses the lot); it lands in the backend before the reactor sees it, so nothing a
@@ -566,7 +567,8 @@ export function offeredDeltasImpl(gw: Gateway): Delta[] {
           return withNegationClosure(gw, [...result.set]);
         })();
   const withheld = egressWithheld(gw, Date.now());
-  const served = withoutErased(gw, offered);
+  // A store's own incarnation marker, cuts and outcomes are facts about this store only.
+  const served = withoutErased(gw, offered).filter((d) => !isStoreLocal(d));
   return withheld.size === 0 ? served : served.filter((d) => !withheld.has(d.id));
 }
 
@@ -733,9 +735,10 @@ export async function federateImpl(
       dead.has(d.id) ||
       publicDefect(d.claims) !== undefined ||
       artifactDefect(d.claims) !== undefined ||
-      (isErasure(d.claims) && eraseDefect(d, gw.reactor, gw.operatorAuthor) !== undefined) ||
+      (isErasure(d.claims) && eraseDefect(d, gw.reactor, gw.operatorAuthor, all) !== undefined) ||
       slateDefect(d, gw.reactor, gw.validityNow(), gw.operatorAuthor) !== undefined ||
       recoveryDefect(d, gw.reactor, gw.operatorAuthor, all) !== undefined ||
+      pausedKeys(gw.reactor, gw.operatorAuthor).has(d.claims.author) ||
       // A cite refusal belongs with the UNLAWFUL group and not with the un-admitted one: the
       // batch-scoped closure below deliberately readmits negations of what crossed, and a delta this
       // store is staging a removal over must never come back through it. Safe by construction with

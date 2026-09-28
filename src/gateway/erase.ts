@@ -57,6 +57,7 @@ import type { StoreBackend } from "../store/backend.js";
 import { withStamp } from "./stamp.js";
 import { governedProgram } from "./governed-trust.js";
 import { userGroundOf } from "./user-root.js";
+import { cutErasureDefect } from "./recovery-cut.js";
 
 export const ERASE_ENTITY = "loam:erasure";
 export const CTX_ERASE = "loam.erasure";
@@ -172,6 +173,7 @@ export function eraseDefect(
   delta: Delta,
   reactor: Reactor,
   operator: string | undefined,
+  batch: readonly Delta[] = [],
 ): string | undefined {
   if (!isErasure(delta.claims)) return undefined;
   const { targetId, spokenBy, slate, count } = erasureParts(delta.claims);
@@ -197,6 +199,12 @@ export function eraseDefect(
   if (target !== undefined && isErasure(target.claims)) {
     return "an erasure cannot itself be erased: an erasure is permanent";
   }
+  // The records a recovery's history cut depends on are kept (recovery-history.md).
+  const cutDefect =
+    target === undefined
+      ? undefined
+      : cutErasureDefect(reactor, operator, target, erasedInBatch(batch, operator));
+  if (cutDefect !== undefined) return cutDefect;
   if (target !== undefined && target.claims.author !== spokenBy) {
     return "an erasure's spoken-by must be the erased delta's actual author";
   }

@@ -11,8 +11,10 @@
 // earlier key wrote before a recovery (ruling 8, M1) — is NOT part of this node yet: the cut that
 // separates old writes from new ones across stores is an open decision.
 
-import { keysActingFor } from "./principal.js";
+import { bindingHeld, keysActingFor } from "./principal.js";
+import { historyBefore } from "./recovery-cut.js";
 import {
+  recoveriesOf,
   retiredKeysOf,
   subjectKeyAt,
   USER_PREFIX,
@@ -131,11 +133,54 @@ export function lowerMembershipJson(
   now: number,
   operator: string | undefined,
 ): unknown {
-  const { json: out, defect } = mapNodes(json, (user, scope) =>
-    inSet(presentAuthors(reactor, now, operator, user, scope)),
-  );
+  // Two branches, kept apart: PRESENT authority as an author set, and HISTORY as specific delta
+  // ids, so a new or backdated delta signed by a retired key can never match it.
+  const { json: out, defect } = mapNodes(json, (user, scope) => ({
+    or: [
+      inSet(presentAuthors(reactor, now, operator, user, scope)),
+      {
+        match: {
+          field: "id",
+          cmp: "inSet",
+          const: historyIds(reactor, now, operator, user).sort(),
+        },
+      },
+    ],
+  }));
   if (defect !== undefined) throw new Error(defect);
   return out;
+}
+
+/**
+ * What earlier keys of `user` wrote in THIS store before the recoveries that retired them (ruling 8,
+ * M1): walk back from the current root through each recovery whose binding the later root still
+ * holds at `now` (a withdrawn binding disowns), and take the retired key's deltas that arrived here
+ * before that recovery's committed cut. A store with no such cut contributes nothing: it fails
+ * closed.
+ */
+export function historyIds(
+  reactor: Reactor,
+  now: number,
+  operator: string | undefined,
+  user: string,
+): string[] {
+  const root = subjectKeyAt(reactor, now, operator, `${USER_PREFIX}${user}`);
+  if (root === undefined) return [];
+  const users = userGroundOf(reactor);
+  const erased = users.erased();
+  const out = new Set<string>();
+  const seen = new Set<string>([root]);
+  const frontier = [root];
+  while (frontier.length > 0) {
+    const key = frontier.pop()!;
+    for (const { record, previous } of recoveriesOf(users.reactor, operator, key, erased)) {
+      if (seen.has(previous) || !bindingHeld(users.reactor, now, key, previous, erased)) continue;
+      seen.add(previous);
+      frontier.push(previous);
+      for (const id of historyBefore(reactor, operator, record, previous)) out.add(id);
+    }
+  }
+  return [...out];
 }
 
 /** The keys that act for `user` in `scope` at `now`: the current root and its scoped delegates. */
