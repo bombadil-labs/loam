@@ -105,13 +105,17 @@ After the fence has drained:
    handoff, or at the creation of an empty peer; never into a serving peer. It must keep the
    source-qualified events and the obligation ids and generations. Nothing is written as ordinary
    deltas the new peer could later strike.
-4. **The currently admitted holdings**: the ids the surface has admitted and holds live, with
-   their exclusion and serving status. They are staged with the state and named in the state
-   digest. At import each one's bytes and signature are verified, and a refused id is excluded,
-   even when its bytes are still held pending a purge. Each inherited holding gets the NEW peer's
-   import testimony, never a borrowed host arrival sequence. Replaying every raw backend row at an
-   open would bypass the admission boundary and could turn refused-but-held bytes into an admitted
-   value, so the new peer's admitted set comes from this list only.
+4. **The currently admitted holdings**: ALL ids the surface has admitted and still holds, whether or
+   not they serve at the cutover's read time: not yet valid, expired, struck, or hidden by policy.
+   Exclusion and serving are carried as separate state beside each id, never folded into
+   admission. They are staged with the state and named in the state digest. At import each one's
+   canonical bytes and id are checked, and then either its own signature verifies, or verified
+   covering bundle evidence does (the SPEC-6 signed-manifest path for an admitted unsigned member)
+   [SUBSTRATE]. A refused id is excluded, even when its bytes are still held pending a purge. Each
+   inherited holding gets the NEW peer's import testimony, never a borrowed host arrival sequence.
+   Replaying every raw backend row at an open would bypass the admission boundary and could turn
+   refused-but-held bytes into an admitted value, so the new peer's admitted set comes from this
+   list only.
 5. **The destination's policy and config** is staged and authenticated beside that state: its
    own-law key K_p; its explicit host-law selections (the law contexts where it selects the host
    as a trusted author, for example seeded registrations and the container table); its external
@@ -226,8 +230,18 @@ Each names the rail that will prove it. The rails are written at P3, against the
 15. A live claim D and a refused-but-held claim X in the old pool: after the handoff D serves and X
     is still refused, and neither depends on replaying raw backend rows as admission.
     `test/gateway/handoff-holdings.test.ts`
-16. A fresh pool starts under its own key with empty state and serves its first admission with no
+16. An admitted claim D whose validity starts after the cutover is carried, and becomes visible
+    in the new peer's views when its time comes, with no new ingest.
+    `test/gateway/handoff-holdings.test.ts`
+17. A fresh pool starts under its own key with empty state and serves its first admission with no
    handoff records. `test/gateway/handoff-fresh-pool.test.ts`
+
+## Substrate contract without a Loam rail
+
+Loam's append door admits only signed deltas today, so Loam cannot hold an unsigned member admitted
+under a signed covering bundle. The carry's bundle path is therefore the substrate's contract: an
+admitted unsigned member keeps its covering evidence, and the import verifies that evidence. Loam
+adds a rail when its door admits such members.
 
 ## Settled with Sol
 
