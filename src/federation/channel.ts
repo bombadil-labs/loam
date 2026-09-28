@@ -24,7 +24,7 @@ import {
 
 import type { Delta } from "@bombadil/rhizomatic";
 import type { Claims } from "@bombadil/rhizomatic";
-import { contentAddress, DeltaSet, makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
+import { contentAddress, DeltaSet, makeNegationClaims } from "@bombadil/rhizomatic";
 import type { Container } from "../gateway/container.js";
 import {
   containerClaims,
@@ -437,17 +437,18 @@ async function attestArrival(
   // sync obeys the same fan as any other. A carried ref is stamped LATE and says so only by the
   // stamp's own timestamp: the moment is the sync that recorded it, not the sync it arrived on.
   const union = [...new Set([...owed, ...arrived])];
-  const at = ground.stamp(gw.operatorAuthor);
+  // Arrival stamps are the pool's own law: its governing key authors and signs them.
+  const poolSigner = ground.signer!;
+  const at = ground.stamp(poolSigner.author);
   const batch: { refs: string[]; stamp: Delta }[] = [];
   for (let i = 0; i < union.length; i += ARRIVAL_FAN) {
     const refs = union.slice(i, i + ARRIVAL_FAN);
     batch.push({
       refs,
-      stamp: signClaims(
+      stamp: poolSigner.sign(
         withStamp(at, (t) =>
-          arrivalClaims({ channel: name, from, arrived: refs }, gw.operatorAuthor!, t),
+          arrivalClaims({ channel: name, from, arrived: refs }, poolSigner.author, t),
         ),
-        gw.options.seed!,
       ),
     });
   }
@@ -644,8 +645,9 @@ async function bindArrived(
   ground: Gateway,
   prefix: string,
 ): Promise<{ bound: string[]; parked: string[]; witnessed: string[] }> {
-  const seed = gw.options.seed!;
-  const operator = gw.operatorAuthor!;
+  // The manifest rows are the pool's own law: its governing key authors, signs and reads them.
+  const poolSigner = ground.signer!;
+  const operator = poolSigner.author;
   const bound: string[] = [];
   const parked: string[] = [];
   const witnessed: string[] = [];
@@ -699,11 +701,10 @@ async function bindArrived(
   if (pending.length > 0) {
     await ground.federate(
       pending.map(([alias, entity]) =>
-        signClaims(
+        poolSigner.sign(
           withStamp(ground.stamp(operator), (t) =>
             manifestExportClaims({ alias, targetEntity: entity, kind: "schema" }, operator, t),
           ),
-          seed,
         ),
       ),
     );
@@ -1092,9 +1093,10 @@ export async function blessChannelAppImpl(
         "cannot take it. Rename your own route, or ask the peer to publish theirs elsewhere.",
     );
   }
-  const seed = gw.options.seed;
-  const operator = gw.operatorAuthor;
-  if (seed === undefined || operator === undefined) {
+  // The manifest row lives in the pool: the pool's governing key authors, signs and reads it.
+  const poolSigner = ground.signer;
+  const operator = poolSigner?.author;
+  if (gw.signer === undefined || poolSigner === undefined || operator === undefined) {
     throw new Error("only an operated store may bless an app (a blessing is the operator's claim)");
   }
   // The manifest row a peer never sent, minted in the POOL — the same shape `bindArrived` mints for
@@ -1116,7 +1118,7 @@ export async function blessChannelAppImpl(
   );
   if (mine.find((r) => r.alias === alias)?.target !== app.deltaId) {
     await ground.federate([
-      signClaims(
+      poolSigner.sign(
         withStamp(ground.stamp(operator), (t) =>
           manifestExportClaims(
             { alias, targetAddress: app.deltaId, kind: "renderer" },
@@ -1124,7 +1126,6 @@ export async function blessChannelAppImpl(
             t,
           ),
         ),
-        seed,
       ),
     ]);
   }
@@ -1190,9 +1191,7 @@ export async function blessChannelResolversImpl(
         "`loam federate list` names the ones it has",
     );
   }
-  const seed = gw.options.seed;
-  const operator = gw.operatorAuthor;
-  if (seed === undefined || operator === undefined) {
+  if (gw.signer === undefined || gw.operatorAuthor === undefined) {
     throw new Error("only an operated store may bless law (a blessing is the operator's claim)");
   }
   // The operator names the lens the way this store serves it; the manifest knows it by the peer's
@@ -1780,7 +1779,7 @@ export async function openChannelImpl(gw: Gateway, opts: OpenChannelOptions): Pr
   );
 }
 async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise<Channel> {
-  if (gw.options.seed === undefined) {
+  if (gw.signer === undefined) {
     throw new Error(
       "openChannel: only an operated store can open a federation channel — the pool's declaration " +
         "is signed constitutional data (§46)",
@@ -1972,9 +1971,8 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
             ...(parent !== undefined && standing.has(parent) ? { parent } : {}),
           };
           standing.add(container);
-          return signClaims(
+          return gw.signer!.sign(
             withStamp(gw.stamp(), (t) => containerClaims(spec, gw.operatorAuthor!, t)),
-            gw.options.seed!,
           );
         }),
       );
@@ -1990,7 +1988,7 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
       // out of every parent-edge walk — and to this loop that is indistinguishable from a name
       // nobody declared. Re-minting it would hand the dropped subtree back to its reader, at the
       // request of the party the drop was aimed at.
-      const seed = gw.options.seed;
+      const signer = gw.signer;
       const stop = opts.openedBy;
       const missing: string[] = [];
       let at = opts.into;
@@ -2027,7 +2025,7 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
       }
       await gw.append(
         missing.reverse().map((container) =>
-          signClaims(
+          signer.sign(
             withStamp(gw.stamp(), (t) =>
               containerClaims(
                 {
@@ -2041,7 +2039,6 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
                 t,
               ),
             ),
-            seed,
           ),
         ),
       );
@@ -2070,7 +2067,8 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
   // The pool is UNTRUSTED and SEPARATE. Untrusted because a peer's law is inert until blessed
   // (§28); separate because its own ground is what keeps the peer's bytes out of the receiver's
   // store and keeps `drop` a physical purge.
-  const poolDeclaration = signClaims(
+  // The pool's declaration is the host's law: the host declares the pool.
+  const poolDeclaration = gw.signer.sign(
     withStamp(gw.stamp(), (t) =>
       containerClaims(
         { container: name, trust: "untrusted", posture: "separate", inboxOf: opts.into },
@@ -2078,7 +2076,6 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
         t,
       ),
     ),
-    gw.options.seed,
   );
   await gw.append([poolDeclaration]);
 
@@ -2333,7 +2330,7 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
   // receiving after it was severed, `setChannel` still succeeded on it, and every later boot
   // re-attempted an attach that cannot work because the declaration is struck. One command said
   // severed and the next said standing — and of the two, the one that keeps being read is the lie.
-  if (gw.options.seed !== undefined) {
+  if (gw.signer !== undefined) {
     // THE SAME SLICE THE READER READS, or a sever leaves a channel standing. `readChannels` counts
     // only the operator's records and only the operator's strikes, so asking a different question
     // here would strand exactly the records the reader still believes: a stranger's negation of a
@@ -2365,10 +2362,7 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
       if (marker.target.entity.id !== `channel:${name}`) continue;
       if (severedForGood(d.id)) continue;
       await gw.append([
-        signClaims(
-          withStamp(gw.stamp(operator), (t) => makeNegationClaims(operator, t, d.id)),
-          gw.options.seed,
-        ),
+        gw.signer.sign(withStamp(gw.stamp(operator), (t) => makeNegationClaims(operator, t, d.id))),
       ]);
     }
   }
@@ -2440,11 +2434,10 @@ async function stamp(
   const claims = withStamp(gw.stamp(), (t) =>
     channelRecordClaims({ ...status, unreadable: [] }, gw.operatorAuthor!, t),
   );
-  const delta = signClaims(
+  const delta = gw.signer!.sign(
     illegible.length === 0
       ? claims
       : { ...claims, pointers: claims.pointers.filter((p) => !illegible.includes(p.role)) },
-    gw.options.seed!,
   );
   await gw.append([delta]);
   return delta.id;
@@ -2584,8 +2577,7 @@ export async function curseChannelLawImpl(
   living: string,
   opts: { lift?: boolean } = {},
 ): Promise<void> {
-  const seed = gw.options.seed;
-  if (seed === undefined) {
+  if (gw.signer === undefined) {
     throw new Error("curseChannelLaw: only an operated store may retire law it blessed (§46)");
   }
   const standing = channelStatusImpl(gw, channel)[0];
@@ -2615,10 +2607,13 @@ export async function curseChannelLawImpl(
         if (lens !== living) continue;
         for (const negationId of g.reactor.negationsOf(binding.id)) {
           if (lifted(negationId)) continue;
+          // Each ground's own law: its governing key lifts the strike there.
+          const signer = g.signer!;
           await g.append([
-            signClaims(
-              withStamp(gw.stamp(), (t) => makeNegationClaims(gw.operatorAuthor!, t, negationId)),
-              seed,
+            signer.sign(
+              withStamp(g.stamp(signer.author), (t) =>
+                makeNegationClaims(signer.author, t, negationId),
+              ),
             ),
           ]);
         }
@@ -2632,9 +2627,8 @@ export async function curseChannelLawImpl(
       // The substrate's own negation shape. A hand-rolled "negates" pointer is not one — it appends
       // cleanly, changes nothing, and the curse silently keeps standing.
       await gw.append([
-        signClaims(
+        gw.signer.sign(
           withStamp(gw.stamp(), (t) => makeNegationClaims(gw.operatorAuthor!, t, d.deltaId)),
-          seed,
         ),
       ]);
     }
@@ -2679,9 +2673,11 @@ export async function curseChannelLawImpl(
   // container that owns the law. The root ground is searched too, for a store carrying bindings
   // blessed before the move; a curse must reach law wherever an older store put it.
   const pool = gw.channelPools.get(channel)?.gateway;
+  // Each ground strikes its own bindings with its own governing key, and reads its strikes by it.
   const grounds: {
     reactor: Gateway["reactor"];
     now: number;
+    governor: string | undefined;
     sign: (id: string) => Promise<void>;
   }[] = [
     ...(pool === undefined
@@ -2690,11 +2686,14 @@ export async function curseChannelLawImpl(
           {
             reactor: pool.reactor,
             now: pool.validityNow(),
+            governor: pool.signer!.author,
             sign: async (id: string): Promise<void> => {
+              const signer = pool.signer!;
               await pool.append([
-                signClaims(
-                  withStamp(gw.stamp(), (t) => makeNegationClaims(gw.operatorAuthor!, t, id)),
-                  seed,
+                signer.sign(
+                  withStamp(pool.stamp(signer.author), (t) =>
+                    makeNegationClaims(signer.author, t, id),
+                  ),
                 ),
               ]);
             },
@@ -2703,11 +2702,11 @@ export async function curseChannelLawImpl(
     {
       reactor: gw.reactor,
       now: gw.validityNow(),
+      governor: gw.operatorAuthor,
       sign: async (id: string): Promise<void> => {
         await gw.append([
-          signClaims(
+          gw.signer!.sign(
             withStamp(gw.stamp(), (t) => makeNegationClaims(gw.operatorAuthor!, t, id)),
-            seed,
           ),
         ]);
       },
@@ -2720,7 +2719,7 @@ export async function curseChannelLawImpl(
     // live again. Asked that way, a SECOND curse finds nothing to strike and refuses with "not
     // served by this store" while the lens is on the surface and a mounted app is rendering it —
     // H9's shape, and the licence it hands out is "you have nothing to retire".
-    const struckHere = negatedAt(g.reactor, g.now, gw.operatorAuthor);
+    const struckHere = negatedAt(g.reactor, g.now, g.governor);
     for (const d of g.reactor.snapshot()) {
       if (!isRegistrationBinding(d.claims)) continue;
       if (livesAt(d) !== living) continue;
@@ -2737,20 +2736,17 @@ export async function curseChannelLawImpl(
 
   // Past every refusal: record the curse (what KEEPS it retired across polls), then strike.
   await gw.append([
-    signClaims(
-      {
-        ...gw.stamp(),
-        author: gw.operatorAuthor!,
-        pointers: [
-          {
-            role: "curse",
-            target: { kind: "entity", entity: { id: `channel:${channel}`, context: CTX_CURSE } },
-          },
-          { role: "living", target: { kind: "primitive", value: living } },
-        ],
-      },
-      seed,
-    ),
+    gw.signer.sign({
+      ...gw.stamp(),
+      author: gw.operatorAuthor!,
+      pointers: [
+        {
+          role: "curse",
+          target: { kind: "entity", entity: { id: `channel:${channel}`, context: CTX_CURSE } },
+        },
+        { role: "living", target: { kind: "primitive", value: living } },
+      ],
+    }),
   ]);
   for (const binding of bindings) {
     await binding.sign(binding.id);

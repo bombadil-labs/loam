@@ -32,7 +32,7 @@ import {
   parseBodyFields as parseAppBody,
   readBodyStrict as readBody,
 } from "./body.js";
-import { authorForSeed, signClaims, type Delta, ParseError } from "@bombadil/rhizomatic";
+import { authorForSeed, type Delta, ParseError } from "@bombadil/rhizomatic";
 import { Kind, OperationTypeNode, parse, type DocumentNode } from "graphql";
 import { fromWire, toWire, type WireDelta } from "../federation/wire.js";
 import { buildOpenApi, handleRest } from "../surface/rest.js";
@@ -2238,7 +2238,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             try {
               await gateway.append(
                 missing.reverse().map((container) =>
-                  signClaims(
+                  gateway.signer!.sign(
                     withStamp(gateway.stamp(), (t) =>
                       containerClaims(
                         {
@@ -2252,7 +2252,6 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
                         t,
                       ),
                     ),
-                    gateway.options.seed!,
                   ),
                 ),
               );
@@ -2357,7 +2356,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
             }
             try {
               await gateway.append([
-                signClaims(
+                gateway.signer!.sign(
                   withStamp(gateway.stamp(), (t) =>
                     containerClaims(
                       {
@@ -2376,7 +2375,6 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
                       t,
                     ),
                   ),
-                  gateway.options.seed!,
                 ),
               ]);
             } catch (err) {

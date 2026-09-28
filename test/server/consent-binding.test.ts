@@ -21,6 +21,7 @@
 //
 // Erasure standing rule: every store here is this file's own mkdtemp/memory fixture.
 
+import { seedSigner } from "../../src/gateway/signer.js";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -633,6 +634,7 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     let failures = 1;
     const ground = {
       options: { seed: OPERATOR_SEED },
+      signer: seedSigner(OPERATOR_SEED),
       operatorAuthor: OPERATOR,
       // Provisioning reads the ground to decide what its grant names: here, no user record.
       reactor: new Reactor(),
@@ -655,8 +657,12 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     // A ground that cannot sign — no seed, or no operator author — refuses before anything is
     // written: no seed file, no fault (there is nothing to repair), and the sentence says why.
     for (const half of [
-      { options: {}, operatorAuthor: OPERATOR },
-      { options: { seed: OPERATOR_SEED }, operatorAuthor: undefined },
+      { options: {}, signer: undefined, operatorAuthor: OPERATOR },
+      {
+        options: { seed: OPERATOR_SEED },
+        signer: seedSigner(OPERATOR_SEED),
+        operatorAuthor: undefined,
+      },
     ]) {
       const unsigned = {
         ...half,

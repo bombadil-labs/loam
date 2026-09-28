@@ -13,7 +13,6 @@ import { type IncomingMessage, type ServerResponse } from "node:http";
 import {
   evalTermRaw,
   parseTerm,
-  signClaims,
   DeltaSet,
   type Claims,
   type Delta,
@@ -789,10 +788,7 @@ ${flowNote}`;
         if (ids.length === 0) return;
         await gw.append(
           ids.map((id) =>
-            signClaims(
-              withStamp(gw.stamp(), (t) => negationOf(id, gw.operatorAuthor!, t)),
-              gw.options.seed!,
-            ),
+            gw.signer!.sign(withStamp(gw.stamp(), (t) => negationOf(id, gw.operatorAuthor!, t))),
           ),
         );
       };
