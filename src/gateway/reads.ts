@@ -449,6 +449,32 @@ export function gatherForRetractionImpl(
   return result.hview;
 }
 
+/**
+ * `gatherForRetraction` over one inbox pool's OWN ground, for an owner's fan-out: every claim the
+ * pool holds, whoever its author stands for now. The parent's scope composes a pool by present
+ * authority, so a revoked or expired connection's claims are absent there, yet still hers to clear.
+ */
+export function gatherPoolForRetraction(
+  gw: Gateway,
+  name: string,
+  entity: string,
+  binding: ConnectionBinding,
+  pool: Gateway,
+  now: number = gw.validityNow(),
+): HView {
+  const def = gw.def(name, binding);
+  const result = evalGoverned(
+    gw,
+    def.hyperschema.body,
+    DeltaSet.from([...pool.reactor.arrivalLog()]),
+    gw.validityNow(now),
+    entity,
+    gw.boundSurface(binding).registry,
+  );
+  if (result.sort !== "hview") throw new Error(`schema ${name} does not evaluate to a hyperview`);
+  return result.hview;
+}
+
 // Resolve (schema, entity) to its node: gather, resolve through the Schema, decorate expanded children
 // through their OWN readings (§22.7), then apply THIS lens's §22 resolvers as the final step — the
 // Policy computes the value, the child decoration fills in nested views, and a resolver the lens

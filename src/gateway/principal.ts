@@ -292,6 +292,51 @@ export function standingDelegationIdsFor(
 }
 
 /**
+ * Every key a root in `roots` ever delegated to in this ground for exactly `scope`, whatever the
+ * record's present state (struck, expired, not yet valid): which keys' writes count as the root's
+ * own here (README ruling 8, M2). Only the one delegation shape Loam signs counts, verified and
+ * exact: a `principal` pointer at the root, `kind: delegation`, one key, the exact scope, and
+ * `delegable: false`, nothing else. A loose or universal-scope row makes no key the root's.
+ */
+export function delegatesEverOf(
+  reactor: Reactor,
+  roots: Iterable<string>,
+  scope: string,
+): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const root of new Set(roots)) {
+    for (const id of reactor.byTarget(root)) {
+      const d = reactor.get(id);
+      if (d === undefined || d.claims.author !== root || !signed(d)) continue;
+      const ps = d.claims.pointers;
+      const one = (role: string) => ps.filter((p) => p.role === role);
+      const prim1 = (role: string) => {
+        const [p, extra] = one(role);
+        return extra === undefined && p?.target.kind === "primitive" ? p.target.value : undefined;
+      };
+      const [principal, extraPrincipal] = one("principal");
+      const key = prim1("key");
+      if (
+        ps.length !== 5 ||
+        extraPrincipal !== undefined ||
+        principal?.target.kind !== "entity" ||
+        principal.target.entity.id !== root ||
+        principal.target.entity.context !== "rhizomatic.principal" ||
+        prim1("kind") !== "delegation" ||
+        prim1("scope") !== scope ||
+        prim1("delegable") !== false ||
+        typeof key !== "string" ||
+        !AUTHOR.test(key)
+      ) {
+        continue;
+      }
+      out.add(key);
+    }
+  }
+  return out;
+}
+
+/**
  * Every root that has signed a delegation to `key` held here, whatever its standing. Delegations are
  * filed at their root, not their key, so this walks the log: a revoke asks it, and revokes are rare.
  */
