@@ -1705,6 +1705,7 @@ export class Gateway {
       return {
         reactor: host.reactor,
         erased: () => erasedIdsOf(host.reactor, host.operatorAuthor),
+        ...(host.operatorAuthor === undefined ? {} : { governor: host.operatorAuthor }),
       };
     });
   }

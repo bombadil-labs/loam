@@ -19,6 +19,7 @@ import {
   subjectKeyAt,
   USER_PREFIX,
   userGroundOf,
+  usersGovernor,
   userNameDefect,
 } from "./user-root.js";
 import type { Reactor } from "@bombadil/rhizomatic";
@@ -177,7 +178,13 @@ export function historyIds(
   const frontier = [root];
   while (frontier.length > 0) {
     const key = frontier.pop()!;
-    for (const { record, previous } of recoveriesOf(users.reactor, operator, user, key, erased)) {
+    for (const { record, previous } of recoveriesOf(
+      users.reactor,
+      usersGovernor(users, operator),
+      user,
+      key,
+      erased,
+    )) {
       if (seen.has(previous) || !bindingHeld(users.reactor, now, key, previous, erased)) continue;
       seen.add(previous);
       frontier.push(previous);
@@ -198,6 +205,6 @@ export function presentAuthors(
   const root = subjectKeyAt(reactor, now, operator, `${USER_PREFIX}${user}`);
   if (root === undefined) return [];
   const users = userGroundOf(reactor);
-  const retired = retiredKeysOf(users.reactor, operator, users.erased());
+  const retired = retiredKeysOf(users.reactor, usersGovernor(users, operator), users.erased());
   return [...keysActingFor(reactor, now, { root }, scope, operator)].filter((k) => !retired.has(k));
 }

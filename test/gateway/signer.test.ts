@@ -93,4 +93,48 @@ describe("a pool's own law is signed and authored by the pool's key", () => {
       .find((d) => d.claims.pointers.some((p) => p.role === "inboxOf"))!;
     expect(declaration.claims.author).toBe(gw.operatorAuthor);
   });
+
+  it("a named owner under a distinct pool key: the grant resolves through the host's users, and the connection writes", async () => {
+    const { vi } = await import("vitest");
+    const { containerClaims } = await import("../../src/gateway/container.js");
+    const { holdsGrant } = await import("../../src/gateway/accounts.js");
+    const { rootClaims, userClaims } = await import("../../src/server/users.js");
+    const { STORE_ENTITY } = await import("../../src/gateway/genesis.js");
+    const { observed } = await import("../spike/garden.js");
+    const gw = await Gateway.boot(new MemoryBackend(), assembleGenesis({ operatorSeed: SEED }));
+    open.push(gw);
+    const op = gw.operatorAuthor!;
+    const ownerSeed = "a1".repeat(32);
+    const owner = authorForSeed(ownerSeed);
+    const connSeed = "c1".repeat(32);
+    await gw.append([
+      gw.signer!.sign(userClaims("ada", op, 20)),
+      gw.signer!.sign(rootClaims("ada", owner, op, 21)),
+      gw.signer!.sign(
+        containerClaims({ container: "home", trust: "curated", posture: "separate" }, op, 22),
+      ),
+    ]);
+    vi.spyOn(gw, "childSeed").mockReturnValue("7e".repeat(32));
+    const inbox = await gw.bindConnection({
+      container: "home",
+      connectionKey: authorForSeed(connSeed),
+      ownerSeed,
+      ownerName: "ada",
+    });
+    const pool = inbox.gateway!;
+    expect(pool.signer!.author).not.toBe(op);
+    expect(
+      holdsGrant(
+        pool.reactor,
+        pool.validityNow(),
+        STORE_ENTITY,
+        owner,
+        "admin",
+        pool.signer!.author,
+      ),
+    ).toBe(true);
+    const w = observed(FERN, "height", 1, pool.stamp(authorForSeed(connSeed)).timestamp, connSeed);
+    await pool.append([w]);
+    expect(pool.reactor.get(w.id)).toBeDefined();
+  });
 });

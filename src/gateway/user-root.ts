@@ -608,6 +608,12 @@ export function userRootAt(
 // because the erasure reader lives above this module.
 export interface UserGround {
   readonly reactor: Reactor;
+  /**
+   * The key whose user records bind in this ground: the governing key of the ground that holds the
+   * users. A pool reads its host's users, so its user ground names the HOST's key, which differs
+   * from the pool's own governing key once each pool has one (step 6). Absent, the caller's own.
+   */
+  readonly governor?: string;
   readonly erased: () => ReadonlySet<string>;
   /** An as-of read's instant: the ground holds only what was signed by then. */
   readonly cut?: number;
@@ -618,6 +624,10 @@ const userGrounds = new WeakMap<Reactor, () => UserGround>();
 export function declareUserGround(reactor: Reactor, ground: () => UserGround): void {
   userGrounds.set(reactor, ground);
 }
+
+/** Whose user records bind in `ground`: its governor, else the caller's own key. */
+export const usersGovernor = (ground: UserGround, operator: string | undefined) =>
+  ground.governor ?? operator;
 
 /** Where `reactor` reads its users: the declared ground, else itself. */
 export function userGroundOf(reactor: Reactor): UserGround {
@@ -705,7 +715,7 @@ export function subjectKeyAt(
   return userRootAt(
     ground.reactor,
     now,
-    operator,
+    usersGovernor(ground, operator),
     subject.slice(USER_PREFIX.length),
     ground.erased(),
     ground.cut,
@@ -727,8 +737,9 @@ export function subjectCouldName(
   key: string,
 ): boolean {
   if (subject === key) return true;
+  operator = usersGovernor(userGroundOf(reactor), operator);
   if (operator === undefined || !subject.startsWith(USER_PREFIX)) return false;
-  const ground = userGrounds.get(reactor)?.().reactor ?? reactor;
+  const ground = userGroundOf(reactor).reactor;
   const entity = userEntity(subject.slice(USER_PREFIX.length));
   for (const id of ground.byTarget(entity)) {
     const d = ground.get(id);
@@ -772,8 +783,9 @@ export function keysSubjectCouldName(
   subject: string,
 ): string[] {
   if (!subject.startsWith(USER_PREFIX)) return [subject];
+  operator = usersGovernor(userGroundOf(reactor), operator);
   if (operator === undefined) return [];
-  const ground = userGrounds.get(reactor)?.().reactor ?? reactor;
+  const ground = userGroundOf(reactor).reactor;
   const entity = userEntity(subject.slice(USER_PREFIX.length));
   const out = new Set<string>();
   for (const id of ground.byTarget(entity)) {

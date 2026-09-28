@@ -36,6 +36,7 @@ import {
   retiredKeysOf,
   USER_PREFIX,
   userGroundOf,
+  usersGovernor,
   userRootAt,
   userRootsRaw,
   type UserGround,
@@ -123,7 +124,7 @@ export function governedStrikers(
   const retired =
     users === undefined
       ? new Set<string>()
-      : retiredKeysOf(users.reactor, operator, erased, users.cut);
+      : retiredKeysOf(users.reactor, usersGovernor(users, operator), erased, users.cut);
   const out = new Set<string>([operator]);
   for (const g of grants.set) {
     for (const subject of reflectedSubjects(g, "subject")) {
@@ -136,7 +137,14 @@ export function governedStrikers(
       if ("raw" in read) {
         for (const k of userRootsRaw(users, operator, name)) out.add(k);
       } else {
-        const root = userRootAt(users.reactor, read.now, operator, name, erased, users.cut);
+        const root = userRootAt(
+          users.reactor,
+          read.now,
+          usersGovernor(users, operator),
+          name,
+          erased,
+          users.cut,
+        );
         if (root !== undefined) out.add(root);
       }
     }

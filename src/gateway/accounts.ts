@@ -20,7 +20,13 @@ import {
   type Term,
 } from "@bombadil/rhizomatic";
 import { keyActsFor, principalScopeOf } from "./principal.js";
-import { recoveryDefect, retiredKeysOf, subjectKeyAt, userGroundOf } from "./user-root.js";
+import {
+  recoveryDefect,
+  retiredKeysOf,
+  subjectKeyAt,
+  userGroundOf,
+  usersGovernor,
+} from "./user-root.js";
 import { STORE_ENTITY } from "./genesis.js";
 import { CTX_GRANTS, dataStrikers, lawfulStrikersJson } from "./governed-trust.js";
 export { CTX_GRANTS, lawfulStrikersJson } from "./governed-trust.js";
@@ -411,7 +417,7 @@ function retiredIn(ctx: Ctx): ReadonlySet<string> {
   let hit = retiredMemo.get(ctx);
   if (hit === undefined) {
     const users = userGroundOf(ctx.reactor);
-    hit = retiredKeysOf(users.reactor, ctx.operator, users.erased());
+    hit = retiredKeysOf(users.reactor, usersGovernor(users, ctx.operator), users.erased());
     retiredMemo.set(ctx, hit);
   }
   return hit;
