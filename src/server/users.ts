@@ -44,6 +44,7 @@ import {
 } from "../gateway/user-root.js";
 import { CTX_GRANTS } from "../gateway/governed-trust.js";
 import { membershipForValidation, namesMemberOf } from "../gateway/member-of.js";
+import { containerDefect, CTX_CONTAINER } from "../gateway/container.js";
 export { CTX_ROLE, CTX_ROOT, userEntity };
 
 const AUTHOR = /^ed25519:[0-9a-f]{64}$/;
@@ -307,6 +308,24 @@ export function rootOf(
   return typeof root === "string" && AUTHOR.test(root) ? root : undefined;
 }
 
+// Is `d` a container declaration that can bind here: the governing account's own, filed at a
+// container entity, and passing the door's own container validator?
+function isDeclaration(reactor: Reactor, now: number, operator: string, d: Delta): boolean {
+  const filed = d.claims.pointers.some(
+    (p) =>
+      p.role === "container" &&
+      p.target.kind === "entity" &&
+      p.target.entity.context === CTX_CONTAINER,
+  );
+  // Only the governing account's own declarations can bind (the container table reads the lawful
+  // slice); a foreign one is inert, and must not block a name.
+  return (
+    filed &&
+    d.claims.author === operator &&
+    containerDefect(d, reactor, now, operator) === undefined
+  );
+}
+
 // Does `text` parse as a valid membership Term with a well-formed `loam.memberOf` node naming `user`?
 function membershipNames(text: string, user: string): boolean {
   let json: unknown;
@@ -372,6 +391,9 @@ export function nameStillHeld(
         (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === entity,
       );
     if (grant) hold(d);
+    // Only a container DECLARATION can serve a membership: its shape is checked by the same
+    // validator the door runs, so a claim that merely carries the role is data.
+    if (!isDeclaration(reactor, now, operator, d)) continue;
     for (const p of d.claims.pointers) {
       if (p.target.kind !== "primitive" || typeof p.target.value !== "string") continue;
       if (p.role === "membership" && membershipNames(p.target.value, name)) hold(d);

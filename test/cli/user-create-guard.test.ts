@@ -154,6 +154,61 @@ describe("only real membership carriers count", () => {
   });
 });
 
+describe("only a governing declaration carries a membership (controls)", () => {
+  const plain = (t: number, op: string, role: string, value: string): Claims => ({
+    timestamp: t,
+    validFrom: t,
+    author: op,
+    pointers: [
+      { role: "about", target: { kind: "entity", entity: { id: "notes:2", context: "note" } } },
+      { role, target: { kind: "primitive", value } },
+    ],
+  });
+
+  it("an ordinary claim carrying the membership role does not refuse", async () => {
+    await plant((op, t) => [
+      plain(t, op, "membership", JSON.stringify(writtenByUser("ada", "inbox:x"))),
+    ]);
+    expect(await run(["user", "create", "ada", "--home", home], io, password)).toBe(0);
+  });
+
+  it("an ordinary claim citing a published membership by membershipAt does not refuse", async () => {
+    const [term] = await plant((op, t) => [termClaims(writtenByUser("ada", "inbox:x"), op, t)]);
+    await plant((op, t) => [plain(t, op, "membershipAt", term!)]);
+    expect(await run(["user", "create", "ada", "--home", home], io, password)).toBe(0);
+  });
+
+  it("a declaration by someone other than the governing account does not refuse", async () => {
+    const seed = readSeed(home);
+    const gw = await Gateway.boot(
+      new SqliteBackend(storePath(home)),
+      assembleGenesis({ operatorSeed: seed }),
+    );
+    try {
+      const strangerSeed = "e7".repeat(32);
+      const stranger = authorForSeed(strangerSeed);
+      await gw.federate([
+        signClaims(
+          containerClaims(
+            {
+              container: "home:ada",
+              trust: "curated",
+              posture: "shared",
+              membership: writtenByUser("ada", "inbox:x"),
+            },
+            stranger,
+            gw.stamp(stranger).timestamp,
+          ),
+          strangerSeed,
+        ),
+      ]);
+    } finally {
+      await gw.close();
+    }
+    expect(await run(["user", "create", "ada", "--home", home], io, password)).toBe(0);
+  });
+});
+
 describe("a similar but different name is not caught (a control)", () => {
   it("claims naming user:adam do not block creating ada", async () => {
     await plant((op, t) => [
