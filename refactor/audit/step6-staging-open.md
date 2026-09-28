@@ -62,13 +62,16 @@ and a Loam staged object is not the substrate's business.
 
 1. Ask the substrate to validate the descriptor against its durable commit and the imported state
    [SUBSTRATE]. Any "no" returns a refusal and changes nothing.
-2. Then build the Gateway runtime over the committed state: write K_p's incarnation marker where
-   the committed import did not already hold it, wire persistence, replay registrations under the
-   committed policy, advance to now, and serve.
-3. Then admit the held items from the old peer's queue in order (handoff step 5).
+2. Then build the Gateway runtime over the committed state, CLOSED to ordinary admission and
+   serving: write K_p's incarnation marker where the committed import did not already hold it,
+   wire persistence, replay registrations under the committed policy, and advance to now.
+3. Then drain the old peer's hold queue, in order, through the new peer's admission boundary
+   (handoff step 5). A fresh append waits: every held item has priority, so none is overtaken, and
+   the arrival testimony keeps the held order.
+4. Only then open ordinary admission and serving.
 
-Step 2 is an idempotent pass: a rerun after a crash writes no second marker and admits nothing
-twice. A mismatch, or a missing import after the commit, fails closed, and is repaired from the
+Steps 2 to 4 are an idempotent pass: a rerun after a crash writes no second marker, admits nothing
+twice, and resumes the drain where it stopped. A mismatch, or a missing import after the commit, fails closed, and is repaired from the
 committed state, never by a raw replay of the backend.
 
 A failed validation at step 1 leaves the backend byte-identical: no marker, no replay into an
