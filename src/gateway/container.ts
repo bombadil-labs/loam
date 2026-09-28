@@ -1565,7 +1565,8 @@ function openShared(
     },
     drop: async () => {
       // A shared container holds no bytes of its own; dropping it is striking its declaration.
-      if (spec.entity === undefined || gw.options.seed === undefined) return;
+      const signer = gw.signer;
+      if (spec.entity === undefined || signer === undefined) return;
       const ids = survivingDeclarationIds(
         gw.reactor,
         gw.validityNow(),
@@ -1574,20 +1575,17 @@ function openShared(
       );
       for (const id of ids) {
         await gw.append([
-          signClaims(
-            withStamp(gw.stamp(), (t) => retractionOf(id, gw.operatorAuthor!, t)),
-            gw.options.seed,
-          ),
+          signer.sign(withStamp(gw.stamp(), (t) => retractionOf(id, gw.operatorAuthor!, t))),
         ]);
       }
     },
     detach: async (note?: string) => {
       const entity = spec.entity;
-      if (entity === undefined || gw.options.seed === undefined) return; // anonymous: recordless
+      const signer = gw.signer;
+      if (entity === undefined || signer === undefined) return; // anonymous: recordless
       await gw.append([
-        signClaims(
+        signer.sign(
           withStamp(gw.stamp(), (t) => detachClaims(entity, note, gw.operatorAuthor!, t)),
-          gw.options.seed,
         ),
       ]);
     },
@@ -1610,7 +1608,7 @@ async function openSeparate(
   },
   voice: "openContainer" | "openQuarantine",
 ): Promise<Container> {
-  if (gw.options.seed === undefined) {
+  if (gw.signer === undefined) {
     throw new Error(
       voice === "openQuarantine"
         ? "only an operated store can open a quarantine pool (§24.1)"
@@ -1698,7 +1696,7 @@ async function openSeparate(
   // ground on purpose — exactly as they were.
   const probationary = spec.trust === "untrusted";
   const pool = await Gateway.open(backend, {
-    seed: gw.options.seed,
+    seed: gw.childSeed()!,
     ...(probationary && gw.options.pens !== undefined ? { pens: gw.options.pens } : {}),
   });
   pool.attachedTo = gw;
@@ -1832,10 +1830,7 @@ async function openSeparate(
     const records = table.detached.get(spec.entity) ?? [];
     if (records.length > 0) {
       const strikes = records.map((r) =>
-        signClaims(
-          withStamp(gw.stamp(), (t) => retractionOf(r.id, gw.operatorAuthor!, t)),
-          gw.options.seed!,
-        ),
+        gw.signer!.sign(withStamp(gw.stamp(), (t) => retractionOf(r.id, gw.operatorAuthor!, t))),
       );
       try {
         await gw.append(strikes);
@@ -1995,9 +1990,8 @@ async function openSeparate(
             spec.entity,
           )) {
             await gw.append([
-              signClaims(
+              gw.signer!.sign(
                 withStamp(gw.stamp(), (t) => retractionOf(id, gw.operatorAuthor!, t)),
-                gw.options.seed!,
               ),
             ]);
           }
@@ -2022,9 +2016,8 @@ async function openSeparate(
       const entity = spec.entity;
       if (entity !== undefined) {
         await gw.append([
-          signClaims(
+          gw.signer!.sign(
             withStamp(gw.stamp(), (t) => detachClaims(entity, note, gw.operatorAuthor!, t)),
-            gw.options.seed!,
           ),
         ]);
       }
@@ -2331,12 +2324,14 @@ export async function bindConnectionImpl(
   gw: Gateway,
   opts: BindConnectionOptions,
 ): Promise<Container> {
-  if (gw.options.seed === undefined) {
+  if (gw.signer === undefined) {
     throw new Error(
       "bindConnection: only an operated store can bind a connection to a container (§39)",
     );
   }
-  const operatorSeed = gw.options.seed;
+  // The inbox's declaration is the host's law, signed by the host; the owner grant and the strikes
+  // below are the pool's own law, signed by the pool's governing key (the same key until step 6).
+  const hostSigner = gw.signer;
   const operator = gw.operatorAuthor!;
   const owner = authorForSeed(opts.ownerSeed);
   const name = inboxName(opts.container, opts.connectionKey);
@@ -2398,7 +2393,7 @@ export async function bindConnectionImpl(
       in: "input",
     };
     await gw.append([
-      signClaims(
+      hostSigner.sign(
         withStamp(gw.stamp(), (t) =>
           containerClaims(
             {
@@ -2412,7 +2407,6 @@ export async function bindConnectionImpl(
             t,
           ),
         ),
-        operatorSeed,
       ),
     ]);
   }
@@ -2441,11 +2435,10 @@ export async function bindConnectionImpl(
   const ownerSubject = userSubject ?? owner;
   if (!holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, owner, "admin", operator)) {
     await pool.append([
-      signClaims(
+      pool.signer!.sign(
         withStamp(pool.stamp(operator), (t) =>
           grantClaims(STORE_ENTITY, ownerSubject, "admin", operator, t),
         ),
-        operatorSeed,
       ),
     ]);
   }
@@ -2502,9 +2495,8 @@ export async function bindConnectionImpl(
           ]
         : []),
       ...stale.map((id) =>
-        signClaims(
+        pool.signer!.sign(
           withStamp(pool.stamp(operator), (t) => revocationClaims(id, operator, t)),
-          operatorSeed,
         ),
       ),
     ]);

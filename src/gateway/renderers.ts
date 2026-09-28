@@ -17,7 +17,8 @@
 // realm, which has no filesystem, no network and no process authority. What this module holds is a set
 // of ADMITTED content addresses; what it hands a door is HTML or a refusal.
 
-import { authorForSeed, signClaims, type Primitive } from "@bombadil/rhizomatic";
+import { seedSigner } from "./signer.js";
+import { authorForSeed, type Primitive } from "@bombadil/rhizomatic";
 import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
 import { bytesEnvelope, findBytesByRef } from "./bytes.js";
 import { esmAddress } from "./esm.js";
@@ -626,11 +627,11 @@ export async function publishRendererImpl(
   context?: RequestContext,
   internals?: RendererInternals,
 ): Promise<void> {
-  const seed = context?.actor ?? gw.options.seed;
-  if (seed === undefined) {
+  const signer = context?.actor !== undefined ? seedSigner(context.actor) : gw.signer;
+  if (signer === undefined) {
     throw new Error("this gateway holds no signing seed and cannot publish a renderer");
   }
-  if (gw.operatorAuthor !== undefined && authorForSeed(seed) !== gw.operatorAuthor) {
+  if (gw.operatorAuthor !== undefined && signer.author !== gw.operatorAuthor) {
     throw new Error("append rejected: only the operator may publish a renderer");
   }
   const spec = parseRendererInput(input); // one shape for every door (HTTP / CLI / MCP / direct)
@@ -674,7 +675,7 @@ export async function publishRendererImpl(
   // evaluate to a default function inside the confined realm. A bundle that reaches for the filesystem
   // or the network at import is refused HERE, with the reason, and nothing is appended.
   await admitRenderer(spec.bundle, rendererAdmissionBudget(gw));
-  const author = authorForSeed(seed);
+  const author = signer.author;
   const binding =
     internals?.timestamp === undefined
       ? withStamp(gw.stamp(author), (t) => rendererBindingClaims(spec, versionId, author, t))
@@ -695,7 +696,7 @@ export async function publishRendererImpl(
             ...binding.pointers,
           ],
         };
-  await gw.append([signClaims(filed, seed)]);
+  await gw.append([signer.sign(filed)]);
 }
 
 /**

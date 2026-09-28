@@ -7,7 +7,6 @@
 // delta kind, one reserved context. HALF of §20's re-sign-and-negate (re-sign, no negation — the pool is
 // dropped wholesale, so there is nothing to negate delta-by-delta).
 
-import { signClaims } from "@bombadil/rhizomatic";
 import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
 import type { Gateway } from "./gateway.js";
 import { negatedAt } from "./negation.js";
@@ -191,7 +190,8 @@ export async function promoteImpl(
   deltaId: string,
   opts: { from?: string } = {},
 ): Promise<{ promoted: string }> {
-  if (gw.options.seed === undefined || gw.operatorAuthor === undefined) {
+  const signer = gw.signer;
+  if (signer === undefined || gw.operatorAuthor === undefined) {
     throw new Error("only an operated store may promote (an adoption is the operator's own claim)");
   }
   const src = source.reactor.get(deltaId);
@@ -316,18 +316,15 @@ export async function promoteImpl(
   // Land TWO deltas: the source's content RE-SPOKEN by the operator (clean, so it resolves as itself),
   // and a separate loam.adoption RECORD citing it with the provenance trail (kept off the content so it
   // never pollutes the value's own gather — §11's erasure-is-separate discipline, applied to adoption).
-  const adopted = signClaims(
-    {
-      // Times inherited whole — content-addressed, idempotent, and valid over the source's own
-      // interval.
-      timestamp: src.claims.timestamp,
-      validFrom: src.claims.validFrom,
-      ...(src.claims.validUntil === undefined ? {} : { validUntil: src.claims.validUntil }),
-      author: gw.operatorAuthor,
-      pointers,
-    },
-    gw.options.seed,
-  );
+  const adopted = signer.sign({
+    // Times inherited whole — content-addressed, idempotent, and valid over the source's own
+    // interval.
+    timestamp: src.claims.timestamp,
+    validFrom: src.claims.validFrom,
+    ...(src.claims.validUntil === undefined ? {} : { validUntil: src.claims.validUntil }),
+    author: gw.operatorAuthor,
+    pointers,
+  });
   // Idempotence: an adoption that already stands is returned, never re-landed — one output, one
   // adopted delta, one trail record, however many times the operator says yes. This reads the LIVE
   // trail (struck records filtered), so once the operator withdraws a record, re-promotion re-lands it.
@@ -355,7 +352,7 @@ export async function promoteImpl(
     return { promoted: adopted.id };
   }
   const operator = gw.operatorAuthor;
-  const record = signClaims(
+  const record = signer.sign(
     withStamp(gw.stamp(operator), (t) =>
       adoptionRecordClaims(
         adopted.id,
@@ -366,7 +363,6 @@ export async function promoteImpl(
         t,
       ),
     ),
-    gw.options.seed,
   );
   await gw.append([adopted, record]);
   return { promoted: adopted.id };

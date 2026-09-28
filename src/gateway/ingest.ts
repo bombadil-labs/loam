@@ -1,4 +1,3 @@
-import { signClaims } from "@bombadil/rhizomatic";
 import {
   protectedIngressIds,
   sameVerifiedDelta,
@@ -122,7 +121,8 @@ async function persistChannelEvent(
         received: readonly string[];
       },
 ): Promise<Delta> {
-  if (gw.options.seed === undefined || gw.operatorAuthor === undefined)
+  const signer = gw.signer;
+  if (signer === undefined || gw.operatorAuthor === undefined)
     throw new Error("local event requires an operated gateway");
   const channel = input.action === "open" ? input.opening.channel : input.channel;
   // The parent container comes from the opening this event belongs to, never from the caller.
@@ -163,7 +163,7 @@ async function persistChannelEvent(
     if (input.action === "close") pointers.push(eventPrimitive("reason", "drop"));
     else pointers.push(...input.received.map((id) => eventRef("received", id)));
   }
-  const d = signClaims({ author: gw.operatorAuthor, ...gw.stamp(), pointers }, gw.options.seed);
+  const d = signer.sign({ author: signer.author, ...gw.stamp(), pointers });
   const parsed = parseLocalEvent(d, gw.operatorAuthor);
   if (parsed === undefined || (parsed.action === "open" && !openingAgrees(gw, parsed.opening)))
     throw new Error("invalid local channel event association");

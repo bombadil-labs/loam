@@ -14,16 +14,15 @@
 // to serve a surface. The bodies here reach the gateway only through its declared internals seam
 // (the `@internal` members on the class — see the seam note in gateway.ts).
 
+import { seedSigner } from "./signer.js";
 import {
   DeltaSet,
   SchemaRegistry,
-  authorForSeed,
   evalTermRaw,
   loadHyperSchema,
   makeDelta,
   schemaToJson,
   publishHyperSchemaClaims,
-  signClaims,
   termHash,
   type Delta,
   type HyperSchema,
@@ -1117,14 +1116,14 @@ export async function publishRegistrationImpl(
   refs?: RefSpecs,
   internals?: PublishInternals,
 ): Promise<PublishOutcome> {
-  const seed = context?.actor ?? gw.options.seed;
-  if (seed === undefined) {
+  const signer = context?.actor !== undefined ? seedSigner(context.actor) : gw.signer;
+  if (signer === undefined) {
     throw new Error("this gateway holds no signing seed and cannot publish a registration");
   }
   // A governed store binds only the OPERATOR's law (readRegistrations filters on it), so
   // refuse a non-operator publish here rather than persist deltas that would look
   // registered but silently never shape the surface.
-  if (gw.operatorAuthor !== undefined && authorForSeed(seed) !== gw.operatorAuthor) {
+  if (gw.operatorAuthor !== undefined && signer.author !== gw.operatorAuthor) {
     throw new Error("append rejected: only the operator may publish a registration");
   }
   if (hyperschema.name.includes(NUL)) {
@@ -1215,12 +1214,7 @@ export async function publishRegistrationImpl(
   ); // groups: one hyperschema per program, and the rival-body refusal fires HERE, loudly
   assertReadingsNamed(hyperschema); // loud HERE: append-only ground cannot take it back
   assertMaterializable(hyperschema, trialRegistry);
-  assertTemplatesVisible(
-    hyperschema,
-    templates,
-    trialRegistry,
-    gw.operatorAuthor ?? authorForSeed(seed),
-  );
+  assertTemplatesVisible(hyperschema, templates, trialRegistry, gw.operatorAuthor ?? signer.author);
   buildGqlSchema(
     [
       ...trialSurvivors,
@@ -1238,15 +1232,14 @@ export async function publishRegistrationImpl(
     gw.gqlHooks(),
   ); // arg names, field collisions, resolver output types — everything the replay would trip on, NOW
 
-  const author = authorForSeed(seed);
+  const author = signer.author;
   // The clock is a seam, not a decision: an ordinary publish stamps NOW, and a T33 blessing threads
   // the SOURCE's timestamps through so its twins re-mint the source's ids (see adopt-law.ts's H4
   // note — the erasure refusal and idempotence both ride that identity).
   const clock = internals?.clock;
   const tick = (): Stamp => (clock === undefined ? gw.stamp(author) : stamped(clock()));
-  const definition = signClaims(
+  const definition = signer.sign(
     withStamp(tick(), (t) => publishHyperSchemaClaims(hyperschema, schemaEntity, author, t)),
-    seed,
   );
   await loadHyperSchemaImpl(gw, [definition], schemaEntity); // proves, then persists the definition
   // The Schema is lifted to a first-class entity (SPEC §21): publish it as the LIVING
@@ -1282,7 +1275,7 @@ export async function publishRegistrationImpl(
             ...binding.pointers,
           ],
         };
-  await gw.append([signClaims(living, seed), signClaims(snapshot, seed), signClaims(filed, seed)]);
+  await gw.append([signer.sign(living), signer.sign(snapshot), signer.sign(filed)]);
   replayRegistrationsImpl(gw);
   await preloadResolversImpl(gw);
   // Success must mean BOUND. The deltas are down either way (append-only ground), but a

@@ -51,7 +51,6 @@ import {
   evalTerm,
   loadHyperSchema,
   loadSchema,
-  signClaims,
   termCanonicalHex,
   type Claims,
   type Delta,
@@ -1154,7 +1153,7 @@ async function adoptOne(
   given: SchemaExport | RendererExport,
   opts: AdoptLawOptions,
 ): Promise<AdoptionOutcome> {
-  if (gw.options.seed === undefined || gw.operatorAuthor === undefined) {
+  if (gw.signer === undefined || gw.operatorAuthor === undefined) {
     throw new Error(
       "only an operated store may adopt law (a blessing is the operator's own claim)",
     );
@@ -1590,7 +1589,7 @@ async function record(
       r.moduleVersion === src.version.id && r.alias === row.alias && r.lawAddress === ex.address,
   );
   if (held) return [];
-  const delta = signClaims(
+  const delta = gw.signer!.sign(
     lawAdoptionRecordClaims(
       {
         kind,
@@ -1607,7 +1606,6 @@ async function record(
       gw.operatorAuthor!,
       row.timestamp,
     ),
-    gw.options.seed!,
   );
   await gw.append([delta]);
   return [delta.id];

@@ -13,7 +13,8 @@
 // through its declared internals seam (the `@internal` members on the class — see the seam note in
 // gateway.ts).
 
-import { authorForSeed, makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
+import { seedSigner } from "./signer.js";
+import { makeNegationClaims } from "@bombadil/rhizomatic";
 import type { HVEntry, Primitive } from "@bombadil/rhizomatic";
 import type { ConnectionBinding, Gateway } from "./gateway.js";
 import { legalNameFor, queryFieldFor, type ClaimPointerSpec, type ResolvedNode } from "./gql.js";
@@ -55,8 +56,8 @@ export async function mutateEntityImpl(
   binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
   const sink = sinkFor(gw, actorSeed, binding);
-  const seed = actorSeed ?? gw.options.seed;
-  if (seed === undefined) {
+  const signer = actorSeed !== undefined ? seedSigner(actorSeed) : gw.signer;
+  if (signer === undefined) {
     throw new Error("this gateway holds no signing seed and cannot write");
   }
   const entries = Object.entries(props);
@@ -68,22 +69,19 @@ export async function mutateEntityImpl(
   // into re-opening the exact fossil path the declaration closed.
   assertNotReference(gw, name, Object.keys(props), binding);
   assertWritable(gw, name, Object.keys(props), binding);
-  const author = authorForSeed(seed);
+  const author = signer.author;
   // Strictly monotonic per author: two mutations never tie on timestamp, and a restart with the
   // clock set back cannot sort a later write before an earlier one under `byTimestamp`.
   const stamp = gw.stamp(author);
   const deltas = entries.map(([prop, value]) =>
-    signClaims(
-      {
-        ...stamp,
-        author,
-        pointers: [
-          { role: "subject", target: { kind: "entity", entity: { id: entity, context: prop } } },
-          { role: "value", target: { kind: "primitive", value } },
-        ],
-      },
-      seed,
-    ),
+    signer.sign({
+      ...stamp,
+      author,
+      pointers: [
+        { role: "subject", target: { kind: "entity", entity: { id: entity, context: prop } } },
+        { role: "value", target: { kind: "primitive", value } },
+      ],
+    }),
   );
   await sink.append(deltas);
   return gw.resolvedNode(name, entity, undefined, undefined, binding);
@@ -113,12 +111,12 @@ async function retract(
   keep: (field: string, entry: HVEntry) => boolean,
 ): Promise<ResolvedNode> {
   const sink = sinkFor(gw, actorSeed, binding);
-  const seed = actorSeed ?? gw.options.seed;
-  if (seed === undefined) {
+  const signer = actorSeed !== undefined ? seedSigner(actorSeed) : gw.signer;
+  if (signer === undefined) {
     throw new Error("this gateway holds no signing seed and cannot write");
   }
   gw.def(name, binding); // refuses an unknown schema
-  const author = authorForSeed(seed);
+  const author = signer.author;
   // The owner's clear reaches her connections' writes in her inbox pools (README ruling 8, M2):
   // for an unbound call, or a bound one signed by that pool's owner. Checked before anything is
   // signed, so a refusal here leaves nothing behind.
@@ -142,10 +140,7 @@ async function retract(
   if (targets.size > 0) {
     const stamp = gw.stamp(author);
     const negations = [...targets].map((id) =>
-      signClaims(
-        withStamp(stamp, (t) => makeNegationClaims(author, t, id)),
-        seed,
-      ),
+      signer.sign(withStamp(stamp, (t) => makeNegationClaims(author, t, id))),
     );
     await sink.append(negations);
   }
@@ -179,10 +174,7 @@ async function retract(
       const stamp = pool.ground.stamp(author);
       await pool.ground.append(
         [...ids].map((id) =>
-          signClaims(
-            withStamp(stamp, (t) => makeNegationClaims(author, t, id)),
-            seed,
-          ),
+          signer.sign(withStamp(stamp, (t) => makeNegationClaims(author, t, id))),
         ),
       );
       landed.push(pool.name);
@@ -341,8 +333,8 @@ export async function linkEntityImpl(
   binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
   const sink = sinkFor(gw, actorSeed, binding);
-  const seed = actorSeed ?? gw.options.seed;
-  if (seed === undefined) {
+  const signer = actorSeed !== undefined ? seedSigner(actorSeed) : gw.signer;
+  if (signer === undefined) {
     throw new Error("this gateway holds no signing seed and cannot write");
   }
   const def = gw.def(name, binding);
@@ -369,21 +361,18 @@ export async function linkEntityImpl(
     assertWritable(gw, name, [field], binding);
   }
   const role = edgeRoleFor(gw, name, field, binding);
-  const author = authorForSeed(seed);
-  const delta = signClaims(
-    {
-      ...gw.stamp(author),
-      author,
-      pointers: [
-        { role: "subject", target: { kind: "entity", entity: { id: entity, context: field } } },
-        {
-          role,
-          target: { kind: "entity", entity: { id: target, context: context ?? field } },
-        },
-      ],
-    },
-    seed,
-  );
+  const author = signer.author;
+  const delta = signer.sign({
+    ...gw.stamp(author),
+    author,
+    pointers: [
+      { role: "subject", target: { kind: "entity", entity: { id: entity, context: field } } },
+      {
+        role,
+        target: { kind: "entity", entity: { id: target, context: context ?? field } },
+      },
+    ],
+  });
   await sink.append([delta]);
   return gw.resolvedNode(name, entity, undefined, undefined, binding);
 }
@@ -492,35 +481,32 @@ export async function linkRefEntityImpl(
   binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
   const sink = sinkFor(gw, actorSeed, binding);
-  const seed = actorSeed ?? gw.options.seed;
-  if (seed === undefined) {
+  const signer = actorSeed !== undefined ? seedSigner(actorSeed) : gw.signer;
+  if (signer === undefined) {
     throw new Error("this gateway holds no signing seed and cannot write");
   }
   const ref = referencePropFor(gw, name, prop, binding);
-  const author = authorForSeed(seed);
-  const delta = signClaims(
-    {
-      ...gw.stamp(author),
-      author,
-      pointers: [
-        {
-          role: ref.role,
-          target: {
-            kind: "entity",
-            entity: {
-              id: target,
-              ...(ref.reciprocal === undefined ? {} : { context: ref.reciprocal.context }),
-            },
+  const author = signer.author;
+  const delta = signer.sign({
+    ...gw.stamp(author),
+    author,
+    pointers: [
+      {
+        role: ref.role,
+        target: {
+          kind: "entity",
+          entity: {
+            id: target,
+            ...(ref.reciprocal === undefined ? {} : { context: ref.reciprocal.context }),
           },
         },
-        {
-          role: ref.reciprocal?.role ?? "subject",
-          target: { kind: "entity", entity: { id: entity, context: prop } },
-        },
-      ],
-    },
-    seed,
-  );
+      },
+      {
+        role: ref.reciprocal?.role ?? "subject",
+        target: { kind: "entity", entity: { id: entity, context: prop } },
+      },
+    ],
+  });
   await sink.append([delta]);
   return gw.resolvedNode(name, entity, undefined, undefined, binding);
 }
@@ -594,8 +580,8 @@ export async function claimEntityImpl(
   binding?: ConnectionBinding,
 ): Promise<{ delta: string }> {
   const sink = sinkFor(gw, actorSeed, binding);
-  const seed = actorSeed ?? gw.options.seed;
-  if (seed === undefined) {
+  const signer = actorSeed !== undefined ? seedSigner(actorSeed) : gw.signer;
+  if (signer === undefined) {
     throw new Error("this gateway holds no signing seed and cannot write");
   }
   if (pointers.length === 0) {
@@ -624,10 +610,11 @@ export async function claimEntityImpl(
     }
     return { role: p.role, target: { kind: "primitive" as const, value: p.value as Primitive } };
   });
-  const delta = signClaims(
-    { ...gw.stamp(authorForSeed(seed)), author: authorForSeed(seed), pointers: mapped },
-    seed,
-  );
+  const delta = signer.sign({
+    ...gw.stamp(signer.author),
+    author: signer.author,
+    pointers: mapped,
+  });
   await sink.append([delta]);
   return { delta: delta.id };
 }

@@ -17,10 +17,10 @@
 // Enumeration is exactly what the uniform-404 discipline prevents elsewhere — a public listing
 // door can inventory a store — so public enumeration waits for §12's per-lens `enumerable` flag.
 
+import type { Signer } from "./signer.js";
 import {
   evalPred,
   parseTerm,
-  signClaims,
   termToJson,
   type Delta,
   type Pred,
@@ -35,7 +35,6 @@ import {
 } from "./container.js";
 import { erasedFromReading, erasedInScope } from "./erase.js";
 import type { ConnectionBinding, Gateway } from "./gateway.js";
-import {} from "./leeway.js";
 import { groupPrograms } from "./lifecycle.js";
 import { programOf, type ProgramName } from "./registration.js";
 import type { ResolvedNode } from "../surface/surface.js";
@@ -183,7 +182,7 @@ async function ensureListingContainer(
   lens: string,
   program: ProgramName,
   membership: Record<string, unknown>,
-  law: { operator: string; seed: string },
+  law: { operator: string; signer: Signer },
 ): Promise<string> {
   const name = listingContainerName(program);
   const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
@@ -218,7 +217,7 @@ async function ensureListingContainer(
     return name;
   }
   await gw.append([
-    signClaims(
+    law.signer.sign(
       withStamp(gw.stamp(law.operator), (t) =>
         containerClaims(
           {
@@ -243,7 +242,6 @@ async function ensureListingContainer(
           t,
         ),
       ),
-      law.seed,
     ),
   ]);
   return name;
@@ -556,7 +554,7 @@ export async function listingPageImpl(
   }
   // The refusal names the LENS the caller asked for (H6: a message reporting the program would
   // describe a request the caller never made); the container it could not declare is the body's.
-  if (gw.operatorAuthor === undefined || gw.options.seed === undefined) {
+  if (gw.operatorAuthor === undefined || gw.signer === undefined) {
     throw new Error(
       `list ${name}: a listing reads through the container that backs its hyperschema ` +
         `("${listingContainerName(program)}"), and an ungoverned store has no operator to ` +
@@ -569,7 +567,7 @@ export async function listingPageImpl(
   const membership = listingMembershipJson(contexts, programMaskJson(def.hyperschema.body));
   const container = await ensureListingContainer(gw, name, program, membership, {
     operator: gw.operatorAuthor,
-    seed: gw.options.seed,
+    signer: gw.signer,
   });
   const inContexts = new Set(contexts);
   const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);

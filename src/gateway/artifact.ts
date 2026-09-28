@@ -27,7 +27,7 @@
 // that would close it is a `loam_manifest(route)` read over constitutional publication state, checked
 // before mounting, which is a new disclosure decision and not this door's.
 
-import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
+import { seedSigner } from "./signer.js";
 import type { Claims, Reactor } from "@bombadil/rhizomatic";
 import { ARTIFACT_SPAWN_TIMEOUT_MS, artifactPage } from "./artifact-page.js";
 import { HOST_GLOBALS, scanHostReferences } from "./artifact-scan.js";
@@ -160,22 +160,19 @@ export async function declareArtifactImpl(
   routes: readonly string[],
   context?: RequestContext,
 ): Promise<void> {
-  const seed = context?.actor ?? gw.options.seed;
-  if (seed === undefined) {
+  const signer = context?.actor !== undefined ? seedSigner(context.actor) : gw.signer;
+  if (signer === undefined) {
     throw new Error("this gateway holds no signing seed and cannot declare an artifact route");
   }
-  if (gw.operatorAuthor !== undefined && authorForSeed(seed) !== gw.operatorAuthor) {
+  if (gw.operatorAuthor !== undefined && signer.author !== gw.operatorAuthor) {
     throw new Error("append rejected: only the operator may declare an artifact route");
   }
   if (routes.length === 0 || routes.some((r) => typeof r !== "string" || r === "")) {
     throw new Error("artifact: declare at least one non-empty route");
   }
   await gw.append([
-    signClaims(
-      withStamp(gw.stamp(authorForSeed(seed)), (t) =>
-        artifactClaims(routes, authorForSeed(seed), t),
-      ),
-      seed,
+    signer.sign(
+      withStamp(gw.stamp(signer.author), (t) => artifactClaims(routes, signer.author, t)),
     ),
   ]);
 }
