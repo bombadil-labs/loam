@@ -2424,6 +2424,10 @@ export async function bindConnectionImpl(
   const pool = inbox.gateway!;
   pool.honorDelegationsAt(name);
 
+  // The pool's own law (the owner grant, the strikes, and the checks that read them) is authored
+  // and judged by the POOL's governing key; users stay host facts, resolved with the host's key.
+  // The two keys are equal until step 6.
+  const poolLaw = pool.signer!.author;
   // The authority chain, in the pool's OWN ground (decision 2): the operator authors the owner's
   // ADMIN grant, then the OWNER — the user's root — signs a sealed DELEGATION to the connection key,
   // scoped to this pool's name (README ruling 6). The pool is its own gateway with its own store
@@ -2433,11 +2437,11 @@ export async function bindConnectionImpl(
   // A named owner is the user's current root (checked above), so the grant names the USER and
   // follows them across a re-point; a caller that names no user gets a grant naming the key.
   const ownerSubject = userSubject ?? owner;
-  if (!holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, owner, "admin", operator)) {
+  if (!holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, owner, "admin", poolLaw)) {
     await pool.append([
       pool.signer!.sign(
-        withStamp(pool.stamp(operator), (t) =>
-          grantClaims(STORE_ENTITY, ownerSubject, "admin", operator, t),
+        withStamp(pool.stamp(poolLaw), (t) =>
+          grantClaims(STORE_ENTITY, ownerSubject, "admin", poolLaw, t),
         ),
       ),
     ]);
@@ -2469,11 +2473,11 @@ export async function bindConnectionImpl(
   const couldBe = grantSubjects(pool.reactor)
     .filter((subject) => subject.startsWith(USER_PREFIX))
     .flatMap((subject) => keysSubjectCouldName(pool.reactor, now, operator, subject));
-  const others = [...new Set([...grantRoots(pool.reactor, now, operator), ...couldBe])].filter(
+  const others = [...new Set([...grantRoots(pool.reactor, now, poolLaw), ...couldBe])].filter(
     (root) => root !== owner && root !== opts.connectionKey,
   );
   const struckForGood = (id: string) =>
-    operatorStruckForGood(pool.reactor, now, operator, id, opts.connectionKey);
+    operatorStruckForGood(pool.reactor, now, poolLaw, id, opts.connectionKey);
   const stale = [
     ...delegationRecordsFor(pool.reactor, others, opts.connectionKey).map((d) => d.id),
     // EVERY admin grant naming another root, whoever issued it: an admin grant from any effective
@@ -2481,7 +2485,7 @@ export async function bindConnectionImpl(
     // inert one costs a delta and creates nothing.
     ...otherSubjects.flatMap((subject) => heldGrantIds(pool.reactor, subject, "admin")),
   ].filter((id) => !struckForGood(id));
-  const fresh = !keyActsFor(pool.reactor, now, { root: owner }, opts.connectionKey, name, operator);
+  const fresh = !keyActsFor(pool.reactor, now, { root: owner }, opts.connectionKey, name, poolLaw);
   if (fresh || stale.length > 0) {
     await pool.append([
       ...(fresh
@@ -2495,9 +2499,7 @@ export async function bindConnectionImpl(
           ]
         : []),
       ...stale.map((id) =>
-        pool.signer!.sign(
-          withStamp(pool.stamp(operator), (t) => revocationClaims(id, operator, t)),
-        ),
+        pool.signer!.sign(withStamp(pool.stamp(poolLaw), (t) => revocationClaims(id, poolLaw, t))),
       ),
     ]);
   }
