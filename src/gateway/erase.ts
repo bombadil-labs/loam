@@ -57,7 +57,7 @@ import type { StoreBackend } from "../store/backend.js";
 import { withStamp } from "./stamp.js";
 import { governedProgram } from "./governed-trust.js";
 import { userGroundOf } from "./user-root.js";
-import { cutErasureDefect } from "./recovery-cut.js";
+import { cutErasureDefect, isStoreLocal } from "./recovery-cut.js";
 
 export const ERASE_ENTITY = "loam:erasure";
 export const CTX_ERASE = "loam.erasure";
@@ -199,11 +199,19 @@ export function eraseDefect(
   if (target !== undefined && isErasure(target.claims)) {
     return "an erasure cannot itself be erased: an erasure is permanent";
   }
-  // The records a recovery's history cut depends on are kept (recovery-history.md).
+  // The records a recovery's history cut depends on are kept (recovery-history.md). Asked only of
+  // those records: `refusedIds` binds local-control erasures through this function, so asking it of
+  // every target recurses.
   const cutDefect =
-    target === undefined
+    target === undefined || !isStoreLocal(target)
       ? undefined
-      : cutErasureDefect(reactor, operator, target, erasedInBatch(batch, operator));
+      : cutErasureDefect(
+          reactor,
+          operator,
+          target,
+          refusedIds(reactor, operator),
+          erasedInBatch(batch, operator),
+        );
   if (cutDefect !== undefined) return cutDefect;
   if (target !== undefined && target.claims.author !== spokenBy) {
     return "an erasure's spoken-by must be the erased delta's actual author";

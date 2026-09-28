@@ -25,7 +25,7 @@ import { STORE_ENTITY } from "./genesis.js";
 import { CTX_GRANTS, dataStrikers, lawfulStrikersJson } from "./governed-trust.js";
 export { CTX_GRANTS, lawfulStrikersJson } from "./governed-trust.js";
 import { entityGatherBody } from "./gather.js";
-import { eraseDefect, erasedInBatch } from "./erase.js";
+import { eraseDefect, erasedInBatch, refusedIds } from "./erase.js";
 import { publicDefect } from "./public.js";
 import { artifactDefect } from "./artifact.js";
 import { trustDefect } from "./trust.js";
@@ -738,7 +738,7 @@ export function authorize(
     return { ok: false, refusal: `delta ${delta.id} is malformed law: ${defect}` };
   } // A key a PREPARED recovery cut pauses writes nothing here until the cut has an outcome
   // (recovery-history.md), so nothing it signs can slip between the cut and the host commit.
-  if (pausedKeys(reactor, operator).has(delta.claims.author)) {
+  if (pausedKeys(reactor, operator, refusedIds(reactor, operator)).has(delta.claims.author)) {
     return {
       ok: false,
       refusal:

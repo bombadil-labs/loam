@@ -172,7 +172,7 @@ describe("the node's shape is validated; its user's state is not", () => {
 
   it("a key-named membership lowers to itself (a control)", () => {
     const m = authoredBy(K1);
-    expect(lowerMembershipJson(m, undefined as never, 0, OP)).toEqual(m);
+    expect(lowerMembershipJson(m, undefined as never, 0, OP, new Set())).toEqual(m);
   });
 });
 

@@ -583,7 +583,7 @@ export class Gateway {
     if (
       seed !== undefined &&
       unreadableRows === 0 &&
-      activeIncarnation(reactor, authorForSeed(seed)) === undefined
+      activeIncarnation(reactor, authorForSeed(seed), new Set()) === undefined
     ) {
       const operator = authorForSeed(seed);
       // Its time never matters (the reader orders markers by arrival), so no clock is read.

@@ -413,12 +413,14 @@ export function recoveredFrom(
 }
 
 /**
- * The recoveries in unbroken chains whose ROOT is `root`: each record's id and the key it retired.
- * What the history reader pairs a cut with.
+ * The recoveries in `user`'s unbroken chain whose new ROOT is `root`: each record's id and the key it
+ * retired. What the history reader pairs a cut with. Keyed by the user as well as the root: two users
+ * may share a root, and one's recoveries are not the other's history.
  */
 export function recoveriesOf(
   reactor: Reactor,
   operator: string | undefined,
+  user: string,
   root: string,
   erased: ReadonlySet<string> = NONE,
 ): { readonly record: string; readonly previous: string }[] {
@@ -430,7 +432,7 @@ export function recoveriesOf(
     if (d === undefined || d.claims.author !== operator || !verified(d)) continue;
     const name = filedFor(d, CTX_RECOVERY);
     const r = name === undefined ? undefined : parse(d, "record");
-    if (name === undefined || r === undefined || r.root !== root || r.previous === undefined) {
+    if (name !== user || r === undefined || r.root !== root || r.previous === undefined) {
       continue;
     }
     if (recoveryChain(reactor, operator, name, erased).kind === "chain") {

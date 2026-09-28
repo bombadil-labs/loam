@@ -125,13 +125,16 @@ export function membershipForValidation(json: unknown): unknown {
 
 /**
  * The membership as an evaluator runs it at `now` over `reactor`'s ground: each node lowered to the
- * present authors acting for its user in its scope. Throws on a malformed node.
+ * present authors acting for its user in its scope, or to what earlier keys wrote before a recovery.
+ * `refused` is this store's erased set (erase.ts `refusedIds`); the caller passes it because
+ * erase.ts sits in the import cycle this module stays out of. Throws on a malformed node.
  */
 export function lowerMembershipJson(
   json: unknown,
   reactor: Reactor,
   now: number,
   operator: string | undefined,
+  refused: ReadonlySet<string>,
 ): unknown {
   // Two branches, kept apart: PRESENT authority as an author set, and HISTORY as specific delta
   // ids, so a new or backdated delta signed by a retired key can never match it.
@@ -142,7 +145,7 @@ export function lowerMembershipJson(
         match: {
           field: "id",
           cmp: "inSet",
-          const: historyIds(reactor, now, operator, user).sort(),
+          const: historyIds(reactor, now, operator, user, refused).sort(),
         },
       },
     ],
@@ -163,6 +166,7 @@ export function historyIds(
   now: number,
   operator: string | undefined,
   user: string,
+  refused: ReadonlySet<string>,
 ): string[] {
   const root = subjectKeyAt(reactor, now, operator, `${USER_PREFIX}${user}`);
   if (root === undefined) return [];
@@ -173,11 +177,11 @@ export function historyIds(
   const frontier = [root];
   while (frontier.length > 0) {
     const key = frontier.pop()!;
-    for (const { record, previous } of recoveriesOf(users.reactor, operator, key, erased)) {
+    for (const { record, previous } of recoveriesOf(users.reactor, operator, user, key, erased)) {
       if (seen.has(previous) || !bindingHeld(users.reactor, now, key, previous, erased)) continue;
       seen.add(previous);
       frontier.push(previous);
-      for (const id of historyBefore(reactor, operator, record, previous)) out.add(id);
+      for (const id of historyBefore(reactor, operator, record, previous, refused)) out.add(id);
     }
   }
   return [...out];

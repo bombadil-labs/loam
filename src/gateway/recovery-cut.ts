@@ -97,13 +97,20 @@ const inContext = (d: Delta, context: string): boolean =>
       p.target.entity.context === context,
   );
 
-// Every verified operator record of `context` held here. Negations and validity are not asked:
-// these are durable facts about this store, and the erase door keeps them.
-function held(reactor: Reactor, operator: string, context: string): Delta[] {
+// Every verified operator record of `context` held here and not erased. Negations and validity are
+// not asked: these are durable facts about this store, and the erase door keeps them. An erased
+// record is gone to every reader at once, though its bytes wait for the purge. `erased` is this
+// store's refused set (erase.ts `refusedIds`), passed in because erase.ts imports this module.
+function held(
+  reactor: Reactor,
+  operator: string,
+  context: string,
+  erased: ReadonlySet<string>,
+): Delta[] {
   const out: Delta[] = [];
   for (const id of reactor.byTarget(RECOVERIES)) {
     const d = reactor.get(id);
-    if (d === undefined || d.claims.author !== operator || !verified(d)) continue;
+    if (d === undefined || erased.has(id) || d.claims.author !== operator || !verified(d)) continue;
     if (inContext(d, context)) out.push(d);
   }
   return out;
@@ -126,10 +133,11 @@ export function arrivalIndex(reactor: Reactor, id: string): number | undefined {
 export function activeIncarnation(
   reactor: Reactor,
   operator: string | undefined,
+  erased: ReadonlySet<string>,
 ): Delta | undefined {
   if (operator === undefined) return undefined;
   let best: { d: Delta; at: number } | undefined;
-  for (const d of held(reactor, operator, CTX_INCARNATION)) {
+  for (const d of held(reactor, operator, CTX_INCARNATION, erased)) {
     const at = arrivalIndex(reactor, d.id);
     if (field(d, "incarnation") === undefined || at === undefined) continue;
     if (best === undefined || at < best.at) best = { d, at };
@@ -140,9 +148,14 @@ export function activeIncarnation(
 export type CutState = "prepared" | "committed" | "aborted";
 
 /** The state of `cut` in its store: its outcome if one stands, else whether the host committed. */
-export function cutState(reactor: Reactor, operator: string, cut: Delta): CutState {
+export function cutState(
+  reactor: Reactor,
+  operator: string,
+  cut: Delta,
+  erased: ReadonlySet<string>,
+): CutState {
   const outcomes = new Set<string>();
-  for (const o of held(reactor, operator, CTX_CUT_OUTCOME)) {
+  for (const o of held(reactor, operator, CTX_CUT_OUTCOME, erased)) {
     if (field(o, "cut") === cut.id) outcomes.add(field(o, "outcome") ?? "");
   }
   if (outcomes.size > 1) return "prepared"; // contradictory outcomes: fail closed
@@ -166,52 +179,73 @@ export interface Cut {
   readonly state: CutState;
 }
 
-/** The cuts that count in THIS store: those naming its active incarnation, with their state. */
-export function cutsHere(reactor: Reactor, operator: string | undefined): Cut[] {
+/**
+ * The cuts that count in THIS store: those naming its active incarnation, with their state. A cut
+ * must have arrived at exactly the position it names: that is the arrival length it measured, so
+ * nothing landed between the measurement and the cut. A cut that did not is kept PREPARED: it
+ * pauses its key and yields no history, and only an abort clears it.
+ */
+export function cutsHere(
+  reactor: Reactor,
+  operator: string | undefined,
+  erased: ReadonlySet<string>,
+): Cut[] {
   if (operator === undefined) return [];
-  const incarnation = activeIncarnation(reactor, operator);
+  const incarnation = activeIncarnation(reactor, operator, erased);
   const here = incarnation === undefined ? undefined : field(incarnation, "incarnation");
   if (here === undefined) return [];
   const out: Cut[] = [];
-  for (const d of held(reactor, operator, CTX_CUT)) {
-    const [store, recovery, key, index] = ["store", "recovery", "key", "position"].map((r) =>
+  for (const d of held(reactor, operator, CTX_CUT, erased)) {
+    const [store, recovery, key, position] = ["store", "recovery", "key", "position"].map((r) =>
       field(d, r),
     );
-    const n = index === undefined ? NaN : Number(index);
-    if (store !== here || recovery === undefined || key === undefined || !Number.isInteger(n)) {
-      continue;
-    }
-    out.push({ delta: d, recovery, key, index: n, state: cutState(reactor, operator, d) });
+    if (store !== here || recovery === undefined || key === undefined) continue;
+    const at = arrivalIndex(reactor, d.id)!;
+    const state = cutState(reactor, operator, d, erased);
+    out.push({
+      delta: d,
+      recovery,
+      key,
+      index: at,
+      state: position === String(at) || state === "aborted" ? state : "prepared",
+    });
   }
   return out;
 }
 
 /** The keys a PREPARED cut pauses here: the door refuses what they sign until an outcome lands. */
-export function pausedKeys(reactor: Reactor, operator: string | undefined): ReadonlySet<string> {
+export function pausedKeys(
+  reactor: Reactor,
+  operator: string | undefined,
+  erased: ReadonlySet<string>,
+): ReadonlySet<string> {
   return new Set(
-    cutsHere(reactor, operator)
+    cutsHere(reactor, operator, erased)
       .filter((c) => c.state === "prepared")
       .map((c) => c.key),
   );
 }
 
 /**
- * The deltas `key` signed in this store before `recovery` retired it: arrival index below the
- * committed cut's index. Empty when no committed cut for that recovery and key counts here.
+ * The deltas `key` signed in this store before `recovery` retired it: those that arrived before the
+ * committed cut. Empty when no committed cut for that recovery and key counts here, and when any
+ * cut for them is still prepared. Several committed cuts give the earliest.
  */
 export function historyBefore(
   reactor: Reactor,
   operator: string | undefined,
   recovery: string,
   key: string,
+  erased: ReadonlySet<string>,
 ): string[] {
-  const cut = cutsHere(reactor, operator).find(
-    (c) => c.recovery === recovery && c.key === key && c.state === "committed",
+  const cuts = cutsHere(reactor, operator, erased).filter(
+    (c) => c.recovery === recovery && c.key === key && c.state !== "aborted",
   );
-  if (cut === undefined) return [];
+  if (cuts.length === 0 || cuts.some((c) => c.state !== "committed")) return [];
+  const end = Math.min(...cuts.map((c) => c.index));
   const log = reactor.arrivalLog();
   const out: string[] = [];
-  for (let i = 0; i < Math.min(cut.index, log.length); i += 1) {
+  for (let i = 0; i < end; i += 1) {
     if (log[i]!.claims.author === key) out.push(log[i]!.id);
   }
   return out;
@@ -226,19 +260,20 @@ export function cutErasureDefect(
   reactor: Reactor,
   operator: string | undefined,
   target: Delta,
-  erasedInBatch: ReadonlySet<string> = new Set(),
+  erased: ReadonlySet<string>,
+  erasedInBatch: ReadonlySet<string>,
 ): string | undefined {
   if (operator === undefined || target.claims.author !== operator) return undefined;
   if (inContext(target, CTX_INCARNATION)) {
-    return activeIncarnation(reactor, operator)?.id === target.id
+    return activeIncarnation(reactor, operator, erased)?.id === target.id
       ? "this store's active incarnation marker cannot be erased"
       : undefined;
   }
   if (inContext(target, CTX_CUT)) {
-    if (cutState(reactor, operator, target) === "prepared") {
+    if (cutState(reactor, operator, target, erased) === "prepared") {
       return "a prepared recovery cut cannot be erased while the host may still commit";
     }
-    const outcome = held(reactor, operator, CTX_CUT_OUTCOME).find(
+    const outcome = held(reactor, operator, CTX_CUT_OUTCOME, erased).find(
       (o) => field(o, "cut") === target.id && !erasedInBatch.has(o.id),
     );
     return outcome === undefined
@@ -247,7 +282,10 @@ export function cutErasureDefect(
   }
   if (inContext(target, CTX_CUT_OUTCOME)) {
     const cut = field(target, "cut");
-    return cut !== undefined && reactor.get(cut) !== undefined && !erasedInBatch.has(cut)
+    return cut !== undefined &&
+      reactor.get(cut) !== undefined &&
+      !erased.has(cut) &&
+      !erasedInBatch.has(cut)
       ? "a recovery cut and its outcome are erased together, not one alone"
       : undefined;
   }
