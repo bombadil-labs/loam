@@ -1159,6 +1159,14 @@ function narrowTerms(own: Terms, allowed: Terms, depth = 0): Terms {
  * fold and the doors ask again, exactly as the open request asked. An absent leeway is every
  * switch off, here as everywhere.
  */
+/** The inbox pools the table declares and has not detached: a recovery cuts each one. */
+export function declaredInboxes(table: ContainerTable): string[] {
+  return [...table.containers]
+    .filter(([pool, rec]) => rec.inboxOf !== undefined && !table.detached.has(pool))
+    .map(([pool]) => pool)
+    .sort();
+}
+
 export function receivesNow(table: ContainerTable, into: string): boolean {
   return governingLeeway(table, into)?.leeway.receive === true;
 }

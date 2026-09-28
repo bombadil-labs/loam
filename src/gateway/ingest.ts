@@ -67,9 +67,10 @@ import {
 } from "./slate.js";
 import { readTrustPolicy } from "./trust.js";
 import { governedProgram, needsLowering } from "./governed-trust.js";
-import { recoveryDefect, userGroundOf } from "./user-root.js";
+import { recordRoster, recoveryDefect, userGroundOf } from "./user-root.js";
 import { hasMemberOf, lowerMembershipJson } from "./member-of.js";
-import { isStoreLocal, pausedKeys } from "./recovery-cut.js";
+import { declaredInboxes, readContainerTable } from "./container.js";
+import { cutPositionDefect, isStoreLocal, pausedKeys, rosterHash } from "./recovery-cut.js";
 
 // Persist a batch, THEN serve it (the body of `Gateway.append`). The batch is validated whole (one
 // bad delta refuses the lot); it lands in the backend before the reactor sees it, so nothing a
@@ -239,6 +240,37 @@ export async function appendLocalErasure(gw: Gateway, erasure: Delta): Promise<v
     throw new Error("local erasure did not ingest");
 }
 async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<AppendReceipt> {
+  const { receipt, fresh } = await admitting(gw, () => appendAdmitted(gw, deltas));
+  // A landing slate that closes `read` ends live subscriptions the way an erase does (SPEC §29.3).
+  // `reseat()` already solves precisely this one phase later — "a parked reader must not keep serving
+  // a view built on the pre-erase ground" — and the reason is identical here: nothing in the slate's
+  // own deltas moves the watched entity's materialization, so no sink fires and no open stream would
+  // ever narrow. Readers wake with `done` and resubscribe into the narrowed gather. Already-delivered
+  // frames are not recalled; nothing can recall them, and §29.3's asymmetry already says so.
+  if (landsReadClosure(gw, fresh, Date.now())) {
+    for (const channel of [...gw.channels]) await channel.return();
+  }
+  return receipt;
+}
+
+// Admission is serialized per gateway. A batch is checked against the state it finds, then awaits
+// the backend, then ingests; two unserialized batches could each pass a check that reads the same
+// state (a pause, a budget, a recovery roster) and both land. Only check, write and ingest run under
+// the lock: closing streams after it may await a reader, and a reader may append.
+const admissions = new WeakMap<Gateway, Promise<unknown>>();
+function admitting<T>(gw: Gateway, fn: () => Promise<T>): Promise<T> {
+  const run = (admissions.get(gw) ?? Promise.resolve()).then(fn);
+  admissions.set(
+    gw,
+    run.catch(() => {}),
+  );
+  return run;
+}
+
+async function appendAdmitted(
+  gw: Gateway,
+  deltas: Iterable<Delta>,
+): Promise<{ receipt: AppendReceipt; fresh: Delta[] }> {
   if (gw.writeFailure !== undefined) {
     throw new Error(`this gateway can no longer persist: ${gw.writeFailure.message}`);
   }
@@ -284,6 +316,28 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
       const verdict = authorize(gw.reactor, gw.validityNow(), d, gw.operatorAuthor, batch);
       if (!verdict.ok) {
         throw new Error(`append rejected: ${verdict.refusal}`);
+      }
+    }
+  }
+  // Recovery barrier (recovery-history.md). Both read the state this batch lands on, and the
+  // admission lock keeps it still: a cut lands at the position it names, and a recovery record
+  // commits only against the inbox roster its cuts were written to.
+  if (gw.operatorAuthor !== undefined) {
+    const refused = refusedIds(gw.reactor, gw.operatorAuthor);
+    const cutDefect = cutPositionDefect(gw.reactor, gw.operatorAuthor, batch, refused);
+    if (cutDefect !== undefined) throw new Error(`append rejected: ${cutDefect}`);
+    const records = batch.filter(
+      (d) => d.claims.author === gw.operatorAuthor && recordRoster(d) !== undefined,
+    );
+    if (records.length > 0) {
+      const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
+      const current = rosterHash(declaredInboxes(table));
+      const moved = records.find((d) => recordRoster(d) !== current);
+      if (moved !== undefined) {
+        throw new Error(
+          `append rejected: recovery ${moved.id} was prepared for other inbox pools than this ` +
+            `store declares now; its cuts do not cover them`,
+        );
       }
     }
   }
@@ -339,16 +393,7 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
     gw.armValidityTimer(); // the batch may name the next boundary
     if (accepted > 0) gw.notifyUserDependents(); // pools read this ground's users
   }
-  // A landing slate that closes `read` ends live subscriptions the way an erase does (SPEC §29.3).
-  // `reseat()` already solves precisely this one phase later — "a parked reader must not keep serving
-  // a view built on the pre-erase ground" — and the reason is identical here: nothing in the slate's
-  // own deltas moves the watched entity's materialization, so no sink fires and no open stream would
-  // ever narrow. Readers wake with `done` and resubscribe into the narrowed gather. Already-delivered
-  // frames are not recalled; nothing can recall them, and §29.3's asymmetry already says so.
-  if (landsReadClosure(gw, fresh, Date.now())) {
-    for (const channel of [...gw.channels]) await channel.return();
-  }
-  return { accepted, duplicates };
+  return { receipt: { accepted, duplicates }, fresh };
 }
 
 // The admission function the store's own TRUST POLICY dictates (the body of `Gateway.admitFor`),
@@ -705,6 +750,55 @@ export async function federateImpl(
   deltas: Iterable<Delta>,
   opts: { admit?: (d: Delta) => boolean; ids?: boolean; admittedIds?: boolean } = {},
 ): Promise<FederationReport> {
+  const { all, now, admitted, rejected, acceptedIds, admittedIds } = await admitting(gw, () =>
+    federateAdmitted(gw, deltas, opts),
+  );
+  // As at append: a batch that closes reads (a slate record or an erasure) touches no watched
+  // entity, so open streams end and readers resubscribe into the narrowed reading.
+  const freshIds = new Set(acceptedIds);
+  if (
+    freshIds.size > 0 &&
+    landsReadClosure(
+      gw,
+      admitted.filter((d) => freshIds.has(d.id)),
+      now,
+    )
+  ) {
+    for (const channel of [...gw.channels]) await channel.return();
+  }
+  const accepted = acceptedIds.length;
+  const crossedIds = new Set(admitted.map((d) => d.id));
+  // "accepted" counts deltas NEWLY ingested — a duplicate verified but merged into what was
+  // already there, so a re-pull accepts nothing (union is idempotent). "held" is the unique-id
+  // remainder: offered ids neither newly ingested nor refused. Occurrences and unique ids are
+  // different dimensions (a refused delta offered twice counts twice in `rejected` and once in
+  // `held`'s complement), so the two are never subtracted from each other.
+  const notCrossedIds = new Set(all.filter((d) => !crossedIds.has(d.id)).map((d) => d.id));
+  const held = new Set(all.map((d) => d.id)).size - accepted - notCrossedIds.size;
+  const counts = { offered: all.length, accepted, rejected, held };
+  // The ids ride only when asked (see FederationReport): the counts are what every other caller
+  // reads, and the report keeps exactly the shape they compare.
+  return opts.ids === true
+    ? {
+        ...counts,
+        acceptedIds,
+        ...(opts.admittedIds === true ? { admittedIds: [...admittedIds].sort() } : {}),
+      }
+    : counts;
+}
+
+async function federateAdmitted(
+  gw: Gateway,
+  deltas: Iterable<Delta>,
+  opts: { admit?: (d: Delta) => boolean; ids?: boolean; admittedIds?: boolean },
+): Promise<{
+  all: Delta[];
+  now: number;
+  admitted: Delta[];
+  rejected: number;
+  acceptedIds: string[];
+  admittedIds: Set<string>;
+}> {
   if (gw.writeFailure !== undefined) {
     throw new Error(`this gateway can no longer persist: ${gw.writeFailure.message}`);
   }
@@ -821,35 +915,5 @@ export async function federateImpl(
       if (acceptedIds.length > 0) gw.notifyUserDependents(); // as at append
     }
   }
-  // As at append: a batch that closes reads (a slate record or an erasure) touches no watched
-  // entity, so open streams end and readers resubscribe into the narrowed reading.
-  const freshIds = new Set(acceptedIds);
-  if (
-    freshIds.size > 0 &&
-    landsReadClosure(
-      gw,
-      admitted.filter((d) => freshIds.has(d.id)),
-      now,
-    )
-  ) {
-    for (const channel of [...gw.channels]) await channel.return();
-  }
-  const accepted = acceptedIds.length;
-  // "accepted" counts deltas NEWLY ingested — a duplicate verified but merged into what was
-  // already there, so a re-pull accepts nothing (union is idempotent). "held" is the unique-id
-  // remainder: offered ids neither newly ingested nor refused. Occurrences and unique ids are
-  // different dimensions (a refused delta offered twice counts twice in `rejected` and once in
-  // `held`'s complement), so the two are never subtracted from each other.
-  const notCrossedIds = new Set(all.filter((d) => !crossed.has(d.id)).map((d) => d.id));
-  const held = new Set(all.map((d) => d.id)).size - accepted - notCrossedIds.size;
-  const counts = { offered: all.length, accepted, rejected, held };
-  // The ids ride only when asked (see FederationReport): the counts are what every other caller
-  // reads, and the report keeps exactly the shape they compare.
-  return opts.ids === true
-    ? {
-        ...counts,
-        acceptedIds,
-        ...(opts.admittedIds === true ? { admittedIds: [...admittedIds].sort() } : {}),
-      }
-    : counts;
+  return { all, now, admitted, rejected, acceptedIds, admittedIds };
 }

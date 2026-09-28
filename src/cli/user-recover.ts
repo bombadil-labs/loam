@@ -7,11 +7,17 @@
 //   1. Every refusal before anything is written, so a refusal leaves no journal and no file moved.
 //   2. The JOURNAL first, durable, naming the attempt. A crash after this point is always resumable.
 //   3. The old seed archived (never deleted), the new seed written.
-//   4. One atomic operator append: the record, its lineage, the new root claim, and strikes of the
-//      old key's standing in the host. From here the fence holds everywhere.
-//   5. After an append error, READ before undoing: the append may have committed. A read that
+//   4. The cuts (recovery-history.md): one in every declared inbox pool, each journaled before it
+//      is written. From its cut on, a pool pauses the old key. A pool that is not attached refuses
+//      the recovery in step 1, because it could not be cut.
+//   5. One atomic operator append: the host's own cut, the record (carrying the roster hash, so the
+//      door refuses it if a pool was declared since step 1), its lineage, the new root claim, and
+//      strikes of the old key's standing in the host. From here the fence holds everywhere.
+//   6. The outcomes: `committed` beside every cut once the record landed, `aborted` once it provably
+//      did not. An abort lands before the key files roll back, so no pool stays paused unjournaled.
+//   7. After an append error, READ before undoing: the append may have committed. A read that
 //      cannot tell leaves everything in place and reports "pending".
-//   6. Pool strikes (hygiene), then the new key's binding. Each step is journaled; the journal is
+//   8. Pool strikes (hygiene), then the new key's binding. Each step is journaled; the journal is
 //      removed only when all are done.
 
 import { randomBytes } from "node:crypto";
@@ -39,7 +45,16 @@ import {
 import { CTX_GRANTS, grantsNaming } from "../gateway/accounts.js";
 import { keysEverOf } from "../gateway/principal.js";
 import { withStamp } from "../gateway/stamp.js";
-import { readContainerTable } from "../gateway/container.js";
+import { declaredInboxes, readContainerTable } from "../gateway/container.js";
+import { refusedIds } from "../gateway/erase.js";
+import {
+  cutClaims,
+  hasOutcome,
+  incarnationId,
+  outcomeClaims,
+  rosterHash,
+  type Outcome,
+} from "../gateway/recovery-cut.js";
 import { readClosedIds } from "../gateway/slate.js";
 import { assembleGenesis } from "../gateway/genesis.js";
 import { Gateway } from "../gateway/gateway.js";
@@ -76,6 +91,8 @@ export interface RecoverOptions {
   readonly abandonAttempt?: boolean;
   /** Test seam: called once the journal is durable and before any seed file moves. */
   readonly afterJournal?: () => void;
+  /** Test seam: called once every pool is cut and before the host commit. */
+  readonly afterCuts?: (gw: Gateway) => void | Promise<void>;
 }
 
 interface Journal {
@@ -90,7 +107,12 @@ interface Journal {
   readonly retired: readonly string[];
   /** The journal of a landed attempt this one abandons, restored if this one never commits. */
   readonly predecessor?: Journal;
+  /** Every cut signed for this attempt, by pool (`HOST` for the host's own), before it is written. */
+  readonly cuts?: Readonly<Record<string, readonly string[]>>;
 }
+
+/** The journal's key for the host's own cut. */
+const HOST = "";
 
 const journalPath = (home: string, name: string): string => `${userSeedPath(home, name)}.recovery`;
 
@@ -261,6 +283,63 @@ function bindingClaims(root: string, key: string, t: number): Claims {
   };
 }
 
+// A cut for `ground`, naming the position it lands at if it is written next.
+function signCut(
+  ground: Gateway,
+  operator: string,
+  seed: string,
+  spec: { attempt: string; recovery: string; key: string },
+): Delta {
+  const store = incarnationId(ground.reactor, operator, refusedIds(ground.reactor, operator));
+  if (store === undefined) throw new Error("the store has no incarnation marker to cut against");
+  return signClaims(
+    withStamp(ground.stamp(operator), (t) =>
+      cutClaims({ ...spec, store, index: ground.reactor.arrivalLog().length }, operator, t),
+    ),
+    seed,
+  );
+}
+
+// Write the outcome beside every cut of this attempt that a ground holds and has none yet. Returns
+// what could not be reached, so the caller reports it and keeps the journal.
+async function settleCuts(
+  gw: Gateway,
+  operator: string,
+  seed: string,
+  j: Journal,
+  outcome: Outcome,
+): Promise<string[]> {
+  const pending: string[] = [];
+  for (const [pool, ids] of Object.entries(j.cuts ?? {})) {
+    const ground = pool === HOST ? gw : gw.connectionInboxes.get(pool)?.gateway;
+    if (ground === undefined) {
+      pending.push(`the ${outcome} outcome in ${pool} (not attached)`);
+      continue;
+    }
+    const erased = refusedIds(ground.reactor, operator);
+    const open = ids.filter(
+      (id) =>
+        ground.reactor.get(id) !== undefined && !hasOutcome(ground.reactor, operator, id, erased),
+    );
+    if (open.length === 0) continue;
+    try {
+      await ground.append(
+        open.map((id) =>
+          signClaims(
+            withStamp(ground.stamp(operator), (t) => outcomeClaims(id, outcome, operator, t)),
+            seed,
+          ),
+        ),
+      );
+    } catch (err) {
+      pending.push(
+        `the ${outcome} outcome in ${pool === HOST ? "the host" : pool} (${err instanceof Error ? err.message : String(err)})`,
+      );
+    }
+  }
+  return pending;
+}
+
 async function boot(o: RecoverOptions, seed: string): Promise<Gateway> {
   return Gateway.boot(o.openBackend(o.storePath), assembleGenesis({ operatorSeed: seed }), {
     ...(o.channelBackend === undefined ? {} : { channelBackend: o.channelBackend }),
@@ -337,6 +416,20 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
       );
     }
     const previous = userRootAt(gw.reactor, now, operator, name, users.erased());
+    // The roster: every declared inbox pool is cut before the host commits, so each must be
+    // reachable now. A first root retires no key and cuts nothing.
+    const roster =
+      previous === undefined ? [] : declaredInboxes(readContainerTable(gw.reactor, now, operator));
+    const unreachable = roster.filter(
+      (pool) => gw.connectionInboxes.get(pool)?.gateway === undefined,
+    );
+    if (unreachable.length > 0) {
+      return refuse(
+        `the inbox pools ${unreachable.join(", ")} are declared but not attached, so this recovery ` +
+          `cannot cut them, and ${previous} could keep writing there unseen. Attach them first. ` +
+          `Nothing was written.`,
+      );
+    }
     const newSeed = randomBytes(32).toString("hex");
     const root = authorForSeed(newSeed);
     const attempt = randomBytes(8).toString("hex");
@@ -355,6 +448,7 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
             attempt,
             ...(chain.kind === "chain" ? { supersedes: chain.head } : {}),
             retired: [...retired],
+            ...(previous === undefined ? {} : { roster: rosterHash(roster) }),
           },
           operator,
           t,
@@ -376,6 +470,7 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
       bound: previous === undefined,
       retired: [...retired],
       ...(superseding === undefined ? {} : { predecessor: superseding }),
+      cuts: {},
     } satisfies Journal);
     if (superseding === undefined) writeDurable(journalPath(home, name), next);
     else {
@@ -392,7 +487,29 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
     // crash lost would leave the user with a root no one holds.
     writeSeedDurable(userSeedPath(home, name), newSeed, attempt);
 
-    // 4. One atomic operator append.
+    // 4. The cuts. Each is journaled before it is written, so a crash can never leave a pool paused
+    // by a cut the rerun does not know to settle.
+    let j = readJournal(home, name)!;
+    const cut = (ground: Gateway, pool: string): Delta => {
+      const d = signCut(ground, operator, opSeed, { attempt, recovery: record.id, key: previous! });
+      j = { ...j, cuts: { ...j.cuts, [pool]: [...(j.cuts?.[pool] ?? []), d.id] } };
+      updateJournal(home, name, j);
+      return d;
+    };
+    if (previous !== undefined) {
+      for (const pool of roster) {
+        const ground = gw.connectionInboxes.get(pool)!.gateway!;
+        try {
+          await ground.append([cut(ground, pool)]);
+        } catch (err) {
+          await gw.close().catch(() => {});
+          return afterAppendError(o, opSeed, err);
+        }
+      }
+      await o.afterCuts?.(gw);
+    }
+
+    // 5. One atomic operator append, led by the host's own cut.
     const lineage = signClaims(
       withStamp(gw.stamp(operator), (t) =>
         lineageClaims({ name, recovery: record.id, root, retired: [...retired] }, operator, t),
@@ -408,10 +525,11 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
       ...[...retired].flatMap((key) => standingOf(gw.reactor, key)),
     ]);
     try {
-      await gw.append([record, lineage, rootClaim, ...struck]);
+      const hostCut = previous === undefined ? [] : [cut(gw, HOST)];
+      await gw.append([...hostCut, record, lineage, rootClaim, ...struck]);
     } catch (err) {
       await gw.close().catch(() => {});
-      // 5. Read before undoing.
+      // 7. Read before undoing.
       return afterAppendError(o, opSeed, err);
     }
   } finally {
@@ -429,12 +547,15 @@ async function afterAppendError(
 ): Promise<number> {
   const journal = readJournal(o.home, o.name)!;
   let committed: boolean;
+  let pending: string[] = [];
   try {
     const gw = await boot(o, opSeed);
     try {
       // The bytes decide whether the append committed; erased-but-held still committed, and resume
       // reports what the readers make of it.
       committed = gw.reactor.get(journal.record) !== undefined;
+      if (!committed)
+        pending = await settleCuts(gw, authorForSeed(opSeed), opSeed, journal, "aborted");
     } finally {
       await gw.close().catch(() => {});
     }
@@ -447,10 +568,22 @@ async function afterAppendError(
     return 1;
   }
   if (committed) return resume(o, opSeed, authorForSeed(opSeed), journal);
+  if (pending.length > 0) return abortPending(o, cause, pending);
   rollback(o, journal);
   o.io.err(
     `user recover: the append failed (${cause instanceof Error ? cause.message : String(cause)}) ` +
       `and did not land. Nothing changed: the old key file is back in place.`,
+  );
+  return 1;
+}
+
+// An attempt that did not land, with cuts it could not yet abort: those pools still pause the old
+// key. Nothing rolls back until they are settled, and the journal stays as the account of them.
+function abortPending(o: RecoverOptions, cause: unknown, pending: readonly string[]): number {
+  o.io.err(
+    `user recover: the recovery of ${o.name} did not land (${cause instanceof Error ? cause.message : String(cause)}). ` +
+      `PENDING: ${pending.join(", ")}; the old key stays paused there. Run this again to finish ` +
+      `the abort.`,
   );
   return 1;
 }
@@ -501,6 +634,8 @@ async function resume(
       return 1;
     }
     if (!held) {
+      const pending = await settleCuts(gw, operator, opSeed, j, "aborted");
+      if (pending.length > 0) return abortPending(o, "an earlier attempt stopped first", pending);
       rollback(o, j);
       io.err(
         `user recover: an earlier attempt for ${name} did not land. It is rolled back; nothing changed. Run this again to recover.`,
@@ -528,8 +663,9 @@ async function resume(
       return 1;
     }
     let journal = j;
-    // 6. Pools: strike the old key's standing in each attached inbox; name the ones not attached.
-    const pending: string[] = [];
+    // The outcomes: the record landed, so every cut of this attempt is committed.
+    const pending: string[] = await settleCuts(gw, operator, opSeed, j, "committed");
+    // 8. Pools: strike the old key's standing in each attached inbox; name the ones not attached.
     if (j.retired.length > 0) {
       // An inbox the store declares but has not attached cannot be reached; the fence already
       // refuses the old key there, and this recovery stays pending until it is struck.

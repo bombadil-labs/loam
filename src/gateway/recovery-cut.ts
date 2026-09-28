@@ -15,6 +15,8 @@
 // "Operator" here means the governing key of the peer that holds this store (user-identity.md).
 // Today inbox pools share the host's key; after step 6 each pool signs its own.
 
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
 import { RECOVERIES, userGroundOf, verified } from "./user-root.js";
 
@@ -143,6 +145,26 @@ export function activeIncarnation(
     if (best === undefined || at < best.at) best = { d, at };
   }
   return best?.d;
+}
+
+/** This store's incarnation id: what a cut written here names as its `store`. */
+export function incarnationId(
+  reactor: Reactor,
+  operator: string | undefined,
+  erased: ReadonlySet<string>,
+): string | undefined {
+  const d = activeIncarnation(reactor, operator, erased);
+  return d === undefined ? undefined : field(d, "incarnation");
+}
+
+/** Does `cut` have an outcome held here (whichever it says)? */
+export function hasOutcome(
+  reactor: Reactor,
+  operator: string,
+  cut: string,
+  erased: ReadonlySet<string>,
+): boolean {
+  return held(reactor, operator, CTX_CUT_OUTCOME, erased).some((o) => field(o, "cut") === cut);
 }
 
 export type CutState = "prepared" | "committed" | "aborted";
@@ -306,3 +328,40 @@ export function cutErasureDefect(
   }
   return undefined;
 }
+
+/**
+ * Why `batch` is refused for a cut in it, or undefined. A cut for this store must name the position
+ * it lands at: this store's arrival length plus the fresh deltas before it in the batch. The append
+ * door asks this under the admission lock, so nothing can land between the check and the cut.
+ */
+export function cutPositionDefect(
+  reactor: Reactor,
+  operator: string | undefined,
+  batch: readonly Delta[],
+  erased: ReadonlySet<string>,
+): string | undefined {
+  if (operator === undefined) return undefined;
+  const incarnation = activeIncarnation(reactor, operator, erased);
+  const here = incarnation === undefined ? undefined : field(incarnation, "incarnation");
+  let at = reactor.arrivalLog().length;
+  const fresh = new Set<string>();
+  for (const d of batch) {
+    if (reactor.get(d.id) !== undefined || fresh.has(d.id)) continue;
+    fresh.add(d.id);
+    if (
+      here !== undefined &&
+      d.claims.author === operator &&
+      inContext(d, CTX_CUT) &&
+      field(d, "store") === here &&
+      field(d, "position") !== String(at)
+    ) {
+      return `a recovery cut must name the position it lands at here (${at}), not ${field(d, "position") ?? "none"}`;
+    }
+    at += 1;
+  }
+  return undefined;
+}
+
+/** The hash a recovery record carries of the inbox pools its cuts were written to. */
+export const rosterHash = (pools: Iterable<string>): string =>
+  bytesToHex(sha256(utf8ToBytes(JSON.stringify([...new Set(pools)].sort()))));

@@ -86,6 +86,8 @@ export interface RecoverySpec {
   readonly attempt: string;
   readonly supersedes?: string;
   readonly retired: readonly string[];
+  /** `rosterHash` of the inbox pools the recovery cut: the append door refuses it if they moved. */
+  readonly roster?: string;
 }
 
 const prim = (role: string, value: string) =>
@@ -108,8 +110,17 @@ export function recoveryClaims(spec: RecoverySpec, operator: string, t: number):
       prim("attempt", spec.attempt),
       ...(spec.supersedes === undefined ? [] : [prim("supersedes", spec.supersedes)]),
       ...[...new Set(spec.retired)].sort().map((k) => prim("retired", k)),
+      ...(spec.roster === undefined ? [] : [prim("roster", spec.roster)]),
     ],
   };
+}
+
+/** The roster hash an operator recovery record carries, or undefined (none, or not a record). */
+export function recordRoster(d: Delta): string | undefined {
+  if (filedFor(d, CTX_RECOVERY) === undefined) return undefined;
+  const r = d.claims.pointers.filter((p) => p.role === "roster");
+  const t = r.length === 1 ? r[0]!.target : undefined;
+  return t?.kind === "primitive" && typeof t.value === "string" ? t.value : undefined;
 }
 
 /** The lineage claim written beside a recovery record: its root and retired set, and the record. */
@@ -201,7 +212,9 @@ function parse(d: Delta, kind: "record" | "lineage"): Parsed | undefined {
   const one = new Map<string, string>();
   const retired: string[] = [];
   const allowed =
-    kind === "record" ? ["previous", "root", "attempt", "supersedes"] : ["recovery", "root"];
+    kind === "record"
+      ? ["previous", "root", "attempt", "supersedes", "roster"]
+      : ["recovery", "root"];
   for (const p of d.claims.pointers) {
     if (p.target.kind === "entity") continue;
     if (p.target.kind !== "primitive" || typeof p.target.value !== "string") return undefined;

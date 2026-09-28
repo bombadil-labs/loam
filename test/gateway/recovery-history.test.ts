@@ -98,7 +98,9 @@ async function recover(
       29,
     ),
   );
-  await gw.append([cut]);
+  // A wrong position is refused at the door; planted past it, the readers must still fail closed.
+  if (opts.position === undefined) await gw.append([cut]);
+  else expect(gw.reactor.ingest(cut).status).toBe("accepted");
   const binding = signClaims(
     {
       timestamp: 32,
@@ -325,6 +327,21 @@ describe("the cut readers, against erasure, position and a shared root", () => {
     await expect(
       gw.append([op(eraseClaims(cut.id, OP, OP, 90)), op(eraseClaims(outcome.id, OP, OP, 90))]),
     ).rejects.toThrow(/prepared recovery cut cannot be erased/);
+    expect(paused(gw).has(K1)).toBe(true);
+  });
+
+  it("S3: the append door refuses a cut that names a position other than where it lands", async () => {
+    const { gw } = await world();
+    const at = gw.reactor.arrivalLog().length;
+    const cutAt = (index: number, t: number) =>
+      op(
+        cutClaims({ store: incarnationOf(gw), attempt: "p", recovery: "r", key: K1, index }, OP, t),
+      );
+    for (const wrong of [at + 1, at - 1, 999])
+      await expect(gw.append([cutAt(wrong, 40 + wrong)])).rejects.toThrow(/position it lands at/);
+    const second = observed(FERN, "height", 7, 41, B_SEED);
+    await expect(gw.append([second, cutAt(at, 42)])).rejects.toThrow(/position it lands at/);
+    await gw.append([second, cutAt(at + 1, 43)]);
     expect(paused(gw).has(K1)).toBe(true);
   });
 
