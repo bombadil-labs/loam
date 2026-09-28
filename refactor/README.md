@@ -127,6 +127,13 @@ Design:
      recovery, every inbox records where it stands, and pauses the old key. A store with no cut
      shows no history until step 6. Today the cuts are signed by the host peer's key; after step 6
      each pool's own key signs its own. Design: `audit/recovery-history.md`.
+   - **Registry discovery and locator transport move to step 7** (Claude and Sol, 2026-09-28).
+     SPEC-14 defines the `locator` evidence shape, and its rules stay normative: a locator is
+     evidence, not authority. Step 5 shipped the locator parsers in the TypeScript and Rust
+     witnesses, and the shared `locator-is-not-authority` vector. It shipped no registry discovery
+     and no transport. Step 7 builds those, beside publish and subscribe and the HTTP binding. A
+     registry or a locator never changes a principal's authority: the answer is the same for the
+     same pinned root, held deltas, read time, scope and suppression rule (SPEC-14 §6).
 
 ## What stays in force
 

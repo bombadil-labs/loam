@@ -193,7 +193,8 @@ level. Loam then consumes it through the barrel and compares its recordings.
    - **Fixtures (done, #609).** Test fixtures sign with `stamp()`, not `nextTimestamp`.
    - **Step 4 is complete on Loam's side** (#606, #607, #608, #609, and the PR that closed it).
      Nothing in it is open. The helper follow-ups are rhizomatic's (#50).
-5. **Principal.** Roots, key binding, succession, delegation, locators. Loam moves user,
+5. **Principal.** Roots, key binding, succession, delegation, locator evidence. Registry
+   discovery and locator transport moved to step 7 (README, ruling 9). Loam moves user,
    connection and container keys into signed data.
    Settled inputs (Myk, 2026-09-26; `README.md` rulings 2 to 4): succession records continuity
    only, and authority comes from a separate delegation. The pinned principal root must authorize
@@ -244,7 +245,9 @@ level. Loam then consumes it through the barrel and compares its recordings.
 7. **Publish and subscribe.** Per-subscriber lenses, the declared closure rule, a closure audit
    of the exact transferable set and its future additions, signed peer messages, the set digest,
    and a revised HTTP binding. The current HTTP helper does not meet SPEC-6 §4. Loam adopts the
-   revised binding.
+   revised binding. Optional registry discovery and locator transport land here too (README,
+   ruling 9): SPEC-14's locator rules stay normative, and a locator never changes principal
+   authority.
 8. **Resolve.** The resolver value ABI. Loam's resolvers move out.
 9. **Forgetting.** Storage and reactor `forget`, the probe, orders, requests, receipts, the
    posture. Sealed payloads last.
