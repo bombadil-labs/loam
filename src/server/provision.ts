@@ -18,6 +18,8 @@ import { STORE_ENTITY } from "../gateway/genesis.js";
 import type { Leeway } from "../gateway/leeway.js";
 import { stampOn, withStamp } from "../gateway/stamp.js";
 import { authoredBy } from "../gateway/membership.js";
+import { writtenByUser } from "../gateway/member-of.js";
+import { userGroundOf, userRootAt } from "../gateway/user-root.js";
 import { resolveUserView, rootClaims, userEntity } from "./users.js";
 
 export interface ProvisionRefusal {
@@ -121,13 +123,40 @@ export async function ensureUserKey(
 }
 
 /**
- * Declare a container gathering what the key derived from `userSeed` authors — the home (no
- * parent) or a child. A SEED, never a public key: the author is derived here.
+ * The membership of a container `owner` owns. It names the user (`loam.memberOf`) when the user
+ * resolves by name to the very key `owner.seed` signs with: it then follows their current root, the
+ * keys that act for them in `scope`, and a recovery. A user this store cannot resolve by name (no
+ * user record, or no root claim for that key) keeps the key form, as their grant does; naming them
+ * would gather nothing.
+ */
+export function ownedMembership(
+  gw: Gateway,
+  owner: { readonly user: string; readonly seed: string },
+  scope: string,
+): unknown {
+  const key = authorForSeed(owner.seed);
+  const operator = gw.operatorAuthor;
+  const root =
+    operator === undefined
+      ? undefined
+      : userRootAt(
+          gw.reactor,
+          gw.validityNow(),
+          operator,
+          owner.user,
+          userGroundOf(gw.reactor).erased(),
+        );
+  return root === key ? writtenByUser(owner.user, scope) : authoredBy(key);
+}
+
+/**
+ * Declare a container gathering what `owner` writes — the home (no parent) or a child. The caller
+ * has proven `owner.user` is the session user's own name, and `owner.seed` is their key file.
  */
 export async function declareOwned(
   gw: Gateway,
   name: string,
-  userSeed: string,
+  owner: { readonly user: string; readonly seed: string },
   parent: string | undefined,
   onFault: (message: string) => void,
   /** What the person set on the five controls, when this declaration is theirs to shape. */
@@ -143,7 +172,7 @@ export async function declareOwned(
     container: name,
     trust: "curated" as const,
     posture: "shared" as const,
-    membership: authoredBy(authorForSeed(userSeed)),
+    membership: ownedMembership(gw, owner, name),
     ...(parent === undefined ? {} : { parent }),
     // WRITTEN ONLY WHEN THE PERSON SET IT. A container declared with no leeway pointer is a pure
     // namespace that inherits; writing a sealed pointer onto every provisioned home would seal

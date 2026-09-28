@@ -1079,7 +1079,7 @@ this lens does not gather; the lens may read ground this container does not hold
     }
     // Operator law: the declaration is signed by the store, once the door has proven the target
     // is the session user's own name — which it is by construction here.
-    const declined = await declareOwned(gw, user, key.userSeed, undefined, (m) =>
+    const declined = await declareOwned(gw, user, { user, seed: key.userSeed }, undefined, (m) =>
       onFault(`the admin page ${m}`),
     );
     if (declined !== undefined) {
