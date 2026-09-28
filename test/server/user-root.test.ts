@@ -232,7 +232,7 @@ describe("every road that mints a user a key names it as their root", () => {
     const size = await withGround((gw) => gw.reactor.size);
     said.length = 0;
     expect(await run(["user", "create", "ada", "--home", home], io(), password)).toBe(2);
-    expect(said.join("\n")).toMatch(/previous person's record, roles or root \(/);
+    expect(said.join("\n")).toMatch(/still named by held claims that would pass to a new person/);
     expect(await withGround((gw) => gw.reactor.size)).toBe(size);
     expect(
       await withGround((gw) => [...rolesOf(gw.reactor, gw.operator, gw.validityNow(), "ada")]),
@@ -272,7 +272,20 @@ describe("every road that mints a user a key names it as their root", () => {
         (id) => gw.reactor.get(id)?.claims.author === op,
       );
       expect(ids.length).toBeGreaterThanOrEqual(3); // record, role, root
-      for (const id of ids) await gw.erase(id);
+      // Everything that would pass to a new person goes, the admin grant naming user:ada included:
+      // left standing, it would bind for whoever next holds the entity.
+      const grants = [...gw.reactor.snapshot()]
+        .filter((d) =>
+          d.claims.pointers.some(
+            (p) =>
+              p.role === "subject" &&
+              p.target.kind === "primitive" &&
+              p.target.value === "user:ada",
+          ),
+        )
+        .map((d) => d.id);
+      expect(grants.length).toBeGreaterThan(0);
+      for (const id of [...ids, ...grants]) await gw.erase(id);
     });
     rmSync(join(home, "credentials.json"), { force: true });
     rmSync(userSeedPath(home, "ada"), { force: true });

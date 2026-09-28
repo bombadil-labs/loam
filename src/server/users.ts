@@ -20,13 +20,14 @@
 import {
   resolveView,
   type Claims,
+  type Delta,
   type HyperSchema,
   type Policy,
   type Reactor,
   type Schema,
   type View,
 } from "@bombadil/rhizomatic";
-import { DeltaSet, evalTerm } from "@bombadil/rhizomatic";
+import { DeltaSet, evalTerm, parseTerm } from "@bombadil/rhizomatic";
 import { erasedFromReading } from "../gateway/erase.js";
 import { entityGatherBody } from "../gateway/gather.js";
 
@@ -35,10 +36,15 @@ import {
   CTX_ROLE,
   CTX_ROOT,
   CTX_USER,
+  CTX_RECOVERY,
+  CTX_LINEAGE,
   userEntity,
   userNameDefect,
   verified,
 } from "../gateway/user-root.js";
+import { CTX_GRANTS } from "../gateway/governed-trust.js";
+import { membershipForValidation, namesMemberOf } from "../gateway/member-of.js";
+import { containerDeclarationName } from "../gateway/container.js";
 export { CTX_ROLE, CTX_ROOT, userEntity };
 
 const AUTHOR = /^ed25519:[0-9a-f]{64}$/;
@@ -302,12 +308,35 @@ export function rootOf(
   return typeof root === "string" && AUTHOR.test(root) ? root : undefined;
 }
 
+// Is `d` a container declaration that could bind here: the governing account's own, and a
+// declaration by the container READER's own test (`containerDeclarationName`, the predicate the
+// table binds with). Not the door's admission test: that weighs today's leeway and tree, and can
+// refuse a declaration that still binds.
+function isDeclaration(operator: string, d: Delta): boolean {
+  return d.claims.author === operator && containerDeclarationName(d.claims) !== undefined;
+}
+
+// Does `text` parse as a valid membership Term with a well-formed `loam.memberOf` node naming `user`?
+function membershipNames(text: string, user: string): boolean {
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+    parseTerm(membershipForValidation(json)); // a real Term, every node well formed
+  } catch {
+    return false;
+  }
+  return namesMemberOf(json, user);
+}
+
 /**
- * Does the ground still HOLD anything the operator said about the person called `name` — their
- * record, a role or a root — whether struck, lapsed or not yet valid? A name that answers yes
- * belonged to someone, and giving it to a new person would hand them what is left: a strike can
- * lapse and revive a role, and the old key's grants and seed file are not at this entity at all.
- * Only erasure, which removes the bytes, frees a name.
+ * Does the ground still HOLD anything that would pass to a new person given the entity `user:<name>`?
+ * Everything that can bind or revive counts, struck or not yet valid included, because a strike can
+ * lapse:
+ *   - the governing account's own record, roles, root, recovery records and lineage at the entity;
+ *   - any held, verified grant (loam.grants) whose subject is the entity, whoever issued it;
+ *   - any held, verified container membership that names the user (loam.memberOf).
+ * This is tooling that tells the truth about what remains, not a uniqueness rule: reusing the entity
+ * on purpose is an explicit act (erase what is found, or recover the entity to the new key).
  */
 export function nameStillHeld(
   reactor: Reactor,
@@ -318,8 +347,13 @@ export function nameStillHeld(
   | { readonly held: false }
   | { readonly held: true; readonly notYetValid: boolean; readonly ids: readonly string[] } {
   const entity = userEntity(name);
-  const ids: string[] = [];
+  const ids = new Set<string>();
   let notYetValid = false;
+  const hold = (d: Delta): void => {
+    ids.add(d.id);
+    if (d.claims.validFrom > now) notYetValid = true;
+  };
+  const ACCOUNT = new Set([CTX_USER, CTX_ROLE, CTX_ROOT, CTX_RECOVERY, CTX_LINEAGE]);
   for (const id of reactor.byTarget(entity)) {
     const d = reactor.get(id);
     if (d === undefined || d.claims.author !== operator || !verified(d)) continue;
@@ -327,13 +361,47 @@ export function nameStillHeld(
       (p) =>
         p.target.kind === "entity" &&
         p.target.entity.id === entity &&
-        (p.target.entity.context === CTX_USER ||
-          p.target.entity.context === CTX_ROLE ||
-          p.target.entity.context === CTX_ROOT),
+        p.target.entity.context !== undefined &&
+        ACCOUNT.has(p.target.entity.context),
     );
-    if (!aboutPerson) continue;
-    ids.push(id);
-    if (d.claims.validFrom > now) notYetValid = true;
+    if (aboutPerson) hold(d);
   }
-  return ids.length === 0 ? { held: false } : { held: true, notYetValid, ids: ids.sort() };
+  // Claims that name the entity from elsewhere. Rare (a user is created once), so a walk.
+  // A membership counts only where one can serve: the inline `membership` of a declaration, or the
+  // published `term` a declaration cites by `membershipAt`, and only when it parses as a valid
+  // membership Term. The same text inside any other claim is just data.
+  const cited = new Map<string, Delta>();
+  for (const d of reactor.arrivalLog()) {
+    if (!verified(d)) continue;
+    const grant =
+      d.claims.pointers.some(
+        (p) => p.target.kind === "entity" && p.target.entity.context === CTX_GRANTS,
+      ) &&
+      d.claims.pointers.some(
+        (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === entity,
+      );
+    if (grant) hold(d);
+    // Only a container DECLARATION can serve a membership, by the container reader's own test
+    // (`isDeclaration`), so a claim that merely carries the role is data.
+    if (!isDeclaration(operator, d)) continue;
+    for (const p of d.claims.pointers) {
+      if (p.target.kind !== "primitive" || typeof p.target.value !== "string") continue;
+      if (p.role === "membership" && membershipNames(p.target.value, name)) hold(d);
+      if (p.role === "membershipAt") cited.set(p.target.value, d);
+    }
+  }
+  for (const [id, declaration] of cited) {
+    const published = reactor.get(id);
+    if (published === undefined || !verified(published)) continue;
+    const term = published.claims.pointers.find((p) => p.role === "term")?.target;
+    if (
+      term?.kind === "primitive" &&
+      typeof term.value === "string" &&
+      membershipNames(term.value, name)
+    ) {
+      hold(declaration);
+      hold(published);
+    }
+  }
+  return ids.size === 0 ? { held: false } : { held: true, notYetValid, ids: [...ids].sort() };
 }
