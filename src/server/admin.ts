@@ -311,9 +311,8 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     const name = target.name;
     const value = gated.fields.get("value") === "true";
     await gw.append([
-      signClaims(
+      gw.signer!.sign(
         withStamp(gw.stamp(), (t) => quietClaims(name, value, gw.operatorAuthor!, t)),
-        gw.options.seed!,
       ),
     ]);
     seeOther(res);
@@ -362,10 +361,7 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     };
     try {
       await gw.append([
-        signClaims(
-          withStamp(gw.stamp(), (t) => containerClaims(spec, gw.operatorAuthor!, t)),
-          gw.options.seed!,
-        ),
+        gw.signer!.sign(withStamp(gw.stamp(), (t) => containerClaims(spec, gw.operatorAuthor!, t))),
       ]);
     } catch (err) {
       refuse(res, 409, `${escapeHtml(appendRefusal(err))} Nothing was changed.`);
@@ -605,7 +601,7 @@ this lens does not gather; the lens may read ground this container does not hold
       refuse(res, 503, "This store's ground is not reachable, so nothing was done.");
       return undefined;
     }
-    if (gw.options.seed === undefined || gw.operatorAuthor === undefined) {
+    if (gw.signer === undefined || gw.operatorAuthor === undefined) {
       refuse(res, 503, "This store cannot sign a declaration right now, so nothing was done.");
       return undefined;
     }
@@ -704,7 +700,7 @@ this lens does not gather; the lens may read ground this container does not hold
     }
     try {
       await gw.append([
-        signClaims(
+        gw.signer!.sign(
           withStamp(gw.stamp(), (t) =>
             containerClaims(
               {
@@ -718,7 +714,6 @@ this lens does not gather; the lens may read ground this container does not hold
               t,
             ),
           ),
-          gw.options.seed!,
         ),
       ]);
     } catch (err) {
@@ -775,9 +770,8 @@ this lens does not gather; the lens may read ground this container does not hold
     }
     try {
       await gw.append([
-        signClaims(
+        gw.signer!.sign(
           withStamp(gw.stamp(), (t) => detachClaims(name, undefined, gw.operatorAuthor!, t)),
-          gw.options.seed!,
         ),
       ]);
     } catch (err) {
@@ -819,10 +813,7 @@ this lens does not gather; the lens may read ground this container does not hold
     try {
       await gw.append(
         records.map((r) =>
-          signClaims(
-            withStamp(gw.stamp(), (t) => negationOf(r.id, gw.operatorAuthor!, t)),
-            gw.options.seed!,
-          ),
+          gw.signer!.sign(withStamp(gw.stamp(), (t) => negationOf(r.id, gw.operatorAuthor!, t))),
         ),
       );
     } catch (err) {
@@ -1030,10 +1021,7 @@ this lens does not gather; the lens may read ground this container does not hold
       const ids = survivingDeclarationIds(gw.reactor, gw.validityNow(), gw.operatorAuthor!, name);
       await gw.append(
         ids.map((id) =>
-          signClaims(
-            withStamp(gw.stamp(), (t) => negationOf(id, gw.operatorAuthor!, t)),
-            gw.options.seed!,
-          ),
+          gw.signer!.sign(withStamp(gw.stamp(), (t) => negationOf(id, gw.operatorAuthor!, t))),
         ),
       );
     } catch (err) {

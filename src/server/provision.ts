@@ -9,7 +9,7 @@
 
 import { randomBytes } from "node:crypto";
 import { rmSync } from "node:fs";
-import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
+import { authorForSeed } from "@bombadil/rhizomatic";
 import { readUserSeed, userSeedPath, writeUserSeed } from "../cli/config.js";
 import { grantClaims } from "../gateway/accounts.js";
 import { containerClaims } from "../gateway/container.js";
@@ -43,7 +43,7 @@ export async function ensureUserKey(
   user: string,
   onFault: (message: string) => void,
 ): Promise<{ userSeed: string } | { refusal: ProvisionRefusal }> {
-  if (gw.options.seed === undefined || gw.operatorAuthor === undefined) {
+  if (gw.signer === undefined || gw.operatorAuthor === undefined) {
     return {
       refusal: {
         status: 503,
@@ -60,7 +60,7 @@ export async function ensureUserKey(
       writeUserSeed(home, user, minted);
       written = true;
       const operator = gw.operatorAuthor;
-      const signer = gw.options.seed;
+      const signer = gw.signer;
       const key = authorForSeed(minted);
       // `stampOn`, not `gw.stamp`: this act runs over any gateway-shaped ground. The grant names the
       // USER, and stands for whatever root the user holds now; it lands with the root pointer, so a
@@ -68,15 +68,13 @@ export async function ensureUserKey(
       // then the grant names the key.
       const known = resolveUserView(gw.reactor, operator, gw.validityNow(), user) !== undefined;
       await gw.append([
-        signClaims(
+        signer.sign(
           withStamp(stampOn(gw, operator, Date.now()), (t) =>
             grantClaims(STORE_ENTITY, known ? userEntity(user) : key, "write", operator, t),
           ),
-          signer,
         ),
-        signClaims(
+        signer.sign(
           withStamp(stampOn(gw, operator, Date.now()), (t) => rootClaims(user, key, operator, t)),
-          signer,
         ),
       ]);
     } catch (err) {
@@ -167,7 +165,7 @@ export async function declareOwned(
   /** What the person set on the five controls, when this declaration is theirs to shape. */
   leeway?: Leeway,
 ): Promise<ProvisionRefusal | undefined> {
-  if (gw.options.seed === undefined || gw.operatorAuthor === undefined) {
+  if (gw.signer === undefined || gw.operatorAuthor === undefined) {
     return {
       status: 503,
       message: "This store cannot sign a declaration right now, so nothing was made.",
@@ -197,9 +195,8 @@ export async function declareOwned(
   const operator = gw.operatorAuthor;
   try {
     await gw.append([
-      signClaims(
+      gw.signer.sign(
         withStamp(stampOn(gw, operator, Date.now()), (t) => containerClaims(spec, operator, t)),
-        gw.options.seed,
       ),
     ]);
   } catch (err) {
