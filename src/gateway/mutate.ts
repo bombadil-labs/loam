@@ -18,7 +18,9 @@ import type { HVEntry, Primitive } from "@bombadil/rhizomatic";
 import type { ConnectionBinding, Gateway } from "./gateway.js";
 import { legalNameFor, queryFieldFor, type ClaimPointerSpec, type ResolvedNode } from "./gql.js";
 import { edgeRoles, lensOf, referenceProps, type ReferenceProp } from "./registration.js";
-import { keysEverOf } from "./principal.js";
+import { delegatesEverOf, keysEverOf } from "./principal.js";
+import { gatherPoolForRetraction } from "./reads.js";
+import { attachedPool, declaredInboxes, poolOwner, readContainerTable } from "./container.js";
 import { withStamp } from "./stamp.js";
 
 // Where a write LANDS (SPEC §58): a bound connection's deltas go into its inbox pool — the pool's
@@ -117,6 +119,11 @@ async function retract(
   }
   gw.def(name, binding); // refuses an unknown schema
   const author = authorForSeed(seed);
+  // The owner's clear reaches her connections' writes in her inbox pools (README ruling 8, M2):
+  // for an unbound call, or a bound one signed by that pool's owner. Checked before anything is
+  // signed, so a refusal here leaves nothing behind.
+  const ownerCall = binding === undefined || ownerOf(gw.poolForBinding(binding)) === author;
+  const pools = ownerCall ? ownedPools(gw, author) : [];
   // UNNARROWED (SPEC §29.3): a read-closing slate must not turn this strike into a silent no-op —
   // the member would be absent from a narrowed hview, so nothing would be targeted and nothing signed.
   // A bound connection gathers ITS scope: its own claims live in its pool, and a strike it signs
@@ -142,7 +149,97 @@ async function retract(
     );
     await sink.append(negations);
   }
+  // The fan-out: in each pool she owns, what she or a key she ever delegated to there wrote. Only
+  // her current root signs (M5). Grounds are not atomic together, so a failure is reported by
+  // ground; a rerun skips what is already struck and finishes the rest.
+  const landed: string[] = [];
+  const failed: string[] = [];
+  for (const pool of pools) {
+    const own = new Set([...mine, ...delegatesEverOf(pool.ground.reactor, mine, pool.name)]);
+    const view = gatherPoolForRetraction(
+      gw,
+      name,
+      entity,
+      { container: pool.parent, inbox: pool.name },
+      pool.ground,
+    );
+    const ids = new Set<string>();
+    for (const [field, entries] of view.props) {
+      for (const entry of entries) {
+        const d = entry.delta;
+        // Judged per ground: the same signed delta may be held in several, and a strike counts only
+        // where it lands. This pool is gathered after the first strike, so one struck here reads as
+        // negated and is not struck twice.
+        if (pool.ground.reactor.get(d.id) === undefined) continue;
+        if (own.has(d.claims.author) && !entry.negated && keep(field, entry)) ids.add(d.id);
+      }
+    }
+    if (ids.size === 0) continue;
+    try {
+      const stamp = pool.ground.stamp(author);
+      await pool.ground.append(
+        [...ids].map((id) =>
+          signClaims(
+            withStamp(stamp, (t) => makeNegationClaims(author, t, id)),
+            seed,
+          ),
+        ),
+      );
+      landed.push(pool.name);
+    } catch (err) {
+      failed.push(`${pool.name} (${err instanceof Error ? err.message : String(err)})`);
+    }
+  }
+  if (failed.length > 0) {
+    throw new Error(
+      `the retraction of ${entity} is partial: it landed in this store` +
+        (landed.length === 0 ? "" : ` and in ${landed.join(", ")}`) +
+        `, and failed in ${failed.join("; ")}. Run it again to finish; what is struck stays struck.`,
+    );
+  }
   return gw.resolvedNode(name, entity, undefined, undefined, binding);
+}
+
+// The key that owns inbox pool `pool`, or undefined when it has none readable.
+function ownerOf(pool: Gateway): string | undefined {
+  const owner = poolOwner(pool);
+  return "refusal" in owner ? undefined : owner.key;
+}
+
+// The inbox pools `author` owns now, attached. Any declared inbox this store cannot read (not
+// attached, or no readable owner) refuses the whole call before a signature: it might be hers, and
+// a clear that skipped it would report a completeness it does not have (H7). This over-refuses when
+// such a pool is someone else's; the refusal names it.
+function ownedPools(
+  gw: Gateway,
+  author: string,
+): { readonly name: string; readonly parent: string; readonly ground: Gateway }[] {
+  const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
+  const out: { name: string; parent: string; ground: Gateway }[] = [];
+  const unreadable: string[] = [];
+  for (const name of declaredInboxes(table)) {
+    if (!name.startsWith("inbox:")) continue;
+    const ground = attachedPool(gw, name);
+    if (ground === undefined) {
+      unreadable.push(`${name} (not attached)`);
+      continue;
+    }
+    const owner = poolOwner(ground);
+    if ("refusal" in owner) {
+      unreadable.push(`${name} (${owner.refusal})`);
+      continue;
+    }
+    if (owner.key === author)
+      out.push({ name, parent: table.containers.get(name)!.inboxOf!, ground });
+  }
+  if (unreadable.length > 0) {
+    throw new Error(
+      `this retraction is refused before anything was signed: the inbox pools ` +
+        `${unreadable.join(", ")} cannot be read here, and one of them might hold writes that are ` +
+        `yours. Attach them, then run it again.`,
+    );
+  }
+  return out;
 }
 
 // Clear whole fields: retract every one of the caller's contributions to each named field.
