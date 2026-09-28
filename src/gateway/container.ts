@@ -1220,7 +1220,7 @@ export function openerStands(
     STORE_ENTITY,
     key,
     "write",
-    gw.operatorAuthor,
+    inbox.operatorAuthor, // the inbox's grants are its own law (step 6 inventory, pattern 3)
   );
 }
 

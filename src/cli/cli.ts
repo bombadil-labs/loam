@@ -3947,7 +3947,7 @@ async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<numbe
           STORE_ENTITY,
           i.author,
           "write",
-          operator,
+          pool.gateway.operatorAuthor,
         );
       const noGround =
         i.inbox === undefined

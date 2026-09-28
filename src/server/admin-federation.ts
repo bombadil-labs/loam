@@ -335,7 +335,7 @@ export const adminFederation = (ctx: AdminFederationCtx) => {
     const state =
       pool === undefined
         ? undefined
-        : connectionGrantState(pool.reactor, pool.validityNow(), gw.operatorAuthor, key);
+        : connectionGrantState(pool.reactor, pool.validityNow(), pool.operatorAuthor, key);
     const stateWords =
       state === undefined
         ? "its inbox pool is not attached here, so its grant cannot be read from this page"
@@ -630,7 +630,7 @@ ${flowNote}`;
     const pool = gw.attachedContainers.get(name);
     const standing =
       pool !== undefined &&
-      holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, key, "write", gw.operatorAuthor);
+      holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, key, "write", pool.operatorAuthor);
     // §58: a key may hold a sibling pool — a re-consent into another container spawns a second
     // inbox and the first stands — and a revoke is the KEY's, so every pool of this key that still
     // holds the grant is struck with the row's. Named on the confirm page before anything happens.
@@ -651,7 +651,7 @@ ${flowNote}`;
             STORE_ENTITY,
             key,
             "write",
-            gw.operatorAuthor,
+            handle.gateway.operatorAuthor,
           ),
       )
       .map(([sibling]) => sibling)
@@ -898,7 +898,7 @@ ${flowNote}`;
             STORE_ENTITY,
             plan.key,
             "write",
-            gw.operatorAuthor,
+            pool.operatorAuthor,
           )
         )
           continue;
