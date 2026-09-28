@@ -5,6 +5,7 @@
 // (`keysEverOf`). A bystander user with a literal grant rides every case.
 
 import { afterEach, describe, expect, it } from "vitest";
+import { withHostCut } from "../helpers/recovery-cut.js";
 import {
   authorForSeed,
   makeDelta,
@@ -113,7 +114,7 @@ async function recover(
     ),
   );
   const root = op(rootClaims("ada", spec.root, OP, t));
-  await gw.append([record, lineage, root]);
+  await gw.append(withHostCut(gw, OP_SEED, [record, lineage, root]));
   return { record, lineage, root };
 }
 
@@ -219,11 +220,13 @@ describe("E4: recovery is durable history", () => {
       ),
       validUntil: 31,
     });
-    await gw.append([
-      record,
-      op(lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30)),
-      op(rootClaims("ada", K2, OP, 30)),
-    ]);
+    await gw.append(
+      withHostCut(gw, OP_SEED, [
+        record,
+        op(lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30)),
+        op(rootClaims("ada", K2, OP, 30)),
+      ]),
+    );
     expect(readers(gw).index).toBe(K2);
     expect(writes(gw, K1)).toBe(false);
   });

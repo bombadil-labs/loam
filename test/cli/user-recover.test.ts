@@ -132,6 +132,16 @@ function faulty(mode: {
     });
   };
 }
+// Attaches each inbox pool on its first boot only: the recovery cuts it, and a rerun cannot reach it.
+const attachedOnce = (): ((pool: string) => StoreBackend) => {
+  const real = channelBackendFor(home, io);
+  const seen = new Set<string>();
+  return (pool) => {
+    if (seen.has(pool)) return undefined as unknown as StoreBackend;
+    seen.add(pool);
+    return real(pool);
+  };
+};
 const direct = (extra: Partial<RecoverOptions>): RecoverOptions => ({
   home,
   name: "ada",
@@ -530,20 +540,19 @@ describe("E6 and E9: inboxes", () => {
     expect(await connWrites(pool)).toBe(true);
   });
 
-  it("an inbox not attached leaves the recovery PENDING; a rerun with it attached completes", async () => {
-    await adaAndBea();
+  it("H6: an inbox not attached refuses the recovery before anything is written; attached, it completes", async () => {
+    const { k1 } = await adaAndBea();
     const pool = await bindAdasConnection();
-    // No pool backend: the declared inbox cannot be attached.
-    expect(await recoverUser(direct({}))).toBe(1);
-    expect(err.join("\n")).toMatch(
-      new RegExp(`PENDING: ${pool.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\(not attached\\)`),
-    );
-    expect(existsSync(journal("ada"))).toBe(true);
-    // The fence already refuses K1 there, pending or not.
-    expect(await connWrites(pool)).toBe(false);
+    // No pool backend: the declared inbox cannot be attached, so it could not be cut.
+    expect(await recoverUser(direct({}))).toBe(2);
+    expect(err.join("\n")).toMatch(/declared but not attached/);
+    expect(existsSync(journal("ada"))).toBe(false);
+    expect(archives("ada")).toEqual([]);
+    expect(seedKey("ada")).toBe(k1);
+    expect(await rootOfAda()).toBe(k1);
     err.length = 0;
     expect(await recoverUser(direct({ channelBackend: channelBackendFor(home, io) }))).toBe(0);
-    expect(existsSync(journal("ada"))).toBe(false);
+    expect(await connWrites(pool)).toBe(false);
   });
 
   const delegationsIn = (pool: string, key: string) =>
@@ -566,7 +575,7 @@ describe("E6 and E9: inboxes", () => {
   it("a record erased after it landed: the rerun says so, keeps the journal, and claims nothing", async () => {
     await adaAndBea();
     await bindAdasConnection();
-    expect(await recoverUser(direct({}))).toBe(1); // the inbox is not attached: PENDING
+    expect(await recoverUser(direct({ channelBackend: attachedOnce() }))).toBe(1); // the inbox is not attached: PENDING
     const j = JSON.parse(readFileSync(journal("ada"), "utf8")) as { record: string };
     await ground(async (gw, op) => {
       await gw.append([
@@ -584,7 +593,7 @@ describe("E6 and E9: inboxes", () => {
   it("an abandon whose new attempt is refused keeps the old journal", async () => {
     await adaAndBea();
     await bindAdasConnection();
-    expect(await recoverUser(direct({}))).toBe(1); // PENDING
+    expect(await recoverUser(direct({ channelBackend: attachedOnce() }))).toBe(1); // PENDING
     const before = readFileSync(journal("ada"), "utf8");
     rmSync(userSeedPath(home, "ada"));
     // The new attempt's preflight will refuse: ada's grant by name is struck.
@@ -598,14 +607,18 @@ describe("E6 and E9: inboxes", () => {
         signClaims(makeNegationClaims(op, gw.stamp(op).timestamp, g.id), readSeed(home)),
       ]);
     });
-    expect(await recoverUser(direct({ abandonAttempt: true }))).toBe(2);
+    expect(
+      await recoverUser(
+        direct({ abandonAttempt: true, channelBackend: channelBackendFor(home, io) }),
+      ),
+    ).toBe(2);
     expect(readFileSync(journal("ada"), "utf8")).toBe(before);
   });
 
   it("an abandon finishes the predecessor's inbox cleanup as well as its own", async () => {
     const { k1 } = await adaAndBea();
     const pool = await bindAdasConnection();
-    expect(await recoverUser(direct({}))).toBe(1); // the inbox not attached: K1's delegation unstruck
+    expect(await recoverUser(direct({ channelBackend: attachedOnce() }))).toBe(1); // the inbox not attached: K1's delegation unstruck
     expect(await delegationsIn(pool, k1)).toEqual([false]);
     rmSync(userSeedPath(home, "ada"));
     expect(
@@ -620,7 +633,7 @@ describe("E6 and E9: inboxes", () => {
   it("a history broken after the attempt landed: the rerun claims nothing and keeps the journal", async () => {
     await adaAndBea();
     await bindAdasConnection();
-    expect(await recoverUser(direct({}))).toBe(1); // PENDING
+    expect(await recoverUser(direct({ channelBackend: attachedOnce() }))).toBe(1); // PENDING
     // A competing first record breaks ada's chain; this attempt's record is still held and unerased.
     await ground(async (gw, op) => {
       const other = authorForSeed("e9".repeat(32));
@@ -644,12 +657,16 @@ describe("E6 and E9: inboxes", () => {
   it("an abandon whose new attempt fails before it commits hands the journal back to the old attempt", async () => {
     await adaAndBea();
     await bindAdasConnection();
-    expect(await recoverUser(direct({}))).toBe(1); // PENDING: K2's inbox work unfinished
+    expect(await recoverUser(direct({ channelBackend: attachedOnce() }))).toBe(1); // PENDING: K2's inbox work unfinished
     const k2Journal = readFileSync(journal("ada"), "utf8");
     rmSync(userSeedPath(home, "ada"));
     expect(
       await recoverUser(
-        direct({ abandonAttempt: true, openBackend: faulty({ append: "before" }) }),
+        direct({
+          abandonAttempt: true,
+          openBackend: faulty({ append: "before" }),
+          channelBackend: channelBackendFor(home, io),
+        }),
       ),
     ).toBe(1);
     expect(readFileSync(journal("ada"), "utf8")).toBe(k2Journal);
@@ -699,7 +716,7 @@ describe("E6 and E9: inboxes", () => {
   it("a struck root claim while the attempt is pending: the rerun claims nothing", async () => {
     await adaAndBea();
     await bindAdasConnection();
-    expect(await recoverUser(direct({}))).toBe(1); // PENDING
+    expect(await recoverUser(direct({ channelBackend: attachedOnce() }))).toBe(1); // PENDING
     const k2 = seedKey("ada")!;
     await ground(async (gw, op) => {
       // The ROOT claim (context loam.root), not the lineage claim, which also names K2.

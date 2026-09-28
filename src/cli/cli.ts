@@ -2600,14 +2600,26 @@ async function cmdUser(args: readonly string[], io: IO, options: RunOptions): Pr
   const home = parsed.flags.get("home") ?? defaultHome();
   if (sub === "create") return cmdUserCreate(name, parsed, home, io, options);
   if (sub === "recover") {
+    const path = storePath(home, parsed.flags.get("store"));
+    // A running server answers from the memory it booted with: it would go on treating the old key
+    // as the user's until it restarts. The recovery's history stays safe either way (a store shows
+    // history only up to a cut it holds), so this is honesty, not a lock.
+    const serving = servingProbe(home, path);
+    if (serving !== undefined) {
+      io.err(
+        `user recover: ${serving.said}. That server would go on accepting the old key as ${name} ` +
+          `until it restarts. Stop the server, then run this again. Nothing was written.`,
+      );
+      return 2;
+    }
     return recoverUser({
       home,
       name,
       replaceSeed: parsed.booleans.has("replace-seed"),
       abandonAttempt: parsed.booleans.has("abandon-attempt"),
-      storePath: storePath(home, parsed.flags.get("store")),
+      storePath: path,
       io,
-      openBackend: (path) => openStore(path, io),
+      openBackend: (p) => openStore(p, io),
       channelBackend: channelBackendFor(home, io),
     });
   }

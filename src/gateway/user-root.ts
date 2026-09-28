@@ -112,6 +112,11 @@ export function recoveryClaims(spec: RecoverySpec, operator: string, t: number):
   };
 }
 
+/** The key a well-formed recovery record retires (its `previous`), or undefined. */
+export function recordPrevious(d: Delta): string | undefined {
+  return filedFor(d, CTX_RECOVERY) === undefined ? undefined : parse(d, "record")?.previous;
+}
+
 /** The lineage claim written beside a recovery record: its root and retired set, and the record. */
 export function lineageClaims(
   spec: {

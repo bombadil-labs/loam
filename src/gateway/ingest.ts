@@ -67,9 +67,19 @@ import {
 } from "./slate.js";
 import { readTrustPolicy } from "./trust.js";
 import { governedProgram, needsLowering } from "./governed-trust.js";
-import { recoveryDefect, userGroundOf } from "./user-root.js";
+import { recordPrevious, recoveryDefect, userGroundOf } from "./user-root.js";
 import { hasMemberOf, lowerMembershipJson } from "./member-of.js";
-import { isStoreLocal, pausedKeys } from "./recovery-cut.js";
+import { attachedPool, declaredInboxes, readContainerTable } from "./container.js";
+import {
+  cutForHere,
+  isCutManifest,
+  isStoreLocal,
+  lateCutDefect,
+  liveCutIds,
+  manifestAhead,
+  manifestDefect,
+  pausedKeys,
+} from "./recovery-cut.js";
 
 // Persist a batch, THEN serve it (the body of `Gateway.append`). The batch is validated whole (one
 // bad delta refuses the lot); it lands in the backend before the reactor sees it, so nothing a
@@ -239,6 +249,37 @@ export async function appendLocalErasure(gw: Gateway, erasure: Delta): Promise<v
     throw new Error("local erasure did not ingest");
 }
 async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<AppendReceipt> {
+  const { receipt, fresh } = await admitting(gw, () => appendAdmitted(gw, deltas));
+  // A landing slate that closes `read` ends live subscriptions the way an erase does (SPEC §29.3).
+  // `reseat()` already solves precisely this one phase later — "a parked reader must not keep serving
+  // a view built on the pre-erase ground" — and the reason is identical here: nothing in the slate's
+  // own deltas moves the watched entity's materialization, so no sink fires and no open stream would
+  // ever narrow. Readers wake with `done` and resubscribe into the narrowed gather. Already-delivered
+  // frames are not recalled; nothing can recall them, and §29.3's asymmetry already says so.
+  if (landsReadClosure(gw, fresh, Date.now())) {
+    for (const channel of [...gw.channels]) await channel.return();
+  }
+  return receipt;
+}
+
+// Admission is serialized per gateway. A batch is checked against the state it finds, then awaits
+// the backend, then ingests; two unserialized batches could each pass a check that reads the same
+// state (a pause, a budget, a recovery barrier) and both land. Only check, write and ingest run under
+// the lock: closing streams after it may await a reader, and a reader may append.
+const admissions = new WeakMap<Gateway, Promise<unknown>>();
+function admitting<T>(gw: Gateway, fn: () => Promise<T>): Promise<T> {
+  const run = (admissions.get(gw) ?? Promise.resolve()).then(fn);
+  admissions.set(
+    gw,
+    run.catch(() => {}),
+  );
+  return run;
+}
+
+async function appendAdmitted(
+  gw: Gateway,
+  deltas: Iterable<Delta>,
+): Promise<{ receipt: AppendReceipt; fresh: Delta[] }> {
   if (gw.writeFailure !== undefined) {
     throw new Error(`this gateway can no longer persist: ${gw.writeFailure.message}`);
   }
@@ -284,6 +325,68 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
       const verdict = authorize(gw.reactor, gw.validityNow(), d, gw.operatorAuthor, batch);
       if (!verdict.ok) {
         throw new Error(`append rejected: ${verdict.refusal}`);
+      }
+    }
+  }
+  // Recovery barrier (recovery-history.md), read under the admission lock so nothing lands between
+  // the check and the commit. A record that retires a key commits only behind its barrier: a cut
+  // manifest ahead of it in this append, naming a live cut in this store and in every declared pool,
+  // and naming nothing else. A name for a cut not yet written could be filled in later by a writer
+  // that never saw the record.
+  if (gw.operatorAuthor !== undefined) {
+    const op = gw.operatorAuthor;
+    const refused = refusedIds(gw.reactor, op);
+    const defect =
+      lateCutDefect(gw.reactor, op, batch, refused) ?? manifestDefect(gw.reactor, op, batch);
+    if (defect !== undefined) throw new Error(`append rejected: ${defect}`);
+    for (const d of batch) {
+      const previous = d.claims.author === op ? recordPrevious(d) : undefined;
+      if (previous === undefined) continue;
+      const named = manifestAhead(gw.reactor, op, batch, d);
+      if (named === undefined) {
+        throw new Error(
+          `append rejected: recovery ${d.id} retires ${previous} and has no cut manifest ahead of ` +
+            `it in this append. \`loam user recover\` writes the cuts and the manifest first.`,
+        );
+      }
+      const stores = [
+        { name: "this store", ground: gw as Gateway | undefined, batch },
+        ...declaredInboxes(readContainerTable(gw.reactor, gw.validityNow(), op)).map((pool) => ({
+          name: pool,
+          ground: attachedPool(gw, pool),
+          batch: [] as Delta[],
+        })),
+      ];
+      const live = new Set<string>();
+      const uncut: string[] = [];
+      for (const s of stores) {
+        const ids =
+          s.ground === undefined
+            ? new Set<string>()
+            : liveCutIds(
+                s.ground.reactor,
+                op,
+                s.batch,
+                d.id,
+                previous,
+                refusedIds(s.ground.reactor, op),
+              );
+        for (const id of ids) live.add(id);
+        if (![...ids].some((id) => named.has(id))) uncut.push(s.name);
+      }
+      if (uncut.length > 0) {
+        throw new Error(
+          `append rejected: recovery ${d.id} retires ${previous}, and ${uncut.join(", ")} ` +
+            `holds no live cut for it in its manifest (or is not attached), so ${previous} could ` +
+            `write there unseen. \`loam user recover\` writes the cuts first.`,
+        );
+      }
+      const unwritten = [...named].filter((id) => !live.has(id));
+      if (unwritten.length > 0) {
+        throw new Error(
+          `append rejected: the cut manifest for ${d.id} names ${unwritten.join(", ")}, which no ` +
+            `store here holds as a live cut`,
+        );
       }
     }
   }
@@ -339,16 +442,7 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
     gw.armValidityTimer(); // the batch may name the next boundary
     if (accepted > 0) gw.notifyUserDependents(); // pools read this ground's users
   }
-  // A landing slate that closes `read` ends live subscriptions the way an erase does (SPEC §29.3).
-  // `reseat()` already solves precisely this one phase later — "a parked reader must not keep serving
-  // a view built on the pre-erase ground" — and the reason is identical here: nothing in the slate's
-  // own deltas moves the watched entity's materialization, so no sink fires and no open stream would
-  // ever narrow. Readers wake with `done` and resubscribe into the narrowed gather. Already-delivered
-  // frames are not recalled; nothing can recall them, and §29.3's asymmetry already says so.
-  if (landsReadClosure(gw, fresh, Date.now())) {
-    for (const channel of [...gw.channels]) await channel.return();
-  }
-  return { accepted, duplicates };
+  return { receipt: { accepted, duplicates }, fresh };
 }
 
 // The admission function the store's own TRUST POLICY dictates (the body of `Gateway.admitFor`),
@@ -705,6 +799,55 @@ export async function federateImpl(
   deltas: Iterable<Delta>,
   opts: { admit?: (d: Delta) => boolean; ids?: boolean; admittedIds?: boolean } = {},
 ): Promise<FederationReport> {
+  const { all, now, admitted, rejected, acceptedIds, admittedIds } = await admitting(gw, () =>
+    federateAdmitted(gw, deltas, opts),
+  );
+  // As at append: a batch that closes reads (a slate record or an erasure) touches no watched
+  // entity, so open streams end and readers resubscribe into the narrowed reading.
+  const freshIds = new Set(acceptedIds);
+  if (
+    freshIds.size > 0 &&
+    landsReadClosure(
+      gw,
+      admitted.filter((d) => freshIds.has(d.id)),
+      now,
+    )
+  ) {
+    for (const channel of [...gw.channels]) await channel.return();
+  }
+  const accepted = acceptedIds.length;
+  const crossedIds = new Set(admitted.map((d) => d.id));
+  // "accepted" counts deltas NEWLY ingested — a duplicate verified but merged into what was
+  // already there, so a re-pull accepts nothing (union is idempotent). "held" is the unique-id
+  // remainder: offered ids neither newly ingested nor refused. Occurrences and unique ids are
+  // different dimensions (a refused delta offered twice counts twice in `rejected` and once in
+  // `held`'s complement), so the two are never subtracted from each other.
+  const notCrossedIds = new Set(all.filter((d) => !crossedIds.has(d.id)).map((d) => d.id));
+  const held = new Set(all.map((d) => d.id)).size - accepted - notCrossedIds.size;
+  const counts = { offered: all.length, accepted, rejected, held };
+  // The ids ride only when asked (see FederationReport): the counts are what every other caller
+  // reads, and the report keeps exactly the shape they compare.
+  return opts.ids === true
+    ? {
+        ...counts,
+        acceptedIds,
+        ...(opts.admittedIds === true ? { admittedIds: [...admittedIds].sort() } : {}),
+      }
+    : counts;
+}
+
+async function federateAdmitted(
+  gw: Gateway,
+  deltas: Iterable<Delta>,
+  opts: { admit?: (d: Delta) => boolean; ids?: boolean; admittedIds?: boolean },
+): Promise<{
+  all: Delta[];
+  now: number;
+  admitted: Delta[];
+  rejected: number;
+  acceptedIds: string[];
+  admittedIds: Set<string>;
+}> {
   if (gw.writeFailure !== undefined) {
     throw new Error(`this gateway can no longer persist: ${gw.writeFailure.message}`);
   }
@@ -746,6 +889,10 @@ export async function federateImpl(
       slateDefect(d, gw.reactor, gw.validityNow(), gw.operatorAuthor) !== undefined ||
       recoveryDefect(d, gw.reactor, gw.operatorAuthor, all) !== undefined ||
       paused.has(d.claims.author) ||
+      // A cut for this store is written by this store's own append, before its record; one that
+      // arrives by federation could come after the record and count what came between.
+      cutForHere(gw.reactor, gw.operatorAuthor, d, dead) ||
+      isCutManifest(d) ||
       // A cite refusal belongs with the UNLAWFUL group and not with the un-admitted one: the
       // batch-scoped closure below deliberately readmits negations of what crossed, and a delta this
       // store is staging a removal over must never come back through it. Safe by construction with
@@ -821,35 +968,5 @@ export async function federateImpl(
       if (acceptedIds.length > 0) gw.notifyUserDependents(); // as at append
     }
   }
-  // As at append: a batch that closes reads (a slate record or an erasure) touches no watched
-  // entity, so open streams end and readers resubscribe into the narrowed reading.
-  const freshIds = new Set(acceptedIds);
-  if (
-    freshIds.size > 0 &&
-    landsReadClosure(
-      gw,
-      admitted.filter((d) => freshIds.has(d.id)),
-      now,
-    )
-  ) {
-    for (const channel of [...gw.channels]) await channel.return();
-  }
-  const accepted = acceptedIds.length;
-  // "accepted" counts deltas NEWLY ingested — a duplicate verified but merged into what was
-  // already there, so a re-pull accepts nothing (union is idempotent). "held" is the unique-id
-  // remainder: offered ids neither newly ingested nor refused. Occurrences and unique ids are
-  // different dimensions (a refused delta offered twice counts twice in `rejected` and once in
-  // `held`'s complement), so the two are never subtracted from each other.
-  const notCrossedIds = new Set(all.filter((d) => !crossed.has(d.id)).map((d) => d.id));
-  const held = new Set(all.map((d) => d.id)).size - accepted - notCrossedIds.size;
-  const counts = { offered: all.length, accepted, rejected, held };
-  // The ids ride only when asked (see FederationReport): the counts are what every other caller
-  // reads, and the report keeps exactly the shape they compare.
-  return opts.ids === true
-    ? {
-        ...counts,
-        acceptedIds,
-        ...(opts.admittedIds === true ? { admittedIds: [...admittedIds].sort() } : {}),
-      }
-    : counts;
+  return { all, now, admitted, rejected, acceptedIds, admittedIds };
 }

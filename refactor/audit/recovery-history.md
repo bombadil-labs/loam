@@ -37,7 +37,29 @@ context `loam.cut`:
 - `attempt` and `recovery`: the attempt id and the id of the recovery record. The record is signed
   before any cut is written, so its id is known.
 - `key`: K1, the key being retired.
-- `index`: the store's arrival-log length just before the cut was written.
+
+**A manifest.** An operator-signed claim on the host, context `loam.cutmanifest`, naming the
+recovery record and every cut of the attempt (the host's and each pool's). It is written in the
+record's own append, ahead of it. The append door admits it only when every cut it names is
+already held, live, in this store or an attached pool, and the record needs it: the door refuses
+a retiring record without a manifest that names a live cut in the host and in every declared pool.
+The federate door drops manifests: only this store's own append writes one. A manifest is kept
+while a cut it names stands here.
+
+A pool cannot order its own arrivals against the host's. So a cut commits only if a manifest
+names it, and that manifest arrived BEFORE the record in the host's durable order. A cut written
+later, by any process, is in no such manifest. A manifest written later, by a writer that never saw
+the record, arrives after it and qualifies nothing.
+
+A cut must arrive BEFORE its recovery record wherever both are held. A cut that arrives after
+the record came too late: whatever K1 wrote between them would count. So the append door refuses a
+cut whose record is already held, and the federate door drops a cut naming this store (only this
+store's own append writes one). In the store that holds both, a cut that arrived after its record
+stays prepared, whatever an outcome says.
+
+The cut's own arrival in the store is the line. It carries no position: an erasure purge renumbers
+arrival indexes on the next boot, and a stated number would then disagree with the store. (#640
+removed an earlier `index` field for this reason.)
 
 **An outcome.** An operator-signed claim in the same store, context `loam.cutoutcome`, naming the
 cut and one of `committed` or `aborted`. It is written after the host commit (or the abort) and is
@@ -56,6 +78,7 @@ so an older marker can never become the lowest held one later.
 
 A cut's state in its store:
 
+- No qualifying manifest names it: PREPARED, whatever an outcome says (unless aborted).
 - No outcome, and the host holds the record (verified, unerased): committed. The outcome marker has
   not landed yet.
 - No outcome, and the host does not hold the record, or cannot be read: PREPARED. This fails closed:
@@ -72,12 +95,10 @@ their outcomes):
    attachable. If any is not, refuse before anything is written.
 2. **Write the cuts.** In each pool, append its cut. From that moment the pool PAUSES K1: its door
    (append and federate) refuses a delta signed by K1 while a PREPARED cut for K1 stands there.
-3. **Commit on the host, against the roster.** The recovery record carries `roster`, the roster
-   hash. The host door refuses the record if the declared-inbox roster at authorization has a
-   different hash. Host appends are serialized, so no declaration can land between that check and
-   the commit. (The build confirms the gateway serializes appends, or adds that lock.) The same
-   append writes the host's own cut, with `index` the host's arrival length just before the
-   record.
+3. **Commit on the host, behind the cuts.** The host door admits a record that retires a key only
+   when the host and every declared pool hold a live cut for it: this incarnation, not aborted.
+   Admission is serialized per gateway, so nothing this gateway admits lands between the check and
+   the commit. The same append writes the host's own cut, ahead of the record.
 4. **Write the outcomes.** In each pool, append the `committed` outcome. A pool whose outcome did
    not land stays in the journal, and the rerun writes it. Until then the pool reads the cut as
    committed if it can see the record, and fails closed if not.
@@ -100,12 +121,26 @@ A delta is ELIGIBLE history for a user in a store when all hold:
   binding removes the history, and a verified K2 counter-strike in force restores it (ruling 8: the
   new key can disown a thief's writes). This corrects the #631 reader, which counts a negated
   binding as history.
-- The store holds a cut naming ITSELF, that recovery and K1, in state committed, and the delta's
-  arrival index is below the cut's `index`.
+- The store holds a cut naming ITSELF, that recovery and K1, in state committed, and the delta
+  arrived before the cut.
 - A store with no such cut has no history for that recovery. This fails closed.
 
-Arrival order must be the same after a restart. The sqlite backend replays in insertion order; a
-rail pins it.
+Arrival order must be the same after a restart. The sqlite backend replays in insertion order
+(`seq`); a rail pins it, including after a purge.
+
+## Other writers
+
+The design does not assume one writer. Another process on the same store only makes history fail
+closed:
+
+- A process shows history for a store only up to a cut it holds. What precedes the cut in its log
+  precedes it in the store's durable order: its replay is in `seq` order, and its own appends land
+  in the order it makes them. A process that never saw the cut shows no history.
+- A pool another process declares during a recovery gets no cut, so it shows none of K1's earlier
+  writes. The command reports it. It does not write a late cut there, because a late cut could
+  count writes made after the recovery.
+- A server that booted before the recovery still treats K1 as the user until it restarts. That is
+  the general rule for a served store, so `loam user recover` refuses while a server serves it.
 
 ## Crash rails
 

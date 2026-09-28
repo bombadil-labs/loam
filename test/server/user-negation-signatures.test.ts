@@ -9,6 +9,7 @@
 // whose signed claims must stand.
 
 import { afterEach, describe, expect, it } from "vitest";
+import { withHostCut } from "../helpers/recovery-cut.js";
 import {
   authorForSeed,
   makeDelta,
@@ -149,7 +150,7 @@ describe("under a recovery chain, an unsigned strike leaves the head's root clai
       lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30),
     );
     const root = op(rootClaims("ada", K2, OP, 31));
-    await gw.append([record, lineage, root]);
+    await gw.append(withHostCut(gw, OP_SEED, [record, lineage, root]));
     expect(readers(gw, "ada")).toEqual({ index: K2, view: K2, raw: [K2] });
     return { gw, ada, root };
   }

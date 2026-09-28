@@ -6,9 +6,13 @@
 //   - an INCARNATION marker: which incarnation of this store it is. A store writes its own before it
 //     admits anything else; the active one is the lowest-arrival marker held, so a replayed older
 //     marker never displaces it.
-//   - a CUT: this store's arrival length just before a recovery, naming the incarnation, the recovery
-//     record and the retired key. It counts only in the incarnation it names.
+//   - a CUT: where in this store's arrival order a recovery begins, naming the incarnation, the
+//     recovery record and the retired key. Its own arrival is the line: what the key signed and this
+//     store admitted before the cut is history. It counts only in the incarnation it names.
 //   - an OUTCOME: the cut's terminal state, committed or aborted.
+//   - a MANIFEST, on the host beside the recovery record and ahead of it: every cut of the attempt.
+//     A pool cannot order itself against the host, so a cut commits only if a manifest that arrived
+//     before its record names it. A cut written later, by any process, is in no such manifest.
 // A cut with no outcome is COMMITTED if the host holds its recovery record, else PREPARED: the store
 // pauses the retired key and shows no history for it. That fails closed.
 //
@@ -21,6 +25,7 @@ import { RECOVERIES, userGroundOf, verified } from "./user-root.js";
 export const CTX_INCARNATION = "loam.incarnation";
 export const CTX_CUT = "loam.cut";
 export const CTX_CUT_OUTCOME = "loam.cutoutcome";
+export const CTX_CUT_MANIFEST = "loam.cutmanifest";
 
 const prim = (role: string, value: string) =>
   ({ role, target: { kind: "primitive", value } }) as const;
@@ -53,7 +58,6 @@ export interface CutSpec {
   readonly attempt: string;
   readonly recovery: string;
   readonly key: string;
-  readonly index: number;
 }
 export const cutClaims = (spec: CutSpec, operator: string, t: number): Claims =>
   claims(
@@ -63,9 +67,20 @@ export const cutClaims = (spec: CutSpec, operator: string, t: number): Claims =>
       prim("attempt", spec.attempt),
       prim("recovery", spec.recovery),
       prim("key", spec.key),
-      // Named `position`: the filing pointer already uses the role `index`.
-      prim("position", String(spec.index)),
     ],
+    operator,
+    t,
+  );
+
+export const manifestClaims = (
+  recovery: string,
+  cuts: readonly string[],
+  operator: string,
+  t: number,
+): Claims =>
+  claims(
+    CTX_CUT_MANIFEST,
+    [prim("recovery", recovery), ...[...new Set(cuts)].sort().map((c) => prim("cut", c))],
     operator,
     t,
   );
@@ -79,7 +94,7 @@ export const outcomeClaims = (cut: string, outcome: Outcome, operator: string, t
  * a fact about one store; a copy anywhere else is testimony, so none is offered to a peer.
  */
 export function isStoreLocal(d: Delta): boolean {
-  return [CTX_INCARNATION, CTX_CUT, CTX_CUT_OUTCOME].some((c) => inContext(d, c));
+  return [CTX_INCARNATION, CTX_CUT, CTX_CUT_OUTCOME, CTX_CUT_MANIFEST].some((c) => inContext(d, c));
 }
 
 // The one primitive value `role` carries, or undefined.
@@ -89,6 +104,13 @@ function field(d: Delta, role: string): string | undefined {
   const t = ps[0]!.target;
   return t.kind === "primitive" && typeof t.value === "string" ? t.value : undefined;
 }
+// Every primitive value `role` carries.
+const fields = (d: Delta, role: string): string[] =>
+  d.claims.pointers.flatMap((p) =>
+    p.role === role && p.target.kind === "primitive" && typeof p.target.value === "string"
+      ? [p.target.value]
+      : [],
+  );
 const inContext = (d: Delta, context: string): boolean =>
   d.claims.pointers.some(
     (p) =>
@@ -145,6 +167,47 @@ export function activeIncarnation(
   return best?.d;
 }
 
+/** This store's incarnation id: what a cut written here names as its `store`. */
+export function incarnationId(
+  reactor: Reactor,
+  operator: string | undefined,
+  erased: ReadonlySet<string>,
+): string | undefined {
+  const d = activeIncarnation(reactor, operator, erased);
+  return d === undefined ? undefined : field(d, "incarnation");
+}
+
+/** The outcomes held here for `cut`, as written (none, one, or contradictory). */
+export function outcomesOf(
+  reactor: Reactor,
+  operator: string,
+  cut: string,
+  erased: ReadonlySet<string>,
+): ReadonlySet<string> {
+  return new Set(
+    held(reactor, operator, CTX_CUT_OUTCOME, erased)
+      .filter((o) => field(o, "cut") === cut)
+      .map((o) => field(o, "outcome") ?? ""),
+  );
+}
+
+/**
+ * Does this store hold a live cut for `recovery` retiring `key`: one naming this incarnation,
+ * and not aborted? What a retiring recovery needs in every store before it
+ * commits.
+ */
+export function holdsLiveCut(
+  reactor: Reactor,
+  operator: string,
+  recovery: string,
+  key: string,
+  erased: ReadonlySet<string>,
+): boolean {
+  return cutsHere(reactor, operator, erased).some(
+    (c) => c.recovery === recovery && c.key === key && c.state !== "aborted",
+  );
+}
+
 export type CutState = "prepared" | "committed" | "aborted";
 
 /** The state of `cut` in its store: its outcome if one stands, else whether the host committed. */
@@ -160,46 +223,59 @@ export function cutState(
   }
   if (outcomes.size > 1) return "prepared"; // contradictory outcomes: fail closed
   const [only] = outcomes;
-  if (only === "committed" || only === "aborted") return only;
-  if (only !== undefined) return "prepared";
-  // No outcome yet: committed only if the host holds the recovery record, verified and unerased.
+  if (only === "aborted") return only;
+  // A cut that arrived after its record, in the store that holds both, came too late to draw the
+  // line: whatever the key wrote between them would count. It never commits, whatever an outcome says.
   const recovery = field(cut, "recovery");
   const users = userGroundOf(reactor);
   const record = recovery === undefined ? undefined : users.reactor.get(recovery);
+  if (record !== undefined && users.reactor === reactor) {
+    const [r, c] = [arrivalIndex(reactor, record.id), arrivalIndex(reactor, cut.id)];
+    if (r !== undefined && c !== undefined && r < c) return "prepared";
+  }
+  if (recovery === undefined || !manifested(reactor, operator, cut.id, recovery)) return "prepared";
+  if (only === "committed") return only;
+  if (only !== undefined) return "prepared";
+  // No outcome yet: committed only if the host holds the recovery record, verified and unerased.
   return record !== undefined && verified(record) && !users.erased().has(record.id)
     ? "committed"
     : "prepared";
 }
 
-// A cut's state as every reader and the erase door see it: a cut that did not arrive at the position
-// it names is PREPARED unless aborted, whatever outcome claims it committed.
-function effectiveState(
-  reactor: Reactor,
-  operator: string,
-  cut: Delta,
-  erased: ReadonlySet<string>,
-): CutState {
-  const state = cutState(reactor, operator, cut, erased);
-  const at = arrivalIndex(reactor, cut.id);
-  return state === "aborted" || (at !== undefined && field(cut, "position") === String(at))
-    ? state
-    : "prepared";
+// Is `cut` named by a manifest for `recovery` that qualifies: operator-signed, verified, held and
+// unerased in the ground this store reads users from, and, while the record is held there, arrived
+// before it. Arrival order is durable, so a manifest written after the record never qualifies.
+function manifested(reactor: Reactor, operator: string, cut: string, recovery: string): boolean {
+  const users = userGroundOf(reactor);
+  const erased = users.erased();
+  const record = users.reactor.get(recovery);
+  const recordAt =
+    record === undefined || erased.has(recovery)
+      ? undefined
+      : arrivalIndex(users.reactor, recovery);
+  for (const id of users.reactor.byTarget(RECOVERIES)) {
+    if (erased.has(id)) continue;
+    const m = users.reactor.get(id);
+    if (m === undefined || m.claims.author !== operator || !verified(m)) continue;
+    if (!inContext(m, CTX_CUT_MANIFEST) || field(m, "recovery") !== recovery) continue;
+    if (!fields(m, "cut").includes(cut)) continue;
+    const at = arrivalIndex(users.reactor, id);
+    if (recordAt !== undefined && (at === undefined || at > recordAt)) continue;
+    return true;
+  }
+  return false;
 }
 
 export interface Cut {
   readonly delta: Delta;
   readonly recovery: string;
   readonly key: string;
+  /** Its own place in this store's arrival log: the line history stops at. */
   readonly index: number;
   readonly state: CutState;
 }
 
-/**
- * The cuts that count in THIS store: those naming its active incarnation, with their state. A cut
- * must have arrived at exactly the position it names: that is the arrival length it measured, so
- * nothing landed between the measurement and the cut. A cut that did not is kept PREPARED: it
- * pauses its key and yields no history, and only an abort clears it.
- */
+/** The cuts that count in THIS store: those naming its active incarnation, with their state. */
 export function cutsHere(
   reactor: Reactor,
   operator: string | undefined,
@@ -218,7 +294,7 @@ export function cutsHere(
       recovery,
       key,
       index: arrivalIndex(reactor, d.id)!,
-      state: effectiveState(reactor, operator, d, erased),
+      state: cutState(reactor, operator, d, erased),
     });
   }
   return out;
@@ -263,9 +339,10 @@ export function historyBefore(
 }
 
 /**
- * Why erasing `target` is refused, or undefined. The active incarnation marker, a PREPARED cut, and a
- * cut or outcome whose partner stands (unless the partner is erased in the same batch) are kept: each
- * is a durable fact the history reader or the pause depends on.
+ * Why erasing `target` is refused, or undefined. The active incarnation marker, a PREPARED cut, a cut
+ * or outcome whose partner stands (unless the partner is erased in the same batch), and a manifest
+ * naming a cut that stands here are kept: each is a durable fact the history reader or the pause
+ * depends on.
  */
 export function cutErasureDefect(
   reactor: Reactor,
@@ -285,7 +362,7 @@ export function cutErasureDefect(
     const here = activeIncarnation(reactor, operator, erased);
     if (here === undefined || field(target, "store") !== field(here, "incarnation"))
       return undefined;
-    if (effectiveState(reactor, operator, target, erased) === "prepared") {
+    if (cutState(reactor, operator, target, erased) === "prepared") {
       return "a prepared recovery cut cannot be erased while the host may still commit";
     }
     const outcome = held(reactor, operator, CTX_CUT_OUTCOME, erased).find(
@@ -294,6 +371,14 @@ export function cutErasureDefect(
     return outcome === undefined
       ? undefined
       : "a recovery cut and its outcome are erased together, not one alone";
+  }
+  if (inContext(target, CTX_CUT_MANIFEST)) {
+    const standing = fields(target, "cut").filter(
+      (id) => reactor.get(id) !== undefined && !erased.has(id) && !erasedInBatch.has(id),
+    );
+    return standing.length > 0
+      ? "a cut manifest is kept while a cut it names stands here: erase the cut and its outcome first"
+      : undefined;
   }
   if (inContext(target, CTX_CUT_OUTCOME)) {
     const cut = field(target, "cut");
@@ -305,4 +390,121 @@ export function cutErasureDefect(
       : undefined;
   }
   return undefined;
+}
+
+/**
+ * The live cuts this store holds for `recovery` retiring `key`: naming this incarnation and not
+ * aborted, whether held or FRESH in `batch`. A cut in the batch that is already held is judged as
+ * held.
+ */
+export function liveCutIds(
+  reactor: Reactor,
+  operator: string,
+  batch: readonly Delta[],
+  recovery: string,
+  key: string,
+  erased: ReadonlySet<string>,
+): Set<string> {
+  const here = incarnationId(reactor, operator, erased);
+  const ours = (d: Delta): boolean =>
+    d.claims.author === operator &&
+    inContext(d, CTX_CUT) &&
+    field(d, "store") === here &&
+    field(d, "recovery") === recovery &&
+    field(d, "key") === key;
+  return new Set([
+    ...held(reactor, operator, CTX_CUT, erased)
+      .filter((d) => ours(d) && cutState(reactor, operator, d, erased) !== "aborted")
+      .map((d) => d.id),
+    ...batch.filter((d) => reactor.get(d.id) === undefined && ours(d)).map((d) => d.id),
+  ]);
+}
+
+/** Is `d` a cut manifest? It is store-local: only this store's own append writes one. */
+export const isCutManifest = (d: Delta): boolean => inContext(d, CTX_CUT_MANIFEST);
+
+/**
+ * The manifest a retiring `record` commits behind: a fresh operator manifest for it, ahead of it in
+ * `batch`. Returns the cut ids it names, or undefined when there is none.
+ */
+export function manifestAhead(
+  reactor: Reactor,
+  operator: string,
+  batch: readonly Delta[],
+  record: Delta,
+): ReadonlySet<string> | undefined {
+  const at = batch.indexOf(record);
+  const m = batch
+    .slice(0, at < 0 ? 0 : at)
+    .find(
+      (d) =>
+        reactor.get(d.id) === undefined &&
+        d.claims.author === operator &&
+        inContext(d, CTX_CUT_MANIFEST) &&
+        field(d, "recovery") === record.id,
+    );
+  return m === undefined ? undefined : new Set(fields(m, "cut"));
+}
+
+/**
+ * Why `batch` is refused for a manifest in it, or undefined. A manifest is written once, beside its
+ * record and ahead of it: one whose record is not later in the same batch could name a later cut.
+ */
+export function manifestDefect(
+  reactor: Reactor,
+  operator: string | undefined,
+  batch: readonly Delta[],
+): string | undefined {
+  if (operator === undefined) return undefined;
+  for (const [i, d] of batch.entries()) {
+    if (reactor.get(d.id) !== undefined || d.claims.author !== operator) continue;
+    if (!inContext(d, CTX_CUT_MANIFEST)) continue;
+    const recovery = field(d, "recovery");
+    const ahead = batch
+      .slice(i + 1)
+      .some((r) => r.id === recovery && reactor.get(r.id) === undefined);
+    if (!ahead) {
+      return `a cut manifest is written ahead of its recovery record, in the same append`;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Why `batch` is refused for a cut in it, or undefined. A cut for this store must arrive before its
+ * recovery record: a cut written once the record is held here, or in the ground this store reads
+ * users from, would count what the retired key wrote in between.
+ */
+export function lateCutDefect(
+  reactor: Reactor,
+  operator: string | undefined,
+  batch: readonly Delta[],
+  erased: ReadonlySet<string>,
+): string | undefined {
+  if (operator === undefined) return undefined;
+  const here = incarnationId(reactor, operator, erased);
+  const users = userGroundOf(reactor).reactor;
+  for (const d of batch) {
+    if (reactor.get(d.id) !== undefined || d.claims.author !== operator) continue;
+    if (!inContext(d, CTX_CUT) || field(d, "store") !== here) continue;
+    const recovery = field(d, "recovery");
+    if (recovery !== undefined && users.get(recovery) !== undefined) {
+      return `a recovery cut must arrive before its record, and ${recovery} is already held here`;
+    }
+  }
+  return undefined;
+}
+
+/** Is `d` a cut naming this store's incarnation? Only this store's own append may write one. */
+export function cutForHere(
+  reactor: Reactor,
+  operator: string | undefined,
+  d: Delta,
+  erased: ReadonlySet<string>,
+): boolean {
+  return (
+    operator !== undefined &&
+    inContext(d, CTX_CUT) &&
+    field(d, "store") === incarnationId(reactor, operator, erased)
+  );
 }
