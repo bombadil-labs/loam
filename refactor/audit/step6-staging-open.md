@@ -1,6 +1,6 @@
 # Step 6: the read-only staging open (design note)
 
-Status: design note for Sol, 2026-09-28. No code. It details the constructor obligation in
+Status: design note, reviewed by Sol (#651), 2026-09-28. No code. It details the constructor obligation in
 `step6-handoff.md` (#648), step 3.
 
 ## Why `Gateway.open` cannot open a staged peer
@@ -41,22 +41,38 @@ Two guards enforce "may not":
 2. **No reactor for admitted state.** The staged peer keeps candidate rows in a plain map keyed by
    id. Nothing it holds can serve a view.
 
+## Import happens inside the commit
+
+Durable import, the new peer's acknowledgement, and the transfer of ownership are ONE effect (the
+handoff contract, #648, step 4). So the staged peer's verified candidates, with the qualified
+refusals, the obligations, the policy and the admitted holdings, become durable as PART of the
+substrate's import, ack and commit [SUBSTRATE], never in a Loam step after it. If the commit could
+release the old peer before the new peer's state were durable, a crash between them would leave
+no responsible state.
+
+On one backend the substrate's import, ack and ownership CAS share one transaction. Loam does not
+rely on sharing it: its own marker may join the committed import only if the adapter makes it part
+of that import explicitly.
+
 ## Opening on the proof
 
-`openStaged(staged, proof)` [LOAM, calling SUBSTRATE]:
+`openStaged(descriptor)` [LOAM, calling SUBSTRATE]. The descriptor is typed: the attempt id, the
+old and new PeerIds, the old state version, and both digests. Digests alone are replay-ambiguous,
+and a Loam staged object is not the substrate's business.
 
-1. Ask the substrate whether the commit for K_p is durable, and whether its state and policy
-   digests match the staged ones [SUBSTRATE]. Any "no" returns a refusal and changes nothing.
-2. Only then build the peer: create K_p's durable peer state from the carried refusals and
-   obligations [SUBSTRATE, created at this step]; admit the carried holdings, and only those,
-   through the new peer's admission, with import testimony [SUBSTRATE]; write K_p's incarnation
-   marker; wire persistence; replay registrations under the staged policy; and advance to now.
-3. Then admit the held items from the old peer's queue in order (handoff step 5), and serve.
+1. Ask the substrate to validate the descriptor against its durable commit and the imported state
+   [SUBSTRATE]. Any "no" returns a refusal and changes nothing.
+2. Then build the Gateway runtime over the committed state: write K_p's incarnation marker where
+   the committed import did not already hold it, wire persistence, replay registrations under the
+   committed policy, advance to now, and serve.
+3. Then admit the held items from the old peer's queue in order (handoff step 5).
 
-A failed proof at step 1 leaves the backend byte-identical: no marker, no replay into an admitted
-set, no materialization, no admission, and no serving. A crash between steps 2 and 3 leaves a peer
-that the substrate knows is committed. The rerun finishes step 2 idempotently: holdings already
-admitted are duplicates, and the marker is not written twice.
+Step 2 is an idempotent pass: a rerun after a crash writes no second marker and admits nothing
+twice. A mismatch, or a missing import after the commit, fails closed, and is repaired from the
+committed state, never by a raw replay of the backend.
+
+A failed validation at step 1 leaves the backend byte-identical: no marker, no replay into an
+admitted set, no materialization, no admission, and no serving.
 
 ## Rails (with the handoff's criterion 13)
 
@@ -67,12 +83,13 @@ admitted are duplicates, and the marker is not written twice.
   `test/gateway/handoff-staging.test.ts`
 - A row on the backend that the holdings list does not name is not admitted after a valid open, and
   a refused-but-held row stays refused. `test/gateway/handoff-holdings.test.ts`
-- Opening twice on the same proof admits nothing twice and writes one marker.
+- Opening twice on the same descriptor admits nothing twice and writes one marker; a missing
+  import after the commit fails closed and is not repaired by raw replay.
   `test/gateway/handoff-staging.test.ts`
 
-## Open for Sol
+## Settled with Sol
 
-- Does the substrate's "is the commit durable for K_p with these digests" call take the staged
-  object, or the digests alone?
-- On a single backend, can the substrate commit and Loam's step 2 share one transaction, or is step
-  2 always a separate, idempotent pass after the commit?
+1. The commit check takes a typed handoff descriptor (attempt, old and new PeerIds, old state
+   version, both digests), not a Loam staged object and not digests alone.
+2. On one backend, the substrate's import, ack and ownership CAS can share a transaction. Loam's
+   runtime construction and registration replay run afterwards, as an idempotent pass.
