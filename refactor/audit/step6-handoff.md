@@ -37,7 +37,11 @@ it.
 
 All refusing checks run first, and a refusal writes nothing:
 
-- the pool is attached, has one readable owner (`poolOwner`), and has no open handoff attempt;
+- the pool is attached and has no open handoff attempt;
+- an INBOX pool has one readable owner (`poolOwner`, which reads an inbox's effective admin
+  grants). A channel, quarantine or separate pool has no owner grant by design: its preflight is
+  its own attachment and constitutional check (it resolves its declaration, its pool handle is
+  attached, and its store reads without quarantined constitution);
 - the pool has no open recovery attempt (a prepared recovery cut): a handoff waits for it, or the
   operator aborts it first;
 - the backend can provide the shared durable commit record that step 4 needs. If it cannot, the
@@ -91,7 +95,12 @@ After the fence has drained:
 2. **The active byte obligations**: every obligation of the pool (standings `owed` or `unasked`,
    the backend's purge debt, the half-done purges of step 2), each with its stable id, generation,
    surface and source PeerId.
-3. The new peer exists only as a STAGED, CLOSED peer. It receives the carried sets through the
+3. The new peer exists only as a STAGED, CLOSED peer. **Constructor obligation [LOAM]:** today's
+   `Gateway.open` cannot open it. It appends a fresh incarnation marker before any proof is
+   checked (gateway.ts:587-600) and replays registrations. The handoff path needs a closed staging
+   open over the pool's backend that reads only: no append, no marker, no materialization, no
+   admission and no serving, until the substrate proof and both digests validate. Only then does
+   the peer establish K_p's incarnation and serve. It receives the carried sets through the
    substrate's import [SUBSTRATE]. Import is allowed only into a staged, closed peer during a
    handoff, or at the creation of an empty peer; never into a serving peer. It must keep the
    source-qualified events and the obligation ids and generations. Nothing is written as ordinary
@@ -202,7 +211,12 @@ Each names the rail that will prove it. The rails are written at P3, against the
 12. After a handoff, a host-seeded registration still binds in the new peer's views only under the
     declared host-law selection of its trust policy; with that selection absent from the staged
     policy, the commit refuses. `test/gateway/handoff-policy.test.ts`
-13. A fresh pool starts under its own key with empty state and serves its first admission with no
+13. A staging open with a missing, forged or mismatched proof leaves the pool's backend
+    byte-identical: no K_p incarnation marker, no registration replay, no append.
+    `test/gateway/handoff-staging.test.ts`
+14. A channel pool and a quarantine pool, which have no owner grant, pass their own preflight and
+    hand off. `test/gateway/handoff-commit.test.ts`
+15. A fresh pool starts under its own key with empty state and serves its first admission with no
    handoff records. `test/gateway/handoff-fresh-pool.test.ts`
 
 ## Settled with Sol
