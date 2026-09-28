@@ -208,7 +208,9 @@ describe("the recovery barrier", () => {
       ]);
     };
     expect(await recoverUser(direct({ afterCuts: declare }))).toBe(1);
-    expect(err.join("\n")).toMatch(/holds no live cut for it \(or is not attached\)/);
+    expect(err.join("\n")).toMatch(
+      /holds no live cut for it in its manifest \(or is not attached\)/,
+    );
     expect(existsSync(journal())).toBe(false);
     expect(seedKey()).toBe(k1);
     await ground((gw, op) => {
@@ -266,7 +268,9 @@ describe("the recovery barrier", () => {
         signClaims(rootClaims("ada", k2, op, t), seed),
       ];
       await expect(gw.append(withHostCut(gw, seed, commit))).rejects.toThrow(
-        new RegExp(`${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} holds no live cut`),
+        new RegExp(
+          `${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} holds no live cut for it in its manifest`,
+        ),
       );
       expect(gw.reactor.get(record.id)).toBeUndefined();
       expect(

@@ -38,6 +38,19 @@ context `loam.cut`:
   before any cut is written, so its id is known.
 - `key`: K1, the key being retired.
 
+**A manifest.** An operator-signed claim on the host, context `loam.cutmanifest`, naming the
+recovery record and every cut of the attempt (the host's and each pool's). It is written in the
+record's own append, ahead of it. The append door admits it only when every cut it names is
+already held, live, in this store or an attached pool, and the record needs it: the door refuses
+a retiring record without a manifest that names a live cut in the host and in every declared pool.
+The federate door drops manifests: only this store's own append writes one. A manifest is kept
+while a cut it names stands here.
+
+A pool cannot order its own arrivals against the host's. So a cut commits only if a manifest
+names it, and that manifest arrived BEFORE the record in the host's durable order. A cut written
+later, by any process, is in no such manifest. A manifest written later, by a writer that never saw
+the record, arrives after it and qualifies nothing.
+
 A cut must arrive BEFORE its recovery record wherever both are held. A cut that arrives after
 the record came too late: whatever K1 wrote between them would count. So the append door refuses a
 cut whose record is already held, and the federate door drops a cut naming this store (only this
@@ -65,6 +78,7 @@ so an older marker can never become the lowest held one later.
 
 A cut's state in its store:
 
+- No qualifying manifest names it: PREPARED, whatever an outcome says (unless aborted).
 - No outcome, and the host holds the record (verified, unerased): committed. The outcome marker has
   not landed yet.
 - No outcome, and the host does not hold the record, or cannot be read: PREPARED. This fails closed:

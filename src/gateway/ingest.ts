@@ -71,10 +71,13 @@ import { recordPrevious, recoveryDefect, userGroundOf } from "./user-root.js";
 import { hasMemberOf, lowerMembershipJson } from "./member-of.js";
 import { attachedPool, declaredInboxes, readContainerTable } from "./container.js";
 import {
-  coversRecovery,
   cutForHere,
+  isCutManifest,
   isStoreLocal,
   lateCutDefect,
+  liveCutIds,
+  manifestAhead,
+  manifestDefect,
   pausedKeys,
 } from "./recovery-cut.js";
 
@@ -326,31 +329,63 @@ async function appendAdmitted(
     }
   }
   // Recovery barrier (recovery-history.md), read under the admission lock so nothing lands between
-  // the check and the commit. A record that retires a key commits only behind its barrier: this store
-  // and every declared pool hold a live cut for it.
+  // the check and the commit. A record that retires a key commits only behind its barrier: a cut
+  // manifest ahead of it in this append, naming a live cut in this store and in every declared pool,
+  // and naming nothing else. A name for a cut not yet written could be filled in later by a writer
+  // that never saw the record.
   if (gw.operatorAuthor !== undefined) {
     const op = gw.operatorAuthor;
     const refused = refusedIds(gw.reactor, op);
-    const late = lateCutDefect(gw.reactor, op, batch, refused);
-    if (late !== undefined) throw new Error(`append rejected: ${late}`);
+    const defect =
+      lateCutDefect(gw.reactor, op, batch, refused) ?? manifestDefect(gw.reactor, op, batch);
+    if (defect !== undefined) throw new Error(`append rejected: ${defect}`);
     for (const d of batch) {
       const previous = d.claims.author === op ? recordPrevious(d) : undefined;
       if (previous === undefined) continue;
-      const uncut = [
-        ...(coversRecovery(gw.reactor, op, batch, d.id, previous, refused) ? [] : ["this store"]),
-        ...declaredInboxes(readContainerTable(gw.reactor, gw.validityNow(), op)).filter((pool) => {
-          const g = attachedPool(gw, pool);
-          return (
-            g === undefined ||
-            !coversRecovery(g.reactor, op, [], d.id, previous, refusedIds(g.reactor, op))
-          );
-        }),
+      const named = manifestAhead(gw.reactor, op, batch, d);
+      if (named === undefined) {
+        throw new Error(
+          `append rejected: recovery ${d.id} retires ${previous} and has no cut manifest ahead of ` +
+            `it in this append. \`loam user recover\` writes the cuts and the manifest first.`,
+        );
+      }
+      const stores = [
+        { name: "this store", ground: gw as Gateway | undefined, batch },
+        ...declaredInboxes(readContainerTable(gw.reactor, gw.validityNow(), op)).map((pool) => ({
+          name: pool,
+          ground: attachedPool(gw, pool),
+          batch: [] as Delta[],
+        })),
       ];
+      const live = new Set<string>();
+      const uncut: string[] = [];
+      for (const s of stores) {
+        const ids =
+          s.ground === undefined
+            ? new Set<string>()
+            : liveCutIds(
+                s.ground.reactor,
+                op,
+                s.batch,
+                d.id,
+                previous,
+                refusedIds(s.ground.reactor, op),
+              );
+        for (const id of ids) live.add(id);
+        if (![...ids].some((id) => named.has(id))) uncut.push(s.name);
+      }
       if (uncut.length > 0) {
         throw new Error(
           `append rejected: recovery ${d.id} retires ${previous}, and ${uncut.join(", ")} ` +
-            `holds no live cut for it (or is not attached), so ${previous} could write there ` +
-            `unseen. \`loam user recover\` writes the cuts first.`,
+            `holds no live cut for it in its manifest (or is not attached), so ${previous} could ` +
+            `write there unseen. \`loam user recover\` writes the cuts first.`,
+        );
+      }
+      const unwritten = [...named].filter((id) => !live.has(id));
+      if (unwritten.length > 0) {
+        throw new Error(
+          `append rejected: the cut manifest for ${d.id} names ${unwritten.join(", ")}, which no ` +
+            `store here holds as a live cut`,
         );
       }
     }
@@ -857,6 +892,7 @@ async function federateAdmitted(
       // A cut for this store is written by this store's own append, before its record; one that
       // arrives by federation could come after the record and count what came between.
       cutForHere(gw.reactor, gw.operatorAuthor, d, dead) ||
+      isCutManifest(d) ||
       // A cite refusal belongs with the UNLAWFUL group and not with the un-admitted one: the
       // batch-scoped closure below deliberately readmits negations of what crossed, and a delta this
       // store is staging a removal over must never come back through it. Safe by construction with

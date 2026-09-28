@@ -10,10 +10,11 @@
 //   4. The cuts (recovery-history.md): one in every declared inbox pool, each journaled before it
 //      is written. From its cut on, a pool pauses the old key. A pool that is not attached refuses
 //      the recovery in step 1, because it could not be cut.
-//   5. One atomic operator append: the host's own cut, the record, its lineage, the new root claim,
-//      and strikes of the old key's standing in the host. The door admits the record only if this
-//      store and every declared pool hold a live cut for it, so a pool declared since step 1
-//      refuses the commit. From here the fence holds everywhere.
+//   5. One atomic operator append: the host's own cut, the cut manifest (every cut that landed), the
+//      record, its lineage, the new root claim, and strikes of the old key's standing in the host.
+//      The door admits the record only if the manifest names a live cut in this store and in every
+//      declared pool, so a pool declared since step 1 refuses the commit. From here the fence holds
+//      everywhere.
 //   6. The outcomes: `committed` beside every cut once the record landed, `aborted` once it provably
 //      did not. An abort lands before the key files roll back, so no pool stays paused unjournaled.
 //   7. After an append error, READ before undoing: the append may have committed. A read that
@@ -51,6 +52,7 @@ import { refusedIds } from "../gateway/erase.js";
 import {
   cutClaims,
   cutsHere,
+  manifestClaims,
   incarnationId,
   outcomeClaims,
   outcomesOf,
@@ -541,8 +543,27 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
       ...[...retired].flatMap((key) => standingOf(gw.reactor, key)),
     ]);
     try {
-      const hostCut = previous === undefined ? [] : [cut(gw, HOST)];
-      await gw.append([...hostCut, record, lineage, rootClaim, ...struck]);
+      // The manifest names every cut this attempt landed, the host's included, and goes ahead of
+      // the record: the door admits the record only behind it.
+      const barrier: Delta[] = [];
+      if (previous !== undefined) {
+        const hostCut = cut(gw, HOST);
+        const landed = roster.flatMap((pool) =>
+          (j.cuts?.[pool] ?? []).filter(
+            (id) => attachedPool(gw, pool)!.reactor.get(id) !== undefined,
+          ),
+        );
+        barrier.push(
+          hostCut,
+          signClaims(
+            withStamp(gw.stamp(operator), (t) =>
+              manifestClaims(record.id, [hostCut.id, ...landed], operator, t),
+            ),
+            opSeed,
+          ),
+        );
+      }
+      await gw.append([...barrier, record, lineage, rootClaim, ...struck]);
     } catch (err) {
       await gw.close().catch(() => {});
       // 7. Read before undoing.
