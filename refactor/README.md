@@ -127,6 +127,11 @@ Design:
      recovery, every inbox records where it stands, and pauses the old key. A store with no cut
      shows no history until step 6. Today the cuts are signed by the host peer's key; after step 6
      each pool's own key signs its own. Design: `audit/recovery-history.md`.
+   - **Locator claims and optional registries move to step 7** (Claude and Sol, 2026-09-28).
+     SPEC-14 already defines the `locator` evidence shape, and those rules stay normative: a
+     locator is evidence, not authority. Step 5 shipped no locator witness or transport. Step 7
+     builds them, beside publish and subscribe and the HTTP binding. A registry or a locator never
+     changes a principal's authority for the same pinned root and the same held evidence.
 
 ## What stays in force
 
