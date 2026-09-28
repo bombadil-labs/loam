@@ -105,15 +105,22 @@ After the fence has drained:
    handoff, or at the creation of an empty peer; never into a serving peer. It must keep the
    source-qualified events and the obligation ids and generations. Nothing is written as ordinary
    deltas the new peer could later strike.
-4. **The destination's policy and config** is staged and authenticated beside that state: its
+4. **The currently admitted holdings**: the ids the surface has admitted and holds live, with
+   their exclusion and serving status. They are staged with the state and named in the state
+   digest. At import each one's bytes and signature are verified, and a refused id is excluded,
+   even when its bytes are still held pending a purge. Each inherited holding gets the NEW peer's
+   import testimony, never a borrowed host arrival sequence. Replaying every raw backend row at an
+   open would bypass the admission boundary and could turn refused-but-held bytes into an admitted
+   value, so the new peer's admitted set comes from this list only.
+5. **The destination's policy and config** is staged and authenticated beside that state: its
    own-law key K_p; its explicit host-law selections (the law contexts where it selects the host
    as a trusted author, for example seeded registrations and the container table); its external
    host user ground (the host key that governs user facts); and any pinned host erasure governor.
    The carried refusals prevent re-entry, but only this policy preserves which held claims bind in
    its views, so "keeps answering as before" depends on it. SPEC-6 already requires the erasure
    pins in the handoff commit.
-5. The carried state gets a canonical digest over the full qualified refusal events and the
-   obligation identities, generations and surfaces, not only sorted ids. The policy gets its own
+6. The carried state gets a canonical digest over the full qualified refusal events and the
+   obligation identities, generations and surfaces, and the admitted holdings, not only sorted ids. The policy gets its own
    digest over those four fields.
 
 ### 4. Commit (substrate CAS, then the new peer's ack)
@@ -216,7 +223,10 @@ Each names the rail that will prove it. The rails are written at P3, against the
     `test/gateway/handoff-staging.test.ts`
 14. A channel pool and a quarantine pool, which have no owner grant, pass their own preflight and
     hand off. `test/gateway/handoff-commit.test.ts`
-15. A fresh pool starts under its own key with empty state and serves its first admission with no
+15. A live claim D and a refused-but-held claim X in the old pool: after the handoff D serves and X
+    is still refused, and neither depends on replaying raw backend rows as admission.
+    `test/gateway/handoff-holdings.test.ts`
+16. A fresh pool starts under its own key with empty state and serves its first admission with no
    handoff records. `test/gateway/handoff-fresh-pool.test.ts`
 
 ## Settled with Sol
