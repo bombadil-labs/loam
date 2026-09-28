@@ -25,6 +25,8 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { writtenByUser } from "../../src/gateway/member-of.js";
+import { FERN, observed } from "../spike/garden.js";
 import { authorForSeed, Reactor, signClaims, type Claims } from "@bombadil/rhizomatic";
 import { userSeedPath } from "../../src/cli/config.js";
 import { holdsGrant } from "../../src/gateway/accounts.js";
@@ -212,11 +214,15 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     expect(codes).toHaveLength(1);
     expect(codes[0]).toMatchObject({ clientId: CLIENT_ID, user: "ada", container: "ada:journal" });
     const seed = readFileSync(userSeedPath(usersHome, "ada"), "utf8").trim();
-    // And WHOSE: each container gathers what the minted key authors, and that key holds the
-    // store-wide write grant — the standing create-root gives, now given here.
+    // And WHOSE: each container names ada, whose root is now the minted key, and gathers what that
+    // key writes. The key holds the store-wide write grant — the standing create-root gives.
     const mintedKey = authorForSeed(seed);
-    expect(table.get("ada")!.membership).toEqual(authoredBy(mintedKey));
-    expect(table.get("ada:journal")!.membership).toEqual(authoredBy(mintedKey));
+    expect(table.get("ada")!.membership).toEqual(writtenByUser("ada", "ada"));
+    expect(table.get("ada:journal")!.membership).toEqual(writtenByUser("ada", "ada:journal"));
+    const byAda = observed(FERN, "height", 1, gateway.stamp(mintedKey).timestamp, seed);
+    await gateway.append([byAda]);
+    for (const c of ["ada", "ada:journal"])
+      expect(gateway.select(table.get(c)!.membership).map((d) => d.id)).toContain(byAda.id);
     expect(
       holdsGrant(
         gateway.reactor,

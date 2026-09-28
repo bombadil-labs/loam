@@ -18,7 +18,9 @@ import { STORE_ENTITY } from "../gateway/genesis.js";
 import type { Leeway } from "../gateway/leeway.js";
 import { stampOn, withStamp } from "../gateway/stamp.js";
 import { authoredBy } from "../gateway/membership.js";
-import { resolveUserView, rootClaims, userEntity } from "./users.js";
+import { writtenByUser } from "../gateway/member-of.js";
+import { subjectKeyAt, USER_PREFIX, userGroundOf } from "../gateway/user-root.js";
+import { keyEvidenceHeld, resolveUserView, rootClaims, userEntity } from "./users.js";
 
 export interface ProvisionRefusal {
   readonly status: number;
@@ -121,13 +123,45 @@ export async function ensureUserKey(
 }
 
 /**
- * Declare a container gathering what the key derived from `userSeed` authors — the home (no
- * parent) or a child. A SEED, never a public key: the author is derived here.
+ * The membership of a container `owner` owns, read through the same ground the memberOf lowering
+ * reads users from. It names the user (`loam.memberOf`) when the user resolves by name to the very
+ * key `owner.seed` signs with: it then follows their current root, the keys that act for them in
+ * `scope`, and a recovery. A name with no key evidence held here (`keyEvidenceHeld`: a user keyed
+ * before root claims, or none at all) keeps the key form, as its grant does. Any other name that
+ * does not resolve to this key is refused, whatever state its evidence is in (struck, expired, not
+ * yet valid, a broken history): the key form would pin the container to a key the user may not hold.
+ */
+export function ownedMembership(
+  gw: Gateway,
+  owner: { readonly user: string; readonly seed: string },
+  scope: string,
+): { readonly membership: unknown } | { readonly refusal: string } {
+  const key = authorForSeed(owner.seed);
+  const operator = gw.operatorAuthor;
+  const now = gw.validityNow();
+  if (subjectKeyAt(gw.reactor, now, operator, `${USER_PREFIX}${owner.user}`) === key) {
+    return { membership: writtenByUser(owner.user, scope) };
+  }
+  const bound =
+    operator !== undefined &&
+    keyEvidenceHeld(userGroundOf(gw.reactor).reactor, operator, owner.user);
+  return bound
+    ? {
+        refusal:
+          `${owner.user} is a user of this store, and the key file here is not their current key, ` +
+          `so a container cannot be made for them from it`,
+      }
+    : { membership: authoredBy(key) };
+}
+
+/**
+ * Declare a container gathering what `owner` writes — the home (no parent) or a child. The caller
+ * has proven `owner.user` is the session user's own name, and `owner.seed` is their key file.
  */
 export async function declareOwned(
   gw: Gateway,
   name: string,
-  userSeed: string,
+  owner: { readonly user: string; readonly seed: string },
   parent: string | undefined,
   onFault: (message: string) => void,
   /** What the person set on the five controls, when this declaration is theirs to shape. */
@@ -139,11 +173,21 @@ export async function declareOwned(
       message: "This store cannot sign a declaration right now, so nothing was made.",
     };
   }
+  const owned = ownedMembership(gw, owner, name);
+  if ("refusal" in owned) {
+    onFault(`could not declare ${name}: ${owned.refusal}`);
+    return {
+      status: 409,
+      message:
+        "This user's key file is not their current key on this store, so nothing was made. Ask " +
+        "the store's operator to repair it.",
+    };
+  }
   const spec = {
     container: name,
     trust: "curated" as const,
     posture: "shared" as const,
-    membership: authoredBy(authorForSeed(userSeed)),
+    membership: owned.membership,
     ...(parent === undefined ? {} : { parent }),
     // WRITTEN ONLY WHEN THE PERSON SET IT. A container declared with no leeway pointer is a pure
     // namespace that inherits; writing a sealed pointer onto every provisioned home would seal

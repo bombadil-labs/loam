@@ -1196,8 +1196,12 @@ ${bindingFields(user, bindable, inherited)}
           return;
         }
         if (!table.containers.has(user)) {
-          const declined = await declareOwned(gw, user, key.userSeed, undefined, (m) =>
-            fault(`the consent page ${m}`),
+          const declined = await declareOwned(
+            gw,
+            user,
+            { user, seed: key.userSeed },
+            undefined,
+            (m) => fault(`the consent page ${m}`),
           );
           if (declined !== undefined) {
             refuse(res, declined.status, declined.message);
@@ -1222,7 +1226,7 @@ ${bindingFields(user, bindable, inherited)}
           const declined = await declareOwned(
             gw,
             binding.container,
-            key.userSeed,
+            { user, seed: key.userSeed },
             user,
             (m) => fault(`the consent page ${m}`),
             answered && differs ? chosen : undefined,

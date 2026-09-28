@@ -13,7 +13,7 @@
 import { escapeHtml, page } from "./session.js";
 import { leewayFields } from "./leeway-form.js";
 import { readUserSeed } from "../cli/config.js";
-import { authorForSeed, type Delta } from "@bombadil/rhizomatic";
+import type { Delta } from "@bombadil/rhizomatic";
 import { lensOf, readRegistrations } from "../gateway/registration.js";
 import type { Container, ContainerTable, ResolvedContainer } from "../gateway/container.js";
 import type { ChannelStatus } from "../federation/channel.js";
@@ -21,7 +21,7 @@ import type { ContestedNameReport } from "../gateway/lifecycle.js";
 import type { Gateway } from "../gateway/gateway.js";
 import type { ContainerAttention } from "../gateway/attention.js";
 import { containerCensusImpl } from "../gateway/container-census.js";
-import { authoredBy } from "../gateway/membership.js";
+import { ownedMembership } from "./provision.js";
 
 /** What the door computed for the attention panel: the summary plus the quiet set. */
 export interface AttentionView {
@@ -122,13 +122,15 @@ export const adminPages = (opts: AdminPagesOpts) => {
     return `<ul>\n${item(root)}\n</ul>`;
   };
 
-  // The author-select Term prefilled as the declare form's suggestion — the same shape the root's
-  // membership takes. A user with no usable signing key gets an empty textarea, never a Term that
-  // names somebody else.
-  const membershipSuggestion = (user: string): string => {
+  // The declare form's suggestion: the same membership the root's provisioning writes. The form
+  // does not know the child's name yet, so a user-form suggestion scopes to the user's home. A user
+  // with no usable signing key, or whose key file is not their current key, gets an empty textarea,
+  // never a Term that names somebody else or a retired key.
+  const membershipSuggestion = (gw: Gateway, user: string): string => {
     const seed = readUserSeed(opts.home, user);
     if (seed.kind !== "present" || !/^[0-9a-f]{64}$/.test(seed.seed)) return "";
-    return JSON.stringify(authoredBy(authorForSeed(seed.seed)));
+    const owned = ownedMembership(gw, { user, seed: seed.seed }, user);
+    return "membership" in owned ? JSON.stringify(owned.membership) : "";
   };
 
   // T146: every admin page carries the way out. The logout door checks the SESSION's own form
@@ -139,7 +141,12 @@ export const adminPages = (opts: AdminPagesOpts) => {
 <button type="submit">sign out</button>
 </form>`;
 
-  const declareFormHtml = (user: string, reach: ReadonlySet<string>, formToken: string): string => {
+  const declareFormHtml = (
+    gw: Gateway,
+    user: string,
+    reach: ReadonlySet<string>,
+    formToken: string,
+  ): string => {
     const parents = [...reach]
       .sort()
       .map(
@@ -162,7 +169,7 @@ ${parents}
 <option value="shared">shared</option>
 <option value="separate">separate</option>
 </select></label></p>
-<p><label>membership Term <textarea name="membership" rows="4" cols="72">${escapeHtml(membershipSuggestion(user))}</textarea></label></p>
+<p><label>membership Term <textarea name="membership" rows="4" cols="72">${escapeHtml(membershipSuggestion(gw, user))}</textarea></label></p>
 <button type="submit">declare</button>
 </form>`;
   };
@@ -497,7 +504,7 @@ ${channelsPanelHtml(gw, (c) => reach.has(c.name), {
   empty: "No channel receives into a container your subtree reaches.",
 })}
 ${isOperator ? orphanedChannelsPanelHtml(gw, table) : ""}
-${declareFormHtml(user, reach, formToken)}
+${declareFormHtml(gw, user, reach, formToken)}
 ${contestedPanelHtml(gw, reach)}
 ${schemaPanelHtml(gw, formToken)}
 ${signOutFormHtml(formToken)}`,

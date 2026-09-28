@@ -14,6 +14,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { writtenByUser } from "../../src/gateway/member-of.js";
+import { FERN, observed } from "../spike/garden.js";
 import { authorForSeed, signClaims, type Claims } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -480,8 +482,12 @@ describe("§40 phase A1 — the admin door", () => {
         OPERATOR,
       ),
     ).toBe(true);
-    // The root's Term names the minted key — the container gathers what CAL authors.
-    expect(gateway.containers().containers.get("cal")!.membership).toEqual(authoredBy(mintedKey));
+    // The root's Term names cal, whose root is now the minted key, and gathers what that key writes.
+    const term = gateway.containers().containers.get("cal")!.membership!;
+    expect(term).toEqual(writtenByUser("cal", "cal"));
+    const byCal = observed(FERN, "height", 1, gateway.stamp(mintedKey).timestamp, raw);
+    await gateway.append([byCal]);
+    expect(gateway.select(term).map((d) => d.id)).toContain(byCal.id);
     // The SECRET never entered the ground (the H7 discipline: prove the scan can see, then clean).
     const scan = (needle: string): boolean =>
       [...gateway.reactor.snapshot()].some((d) => JSON.stringify(d.claims).includes(needle));
