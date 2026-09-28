@@ -9,7 +9,7 @@ import {
   type Reactor,
   type Suppression,
 } from "@bombadil/rhizomatic";
-import { recoveredFrom, userGroundOf } from "./user-root.js";
+import { recoveredFrom, userGroundOf, usersGovernor } from "./user-root.js";
 
 /**
  * A Loam principal: the root key it is pinned to. A user's root is their own key (README ruling
@@ -155,7 +155,12 @@ export function keysEverOf(
   const frontier = [who.root];
   while (frontier.length > 0) {
     const key = frontier.pop()!;
-    for (const earlier of recoveredFrom(users.reactor, operator, key, erased)) {
+    for (const earlier of recoveredFrom(
+      users.reactor,
+      usersGovernor(users, operator),
+      key,
+      erased,
+    )) {
       if (out.has(earlier) || !bindingHeld(users.reactor, now, key, earlier, erased)) continue;
       out.add(earlier);
       frontier.push(earlier);

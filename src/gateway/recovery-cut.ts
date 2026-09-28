@@ -20,7 +20,7 @@
 // Today inbox pools share the host's key; after step 6 each pool signs its own.
 
 import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
-import { RECOVERIES, userGroundOf, verified } from "./user-root.js";
+import { RECOVERIES, userGroundOf, usersGovernor, verified } from "./user-root.js";
 
 export const CTX_INCARNATION = "loam.incarnation";
 export const CTX_CUT = "loam.cut";
@@ -256,7 +256,10 @@ function manifested(reactor: Reactor, operator: string, cut: string, recovery: s
   for (const id of users.reactor.byTarget(RECOVERIES)) {
     if (erased.has(id)) continue;
     const m = users.reactor.get(id);
-    if (m === undefined || m.claims.author !== operator || !verified(m)) continue;
+    // The manifest is the host's law, beside the record: the user ground's governor signed it.
+    if (m === undefined || m.claims.author !== usersGovernor(users, operator) || !verified(m)) {
+      continue;
+    }
     if (!inContext(m, CTX_CUT_MANIFEST) || field(m, "recovery") !== recovery) continue;
     if (!fields(m, "cut").includes(cut)) continue;
     const at = arrivalIndex(users.reactor, id);

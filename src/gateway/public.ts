@@ -10,7 +10,7 @@
 // — with no operator there is no lawful voice to open a door with, and anonymous read is an
 // explicit grant, never a default.
 
-import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
+import { seedSigner } from "./signer.js";
 import type { Claims, Reactor } from "@bombadil/rhizomatic";
 import type { Gateway, RequestContext } from "./gateway.js";
 import { lawfulDeltasAt, lensOf, type LensName } from "./registration.js";
@@ -121,20 +121,17 @@ export async function declarePublicImpl(
   entries: readonly string[],
   context?: RequestContext,
 ): Promise<void> {
-  const seed = context?.actor ?? gw.options.seed;
-  if (seed === undefined) {
+  const signer = context?.actor !== undefined ? seedSigner(context.actor) : gw.signer;
+  if (signer === undefined) {
     throw new Error("this gateway holds no signing seed and cannot declare a lens public");
   }
-  if (gw.operatorAuthor !== undefined && authorForSeed(seed) !== gw.operatorAuthor) {
+  if (gw.operatorAuthor !== undefined && signer.author !== gw.operatorAuthor) {
     throw new Error("append rejected: only the operator may declare a lens public");
   }
   const resolved = entries.map((entry) => freezePublicEntry(gw, entry));
   await gw.append([
-    signClaims(
-      withStamp(gw.stamp(authorForSeed(seed)), (t) =>
-        publicClaims(resolved, authorForSeed(seed), t),
-      ),
-      seed,
+    signer.sign(
+      withStamp(gw.stamp(signer.author), (t) => publicClaims(resolved, signer.author, t)),
     ),
   ]);
 }

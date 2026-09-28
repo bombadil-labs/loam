@@ -33,7 +33,7 @@ import {
 import { sha256 } from "@noble/hashes/sha2.js";
 import { probePhysicalRetention } from "./custody.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
-import { DeltaSet, Reactor, signClaims } from "@bombadil/rhizomatic";
+import { DeltaSet, Reactor } from "@bombadil/rhizomatic";
 import type { Claims, Delta } from "@bombadil/rhizomatic";
 import { evalTerm, parseTerm } from "@bombadil/rhizomatic";
 import { readRegistrations } from "./registration.js";
@@ -1108,8 +1108,8 @@ export async function eraseImpl(
   // Erasure is the operator's alone (SPEC §11): destructive, so the only signer is the store's
   // own operator. A data subject's request is honored BY the operator, never by the subject
   // directly — there is no actor override here on purpose.
-  const seed = gw.options.seed;
-  if (seed === undefined || gw.operatorAuthor === undefined) {
+  const signer = gw.signer;
+  if (signer === undefined || gw.operatorAuthor === undefined) {
     throw new Error("erasure is the instance operator's alone, and this store has no operator");
   }
   // The completeness guard (SPEC §27.7, T32), BEFORE any work: the mint made containers
@@ -1231,13 +1231,12 @@ export async function eraseImpl(
   const operator = gw.operatorAuthor;
   const erasure =
     already ??
-    signClaims(
+    signer.sign(
       localClaims(
         withStamp(gw.stamp(operator), (t) =>
           eraseClaims(id, target!.claims.author, operator, t, opts.reason, opts.slate),
         ),
       ),
-      seed,
     );
   // The manifest: every delta citing the id (negations, provenance links) — the holes the
   // cut will leave, enumerated before it is made, across every WALKABLE tier the byte verdict walks

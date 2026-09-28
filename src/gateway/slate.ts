@@ -39,7 +39,6 @@ import {
   DeltaSet,
   evalTermRaw,
   parseTerm,
-  signClaims,
   type Claims,
   type Delta,
   type Reactor,
@@ -1269,9 +1268,9 @@ export async function cutImpl(
   container: string,
   opts: { now?: number } = {},
 ): Promise<CutReport> {
-  const seed = gw.options.seed;
+  const signer = gw.signer;
   const operator = gw.operatorAuthor;
-  if (seed === undefined || operator === undefined) {
+  if (signer === undefined || operator === undefined) {
     throw new Error("a cut is the instance operator's alone, and this store has no operator");
   }
   const now = opts.now ?? Date.now();
@@ -1483,7 +1482,7 @@ export async function cutImpl(
   const existing = findGraveyard(gw.reactor, gw.validityNow(), operator, slate.record);
   const graveyard =
     existing ??
-    signClaims(
+    signer.sign(
       withStamp(gw.stamp(operator), (t) =>
         graveyardClaims(
           {
@@ -1502,7 +1501,6 @@ export async function cutImpl(
           t,
         ),
       ),
-      seed,
     );
   if (existing === undefined) {
     await gw.append([graveyard]);
@@ -1517,10 +1515,7 @@ export async function cutImpl(
   if (declarations.length > 0) {
     await gw.append(
       declarations.map((id) =>
-        signClaims(
-          withStamp(gw.stamp(operator), (t) => retractionOf(id, operator, t)),
-          seed,
-        ),
+        signer.sign(withStamp(gw.stamp(operator), (t) => retractionOf(id, operator, t))),
       ),
     );
   }

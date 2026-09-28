@@ -201,6 +201,7 @@ import {
 import { listImpl, type ListOptions } from "./listing.js";
 import { declareReadHidden, governedProgram, needsLowering } from "./governed-trust.js";
 import { activeIncarnation, incarnationClaims, mintIncarnation } from "./recovery-cut.js";
+import { seedSigner, type Signer } from "./signer.js";
 
 export interface AppendReceipt {
   readonly accepted: number;
@@ -475,6 +476,20 @@ export class Gateway {
   private unreadableRows = 0; // set by open: rows held, none readable
   /** @internal — T19 seam (erase.ts, adopt.ts) */
   readonly operatorAuthor: string | undefined;
+  /**
+   * The signer of THIS ground's governing key: what signs this ground's own law. Absent, the ground
+   * is ungoverned, and nothing is signed in its voice. Its author equals `operatorAuthor`.
+   */
+  readonly signer: Signer | undefined;
+
+  /**
+   * The governing seed, for opening a child ground (a pool, a channel) that is governed by the same
+   * key today. The one place a seed leaves the gateway; at step 6 each child gets its own key.
+   * @internal
+   */
+  childSeed(): string | undefined {
+    return this.options.seed;
+  }
   // When a runner animates the gateway, ingest routes through its DerivationHost (ingest + drain
   // derivations); otherwise straight to the reactor. Passive vs animate is exactly this hook.
   /** @internal — T19 seam (ingest.ts: both doors write through it; animate/reseat re-point it) */
@@ -495,7 +510,9 @@ export class Gateway {
     readonly options: GatewayOptions,
   ) {
     this._reactor = reactor;
-    this.operatorAuthor = options.seed === undefined ? undefined : authorForSeed(options.seed);
+    const seed = options.seed;
+    this.signer = seed === undefined ? undefined : seedSigner(seed);
+    this.operatorAuthor = this.signer?.author;
     this.declareUsers(reactor);
     // Fail fast on a mis-shaped offered lens: a term that does not select a delta set would only
     // blow up when a peer first pulls, in production. Trial-eval it now (empty store → empty
@@ -1688,6 +1705,7 @@ export class Gateway {
       return {
         reactor: host.reactor,
         erased: () => erasedIdsOf(host.reactor, host.operatorAuthor),
+        ...(host.operatorAuthor === undefined ? {} : { governor: host.operatorAuthor }),
       };
     });
   }
