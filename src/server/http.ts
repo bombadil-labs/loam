@@ -1386,7 +1386,7 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           STORE_ENTITY,
           author,
           "write",
-          gateway.operatorAuthor,
+          pool.operatorAuthor,
         );
       } catch {
         return false;
