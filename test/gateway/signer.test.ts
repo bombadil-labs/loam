@@ -136,5 +136,14 @@ describe("a pool's own law is signed and authored by the pool's key", () => {
     const w = observed(FERN, "height", 1, pool.stamp(authorForSeed(connSeed)).timestamp, connSeed);
     await pool.append([w]);
     expect(pool.reactor.get(w.id)).toBeDefined();
+    // The pool's governed mask names the owner as a striker by its user-named grant, raw and at now.
+    const { governedStrikers } = await import("../../src/gateway/governed-trust.js");
+    const { userGroundOf } = await import("../../src/gateway/user-root.js");
+    const { DeltaSet } = await import("@bombadil/rhizomatic");
+    const ground = DeltaSet.from([...pool.reactor.arrivalLog()]);
+    const users = userGroundOf(pool.reactor);
+    for (const read of [{ raw: true as const }, { now: pool.validityNow() }]) {
+      expect(governedStrikers(ground, read, pool.signer!.author, true, users)).toContain(owner);
+    }
   });
 });

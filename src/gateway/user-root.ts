@@ -647,6 +647,7 @@ export function userRootsRaw(
   operator: string | undefined,
   name: string,
 ): string[] {
+  operator = usersGovernor(ground, operator); // user records bind under the ground's governor
   if (operator === undefined) return [];
   const { reactor } = ground;
   const erased = ground.erased();
