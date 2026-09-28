@@ -15,7 +15,7 @@ import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { authoredBy } from "../../src/gateway/membership.js";
 import { writtenByUser } from "../../src/gateway/member-of.js";
-import { declareOwned } from "../../src/server/provision.js";
+import { declareOwned, ownedMembership } from "../../src/server/provision.js";
 import type { ScryptParams } from "../../src/server/credentials.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import { FERN, observed } from "../spike/garden.js";
@@ -97,6 +97,37 @@ describe("provisioned containers name their user", () => {
     const byK2 = await write(seedOf("ada"), 2);
     const home2 = await gathered("ada");
     expect([home2.has(byK2.id), home2.has(before.id)]).toEqual([true, true]);
+  });
+
+  it("a known user's retired key file is refused, never pinned: no container, no suggestion", async () => {
+    expect(await run(["init", "--home", home], io)).toBe(0);
+    expect(await run(["user", "create", "ada", "--operator", "--home", home], io, password)).toBe(
+      0,
+    );
+    const k1Seed = seedOf("ada");
+    expect(
+      await recoverUser({
+        home,
+        name: "ada",
+        replaceSeed: true,
+        storePath: storePath(home),
+        io,
+        openBackend: (path) => new SqliteBackend(path),
+        channelBackend: channelBackendFor(home, io),
+      }),
+    ).toBe(0);
+    await ground(async (gw) => {
+      expect(ownedMembership(gw, { user: "ada", seed: k1Seed }, "ada:old")).toHaveProperty(
+        "refusal",
+      );
+      const faults: string[] = [];
+      const refused = await declareOwned(gw, "ada:old", { user: "ada", seed: k1Seed }, "ada", (m) =>
+        faults.push(m),
+      );
+      expect(refused?.status).toBe(409);
+      expect(faults.join("\n")).toMatch(/not their current key/);
+      expect(gw.containers().containers.has("ada:old")).toBe(false);
+    });
   });
 
   it("a user the store cannot resolve by name keeps the key form, which still gathers their writes", async () => {

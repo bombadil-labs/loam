@@ -124,11 +124,13 @@ export const adminPages = (opts: AdminPagesOpts) => {
 
   // The declare form's suggestion: the same membership the root's provisioning writes. The form
   // does not know the child's name yet, so a user-form suggestion scopes to the user's home. A user
-  // with no usable signing key gets an empty textarea, never a Term that names somebody else.
+  // with no usable signing key, or whose key file is not their current key, gets an empty textarea,
+  // never a Term that names somebody else or a retired key.
   const membershipSuggestion = (gw: Gateway, user: string): string => {
     const seed = readUserSeed(opts.home, user);
     if (seed.kind !== "present" || !/^[0-9a-f]{64}$/.test(seed.seed)) return "";
-    return JSON.stringify(ownedMembership(gw, { user, seed: seed.seed }, user));
+    const owned = ownedMembership(gw, { user, seed: seed.seed }, user);
+    return "membership" in owned ? JSON.stringify(owned.membership) : "";
   };
 
   // T146: every admin page carries the way out. The logout door checks the SESSION's own form

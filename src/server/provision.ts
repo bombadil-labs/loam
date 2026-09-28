@@ -19,7 +19,13 @@ import type { Leeway } from "../gateway/leeway.js";
 import { stampOn, withStamp } from "../gateway/stamp.js";
 import { authoredBy } from "../gateway/membership.js";
 import { writtenByUser } from "../gateway/member-of.js";
-import { userGroundOf, userRootAt } from "../gateway/user-root.js";
+import {
+  recoveryChain,
+  subjectKeyAt,
+  USER_PREFIX,
+  userGroundOf,
+  userRootsRaw,
+} from "../gateway/user-root.js";
 import { resolveUserView, rootClaims, userEntity } from "./users.js";
 
 export interface ProvisionRefusal {
@@ -123,30 +129,36 @@ export async function ensureUserKey(
 }
 
 /**
- * The membership of a container `owner` owns. It names the user (`loam.memberOf`) when the user
- * resolves by name to the very key `owner.seed` signs with: it then follows their current root, the
- * keys that act for them in `scope`, and a recovery. A user this store cannot resolve by name (no
- * user record, or no root claim for that key) keeps the key form, as their grant does; naming them
- * would gather nothing.
+ * The membership of a container `owner` owns, read through the same ground the memberOf lowering
+ * reads users from. It names the user (`loam.memberOf`) when the user resolves by name to the very
+ * key `owner.seed` signs with: it then follows their current root, the keys that act for them in
+ * `scope`, and a recovery. A name bound to no key here (no root claim, no recovery history: a user
+ * keyed before root claims, or none at all) keeps the key form, as its grant does. A name bound to a
+ * key that is not this one, or to none (a broken history), is refused: the key form would pin the
+ * container to a key the user no longer holds.
  */
 export function ownedMembership(
   gw: Gateway,
   owner: { readonly user: string; readonly seed: string },
   scope: string,
-): unknown {
+): { readonly membership: unknown } | { readonly refusal: string } {
   const key = authorForSeed(owner.seed);
   const operator = gw.operatorAuthor;
-  const root =
-    operator === undefined
-      ? undefined
-      : userRootAt(
-          gw.reactor,
-          gw.validityNow(),
-          operator,
-          owner.user,
-          userGroundOf(gw.reactor).erased(),
-        );
-  return root === key ? writtenByUser(owner.user, scope) : authoredBy(key);
+  const now = gw.validityNow();
+  if (subjectKeyAt(gw.reactor, now, operator, `${USER_PREFIX}${owner.user}`) === key) {
+    return { membership: writtenByUser(owner.user, scope) };
+  }
+  const ground = userGroundOf(gw.reactor);
+  const bound =
+    userRootsRaw(ground, operator, owner.user).length > 0 ||
+    recoveryChain(ground.reactor, operator, owner.user, ground.erased()).kind !== "none";
+  return bound
+    ? {
+        refusal:
+          `${owner.user} is a user of this store, and the key file here is not their current key, ` +
+          `so a container cannot be made for them from it`,
+      }
+    : { membership: authoredBy(key) };
 }
 
 /**
@@ -168,11 +180,21 @@ export async function declareOwned(
       message: "This store cannot sign a declaration right now, so nothing was made.",
     };
   }
+  const owned = ownedMembership(gw, owner, name);
+  if ("refusal" in owned) {
+    onFault(`could not declare ${name}: ${owned.refusal}`);
+    return {
+      status: 409,
+      message:
+        "This user's key file is not their current key on this store, so nothing was made. Ask " +
+        "the store's operator to repair it.",
+    };
+  }
   const spec = {
     container: name,
     trust: "curated" as const,
     posture: "shared" as const,
-    membership: ownedMembership(gw, owner, name),
+    membership: owned.membership,
     ...(parent === undefined ? {} : { parent }),
     // WRITTEN ONLY WHEN THE PERSON SET IT. A container declared with no leeway pointer is a pure
     // namespace that inherits; writing a sealed pointer onto every provisioned home would seal
