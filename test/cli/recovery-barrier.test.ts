@@ -12,6 +12,8 @@ import { withHostCut } from "../helpers/recovery-cut.js";
 import { channelBackendFor, run } from "../../src/cli/cli.js";
 import { readSeed, readUserSeed, storePath, userSeedPath } from "../../src/cli/config.js";
 import { recoverUser, type RecoverOptions } from "../../src/cli/user-recover.js";
+import { writtenByUser } from "../../src/gateway/member-of.js";
+import { FERN, observed } from "../spike/garden.js";
 import { containerClaims } from "../../src/gateway/container.js";
 import { refusedIds } from "../../src/gateway/erase.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
@@ -302,7 +304,7 @@ describe("the recovery barrier", () => {
   });
 });
 
-describe("one writer per store for a recovery", () => {
+describe("other writers during a recovery", () => {
   const recoverCli = () => run(["user", "recover", "ada", "--replace-seed", "--home", home], io);
   const serving = (pid: number) =>
     writeFileSync(
@@ -315,10 +317,9 @@ describe("one writer per store for a recovery", () => {
     const { k1 } = await world();
     serving(process.pid);
     expect(await recoverCli()).toBe(2);
-    expect(err.join("\n")).toMatch(/is serving this store right now.*only writer/);
+    expect(err.join("\n")).toMatch(/is serving this store right now.*accepting the old key/);
     expect(existsSync(journal())).toBe(false);
     expect(seedKey()).toBe(k1);
-    expect(existsSync(join(home, "recovering.json"))).toBe(false);
   });
 
   it("a crashed server's record does not block recover", async () => {
@@ -326,23 +327,65 @@ describe("one writer per store for a recovery", () => {
     serving(deadPid());
     expect(await recoverCli()).toBe(0);
     expect(seedKey()).not.toBe(k1);
-    expect(existsSync(join(home, "recovering.json"))).toBe(false);
   });
 
-  it("a live recovery refuses a second recovery and a server start", async () => {
-    await world();
-    writeFileSync(
-      join(home, "recovering.json"),
-      `${JSON.stringify({ pid: process.pid, store: storePath(home) })}\n`,
+  it("a second writer that never saw the recovery: the old key's later write is never history", async () => {
+    const { k1 } = await world();
+    const k1Seed = readUserSeed(home, "ada");
+    if (k1Seed.kind !== "present") throw new Error("ada has a key file");
+    const seed = readSeed(home);
+    // Booted before the recovery, this handle still reads k1 as ada's root.
+    const stale = await Gateway.boot(
+      new SqliteBackend(storePath(home)),
+      assembleGenesis({ operatorSeed: seed }),
+      { channelBackend: channelBackendFor(home, io) },
     );
-    expect(await recoverCli()).toBe(2);
-    expect(err.join("\n")).toMatch(/a recovery is running on this home/);
-    err.length = 0;
-    expect(
-      await run(["serve", "--http", "--token", "t", "--port", "0", "--home", home], io, {
-        detach: true,
-      }),
-    ).toBe(2);
-    expect(err.join("\n")).toMatch(/a recovery is running on this store/);
+    let before: Delta, after: Delta;
+    try {
+      before = observed(FERN, "height", 1, stale.stamp(k1).timestamp, k1Seed.seed);
+      await stale.append([before]);
+      expect(await recoverUser(direct())).toBe(0);
+      after = observed(FERN, "height", 2, stale.stamp(k1).timestamp, k1Seed.seed);
+      await stale.append([after]); // its view admits it: it never saw the recovery
+    } finally {
+      await stale.close();
+    }
+    await ground((gw) => {
+      const m = new Set(gw.select(writtenByUser("ada", "home:ada")).map((d) => d.id));
+      expect([m.has(before.id), m.has(after.id)]).toEqual([true, false]);
+    });
+  });
+
+  it("a pool another writer declares during the recovery gets no cut, and the command says so", async () => {
+    const { k1, pool: p } = await world();
+    const late = `${p}:late`;
+    const seed = readSeed(home);
+    const declareElsewhere = async () => {
+      const other = await Gateway.boot(
+        new SqliteBackend(storePath(home)),
+        assembleGenesis({ operatorSeed: seed }),
+      );
+      try {
+        const op = other.operator!;
+        await other.append([
+          signClaims(
+            containerClaims(
+              { container: late, trust: "curated", posture: "separate", inboxOf: "home:ada" },
+              op,
+              other.stamp(op).timestamp,
+            ),
+            seed,
+          ),
+        ]);
+      } finally {
+        await other.close();
+      }
+    };
+    expect(await recoverUser(direct({ afterCuts: declareElsewhere }))).toBe(0);
+    expect(out.join("\n")).toMatch(/was declared during this recovery and has no cut/);
+    await ground((gw, op) => {
+      expect(cutsOf(pool(gw, late), op, k1)).toEqual([]);
+      expect(cutsOf(pool(gw, p), op, k1)).toEqual([{ state: "committed", outcome: "committed" }]);
+    });
   });
 });

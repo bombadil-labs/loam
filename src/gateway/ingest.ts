@@ -70,7 +70,7 @@ import { governedProgram, needsLowering } from "./governed-trust.js";
 import { recordPrevious, recoveryDefect, userGroundOf } from "./user-root.js";
 import { hasMemberOf, lowerMembershipJson } from "./member-of.js";
 import { attachedPool, declaredInboxes, readContainerTable } from "./container.js";
-import { coversRecovery, cutPositionDefect, isStoreLocal, pausedKeys } from "./recovery-cut.js";
+import { coversRecovery, isStoreLocal, pausedKeys } from "./recovery-cut.js";
 
 // Persist a batch, THEN serve it (the body of `Gateway.append`). The batch is validated whole (one
 // bad delta refuses the lot); it lands in the backend before the reactor sees it, so nothing a
@@ -320,13 +320,11 @@ async function appendAdmitted(
     }
   }
   // Recovery barrier (recovery-history.md), read under the admission lock so nothing lands between
-  // the check and the commit. A cut lands at the position it names. A record that retires a key
-  // commits only behind its barrier: this store and every declared pool hold a live cut for it.
+  // the check and the commit. A record that retires a key commits only behind its barrier: this store
+  // and every declared pool hold a live cut for it.
   if (gw.operatorAuthor !== undefined) {
     const op = gw.operatorAuthor;
     const refused = refusedIds(gw.reactor, op);
-    const cutDefect = cutPositionDefect(gw.reactor, op, batch, refused);
-    if (cutDefect !== undefined) throw new Error(`append rejected: ${cutDefect}`);
     for (const d of batch) {
       const previous = d.claims.author === op ? recordPrevious(d) : undefined;
       if (previous === undefined) continue;

@@ -38,7 +38,6 @@ async function world(): Promise<{ gw: Gateway; cut: Delta }> {
         attempt: "a",
         recovery: "no-such-record",
         key: K1,
-        index: gw.reactor.arrivalLog().length,
       },
       OP,
       20,

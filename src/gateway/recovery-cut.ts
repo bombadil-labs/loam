@@ -6,8 +6,9 @@
 //   - an INCARNATION marker: which incarnation of this store it is. A store writes its own before it
 //     admits anything else; the active one is the lowest-arrival marker held, so a replayed older
 //     marker never displaces it.
-//   - a CUT: this store's arrival length just before a recovery, naming the incarnation, the recovery
-//     record and the retired key. It counts only in the incarnation it names.
+//   - a CUT: where in this store's arrival order a recovery begins, naming the incarnation, the
+//     recovery record and the retired key. Its own arrival is the line: what the key signed and this
+//     store admitted before the cut is history. It counts only in the incarnation it names.
 //   - an OUTCOME: the cut's terminal state, committed or aborted.
 // A cut with no outcome is COMMITTED if the host holds its recovery record, else PREPARED: the store
 // pauses the retired key and shows no history for it. That fails closed.
@@ -53,7 +54,6 @@ export interface CutSpec {
   readonly attempt: string;
   readonly recovery: string;
   readonly key: string;
-  readonly index: number;
 }
 export const cutClaims = (spec: CutSpec, operator: string, t: number): Claims =>
   claims(
@@ -63,8 +63,6 @@ export const cutClaims = (spec: CutSpec, operator: string, t: number): Claims =>
       prim("attempt", spec.attempt),
       prim("recovery", spec.recovery),
       prim("key", spec.key),
-      // Named `position`: the filing pointer already uses the role `index`.
-      prim("position", String(spec.index)),
     ],
     operator,
     t,
@@ -171,7 +169,7 @@ export function outcomesOf(
 
 /**
  * Does this store hold a live cut for `recovery` retiring `key`: one naming this incarnation,
- * arrived at its position, and not aborted? What a retiring recovery needs in every store before it
+ * and not aborted? What a retiring recovery needs in every store before it
  * commits.
  */
 export function holdsLiveCut(
@@ -182,7 +180,7 @@ export function holdsLiveCut(
   erased: ReadonlySet<string>,
 ): boolean {
   return cutsHere(reactor, operator, erased).some(
-    (c) => c.recovery === recovery && c.key === key && c.positioned && c.state !== "aborted",
+    (c) => c.recovery === recovery && c.key === key && c.state !== "aborted",
   );
 }
 
@@ -212,37 +210,16 @@ export function cutState(
     : "prepared";
 }
 
-// A cut's state as every reader and the erase door see it: a cut that did not arrive at the position
-// it names is PREPARED unless aborted, whatever outcome claims it committed.
-function effectiveState(
-  reactor: Reactor,
-  operator: string,
-  cut: Delta,
-  erased: ReadonlySet<string>,
-): CutState {
-  const state = cutState(reactor, operator, cut, erased);
-  const at = arrivalIndex(reactor, cut.id);
-  return state === "aborted" || (at !== undefined && field(cut, "position") === String(at))
-    ? state
-    : "prepared";
-}
-
 export interface Cut {
   readonly delta: Delta;
   readonly recovery: string;
   readonly key: string;
+  /** Its own place in this store's arrival log: the line history stops at. */
   readonly index: number;
-  /** Did it arrive at the position it names? A cut that did not stays PREPARED unless aborted. */
-  readonly positioned: boolean;
   readonly state: CutState;
 }
 
-/**
- * The cuts that count in THIS store: those naming its active incarnation, with their state. A cut
- * must have arrived at exactly the position it names: that is the arrival length it measured, so
- * nothing landed between the measurement and the cut. A cut that did not is kept PREPARED: it
- * pauses its key and yields no history, and only an abort clears it.
- */
+/** The cuts that count in THIS store: those naming its active incarnation, with their state. */
 export function cutsHere(
   reactor: Reactor,
   operator: string | undefined,
@@ -261,8 +238,7 @@ export function cutsHere(
       recovery,
       key,
       index: arrivalIndex(reactor, d.id)!,
-      positioned: field(d, "position") === String(arrivalIndex(reactor, d.id)),
-      state: effectiveState(reactor, operator, d, erased),
+      state: cutState(reactor, operator, d, erased),
     });
   }
   return out;
@@ -329,7 +305,7 @@ export function cutErasureDefect(
     const here = activeIncarnation(reactor, operator, erased);
     if (here === undefined || field(target, "store") !== field(here, "incarnation"))
       return undefined;
-    if (effectiveState(reactor, operator, target, erased) === "prepared") {
+    if (cutState(reactor, operator, target, erased) === "prepared") {
       return "a prepared recovery cut cannot be erased while the host may still commit";
     }
     const outcome = held(reactor, operator, CTX_CUT_OUTCOME, erased).find(
@@ -352,41 +328,8 @@ export function cutErasureDefect(
 }
 
 /**
- * Why `batch` is refused for a cut in it, or undefined. A cut for this store must name the position
- * it lands at: this store's arrival length plus the fresh deltas before it in the batch. The append
- * door asks this under the admission lock, so nothing can land between the check and the cut.
- */
-export function cutPositionDefect(
-  reactor: Reactor,
-  operator: string | undefined,
-  batch: readonly Delta[],
-  erased: ReadonlySet<string>,
-): string | undefined {
-  if (operator === undefined) return undefined;
-  const incarnation = activeIncarnation(reactor, operator, erased);
-  const here = incarnation === undefined ? undefined : field(incarnation, "incarnation");
-  let at = reactor.arrivalLog().length;
-  const fresh = new Set<string>();
-  for (const d of batch) {
-    if (reactor.get(d.id) !== undefined || fresh.has(d.id)) continue;
-    fresh.add(d.id);
-    if (
-      here !== undefined &&
-      d.claims.author === operator &&
-      inContext(d, CTX_CUT) &&
-      field(d, "store") === here &&
-      field(d, "position") !== String(at)
-    ) {
-      return `a recovery cut must name the position it lands at here (${at}), not ${field(d, "position") ?? "none"}`;
-    }
-    at += 1;
-  }
-  return undefined;
-}
-
-/**
- * Does this store cover `recovery` retiring `key`: a live cut held here, or one in `batch` naming
- * this incarnation (the append door has already checked its position)?
+ * Does this store cover `recovery` retiring `key`: a live cut held here, or a FRESH one in `batch`
+ * naming this incarnation? A cut in the batch that is already held is judged as held.
  */
 export function coversRecovery(
   reactor: Reactor,
@@ -400,6 +343,7 @@ export function coversRecovery(
   const here = incarnationId(reactor, operator, erased);
   return batch.some(
     (d) =>
+      reactor.get(d.id) === undefined &&
       d.claims.author === operator &&
       inContext(d, CTX_CUT) &&
       field(d, "store") === here &&

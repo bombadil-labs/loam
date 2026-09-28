@@ -284,7 +284,7 @@ function bindingClaims(root: string, key: string, t: number): Claims {
   };
 }
 
-// A cut for `ground`, naming the position it lands at if it is written next.
+// A cut for `ground`: this store's incarnation, the recovery, and the key it retires.
 function signCut(
   ground: Gateway,
   operator: string,
@@ -294,9 +294,7 @@ function signCut(
   const store = incarnationId(ground.reactor, operator, refusedIds(ground.reactor, operator));
   if (store === undefined) throw new Error("the store has no incarnation marker to cut against");
   return signClaims(
-    withStamp(ground.stamp(operator), (t) =>
-      cutClaims({ ...spec, store, index: ground.reactor.arrivalLog().length }, operator, t),
-    ),
+    withStamp(ground.stamp(operator), (t) => cutClaims({ ...spec, store }, operator, t)),
     seed,
   );
 }
@@ -352,8 +350,7 @@ async function settleCuts(
       continue;
     }
     const committed = cutsHere(ground.reactor, operator, refusedIds(ground.reactor, operator)).some(
-      (c) =>
-        c.recovery === j.record && c.key === j.previous && c.positioned && c.state === "committed",
+      (c) => c.recovery === j.record && c.key === j.previous && c.state === "committed",
     );
     if (outcome === "committed" && !conflict && !committed) {
       pending.push(`the cut in ${where}, which does not read committed`);
@@ -754,6 +751,17 @@ async function resume(
       ...(j.previous === undefined ? [] : [`${j.previous} is retired: it holds no standing here.`]),
       ...(j.archive === undefined ? [] : [`the old key file is kept at ${j.archive}.`]),
       `connections do not carry over: ${name} re-authorizes the ones to keep.`,
+      // A pool declared while this ran (by another writer) has no cut. It shows none of the old
+      // key's earlier writes, and a cut written now would come too late to draw the line honestly.
+      ...(j.previous === undefined || j.cuts === undefined
+        ? []
+        : declaredInboxes(readContainerTable(gw.reactor, gw.validityNow(), operator))
+            .filter((pool) => !(pool in j.cuts!))
+            .map(
+              (pool) =>
+                `${pool} was declared during this recovery and has no cut: it shows none of ` +
+                `${j.previous}'s earlier writes.`,
+            )),
     ];
     for (const line of lines) io.out(`user recover: ${line}`);
     if (pending.length > 0) {
