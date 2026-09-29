@@ -602,30 +602,32 @@ export class Gateway {
   static async open(backend: StoreBackend, options: GatewayOptions = {}): Promise<Gateway> {
     const seed = options.seed;
     const reactor = new Reactor();
-    if (options.peerStore !== undefined && seed === undefined) {
-      throw new Error(
-        "peer journal: a single-peer store needs the operator seed that names the peer",
-      );
-    }
     let peer: HostPeer | undefined;
     let replayed: Delta[];
     let outsideJournal = 0;
     // A journaled store's raw rows are not its admitted set, so it always opens through its
-    // journal: with a seed, that journal is used; without one, the open is refused.
+    // journal. With a seed, that seed names the peer; without one, the store's only journal does.
     let peerStore = options.peerStore;
-    if (peerStore === undefined && holdsJournals(backend) && (await backend.holdsAnyJournal())) {
-      if (seed === undefined) {
-        throw new Error(
-          "peer journal: this store is a journaled peer; open it with the operator seed that " +
-            "names it",
-        );
+    let peerId = seed === undefined ? undefined : peerIdOf(authorForSeed(seed));
+    if (peerStore === undefined && holdsJournals(backend)) {
+      const journals = await backend.journalPeers();
+      if (journals.length > 0) {
+        if (peerId === undefined) {
+          if (journals.length > 1) {
+            throw new Error(
+              "peer journal: this store holds several peer journals; open it with the operator " +
+                "seed that names one",
+            );
+          }
+          peerId = journals[0]!;
+        }
+        peerStore = backend.journalStore();
       }
-      peerStore = backend.journalStore();
     }
     if (peerStore === undefined) {
       replayed = await backend.deltasSince(new Set());
     } else {
-      const opened = await openHostPeer(peerStore, peerIdOf(authorForSeed(seed!)));
+      const opened = await openHostPeer(peerStore, peerId!);
       peer = opened.peer;
       replayed = opened.rows;
       if (holdsJournals(backend)) {

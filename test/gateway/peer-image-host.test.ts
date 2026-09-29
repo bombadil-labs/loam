@@ -202,13 +202,12 @@ describe("the journal is the authority over the rows", () => {
     await again.close();
   });
 
-  it("a journaled store opens only through its journal: a seed uses it, no seed is refused", async () => {
+  it("a journaled store opens only through its journal, with or without a seed", async () => {
     const path = sqliteHome();
     const gw = await boot(new SqliteBackend(path));
     const d = note(1);
     await gw.append([d]);
     await gw.close();
-    await expect(Gateway.open(new SqliteBackend(path))).rejects.toThrow(/journaled peer/);
     const stray = note(2);
     await new SqliteBackend(path).append([stray]); // a raw row the journal never admitted
     const again = await Gateway.open(new SqliteBackend(path), { seed: SEED });
@@ -216,6 +215,11 @@ describe("the journal is the authority over the rows", () => {
     expect(again.reactor.get(d.id)).toBeDefined();
     expect(again.reactor.get(stray.id)).toBeUndefined();
     await again.close();
+    // No seed: the store's only journal names the peer, and the stray row stays unserved.
+    const seedless = await Gateway.open(new SqliteBackend(path));
+    expect(seedless.peer).toBeDefined();
+    expect(seedless.reactor.get(stray.id)).toBeUndefined();
+    await seedless.close();
   });
 
   it("another operator key is another peer: its open over these rows is refused", async () => {
