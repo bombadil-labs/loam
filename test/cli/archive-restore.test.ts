@@ -3,7 +3,7 @@
 // bound stays out even when that erasure was later negated. Both levels: the store's bytes and
 // journal, and what a reopened gateway serves. A bystander proves the restore still runs.
 
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -14,7 +14,8 @@ import {
   signClaims,
   type Delta,
 } from "@bombadil/rhizomatic";
-import { restoreIntoJournal } from "../../src/cli/cli.js";
+import { restoreIntoJournal, run } from "../../src/cli/cli.js";
+import { storePath } from "../../src/cli/config.js";
 import { eraseClaims, neverReturns } from "../../src/gateway/erase.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { ArchiveBackend } from "../../src/store/archive.js";
@@ -119,5 +120,36 @@ describe("the archive restore", () => {
     expect(await primary.holds(target.id)).toBe(true);
     await gw.close();
     await archive.close();
+  });
+
+  it("serve refuses a half-restored store without its archive, and resumes with it", async () => {
+    const home = join(mkdtempSync(join(tmpdir(), "loam-archive-restore-")), "home");
+    const lines: string[] = [];
+    const io = { out: (l: string) => lines.push(l), err: (l: string) => lines.push(l) };
+    expect(await run(["init", "--home", home, "--seed", SEED], io)).toBe(0);
+    const marker = `${storePath(home)}.restoring`;
+    writeFileSync(marker, ""); // what a restore a fault interrupted leaves behind
+    lines.length = 0;
+    const refused = await run(
+      ["serve", "--http", "--home", home, "--port", "0", "--token", "t"],
+      io,
+      {
+        detach: true,
+      },
+    );
+    expect(refused, lines.join("\n")).toBe(1);
+    expect(lines.join("\n")).toMatch(/did not finish.*--archive/s);
+    // Two-sided: named, the archive resumes the restore (nothing living is left here), and the
+    // store is served.
+    const vault = join(home, "vault");
+    mkdirSync(vault, { recursive: true });
+    const served = await run(
+      ["serve", "--http", "--home", home, "--port", "0", "--token", "t", "--archive", vault],
+      io,
+      { detach: true },
+    );
+    if (typeof served === "number") throw new Error(`serve refused: ${lines.join("\n")}`);
+    expect(existsSync(marker)).toBe(false);
+    await served.close();
   });
 });

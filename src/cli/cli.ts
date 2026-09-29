@@ -1262,6 +1262,15 @@ async function cmdServe(
   // replanted from the archive's memory before the gateway ever looks. Lag is safe (union) but
   // never silent: it reaches the operator's log.
   const vault = archivePath(home, parsed.flags.get("archive"));
+  // A restore a fault interrupted left a partial journal; serving it would serve half a store.
+  if (vault === undefined && existsSync(`${path}.restoring`)) {
+    io.err(
+      `serve: a restore of ${path} from its archive did not finish. This store holds only part of ` +
+        "it, so it is not served. Serve again with `--archive <dir>` naming that archive; the " +
+        "restore resumes.",
+    );
+    return 1;
+  }
   let backend: StoreBackend = openStore(path, io);
   if (vault !== undefined) {
     const archive = new ArchiveBackend(vault);
