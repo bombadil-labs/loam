@@ -21,6 +21,7 @@
 // Admission resolves from the subject declaration and never from the knob; posture legality
 // gates on the knob and never from the roster.
 
+import { seedSigner } from "./signer.js";
 import {
   authorForSeed,
   parseTerm,
@@ -2581,13 +2582,25 @@ export async function resumeInboxesImpl(gw: Gateway): Promise<void> {
 export async function revokeConnectionImpl(opts: {
   inbox: Container;
   connectionKey: string;
-  ownerSeed: string;
+  /** The owner's seed, or `asPool` for the pool's own governing voice (its signer). */
+  ownerSeed?: string;
+  asPool?: boolean;
 }): Promise<void> {
   const pool = opts.inbox.gateway;
   if (pool === undefined) {
     throw new Error("revokeConnection: the inbox has no pool of its own — nothing to revoke (§39)");
   }
-  const owner = authorForSeed(opts.ownerSeed);
+  // The pool's own voice is its signer, never a host seed: the pool's law is its own (step 6).
+  const voice =
+    opts.asPool === true
+      ? pool.signer
+      : opts.ownerSeed === undefined
+        ? undefined
+        : seedSigner(opts.ownerSeed);
+  if (voice === undefined) {
+    throw new Error("revokeConnection: name the owner's seed, or revoke in the pool's own voice");
+  }
+  const owner = voice.author;
   const now = pool.validityNow();
   const scope = principalScopeOf(pool.reactor);
   // A grant naming a user whose root cannot be read right now may stand again later, and the
@@ -2703,10 +2716,7 @@ export async function revokeConnectionImpl(opts: {
   }
   await pool.append(
     [...new Set(ids)].map((id) =>
-      signClaims(
-        withStamp(pool.stamp(owner), (t) => revocationClaims(id, owner, t)),
-        opts.ownerSeed,
-      ),
+      voice.sign(withStamp(pool.stamp(owner), (t) => revocationClaims(id, owner, t))),
     ),
   );
   // The strikes landed; whether they BIND is the suppression rule's call (the signer or the
