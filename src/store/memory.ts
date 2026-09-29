@@ -4,7 +4,7 @@
 
 /* eslint-disable @typescript-eslint/require-await -- the async keyword is load-bearing: it
    turns every synchronous throw into the rejected promise the seam promises. */
-import { DeltaSet, type Delta } from "@bombadil/rhizomatic";
+import { DeltaSet, type Delta, type DurableOrdinaryJournalStore } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "./backend.js";
 import { canonicalDelta } from "./canon.js";
 
@@ -66,5 +66,126 @@ export class MemoryBackend implements StoreBackend {
 
   async close(): Promise<void> {
     this.closed = true;
+  }
+
+  // One journal per peer: a head and its committed frames, which never change once written. The
+  // compare, the frame, the head and the rows change with no await between them, so they are one
+  // step for every other caller.
+  private journals = new Map<
+    string,
+    { head: string; frames: Uint8Array[]; checkpoint?: Uint8Array; rebaseDebt: Set<string> }
+  >();
+  private store: DurableOrdinaryJournalStore | undefined;
+
+  async journalPeers(): Promise<string[]> {
+    this.assertOpen();
+    return [...this.journals.keys()];
+  }
+
+  journalStore(): DurableOrdinaryJournalStore {
+    return (this.store ??= {
+      readJournal: async (peerId) => {
+        this.assertOpen();
+        const j = this.journals.get(peerId);
+        if (j !== undefined) {
+          return {
+            status: "journal",
+            head: j.head,
+            frames: j.frames.map((f) => Uint8Array.from(f)),
+            ...(j.checkpoint === undefined ? {} : { checkpoint: Uint8Array.from(j.checkpoint) }),
+          };
+        }
+        return this.set.size > 0 ? { status: "rows-without-journal" } : { status: "empty" };
+      },
+      readAdmittedRows: async (_peerId, ids) => {
+        this.assertOpen();
+        return ids.flatMap((id) => {
+          const d = this.set.get(id);
+          return d === undefined ? [] : [d];
+        });
+      },
+      readAdmittedRowsDegraded: async (_peerId, ids) => {
+        this.assertOpen();
+        return ids.map((id) => {
+          const d = this.set.get(id);
+          return d === undefined ? { id, fault: "missing" } : { id, row: d };
+        });
+      },
+      readHead: async (peerId) => {
+        this.assertOpen();
+        const j = this.journals.get(peerId);
+        return j === undefined ? { status: "missing" } : { status: "head", head: j.head };
+      },
+      compareAndAppendErasure: async (
+        peerId,
+        expectedHead,
+        nextHead,
+        frame,
+        newlyAdmitted,
+        assertedAbsentTargetIds,
+      ) => {
+        this.assertOpen();
+        const j = this.journals.get(peerId);
+        if (j === undefined || j.head !== expectedHead) return { status: "conflict" };
+        const held = assertedAbsentTargetIds.find((id) => this.set.has(id));
+        if (held !== undefined) return { status: "absence-refuted", targetId: held };
+        const batch = newlyAdmitted.map(canonicalDelta);
+        for (const d of batch) this.set.add(d);
+        // Each erased target's payload sits in its admitting frame until a rebase replaces them.
+        for (const d of batch) {
+          for (const p of d.claims.pointers) {
+            if (p.role === "erases" && p.target.kind === "delta") {
+              j.rebaseDebt.add(p.target.deltaRef.delta);
+            }
+          }
+        }
+        j.frames.push(Uint8Array.from(frame));
+        j.head = nextHead;
+        return { status: "durable" };
+      },
+      compareAndRebase: async (peerId, expectedHead, nextHead, checkpoint) => {
+        this.assertOpen();
+        const j = this.journals.get(peerId);
+        if (j === undefined || j.head !== expectedHead) return { status: "conflict" };
+        j.frames = [];
+        j.checkpoint = Uint8Array.from(checkpoint);
+        j.head = nextHead;
+        j.rebaseDebt.clear();
+        return { status: "durable" };
+      },
+      compareAndSettlePurge: async (peerId, expectedHead, nextHead, frame, targetId) => {
+        this.assertOpen();
+        const j = this.journals.get(peerId);
+        if (j === undefined || j.head !== expectedHead) return { status: "conflict" };
+        // The frame that admitted the target holds its payload until a rebase replaces the frames.
+        if (this.set.has(targetId) || j.rebaseDebt.has(targetId)) {
+          return { status: "absence-refuted", targetId };
+        }
+        j.frames.push(Uint8Array.from(frame));
+        j.head = nextHead;
+        return { status: "durable" };
+      },
+      compareAndAppend: async (peerId, expectedHead, nextHead, frame, newlyAdmitted) => {
+        this.assertOpen();
+        const j = this.journals.get(peerId);
+        const matches =
+          expectedHead === null
+            ? j === undefined && this.set.size === 0
+            : j !== undefined && j.head === expectedHead;
+        if (!matches) return { status: "conflict" };
+        const batch = newlyAdmitted.map(canonicalDelta);
+        for (const d of batch) this.set.add(d);
+        const frames = j?.frames ?? [];
+        if (frame !== null) frames.push(Uint8Array.from(frame));
+        // Keep the checkpoint a rebase stored: later frames continue from it.
+        this.journals.set(peerId, {
+          head: nextHead,
+          frames,
+          ...(j?.checkpoint === undefined ? {} : { checkpoint: j.checkpoint }),
+          rebaseDebt: j?.rebaseDebt ?? new Set(),
+        });
+        return { status: "durable" };
+      },
+    });
   }
 }

@@ -24,10 +24,17 @@ import {
   parseClaims,
   verifyDelta,
   type Delta,
+  type DurableOrdinaryJournalStore,
 } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "./backend.js";
 import { canonicalDelta } from "./canon.js";
-import { admit, previewOf, type QuarantinedRow, type RepairableBackend } from "./quarantine.js";
+import {
+  admit,
+  previewOf,
+  type QuarantinedRow,
+  type QuarantineReason,
+  type RepairableBackend,
+} from "./quarantine.js";
 
 interface DeltaRow {
   readonly id: string;
@@ -154,6 +161,25 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
       CREATE TABLE IF NOT EXISTS meta (
         key   TEXT PRIMARY KEY,
         value TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS journal_head (
+        peer TEXT PRIMARY KEY,
+        head TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS journal_checkpoint (
+        peer       TEXT PRIMARY KEY,
+        checkpoint BLOB NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS journal_rebase_debt (
+        peer   TEXT NOT NULL,
+        target TEXT NOT NULL,
+        PRIMARY KEY (peer, target)
+      );
+      CREATE TABLE IF NOT EXISTS journal_frames (
+        peer  TEXT NOT NULL,
+        n     INTEGER NOT NULL,
+        frame BLOB NOT NULL,
+        PRIMARY KEY (peer, n)
       );
     `);
     this.insertDelta = this.db.prepare(
@@ -476,6 +502,44 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     return removed;
   }
 
+  // `holds` without the await, for a check inside a transaction. It also counts truncation debt
+  // another handle recorded in the file: unprovable answers TRUE (H9).
+  private holdsNow(id: string): boolean {
+    if (this.truncationUnknown || this.truncationOwed.has(id)) return true;
+    const debt = this.db
+      .prepare("SELECT value FROM meta WHERE key = 'truncation-outstanding'")
+      .get() as { value: string } | undefined;
+    if (debt !== undefined) {
+      try {
+        const ids = JSON.parse(debt.value) as unknown;
+        if (!Array.isArray(ids) || ids.includes(id) || ids.some((x) => typeof x !== "string")) {
+          return true;
+        }
+      } catch {
+        return true;
+      }
+    }
+    return this.db.prepare("SELECT 1 FROM deltas WHERE id = ?").get(id) !== undefined;
+  }
+
+  setAside(rows: readonly { id: string; reason: string }[]): void {
+    // A missing row has no bytes to set aside; a present one is reported the way a boot read
+    // reports it, with the journal's reason mapped onto the quarantine's.
+    const preview = this.db.prepare("SELECT claims FROM deltas WHERE id = ?");
+    const out: QuarantinedRow[] = [];
+    for (const { id, reason } of rows) {
+      const r = preview.get(id) as { claims: string } | undefined;
+      if (r === undefined) continue;
+      const why: QuarantineReason = /unparseable/i.test(reason)
+        ? "unparseable"
+        : /sig/i.test(reason)
+          ? "invalid-signature"
+          : "id-mismatch";
+      out.push({ key: id, reason: why, preview: previewOf(r.claims) });
+    }
+    this.lastQuarantine = out;
+  }
+
   async holds(id: string): Promise<boolean> {
     this.assertOpen();
     // An id whose truncation is owed may still have pre-delete page images in the `-wal`
@@ -506,6 +570,303 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     for (const row of this.db.prepare("SELECT id FROM deltas").all() as { id: string }[])
       out.add(row.id);
     return out;
+  }
+
+  // One journal per peer. A frame is inserted once and never updated. The head, the new frame and
+  // the new rows commit in one IMMEDIATE transaction, so a crash leaves the old head or the new one.
+  private store: DurableOrdinaryJournalStore | undefined;
+
+  async journalPeers(): Promise<string[]> {
+    this.assertOpen();
+    return (this.db.prepare("SELECT peer FROM journal_head").all() as { peer: string }[]).map(
+      (r) => r.peer,
+    );
+  }
+
+  journalStore(): DurableOrdinaryJournalStore {
+    const headOf = (peer: string): string | undefined =>
+      (
+        this.db.prepare("SELECT head FROM journal_head WHERE peer = ?").get(peer) as
+          { head: string } | undefined
+      )?.head;
+    const hasRows = (): boolean =>
+      this.db.prepare("SELECT 1 FROM deltas LIMIT 1").get() !== undefined;
+    const rowFor = this.db.prepare("SELECT id, claims, sig FROM deltas WHERE id = ?");
+    // Fold the -wal sidecar into the file and truncate it, so the rebase's deleted frame pages
+    // leave the sidecar too. Contention leaves the debt standing (a busy checkpoint returns, it
+    // does not throw), and a purge cannot settle until it clears.
+    const settleRebaseWal = (): void => {
+      if (
+        this.db.prepare("SELECT 1 FROM meta WHERE key = 'rebase-wal-outstanding'").get() ===
+        undefined
+      ) {
+        return;
+      }
+      const [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
+      if (status !== undefined && status.busy === 0) {
+        this.db.prepare("DELETE FROM meta WHERE key = 'rebase-wal-outstanding'").run();
+      }
+    };
+    const rollback = (): void => {
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {
+        /* already rolled back */
+      }
+    };
+    // Inside an open transaction: the new rows, one immutable frame, the new head.
+    const commitFrame = (
+      peerId: string,
+      nextHead: string,
+      frame: Uint8Array | null,
+      rows: readonly Delta[],
+    ): string[] => {
+      const stored: string[] = [];
+      for (const d of rows) {
+        const info = this.insertDelta.run(
+          d.id,
+          JSON.stringify(claimsToJson(d.claims)),
+          d.sig ?? null,
+        );
+        if (info.changes > 0) stored.push(d.id);
+      }
+      if (frame !== null) {
+        const next = (
+          this.db
+            .prepare("SELECT COALESCE(MAX(n), -1) + 1 AS n FROM journal_frames WHERE peer = ?")
+            .get(peerId) as { n: number }
+        ).n;
+        this.db
+          .prepare("INSERT INTO journal_frames (peer, n, frame) VALUES (?, ?, ?)")
+          .run(peerId, next, Buffer.from(frame));
+      }
+      this.db
+        .prepare("INSERT OR REPLACE INTO journal_head (peer, head) VALUES (?, ?)")
+        .run(peerId, nextHead);
+      return stored;
+    };
+    return (this.store ??= {
+      readJournal: async (peerId) => {
+        this.assertOpen();
+        // One read transaction, so the head and the frames agree.
+        return this.db.transaction(() => {
+          const head = headOf(peerId);
+          if (head === undefined) {
+            return hasRows()
+              ? ({ status: "rows-without-journal" } as const)
+              : ({ status: "empty" } as const);
+          }
+          const frames = (
+            this.db
+              .prepare("SELECT frame FROM journal_frames WHERE peer = ? ORDER BY n")
+              .all(peerId) as { frame: Buffer }[]
+          ).map((r) => new Uint8Array(r.frame));
+          const cp = this.db
+            .prepare("SELECT checkpoint FROM journal_checkpoint WHERE peer = ?")
+            .get(peerId) as { checkpoint: Buffer } | undefined;
+          return cp === undefined
+            ? ({ status: "journal", head, frames } as const)
+            : ({
+                status: "journal",
+                head,
+                frames,
+                checkpoint: new Uint8Array(cp.checkpoint),
+              } as const);
+        })();
+      },
+      readAdmittedRows: async (_peerId, ids) => {
+        this.assertOpen();
+        // The rows exactly as stored. The journal's open compares each one's id and signature with
+        // the delta its verified frame admitted, so a second signature check here would only
+        // repeat that work. A row whose claims do not parse is left out, and the open then fails.
+        const out: Delta[] = [];
+        for (const id of ids) {
+          const row = rowFor.get(id) as DeltaRow | undefined;
+          if (row === undefined) continue;
+          try {
+            const claims = parseClaims(JSON.parse(row.claims));
+            out.push(
+              row.sig === null ? { id: row.id, claims } : { id: row.id, claims, sig: row.sig },
+            );
+          } catch {
+            continue;
+          }
+        }
+        return out;
+      },
+      readAdmittedRowsDegraded: async (_peerId, ids) => {
+        this.assertOpen();
+        // One answer per id: the stored row, or why it cannot be read. The journal compares each row
+        // with its verified copy and marks the rest unavailable.
+        return ids.map((id) => {
+          const row = rowFor.get(id) as DeltaRow | undefined;
+          if (row === undefined) return { id, fault: "missing" };
+          try {
+            const claims = parseClaims(JSON.parse(row.claims));
+            return { id, row: row.sig === null ? { id, claims } : { id, claims, sig: row.sig } };
+          } catch {
+            return { id, fault: "unparseable" };
+          }
+        });
+      },
+      readHead: async (peerId) => {
+        this.assertOpen();
+        const head = headOf(peerId);
+        return head === undefined ? { status: "missing" } : { status: "head", head };
+      },
+      compareAndAppendErasure: async (
+        peerId,
+        expectedHead,
+        nextHead,
+        frame,
+        newlyAdmitted,
+        assertedAbsentTargetIds,
+      ) => {
+        this.assertOpen();
+        const batch = newlyAdmitted.map(canonicalDelta);
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          // A target the order says holds no bytes here must hold none, checked in this
+          // transaction; otherwise the order would record no purge obligation for real bytes.
+          if (headOf(peerId) !== expectedHead) {
+            this.db.exec("ROLLBACK");
+            return { status: "conflict" };
+          }
+          const held = assertedAbsentTargetIds.find((id) => this.holdsNow(id));
+          if (held !== undefined) {
+            this.db.exec("ROLLBACK");
+            return { status: "absence-refuted", targetId: held };
+          }
+          commitFrame(peerId, nextHead, frame, batch);
+          // Each erased target's payload still sits in the frame that admitted it, until a rebase
+          // replaces the frames.
+          const debt = this.db.prepare(
+            "INSERT OR IGNORE INTO journal_rebase_debt (peer, target) VALUES (?, ?)",
+          );
+          for (const d of batch) {
+            for (const p of d.claims.pointers) {
+              if (p.role === "erases" && p.target.kind === "delta") {
+                debt.run(peerId, p.target.deltaRef.delta);
+              }
+            }
+          }
+          this.db.exec("COMMIT");
+        } catch (err) {
+          rollback();
+          throw err;
+        }
+        for (const d of batch) this.onDisk.add(d.id);
+        return { status: "durable" };
+      },
+      compareAndRebase: async (peerId, expectedHead, nextHead, checkpoint) => {
+        this.assertOpen();
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          if (headOf(peerId) !== expectedHead) {
+            this.db.exec("ROLLBACK");
+            return { status: "conflict" };
+          }
+          // secure_delete zeroes the freed frame pages in the database file.
+          this.db.prepare("DELETE FROM journal_frames WHERE peer = ?").run(peerId);
+          this.db
+            .prepare("INSERT OR REPLACE INTO journal_checkpoint (peer, checkpoint) VALUES (?, ?)")
+            .run(peerId, Buffer.from(checkpoint));
+          this.db
+            .prepare("INSERT OR REPLACE INTO journal_head (peer, head) VALUES (?, ?)")
+            .run(peerId, nextHead);
+          this.db.prepare("DELETE FROM journal_rebase_debt WHERE peer = ?").run(peerId);
+          this.db
+            .prepare(
+              "INSERT OR REPLACE INTO meta (key, value) VALUES ('rebase-wal-outstanding', ?)",
+            )
+            .run(peerId);
+          this.db.exec("COMMIT");
+        } catch (err) {
+          rollback();
+          throw err;
+        }
+        settleRebaseWal();
+        return { status: "durable" };
+      },
+      compareAndSettlePurge: async (peerId, expectedHead, nextHead, frame, targetId) => {
+        this.assertOpen();
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          // "removed" is appended only if the bytes are provably gone, WAL debt included, and no
+          // committed frame still carries the target: a frame holds the full admitted delta.
+          settleRebaseWal();
+          if (headOf(peerId) !== expectedHead) {
+            this.db.exec("ROLLBACK");
+            return { status: "conflict" };
+          }
+          const refuted =
+            this.holdsNow(targetId) ||
+            // the frame that admitted it is still stored: no rebase since the order
+            this.db
+              .prepare("SELECT 1 FROM journal_rebase_debt WHERE peer = ? AND target = ?")
+              .get(peerId, targetId) !== undefined ||
+            // the old frames' pages may still be in the -wal sidecar
+            this.db.prepare("SELECT 1 FROM meta WHERE key = 'rebase-wal-outstanding'").get() !==
+              undefined;
+          if (refuted) {
+            this.db.exec("ROLLBACK");
+            return { status: "absence-refuted", targetId };
+          }
+          commitFrame(peerId, nextHead, frame, []);
+          this.db.exec("COMMIT");
+        } catch (err) {
+          rollback();
+          throw err;
+        }
+        return { status: "durable" };
+      },
+      compareAndAppend: async (peerId, expectedHead, nextHead, frame, newlyAdmitted) => {
+        this.assertOpen();
+        const batch = newlyAdmitted.map(canonicalDelta);
+        const stored: string[] = [];
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          const head = headOf(peerId);
+          const matches =
+            expectedHead === null ? head === undefined && !hasRows() : head === expectedHead;
+          if (!matches) {
+            this.db.exec("ROLLBACK");
+            return { status: "conflict" };
+          }
+          for (const d of batch) {
+            const info = this.insertDelta.run(
+              d.id,
+              JSON.stringify(claimsToJson(d.claims)),
+              d.sig ?? null,
+            );
+            if (info.changes > 0) stored.push(d.id);
+          }
+          if (frame !== null) {
+            const next = (
+              this.db
+                .prepare("SELECT COALESCE(MAX(n), -1) + 1 AS n FROM journal_frames WHERE peer = ?")
+                .get(peerId) as { n: number }
+            ).n;
+            this.db
+              .prepare("INSERT INTO journal_frames (peer, n, frame) VALUES (?, ?, ?)")
+              .run(peerId, next, Buffer.from(frame));
+          }
+          this.db
+            .prepare("INSERT OR REPLACE INTO journal_head (peer, head) VALUES (?, ?)")
+            .run(peerId, nextHead);
+          this.db.exec("COMMIT");
+        } catch (err) {
+          try {
+            this.db.exec("ROLLBACK");
+          } catch {
+            /* already rolled back */
+          }
+          throw err;
+        }
+        for (const id of stored) this.onDisk.add(id);
+        return { status: "durable" };
+      },
+    });
   }
 
   async close(): Promise<void> {
