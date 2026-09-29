@@ -134,9 +134,17 @@ async function capture(
   if (refused.size !== refusals.length || refusals.some((r) => !refused.has(r.targetId))) {
     throw new Error("pool carry: the refusal events disagree with the refused set");
   }
+  // A row is asked of the table, not of `holds`: a driver answers `holds` true while a -wal
+  // truncation is owed, which is byte presence, not a row. That debt is its own obligation below.
+  const tabled = backend.ids === undefined ? undefined : await backend.ids();
+  const debtIds = new Set(debt.ids);
   const obligations: CarriedObligation[] = [];
   for (const { targetId } of refusals) {
-    if (await backend.holds(targetId)) obligations.push({ targetId, surface: "rows" });
+    const row =
+      tabled !== undefined
+        ? tabled.has(targetId)
+        : !debtIds.has(targetId) && (await backend.holds(targetId));
+    if (row) obligations.push({ targetId, surface: "rows" });
   }
   for (const id of debt.ids) obligations.push({ targetId: id, surface: "sidecar" });
   return {

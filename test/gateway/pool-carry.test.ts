@@ -194,4 +194,33 @@ describe("an existing pool's carry is complete", () => {
     await result.release();
     await gw.close();
   });
+
+  it("a deleted row whose -wal truncation is owed is a sidecar obligation, not a row", async () => {
+    const target = note(12);
+    // Like the sqlite driver: `holds` answers true while a truncation is owed for the id.
+    class Owing extends MemoryBackend {
+      private owed = new Set<string>();
+      owe(id: string): void {
+        this.owed.add(id);
+      }
+      override async holds(id: string): Promise<boolean> {
+        return this.owed.has(id) || (await super.holds(id));
+      }
+      truncationDebt() {
+        return { ids: [...this.owed], unknown: false };
+      }
+    }
+    const store = new Owing();
+    const { gw, pool } = await hostAndPool(store);
+    await pool.federate([target], { admit: () => true });
+    await pool.append([signClaims(eraseClaims(target.id, OP, OP, 31_000), SEED)]);
+    await store.purge([target.id]); // the row is gone...
+    store.owe(target.id); // ...and its page images may linger in the sidecar
+    const result = await buildPoolCarry(pool);
+    expect(result.status === "carry" && result.carry.obligations).toEqual([
+      { targetId: target.id, surface: "sidecar" },
+    ]);
+    if (result.status === "carry") await result.release();
+    await gw.close();
+  });
 });
