@@ -32,7 +32,12 @@ import {
   outcomeClaims,
   pausedKeys,
 } from "../../src/gateway/recovery-cut.js";
-import { lineageClaims, recoveryClaims } from "../../src/gateway/user-root.js";
+import {
+  lineageClaims,
+  recoveryClaims,
+  userGroundOf,
+  userRootAt,
+} from "../../src/gateway/user-root.js";
 import { rootClaims, userClaims } from "../../src/server/users.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
@@ -184,6 +189,40 @@ describe("H1: history before the cut, nothing after it", () => {
         op(rootClaims("ada", K2, OP, 30)),
       ]),
     ).rejects.toThrow(/holds no live cut for it/);
+  });
+});
+
+describe("the barrier holds at both doors", () => {
+  it("federation drops a retiring record with no manifest, and the root does not move", async () => {
+    const { gw } = await world();
+    const root = () =>
+      userRootAt(gw.reactor, gw.validityNow(), OP, "ada", userGroundOf(gw.reactor).erased());
+    expect(root()).toBe(K1);
+    const record = op(
+      recoveryClaims({ name: "ada", attempt: "f", previous: K1, root: K2, retired: [K1] }, OP, 30),
+    );
+    const lineage = op(
+      lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30),
+    );
+    // A bare operator root claim moves a root at either door; the record is what retires K1.
+    await gw.federate([record, lineage], { admit: () => true });
+    // delta level: the record did not land; object level: the served root is still K1
+    expect(gw.reactor.get(record.id)).toBeUndefined();
+    expect(root()).toBe(K1);
+  });
+
+  it("an earlier, narrower manifest does not block a later, complete one", async () => {
+    const { gw } = await world();
+    const { record, cut } = await recover(gw, { land: false });
+    // A manifest naming no cut is lawful to hold, and covers nothing.
+    await gw.append([op(manifestClaims(record.id, [], OP, 29))]);
+    await gw.append([op(manifestClaims(record.id, [cut.id], OP, 30))]);
+    await gw.append([
+      record,
+      op(lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30)),
+      op(rootClaims("ada", K2, OP, 30)),
+    ]);
+    expect(gw.reactor.get(record.id)).toBeDefined();
   });
 });
 
@@ -368,11 +407,14 @@ describe("the cut readers, against erasure, restart and a shared root", () => {
     const record = op(
       recoveryClaims({ name: "ada", attempt: "f", previous: K1, root: K2, retired: [K1] }, OP, 30),
     );
-    await gw.federate([
+    const landed = [
       record,
       op(lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30)),
       op(rootClaims("ada", K2, OP, 30)),
-    ]);
+    ];
+    await gw.federate(landed);
+    expect(gw.reactor.get(record.id)).toBeUndefined(); // federation runs the barrier too
+    for (const d of landed) gw.reactor.ingest(d); // planted past both doors
     expect(gw.reactor.get(record.id)).toBeDefined();
     const late = observed(FERN, "height", 9, 5, K1_SEED); // after the record, backdated
     await gw.federate([late]);
@@ -483,13 +525,15 @@ describe("the cut readers, against erasure, restart and a shared root", () => {
       ),
     );
     const manifest = op(manifestClaims(record.id, [cut.id], OP, 30)); // names a cut not yet written
-    await host.federate([
-      manifest,
+    const rest = [
       record,
       op(lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30)),
       op(rootClaims("ada", K2, OP, 30)),
-    ]);
+    ];
+    await host.federate([manifest, ...rest]);
     expect(host.reactor.get(manifest.id)).toBeUndefined(); // the federate door drops a manifest
+    expect(host.reactor.get(record.id)).toBeUndefined(); // and a record with no barrier
+    for (const d of rest) host.reactor.ingest(d); // planted past both doors
     expect(host.reactor.get(record.id)).toBeDefined();
     const late = observed(FERN, "height", 996, 5, K1_SEED);
     await pool.federate([late]);
