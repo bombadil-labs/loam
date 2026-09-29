@@ -4,6 +4,7 @@
 // or a missing journal is never read as "existing pool".
 
 import { randomBytes } from "node:crypto";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
 
 export const POOL_KEYS_ENTITY = "loam:poolkeys";
@@ -65,4 +66,33 @@ export function recordedPoolKey(
     if (first === undefined || d.claims.timestamp < first.claims.timestamp) first = d;
   }
   return first === undefined ? undefined : field(first, "key");
+}
+
+/**
+ * A key source kept in one file beside a store (the trial's durable custody). Written whole to a
+ * temporary file and renamed, readable by its owner only. A key is on disk before the host records
+ * it, so a crash between the two leaves an unused key, never a record without its key.
+ */
+export function filePoolKeys(path: string): PoolKeySource {
+  const read = (): Record<string, string> =>
+    existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Record<string, string>) : {};
+  return {
+    load: (pool) => read()[pool],
+    create: (pool) => {
+      const all = read();
+      const seed = randomBytes(32).toString("hex");
+      all[pool] = seed;
+      writeFileSync(`${path}.tmp`, JSON.stringify(all), { mode: 0o600 });
+      renameSync(`${path}.tmp`, path);
+      return seed;
+    },
+  };
+}
+
+// One in-memory source per store object, so a reboot over the same store finds its pools' keys.
+const memoryByStore = new WeakMap<object, PoolKeySource>();
+export function memoryPoolKeysFor(store: object): PoolKeySource {
+  let keys = memoryByStore.get(store);
+  if (keys === undefined) memoryByStore.set(store, (keys = memoryPoolKeys()));
+  return keys;
 }

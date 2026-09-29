@@ -30,7 +30,7 @@ import { graphql, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
 import { holdsJournals } from "../store/peer-image.js";
-import { memoryPoolKeys, type PoolKeySource } from "./pool-keys.js";
+import { filePoolKeys, memoryPoolKeysFor, type PoolKeySource } from "./pool-keys.js";
 import {
   admitLocal,
   JournalConflict,
@@ -751,7 +751,16 @@ export class Gateway {
       options.poolKeys === undefined &&
       typeof process !== "undefined" &&
       process.env.LOAM_POOL_KEYS === "1"
-        ? { poolKeys: memoryPoolKeys() }
+        ? {
+            poolKeys:
+              // A file-backed store keeps its pools' keys in a file beside it; the sqlite driver is
+              // not imported here, because the gateway also runs in a browser.
+              typeof (backend as { filePath?: unknown }).filePath === "string"
+                ? filePoolKeys(
+                    `${(backend as unknown as { filePath: string }).filePath}.poolkeys.json`,
+                  )
+                : memoryPoolKeysFor(backend),
+          }
         : {};
     const gateway = await Gateway.open(backend, {
       ...options,
