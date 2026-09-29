@@ -231,6 +231,8 @@ level. Loam then consumes it through the barrel and compares its recordings.
      cases in it should move: a rotated user keeps its containers and can retract its own values.
 6. **Peer and admission.** The peer model, the guard pipeline, arrival testimony. Loam's
    containers become peers, and the import cycle breaks.
+   Decided (rulings 11 and 12, README): a curse is pool-local, and received law keeps the peer's
+   signed start time. The container split closes the step (ruling 13).
    Decide the scope of a channel curse. `curseChannelLawImpl` also strikes a matching binding in
    the root ground, and current code can still publish one there. First pin a root-binding
    bystander and the pool binding, at the delta and the served-view levels. The lean is a
