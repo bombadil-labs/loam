@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { MemoryBackend } from "../../src/store/memory.js";
+import { overlay } from "../helpers/faultable-backend.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { readErasures } from "../../src/gateway/erase.js";
@@ -159,15 +160,12 @@ describe("T32 criterion 14 — erasure reaches the generalized wall", () => {
     const gw = await boot();
     const inner = new MemoryBackend();
     const stuckRow = { key: "corrupt-row-1", reason: "unparseable" as const, preview: "…" };
-    const lying: import("../../src/store/quarantine.js").RepairableBackend = {
-      append: (d) => inner.append(d),
-      deltasSince: (k) => inner.deltasSince(k),
-      purge: (ids) => inner.purge(ids),
-      holds: (id) => inner.holds(id),
-      close: () => inner.close(),
+    // Every other probe is the memory store's own, its journal included: a pool is always its
+    // own journal peer.
+    const lying = overlay(inner, {
       quarantine: () => Promise.resolve([stuckRow]), // the origin's bytes keep the row, every walk
       discardRow: () => Promise.resolve(true), // "removed it", removing nothing
-    };
+    });
     const pool = await gw.openQuarantine({ backend: lying });
     await expect(pool.drop()).rejects.toThrow(/pen still holds/);
     expect(gw.quarantinePools.has(pool.gateway)).toBe(true); // refused = still in erasure reach
