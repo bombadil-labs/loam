@@ -488,8 +488,12 @@ describe("recordings: principals", () => {
       }
       await gw.append(recovery);
       tick();
+      // A standing in a ground: a surviving grant by the ground's own key, or by a host it selects
+      // for grants (either governor's grant counts).
       const holds = (r: Gateway, who: Who, verb: Verb) =>
-        holdsGrant(r.reactor, r.validityNow(), STORE_ENTITY, KEY[who], verb, KEY.operator);
+        r
+          .lawAuthors("grants")
+          .some((a) => holdsGrant(r.reactor, r.validityNow(), STORE_ENTITY, KEY[who], verb, a));
       const standing = {
         newKeyWrite: holds(gw, "peer", "write"),
         firstKeyWrite: holds(gw, "writer", "write"),
