@@ -689,12 +689,14 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
         try {
           // A target the order says holds no bytes here must hold none, checked in this
           // transaction; otherwise the order would record no purge obligation for real bytes.
-          if (
-            headOf(peerId) !== expectedHead ||
-            assertedAbsentTargetIds.some((id) => this.holdsNow(id))
-          ) {
+          if (headOf(peerId) !== expectedHead) {
             this.db.exec("ROLLBACK");
             return { status: "conflict" };
+          }
+          const held = assertedAbsentTargetIds.find((id) => this.holdsNow(id));
+          if (held !== undefined) {
+            this.db.exec("ROLLBACK");
+            return { status: "absence-refuted", targetId: held };
           }
           commitFrame(peerId, nextHead, frame, batch);
           // Each erased target's payload still sits in the frame that admitted it, until a rebase
@@ -754,8 +756,11 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
           // "removed" is appended only if the bytes are provably gone, WAL debt included, and no
           // committed frame still carries the target: a frame holds the full admitted delta.
           settleRebaseWal();
-          if (
-            headOf(peerId) !== expectedHead ||
+          if (headOf(peerId) !== expectedHead) {
+            this.db.exec("ROLLBACK");
+            return { status: "conflict" };
+          }
+          const refuted =
             this.holdsNow(targetId) ||
             // the frame that admitted it is still stored: no rebase since the order
             this.db
@@ -763,10 +768,10 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
               .get(peerId, targetId) !== undefined ||
             // the old frames' pages may still be in the -wal sidecar
             this.db.prepare("SELECT 1 FROM meta WHERE key = 'rebase-wal-outstanding'").get() !==
-              undefined
-          ) {
+              undefined;
+          if (refuted) {
             this.db.exec("ROLLBACK");
-            return { status: "conflict" };
+            return { status: "absence-refuted", targetId };
           }
           commitFrame(peerId, nextHead, frame, []);
           this.db.exec("COMMIT");

@@ -104,20 +104,23 @@ describe("a host opened with a peer journal admits through it", () => {
     await again.close();
   });
 
-  it("a local append that mixes an erasure with other deltas commits nothing", async () => {
+  it("a local append that mixes an erasure with other deltas is one atomic transfer", async () => {
     const backend = new MemoryBackend();
     const gw = await boot(backend);
     const live = note(1);
     await gw.append([live]);
-    const before = await image(backend.journalStore());
     const bystander = note(2);
-    // One transfer is simultaneous; until a mixed transfer exists, an erasure travels alone.
     const erasure = signClaims(eraseClaims(live.id, OP, OP, 20_000), SEED);
-    await expect(gw.append([bystander, erasure])).rejects.toThrow(/its own append/);
-    expect(await image(backend.journalStore())).toEqual(before);
-    expect(await backend.holds(bystander.id)).toBe(false);
-    expect(gw.reactor.get(bystander.id)).toBeUndefined();
-    expect(gw.reactor.get(live.id)).toBeDefined(); // the earlier delta is untouched
+    await gw.append([bystander, erasure]);
+    const state = await stateOf(backend.journalStore());
+    // one transfer: the order and the ordinary delta share one transfer ordinal
+    const arrivals = state.base.arrivals.filter(
+      (a) => a.id === erasure.id || a.id === bystander.id,
+    );
+    expect(arrivals).toHaveLength(2);
+    expect(new Set(arrivals.map((a) => a.transfer)).size).toBe(1);
+    expect(state.base.refusedIds.has(live.id)).toBe(true);
+    expect(gw.reactor.get(bystander.id)).toBeDefined();
     await gw.close();
   });
 
@@ -327,6 +330,23 @@ describe("the adapters' empty-journal creation", () => {
       expect(await store.readJournal(OP)).toEqual({ status: "rows-without-journal" });
       expect((await store.compareAndAppend(OP, null, "", null, [])).status).toBe("conflict");
       expect(await store.readJournal(OP)).toEqual({ status: "rows-without-journal" });
+    });
+
+    it(`${name}: settling a purge: a stale head is a conflict; held bytes refute absence`, async () => {
+      const backend = make();
+      const store = backend.journalStore();
+      await store.compareAndAppend(OP, null, "", null, []);
+      const held = note(3);
+      await backend.append([held]);
+      const frame = new Uint8Array([7]);
+      expect((await store.compareAndSettlePurge!(OP, "stale", "x", frame, held.id, 1)).status).toBe(
+        "conflict",
+      );
+      expect(await store.compareAndSettlePurge!(OP, "", "x", frame, held.id, 1)).toEqual({
+        status: "absence-refuted",
+        targetId: held.id,
+      });
+      expect(await store.readHead(OP)).toEqual({ status: "head", head: "" }); // unchanged
     });
 
     it(`${name}: an append against a stale head is a conflict and writes nothing`, async () => {

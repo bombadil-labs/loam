@@ -136,10 +136,14 @@ export async function admitErasureOrders(
   orders: readonly EffectiveErasureOrder[],
   origin: "local" | "unattributed",
   arrivedAt: number,
+  ordinary: readonly Delta[] = [],
 ): Promise<Set<string>> {
   const run = peer.tail.then(() =>
     peer.journal.admitErasures({
       orders,
+      // One transfer: its orders are considered before its ordinary deltas (SPEC-6), so a target
+      // offered beside its erasure is refused and never briefly admitted.
+      ...(ordinary.length === 0 ? {} : { ordinary, capacity: Number.MAX_SAFE_INTEGER }),
       origin: origin === "local" ? LOCAL : UNATTRIBUTED,
       arrivedAt,
       policyState: {},
@@ -180,6 +184,9 @@ export async function reportPurged(
   peer.tail = run.catch(() => {});
   const result = await run;
   if (result.status === "conflict") throw new JournalConflict("the peer journal moved");
+  if (result.status === "absence-refuted") {
+    throw new Error(`the bytes of ${targetId} are not proven gone; the purge stays owed`);
+  }
   if (result.status !== "committed") {
     throw new Error(`purge report not committed: ${describe(result)}`);
   }

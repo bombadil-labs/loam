@@ -120,7 +120,8 @@ export class MemoryBackend implements StoreBackend {
         this.assertOpen();
         const j = this.journals.get(peerId);
         if (j === undefined || j.head !== expectedHead) return { status: "conflict" };
-        if (assertedAbsentTargetIds.some((id) => this.set.has(id))) return { status: "conflict" };
+        const held = assertedAbsentTargetIds.find((id) => this.set.has(id));
+        if (held !== undefined) return { status: "absence-refuted", targetId: held };
         const batch = newlyAdmitted.map(canonicalDelta);
         for (const d of batch) this.set.add(d);
         // Each erased target's payload sits in its admitting frame until a rebase replaces them.
@@ -148,14 +149,10 @@ export class MemoryBackend implements StoreBackend {
       compareAndSettlePurge: async (peerId, expectedHead, nextHead, frame, targetId) => {
         this.assertOpen();
         const j = this.journals.get(peerId);
+        if (j === undefined || j.head !== expectedHead) return { status: "conflict" };
         // The frame that admitted the target holds its payload until a rebase replaces the frames.
-        if (
-          j === undefined ||
-          j.head !== expectedHead ||
-          this.set.has(targetId) ||
-          j.rebaseDebt.has(targetId)
-        ) {
-          return { status: "conflict" };
+        if (this.set.has(targetId) || j.rebaseDebt.has(targetId)) {
+          return { status: "absence-refuted", targetId };
         }
         j.frames.push(Uint8Array.from(frame));
         j.head = nextHead;

@@ -874,22 +874,17 @@ function recordBarrierDefect(
   return first;
 }
 
-// The local door on the journal path. Ordinary deltas are one atomic transfer. Erasure orders are
-// another, and never share a transfer with ordinary deltas (SPEC-6 treats one transfer as
-// simultaneous; a mixed atomic transfer is not offered yet).
+// The local door on the journal path: one atomic transfer. Ordinary deltas alone go through
+// `admit`; an append carrying erasure orders goes through the mixed transfer, orders first.
 async function admitToJournal(gw: Gateway, batch: readonly Delta[], at: number): Promise<void> {
-  const erasures = batch.filter((d) => isErasure(d.claims));
-  if (erasures.length === 0) return admitLocal(gw.peer!, batch, at, () => false);
-  if (erasures.length !== batch.length) {
-    throw new Error(
-      "append rejected: an erasure travels in its own append, not beside other deltas",
-    );
-  }
-  await admitErasureOrders(gw.peer!, await ordersFor(gw, erasures), "local", at);
+  const orders = batch.filter((d) => isErasure(d.claims));
+  if (orders.length === 0) return admitLocal(gw.peer!, batch, at, () => false);
+  const ordinary = batch.filter((d) => !isErasure(d.claims));
+  await admitErasureOrders(gw.peer!, await ordersFor(gw, orders), "local", at, ordinary);
 }
 
-// Federation on the journal path: the ordinary deltas first, then the erasure orders, as two
-// transfers with one receive time. This approximates SPEC-6's simultaneous mixed transfer.
+// Federation on the journal path: one transfer. Ordinary deltas alone go through `admit`; a pull
+// that carries erasure orders goes through the mixed transfer, orders first.
 async function receiveIntoJournal(
   gw: Gateway,
   admitted: readonly Delta[],
@@ -897,23 +892,16 @@ async function receiveIntoJournal(
 ): Promise<Delta[]> {
   const ordinary = admitted.filter((d) => !isErasure(d.claims));
   const orders = admitted.filter((d) => isErasure(d.claims));
-  const ok = new Set<string>();
-  if (ordinary.length > 0) {
-    for (const id of await admitReceived(gw.peer!, ordinary, at, () => false)) ok.add(id);
-  }
-  if (orders.length > 0) {
-    const held = orders;
-    if (held.length > 0) {
-      for (const id of await admitErasureOrders(
-        gw.peer!,
-        await ordersFor(gw, held),
-        "unattributed",
-        at,
-      )) {
-        ok.add(id);
-      }
-    }
-  }
+  const ok =
+    orders.length === 0
+      ? await admitReceived(gw.peer!, ordinary, at, () => false)
+      : await admitErasureOrders(
+          gw.peer!,
+          await ordersFor(gw, orders),
+          "unattributed",
+          at,
+          ordinary,
+        );
   return admitted.filter((d) => ok.has(d.id));
 }
 
