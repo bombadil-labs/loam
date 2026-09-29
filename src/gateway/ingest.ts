@@ -415,18 +415,17 @@ async function appendAdmitted(
 // closes the offered batch over what this predicate admits (see `federateImpl`) — otherwise a
 // rostered pull takes a post and refuses the off-roster retraction that withdrew it.
 export function admitForImpl(gw: Gateway): (d: Delta) => boolean {
-  // A child's own trust declaration comes first; a selected host declaration (a seeded copy)
-  // governs only where the child declares none.
+  // The nearest key in the chain (own first, then selected hosts) that declares a policy governs.
   const now = gw.validityNow();
-  const [own, host] = gw.lawAuthors("trust");
-  const governor =
-    host !== undefined && own !== undefined && !declaresTrust(gw.reactor, now, own) ? host : own;
+  const authors = gw.lawAuthors("trust");
+  const governor = authors.find((a) => declaresTrust(gw.reactor, now, a)) ?? authors[0];
   const policy = readTrustPolicy(gw.reactor, now, governor);
   if (policy.mode === "open") return () => true;
   if (policy.mode === "closed") return () => false;
-  // The receiver's own acts pass a roster: its own key and, in a child, its host's seeded copies.
-  const local = new Set(gw.localAuthors());
-  return (d) => local.has(d.claims.author) || policy.roster.has(d.claims.author);
+  // A roster passes the keys selected for trust: the child's own and, where it selects them, its
+  // hosts' seeded copies. An inbox selects none, so only its own key passes.
+  const trusted = new Set(authors);
+  return (d) => trusted.has(d.claims.author) || policy.roster.has(d.claims.author);
 }
 
 // A filter narrows what you SEE; it must never resurrect what was STRUCK (SPEC §28.4, ticket T38).

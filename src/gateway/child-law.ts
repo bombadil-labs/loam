@@ -12,43 +12,53 @@
 export type LawContext = "containers" | "registrations" | "trust" | "grants" | "renderers";
 
 export interface ChildLaw {
-  /** The host's governing key. */
-  readonly host: string;
+  /**
+   * The host chain, nearest first: the opener's key, then the opener's own hosts. A nested pool's
+   * seeded copies come from its opener's offer, which carries its opener's hosts' copies too.
+   */
+  readonly hosts: readonly string[];
   /** The law contexts where this child accepts the host as a trusted author. */
   readonly selects: ReadonlySet<LawContext>;
   /** Whether host review strikes (the host and its surviving grantees) can block a promotion. */
   readonly hostReviews: boolean;
 }
 
-// An inbox builds its authority in its own ground on purpose: it selects nothing from the host.
-export const inboxLaw = (host: string): ChildLaw => ({
-  host,
+// An inbox builds its authority in its own ground on purpose: it selects nothing from its hosts.
+export const inboxLaw = (hosts: readonly string[]): ChildLaw => ({
+  hosts,
   selects: new Set(),
   hostReviews: false,
 });
 
 // A channel, quarantine or separate pool holds seeded host copies of the container table,
 // registrations, trust, grants and renderer twins, and selects the host for all of them.
-export const seededLaw = (host: string): ChildLaw => ({
-  host,
+export const seededLaw = (hosts: readonly string[]): ChildLaw => ({
+  hosts,
   selects: new Set<LawContext>(["containers", "registrations", "trust", "grants", "renderers"]),
   hostReviews: true,
 });
 
-/** The authors of `context` law in a ground governed by `own`: own key first, then a selected host. */
+/** The host chain an opener hands a child: its own key, then its own hosts, without repeats. */
+export function hostChain(ownerKey: string, ownerLaw: ChildLaw | undefined): string[] {
+  return [...new Set([ownerKey, ...(ownerLaw?.hosts ?? [])])];
+}
+
+/** The authors of `context` law in a ground governed by `own`: own key first, then selected hosts. */
 export function lawAuthors(
   own: string | undefined,
   law: ChildLaw | undefined,
   context: LawContext,
 ): string[] {
   const out = own === undefined ? [] : [own];
-  if (law !== undefined && law.selects.has(context) && law.host !== own) out.push(law.host);
+  if (law !== undefined && law.selects.has(context)) {
+    for (const h of law.hosts) if (!out.includes(h)) out.push(h);
+  }
   return out;
 }
 
-/** Every key whose acts in this ground are the receiver's own, never a peer's: own and host. */
+/** Every key whose acts in this ground are the receiver's own, never a peer's: own and its hosts. */
 export function localAuthors(own: string | undefined, law: ChildLaw | undefined): string[] {
   const out = own === undefined ? [] : [own];
-  if (law !== undefined && law.host !== own) out.push(law.host);
+  for (const h of law?.hosts ?? []) if (!out.includes(h)) out.push(h);
   return out;
 }

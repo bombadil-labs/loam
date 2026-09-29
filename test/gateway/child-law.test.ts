@@ -5,7 +5,13 @@
 
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
-import { inboxLaw, lawAuthors, localAuthors, seededLaw } from "../../src/gateway/child-law.js";
+import {
+  hostChain,
+  inboxLaw,
+  lawAuthors,
+  localAuthors,
+  seededLaw,
+} from "../../src/gateway/child-law.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { trustClaims } from "../../src/gateway/trust.js";
@@ -32,17 +38,17 @@ const byPeer = (n: number): Delta =>
 // A pool-shaped ground: governed by POOL, with HOST as its seeded host.
 async function child(): Promise<Gateway> {
   const gw = await Gateway.boot(new MemoryBackend(), assembleGenesis({ operatorSeed: POOL_SEED }));
-  gw.childLaw = seededLaw(HOST);
+  gw.childLaw = seededLaw([HOST]);
   return gw;
 }
 
 describe("lawAuthors and localAuthors", () => {
   it("a seeded child reads its own key first, then the host, and only in selected contexts", () => {
-    expect(lawAuthors(POOL, seededLaw(HOST), "trust")).toEqual([POOL, HOST]);
-    expect(lawAuthors(POOL, inboxLaw(HOST), "trust")).toEqual([POOL]);
+    expect(lawAuthors(POOL, seededLaw([HOST]), "trust")).toEqual([POOL, HOST]);
+    expect(lawAuthors(POOL, inboxLaw([HOST]), "trust")).toEqual([POOL]);
     expect(lawAuthors(POOL, undefined, "grants")).toEqual([POOL]);
-    expect(lawAuthors(HOST, seededLaw(HOST), "grants")).toEqual([HOST]); // equal keys: one
-    expect(localAuthors(POOL, inboxLaw(HOST))).toEqual([POOL, HOST]);
+    expect(lawAuthors(HOST, seededLaw([HOST]), "grants")).toEqual([HOST]); // equal keys: one
+    expect(localAuthors(POOL, inboxLaw([HOST]))).toEqual([POOL, HOST]);
   });
 });
 
@@ -70,11 +76,34 @@ describe("a child's trust policy: its own first, a selected host copy only where
 
   it("an inbox selects nothing: a host declaration does not govern it", async () => {
     const gw = await child();
-    gw.childLaw = inboxLaw(HOST);
+    gw.childLaw = inboxLaw([HOST]);
     await gw.federate([signClaims(trustClaims("closed", [], HOST, 6_000), HOST_SEED)], {
       admit: () => true,
     });
     expect(gw.admitFor()(byPeer(4))).toBe(true); // the child's own default: open
+    await gw.close();
+  });
+
+  it("an inbox's own roster is not widened for its host's key", async () => {
+    const gw = await child();
+    gw.childLaw = inboxLaw([HOST]);
+    await gw.append([signClaims(trustClaims("roster", [], POOL, 6_000), POOL_SEED)]);
+    const hostDatum = signClaims({ ...byPeer(5).claims, author: HOST }, HOST_SEED);
+    expect(gw.admitFor()(hostDatum)).toBe(false);
+    expect(gw.admitFor()(signClaims({ ...byPeer(6).claims, author: POOL }, POOL_SEED))).toBe(true);
+    await gw.close();
+  });
+
+  it("a nested pool keeps its root host's seeded law through the host chain", async () => {
+    const gw = await child();
+    const MIDDLE = authorForSeed("4d".repeat(32));
+    // opened by a pool (MIDDLE) that itself was opened by HOST: the chain is [MIDDLE, HOST]
+    gw.childLaw = seededLaw(hostChain(MIDDLE, seededLaw([HOST])));
+    expect(gw.lawAuthors("trust")).toEqual([POOL, MIDDLE, HOST]);
+    await gw.federate([signClaims(trustClaims("closed", [], HOST, 6_000), HOST_SEED)], {
+      admit: () => true,
+    });
+    expect(gw.admitFor()(byPeer(7))).toBe(false); // the root host's copy governs
     await gw.close();
   });
 });
