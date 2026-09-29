@@ -1,4 +1,5 @@
 import { appendLocalErasure } from "./ingest.js";
+import { rebaseHostPeer, reportPurged } from "./peer-admission.js";
 import {
   withChannelCommit,
   parseLocalEvent,
@@ -1085,15 +1086,22 @@ async function storeHoldsAny(backend: StoreBackend): Promise<boolean> {
   }
 }
 /** The received and close events that reference one opening and still stand. */
-function incarnationMembers(gw: Gateway, openingId: string): string[] {
-  const out: string[] = [];
-  for (const d of gw.reactor.snapshot()) {
-    if (!inLocalContext(d, LOCAL_EVENT) || isErasure(d.claims)) continue;
+async function incarnationMembers(gw: Gateway, openingId: string): Promise<string[]> {
+  const out = new Set<string>();
+  const take = (d: Delta): void => {
+    if (!inLocalContext(d, LOCAL_EVENT) || isErasure(d.claims)) return;
     const parsed = parseLocalEvent(d, gw.operatorAuthor);
     if (parsed !== undefined && parsed.action !== "open" && parsed.opening === openingId)
-      out.push(d.id);
+      out.add(d.id);
+  };
+  const snapshot = gw.reactor.snapshot();
+  for (const d of snapshot) take(d);
+  // On the journal path the reading drops a target when its order is admitted, before its bytes
+  // go. A member whose purge faulted is then held but not served, and must still be found here.
+  if (gw.peer !== undefined) {
+    for (const d of await gw.backend.deltasSince(new Set(snapshot.ids()))) take(d);
   }
-  return out.sort();
+  return [...out].sort();
 }
 export async function eraseImpl(
   gw: Gateway,
@@ -1197,7 +1205,7 @@ export async function eraseImpl(
     // faulted has an erasure and must be erased again; that erase anchors on it.
     if (opts.cascade !== false)
       await withChannelCommit(gw, o.channel, async () => {
-        for (const member of incarnationMembers(gw, id)) {
+        for (const member of await incarnationMembers(gw, id)) {
           const erased = standingErasures(gw.reactor, gw.validityNow(), gw.operatorAuthor).some(
             (d) => erasureParts(d.claims).targetId === member,
           );
@@ -1263,10 +1271,41 @@ export async function eraseImpl(
   // A local refusal is a fault to COLLECT, never an abort: thrown here it would deny the
   // erasure and the sweep to every attached pool — one tier's fault becoming every replica's leak.
   let localPurge: unknown;
+  // On the journal path the frame that admitted the target still carries it: rebase first, so the
+  // purge and its WAL truncation reach the old frames too.
+  if (gw.peer !== undefined) {
+    try {
+      await rebaseHostPeer(gw.peer);
+    } catch (err) {
+      localPurge = err;
+    }
+  }
   try {
     await gw.backend.purge([id]);
   } catch (err) {
-    localPurge = err;
+    localPurge = localPurge ?? err;
+  }
+  // On the journal path the purge obligation is the journal's: "removed" settles only where the
+  // store proves the bytes gone; anything else is reported failed and stays owed.
+  if (gw.peer !== undefined) {
+    try {
+      const gone = localPurge === undefined && !(await gw.backend.holds(id));
+      await reportPurged(
+        gw.peer,
+        id,
+        gone
+          ? { status: "removed" }
+          : {
+              status: "failed",
+              fault:
+                localPurge instanceof Error
+                  ? localPurge.message
+                  : "the store still holds the bytes",
+            },
+      );
+    } catch (err) {
+      localPurge = localPurge ?? err;
+    }
   }
   try {
     await gw.reseat();

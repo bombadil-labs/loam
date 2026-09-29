@@ -58,6 +58,7 @@ import {
 import { toWire } from "../../src/federation/wire.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import { MemoryBackend } from "../../src/store/memory.js";
+import { FaultableBackend } from "../helpers/faultable-backend.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import { FERN, observed } from "../spike/garden.js";
 
@@ -81,12 +82,11 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-class FaultBackend extends MemoryBackend {
+class FaultBackend extends FaultableBackend {
   failAction: string | undefined;
   failPurge = false;
   beforeAppend: ((batch: readonly Delta[]) => Promise<void>) | undefined;
-  override async append(deltas: Iterable<Delta>): Promise<number> {
-    const batch = [...deltas];
+  override async checkWrite(batch: readonly Delta[]): Promise<void> {
     if (
       this.failAction !== undefined &&
       batch.some((d) => inContext(d, EVENT) && value(d, "action") === this.failAction)
@@ -94,7 +94,6 @@ class FaultBackend extends MemoryBackend {
       throw new Error(`fixture ${this.failAction} append failure`);
     }
     await this.beforeAppend?.(batch);
-    return super.append(batch);
   }
   override async purge(ids: Iterable<string>): Promise<number> {
     if (this.failPurge) throw new Error("fixture purge failure");
@@ -1481,7 +1480,8 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     const receipt = events(gw, "received")[0]!;
     primary.failPurge = true;
     await expect(gw.erase(receipt.id)).rejects.toThrow();
-    expect(gw.reactor.get(receipt.id)).toBeDefined();
+    // The order is admitted, so the reading drops the receipt; its bytes stay held and owed.
+    expect(gw.reactor.get(receipt.id)).toBeUndefined();
     expect(await primary.holds(receipt.id)).toBe(true);
     expect(opened(gw, ch.name).received).toEqual([]);
     const erasure = [...gw.reactor.snapshot()].find(
@@ -1497,6 +1497,7 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     primary.failPurge = false;
     await gw.erase(receipt.id);
     expect(gw.reactor.get(receipt.id)).toBeUndefined();
+    expect(await primary.holds(receipt.id)).toBe(false);
   });
   it("direct unattached eraseReplica cannot mint event deletion authority from a same-key fresh erasure", async () => {
     const { gw } = await home();

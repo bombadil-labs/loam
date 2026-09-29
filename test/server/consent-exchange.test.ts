@@ -85,8 +85,10 @@ async function exchangeServer(
   gateway: Gateway;
   faults: string[];
 }> {
-  const gateway = await Gateway.open(opts.primary ?? new MemoryBackend(), {
+  const primary = opts.primary ?? new MemoryBackend();
+  const gateway = await Gateway.open(primary, {
     seed: OPERATOR_SEED,
+    peerStore: primary.journalStore(), // a host, as `boot` opens one: a later boot reopens it
     ...(opts.sticky === true
       ? { channelBackend: (): MemoryBackend => new StickyBackend() }
       : opts.pools === undefined

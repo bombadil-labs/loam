@@ -182,6 +182,7 @@ import { exportOffer } from "../../src/federation/offer.js";
 import { ArchiveBackend } from "../../src/store/archive.js";
 import { MirrorBackend } from "../../src/store/mirror.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
+import { admitLocal, openHostPeer } from "../../src/gateway/peer-admission.js";
 import type { ScryptParams } from "../../src/server/credentials.js";
 import type { StoreBackend } from "../../src/store/backend.js";
 import { termClaims } from "../../src/gateway/container.js";
@@ -1136,7 +1137,7 @@ describe("T206 (d) — `loam erasures` reads the receipt, never the record", () 
     const home = await noteHome("anonymous");
     // The DOOR requires `spoken-by`; replay does not. A receipt replanted from a cold copy, or
     // written by an older version, can stand without one — so the reader meets a receipt the door
-    // would refuse. Planted through the driver rather than the door, which is exactly how such a
+    // would refuse. Planted through the host's journal rather than the door, which is how such a
     // receipt arrives.
     const tomb = await ground(home, async (gw) => {
       const target = await note(gw, "note:kit", "title", "kit-erased-marker");
@@ -1159,7 +1160,8 @@ describe("T206 (d) — `loam erasures` reads the receipt, never the record", () 
       OP_SEED,
     );
     const backend = new SqliteBackend(storePath(home));
-    await backend.append([bare]);
+    const { peer } = await openHostPeer(backend.journalStore(), OP);
+    await admitLocal(peer, [bare], 9_500_000, () => false);
     await backend.close();
 
     expect(await run(["erasures", "list", "--home", home], io()), printed()).toBe(0);

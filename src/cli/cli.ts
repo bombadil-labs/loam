@@ -48,6 +48,7 @@ import {
   standingErasures,
   erasuresIn,
   erasureTarget,
+  isErasure,
   UNSWEPT_AUTH_SURFACES,
   type ErasureReceipt,
 } from "../gateway/erase.js";
@@ -124,6 +125,8 @@ import { promptLine, promptSecret } from "./prompt.js";
 import type { StoreBackend } from "../store/backend.js";
 import { ArchiveBackend } from "../store/archive.js";
 import { MirrorBackend } from "../store/mirror.js";
+import { holdsJournals } from "../store/peer-image.js";
+import { admitErasureOrders, admitLocal, openHostPeer } from "../gateway/peer-admission.js";
 import { SqliteBackend } from "../store/sqlite.js";
 import { legibilityWarnings, reAdmit } from "../gateway/repair.js";
 import { isRepairable, strandedStrikeWarnings } from "../store/quarantine.js";
@@ -1146,6 +1149,39 @@ async function cmdInitGuided(parsed: Parsed, io: IO, options: RunOptions): Promi
   return 0;
 }
 
+// Restore an empty host store from its archive, through a new peer journal. Returns the count
+// admitted; 0 when the store is not empty or the archive holds nothing living.
+async function restoreIntoJournal(
+  primary: StoreBackend,
+  archive: StoreBackend,
+  dead: ReadonlySet<string>,
+  seed: string,
+): Promise<number> {
+  if (!holdsJournals(primary)) return 0;
+  if ((await primary.journalPeers()).length > 0 || (await primary.holdsAny?.()) !== false) return 0;
+  const rows = (await archive.deltasSince(new Set())).filter((d) => !dead.has(d.id));
+  if (rows.length === 0) return 0;
+  const { peer } = await openHostPeer(primary.journalStore(), authorForSeed(seed));
+  const orders = rows.filter((d) => isErasure(d.claims));
+  const ordinary = rows.filter((d) => !isErasure(d.claims));
+  const at = Date.now();
+  if (orders.length === 0) await admitLocal(peer, ordinary, at, () => false);
+  else {
+    await admitErasureOrders(
+      peer,
+      orders.map((d) => ({
+        delta: d,
+        targetId: erasureTarget(d.claims)!,
+        surfaceHoldsBytes: false,
+      })),
+      "local",
+      at,
+      ordinary,
+    );
+  }
+  return rows.length;
+}
+
 async function cmdServe(
   args: readonly string[],
   io: IO,
@@ -1221,6 +1257,13 @@ async function cmdServe(
         Date.now(), // no gateway yet, so no validity floor: the wall clock is the read time
         authorForSeed(seed),
       );
+      // A host store lives in its peer journal, and the archive keeps rows only. So a lost primary
+      // is restored through a new journal: the archive's living rows enter as one local transfer,
+      // erasure orders first. Their arrival order before the crash is not kept.
+      const restored = await restoreIntoJournal(backend, archive, dead, seed);
+      if (restored > 0) {
+        io.out(`loam: healed — ${restored} deltas restored from the archive into a new journal`);
+      }
       healed = await mirror.heal(dead);
     } catch (err) {
       await mirror.close().catch(() => {}); // never let a close failure mask the real refusal
@@ -1305,6 +1348,14 @@ async function cmdServe(
       return held.kind === "present" ? held.seed : undefined;
     },
   });
+  // On the journal path a row the journal never admitted is held and never served. Say so.
+  if (gateway.rowsOutsideJournal > 0) {
+    const n = gateway.rowsOutsideJournal;
+    io.err(
+      `loam: ${n} stored row${n === 1 ? " is" : "s are"} outside the peer journal and not ` +
+        "served — a damaged row, or one written around the door.",
+    );
+  }
   const setAside = isRepairable(backend) ? (await backend.quarantine()).length : 0;
   if (setAside > 0) io.err(`loam: ${setAsideLine(setAside)}`);
   let server;
@@ -5200,12 +5251,16 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
       // later run can say it: the re-run boots on the post-purge ground, where nothing came back.
       // A failed RE-SEAT leaves the old reactor in place, so this reading can be taken over ground
       // the purge already changed underneath it. Silence would then read as "nothing came back"
-      // when the honest answer is "this could not be measured" (H9). The cheap tell is the erased
-      // delta itself: if it is still in the reactor, the removal did not land here.
+      // when the honest answer is "this could not be measured" (H9). The tell is the erased delta's
+      // bytes: if a ground still holds them, the removal did not land there. (A reactor is not the
+      // tell: a journaled store drops an erased id from serving before its bytes go.)
       // EVERY GROUND THE SWEEP TOUCHED, not the host alone. A pool re-seats in its own turn and
       // a failure there is folded into the fault list, leaving no mark on the host — so asking the
       // host only reports "measured" about a reading taken over a pool the purge changed underneath.
-      if ([gateway, ...gateway.quarantinePools].some((g) => g.reactor.get(id) !== undefined)) {
+      const heldBy = await Promise.all(
+        [gateway, ...gateway.quarantinePools].map((g) => g.backend.holds(id).catch(() => true)),
+      );
+      if (heldBy.some(Boolean)) {
         io.err(
           `loam: the removal did not complete in this store's own ground, so the revival reading ` +
             `below was taken over a ground that may not reflect the purge. Treat an empty answer ` +

@@ -333,7 +333,7 @@ describe("other writers during a recovery", () => {
     expect(seedKey()).not.toBe(k1);
   });
 
-  it("a second writer that never saw the recovery: the old key's later write is never history", async () => {
+  it("a second writer that booted before the recovery: the old key's later write is refused and never history", async () => {
     const { k1 } = await world();
     const k1Seed = readUserSeed(home, "ada");
     if (k1Seed.kind !== "present") throw new Error("ada has a key file");
@@ -350,7 +350,9 @@ describe("other writers during a recovery", () => {
       await stale.append([before]);
       expect(await recoverUser(direct())).toBe(0);
       after = observed(FERN, "height", 2, stale.stamp(k1).timestamp, k1Seed.seed);
-      await stale.append([after]); // its view admits it: it never saw the recovery
+      // The stale handle's journal head moved, so it takes in the recovery before it admits, and
+      // the old key's write is refused.
+      await expect(stale.append([after])).rejects.toThrow(/not permitted/);
     } finally {
       await stale.close();
     }
@@ -360,7 +362,7 @@ describe("other writers during a recovery", () => {
     });
   });
 
-  it("a pool another writer declares during the recovery gets no cut, and the command says so", async () => {
+  it("a pool another writer declares during the recovery: the host catches up, refuses the record, and a rerun cuts it", async () => {
     const { k1, pool: p } = await world();
     const late = `${p}:late`;
     const seed = readSeed(home);
@@ -385,11 +387,22 @@ describe("other writers during a recovery", () => {
         await other.close();
       }
     };
-    expect(await recoverUser(direct({ afterCuts: declareElsewhere }))).toBe(0);
-    expect(out.join("\n")).toMatch(/was declared during this recovery and has no cut/);
+    // The host journal moved under the command, so it takes in the new pool before it admits.
+    // The door then sees a pool with no cut and refuses the record; nothing lands.
+    expect(await recoverUser(direct({ afterCuts: declareElsewhere }))).toBe(1);
+    expect(err.join("\n")).toMatch(new RegExp(`${late}.*holds no live cut`));
+    expect(seedKey()).toBe(k1);
+    // A rerun cuts every pool, the late one included, and lands.
+    expect(await recoverUser(direct())).toBe(0);
     await ground((gw, op) => {
-      expect(cutsOf(pool(gw, late), op, k1)).toEqual([]);
-      expect(cutsOf(pool(gw, p), op, k1)).toEqual([{ state: "committed", outcome: "committed" }]);
+      expect(cutsOf(pool(gw, late), op, k1)).toEqual([
+        { state: "committed", outcome: "committed" },
+      ]);
+      // The refused attempt's cut in the first pool is aborted; the rerun's is committed.
+      expect(cutsOf(pool(gw, p), op, k1).sort((a, b) => a.state.localeCompare(b.state))).toEqual([
+        { state: "aborted", outcome: "aborted" },
+        { state: "committed", outcome: "committed" },
+      ]);
     });
   });
 });

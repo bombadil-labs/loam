@@ -98,7 +98,7 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
     return this.#lastRestore;
   }
 
-  // THE JOURNAL LIVES ON THE PRIMARY (step 6 host trial). The mirror offers the primary's journal
+  // THE JOURNAL LIVES ON THE PRIMARY. The mirror offers the primary's journal
   // store with the tiers as one declared surface: newly admitted rows reach the shadow tier too (lag
   // rules as for append), and a purge settles only if the shadow tier holds no copy either.
   #journal: DurableOrdinaryJournalStore | undefined;

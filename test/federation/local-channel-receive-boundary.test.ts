@@ -227,9 +227,11 @@ describe("T288 receive service boundary", () => {
   it("receipt-stage refusal returns the actual successful source report and only a later offer can prove those bytes", async () => {
     const f = await fixture();
     const a = fact(10);
-    const real = f.gw.backend.append.bind(f.gw.backend);
-    const fault = vi.spyOn(f.gw.backend, "append").mockImplementation(async (offer) => {
-      const batch = [...offer];
+    // The host writes through its peer journal: the fault sits on the journal's commit.
+    const journal = (f.gw.backend as MemoryBackend).journalStore();
+    const real = journal.compareAndAppend.bind(journal);
+    const fault = vi.spyOn(journal, "compareAndAppend").mockImplementation(async (...args) => {
+      const batch = args[4];
       if (
         batch.some((d) =>
           d.claims.pointers.some(
@@ -239,7 +241,7 @@ describe("T288 receive service boundary", () => {
         )
       )
         throw new Error("receipt boundary fault");
-      return real(batch);
+      return real(...args);
     });
     const result = await receive(f.gw, f.opening, [a]);
     expect(result.ok).toBe(false);

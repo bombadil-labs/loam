@@ -1,4 +1,4 @@
-// The ordinary journal seam (step 6 host trial). A backend that can hold a peer journal offers one
+// The ordinary journal seam. A backend that can hold a peer journal offers one
 // `DurableOrdinaryJournalStore` per store object; the substrate plans, and the adapter commits the
 // head, the frame and the newly admitted rows in one transaction.
 //
