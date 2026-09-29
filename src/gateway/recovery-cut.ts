@@ -427,47 +427,46 @@ export function liveCutIds(
 export const isCutManifest = (d: Delta): boolean => inContext(d, CTX_CUT_MANIFEST);
 
 /**
- * The manifest a retiring `record` commits behind: a fresh operator manifest for it, ahead of it in
- * `batch`. Returns the cut ids it names, or undefined when there is none.
+ * The manifest a retiring `record` commits behind: an operator manifest for it, HELD before this
+ * append. The arrivals of one transfer are simultaneous (SPEC-6 §3), so a manifest in the record's
+ * own append does not count. Returns the cut ids it names, or undefined when there is none.
  */
 export function manifestAhead(
   reactor: Reactor,
   operator: string,
-  batch: readonly Delta[],
   record: Delta,
+  erased: ReadonlySet<string>,
 ): ReadonlySet<string> | undefined {
-  const at = batch.indexOf(record);
-  const m = batch
-    .slice(0, at < 0 ? 0 : at)
-    .find(
-      (d) =>
-        reactor.get(d.id) === undefined &&
-        d.claims.author === operator &&
-        inContext(d, CTX_CUT_MANIFEST) &&
-        field(d, "recovery") === record.id,
-    );
+  const m = held(reactor, operator, CTX_CUT_MANIFEST, erased).find(
+    (d) => field(d, "recovery") === record.id,
+  );
   return m === undefined ? undefined : new Set(fields(m, "cut"));
 }
 
 /**
- * Why `batch` is refused for a manifest in it, or undefined. A manifest is written once, beside its
- * record and ahead of it: one whose record is not later in the same batch could name a later cut.
+ * Why `batch` is refused for a manifest in it, or undefined. A manifest may name only cuts already
+ * held (here, or in an attached pool: `heldElsewhere`) or in its own append, so it can never bind a
+ * cut that arrives after it. Its record comes in a later append.
  */
 export function manifestDefect(
   reactor: Reactor,
   operator: string | undefined,
   batch: readonly Delta[],
+  heldElsewhere: (id: string) => boolean,
 ): string | undefined {
   if (operator === undefined) return undefined;
-  for (const [i, d] of batch.entries()) {
+  const here = new Set(batch.map((d) => d.id));
+  for (const d of batch) {
     if (reactor.get(d.id) !== undefined || d.claims.author !== operator) continue;
     if (!inContext(d, CTX_CUT_MANIFEST)) continue;
-    const recovery = field(d, "recovery");
-    const ahead = batch
-      .slice(i + 1)
-      .some((r) => r.id === recovery && reactor.get(r.id) === undefined);
-    if (!ahead) {
-      return `a cut manifest is written ahead of its recovery record, in the same append`;
+    const later = fields(d, "cut").filter(
+      (id) => reactor.get(id) === undefined && !here.has(id) && !heldElsewhere(id),
+    );
+    if (later.length > 0) {
+      return `a cut manifest names ${later.join(", ")}, which is neither held nor in its append`;
+    }
+    if (here.has(field(d, "recovery") ?? "")) {
+      return `a cut manifest and its recovery record are written in separate appends, the manifest first`;
     }
   }
   return undefined;

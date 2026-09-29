@@ -1,5 +1,5 @@
 diff --git a/refactor/recordings/out/principal.gateway-operator.json b/refactor/recordings/out/principal.gateway-operator.json
-index e4f92b45..071e537c 100644
+index e4f92b45..316eebe7 100644
 --- a/refactor/recordings/out/principal.gateway-operator.json
 +++ b/refactor/recordings/out/principal.gateway-operator.json
 @@ -10,15 +10,7 @@
@@ -15,7 +15,7 @@ index e4f92b45..071e537c 100644
 -      "@operator"
 -    ],
 -    "operatorAuthor": "@stranger"
-+    "refused": "peer image: this store holds rows but no peer image, so it cannot open as a single peer. The trial path starts only from a fresh, empty store."
++    "refused": "peer journal: this store holds rows but no peer journal, so it cannot open as a single peer. The trial path starts only from a fresh, empty store."
    },
    "reopened with no seed": {
      "appendSignedByOperatorSeed": "accepted",

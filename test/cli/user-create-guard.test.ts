@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { withHostCut } from "../helpers/recovery-cut.js";
+import { appendWithHostCut } from "../helpers/recovery-cut.js";
 import { authorForSeed, makeNegationClaims, signClaims, type Claims } from "@bombadil/rhizomatic";
 import { run } from "../../src/cli/cli.js";
 import { readSeed, storePath } from "../../src/cli/config.js";
@@ -50,7 +50,7 @@ async function plant(build: (op: string, t: number) => Claims[]): Promise<string
   );
   try {
     const deltas = build(op, gw.stamp(op).timestamp).map((c) => signClaims(c, seed));
-    await gw.append(withHostCut(gw, seed, deltas));
+    await appendWithHostCut(gw, seed, deltas);
     return deltas.map((d) => d.id);
   } finally {
     await gw.close();

@@ -24,13 +24,13 @@ import {
   type Schema,
   type Primitive,
   type Term,
-  type DurablePeerStore,
+  type DurableOrdinaryJournalStore,
 } from "@bombadil/rhizomatic";
 import { graphql, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
-import { holdsPeerImages } from "../store/peer-image.js";
-import { admitLocal, hostPeer, openHostPeer, peerIdOf, type HostPeer } from "./peer-admission.js";
+import { holdsJournals } from "../store/peer-image.js";
+import { admitLocal, openHostPeer, peerIdOf, type HostPeer } from "./peer-admission.js";
 import { stampOn, type Stamp } from "./stamp.js";
 import { declarePrincipalScope } from "./principal.js";
 import { declareUserGround, userGroundOf } from "./user-root.js";
@@ -218,11 +218,11 @@ export interface QueryResult {
 
 export interface GatewayOptions {
   /**
-   * The single-peer image store (step 6 host trial). Given, this gateway is a substrate peer under
-   * its operator key: it opens from the image, and every write is admitted through it. Only a
+   * The ordinary journal store (step 6 host trial). Given, this gateway is a substrate peer under
+   * its operator key: it opens from the journal, and every write is admitted through it. Only a
    * host passes this; pools, quarantine and scratch gateways never do.
    */
-  readonly peerStore?: DurablePeerStore;
+  readonly peerStore?: DurableOrdinaryJournalStore;
   /**
    * Where a FEDERATION CHANNEL's pool keeps its bytes, by pool name. A separate container defaults
    * to a fresh in-memory backend, which is right for a quarantine (transient by design) and WRONG
@@ -586,17 +586,17 @@ export class Gateway {
     const reactor = new Reactor();
     if (options.peerStore !== undefined && seed === undefined) {
       throw new Error(
-        "peer image: a single-peer store needs the operator seed that names the peer",
+        "peer journal: a single-peer store needs the operator seed that names the peer",
       );
     }
-    const peer: HostPeer | undefined =
-      options.peerStore === undefined
-        ? undefined
-        : hostPeer(options.peerStore, peerIdOf(authorForSeed(seed!)));
-    const replayed =
-      peer === undefined
-        ? await backend.deltasSince(new Set())
-        : await openHostPeer(peer.store, peer.peerId, backend);
+    let peer: HostPeer | undefined;
+    let replayed: Delta[];
+    if (options.peerStore === undefined) replayed = await backend.deltasSince(new Set());
+    else {
+      const opened = await openHostPeer(options.peerStore, peerIdOf(authorForSeed(seed!)));
+      peer = opened.peer;
+      replayed = opened.rows;
+    }
     for (const d of replayed) {
       const result = reactor.ingest(d);
       if (result.status === "rejected") {
@@ -679,8 +679,8 @@ export class Gateway {
       options.peerStore === undefined &&
       typeof process !== "undefined" &&
       process.env.LOAM_PEER_TRIAL === "1" &&
-      holdsPeerImages(backend)
-        ? { peerStore: backend.peerStore() }
+      holdsJournals(backend)
+        ? { peerStore: backend.journalStore() }
         : {};
     const gateway = await Gateway.open(backend, {
       ...options,

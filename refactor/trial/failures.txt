@@ -1,5 +1,5 @@
 
-## A erasure refused by the image (202)
+## A erasure refused by the journal (203)
 - test/health-surface.test.ts :: T111 — the health report is nameable from the package barrel boots, writes, erases, and reads health through the barrel alone
 - test/slate-surface.test.ts :: T109 — the slate surface is reachable from the package barrel stands, reviews, cuts, and receipts a slate through the barrel alone
 - test/cli/erasure-verbs.test.ts :: T206 (d) — `loam erasures` reads the receipt, never the record shows who ordered it, whose record it was, when, and why — and none of the content
@@ -45,7 +45,6 @@
 - test/federation/local-channel-container-scope.test.ts :: spec 64: lifecycle events name their parent container every open, receipt and close carries the pointer at position 3, and it is not container law
 - test/federation/local-channel-container-scope.test.ts :: spec 64: lifecycle events name their parent container an open whose parent pointer disagrees with its into does not parse; the marker names the channel from the event pointer
 - test/federation/local-channel-container-scope.test.ts :: spec 64: lifecycle events name their parent container a refused drop leaves a close beside a standing pool and the channel stays listed; a close erased before its opening leaves the dropped channel unlisted
-- test/federation/local-channel-container-scope.test.ts :: spec 64: lifecycle events name their parent container an opening whose declaration is absent from the reactor is not standing
 - test/federation/local-channel-container-scope.test.ts :: spec 64: lifecycle events name their parent container a bound connection's lineage read lists the channels opened into its container and no others; the operator's read filters by container
 - test/federation/local-channel-drop-erased-source.test.ts :: T288 channel cleanup after real received-source erasure closes the exact valid lifecycle before purging despite unavailable receive evidence; root and sibling keep working
 - test/federation/local-channel-events.test.ts :: T288 honest local received operand source erasure leaves exact receipt citation dangling and makes the whole operand unavailable
@@ -192,9 +191,6 @@
 - test/refactor/step4-store-guard-window.test.ts :: the store guard's present-time read of a separate declaration's negation control: a detach record covering the expired store lets erase complete, listing it kept
 - test/refactor/step4-store-guard-window.test.ts :: the store guard's present-time read of a separate declaration's negation control: the explicit forget still clears the guard: every declaration negated
 - test/refactor/step4-strike-readers.test.ts :: an erasure's negation is reported only while it holds the receipt and the completeness check name the strike inside its window
-- test/server/user-root.test.ts :: every road that mints a user a key names it as their root erasing the person and moving the key file away frees the name
-- test/server/users-erasure.test.ts :: T131 criterion 2 — the disclosure reaches the compliance receipt the receipt's nonClaim names credentials.json, login-locks.json and user.<name>.seed
-- test/server/users-erasure.test.ts :: T131 criterion 7 — both surfaces disclose exactly the derived home auth surfaces both surfaces disclose the same set, and it equals the path-function-derived MUST_DISCLOSE
 - test/site/arc-clock.test.ts :: an order clock ahead of the wall clock every step of the arc still banks: validity is never later than now
 - test/site/arc.test.ts :: the arc, headless: every step earns its store observable walks the whole arc in order; no lesson is green before it runs; every step's store predicate turns true
 - test/site/arc.test.ts :: progress is claims lands one claim per kind, counts at or above the actions performed, and reads back as the rail
@@ -202,6 +198,11 @@
 - test/site/arc.test.ts :: the tutorial's store is a real store the homecoming's forgetting travels: the erased words are in no byte of the export, and the diary around them is
 - test/site/arc.test.ts :: the fifteen lessons, end to end plants every term as a claim, in the manifest's order, and every quiz teaches its own lesson
 - test/site/artifact-shell.test.ts :: §30 criterion 26: an emitted page OUTLIVES its withdrawal — the accepted residual still renders after the declaration and the binding are struck
+- test/server/subtree-walls.test.ts :: §58 — the walls a container named under the binding but PARENTED elsewhere is governed by its name
+- test/server/subtree-walls.test.ts :: §58 — the walls a container parented under ANOTHER PERSON'S container is governed by its name, and no refusal names them
+- test/server/user-root.test.ts :: every road that mints a user a key names it as their root erasing the person and moving the key file away frees the name
+- test/server/users-erasure.test.ts :: T131 criterion 2 — the disclosure reaches the compliance receipt the receipt's nonClaim names credentials.json, login-locks.json and user.<name>.seed
+- test/server/users-erasure.test.ts :: T131 criterion 7 — both surfaces disclose exactly the derived home auth surfaces both surfaces disclose the same set, and it equals the path-function-derived MUST_DISCLOSE
 
 ## B unsigned delta ingested around the door (14)
 - test/gateway/user-recovery-readers.test.ts :: the shapes a door refuses are refused, and no reader disagrees about them an unsigned binding-shaped row does not make K1 K2's own
@@ -219,7 +220,7 @@
 - test/server/user-root-signatures.test.ts :: an unsigned operator user record neither creates nor un-names a user a name held only by unsigned rows is free; a signed name stays held
 - test/server/user-root-signatures.test.ts :: an unsigned operator role claim grants no role ada keeps only her signed role; bea keeps hers
 
-## C rows written before the image (7)
+## C rows written before the journal (7)
 - test/federation/local-channel-live-opening.test.ts :: spec 64: a live opening cannot be erased an event this reader cannot parse makes the orphan question fail closed: the drop refuses rather than purges
 - test/federation/local-channel-live-opening.test.ts :: spec 64: a live opening cannot be erased another channel's unreadable event does not close this pool's orphan question
 - test/gateway/container-compat.test.ts :: a previous-format store is refused, not booted empty boot refuses the pre-0.11 fixture, and plants nothing beside it
@@ -228,34 +229,26 @@
 - test/store/corrupt-row-recovery.test.ts :: T66: heal replaces a corrupt row from the mirror's healthy copy an UNPARSEABLE row is a squatter too — the pen reason that cannot name its own strike
 - test/store/corrupt-row-recovery.test.ts :: T66: heal replaces a corrupt row from the mirror's healthy copy a genuinely-new archive delta still federates in the SAME heal that repairs a corrupt row
 
-## D rows purged outside the image (3)
+## D rows purged or changed outside the journal (3)
 - test/cli/erasure-verbs.test.ts :: T206 (a) — `loam slate list` prints §29.1's record calls an unreadable condemned set UNKNOWN, and never zero
 - test/cli/erasure-verbs.test.ts :: T206 (a) — `loam slate list` prints §29.1's record points a lapsed slate with an unreadable set at the UNRESOLVED row
 - test/cli/erasure-verbs.test.ts :: T206 (b) — `loam erase` removes the bytes at every local tier says the byte verdict could not see the §25 rows, and stays quiet when there are none
 
-## E recovery: in-transfer arrival order (16)
-- test/cli/recovery-barrier.test.ts :: the recovery barrier a completed recovery leaves a committed cut with its outcome in the host and every pool
-- test/cli/recovery-barrier.test.ts :: the recovery barrier H4: a crash after the commit and before the outcomes: the pool reads its cut committed, and the rerun writes the outcome
-- test/cli/recovery-barrier.test.ts :: the recovery barrier H5: a pool declared between the cuts and the commit: the host refuses the record, the cuts abort, the rerun covers both
+## E recovery (7)
 - test/cli/recovery-barrier.test.ts :: other writers during a recovery a second writer that never saw the recovery: the old key's later write is never history
 - test/cli/recovery-barrier.test.ts :: other writers during a recovery a pool another writer declares during the recovery gets no cut, and the command says so
 - test/cli/user-recover.test.ts :: E8: the journal, the key files, and the append that may or may not have landed a failure BEFORE the append commits restores the old key file and leaves no journal
 - test/cli/user-recover.test.ts :: E8: the journal, the key files, and the append that may or may not have landed a read that cannot tell leaves everything and says PENDING; a rerun decides
-- test/cli/user-recover.test.ts :: E8: the journal, the key files, and the append that may or may not have landed a crash after the journal and before any key file moves is rolled back by the rerun
 - test/cli/user-recover.test.ts :: the second append, the new key file, and clocks a binding written and then reported failed is not signed twice on the rerun
 - test/cli/user-recover.test.ts :: the second append, the new key file, and clocks a lost new key file after the record landed: PENDING, then --abandon-attempt recovers again
-- test/cli/user-recover.test.ts :: the second append, the new key file, and clocks an operator ordering floor ahead of the clock does not delay the recovery's validity
-- test/cli/user-recover.test.ts :: an unsigned strike is not a strike an unsigned operator-named strike on K1's grant does not stop the recovery from striking it
-- test/cli/user-recover.test.ts :: E6 and E9: inboxes K1's connection is refused after recovery; K1's delegation in the inbox is struck; K2 re-binds
-- test/cli/user-recover.test.ts :: E6 and E9: inboxes H6: an inbox not attached refuses the recovery before anything is written; attached, it completes
 - test/cli/user-recover.test.ts :: E6 and E9: inboxes an abandon whose new attempt fails before it commits hands the journal back to the old attempt
-- test/server/owned-membership.test.ts :: provisioned containers name their user a user made by `user create` gets a home in the user form, and it follows a recovery
 
-## F fault injected into backend.append (2)
+## F fault injected into backend.append (3)
+- test/federation/local-channel-container-scope.test.ts :: spec 64: lifecycle events name their parent container an opening whose declaration is absent from the reactor is not standing
 - test/federation/local-channel-events.test.ts :: T288 partial writes and shared channel commit order failed protected open leaves a real legacy pool and never auto-promotes partial retry
 - test/federation/local-channel-r2-regressions.test.ts :: T288 R2 regression controls retry after failed status never promotes a partial opening
 
-## G raw rows no longer surfaced (2)
+## G other (2)
 - test/cli/honest-reports.test.ts :: serve names the rows boot set aside prints one line with the count and `loam repair list`; a clean store prints none
 - test/federation/channel-record-trust.test.ts :: T217 (b) — `loam federate list` renders the unreadable record as unreadable names the fields it cannot read, and leaves a legible channel reading as it did
 

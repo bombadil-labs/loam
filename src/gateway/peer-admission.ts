@@ -1,55 +1,48 @@
 // The host store as one substrate peer (step 6 host trial, refactor/audit/step6-host-trial.md).
-// Loam's own checks run first, under the gateway's admission lock; the substrate then admits,
-// records arrivals and refusals, and commits the image and the new rows together.
+// Loam's own checks run first, under the gateway's admission lock; the substrate's ordinary
+// journal then admits, records arrivals and refusals, and commits a frame and the new rows.
 //
 // Erasure is not on this path: the substrate reports `unsupported-erasure`, and an erasure is
-// refused here rather than purged by Loam's older path while the image still admits its target.
+// refused here rather than purged by Loam's older path while the journal still admits its target.
 
 import {
-  admitSinglePeerTransfer,
-  openSinglePeer,
+  OrdinaryJournalPeer,
   type ArrivalOrigin,
   type Delta,
-  type DurablePeerStore,
-  type SinglePeerTransferResult,
+  type DurableOrdinaryJournalStore,
+  type OrdinaryJournalAdmissionResult,
 } from "@bombadil/rhizomatic";
-import { imageRows } from "../store/peer-image.js";
-import type { StoreBackend } from "../store/backend.js";
 
-// One peer, one commit queue. The door and the write-through both commit to the image, and a
-// compare-and-set that loses a race is a lost write, so every commit waits for the one before it.
+// One peer, one commit queue. The door and the write-through both commit, and the journal peer
+// asks its caller to serialize writers.
 export interface HostPeer {
-  readonly store: DurablePeerStore;
-  readonly peerId: string;
+  readonly journal: OrdinaryJournalPeer;
+  readonly store: DurableOrdinaryJournalStore;
   tail: Promise<unknown>;
-}
-
-export function hostPeer(store: DurablePeerStore, peerId: string): HostPeer {
-  return { store, peerId, tail: Promise.resolve() };
 }
 
 // A Loam author is already a canonical PeerId (`ed25519:<hex>`): the peer IS its governing key.
 export const peerIdOf = (author: string): string => author;
 
-// Open the image and return the rows it admitted, in arrival order. A store with rows and no
-// image, a conflict or an unconfirmed commit refuses the open.
+// Open the journal. Returns the peer and the rows it admitted, in arrival order.
 export async function openHostPeer(
-  store: DurablePeerStore,
+  store: DurableOrdinaryJournalStore,
   peerId: string,
-  backend: StoreBackend,
-): Promise<Delta[]> {
-  const opened = await openSinglePeer(store, peerId);
-  if (opened.status === "rows-without-image") {
+): Promise<{ peer: HostPeer; rows: Delta[] }> {
+  const opened = await OrdinaryJournalPeer.open(store, peerId);
+  if (opened.status === "rows-without-journal") {
     throw new Error(
-      "peer image: this store holds rows but no peer image, so it cannot open as a single peer. " +
-        "The trial path starts only from a fresh, empty store.",
+      "peer journal: this store holds rows but no peer journal, so it cannot open as a single " +
+        "peer. The trial path starts only from a fresh, empty store.",
     );
   }
   if (opened.status !== "open") {
-    throw new Error(`peer image: the open did not commit (${describe(opened)})`);
+    throw new Error(`peer journal: the open did not commit (${describe(opened)})`);
   }
-  const order = opened.state.base.arrivals.map((a) => a.id);
-  return imageRows(order, await backend.deltasSince(new Set()));
+  const order = opened.peer.snapshot().base.arrivals.map((a) => a.id);
+  const byId = new Map((await store.readAdmittedRows(peerId, order)).map((d) => [d.id, d]));
+  const rows = order.map((id) => byId.get(id)!);
+  return { peer: { journal: opened.peer, store, tail: Promise.resolve() }, rows };
 }
 
 const LOCAL: ArrivalOrigin = { kind: "local" };
@@ -64,11 +57,11 @@ export async function admitLocal(
 ): Promise<void> {
   const result = await transfer(peer, batch, LOCAL, arrivedAt, isErasure, "atomic");
   if (result.status !== "committed") {
-    throw new Error(`append rejected by the peer image: ${describe(result)}`);
+    throw new Error(`append rejected by the peer journal: ${describe(result)}`);
   }
 }
 
-// A federation receive: per delta. The ids the image admitted or already held.
+// A federation receive: per delta. The ids the journal admitted or already held.
 export async function admitReceived(
   peer: HostPeer,
   batch: readonly Delta[],
@@ -77,7 +70,7 @@ export async function admitReceived(
 ): Promise<Set<string>> {
   const result = await transfer(peer, batch, UNATTRIBUTED, arrivedAt, isErasure, "individual");
   if (result.status !== "committed") {
-    throw new Error(`federation refused by the peer image: ${describe(result)}`);
+    throw new Error(`federation refused by the peer journal: ${describe(result)}`);
   }
   return new Set(
     result.outcomes
@@ -93,9 +86,9 @@ function transfer(
   arrivedAt: number,
   isErasure: (d: Delta) => boolean,
   mode: "atomic" | "individual",
-): Promise<SinglePeerTransferResult> {
+): Promise<OrdinaryJournalAdmissionResult> {
   const run = peer.tail.then(() =>
-    admitSinglePeerTransfer(peer.store, peer.peerId, {
+    peer.journal.admit({
       offered,
       origin,
       arrivedAt,

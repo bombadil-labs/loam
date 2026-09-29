@@ -24,11 +24,10 @@ import {
   parseClaims,
   verifyDelta,
   type Delta,
-  type DurablePeerStore,
+  type DurableOrdinaryJournalStore,
 } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "./backend.js";
 import { canonicalDelta } from "./canon.js";
-import { sameBytes } from "./peer-image.js";
 import { admit, previewOf, type QuarantinedRow, type RepairableBackend } from "./quarantine.js";
 
 interface DeltaRow {
@@ -157,9 +156,15 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
         key   TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
-      CREATE TABLE IF NOT EXISTS peer_image (
-        peer  TEXT PRIMARY KEY,
-        image BLOB NOT NULL
+      CREATE TABLE IF NOT EXISTS journal_head (
+        peer TEXT PRIMARY KEY,
+        head TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS journal_frames (
+        peer  TEXT NOT NULL,
+        n     INTEGER NOT NULL,
+        frame BLOB NOT NULL,
+        PRIMARY KEY (peer, n)
       );
     `);
     this.insertDelta = this.db.prepare(
@@ -514,36 +519,72 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     return out;
   }
 
-  // One image per peer. The compare, the new rows and the image commit in one IMMEDIATE
-  // transaction, so a crash leaves either the old image and rows or the new ones.
-  private store: DurablePeerStore | undefined;
+  // One journal per peer. A frame is inserted once and never updated. The head, the new frame and
+  // the new rows commit in one IMMEDIATE transaction, so a crash leaves the old head or the new one.
+  private store: DurableOrdinaryJournalStore | undefined;
 
-  peerStore(): DurablePeerStore {
-    const imageOf = (peer: string): Uint8Array | undefined => {
-      const row = this.db.prepare("SELECT image FROM peer_image WHERE peer = ?").get(peer) as
-        { image: Buffer } | undefined;
-      return row === undefined ? undefined : new Uint8Array(row.image);
-    };
+  journalStore(): DurableOrdinaryJournalStore {
+    const headOf = (peer: string): string | undefined =>
+      (
+        this.db.prepare("SELECT head FROM journal_head WHERE peer = ?").get(peer) as
+          { head: string } | undefined
+      )?.head;
     const hasRows = (): boolean =>
       this.db.prepare("SELECT 1 FROM deltas LIMIT 1").get() !== undefined;
+    const rowFor = this.db.prepare("SELECT id, claims, sig FROM deltas WHERE id = ?");
     return (this.store ??= {
-      readImage: async (peerId) => {
+      readJournal: async (peerId) => {
         this.assertOpen();
-        const image = imageOf(peerId);
-        if (image !== undefined) return { status: "image", image };
-        return hasRows() ? { status: "rows-without-image" } : { status: "empty" };
+        // One read transaction, so the head and the frames agree.
+        return this.db.transaction(() => {
+          const head = headOf(peerId);
+          if (head === undefined) {
+            return hasRows()
+              ? ({ status: "rows-without-journal" } as const)
+              : ({ status: "empty" } as const);
+          }
+          const frames = (
+            this.db
+              .prepare("SELECT frame FROM journal_frames WHERE peer = ? ORDER BY n")
+              .all(peerId) as { frame: Buffer }[]
+          ).map((r) => new Uint8Array(r.frame));
+          return { status: "journal", head, frames } as const;
+        })();
       },
-      compareAndSet: async (peerId, expectedPrior, nextImage, newlyAdmitted) => {
+      readAdmittedRows: async (_peerId, ids) => {
+        this.assertOpen();
+        // The rows exactly as stored. The journal's open compares each one's id and signature with
+        // the delta its verified frame admitted, so a second signature check here would only
+        // repeat that work. A row whose claims do not parse is left out, and the open then fails.
+        const out: Delta[] = [];
+        for (const id of ids) {
+          const row = rowFor.get(id) as DeltaRow | undefined;
+          if (row === undefined) continue;
+          try {
+            const claims = parseClaims(JSON.parse(row.claims));
+            out.push(
+              row.sig === null ? { id: row.id, claims } : { id: row.id, claims, sig: row.sig },
+            );
+          } catch {
+            continue;
+          }
+        }
+        return out;
+      },
+      readHead: async (peerId) => {
+        this.assertOpen();
+        const head = headOf(peerId);
+        return head === undefined ? { status: "missing" } : { status: "head", head };
+      },
+      compareAndAppend: async (peerId, expectedHead, nextHead, frame, newlyAdmitted) => {
         this.assertOpen();
         const batch = newlyAdmitted.map(canonicalDelta);
         const stored: string[] = [];
         this.db.exec("BEGIN IMMEDIATE");
         try {
-          const current = imageOf(peerId);
+          const head = headOf(peerId);
           const matches =
-            expectedPrior === null
-              ? current === undefined && !hasRows()
-              : current !== undefined && sameBytes(current, expectedPrior);
+            expectedHead === null ? head === undefined && !hasRows() : head === expectedHead;
           if (!matches) {
             this.db.exec("ROLLBACK");
             return { status: "conflict" };
@@ -556,9 +597,19 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
             );
             if (info.changes > 0) stored.push(d.id);
           }
+          if (frame !== null) {
+            const next = (
+              this.db
+                .prepare("SELECT COALESCE(MAX(n), -1) + 1 AS n FROM journal_frames WHERE peer = ?")
+                .get(peerId) as { n: number }
+            ).n;
+            this.db
+              .prepare("INSERT INTO journal_frames (peer, n, frame) VALUES (?, ?, ?)")
+              .run(peerId, next, Buffer.from(frame));
+          }
           this.db
-            .prepare("INSERT OR REPLACE INTO peer_image (peer, image) VALUES (?, ?)")
-            .run(peerId, Buffer.from(nextImage));
+            .prepare("INSERT OR REPLACE INTO journal_head (peer, head) VALUES (?, ?)")
+            .run(peerId, nextHead);
           this.db.exec("COMMIT");
         } catch (err) {
           try {

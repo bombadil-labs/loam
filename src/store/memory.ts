@@ -4,10 +4,9 @@
 
 /* eslint-disable @typescript-eslint/require-await -- the async keyword is load-bearing: it
    turns every synchronous throw into the rejected promise the seam promises. */
-import { DeltaSet, type Delta, type DurablePeerStore } from "@bombadil/rhizomatic";
+import { DeltaSet, type Delta, type DurableOrdinaryJournalStore } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "./backend.js";
 import { canonicalDelta } from "./canon.js";
-import { sameBytes } from "./peer-image.js";
 
 export class MemoryBackend implements StoreBackend {
   private set = new DeltaSet();
@@ -69,30 +68,51 @@ export class MemoryBackend implements StoreBackend {
     this.closed = true;
   }
 
-  // One image per peer. The compare, the row insert and the image swap run with no await between
-  // them, so they are one step for every other caller.
-  private images = new Map<string, Uint8Array>();
-  private store: DurablePeerStore | undefined;
+  // One journal per peer: a head and its committed frames, which never change once written. The
+  // compare, the frame, the head and the rows change with no await between them, so they are one
+  // step for every other caller.
+  private journals = new Map<string, { head: string; frames: Uint8Array[] }>();
+  private store: DurableOrdinaryJournalStore | undefined;
 
-  peerStore(): DurablePeerStore {
+  journalStore(): DurableOrdinaryJournalStore {
     return (this.store ??= {
-      readImage: async (peerId) => {
+      readJournal: async (peerId) => {
         this.assertOpen();
-        const image = this.images.get(peerId);
-        if (image !== undefined) return { status: "image", image: Uint8Array.from(image) };
-        return this.set.size > 0 ? { status: "rows-without-image" } : { status: "empty" };
+        const j = this.journals.get(peerId);
+        if (j !== undefined) {
+          return {
+            status: "journal",
+            head: j.head,
+            frames: j.frames.map((f) => Uint8Array.from(f)),
+          };
+        }
+        return this.set.size > 0 ? { status: "rows-without-journal" } : { status: "empty" };
       },
-      compareAndSet: async (peerId, expectedPrior, nextImage, newlyAdmitted) => {
+      readAdmittedRows: async (_peerId, ids) => {
         this.assertOpen();
-        const current = this.images.get(peerId);
+        return ids.flatMap((id) => {
+          const d = this.set.get(id);
+          return d === undefined ? [] : [d];
+        });
+      },
+      readHead: async (peerId) => {
+        this.assertOpen();
+        const j = this.journals.get(peerId);
+        return j === undefined ? { status: "missing" } : { status: "head", head: j.head };
+      },
+      compareAndAppend: async (peerId, expectedHead, nextHead, frame, newlyAdmitted) => {
+        this.assertOpen();
+        const j = this.journals.get(peerId);
         const matches =
-          expectedPrior === null
-            ? current === undefined && this.set.size === 0
-            : current !== undefined && sameBytes(current, expectedPrior);
+          expectedHead === null
+            ? j === undefined && this.set.size === 0
+            : j !== undefined && j.head === expectedHead;
         if (!matches) return { status: "conflict" };
         const batch = newlyAdmitted.map(canonicalDelta);
         for (const d of batch) this.set.add(d);
-        this.images.set(peerId, Uint8Array.from(nextImage));
+        const frames = j?.frames ?? [];
+        if (frame !== null) frames.push(Uint8Array.from(frame));
+        this.journals.set(peerId, { head: nextHead, frames });
         return { status: "durable" };
       },
     });

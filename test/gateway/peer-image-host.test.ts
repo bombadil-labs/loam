@@ -1,9 +1,8 @@
-// The step 6 host trial (refactor/audit/step6-host-trial.md): a host opened with a peer image
-// store admits through the substrate. Each case reads BOTH levels: the image (what the peer
-// admitted, and how it arrived) and the gateway (what a reader sees).
+// The step 6 host trial (refactor/audit/step6-host-trial.md): a host opened with an ordinary
+// journal store admits through the substrate. Each case reads BOTH levels: the journal (what the
+// peer admitted, and how it arrived) and the gateway (what a reader sees).
 //
-// Not covered here: erasure, which the image refuses by design in this trial; and the recovery
-// barrier's in-batch order, which the image does not keep (a trial finding, not a rail).
+// Not covered here: erasure, which the journal refuses by design in this trial.
 
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync } from "node:fs";
@@ -13,11 +12,11 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import {
   authorForSeed,
-  decodeDurablePeerState,
+  OrdinaryJournalPeer,
   signClaims,
   type Delta,
+  type DurableOrdinaryJournalStore,
   type DurablePeerState,
-  type DurablePeerStore,
 } from "@bombadil/rhizomatic";
 import { containerClaims } from "../../src/gateway/container.js";
 import { eraseClaims } from "../../src/gateway/erase.js";
@@ -48,31 +47,36 @@ const note = (n: number, seed = SEED): Delta =>
     seed,
   );
 
-const boot = (backend: StoreBackend & { peerStore(): DurablePeerStore }): Promise<Gateway> =>
+const boot = (
+  backend: StoreBackend & { journalStore(): DurableOrdinaryJournalStore },
+): Promise<Gateway> =>
   Gateway.boot(backend, assembleGenesis({ operatorSeed: SEED }), {
-    peerStore: backend.peerStore(),
+    peerStore: backend.journalStore(),
   });
 
-async function image(store: DurablePeerStore): Promise<Uint8Array | undefined> {
-  const read = await store.readImage(OP);
-  return read.status === "image" ? read.image : undefined;
+// The journal's head, and its frame count: together they change on every commit.
+async function image(store: DurableOrdinaryJournalStore): Promise<string | undefined> {
+  const read = await store.readJournal(OP);
+  return read.status === "journal" ? `${read.head}/${read.frames.length}` : undefined;
 }
 
-async function stateOf(store: DurablePeerStore): Promise<DurablePeerState> {
-  return decodeDurablePeerState((await image(store))!, OP);
+async function stateOf(store: DurableOrdinaryJournalStore): Promise<DurablePeerState> {
+  const opened = await OrdinaryJournalPeer.open(store, OP);
+  if (opened.status !== "open") throw new Error(opened.status);
+  return opened.peer.snapshot();
 }
 
 const sqliteHome = (): string => join(mkdtempSync(join(tmpdir(), "loam-peer-image-")), "s.sqlite");
 const fileHash = (path: string): string =>
   createHash("sha256").update(readFileSync(path)).digest("hex");
 
-describe("a host opened with a peer image admits through it", () => {
-  it("a fresh host's genesis, marker and appends are local arrivals in the image", async () => {
+describe("a host opened with a peer journal admits through it", () => {
+  it("a fresh host's genesis, marker and appends are local arrivals in the journal", async () => {
     const backend = new MemoryBackend();
     const gw = await boot(backend);
     const d = note(1);
     await gw.append([d]);
-    const state = await stateOf(backend.peerStore());
+    const state = await stateOf(backend.journalStore());
     // delta level: the image admitted it, as a local arrival, and it is the store's row
     expect(state.base.admitted.has(d.id)).toBe(true);
     expect(state.base.arrivals.find((a) => a.id === d.id)?.sender).toBe("local");
@@ -94,7 +98,7 @@ describe("a host opened with a peer image admits through it", () => {
     const again = await boot(backend);
     const after = new Set([...again.reactor.snapshot()].map((d) => d.id));
     expect(after).toEqual(before);
-    expect((await stateOf(backend.peerStore())).base.admitted.size).toBe(before.size);
+    expect((await stateOf(backend.journalStore())).base.admitted.size).toBe(before.size);
     await again.close();
   });
 
@@ -103,12 +107,12 @@ describe("a host opened with a peer image admits through it", () => {
     const gw = await boot(backend);
     const live = note(1);
     await gw.append([live]);
-    const before = await image(backend.peerStore());
+    const before = await image(backend.journalStore());
     const bystander = note(2);
     // The image refuses an erasure in this trial, so the batch it rides in lands nowhere.
     const erasure = signClaims(eraseClaims(live.id, OP, OP, 20_000), SEED);
-    await expect(gw.append([bystander, erasure])).rejects.toThrow(/peer image/);
-    expect(await image(backend.peerStore())).toEqual(before);
+    await expect(gw.append([bystander, erasure])).rejects.toThrow(/peer journal/);
+    expect(await image(backend.journalStore())).toEqual(before);
     expect(await backend.holds(bystander.id)).toBe(false);
     expect(gw.reactor.get(bystander.id)).toBeUndefined();
     expect(gw.reactor.get(live.id)).toBeDefined(); // the earlier delta is untouched
@@ -121,7 +125,9 @@ describe("a host opened with a peer image admits through it", () => {
     const d = note(3);
     const report = await gw.federate([d], { admit: () => true });
     expect(report.accepted).toBe(1);
-    const arrival = (await stateOf(backend.peerStore())).base.arrivals.find((a) => a.id === d.id);
+    const arrival = (await stateOf(backend.journalStore())).base.arrivals.find(
+      (a) => a.id === d.id,
+    );
     expect(arrival?.sender).toBe("unattributed");
     expect(gw.reactor.get(d.id)).toBeDefined();
     await gw.close();
@@ -138,20 +144,20 @@ describe("a host opened with a peer image admits through it", () => {
     for (const d of raw) gw.reactor.ingest(d);
     await Promise.all(appends);
     await gw.flush();
-    const state = await stateOf(backend.peerStore());
+    const state = await stateOf(backend.journalStore());
     for (const d of [...raw, ...door]) expect(state.base.admitted.has(d.id)).toBe(true);
     await gw.close();
   });
 });
 
-describe("the image is the authority over the rows", () => {
-  it("a store with rows and no image refuses to open, and its bytes do not change", async () => {
+describe("the journal is the authority over the rows", () => {
+  it("a store with rows and no journal refuses to open, and its bytes do not change", async () => {
     const path = sqliteHome();
     const plain = new SqliteBackend(path);
     await plain.append([note(1)]); // rows written by a store that never had an image
     await plain.close();
     const hash = fileHash(path);
-    await expect(boot(new SqliteBackend(path))).rejects.toThrow(/rows but no peer image/);
+    await expect(boot(new SqliteBackend(path))).rejects.toThrow(/rows but no peer journal/);
     expect(fileHash(path)).toBe(hash);
   });
 
@@ -164,10 +170,22 @@ describe("the image is the authority over the rows", () => {
     const db = new Database(path);
     db.prepare("DELETE FROM deltas WHERE id = ?").run(d.id);
     db.close();
-    await expect(boot(new SqliteBackend(path))).rejects.toThrow(/no stored row/);
+    await expect(boot(new SqliteBackend(path))).rejects.toThrow(/admitted row mismatch/);
   });
 
-  it("a row the image never admitted is not served", async () => {
+  it("an admitted row whose signature changed in the file fails the open closed", async () => {
+    const path = sqliteHome();
+    const gw = await boot(new SqliteBackend(path));
+    const d = note(1);
+    await gw.append([d]);
+    await gw.close();
+    const db = new Database(path);
+    db.prepare("UPDATE deltas SET sig = ? WHERE id = ?").run(note(2).sig, d.id);
+    db.close();
+    await expect(boot(new SqliteBackend(path))).rejects.toThrow(/admitted row mismatch/);
+  });
+
+  it("a row the journal never admitted is not served", async () => {
     const path = sqliteHome();
     const gw = await boot(new SqliteBackend(path));
     const kept = note(1);
@@ -189,37 +207,46 @@ describe("the image is the authority over the rows", () => {
     const backend = new SqliteBackend(path);
     await expect(
       Gateway.boot(backend, assembleGenesis({ operatorSeed: OTHER_SEED }), {
-        peerStore: backend.peerStore(),
+        peerStore: backend.journalStore(),
       }),
-    ).rejects.toThrow(/rows but no peer image/);
+    ).rejects.toThrow(/rows but no peer journal/);
     await backend.close();
   });
 });
 
-describe("the adapters' empty-image creation", () => {
+describe("the adapters' empty-journal creation", () => {
   for (const [name, make] of [
     ["memory", () => new MemoryBackend()],
     ["sqlite", () => new SqliteBackend(sqliteHome())],
   ] as const) {
     it(`${name}: two creations race, and exactly one commits`, async () => {
-      const store = make().peerStore();
-      const bytes = new Uint8Array([1, 2, 3]);
+      const store = make().journalStore();
       const results = await Promise.all([
-        store.compareAndSet(OP, null, bytes, []),
-        store.compareAndSet(OP, null, bytes, []),
+        store.compareAndAppend(OP, null, "", null, []),
+        store.compareAndAppend(OP, null, "", null, []),
       ]);
       expect(results.map((r) => r.status).sort()).toEqual(["conflict", "durable"]);
+      expect(await store.readJournal(OP)).toEqual({ status: "journal", head: "", frames: [] });
     });
 
     it(`${name}: creation over a store that holds a row refuses and writes nothing`, async () => {
       const backend = make();
       await backend.append([note(1)]);
-      const store = backend.peerStore();
-      expect(await store.readImage(OP)).toEqual({ status: "rows-without-image" });
-      expect((await store.compareAndSet(OP, null, new Uint8Array([9]), [])).status).toBe(
-        "conflict",
-      );
-      expect(await store.readImage(OP)).toEqual({ status: "rows-without-image" });
+      const store = backend.journalStore();
+      expect(await store.readJournal(OP)).toEqual({ status: "rows-without-journal" });
+      expect((await store.compareAndAppend(OP, null, "", null, [])).status).toBe("conflict");
+      expect(await store.readJournal(OP)).toEqual({ status: "rows-without-journal" });
+    });
+
+    it(`${name}: an append against a stale head is a conflict and writes nothing`, async () => {
+      const store = make().journalStore();
+      await store.compareAndAppend(OP, null, "", null, []);
+      const write = await store.compareAndAppend(OP, "not-the-head", "x", new Uint8Array([1]), [
+        note(2),
+      ]);
+      expect(write.status).toBe("conflict");
+      expect(await store.readJournal(OP)).toEqual({ status: "journal", head: "", frames: [] });
+      expect(await store.readAdmittedRows(OP, [note(2).id])).toEqual([]);
     });
   }
 });
@@ -238,7 +265,7 @@ describe("pools stay on today's path", () => {
         SEED,
       ),
     ]);
-    const before = await image(backend.peerStore());
+    const before = await image(backend.journalStore());
     const c = await gw.openContainer({ name: "container:trial" });
     const pool = c.gateway!;
     expect(pool.peer).toBeUndefined();
@@ -247,7 +274,7 @@ describe("pools stay on today's path", () => {
     await pool.federate([d], { admit: () => true });
     expect(pool.reactor.get(d.id)).toBeDefined();
     // the host's image did not see the pool's write
-    expect(await image(backend.peerStore())).toEqual(before);
+    expect(await image(backend.journalStore())).toEqual(before);
     await gw.close();
   });
 });

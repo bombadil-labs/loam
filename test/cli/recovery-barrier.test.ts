@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
-import { withHostCut } from "../helpers/recovery-cut.js";
+import { appendWithHostCut } from "../helpers/recovery-cut.js";
 import { channelBackendFor, run } from "../../src/cli/cli.js";
 import { readSeed, readUserSeed, storePath, userSeedPath } from "../../src/cli/config.js";
 import { recoverUser, type RecoverOptions } from "../../src/cli/user-recover.js";
@@ -267,7 +267,7 @@ describe("the recovery barrier", () => {
         ),
         signClaims(rootClaims("ada", k2, op, t), seed),
       ];
-      await expect(gw.append(withHostCut(gw, seed, commit))).rejects.toThrow(
+      await expect(appendWithHostCut(gw, seed, commit)).rejects.toThrow(
         new RegExp(
           `${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} holds no live cut for it in its manifest`,
         ),
