@@ -54,7 +54,14 @@ export class MemoryBackend implements StoreBackend {
 
   async holdsAny(): Promise<boolean> {
     this.assertOpen();
-    return this.set.size > 0;
+    // A journal's frames and checkpoint carry whole deltas, so a journal is bytes too.
+    return this.set.size > 0 || this.journals.size > 0;
+  }
+
+  // Discard every peer journal in this store (a whole-store discard, such as a dropped pool).
+  async discardJournals(): Promise<void> {
+    this.assertOpen();
+    this.journals.clear();
   }
 
   async ids(): Promise<Set<string>> {

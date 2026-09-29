@@ -109,6 +109,11 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
     return this.primary.ids();
   }
 
+  async discardJournals(): Promise<void> {
+    if (!holdsJournals(this.primary)) return;
+    await this.primary.discardJournals();
+  }
+
   keepsJournals(): boolean {
     return holdsJournals(this.primary);
   }

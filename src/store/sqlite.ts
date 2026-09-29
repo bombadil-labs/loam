@@ -558,7 +558,44 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     this.assertOpen();
     // An owed truncation may leave page images in the sidecar: unprovable answers TRUE (H9).
     if (this.truncationUnknown || this.truncationOwed.size > 0) return true;
-    return this.db.prepare("SELECT 1 FROM deltas LIMIT 1").get() !== undefined;
+    // A journal's frames and checkpoint carry whole deltas, so a journal is bytes too.
+    return (
+      this.db.prepare("SELECT 1 FROM deltas LIMIT 1").get() !== undefined ||
+      this.db.prepare("SELECT 1 FROM journal_head LIMIT 1").get() !== undefined ||
+      this.db.prepare("SELECT 1 FROM journal_frames LIMIT 1").get() !== undefined ||
+      this.db.prepare("SELECT 1 FROM journal_checkpoint LIMIT 1").get() !== undefined
+    );
+  }
+
+  // Discard every peer journal in this store: heads, frames, checkpoints and rebase debt, then
+  // fold the -wal sidecar into the file and truncate it. For a whole-store discard (a dropped
+  // pool); it throws rather than report clean while the sidecar may still hold frame pages.
+  async discardJournals(): Promise<void> {
+    this.assertOpen();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const table of [
+        "journal_frames",
+        "journal_checkpoint",
+        "journal_head",
+        "journal_rebase_debt",
+      ]) {
+        this.db.prepare(`DELETE FROM ${table}`).run();
+      }
+      this.db.prepare("DELETE FROM meta WHERE key = 'rebase-wal-outstanding'").run();
+      this.db.exec("COMMIT");
+    } catch (err) {
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {
+        /* already rolled back */
+      }
+      throw err;
+    }
+    const [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
+    if (status === undefined || status.busy !== 0) {
+      throw new Error("the journal was discarded, but its pages may still sit in the -wal sidecar");
+    }
   }
 
   async ids(): Promise<Set<string>> {

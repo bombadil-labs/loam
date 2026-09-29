@@ -1972,6 +1972,8 @@ async function openSeparate(
             ids.add(row.key);
           }
         }
+        // A journaled pool's frames carry its deltas too: the whole journal goes with the store.
+        if (holdsJournals(target.backend)) await target.backend.discardJournals();
         if (ids.size > 0) {
           const batch = [...ids];
           await target.backend.purge(batch);
