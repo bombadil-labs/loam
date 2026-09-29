@@ -660,7 +660,9 @@ async function bindArrived(
     // same pool (§47 slice 3), and enumerating per lens would otherwise read them back as fresh
     // exports — blessing "alice:Plant" into "alice:alice:Plant", one layer per poll, forever. The
     // entity-keyed enumeration hid this by accident; the author filter states it.
-    if (d.claims.author === gw.operatorAuthor) continue;
+    if (d.claims.author === gw.operatorAuthor || ground.localAuthors().includes(d.claims.author)) {
+      continue;
+    }
     const target = d.claims.pointers.find(
       (p) => p.target.kind === "entity" && p.target.entity.context === CTX_REGISTRATION,
     );
@@ -841,7 +843,11 @@ function arrivedBindings(gw: Gateway, ground: Gateway): RendererBinding[] {
   // No operator is no answer, not an empty one: without one, "not the operator's" is every delta in
   // the pool, and the listing would report a peer's law and the receiver's own alike.
   if (operator === undefined) return [];
-  return readForeignRenderers(ground.reactor, ground.validityNow(), operator);
+  // Foreign means neither the pool's own key nor its host's: both are the receiver's acts.
+  return readForeignRenderers(ground.reactor, ground.validityNow(), [
+    operator,
+    ...ground.localAuthors(),
+  ]);
 }
 
 /**

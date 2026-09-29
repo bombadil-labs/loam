@@ -202,6 +202,7 @@ import { listImpl, type ListOptions } from "./listing.js";
 import { declareReadHidden, governedProgram, needsLowering } from "./governed-trust.js";
 import { activeIncarnation, incarnationClaims, mintIncarnation } from "./recovery-cut.js";
 import { seedSigner, type Signer } from "./signer.js";
+import { lawAuthors, localAuthors, type ChildLaw, type LawContext } from "./child-law.js";
 
 export interface AppendReceipt {
   readonly accepted: number;
@@ -489,6 +490,16 @@ export class Gateway {
    */
   childSeed(): string | undefined {
     return this.options.seed;
+  }
+  /** @internal — set by the child's opener (container.ts `openSeparate`); undefined at a root. */
+  childLaw: ChildLaw | undefined = undefined;
+  /** The authors of `context` law here: this ground's own key, then a host it selects. */
+  lawAuthors(context: LawContext): string[] {
+    return lawAuthors(this.operatorAuthor, this.childLaw, context);
+  }
+  /** The keys whose acts here are the receiver's own: this ground's key and its host's. */
+  localAuthors(): string[] {
+    return localAuthors(this.operatorAuthor, this.childLaw);
   }
   // When a runner animates the gateway, ingest routes through its DerivationHost (ingest + drain
   // derivations); otherwise straight to the reactor. Passive vs animate is exactly this hook.

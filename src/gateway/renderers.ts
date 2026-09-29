@@ -417,11 +417,12 @@ export function readPoolRenderers(pool: Gateway, host: Gateway): RendererBinding
 export function readForeignRenderers(
   reactor: Reactor,
   now: number,
-  operator: string,
+  operator: string | readonly string[],
 ): RendererBinding[] {
+  const local = new Set(typeof operator === "string" ? [operator] : operator);
   const negated = new Map<string, (id: string) => boolean>();
   const survives = (d: Delta): boolean => {
-    if (d.claims.author === operator) return false;
+    if (local.has(d.claims.author)) return false;
     let owned = negated.get(d.claims.author);
     if (owned === undefined) {
       owned = negatedAt(reactor, now, d.claims.author);
