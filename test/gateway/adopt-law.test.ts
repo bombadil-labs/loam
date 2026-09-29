@@ -15,8 +15,8 @@
 //
 // NAMED GAP — §28.1's effectiveness attenuation is NOT built, so no rail here may claim it. The
 // spec's "a loaded module RUNS, fully, inside its container: its law binds there" needs a container
-// gateway whose LAWFUL slice is the module's own authorship; `openWall` gives the wall the PRIMARY's
-// operator seed (§24.1), and lawfulness is authorship (§7), so a stranger's schema and renderer are
+// gateway whose LAWFUL slice is the module's own authorship; a wall's law is its own governing key's
+// and its hosts', and lawfulness is authorship (§7), so a stranger's schema and renderer are
 // inert inside the wall exactly as they are outside it. Criterion 7 therefore asserts what is true —
 // the module's ground and its reading are UNTOUCHED by a blessing — and states the missing leg
 // rather than implying it. The rail that would close it: a container whose lawful slice is the
@@ -429,7 +429,11 @@ describe("T33 criterion 4 — idempotence by identity", () => {
 describe("T33 criterion 7 — a blessing crosses a wall only by re-signing", () => {
   it("root-signed twins land; the module's own deltas and its own reading are untouched", async () => {
     const { gw, wall, version, parts } = await moduleWorld();
-    await wall.gateway!.append([observed(FERN, "height", 7, 40_500, OP_SEED)]);
+    // A claim of the wall's own, signed by the wall's governing key.
+    const own = wall.gateway!.signer!;
+    await wall.gateway!.append([
+      own.sign({ ...observed(FERN, "height", 7, 40_500, OP_SEED).claims, author: own.author }),
+    ]);
     const moduleGroundBefore = [...wall.gateway!.reactor.snapshot()].map((d) => d.id).sort();
     // OBJECT LEVEL at the module's own door, before the blessing.
     const moduleReadBefore = await wall.gateway!.query(
@@ -453,8 +457,8 @@ describe("T33 criterion 7 — a blessing crosses a wall only by re-signing", () 
     );
     expect(moduleReadAfter).toEqual(moduleReadBefore);
     // The honest shape of "the module still runs its own law" today (see this file's header): the
-    // stranger's renderer is inert inside the wall too, because the wall shares the primary's
-    // OPERATOR (§24.1) and lawfulness is authorship (§7). Asserted so the gap is a tested fact
+    // stranger's renderer is inert inside the wall too, because the wall's law is its own
+    // governing key's and its hosts' and lawfulness is authorship (§7). Asserted so the gap is a tested fact
     // rather than a comment — when §28.1's attenuation lands, THIS is the line that must flip.
     expect(wall.gateway!.renderers().length).toBe(0);
     expect((await wall.gateway!.serveRoute("feed", FERN, "full")).status).toBe(404);

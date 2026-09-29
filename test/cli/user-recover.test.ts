@@ -698,9 +698,10 @@ describe("E6 and E9: inboxes", () => {
   it("an erased strike in the inbox is not a strike: recovery lands a fresh one", async () => {
     const { k1 } = await adaAndBea();
     const pool = await bindAdasConnection();
-    const [delegation, erasedStrike] = await ground(async (gw, op) => {
+    // The inbox's own law: the strike and its erasure are signed by the pool's key.
+    const [delegation, erasedStrike] = await ground(async (gw) => {
       const g = gw.connectionInboxes.get(pool)!.gateway!;
-      const seed = readSeed(home);
+      const op = g.operatorAuthor!;
       const d = [...g.reactor.arrivalLog()].find(
         (x) =>
           x.claims.author === k1 &&
@@ -708,22 +709,17 @@ describe("E6 and E9: inboxes", () => {
             (p) => p.target.kind === "primitive" && p.target.value === "delegation",
           ),
       )!;
-      const strike = signClaims(
-        withStamp(g.stamp(op), (t) => makeNegationClaims(op, t, d.id)),
-        seed,
-      );
+      const strike = g.signer!.sign(withStamp(g.stamp(op), (t) => makeNegationClaims(op, t, d.id)));
       await g.append([strike]);
       await g.append([
-        signClaims(
-          withStamp(g.stamp(op), (t) => eraseClaims(strike.id, op, op, t)),
-          seed,
-        ),
+        g.signer!.sign(withStamp(g.stamp(op), (t) => eraseClaims(strike.id, op, op, t))),
       ]);
       return [d.id, strike.id] as const;
     });
     expect(await recoverUser(direct({ channelBackend: channelBackendFor(home, io) }))).toBe(0);
-    await ground((gw, op) => {
+    await ground((gw) => {
       const g = gw.connectionInboxes.get(pool)!.gateway!;
+      const op = g.operatorAuthor!;
       const fresh = g.reactor
         .negationsOf(delegation)
         .filter((n) => n !== erasedStrike)

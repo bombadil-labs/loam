@@ -356,20 +356,25 @@ describe("lifting a curse ignores a counter-negation whose window ended", () => 
       expect(() => me.def("alice:Plant")).toThrow();
 
       // Every curse strike, wherever it landed, gets a counter-negation whose window has ended: an
-      // earlier lift that no longer holds.
+      // earlier lift that no longer holds. Each ground's curse and counter are its own key's.
       const now = Date.now();
       const grounds = [me.channelPools.get(ch.name)?.gateway, me].filter(
         (g): g is Gateway => g !== undefined,
       );
       let planted = 0;
       for (const g of grounds) {
+        const own = g.signer!;
         for (const d of [...g.reactor.snapshot()]) {
           for (const n of g.reactor.negationsOf(d.id)) {
             const curse = g.reactor.get(n)!;
-            if (curse.claims.author !== authorForSeed(meSeed)) continue;
+            if (curse.claims.author !== own.author) continue;
             if (g.reactor.negationsOf(n).length > 0) continue;
             await g.append([
-              timedStrike(meSeed, n, now - 2000, { validFrom: now - 2000, validUntil: now - 1000 }),
+              own.sign({
+                ...makeNegationClaims(own.author, now - 2000, n),
+                validFrom: now - 2000,
+                validUntil: now - 1000,
+              }),
             ]);
             planted += 1;
           }

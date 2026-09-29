@@ -129,7 +129,10 @@ describe("serving reads outside the gathers never show an erased delta", () => {
     const before = boundGroundFor(gw, binding, Date.now());
     expect(before.has(claim.id)).toBe(true); // control
 
-    await pool.append([signClaims(eraseClaims(claim.id, GARDENER, OP, 2000), OP_SEED)]);
+    // The pool's own erasure, signed by the pool's key.
+    await pool.append([
+      pool.signer!.sign(eraseClaims(claim.id, GARDENER, pool.operatorAuthor!, 2000)),
+    ]);
     expect(pool.reactor.get(claim.id)).toBeDefined(); // still held in the pool
     expect(gw.reactor.get(claim.id)).toBeUndefined(); // the parent never saw either
     const after = boundGroundFor(gw, binding, Date.now());
@@ -167,7 +170,10 @@ describe("serving reads outside the gathers never show an erased delta", () => {
     const { gw, pools } = await homeWithPools(2);
     const claim = observed(FERN, "height", 30, 1000, GARDENER_SEED);
     // Lawful at the first pool's door, because the target is absent there.
-    await pools[0]!.gw.append([signClaims(eraseClaims(claim.id, OP, OP, 2000), OP_SEED)]);
+    const first = pools[0]!.gw;
+    await first.append([
+      first.signer!.sign(eraseClaims(claim.id, OP, first.operatorAuthor!, 2000)),
+    ]);
     await pools[1]!.gw.append([claim]);
     expect(boundGroundFor(gw, pools[1]!.binding, Date.now()).has(claim.id)).toBe(true);
     await gw.close();
