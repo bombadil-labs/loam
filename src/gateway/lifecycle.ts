@@ -34,13 +34,14 @@ import { fenceAdmits } from "./accounts.js";
 import { NUL, type Bound, type Gateway, type RequestContext } from "./gateway.js";
 import { buildGqlSchema } from "./gql.js";
 import {
+  readLawfulContested,
+  readLawfulRegistrations,
+  type Registration,
   lensOf,
   programOf,
   lawfulSnapshot,
   readinglessExpandRole,
   parseClaimTemplates,
-  readContestedBindings,
-  readRegistrations,
   type Boundary,
   referenceProps,
   registrationDeltaClaims,
@@ -437,13 +438,12 @@ const lastBindFailure = (gw: Gateway, key: string): string | undefined =>
 // ONE derivation, read by the replay that DROPS a contest's losers and by the reading that NAMES
 // them (`contestedNamesImpl` below). A second copy could only drift into a surface that disagrees
 // with the store it reports on.
+// A ground's registrations under its own law and its selected hosts' (readLawfulRegistrations).
+const lawfulRegistrations = (g: Gateway, boundary?: Boundary): Registration[] =>
+  readLawfulRegistrations(g.reactor, g.validityNow(), g.lawAuthors("registrations"), boundary);
+
 function storeBindings(gw: Gateway, boundary?: Boundary): Bound[] {
-  const rows: Bound[] = readRegistrations(
-    gw.reactor,
-    gw.validityNow(),
-    gw.operatorAuthor,
-    boundary,
-  ).map((r) => ({
+  const rows: Bound[] = lawfulRegistrations(gw, boundary).map((r) => ({
     ...r,
     origin: "store" as const,
   }));
@@ -453,7 +453,7 @@ function storeBindings(gw: Gateway, boundary?: Boundary): Bound[] {
     if (standing.openedBy !== undefined) continue;
     const pool = gw.channelPools.get(standing.name)?.gateway;
     if (pool === undefined) continue;
-    const read = readRegistrations(pool.reactor, pool.validityNow(), pool.operatorAuthor, boundary);
+    const read = lawfulRegistrations(pool, boundary);
     for (const r of read) {
       if (!lensOf(r).startsWith(`${standing.prefix}:`)) continue;
       rows.push({ ...r, origin: "store" as const, channel: standing.name });
@@ -527,11 +527,7 @@ export function boundBindingsImpl(
     const owner = table.containers.get(name)?.inboxOf;
     if (owner === undefined || !reach.has(owner) || inbox.gateway === undefined) continue;
     const prefix = `${owner}:`;
-    for (const r of readRegistrations(
-      inbox.gateway.reactor,
-      inbox.gateway.validityNow(),
-      inbox.gateway.operatorAuthor,
-    )) {
+    for (const r of lawfulRegistrations(inbox.gateway)) {
       if (!fenceAdmits(prefix, r.hyperschema.name)) continue; // the program
       if (!fenceAdmits(prefix, lensOf(r))) continue; // the reading
       if (lensOf(r).includes(NUL)) continue; // a reading name is the gateway's alphabet too
@@ -549,7 +545,7 @@ export function boundBindingsImpl(
     if (!receivesNow(table, standing.into)) continue; // and one whose container stopped receiving
     const pool = gw.channelPools.get(standing.name)?.gateway;
     if (pool === undefined) continue;
-    for (const r of readRegistrations(pool.reactor, pool.validityNow(), pool.operatorAuthor)) {
+    for (const r of lawfulRegistrations(pool)) {
       if (!lensOf(r).startsWith(`${standing.prefix}:`)) continue;
       if (lensOf(r).includes(NUL)) continue;
       candidates.push({ ...r, origin: "store" as const, channel: standing.name });
@@ -785,10 +781,10 @@ export function contestedNamesImpl(gw: Gateway): Map<string, ContestedNameReport
     list.push(row);
     drafts.set(lens, list);
   };
-  for (const [lens, list] of readContestedBindings(
+  for (const [lens, list] of readLawfulContested(
     gw.reactor,
     gw.validityNow(),
-    gw.operatorAuthor,
+    gw.lawAuthors("registrations"),
   )) {
     for (const c of list) add(lens, { ...c, origin: "root" });
   }
@@ -797,10 +793,10 @@ export function contestedNamesImpl(gw: Gateway): Map<string, ContestedNameReport
   for (const standing of gw.channelStatus()) {
     const pool = gw.channelPools.get(standing.name)?.gateway;
     if (pool === undefined) continue;
-    for (const [lens, list] of readContestedBindings(
+    for (const [lens, list] of readLawfulContested(
       pool.reactor,
       pool.validityNow(),
-      pool.operatorAuthor,
+      pool.lawAuthors("registrations"),
     )) {
       if (!lens.startsWith(`${standing.prefix}:`)) continue;
       for (const c of list) add(lens, { ...c, origin: originOf(c.deltaId, standing.name) });

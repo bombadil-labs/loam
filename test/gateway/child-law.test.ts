@@ -4,7 +4,13 @@
 // http standing checks), which the mount rails exercise with equal keys.
 
 import { describe, expect, it } from "vitest";
-import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
+import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
+import { grantClaims } from "../../src/gateway/accounts.js";
+import { bindingPolicyClaims } from "../../src/gateway/binding-policy.js";
+import { maskReadings } from "../../src/gateway/erase.js";
+import { withStamp } from "../../src/gateway/stamp.js";
+import { FERN } from "../spike/garden.js";
+import { PLANT, PLANT_READING } from "./fixtures.js";
 import {
   hostChain,
   inboxLaw,
@@ -13,7 +19,7 @@ import {
   seededLaw,
 } from "../../src/gateway/child-law.js";
 import { Gateway } from "../../src/gateway/gateway.js";
-import { assembleGenesis } from "../../src/gateway/genesis.js";
+import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { trustClaims } from "../../src/gateway/trust.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 
@@ -104,6 +110,132 @@ describe("a child's trust policy: its own first, a selected host copy only where
       admit: () => true,
     });
     expect(gw.admitFor()(byPeer(7))).toBe(false); // the root host's copy governs
+    await gw.close();
+  });
+});
+
+describe("stage 1b-ii: standing and registrations read own and selected host law", () => {
+  const WRITER_SEED = "5e".repeat(32);
+  const WRITER = authorForSeed(WRITER_SEED);
+  const byWriter = (n: number): Delta =>
+    signClaims({ ...byPeer(n).claims, author: WRITER }, WRITER_SEED);
+  const hostGrant = signClaims(grantClaims(STORE_ENTITY, WRITER, "write", HOST, 7_000), HOST_SEED);
+
+  it("a host-rooted write grant gives standing in a seeded child, and not in an inbox", async () => {
+    const gw = await child();
+    await gw.federate([hostGrant], { admit: () => true });
+    await gw.append([byWriter(10)]);
+    expect(gw.reactor.get(byWriter(10).id)).toBeDefined();
+    const inbox = await child();
+    inbox.childLaw = inboxLaw([HOST]);
+    await inbox.federate([hostGrant], { admit: () => true });
+    await expect(inbox.append([byWriter(11)])).rejects.toThrow(/not permitted/);
+    await gw.close();
+    await inbox.close();
+  });
+
+  it("a host-rooted grant is the host chain's to strike, not the pool's", async () => {
+    const gw = await child();
+    await gw.federate([hostGrant], { admit: () => true });
+    await gw.append([signClaims(makeNegationClaims(POOL, 7_100, hostGrant.id), POOL_SEED)]);
+    await gw.append([byWriter(12)]); // the pool's strike does not end a host-rooted grant
+    await gw.federate([signClaims(makeNegationClaims(HOST, 7_200, hostGrant.id), HOST_SEED)], {
+      admit: () => true,
+    });
+    await expect(gw.append([byWriter(13)])).rejects.toThrow(/not permitted/);
+    await gw.close();
+  });
+
+  it("a host's registration copy binds in a seeded child, and not in an inbox", async () => {
+    const hostRegs = assembleGenesis({
+      operatorSeed: HOST_SEED,
+      registrations: [{ hyperschema: PLANT, schema: PLANT_READING, roots: [FERN] }],
+    }).deltas;
+    const gw = await child();
+    await gw.federate(hostRegs, { admit: () => true });
+    gw.replayRegistrations();
+    expect(gw.registered.map((r) => r.hyperschema.name)).toContain("Plant");
+    const inbox = await child();
+    inbox.childLaw = inboxLaw([HOST]);
+    await inbox.federate(hostRegs, { admit: () => true });
+    inbox.replayRegistrations();
+    expect(inbox.registered.map((r) => r.hyperschema.name)).not.toContain("Plant");
+    await gw.close();
+    await inbox.close();
+  });
+
+  it("a selected host has no standing of its own in a child: only its grants count", async () => {
+    const gw = await child();
+    const hostDatum = signClaims({ ...byPeer(14).claims, author: HOST }, HOST_SEED);
+    await expect(gw.append([hostDatum])).rejects.toThrow(/not permitted/);
+    await gw.close();
+  });
+
+  it("a host copy does not fill a name the child claimed and its own policy withheld", async () => {
+    const gw = await child();
+    await gw.append([
+      signClaims(
+        withStamp(gw.stamp(), (t) => bindingPolicyClaims("conflicts", POOL, t)),
+        POOL_SEED,
+      ),
+    ]);
+    const named = (name: string) => ({ ...PLANT_READING, name });
+    await gw.publishRegistration(PLANT, named("Shared"), [FERN], undefined, "hyperschema:One");
+    await gw.publishRegistration(
+      { name: "Two", alg: 1, body: PLANT.body },
+      named("Shared"),
+      [FERN],
+      undefined,
+      "hyperschema:Two",
+    );
+    const lenses = () => gw.registered.map((r) => r.lensName ?? r.hyperschema.name);
+    expect(lenses()).not.toContain("Shared"); // withheld under the child's own `conflicts`
+    const hostShared = assembleGenesis({
+      operatorSeed: HOST_SEED,
+      registrations: [{ hyperschema: PLANT, schema: named("Shared"), roots: [FERN] }],
+    }).deltas;
+    await gw.federate(hostShared, { admit: () => true });
+    gw.replayRegistrations();
+    expect(lenses()).not.toContain("Shared");
+    await gw.close();
+  });
+
+  it("the erasure reading mask counts a host-seeded reading the child serves", async () => {
+    const hostRegs = assembleGenesis({
+      operatorSeed: HOST_SEED,
+      registrations: [{ hyperschema: PLANT, schema: PLANT_READING, roots: [FERN] }],
+    }).deltas;
+    const gw = await child();
+    await gw.federate(hostRegs, { admit: () => true });
+    gw.replayRegistrations();
+    const labels = [...maskReadings(gw).masks.values()].flatMap((m) =>
+      m.readings.map((r) => r.label),
+    );
+    expect(labels).toContain("Plant");
+    await gw.close();
+  });
+
+  it("a contest a selected host's policy withholds is reported where the child serves the name", async () => {
+    const gw = await child();
+    const named = (name: string) => ({ ...PLANT_READING, name });
+    const host = assembleGenesis({
+      operatorSeed: HOST_SEED,
+      registrations: [
+        { hyperschema: PLANT, schema: named("Shared"), roots: [FERN] },
+        {
+          hyperschema: { name: "Two", alg: 1, body: PLANT.body },
+          schema: named("Shared"),
+          roots: [FERN],
+        },
+      ],
+    }).deltas;
+    await gw.federate(
+      [...host, signClaims(bindingPolicyClaims("conflicts", HOST, 6_500), HOST_SEED)],
+      { admit: () => true },
+    );
+    gw.replayRegistrations();
+    expect(gw.registered.map((r) => r.lensName ?? r.hyperschema.name)).not.toContain("Shared");
+    expect(gw.contestedNames().has("Shared")).toBe(true);
     await gw.close();
   });
 });

@@ -382,7 +382,14 @@ async function appendAdmitted(
     // enforces capabilities on everyone but the operator. Deployed gateways (step 6) are
     // always governed.
     if (gw.operatorAuthor !== undefined) {
-      const verdict = authorize(gw.reactor, gw.validityNow(), d, gw.operatorAuthor, batch);
+      const verdict = authorize(
+        gw.reactor,
+        gw.validityNow(),
+        d,
+        gw.operatorAuthor,
+        batch,
+        gw.lawAuthors("grants"),
+      );
       if (!verdict.ok) {
         throw new Error(`append rejected: ${verdict.refusal}`);
       }
