@@ -223,4 +223,16 @@ describe("an existing pool's carry is complete", () => {
     if (result.status === "carry") await result.release();
     await gw.close();
   });
+
+  it("does not carry a pool whose store cannot list its rows", async () => {
+    // A valid StoreBackend without the optional inventory: a row and sidecar bytes look alike.
+    class Unlisted extends MemoryBackend {
+      override ids = undefined as unknown as MemoryBackend["ids"];
+    }
+    const { gw, pool } = await hostAndPool(new Unlisted());
+    const result = await buildPoolCarry(pool);
+    expect(result).toMatchObject({ status: "undisposed" });
+    expect(pool.fence).toBeUndefined();
+    await gw.close();
+  });
 });

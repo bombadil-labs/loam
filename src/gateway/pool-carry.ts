@@ -109,6 +109,15 @@ async function capture(
       };
     }
   }
+  // Complete accounting needs the store's row inventory (StoreBackend.ids): without it, a row
+  // and a byte left in a sidecar cannot be told apart, so the carry refuses rather than guess.
+  if (backend.ids === undefined) {
+    return {
+      status: "undisposed",
+      reason: "the pool's store cannot list its rows, so its carry cannot be proven complete",
+      rows: [],
+    };
+  }
   const debt = hasSidecarDebt(backend) ? backend.truncationDebt() : { ids: [], unknown: false };
   if (debt.unknown) {
     return {
@@ -136,15 +145,10 @@ async function capture(
   }
   // A row is asked of the table, not of `holds`: a driver answers `holds` true while a -wal
   // truncation is owed, which is byte presence, not a row. That debt is its own obligation below.
-  const tabled = backend.ids === undefined ? undefined : await backend.ids();
-  const debtIds = new Set(debt.ids);
+  const tabled = await backend.ids();
   const obligations: CarriedObligation[] = [];
   for (const { targetId } of refusals) {
-    const row =
-      tabled !== undefined
-        ? tabled.has(targetId)
-        : !debtIds.has(targetId) && (await backend.holds(targetId));
-    if (row) obligations.push({ targetId, surface: "rows" });
+    if (tabled.has(targetId)) obligations.push({ targetId, surface: "rows" });
   }
   for (const id of debt.ids) obligations.push({ targetId: id, surface: "sidecar" });
   return {
