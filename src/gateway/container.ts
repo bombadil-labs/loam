@@ -23,7 +23,7 @@
 
 import { seedSigner } from "./signer.js";
 import { hostChain, inboxLaw, seededLaw } from "./child-law.js";
-import { poolKeyClaims, recordedPoolKey } from "./pool-keys.js";
+import { memoryPoolKeys, poolKeyClaims, recordedPoolKey } from "./pool-keys.js";
 import { holdsJournals, type JournalBackend } from "../store/peer-image.js";
 import {
   authorForSeed,
@@ -1601,46 +1601,46 @@ function openShared(
 // is the operator's own arena, so the operator's erasure stays authoritative there, §24.8). The edge
 // is inbound only — nothing is ever wired back. This is the T72 body, generalized: the settle, the
 // seeding closure, the drop-verify, and the detach are the invariants the lifting preserves.
-// Which key governs a pool, and whether it opens as its own journal peer. With a key source and a
-// journal-capable store: a pool the host recorded with a key must load that key (else it is
-// refused); a fresh, empty pool mints one, and the host records it first. A pool the host never
-// recorded, over a store that holds rows, was made by an earlier Loam and is refused (ruling 10).
+// Which key governs a pool. Every pool is its own journal peer under its own key: a store that
+// cannot keep a journal is refused. A pool the host recorded must load that key (else it is
+// refused); a fresh, empty pool mints one, and the host records it first; an anonymous pool's key
+// lives for this process. A store that holds bytes the host never recorded was made by an earlier
+// Loam and is refused (ruling 10). No pool ever opens under the host's key.
 async function poolGovernor(
   gw: Gateway,
   name: string | undefined,
   backend: StoreBackend,
-): Promise<{ seed: string; journal: boolean }> {
-  const host = { seed: gw.childSeed()!, journal: false };
-  const keys = gw.options.poolKeys;
-  const recorded =
-    name === undefined ? undefined : recordedPoolKey(gw.reactor, gw.operatorAuthor, name);
-  // A pool the host recorded under its own key never reopens under the host's key, whatever
-  // this opener can offer.
-  if (recorded !== undefined && (keys === undefined || !holdsJournals(backend))) {
+): Promise<{ seed: string }> {
+  if (!holdsJournals(backend)) {
     throw new Error(
-      `${name}: this pool governs itself under ${recorded}, and this opener has no key source or ` +
-        "no journal for it. It is refused rather than reopened under the host's key.",
+      `${name ?? "a pool"}: this store cannot keep a peer journal, and every pool is its own peer ` +
+        "under its own key. It is refused rather than opened under the host's key.",
     );
   }
-  if (keys === undefined || name === undefined || !holdsJournals(backend)) return host;
+  const keys = gw.poolKeys;
+  const recorded =
+    name === undefined ? undefined : recordedPoolKey(gw.reactor, gw.operatorAuthor, name);
   if (recorded !== undefined) {
-    const seed = keys.load(name);
+    const seed = keys.load(name!);
     if (seed === undefined || authorForSeed(seed) !== recorded) {
       throw new Error(
         `${name}: this pool governs itself under ${recorded}, and its key is not here. It is ` +
           "refused rather than reopened under the host's key.",
       );
     }
-    return { seed, journal: true };
+    return { seed };
   }
   const empty =
     (await backend.journalPeers()).length === 0 && (await backend.holdsAny?.()) === false;
   if (!empty) {
     throw new Error(
-      `${name}: this pool's store holds bytes, and the host never recorded a key for it. It was ` +
-        "made by an earlier Loam, and this Loam does not carry old pools forward. It is refused.",
+      `${name ?? "a pool"}: this pool's store holds bytes, and the host never recorded a key for ` +
+        "it. It was made by an earlier Loam, and this Loam does not carry old pools forward. It " +
+        "is refused.",
     );
   }
+  // An anonymous pool never reopens, so its key lives for this process only and needs no record.
+  if (name === undefined) return { seed: memoryPoolKeys().create("anonymous") };
   const seed = keys.create(name);
   await gw.append([
     gw.signer!.sign(
@@ -1649,7 +1649,7 @@ async function poolGovernor(
       ),
     ),
   ]);
-  return { seed, journal: true };
+  return { seed };
 }
 
 async function openSeparate(
@@ -1753,9 +1753,7 @@ async function openSeparate(
   const own = await poolGovernor(gw, spec.entity, backend);
   const pool = await Gateway.open(backend, {
     seed: own.seed,
-    ...(own.journal
-      ? { peerStore: (backend as JournalBackend).journalStore() }
-      : { unjournaled: true }),
+    peerStore: (backend as JournalBackend).journalStore(),
     ...(probationary && gw.options.pens !== undefined ? { pens: gw.options.pens } : {}),
   });
   pool.attachedTo = gw;

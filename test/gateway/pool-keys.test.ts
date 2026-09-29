@@ -91,16 +91,44 @@ describe("criterion 17: a fresh pool starts under its own key", () => {
     await gw.close();
   });
 
-  it("a recorded pool opened by a host with no key source is refused, never reopened as the host", async () => {
+  it("a recorded pool opened by a host that brought no key source is refused, never reopened as the host", async () => {
     const hostStore = new MemoryBackend();
     const poolStore = new MemoryBackend();
     const gw = await hostWith(hostStore, memoryPoolKeys());
     await declare(gw, "container:k17e");
     await gw.openContainer({ name: "container:k17e", backend: poolStore });
-    const bare = await Gateway.open(hostStore, { seed: SEED }); // no poolKeys: an embedder's open
+    // An embedder's open with no key source: it gets a fresh one, which lacks the recorded key.
+    const bare = await Gateway.open(hostStore, { seed: SEED });
     await expect(
       bare.openContainer({ name: "container:k17e", backend: poolStore }),
-    ).rejects.toThrow(/no key source or no journal/);
+    ).rejects.toThrow(/its key is not here/);
+    await gw.close();
+  });
+
+  it("a host opened directly still gives a named pool its own key, and refuses an older pool", async () => {
+    const hostStore = new MemoryBackend();
+    const gw = await Gateway.open(hostStore, { seed: SEED }); // no boot, no key source passed
+    await declare(gw, "container:k17f");
+    const c = await gw.openContainer({ name: "container:k17f", backend: new MemoryBackend() });
+    const kp = c.gateway!.operatorAuthor!;
+    expect(kp).not.toBe(OP);
+    expect(c.gateway!.peer?.journal.peerId).toBe(kp);
+    expect(recordedPoolKey(gw.reactor, OP, "container:k17f")).toBe(kp);
+    await declare(gw, "container:k17g");
+    const older = new MemoryBackend();
+    await older.append([note(30)]);
+    await expect(gw.openContainer({ name: "container:k17g", backend: older })).rejects.toThrow(
+      /earlier Loam/,
+    );
+    await gw.close();
+  });
+
+  it("an anonymous quarantine pool starts under its own key, on its own journal", async () => {
+    const gw = await hostWith(new MemoryBackend(), memoryPoolKeys());
+    const q = await gw.openQuarantine();
+    const pool = q.gateway!;
+    expect(pool.operatorAuthor).not.toBe(OP);
+    expect(pool.peer?.journal.peerId).toBe(pool.operatorAuthor);
     await gw.close();
   });
 

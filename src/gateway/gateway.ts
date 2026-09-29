@@ -237,8 +237,6 @@ export interface GatewayOptions {
    * host passes this; pools, quarantine and scratch gateways never do.
    */
   readonly peerStore?: DurableOrdinaryJournalStore;
-  /** @internal — a pool opens on its rows, not as a peer, until it takes its own key. */
-  readonly unjournaled?: boolean;
   /**
    * Where each new pool's own key lives. A host defaults to its store's own key file, or to
    * process memory for a store with none. Absent on a pool, whose child pools stay on its key.
@@ -505,6 +503,8 @@ export class Gateway {
   readonly justPersisted = new Set<string>();
   /** @internal — the host's substrate peer; undefined off that path. */
   peer: HostPeer | undefined = undefined;
+  /** @internal — where this ground's new pools keep their own keys (container.ts). */
+  poolKeys: PoolKeySource = memoryPoolKeysFor(this);
   /** Stored rows the host's journal never admitted: held, never served. */
   rowsOutsideJournal = 0;
   private unreadableRows = 0; // set by open: rows held, none readable
@@ -649,11 +649,10 @@ export class Gateway {
             `(${peerId}) names no journal here. Open it with its own operator seed.`,
         );
       }
-      // A seeded open is a host's, and a host opens only as a peer: a fresh store starts its
-      // journal, and a store with rows and no journal is refused. Only a pool, which takes its
-      // own key later (step 6), still opens on the rows.
+      // A seeded open is a peer's, host or pool: a fresh store starts its journal, and a store
+      // with rows and no journal is refused.
       if (peerStore === undefined && journals.length === 0 && peerId !== undefined) {
-        if (options.unjournaled !== true) peerStore = backend.journalStore();
+        peerStore = backend.journalStore();
       } else if (peerStore === undefined && journals.length > 0) {
         if (peerId === undefined) {
           if (journals.length > 1) {
@@ -727,6 +726,12 @@ export class Gateway {
     const gateway = new Gateway(backend, reactor, options);
     gateway.peer = peer;
     gateway.rowsOutsideJournal = outsideJournal;
+    // Each new pool takes its own key; this ground records it first (container.ts
+    // `poolGovernor`). The store keeps the keys beside itself, or this process holds them.
+    gateway.poolKeys =
+      options.poolKeys ??
+      (holdsPoolKeys(backend) ? backend.poolKeys() : undefined) ??
+      memoryPoolKeysFor(backend);
     // On the journal path the marker enters through local admission, at the gateway's clock.
     if (peer !== undefined && pendingMarker !== undefined) {
       await admitLocal(peer, [pendingMarker], gateway.now(), () => false);
@@ -766,15 +771,9 @@ export class Gateway {
       options.peerStore === undefined && holdsJournals(backend)
         ? { peerStore: backend.journalStore() }
         : {};
-    // Each new pool takes its own key; the host records it first (container.ts `poolGovernor`).
-    const poolKeys =
-      options.poolKeys ??
-      (holdsPoolKeys(backend) ? backend.poolKeys() : undefined) ??
-      memoryPoolKeysFor(backend);
     const gateway = await Gateway.open(backend, {
       ...options,
       ...journal,
-      poolKeys,
       seed: genesis.operatorSeed,
     });
     // A store with rows and none readable would boot empty, with a fresh genesis planted beside

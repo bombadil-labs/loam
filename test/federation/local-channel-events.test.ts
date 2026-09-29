@@ -273,7 +273,7 @@ async function legacyFixture(gw: Gateway) {
   const restored = await Gateway.open(root, {
     seed: SEED,
     channelBackend: () => poolBackend,
-    poolKeys: gw.options.poolKeys!,
+    poolKeys: gw.poolKeys,
   });
   homes.push(restored);
   await restored.resumeChannels();
@@ -1650,7 +1650,7 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     const restored = await Gateway.open(root, {
       seed: SEED,
       channelBackend: () => restoredPool,
-      poolKeys: gw.options.poolKeys!,
+      poolKeys: gw.poolKeys,
     });
     homes.push(restored);
     await restored.resumeChannels();
@@ -1763,7 +1763,7 @@ describe("T288 durable trusted history, distinct from content import", () => {
     const restored = await Gateway.open(root, {
       seed: SEED,
       channelBackend: () => pool,
-      poolKeys: original.gw.options.poolKeys!,
+      poolKeys: original.gw.poolKeys,
     });
     homes.push(restored);
     await restored.resumeChannels();
