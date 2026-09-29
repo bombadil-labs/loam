@@ -1,6 +1,6 @@
 // A channel's records are signed by the ground they land in (step 5 PR 3j-2): the pool's own law
 // (its arrival stamps) by the pool's governing key, the host's law (the pool's declaration) by the
-// host's. The keys are equal until step 6; this gives the pool a key of its own through `childSeed`.
+// host's. The pool's key comes from the host's pool key source, fixed here so the test can name it.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { authorForSeed, type Delta } from "@bombadil/rhizomatic";
@@ -24,10 +24,12 @@ describe("channel records are signed by their own ground", () => {
     const gw = await Gateway.boot(
       new MemoryBackend(),
       assembleGenesis({ operatorSeed: SEED, registrations: [] }),
-      { channelBackend: () => new MemoryBackend() },
+      {
+        channelBackend: () => new MemoryBackend(),
+        poolKeys: { load: () => POOL_SEED, create: () => POOL_SEED },
+      },
     );
     homes.push(gw);
-    vi.spyOn(gw, "childSeed").mockReturnValue(POOL_SEED);
     const fact = observed(FERN, "height", 1, 1001, "a1".repeat(32));
     const ch = await gw.openChannel({
       into: "friends",

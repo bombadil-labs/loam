@@ -212,6 +212,17 @@ function markedErase(target: Delta): Delta {
     ],
   });
 }
+// A pool under its own key holds the host's order re-signed for it: every pointer kept, plus the
+// pool as its one receiver.
+function orderIn(pool: Gateway, erasure: Delta): Delta | undefined {
+  const pointers = JSON.stringify(erasure.claims.pointers);
+  return [...pool.reactor.snapshot()].find(
+    (d) =>
+      d.claims.author === erasure.claims.author &&
+      value(d, "receiver") === pool.operatorAuthor &&
+      JSON.stringify(d.claims.pointers.filter((pt) => pt.role !== "receiver")) === pointers,
+  );
+}
 async function raw(gw: Gateway, batch: readonly Delta[]) {
   await plant(gw.backend, batch);
   for (const d of batch) expect(gw.reactor.ingest(d).status).not.toBe("rejected");
@@ -1298,7 +1309,9 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     expect(verifyDelta(erasure)).toBe("verified");
     expect(ref(erasure, "erases")).not.toBe(bystander.id);
     // Legitimate host fan-out must retain the same marked signed control in its attached pool.
-    expect(pool.reactor.get(erasure.id)).toEqual(erasure);
+    const held = orderIn(pool, erasure);
+    expect(held).toBeDefined();
+    expect(verifyDelta(held!)).toBe("verified");
     const negation = strike(erasure),
       forgivenessAgain = strike(negation);
     await expect(gw.append([negation])).rejects.toThrow();
@@ -1524,10 +1537,16 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
             p.target.deltaRef.delta === farOpening,
         ),
     )!;
-    await expect(pool.eraseReplica(farTombstone, farOpening)).rejects.toThrow(
+    // Signed for this pool as its receiver, so only the authority check stands in its way.
+    const farOrder = signed({
+      ...farTombstone.claims,
+      pointers: [...farTombstone.claims.pointers, p("receiver", pool.operatorAuthor!)],
+    });
+    await expect(pool.eraseReplica(farOrder, farOpening)).rejects.toThrow(
       "no attached held local erasure authority",
     );
     expect(pool.reactor.get(farTombstone.id)).toBeUndefined();
+    expect(pool.reactor.get(farOrder.id)).toBeUndefined();
     expect(gw.reactor.get(target.id)).toBeDefined();
     expect(gw.reactor.get(erasure.id)).toBeUndefined();
     expect(localChannelEvidence(gw, ch.name).state).toBe("open");
@@ -1613,8 +1632,10 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     expect(gw.reactor.get(predicted.id)).toEqual(predicted);
     expect(await primary.holds(target.id)).toBe(true);
     expect(readErasures(gw.reactor, gw.validityNow(), OP).has(target.id)).toBe(true);
-    expect(readErasures(pool.reactor, pool.validityNow(), OP).has(target.id)).toBe(true);
-    expect(pool.reactor.get(predicted.id)).toEqual(predicted);
+    expect(readErasures(pool.reactor, pool.validityNow(), pool.operatorAuthor).has(target.id)).toBe(
+      true,
+    );
+    expect(orderIn(pool, predicted)).toBeDefined();
     expect(opened(gw, ch.name).received).toEqual([]);
     await expect(gw.append([strike(preplant, SEED, 70001)])).rejects.toThrow();
     const root = new MemoryBackend(),
