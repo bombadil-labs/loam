@@ -153,6 +153,28 @@ describe("criterion 17: a fresh pool starts under its own key", () => {
     await gw.close();
   });
 
+  it("a nested pool opened after a root erasure receives it from its own opener, and refuses the target", async () => {
+    const gw = await hostWith(new MemoryBackend(), memoryPoolKeys());
+    const target = note(42);
+    const p = (await gw.openQuarantine()).gateway;
+    await gw.append([target]);
+    await p.federate([target], { admit: () => true });
+    await gw.erase(target.id); // fans out to p as an order naming p
+    expect(p.reactor.get(target.id)).toBeUndefined();
+    const q = (await p.openQuarantine()).gateway;
+    const orders = [...q.reactor.snapshot()].filter((d) =>
+      d.claims.pointers.some((x) => x.role === "erases"),
+    );
+    expect(orders.map((d) => d.claims.author)).toEqual([p.operatorAuthor]);
+    expect(orders[0]!.claims.pointers.find((x) => x.role === "receiver")?.target).toEqual({
+      kind: "primitive",
+      value: q.operatorAuthor,
+    });
+    expect((await q.federate([target], { admit: () => true })).accepted).toBe(0);
+    expect((await q.federate([note(43)], { admit: () => true })).accepted).toBe(1); // bystander
+    await gw.close();
+  });
+
   it("an older pool (bytes, no key record) is refused, and its bytes do not change", async () => {
     const gw = await hostWith(new MemoryBackend(), memoryPoolKeys());
     await declare(gw, "container:k17c");

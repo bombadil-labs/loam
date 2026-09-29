@@ -46,7 +46,7 @@ import {
   revocationClaims,
 } from "./accounts.js";
 import { STORE_ENTITY } from "./genesis.js";
-import { isErasure, orderForPool, readErasures } from "./erase.js";
+import { isErasure, orderBinds, orderForPool, readErasures } from "./erase.js";
 import {
   canonicalLeewayJson,
   parseLeeway,
@@ -1858,11 +1858,14 @@ async function openSeparate(
     return (d) => members.has(d.id);
   };
   const reseed = (): Promise<FederationReport> => {
-    // This ground's own erasures reach a pool under its own key as orders naming the pool.
+    // Every erasure that binds here, this ground's own or a host's order naming this ground,
+    // reaches a pool under its own key as this ground's order naming that pool.
     const offer = gw
       .offeredDeltas()
       .map((d) =>
-        isErasure(d.claims) && d.claims.author === gw.operatorAuthor
+        isErasure(d.claims) &&
+        gw.operatorAuthor !== undefined &&
+        orderBinds(d, gw.reactor, gw.operatorAuthor)
           ? orderForPool(gw, d, pool)
           : d,
       );
