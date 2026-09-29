@@ -33,7 +33,7 @@ import { openerStands } from "./container.js";
 import { readContainerTable, receivesNow, subtreeUnder } from "./container-law.js";
 import { fenceAdmits } from "./accounts.js";
 import type { Bound, Gateway, RequestContext } from "./gateway.js";
-import { NUL } from "./nul.js";
+import { NUL } from "./alphabet.js";
 import { buildGqlSchema } from "./gql.js";
 import {
   readLawfulContested,

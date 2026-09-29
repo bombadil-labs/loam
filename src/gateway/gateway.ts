@@ -41,7 +41,7 @@ import {
 } from "./peer-admission.js";
 import { stampOn, type Stamp } from "./stamp.js";
 import { claimGatewayMarker } from "./gateway-brand.js";
-import { NUL } from "./nul.js";
+import { NUL } from "./alphabet.js";
 import { declarePrincipalScope } from "./principal.js";
 import { declareUserGround, userGroundOf } from "./user-root.js";
 import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
@@ -356,7 +356,7 @@ export class NothingPublic extends Error {
   }
 }
 
-export { NUL } from "./nul.js";
+export { NUL } from "./alphabet.js";
 
 // What the gateway holds bound: a registration plus where it came from. Manual registrations
 // (register()) live only in this process; store-derived ones are re-generated from deltas on
