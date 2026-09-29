@@ -243,6 +243,17 @@ export function readErasures(
 // DERIVED, NOT PERSISTED, and that rests on one premise: an erasure can never itself be erased (§11).
 // If that ever changes, this list must be kept in its own store, or an erasure can be undone.
 // A batch that carries an erasure and its target is handled by `erasedInBatch`.
+/** Every erasure order that binds here, ever (negated ones included): the refusal events. */
+export function bindingErasureOrders(
+  reactor: Reactor,
+  operator: string | undefined,
+): { targetId: string; order: Delta }[] {
+  return boundErasures(reactor, operator, undefined).map((order) => ({
+    targetId: erasureParts(order.claims).targetId!,
+    order,
+  }));
+}
+
 export function refusedIds(reactor: Reactor, operator: string | undefined): Set<string> {
   const refused = new Set<string>();
   for (const tomb of boundErasures(reactor, operator, undefined)) {

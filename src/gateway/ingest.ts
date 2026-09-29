@@ -267,6 +267,11 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
 // state (a pause, a budget, a recovery barrier) and both land. Only check, write and ingest run under
 // the lock: closing streams after it may await a reader, and a reader may append.
 const admissions = new WeakMap<Gateway, Promise<unknown>>();
+/** @internal — run `fn` under this ground's admission lock (a handoff freezes a surface here). */
+export function underAdmissionLock<T>(gw: Gateway, fn: () => Promise<T>): Promise<T> {
+  return admitting(gw, fn);
+}
+
 function admitting<T>(gw: Gateway, fn: () => Promise<T>): Promise<T> {
   const run = (admissions.get(gw) ?? Promise.resolve()).then(fn);
   admissions.set(
