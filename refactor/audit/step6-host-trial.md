@@ -172,12 +172,15 @@ batch (`manifestAhead`, `manifestDefect`, recovery-cut.ts). On the image path th
 
 The change, before the host moves to the image path:
 
-- `loam user recover` writes the cuts and the manifest in one transfer, and the record in a later
-  transfer.
-- The door admits a retiring record only behind a manifest held from an EARLIER transfer. A
-  manifest in the same transfer as its record no longer counts.
-- A manifest whose record never lands must not bind later cuts. The journal already names the
-  attempt, so a rerun or an abort settles it.
+- `loam user recover` writes the cuts and the manifest in one transfer, the host's own cut
+  included, and the record in a later transfer.
+- The door admits a manifest only if every cut it names is already held, or is admitted in the
+  manifest's own transfer. A manifest can never bind a cut that arrives after it.
+- The door admits a retiring record only behind a manifest held from an EARLIER transfer, and
+  only if that manifest passed the rule above. A manifest in the same transfer as its record no
+  longer counts. The record's admission keeps that proof: the manifest id and its transfer.
+- This rule lives at the door, because direct operator-signed appends do not pass through
+  `loam user recover`. The recover journal only settles a failed CLI attempt (rerun or abort).
 - Every "arrived before" question in the barrier compares transfer ordinals, never positions
   inside one transfer.
 
