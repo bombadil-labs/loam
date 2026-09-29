@@ -58,6 +58,12 @@ export class MemoryBackend implements StoreBackend {
     return this.set.size > 0 || this.journals.size > 0;
   }
 
+  /** Rows only, journal aside: what a whole-store discard checks before it discards the journal. */
+  async holdsAnyRow(): Promise<boolean> {
+    this.assertOpen();
+    return this.set.size > 0;
+  }
+
   // Discard every peer journal in this store (a whole-store discard, such as a dropped pool).
   async discardJournals(): Promise<void> {
     this.assertOpen();

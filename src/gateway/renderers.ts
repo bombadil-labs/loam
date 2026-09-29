@@ -18,7 +18,7 @@
 // of ADMITTED content addresses; what it hands a door is HTML or a refusal.
 
 import { seedSigner } from "./signer.js";
-import { authorForSeed, governedDeltas, type Primitive } from "@bombadil/rhizomatic";
+import { authorForSeed, type Primitive } from "@bombadil/rhizomatic";
 import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
 import { bytesEnvelope, findBytesByRef } from "./bytes.js";
 import { esmAddress } from "./esm.js";
@@ -312,7 +312,6 @@ export function readRenderers(
   // Several governors (a ground's own key first, then the hosts it selects for renderers): each
   // binding is struck only under its own author's strikes or the holding ground's (ruling 11), so
   // one governor never retires another's binding in a ground it does not hold.
-  const authors = new Set(operator);
   const holder = operator[0];
   const byAuthor = new Map<string, (id: string) => boolean>();
   const strikesOf = (author: string) => {
@@ -322,7 +321,7 @@ export function readRenderers(
   };
   const struck = (d: Delta): boolean =>
     strikesOf(d.claims.author)(d.id) || (holder !== undefined && strikesOf(holder)(d.id));
-  return latestPerRoute(governedDeltas(reactor.snapshot(), now, authors), (d) => !struck(d));
+  return latestPerRoute(lawfulSnapshot(reactor, now, operator), (d) => !struck(d));
 }
 
 /**

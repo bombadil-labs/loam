@@ -38,7 +38,7 @@ import { negatedAt } from "../../src/gateway/negation.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../../test/spike/garden.js";
 import { PLANT, PLANT_POLICY } from "../../test/gateway/fixtures.js";
-import { KEY, record, SEEDS } from "./corpus.js";
+import { record, SEEDS } from "./corpus.js";
 
 const NOW = 2_000_000;
 

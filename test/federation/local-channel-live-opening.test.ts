@@ -95,31 +95,22 @@ const homes: Gateway[] = [];
 afterEach(async () => {
   for (const gw of homes.splice(0)) await gw.close();
 });
-// A driver with no whole-store byte probe: "empty" cannot be proven through it.
-class BlindBackend implements StoreBackend {
-  private readonly inner: MemoryBackend;
-  constructor(private readonly file: Delta[]) {
-    this.inner = new MemoryBackend();
-    void this.inner.append(file);
-  }
-  async append(deltas: Iterable<Delta>): Promise<number> {
-    const batch = [...deltas];
-    const n = await this.inner.append(batch);
-    for (const d of batch) if (!this.file.some((f) => f.id === d.id)) this.file.push(d);
-    return n;
-  }
-  deltasSince(known: ReadonlySet<string>): Promise<Delta[]> {
-    return this.inner.deltasSince(known);
-  }
-  purge(ids: Iterable<string>): Promise<number> {
-    return this.inner.purge(ids);
-  }
-  holds(id: string): Promise<boolean> {
-    return this.inner.holds(id);
-  }
-  close(): Promise<void> {
-    return this.inner.close();
-  }
+// A view of a store with no inventory and no whole-store byte probe: "empty" cannot be proven
+// through it. It keeps the store's journal, so a pool under its own key still opens over it.
+const BLIND = new Set(["ids", "holdsAny", "heldAmong"]);
+function blindView<B extends StoreBackend>(store: B): B {
+  return new Proxy(store, {
+    get(target, prop) {
+      if (typeof prop === "string" && BLIND.has(prop)) return undefined;
+      if (prop === "holdsAnyRow") return () => Promise.resolve(true); // unprovable reads as held
+      // The journal machinery still lists the rows beside its own journal.
+      if (prop === "journalRowIds") return () => (target as unknown as MemoryBackend).ids();
+      const value: unknown = Reflect.get(target, prop, target);
+      return typeof value === "function"
+        ? (value as (...a: unknown[]) => unknown).bind(target)
+        : value;
+    },
+  });
 }
 class FaultBackend extends MemoryBackend {
   failPurgeAfter = Number.POSITIVE_INFINITY;
@@ -215,7 +206,7 @@ async function home() {
     files.set(name, file);
     const disk = disks.get(name) ?? new PoolFile(file);
     disks.set(name, disk);
-    const primary = blind.has(name) ? new BlindBackend(file) : disk;
+    const primary = blind.has(name) ? blindView(disk) : disk;
     const mirror = mirrors.get(name);
     return mirror === undefined ? primary : new MirrorBackend(primary, new FaultBackend(mirror));
   };
@@ -1229,7 +1220,18 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
       /still holds bytes although its declaration was negated/,
     );
     expect(gw.reactor.get(opening.id)).toBeDefined();
+    // With the probe back, the store still answers "held": its rows are cut, but the pool's own
+    // journal still carries them. The road the refusal names: open again, drop, then erase.
     first.blind.delete(ch.name);
+    await expect(gw.erase(opening.id)).rejects.toThrow(/open the channel again under this name/);
+    const feed = peer();
+    await gw.openChannel({
+      into: "friends",
+      prefix: "peer",
+      from: "https://peer.example/peer",
+      source: feed.source,
+    });
+    await gw.dropChannel(ch.name);
     await gw.erase(opening.id);
     expect(gw.reactor.get(opening.id)).toBeUndefined();
   });

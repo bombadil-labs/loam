@@ -268,8 +268,13 @@ async function legacyFixture(gw: Gateway) {
   await plant(root, await gw.backend.deltasSince(new Set()), gw.operatorAuthor);
   const poolBytes = await fixture.pool.backend.deltasSince(new Set());
   let poolBackend = new MemoryBackend();
-  await poolBackend.append(poolBytes);
-  const restored = await Gateway.open(root, { seed: SEED, channelBackend: () => poolBackend });
+  // The pool is its own peer: its copy is its journal's, under its own key.
+  await plant(poolBackend, poolBytes, fixture.pool.operatorAuthor);
+  const restored = await Gateway.open(root, {
+    seed: SEED,
+    channelBackend: () => poolBackend,
+    poolKeys: gw.options.poolKeys!,
+  });
   homes.push(restored);
   await restored.resumeChannels();
   return {
@@ -1641,8 +1646,12 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     const root = new MemoryBackend(),
       restoredPool = new MemoryBackend();
     await plant(root, await primary.deltasSince(new Set()), OP);
-    await restoredPool.append(await pool.backend.deltasSince(new Set()));
-    const restored = await Gateway.open(root, { seed: SEED, channelBackend: () => restoredPool });
+    await plant(restoredPool, await pool.backend.deltasSince(new Set()), pool.operatorAuthor);
+    const restored = await Gateway.open(root, {
+      seed: SEED,
+      channelBackend: () => restoredPool,
+      poolKeys: gw.options.poolKeys!,
+    });
     homes.push(restored);
     await restored.resumeChannels();
     expect(readErasures(restored.reactor, restored.validityNow(), OP).has(target.id)).toBe(true);
@@ -1749,8 +1758,13 @@ describe("T288 durable trusted history, distinct from content import", () => {
     const root = new MemoryBackend();
     await plant(root, await original.primary.deltasSince(new Set()), OP);
     const pool = new MemoryBackend();
-    await pool.append(await ch.pool.gateway!.backend.deltasSince(new Set()));
-    const restored = await Gateway.open(root, { seed: SEED, channelBackend: () => pool });
+    const source = ch.pool.gateway!;
+    await plant(pool, await source.backend.deltasSince(new Set()), source.operatorAuthor);
+    const restored = await Gateway.open(root, {
+      seed: SEED,
+      channelBackend: () => pool,
+      poolKeys: original.gw.options.poolKeys!,
+    });
     homes.push(restored);
     await restored.resumeChannels();
     expect(opened(restored, ch.name).received).toEqual([]);

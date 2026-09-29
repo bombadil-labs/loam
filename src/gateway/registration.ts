@@ -802,11 +802,17 @@ export function parseRegistrationInput(raw: unknown): RegistrationInput {
 // foreign negation can no more retire the operator's schema than a foreign definition can
 // replace it.
 /** The operator's deltas that hold at `now`. */
-export function lawfulSnapshot(reactor: Reactor, now: number, operator?: string): DeltaSet {
+export function lawfulSnapshot(
+  reactor: Reactor,
+  now: number,
+  operator?: string | readonly string[],
+): DeltaSet {
   return governedDeltas(
     reactor.snapshot(),
     now,
-    operator === undefined ? () => true : new Set([operator]),
+    operator === undefined
+      ? () => true
+      : new Set(typeof operator === "string" ? [operator] : operator),
   );
 }
 

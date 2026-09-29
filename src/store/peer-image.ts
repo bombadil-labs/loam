@@ -17,6 +17,8 @@ export interface JournalBackend extends StoreBackend {
   setAside?(rows: readonly { id: string; reason: string }[]): void;
   /** The rows beside the journal, where they differ from `ids` (a mirror: its primary tier's). */
   journalRowIds?(): Promise<Set<string>>;
+  /** Rows only, journal aside (every tier but the journal's). Unprovable answers true. */
+  holdsAnyRow(): Promise<boolean>;
   /** Discard every peer journal here (a whole-store discard). Throws if it cannot prove it. */
   discardJournals(): Promise<void>;
   /** A wrapper answers for its inner store: false when that store keeps no journal. */

@@ -1972,8 +1972,6 @@ async function openSeparate(
             ids.add(row.key);
           }
         }
-        // A journaled pool's frames carry its deltas too: the whole journal goes with the store.
-        if (holdsJournals(target.backend)) await target.backend.discardJournals();
         if (ids.size > 0) {
           const batch = [...ids];
           await target.backend.purge(batch);
@@ -2006,6 +2004,19 @@ async function openSeparate(
         // The whole-store verdict: a byte no read and no session named (a mirror tier a partial
         // purge left behind) is still this store's, and a drop that reported it clean would be
         // false at the bytes (H7). A driver without the probe leaves that byte to heal, as before.
+        // A journaled pool: every row on every tier first, then the journal, and then nothing at
+        // all may remain. The journal goes last, because a store left with rows and no journal
+        // cannot reopen, and a refused drop must leave its pool reopenable.
+        const journaled = holdsJournals(target.backend);
+        if (journaled && (await target.backend.holdsAnyRow())) {
+          refuse(
+            `${who}'s store still holds bytes that no read named after the sweep (a tier a partial ` +
+              `purge left behind). To discard it: take it out of scope first (detach()), heal its ` +
+              `store while nothing is attached to it so every tier shows what it holds, open it ` +
+              `again, then drop again`,
+          );
+        }
+        if (journaled) await target.backend.discardJournals();
         if (target.backend.holdsAny !== undefined && (await target.backend.holdsAny())) {
           refuse(
             `${who}'s store still holds bytes that no read named after the sweep (a tier a partial ` +

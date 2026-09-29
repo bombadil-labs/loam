@@ -560,11 +560,18 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     if (this.truncationUnknown || this.truncationOwed.size > 0) return true;
     // A journal's frames and checkpoint carry whole deltas, so a journal is bytes too.
     return (
-      this.db.prepare("SELECT 1 FROM deltas LIMIT 1").get() !== undefined ||
+      (await this.holdsAnyRow()) ||
       this.db.prepare("SELECT 1 FROM journal_head LIMIT 1").get() !== undefined ||
       this.db.prepare("SELECT 1 FROM journal_frames LIMIT 1").get() !== undefined ||
       this.db.prepare("SELECT 1 FROM journal_checkpoint LIMIT 1").get() !== undefined
     );
+  }
+
+  /** Rows only, journal aside: what a whole-store discard checks before it discards the journal. */
+  async holdsAnyRow(): Promise<boolean> {
+    this.assertOpen();
+    if (this.truncationUnknown || this.truncationOwed.size > 0) return true;
+    return this.db.prepare("SELECT 1 FROM deltas LIMIT 1").get() !== undefined;
   }
 
   // Discard every peer journal in this store: heads, frames, checkpoints and rebase debt, then
