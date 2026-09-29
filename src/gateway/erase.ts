@@ -36,7 +36,7 @@ import { bytesToHex } from "@noble/hashes/utils.js";
 import { DeltaSet, Reactor } from "@bombadil/rhizomatic";
 import type { Claims, Delta } from "@bombadil/rhizomatic";
 import { evalTerm, parseTerm } from "@bombadil/rhizomatic";
-import { readRegistrations } from "./registration.js";
+import { readLawfulRegistrations } from "./registration.js";
 import { negatedAt } from "./negation.js";
 import { programMaskJson } from "./listing.js";
 import { currentContainerDeclarationId, unreachableStoreReport } from "./container.js";
@@ -560,7 +560,11 @@ export function maskReadings(
     else if (!seen.readings.some((r) => r.identity === identity)) seen.readings.push(pair);
   };
   remember("drop", UNGOVERNED_READING);
-  for (const reg of readRegistrations(gw.reactor, gw.validityNow(), gw.operatorAuthor)) {
+  for (const reg of readLawfulRegistrations(
+    gw.reactor,
+    gw.validityNow(),
+    gw.lawAuthors("registrations"),
+  )) {
     const name = reg.lensName ?? reg.hyperschema.name;
     const identity = `${reg.entity ?? `hyperschema:${reg.hyperschema.name}`}\u0000${name}`;
     try {

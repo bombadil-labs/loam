@@ -6,6 +6,9 @@
 import { describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
+import { bindingPolicyClaims } from "../../src/gateway/binding-policy.js";
+import { maskReadings } from "../../src/gateway/erase.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 import { FERN } from "../spike/garden.js";
 import { PLANT, PLANT_READING } from "./fixtures.js";
 import {
@@ -159,5 +162,56 @@ describe("stage 1b-ii: standing and registrations read own and selected host law
     expect(inbox.registered.map((r) => r.hyperschema.name)).not.toContain("Plant");
     await gw.close();
     await inbox.close();
+  });
+
+  it("a selected host has no standing of its own in a child: only its grants count", async () => {
+    const gw = await child();
+    const hostDatum = signClaims({ ...byPeer(14).claims, author: HOST }, HOST_SEED);
+    await expect(gw.append([hostDatum])).rejects.toThrow(/not permitted/);
+    await gw.close();
+  });
+
+  it("a host copy does not fill a name the child claimed and its own policy withheld", async () => {
+    const gw = await child();
+    await gw.append([
+      signClaims(
+        withStamp(gw.stamp(), (t) => bindingPolicyClaims("conflicts", POOL, t)),
+        POOL_SEED,
+      ),
+    ]);
+    const named = (name: string) => ({ ...PLANT_READING, name });
+    await gw.publishRegistration(PLANT, named("Shared"), [FERN], undefined, "hyperschema:One");
+    await gw.publishRegistration(
+      { name: "Two", alg: 1, body: PLANT.body },
+      named("Shared"),
+      [FERN],
+      undefined,
+      "hyperschema:Two",
+    );
+    const lenses = () => gw.registered.map((r) => r.lensName ?? r.hyperschema.name);
+    expect(lenses()).not.toContain("Shared"); // withheld under the child's own `conflicts`
+    const hostShared = assembleGenesis({
+      operatorSeed: HOST_SEED,
+      registrations: [{ hyperschema: PLANT, schema: named("Shared"), roots: [FERN] }],
+    }).deltas;
+    await gw.federate(hostShared, { admit: () => true });
+    gw.replayRegistrations();
+    expect(lenses()).not.toContain("Shared");
+    await gw.close();
+  });
+
+  it("the erasure reading mask counts a host-seeded reading the child serves", async () => {
+    const hostRegs = assembleGenesis({
+      operatorSeed: HOST_SEED,
+      registrations: [{ hyperschema: PLANT, schema: PLANT_READING, roots: [FERN] }],
+    }).deltas;
+    const gw = await child();
+    await gw.federate(hostRegs, { admit: () => true });
+    gw.replayRegistrations();
+    const labels = [...maskReadings(gw).masks.values()].flatMap((m) =>
+      m.readings.map((r) => r.label),
+    );
+    expect(labels).toContain("Plant");
+    await gw.close();
   });
 });

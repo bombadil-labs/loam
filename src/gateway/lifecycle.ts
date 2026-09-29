@@ -34,6 +34,7 @@ import { fenceAdmits } from "./accounts.js";
 import { NUL, type Bound, type Gateway, type RequestContext } from "./gateway.js";
 import { buildGqlSchema } from "./gql.js";
 import {
+  readLawfulRegistrations,
   type Registration,
   lensOf,
   programOf,
@@ -41,7 +42,6 @@ import {
   readinglessExpandRole,
   parseClaimTemplates,
   readContestedBindings,
-  readRegistrations,
   type Boundary,
   referenceProps,
   registrationDeltaClaims,
@@ -438,22 +438,9 @@ const lastBindFailure = (gw: Gateway, key: string): string | undefined =>
 // ONE derivation, read by the replay that DROPS a contest's losers and by the reading that NAMES
 // them (`contestedNamesImpl` below). A second copy could only drift into a surface that disagrees
 // with the store it reports on.
-// A ground's registrations: its own, then each selected host's copy of a lens name it has not
-// registered, nearest host first (step6-pool-keys.md, stage 1b-ii). A root store, and a pool whose
-// key equals its host's, has one governor, so this is exactly today's read.
-function lawfulRegistrations(g: Gateway, boundary?: Boundary): Registration[] {
-  const [own, ...hosts] = g.lawAuthors("registrations");
-  const rows = readRegistrations(g.reactor, g.validityNow(), own, boundary);
-  const named = new Set(rows.map(lensOf));
-  for (const host of hosts) {
-    for (const r of readRegistrations(g.reactor, g.validityNow(), host, boundary)) {
-      if (named.has(lensOf(r))) continue;
-      named.add(lensOf(r));
-      rows.push(r);
-    }
-  }
-  return rows;
-}
+// A ground's registrations under its own law and its selected hosts' (readLawfulRegistrations).
+const lawfulRegistrations = (g: Gateway, boundary?: Boundary): Registration[] =>
+  readLawfulRegistrations(g.reactor, g.validityNow(), g.lawAuthors("registrations"), boundary);
 
 function storeBindings(gw: Gateway, boundary?: Boundary): Bound[] {
   const rows: Bound[] = lawfulRegistrations(gw, boundary).map((r) => ({

@@ -1163,6 +1163,32 @@ export function readContestedBindings(
   return out;
 }
 
+/**
+ * Registrations read under several governors, nearest first (a pool's own key, then the hosts it
+ * selects; step6-pool-keys.md, stage 1b-ii). Each governor's own rules resolve its own names,
+ * binding policy included. A name a nearer governor CLAIMS is reserved for it, even where its policy
+ * withheld the name: a farther copy fills only a name no nearer governor claimed.
+ */
+export function readLawfulRegistrations(
+  reactor: Reactor,
+  now: number,
+  governors: readonly string[],
+  boundary?: Boundary,
+): Registration[] {
+  if (governors.length === 0) return readRegistrations(reactor, now, undefined, boundary);
+  const rows: Registration[] = [];
+  const claimed = new Set<LensName>();
+  for (const governor of governors) {
+    for (const r of readRegistrations(reactor, now, governor, boundary)) {
+      if (!claimed.has(lensOf(r))) rows.push(r);
+    }
+    for (const group of survivingCandidates(reactor, now, governor, undefined, boundary).values()) {
+      for (const cand of group) claimed.add(lensNameOf(cand));
+    }
+  }
+  return rows;
+}
+
 export function readRegistrations(
   reactor: Reactor,
   now: number,

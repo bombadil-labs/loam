@@ -776,9 +776,9 @@ export function authorize(
   const author = delta.claims.author;
   if (operator === undefined || author === operator) return { ok: true };
   // Each root's chain is judged whole, under that root's strikes; a link under one root never
-  // extends a chain rooted at another.
+  // extends a chain rooted at another. Only this ground's own key stands by itself: a selected
+  // host has no general authority here, only the grants its chain issued.
   for (const root of grantRoots ?? [operator]) {
-    if (author === root) return { ok: true };
     if (grantHeld({ reactor, now, operator: root }, STORE_ENTITY, author, "write", new Set())) {
       return { ok: true };
     }
