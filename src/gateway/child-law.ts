@@ -9,7 +9,8 @@
 // counts only where the child declares none. For a standing (a grant), either governor's surviving
 // grant counts.
 
-export type LawContext = "containers" | "registrations" | "trust" | "grants" | "renderers";
+export type LawContext =
+  "containers" | "registrations" | "trust" | "grants" | "renderers" | "public";
 
 export interface ChildLaw {
   /**
@@ -31,10 +32,18 @@ export const inboxLaw = (hosts: readonly string[]): ChildLaw => ({
 });
 
 // A channel, quarantine or separate pool holds seeded host copies of the container table,
-// registrations, trust, grants and renderer twins, and selects the host for all of them.
+// registrations, trust, grants, renderer twins and public-read declarations, and selects the host
+// for all of them.
 export const seededLaw = (hosts: readonly string[]): ChildLaw => ({
   hosts,
-  selects: new Set<LawContext>(["containers", "registrations", "trust", "grants", "renderers"]),
+  selects: new Set<LawContext>([
+    "containers",
+    "registrations",
+    "trust",
+    "grants",
+    "renderers",
+    "public",
+  ]),
   hostReviews: true,
 });
 

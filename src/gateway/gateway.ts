@@ -2182,7 +2182,7 @@ export class Gateway {
       now >= this.publicOpen.until
     ) {
       this.publicOpen = {
-        open: readPublicSchemas(this.reactor, now, this.operatorAuthor),
+        open: readPublicSchemas(this.reactor, now, this.lawAuthors("public")),
         from: now,
         until: this.reactor.nextValidityBoundary(now) ?? Infinity,
       };
