@@ -742,6 +742,8 @@ export function authorize(
   delta: Delta,
   operator: string | undefined,
   batch: readonly Delta[] = [],
+  /** The roots whose grant chains give standing here: a pool's own key, then selected hosts. */
+  grantRoots: readonly string[] | undefined = undefined,
 ): { ok: true } | { ok: false; refusal: string } {
   const defect =
     constitutionalDefect(delta) ??
@@ -773,8 +775,13 @@ export function authorize(
 
   const author = delta.claims.author;
   if (operator === undefined || author === operator) return { ok: true };
-  if (grantHeld({ reactor, now, operator }, STORE_ENTITY, author, "write", new Set())) {
-    return { ok: true };
+  // Each root's chain is judged whole, under that root's strikes; a link under one root never
+  // extends a chain rooted at another.
+  for (const root of grantRoots ?? [operator]) {
+    if (author === root) return { ok: true };
+    if (grantHeld({ reactor, now, operator: root }, STORE_ENTITY, author, "write", new Set())) {
+      return { ok: true };
+    }
   }
   return {
     ok: false,

@@ -34,6 +34,7 @@ import { fenceAdmits } from "./accounts.js";
 import { NUL, type Bound, type Gateway, type RequestContext } from "./gateway.js";
 import { buildGqlSchema } from "./gql.js";
 import {
+  type Registration,
   lensOf,
   programOf,
   lawfulSnapshot,
@@ -437,13 +438,25 @@ const lastBindFailure = (gw: Gateway, key: string): string | undefined =>
 // ONE derivation, read by the replay that DROPS a contest's losers and by the reading that NAMES
 // them (`contestedNamesImpl` below). A second copy could only drift into a surface that disagrees
 // with the store it reports on.
+// A ground's registrations: its own, then each selected host's copy of a lens name it has not
+// registered, nearest host first (step6-pool-keys.md, stage 1b-ii). A root store, and a pool whose
+// key equals its host's, has one governor, so this is exactly today's read.
+function lawfulRegistrations(g: Gateway, boundary?: Boundary): Registration[] {
+  const [own, ...hosts] = g.lawAuthors("registrations");
+  const rows = readRegistrations(g.reactor, g.validityNow(), own, boundary);
+  const named = new Set(rows.map(lensOf));
+  for (const host of hosts) {
+    for (const r of readRegistrations(g.reactor, g.validityNow(), host, boundary)) {
+      if (named.has(lensOf(r))) continue;
+      named.add(lensOf(r));
+      rows.push(r);
+    }
+  }
+  return rows;
+}
+
 function storeBindings(gw: Gateway, boundary?: Boundary): Bound[] {
-  const rows: Bound[] = readRegistrations(
-    gw.reactor,
-    gw.validityNow(),
-    gw.operatorAuthor,
-    boundary,
-  ).map((r) => ({
+  const rows: Bound[] = lawfulRegistrations(gw, boundary).map((r) => ({
     ...r,
     origin: "store" as const,
   }));
@@ -453,7 +466,7 @@ function storeBindings(gw: Gateway, boundary?: Boundary): Bound[] {
     if (standing.openedBy !== undefined) continue;
     const pool = gw.channelPools.get(standing.name)?.gateway;
     if (pool === undefined) continue;
-    const read = readRegistrations(pool.reactor, pool.validityNow(), pool.operatorAuthor, boundary);
+    const read = lawfulRegistrations(pool, boundary);
     for (const r of read) {
       if (!lensOf(r).startsWith(`${standing.prefix}:`)) continue;
       rows.push({ ...r, origin: "store" as const, channel: standing.name });
@@ -527,11 +540,7 @@ export function boundBindingsImpl(
     const owner = table.containers.get(name)?.inboxOf;
     if (owner === undefined || !reach.has(owner) || inbox.gateway === undefined) continue;
     const prefix = `${owner}:`;
-    for (const r of readRegistrations(
-      inbox.gateway.reactor,
-      inbox.gateway.validityNow(),
-      inbox.gateway.operatorAuthor,
-    )) {
+    for (const r of lawfulRegistrations(inbox.gateway)) {
       if (!fenceAdmits(prefix, r.hyperschema.name)) continue; // the program
       if (!fenceAdmits(prefix, lensOf(r))) continue; // the reading
       if (lensOf(r).includes(NUL)) continue; // a reading name is the gateway's alphabet too
@@ -549,7 +558,7 @@ export function boundBindingsImpl(
     if (!receivesNow(table, standing.into)) continue; // and one whose container stopped receiving
     const pool = gw.channelPools.get(standing.name)?.gateway;
     if (pool === undefined) continue;
-    for (const r of readRegistrations(pool.reactor, pool.validityNow(), pool.operatorAuthor)) {
+    for (const r of lawfulRegistrations(pool)) {
       if (!lensOf(r).startsWith(`${standing.prefix}:`)) continue;
       if (lensOf(r).includes(NUL)) continue;
       candidates.push({ ...r, origin: "store" as const, channel: standing.name });

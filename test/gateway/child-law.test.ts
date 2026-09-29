@@ -4,7 +4,10 @@
 // http standing checks), which the mount rails exercise with equal keys.
 
 import { describe, expect, it } from "vitest";
-import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
+import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
+import { grantClaims } from "../../src/gateway/accounts.js";
+import { FERN } from "../spike/garden.js";
+import { PLANT, PLANT_READING } from "./fixtures.js";
 import {
   hostChain,
   inboxLaw,
@@ -13,7 +16,7 @@ import {
   seededLaw,
 } from "../../src/gateway/child-law.js";
 import { Gateway } from "../../src/gateway/gateway.js";
-import { assembleGenesis } from "../../src/gateway/genesis.js";
+import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { trustClaims } from "../../src/gateway/trust.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 
@@ -105,5 +108,56 @@ describe("a child's trust policy: its own first, a selected host copy only where
     });
     expect(gw.admitFor()(byPeer(7))).toBe(false); // the root host's copy governs
     await gw.close();
+  });
+});
+
+describe("stage 1b-ii: standing and registrations read own and selected host law", () => {
+  const WRITER_SEED = "5e".repeat(32);
+  const WRITER = authorForSeed(WRITER_SEED);
+  const byWriter = (n: number): Delta =>
+    signClaims({ ...byPeer(n).claims, author: WRITER }, WRITER_SEED);
+  const hostGrant = signClaims(grantClaims(STORE_ENTITY, WRITER, "write", HOST, 7_000), HOST_SEED);
+
+  it("a host-rooted write grant gives standing in a seeded child, and not in an inbox", async () => {
+    const gw = await child();
+    await gw.federate([hostGrant], { admit: () => true });
+    await gw.append([byWriter(10)]);
+    expect(gw.reactor.get(byWriter(10).id)).toBeDefined();
+    const inbox = await child();
+    inbox.childLaw = inboxLaw([HOST]);
+    await inbox.federate([hostGrant], { admit: () => true });
+    await expect(inbox.append([byWriter(11)])).rejects.toThrow(/not permitted/);
+    await gw.close();
+    await inbox.close();
+  });
+
+  it("a host-rooted grant is the host chain's to strike, not the pool's", async () => {
+    const gw = await child();
+    await gw.federate([hostGrant], { admit: () => true });
+    await gw.append([signClaims(makeNegationClaims(POOL, 7_100, hostGrant.id), POOL_SEED)]);
+    await gw.append([byWriter(12)]); // the pool's strike does not end a host-rooted grant
+    await gw.federate([signClaims(makeNegationClaims(HOST, 7_200, hostGrant.id), HOST_SEED)], {
+      admit: () => true,
+    });
+    await expect(gw.append([byWriter(13)])).rejects.toThrow(/not permitted/);
+    await gw.close();
+  });
+
+  it("a host's registration copy binds in a seeded child, and not in an inbox", async () => {
+    const hostRegs = assembleGenesis({
+      operatorSeed: HOST_SEED,
+      registrations: [{ hyperschema: PLANT, schema: PLANT_READING, roots: [FERN] }],
+    }).deltas;
+    const gw = await child();
+    await gw.federate(hostRegs, { admit: () => true });
+    gw.replayRegistrations();
+    expect(gw.registered.map((r) => r.hyperschema.name)).toContain("Plant");
+    const inbox = await child();
+    inbox.childLaw = inboxLaw([HOST]);
+    await inbox.federate(hostRegs, { admit: () => true });
+    inbox.replayRegistrations();
+    expect(inbox.registered.map((r) => r.hyperschema.name)).not.toContain("Plant");
+    await gw.close();
+    await inbox.close();
   });
 });

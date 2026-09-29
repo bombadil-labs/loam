@@ -74,6 +74,34 @@ excludes both, `channel.ts:663`). Promotion uses the `review` rule above.
 Stages 1 and 2 need no new substrate API. Stage 3 and the handoff of existing pools do.
 Nothing serves under K_p before stage 3.
 
+## Stage 1b-ii: grants and registrations (plan)
+
+Stage 1b-i (#661) gave each pool its `ChildLaw` and moved trust, mount grants and renderers onto
+it. The host trial measured what the rest costs: with pool keys on, 37 failures read grants and 19
+read registrations with the pool key alone. Both readers take ONE operator today, through shared
+helpers. This stage lets them read the pool's own law and its selected host law, without treating
+the two as one governor.
+
+- **Grants.** `grantHeld` walks a chain of admin grants back to one root key, and judges strikes
+  with that root's authority. A pool's standing counts if a chain rooted at its own key holds, or
+  a chain rooted at a host key it selects for `grants` holds, each judged with its own root's
+  strikes. The union is over whole chains; a link issued under one root never extends a chain
+  rooted at the other. Sites: `authorize` (both doors), `holdsGrant`, `survivingWriteGrantIds`,
+  and the grant readers the inventory lists for a pool.
+- **Registrations.** `readRegistrations` runs once per governor in `lawAuthors("registrations")`.
+  The results merge per lens name: the pool's own surviving registration wins; a selected host
+  copy fills a name the pool has not registered. Within one governor, today's rules hold
+  (latest-per-lens, §21.7). The binding policy (§47) is single-valued, so it follows the trust
+  rule: the nearest governor that declares one governs, and it resolves only that governor's
+  contested names.
+- **Where it applies.** Only a pool reads more than one governor. A root store's `lawAuthors` is
+  its own key alone, so every answer there is unchanged. While a pool's key equals its host's key,
+  the list has one entry and every answer is unchanged too.
+- **Rails.** Two-key rails in the style of `child-law.test.ts`: a host-rooted write grant lets a
+  writer into a seeded pool, and not into an inbox; a pool's own strike of a host-rooted grant does
+  not end it (it is the host chain's to strike) while the host's strike does; a pool's own
+  registration shadows a host copy of the same lens name; a host copy fills a name the pool lacks.
+
 ## Settled in review (2026-09-29)
 
 - A durable pool's key lives in stable pool identity custody. Key loss is a hard refusal, marked
