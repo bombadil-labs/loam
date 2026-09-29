@@ -675,8 +675,15 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
         this.assertOpen();
         this.db.exec("BEGIN IMMEDIATE");
         try {
-          // "removed" is appended only if the bytes are provably gone, WAL debt included.
-          if (headOf(peerId) !== expectedHead || this.holdsNow(targetId)) {
+          // "removed" is appended only if the bytes are provably gone, WAL debt included, and no
+          // committed frame still carries the target: a frame holds the full admitted delta.
+          if (
+            headOf(peerId) !== expectedHead ||
+            this.holdsNow(targetId) ||
+            this.db
+              .prepare("SELECT 1 FROM journal_frames WHERE peer = ? AND instr(frame, ?) > 0")
+              .get(peerId, Buffer.from(targetId)) !== undefined
+          ) {
             this.db.exec("ROLLBACK");
             return { status: "conflict" };
           }

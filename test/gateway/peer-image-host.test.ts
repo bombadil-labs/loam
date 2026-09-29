@@ -121,7 +121,7 @@ describe("a host opened with a peer journal admits through it", () => {
     await gw.close();
   });
 
-  it("erase through the journal: the target is refused, its bytes go, a bystander stays", async () => {
+  it("erase through the journal: the target is refused, a bystander stays, and no false removal", async () => {
     const path = sqliteHome();
     const backend = new SqliteBackend(path);
     const gw = await boot(backend);
@@ -129,15 +129,24 @@ describe("a host opened with a peer journal admits through it", () => {
     const bystander = note(2);
     await gw.append([target]);
     await gw.append([bystander]);
-    await gw.erase(target.id);
-    // delta level: the journal refuses the target and holds no obligation still owed
+    await gw.erase(target.id).catch(() => undefined); // the report may be "not complete"
+    // delta level: the journal refuses the target
     const state = await stateOf(backend.journalStore());
     expect(state.base.refusedIds.has(target.id)).toBe(true);
     expect(state.base.admitted.has(target.id)).toBe(false);
-    expect(state.obligations.filter((o) => o.targetId === target.id).map((o) => o.status)).toEqual([
-      "removed",
-    ]);
     expect(await backend.holds(target.id)).toBe(false);
+    // the bytes: while a committed frame still carries the target, its purge never reads
+    // "removed" (the frames are immutable and hold the full admitted delta)
+    const db = new Database(path);
+    const inFrame =
+      db
+        .prepare("SELECT 1 FROM journal_frames WHERE instr(frame, ?) > 0")
+        .get(Buffer.from(target.id)) !== undefined;
+    db.close();
+    const removed = state.obligations.some(
+      (o) => o.targetId === target.id && o.status === "removed",
+    );
+    expect(inFrame && removed).toBe(false);
     await gw.close();
     // object level, after a reopen: the target never returns; the bystander is served
     const again = await boot(new SqliteBackend(path));

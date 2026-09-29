@@ -126,7 +126,17 @@ export class MemoryBackend implements StoreBackend {
       compareAndSettlePurge: async (peerId, expectedHead, nextHead, frame, targetId) => {
         this.assertOpen();
         const j = this.journals.get(peerId);
-        if (j === undefined || j.head !== expectedHead || this.set.has(targetId)) {
+        // A committed frame holds the full admitted delta: while one carries the target, its
+        // bytes are not gone.
+        const needle = new TextEncoder().encode(targetId);
+        const inFrame = (f: Uint8Array): boolean =>
+          f.some((_, i) => needle.every((b, k) => f[i + k] === b));
+        if (
+          j === undefined ||
+          j.head !== expectedHead ||
+          this.set.has(targetId) ||
+          j.frames.some(inFrame)
+        ) {
           return { status: "conflict" };
         }
         j.frames.push(Uint8Array.from(frame));
