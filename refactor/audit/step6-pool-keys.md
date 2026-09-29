@@ -51,10 +51,14 @@ excludes both, `channel.ts:663`). Promotion uses the `review` rule above.
 2. **K_p custody (prepared, not active).** Mint K_p when a pool is created, and keep it in a key
    source the opener supplies: the CLI keeps it under the home; an embedder with no home must pass
    its own source, or the pool cannot take its own key. A missing key file is NOT a marker of an
-   existing pool, because a lost key looks the same. The marker is the pool store's own journal:
-   it names its peer id. A pool whose journal names K_p and whose key is missing is refused, never
-   reopened under the host key. A pool with no journal is an existing pool: it keeps the host key
-   until the handoff. The host never signs the pool's law again; a host command writes pool law
+   existing pool, because a lost key looks the same. Neither is a missing journal alone: a new
+   pool is journal-less between minting K_p and creating its journal. So the HOST records the
+   pool's key id first: a durable, store-local host record naming the pool and K_p's public key,
+   written before K_p is used. On resume, a pool the host names with K_p must have its key (else
+   it is refused) and its journal: an empty store with no journal resumes creation and gets its
+   empty journal; a store with rows and no journal is refused. Only a pool the host never named
+   with a key is an existing pool; it keeps the host key until the handoff. A pool whose journal
+   names K_p is refused if its key is missing, never reopened under the host key. The host never signs the pool's law again; a host command writes pool law
    through the pool's own signer (inventory pattern 4). This stage lands behind the trial switch
    and activates nothing.
 3. **Activation: new pools on an empty journal under K_p.** `OrdinaryJournalPeer.open(store, K_p)`
@@ -73,6 +77,7 @@ Nothing serves under K_p before stage 3.
 ## Settled in review (2026-09-29)
 
 - A durable pool's key lives in stable pool identity custody. Key loss is a hard refusal, marked
-  by the pool's journal, not inferred from a missing file.
+  by the host's key-id record and the pool's journal, never inferred from a missing file or a
+  missing journal.
 - A channel pool selects host grants for host-governed review strikes. Its own grants remain K_p
   law.
