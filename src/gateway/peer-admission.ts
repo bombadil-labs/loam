@@ -16,7 +16,7 @@ import {
 // One peer, one commit queue. The door and the write-through both commit, and the journal peer
 // asks its caller to serialize writers.
 export interface HostPeer {
-  readonly journal: OrdinaryJournalPeer;
+  journal: OrdinaryJournalPeer;
   readonly store: DurableOrdinaryJournalStore;
   tail: Promise<unknown>;
 }
@@ -45,6 +45,21 @@ export async function openHostPeer(
   return { peer: { journal: opened.peer, store, tail: Promise.resolve() }, rows };
 }
 
+// Another writer moved the journal's head. Nothing was admitted or refused; the caller reopens,
+// re-runs its checks and retries with the same receive time and origin.
+export class JournalConflict extends Error {}
+
+// Reopen at the latest head. Returns the admitted rows this process does not hold yet, in arrival
+// order.
+export async function reopenHostPeer(
+  peer: HostPeer,
+  holds: (id: string) => boolean,
+): Promise<Delta[]> {
+  const { peer: fresh, rows } = await openHostPeer(peer.store, peer.journal.peerId);
+  peer.journal = fresh.journal;
+  return rows.filter((d) => !holds(d.id));
+}
+
 const LOCAL: ArrivalOrigin = { kind: "local" };
 const UNATTRIBUTED: ArrivalOrigin = { kind: "unattributed" };
 
@@ -56,6 +71,7 @@ export async function admitLocal(
   isErasure: (d: Delta) => boolean,
 ): Promise<void> {
   const result = await transfer(peer, batch, LOCAL, arrivedAt, isErasure, "atomic");
+  if (result.status === "conflict") throw new JournalConflict("the peer journal moved");
   if (result.status !== "committed") {
     throw new Error(`append rejected by the peer journal: ${describe(result)}`);
   }
@@ -69,6 +85,7 @@ export async function admitReceived(
   isErasure: (d: Delta) => boolean,
 ): Promise<Set<string>> {
   const result = await transfer(peer, batch, UNATTRIBUTED, arrivedAt, isErasure, "individual");
+  if (result.status === "conflict") throw new JournalConflict("the peer journal moved");
   if (result.status !== "committed") {
     throw new Error(`federation refused by the peer journal: ${describe(result)}`);
   }

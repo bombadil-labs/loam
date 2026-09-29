@@ -74,6 +74,11 @@ export class MemoryBackend implements StoreBackend {
   private journals = new Map<string, { head: string; frames: Uint8Array[] }>();
   private store: DurableOrdinaryJournalStore | undefined;
 
+  async holdsAnyJournal(): Promise<boolean> {
+    this.assertOpen();
+    return this.journals.size > 0;
+  }
+
   journalStore(): DurableOrdinaryJournalStore {
     return (this.store ??= {
       readJournal: async (peerId) => {

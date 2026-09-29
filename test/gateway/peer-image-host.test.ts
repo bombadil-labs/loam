@@ -12,16 +12,18 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import {
   authorForSeed,
+  makeNegationClaims,
   OrdinaryJournalPeer,
   signClaims,
   type Delta,
   type DurableOrdinaryJournalStore,
   type DurablePeerState,
 } from "@bombadil/rhizomatic";
+import { grantClaims } from "../../src/gateway/accounts.js";
 import { containerClaims } from "../../src/gateway/container.js";
 import { eraseClaims } from "../../src/gateway/erase.js";
 import { Gateway } from "../../src/gateway/gateway.js";
-import { assembleGenesis } from "../../src/gateway/genesis.js";
+import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import type { StoreBackend } from "../../src/store/backend.js";
@@ -196,6 +198,23 @@ describe("the journal is the authority over the rows", () => {
     const again = await boot(new SqliteBackend(path));
     expect(again.reactor.get(stray.id)).toBeUndefined();
     expect(again.reactor.get(kept.id)).toBeDefined();
+    expect(again.rowsOutsideJournal).toBe(1); // held, not served, and counted for the report
+    await again.close();
+  });
+
+  it("a journaled store opens only through its journal: a seed uses it, no seed is refused", async () => {
+    const path = sqliteHome();
+    const gw = await boot(new SqliteBackend(path));
+    const d = note(1);
+    await gw.append([d]);
+    await gw.close();
+    await expect(Gateway.open(new SqliteBackend(path))).rejects.toThrow(/journaled peer/);
+    const stray = note(2);
+    await new SqliteBackend(path).append([stray]); // a raw row the journal never admitted
+    const again = await Gateway.open(new SqliteBackend(path), { seed: SEED });
+    expect(again.peer).toBeDefined();
+    expect(again.reactor.get(d.id)).toBeDefined();
+    expect(again.reactor.get(stray.id)).toBeUndefined();
     await again.close();
   });
 
@@ -275,6 +294,72 @@ describe("pools stay on today's path", () => {
     expect(pool.reactor.get(d.id)).toBeDefined();
     // the host's image did not see the pool's write
     expect(await image(backend.journalStore())).toEqual(before);
+    await gw.close();
+  });
+});
+
+describe("two writers on one journal: catch up, re-check, retry", () => {
+  const WRITER_SEED = "7c".repeat(32);
+  const WRITER = authorForSeed(WRITER_SEED);
+  const grant = grantClaims(STORE_ENTITY, WRITER, "write", OP, 9_000);
+  const bootWith = (backend: SqliteBackend): Promise<Gateway> =>
+    Gateway.boot(backend, assembleGenesis({ operatorSeed: SEED, grants: [grant] }), {
+      peerStore: backend.journalStore(),
+    });
+
+  it("a stale writer catches up and commits; both writes are in the journal", async () => {
+    const path = sqliteHome();
+    const a = await bootWith(new SqliteBackend(path));
+    const bBackend = new SqliteBackend(path);
+    const b = await bootWith(bBackend);
+    const d1 = note(1);
+    await a.append([d1]);
+    const d2 = note(2);
+    await b.append([d2]); // b's head is stale: it reopens, takes in d1, and retries
+    const state = await stateOf(bBackend.journalStore());
+    expect(state.base.admitted.has(d1.id) && state.base.admitted.has(d2.id)).toBe(true);
+    expect(b.reactor.get(d1.id)).toBeDefined(); // b now serves what a wrote
+    await a.close();
+    await b.close();
+  });
+
+  it("the retry re-runs Loam's checks: a write the other writer made unlawful is refused", async () => {
+    const path = sqliteHome();
+    const a = await bootWith(new SqliteBackend(path));
+    const bBackend = new SqliteBackend(path);
+    const b = await bootWith(bBackend);
+    const granted = [...a.reactor.snapshot()].find((d) =>
+      d.claims.pointers.some((p) => p.target.kind === "primitive" && p.target.value === WRITER),
+    )!;
+    // a revokes the writer's grant; b has not seen it
+    await a.append([signClaims(makeNegationClaims(OP, 20_000, granted.id), SEED)]);
+    const late = note(3, WRITER_SEED);
+    await expect(b.append([late])).rejects.toThrow(/not permitted/);
+    const state = await stateOf(bBackend.journalStore());
+    expect(state.base.admitted.has(late.id)).toBe(false);
+    expect(b.reactor.get(late.id)).toBeUndefined();
+    await a.close();
+    await b.close();
+  });
+
+  it("under persistent contention the append fails as retryable, and writes nothing", async () => {
+    const backend = new MemoryBackend();
+    const real = backend.journalStore();
+    let contended = false;
+    // Every commit after the boot finds the head moved by "another writer".
+    const store: DurableOrdinaryJournalStore = {
+      ...real,
+      compareAndAppend: (...args) =>
+        contended ? Promise.resolve({ status: "conflict" }) : real.compareAndAppend(...args),
+    };
+    const gw = await Gateway.boot(backend, assembleGenesis({ operatorSeed: SEED }), {
+      peerStore: store,
+    });
+    contended = true;
+    const d = note(4);
+    await expect(gw.append([d])).rejects.toThrow(/Nothing was admitted or refused; try again/);
+    expect(await backend.holds(d.id)).toBe(false);
+    expect(gw.reactor.get(d.id)).toBeUndefined();
     await gw.close();
   });
 });

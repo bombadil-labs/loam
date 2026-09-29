@@ -523,6 +523,11 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
   // the new rows commit in one IMMEDIATE transaction, so a crash leaves the old head or the new one.
   private store: DurableOrdinaryJournalStore | undefined;
 
+  async holdsAnyJournal(): Promise<boolean> {
+    this.assertOpen();
+    return this.db.prepare("SELECT 1 FROM journal_head LIMIT 1").get() !== undefined;
+  }
+
   journalStore(): DurableOrdinaryJournalStore {
     const headOf = (peer: string): string | undefined =>
       (

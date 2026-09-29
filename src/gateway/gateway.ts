@@ -30,7 +30,13 @@ import { graphql, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
 import { holdsJournals } from "../store/peer-image.js";
-import { admitLocal, openHostPeer, peerIdOf, type HostPeer } from "./peer-admission.js";
+import {
+  admitLocal,
+  JournalConflict,
+  openHostPeer,
+  peerIdOf,
+  type HostPeer,
+} from "./peer-admission.js";
 import { stampOn, type Stamp } from "./stamp.js";
 import { declarePrincipalScope } from "./principal.js";
 import { declareUserGround, userGroundOf } from "./user-root.js";
@@ -80,6 +86,7 @@ import { STORE_ENTITY, operatorMarkerClaims, type Genesis } from "./genesis.js";
 import {
   admitForImpl,
   appendImpl,
+  catchUp,
   federateImpl,
   offeredDeltasImpl,
   selectImpl,
@@ -484,6 +491,8 @@ export class Gateway {
   readonly justPersisted = new Set<string>();
   /** @internal — the host's substrate peer (step 6 host trial); undefined off that path. */
   peer: HostPeer | undefined = undefined;
+  /** Stored rows the host's journal never admitted: held, never served (step 6 host trial). */
+  rowsOutsideJournal = 0;
   private unreadableRows = 0; // set by open: rows held, none readable
   /** @internal — T19 seam (erase.ts, adopt.ts) */
   readonly operatorAuthor: string | undefined;
@@ -560,8 +569,17 @@ export class Gateway {
       const peer = this.peer;
       this.writes = this.writes
         .then(async () => {
-          if (peer === undefined) await this.backend.append([d]);
-          else await admitLocal(peer, [d], this.now(), () => false);
+          if (peer === undefined) return void (await this.backend.append([d]));
+          // The same conflict rule as the doors: catch up, then retry at the first receive time.
+          const at = this.now();
+          for (let attempt = 0; ; attempt += 1) {
+            try {
+              return await admitLocal(peer, [d], at, () => false);
+            } catch (err) {
+              if (!(err instanceof JournalConflict) || attempt >= 3) throw err;
+              await catchUp(this);
+            }
+          }
         })
         .then(
           () => {},
@@ -591,11 +609,29 @@ export class Gateway {
     }
     let peer: HostPeer | undefined;
     let replayed: Delta[];
-    if (options.peerStore === undefined) replayed = await backend.deltasSince(new Set());
-    else {
-      const opened = await openHostPeer(options.peerStore, peerIdOf(authorForSeed(seed!)));
+    let outsideJournal = 0;
+    // A journaled store's raw rows are not its admitted set, so it always opens through its
+    // journal: with a seed, that journal is used; without one, the open is refused.
+    let peerStore = options.peerStore;
+    if (peerStore === undefined && holdsJournals(backend) && (await backend.holdsAnyJournal())) {
+      if (seed === undefined) {
+        throw new Error(
+          "peer journal: this store is a journaled peer; open it with the operator seed that " +
+            "names it",
+        );
+      }
+      peerStore = backend.journalStore();
+    }
+    if (peerStore === undefined) {
+      replayed = await backend.deltasSince(new Set());
+    } else {
+      const opened = await openHostPeer(peerStore, peerIdOf(authorForSeed(seed!)));
       peer = opened.peer;
       replayed = opened.rows;
+      if (holdsJournals(backend)) {
+        const admitted = new Set(replayed.map((d) => d.id));
+        outsideJournal = [...(await backend.ids())].filter((id) => !admitted.has(id)).length;
+      }
     }
     for (const d of replayed) {
       const result = reactor.ingest(d);
@@ -641,6 +677,7 @@ export class Gateway {
     }
     const gateway = new Gateway(backend, reactor, options);
     gateway.peer = peer;
+    gateway.rowsOutsideJournal = outsideJournal;
     // On the peer image path the marker enters through local admission, at the gateway's clock.
     if (peer !== undefined && pendingMarker !== undefined) {
       await admitLocal(peer, [pendingMarker], gateway.now(), () => false);

@@ -1305,6 +1305,14 @@ async function cmdServe(
       return held.kind === "present" ? held.seed : undefined;
     },
   });
+  // On the journal path a row the journal never admitted is held and never served. Say so.
+  if (gateway.rowsOutsideJournal > 0) {
+    const n = gateway.rowsOutsideJournal;
+    io.err(
+      `loam: ${n} stored row${n === 1 ? " is" : "s are"} outside the peer journal and not ` +
+        "served — a damaged row, or one written around the door.",
+    );
+  }
   const setAside = isRepairable(backend) ? (await backend.quarantine()).length : 0;
   if (setAside > 0) io.err(`loam: ${setAsideLine(setAside)}`);
   let server;

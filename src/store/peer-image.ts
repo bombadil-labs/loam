@@ -10,6 +10,9 @@ import type { StoreBackend } from "./backend.js";
 
 export interface JournalBackend extends StoreBackend {
   journalStore(): DurableOrdinaryJournalStore;
+  /** Does any peer journal live here? A journaled store opens only through its journal. */
+  holdsAnyJournal(): Promise<boolean>;
+  ids(): Promise<Set<string>>;
 }
 
 export function holdsJournals(backend: StoreBackend): backend is JournalBackend {
