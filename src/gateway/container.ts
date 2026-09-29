@@ -1902,6 +1902,7 @@ async function openSeparate(
       // as corrupt, still legible bytes on disk — is swept by its own door, since no id-keyed
       // purge can reach a row whose id was never returned.
       const discardBytes = async (target: Gateway, who: string): Promise<void> => {
+        target.assertUnfenced("a drop's purge");
         const ids = new Set((await target.backend.deltasSince(new Set())).map((d) => d.id));
         for (const d of target.reactor.snapshot()) ids.add(d.id);
         if (isRepairable(target.backend)) {

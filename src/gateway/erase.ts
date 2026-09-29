@@ -1120,6 +1120,7 @@ export async function eraseImpl(
   reasons: string[];
   spokenBy?: string;
 }> {
+  gw.assertUnfenced("an erasure");
   // Erasure is the operator's alone (SPEC §11): destructive, so the only signer is the store's
   // own operator. A data subject's request is honored BY the operator, never by the subject
   // directly — there is no actor override here on purpose.
@@ -1500,6 +1501,7 @@ export async function eraseReplicaImpl(
   id: string,
   seen: Set<Gateway>,
 ): Promise<void> {
+  gw.assertUnfenced("a replica erasure");
   // Authorization first, on its own: a forged or foreign removal-order is refused WITHOUT purging
   // — loudly, since only a hostile direct caller can reach this branch (the primary's fan-out only
   // ever hands over the erasure its own erase door just validated).

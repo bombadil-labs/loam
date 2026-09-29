@@ -14,6 +14,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { buildPoolCarry } from "../../src/gateway/pool-carry.js";
 import { MemoryBackend } from "../../src/store/memory.js";
+import { MirrorBackend } from "../../src/store/mirror.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import type { StoreBackend } from "../../src/store/backend.js";
 
@@ -78,6 +79,10 @@ describe("an existing pool's carry is complete", () => {
     expect(result.status === "carry" && result.carry.obligations).toEqual([
       { targetId: target.id, surface: "rows" },
     ]);
+    // a refused id is never an admitted holding, even while its bytes remain
+    expect(result.status === "carry" && result.carry.holdings.some((d) => d.id === target.id)).toBe(
+      false,
+    );
     await gw.close();
   });
 
@@ -114,5 +119,43 @@ describe("an existing pool's carry is complete", () => {
     const unnamed = await hostAndPool(new Debtor({ ids: [], unknown: true }));
     expect((await buildPoolCarry(unnamed.pool)).status).toBe("undisposed");
     await unnamed.gw.close();
+  });
+
+  it("the fence drains writes begun before it, and holds writes after it until release", async () => {
+    // A store whose append takes real time, so a carry that did not drain would miss the row.
+    class Slow extends MemoryBackend {
+      override async append(deltas: Iterable<Delta>): Promise<number> {
+        const batch = [...deltas];
+        await new Promise((r) => setTimeout(r, 30));
+        return super.append(batch);
+      }
+    }
+    const { gw, pool } = await hostAndPool(new Slow());
+    const early = note(5);
+    pool.reactor.ingest(early); // a raw emission, its write still queued
+    const result = await buildPoolCarry(pool);
+    if (result.status !== "carry") throw new Error(result.reason);
+    expect(result.carry.holdings.some((d) => d.id === early.id)).toBe(true); // drained, carried
+    const late = note(6);
+    pool.reactor.ingest(late); // after the fence: held, not written
+    await pool.flush();
+    expect(await pool.backend.holds(late.id)).toBe(false);
+    await expect(pool.append([note(7)])).rejects.toThrow(/fenced/);
+    await expect(pool.federate([note(8)], { admit: () => true })).rejects.toThrow(/fenced/);
+    await expect(pool.reseat()).rejects.toThrow(/fenced/);
+    const held = await result.release(); // abort: the old surface writes what it held
+    expect(held.map((d) => d.id)).toEqual([late.id]);
+    expect(await pool.backend.holds(late.id)).toBe(true);
+    await gw.close();
+  });
+
+  it("does not carry a mirrored pool whose shadow tier holds a row the primary lacks", async () => {
+    const archive = new MemoryBackend();
+    const lost = note(9);
+    await archive.append([lost]); // only the archive holds it: the primary was replaced
+    const { gw, pool } = await hostAndPool(new MirrorBackend(new MemoryBackend(), archive));
+    expect(await buildPoolCarry(pool)).toMatchObject({ status: "undisposed", rows: [lost.id] });
+    expect(pool.fence).toBeUndefined(); // an undisposed carry lifts its fence
+    await gw.close();
   });
 });

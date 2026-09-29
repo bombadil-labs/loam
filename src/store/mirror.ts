@@ -163,6 +163,29 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
     return results.some((r) => r.status === "fulfilled" && r.value);
   }
 
+  // The ids the shadow tier holds and the primary does not: what a read (primary-only) cannot see.
+  // Unprovable, if a tier cannot list itself, is reported as a gap rather than as none.
+  async tierGap(): Promise<string[]> {
+    if (this.primary.ids === undefined || this.mirror.ids === undefined) return ["(unlisted tier)"];
+    const primary = await this.primary.ids();
+    return [...(await this.mirror.ids())].filter((id) => !primary.has(id)).sort();
+  }
+
+  // Both tiers' sidecar debt: a byte image may linger in either.
+  truncationDebt(): { ids: string[]; unknown: boolean } {
+    const ids = new Set<string>();
+    let unknown = false;
+    for (const tier of [this.primary, this.mirror]) {
+      const debt = (
+        tier as { truncationDebt?: () => { ids: string[]; unknown: boolean } }
+      ).truncationDebt?.();
+      if (debt === undefined) continue;
+      for (const id of debt.ids) ids.add(id);
+      unknown ||= debt.unknown;
+    }
+    return { ids: [...ids].sort(), unknown };
+  }
+
   // BOTH tiers, as `holdsAny`: the union of what each lists, and unprovable if either cannot.
   async ids(): Promise<Set<string>> {
     const ask = (tier: StoreBackend, label: string): Promise<Set<string>> =>

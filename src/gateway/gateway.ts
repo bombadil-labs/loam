@@ -557,6 +557,11 @@ export class Gateway {
       // cached read; the next tokenless request recomputes. Once per WRITE, not per read.
       this.publicOpen = undefined;
       if (this.justPersisted.delete(d.id)) return;
+      // A fenced surface writes nothing: an emission is held, and released with the fence.
+      if (this.fence !== undefined) {
+        this.fence.held.push(d);
+        return;
+      }
       this.writes = this.writes
         .then(() => this.backend.append([d]))
         .then(
@@ -1358,7 +1363,22 @@ export class Gateway {
   // re-attaches, and any animating host is detached (it watched the old reactor — the caller
   // re-attaches its runner, as the village does after the crash).
   /** @internal — T19 seam (erase.ts) */
+  /**
+   * @internal — a handoff's fence on this surface (step6-handoff.md, step 2). While it stands the
+   * surface admits nothing, writes nothing through, and refuses any byte mutation; an emission is
+   * held in `held`, in order.
+   */
+  fence: { readonly reason: string; readonly held: Delta[] } | undefined = undefined;
+
+  /** @internal — refuse a byte mutation while a fence stands. */
+  assertUnfenced(what: string): void {
+    if (this.fence !== undefined) {
+      throw new Error(`${what} refused: this surface is fenced (${this.fence.reason})`);
+    }
+  }
+
   async reseat(): Promise<void> {
+    this.assertUnfenced("reseat");
     // READ FIRST, TEAR DOWN AFTER, CATCH UP LAST: the read is the one step here that can fail,
     // and everything after it is destructive. Ordered the other way, a failed read leaves the
     // gateway half-torn-down — subscriptions killed, reactor still on pre-purge ground.
