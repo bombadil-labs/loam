@@ -1164,6 +1164,30 @@ export function readContestedBindings(
 }
 
 /**
+ * Contested names under several governors, nearest first, with the same reservation as
+ * `readLawfulRegistrations`: a governor's contest counts only for names no nearer governor claimed.
+ * A contest a selected host's policy withholds is reported where the child serves that name.
+ */
+export function readLawfulContested(
+  reactor: Reactor,
+  now: number,
+  governors: readonly string[],
+): Map<string, ContestedBinding[]> {
+  if (governors.length === 0) return readContestedBindings(reactor, now, undefined);
+  const out = new Map<string, ContestedBinding[]>();
+  const claimed = new Set<LensName>();
+  for (const governor of governors) {
+    for (const [lens, list] of readContestedBindings(reactor, now, governor)) {
+      if (!claimed.has(lens as LensName) && !out.has(lens)) out.set(lens, list);
+    }
+    for (const group of survivingCandidates(reactor, now, governor).values()) {
+      for (const cand of group) claimed.add(lensNameOf(cand));
+    }
+  }
+  return out;
+}
+
+/**
  * Registrations read under several governors, nearest first (a pool's own key, then the hosts it
  * selects; step6-pool-keys.md, stage 1b-ii). Each governor's own rules resolve its own names,
  * binding policy included. A name a nearer governor CLAIMS is reserved for it, even where its policy

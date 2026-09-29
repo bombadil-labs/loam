@@ -214,4 +214,28 @@ describe("stage 1b-ii: standing and registrations read own and selected host law
     expect(labels).toContain("Plant");
     await gw.close();
   });
+
+  it("a contest a selected host's policy withholds is reported where the child serves the name", async () => {
+    const gw = await child();
+    const named = (name: string) => ({ ...PLANT_READING, name });
+    const host = assembleGenesis({
+      operatorSeed: HOST_SEED,
+      registrations: [
+        { hyperschema: PLANT, schema: named("Shared"), roots: [FERN] },
+        {
+          hyperschema: { name: "Two", alg: 1, body: PLANT.body },
+          schema: named("Shared"),
+          roots: [FERN],
+        },
+      ],
+    }).deltas;
+    await gw.federate(
+      [...host, signClaims(bindingPolicyClaims("conflicts", HOST, 6_500), HOST_SEED)],
+      { admit: () => true },
+    );
+    gw.replayRegistrations();
+    expect(gw.registered.map((r) => r.lensName ?? r.hyperschema.name)).not.toContain("Shared");
+    expect(gw.contestedNames().has("Shared")).toBe(true);
+    await gw.close();
+  });
 });

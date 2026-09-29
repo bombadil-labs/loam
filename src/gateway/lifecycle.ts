@@ -34,6 +34,7 @@ import { fenceAdmits } from "./accounts.js";
 import { NUL, type Bound, type Gateway, type RequestContext } from "./gateway.js";
 import { buildGqlSchema } from "./gql.js";
 import {
+  readLawfulContested,
   readLawfulRegistrations,
   type Registration,
   lensOf,
@@ -41,7 +42,6 @@ import {
   lawfulSnapshot,
   readinglessExpandRole,
   parseClaimTemplates,
-  readContestedBindings,
   type Boundary,
   referenceProps,
   registrationDeltaClaims,
@@ -781,10 +781,10 @@ export function contestedNamesImpl(gw: Gateway): Map<string, ContestedNameReport
     list.push(row);
     drafts.set(lens, list);
   };
-  for (const [lens, list] of readContestedBindings(
+  for (const [lens, list] of readLawfulContested(
     gw.reactor,
     gw.validityNow(),
-    gw.operatorAuthor,
+    gw.lawAuthors("registrations"),
   )) {
     for (const c of list) add(lens, { ...c, origin: "root" });
   }
@@ -793,10 +793,10 @@ export function contestedNamesImpl(gw: Gateway): Map<string, ContestedNameReport
   for (const standing of gw.channelStatus()) {
     const pool = gw.channelPools.get(standing.name)?.gateway;
     if (pool === undefined) continue;
-    for (const [lens, list] of readContestedBindings(
+    for (const [lens, list] of readLawfulContested(
       pool.reactor,
       pool.validityNow(),
-      pool.operatorAuthor,
+      pool.lawAuthors("registrations"),
     )) {
       if (!lens.startsWith(`${standing.prefix}:`)) continue;
       for (const c of list) add(lens, { ...c, origin: originOf(c.deltaId, standing.name) });
