@@ -337,16 +337,21 @@ async function appendAdmitted(
     const op = gw.operatorAuthor;
     const refused = refusedIds(gw.reactor, op);
     const defect =
-      lateCutDefect(gw.reactor, op, batch, refused) ?? manifestDefect(gw.reactor, op, batch);
+      lateCutDefect(gw.reactor, op, batch, refused) ??
+      manifestDefect(gw.reactor, op, batch, (id) =>
+        declaredInboxes(readContainerTable(gw.reactor, gw.validityNow(), op)).some(
+          (pool) => attachedPool(gw, pool)?.reactor.get(id) !== undefined,
+        ),
+      );
     if (defect !== undefined) throw new Error(`append rejected: ${defect}`);
     for (const d of batch) {
       const previous = d.claims.author === op ? recordPrevious(d) : undefined;
       if (previous === undefined) continue;
-      const named = manifestAhead(gw.reactor, op, batch, d);
+      const named = manifestAhead(gw.reactor, op, d, refused);
       if (named === undefined) {
         throw new Error(
-          `append rejected: recovery ${d.id} retires ${previous} and has no cut manifest ahead of ` +
-            `it in this append. \`loam user recover\` writes the cuts and the manifest first.`,
+          `append rejected: recovery ${d.id} retires ${previous} and no cut manifest for it is ` +
+            `held. \`loam user recover\` writes the cuts and the manifest in an earlier append.`,
         );
       }
       const stores = [

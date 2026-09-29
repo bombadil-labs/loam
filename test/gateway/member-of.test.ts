@@ -6,7 +6,7 @@
 // "known gap" cases below pin today's answer so the change is visible when it comes.
 
 import { afterEach, describe, expect, it } from "vitest";
-import { withHostCut } from "../helpers/recovery-cut.js";
+import { appendWithHostCut } from "../helpers/recovery-cut.js";
 import {
   authorForSeed,
   parseTerm,
@@ -92,13 +92,11 @@ async function recoverToK2(gw: Gateway, t: number): Promise<void> {
   const record = op(
     recoveryClaims({ name: "ada", attempt: "x", previous: K1, root: K2, retired: [K1] }, OP, t),
   );
-  await gw.append(
-    withHostCut(gw, OP_SEED, [
-      record,
-      op(lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, t)),
-      op(rootClaims("ada", K2, OP, t)),
-    ]),
-  );
+  await appendWithHostCut(gw, OP_SEED, [
+    record,
+    op(lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, t)),
+    op(rootClaims("ada", K2, OP, t)),
+  ]);
 }
 
 describe("the node's shape is validated; its user's state is not", () => {

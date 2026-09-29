@@ -121,13 +121,13 @@ async function recover(
     K2_SEED,
   );
   if (opts.land !== false) {
-    const commit = [
-      op(manifestClaims(record.id, [cut.id], OP, 30)),
+    // The manifest in its own append, then the record's: one append is one transfer.
+    await gw.append([op(manifestClaims(record.id, [cut.id], OP, 30))]);
+    await gw.append([
       record,
       op(lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30)),
       op(rootClaims("ada", K2, OP, 30)),
-    ];
-    await gw.append(commit);
+    ]);
     await gw.append([binding]);
   }
   if (opts.outcome !== undefined)
@@ -166,7 +166,7 @@ describe("H1: history before the cut, nothing after it", () => {
       op(lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30)),
       op(rootClaims("ada", K2, OP, 30)),
     ];
-    await expect(gw.append(commit)).rejects.toThrow(/has no cut manifest ahead of it/);
+    await expect(gw.append(commit)).rejects.toThrow(/no cut manifest for it is held/);
     expect(gw.reactor.get(record.id)).toBeUndefined();
     for (const d of commit) expect(gw.reactor.ingest(d).status).toBe("accepted");
     expect(members(gw).has(byK1.id)).toBe(false);
@@ -176,9 +176,9 @@ describe("H1: history before the cut, nothing after it", () => {
     const { gw } = await world();
     const { record, cut } = await recover(gw, { land: false });
     await gw.append([op(outcomeClaims(cut.id, "aborted", OP, 31))]);
+    await gw.append([op(manifestClaims(record.id, [cut.id], OP, 30))]);
     await expect(
       gw.append([
-        op(manifestClaims(record.id, [cut.id], OP, 30)),
         record,
         op(lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30)),
         op(rootClaims("ada", K2, OP, 30)),
@@ -540,7 +540,7 @@ describe("the cut readers, against erasure, restart and a shared root", () => {
     ).not.toContain(late.id);
   });
 
-  it("the append door refuses a manifest naming a cut no store holds, and one without its record", async () => {
+  it("the append door refuses a manifest naming a cut no store holds, and one beside its record", async () => {
     const { gw } = await world();
     const { record, cut } = await recover(gw, { land: false });
     const future = op(
@@ -556,12 +556,14 @@ describe("the cut readers, against erasure, restart and a shared root", () => {
       op(lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30)),
       op(rootClaims("ada", K2, OP, 30)),
     ];
+    // A manifest may not name a cut that is not held yet: it would bind a later arrival.
+    const early = op(manifestClaims(record.id, [cut.id, future.id], OP, 30));
+    await expect(gw.append([early])).rejects.toThrow(/neither held nor in its append/);
+    expect(gw.reactor.get(early.id)).toBeUndefined();
+    // One append's arrivals are simultaneous, so a manifest beside its record does not count.
     await expect(
-      gw.append(commit(op(manifestClaims(record.id, [cut.id, future.id], OP, 30)))),
-    ).rejects.toThrow(/which no store here holds as a live cut/);
-    await expect(gw.append([op(manifestClaims(record.id, [cut.id], OP, 30))])).rejects.toThrow(
-      /ahead of its recovery record, in the same append/,
-    );
+      gw.append(commit(op(manifestClaims(record.id, [cut.id], OP, 30)))),
+    ).rejects.toThrow(/separate appends, the manifest first/);
     expect(gw.reactor.get(record.id)).toBeUndefined();
   });
 
@@ -587,10 +589,9 @@ describe("the cut readers, against erasure, restart and a shared root", () => {
     const { gw } = await world();
     const { record, cut } = await recover(gw, { land: false });
     await gw.append([op(outcomeClaims(cut.id, "aborted", OP, 31))]);
+    await gw.append([cut, op(manifestClaims(record.id, [cut.id], OP, 30))]);
     await expect(
       gw.append([
-        cut,
-        op(manifestClaims(record.id, [cut.id], OP, 30)),
         record,
         op(lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30)),
         op(rootClaims("ada", K2, OP, 30)),
@@ -611,8 +612,8 @@ describe("the cut readers, against erasure, restart and a shared root", () => {
     expect(gw.reactor.ingest(between).status).toBe("accepted");
     const cutB = cutFor("b", 29);
     await gw.append([cutB]);
+    await gw.append([op(manifestClaims(record.id, [cutA.id, cutB.id], OP, 30))]);
     await gw.append([
-      op(manifestClaims(record.id, [cutA.id, cutB.id], OP, 30)),
       record,
       op(lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30)),
       op(rootClaims("ada", K2, OP, 30)),
