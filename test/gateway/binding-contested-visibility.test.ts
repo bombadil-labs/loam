@@ -22,7 +22,7 @@
 //
 // A SERVED NAME IS MARKED, NEVER DROPPED. An earlier shape of this reading deleted a name the
 // surface served, which let one more registration of your own resolve the other contenders away
-// and erase their refusal wholesale. Two tests pin the replacement: the re-attach case, where the
+// and erase their refusal wholesale. Two tests pin the replacement: the stale-copy case, where the
 // serving binding IS one of the contenders by content address, and the third-binding case, where
 // it is not.
 //
@@ -36,9 +36,6 @@
 //
 // Erasure standing rule: every store here is this file's own in-memory fixture.
 
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   makeNegationClaims,
@@ -51,9 +48,12 @@ import { bindingPolicyClaims } from "../../src/gateway/binding-policy.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import type { ContestedName } from "../../src/gateway/lifecycle.js";
-import { readContestedBindings, readRegistrations } from "../../src/gateway/registration.js";
+import {
+  readContestedBindings,
+  readLawfulContested,
+  readRegistrations,
+} from "../../src/gateway/registration.js";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { SqliteBackend } from "../../src/store/sqlite.js";
 import { FERN } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "./fixtures.js";
 import { withStamp } from "../../src/gateway/stamp.js";
@@ -69,14 +69,13 @@ const store = (seed: string): Promise<Gateway> =>
 
 const feed = (g: Gateway) => ({ pull: () => Promise.resolve(g.reactor.arrivalLog()) });
 
-/** Declare `conflicts` in a ground, signed by the operator whose law that ground reads. */
-const declareConflicts = (gw: Gateway, seed: string): Promise<unknown> =>
-  gw.append([
-    signClaims(
-      withStamp(gw.stamp(), (t) => bindingPolicyClaims("conflicts", gw.operatorAuthor!, t)),
-      seed,
-    ),
-  ]);
+/** Declare `conflicts` in a ground, signed by the key that governs that ground's own law. */
+const declareConflicts = (gw: Gateway): Promise<Delta> => {
+  const declaration = gw.signer!.sign(
+    withStamp(gw.stamp(), (t) => bindingPolicyClaims("conflicts", gw.operatorAuthor!, t)),
+  );
+  return gw.append([declaration]).then(() => declaration);
+};
 
 /**
  * The row's own binding delta, in the ground the row's origin names — and nowhere else.
@@ -95,7 +94,7 @@ describe("T204 — a contested name is named, with its origin", () => {
   it("(a) a root-vs-root contest names both contenders, with origin, author, timestamp, and delta id", async () => {
     const gw = await store(OP_SEED);
     try {
-      await declareConflicts(gw, OP_SEED);
+      await declareConflicts(gw);
       await gw.publishRegistration(PLANT, named("Shared"), [FERN], undefined, "hyperschema:One");
       const second = await gw.publishRegistration(
         bodyNamed("Two"),
@@ -137,7 +136,7 @@ describe("T204 — a contested name is named, with its origin", () => {
   it("(a) an uncontested lens on the same store is absent from the reading and still serves", async () => {
     const gw = await store(OP_SEED);
     try {
-      await declareConflicts(gw, OP_SEED);
+      await declareConflicts(gw);
       await gw.publishRegistration(PLANT, named("Shared"), [FERN], undefined, "hyperschema:One");
       await gw.publishRegistration(
         bodyNamed("Two"),
@@ -167,7 +166,7 @@ describe("T204 — a contested name is named, with its origin", () => {
     const me = await store(OP_SEED);
     try {
       await alice.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
-      await declareConflicts(me, OP_SEED);
+      await declareConflicts(me);
       const ch = await me.openChannel({ into: "friends", prefix: "alice", source: feed(alice) });
       await ch.sync();
       // The channel's lens SERVES before the contest — so the refusal below is the contest's doing
@@ -205,14 +204,15 @@ describe("T204 — a contested name is named, with its origin", () => {
       expect(bindingIn(pool, fromChannel.deltaId)).toBeDefined();
       expect(bindingIn(me, fromChannel.deltaId)).toBeUndefined();
 
-      // The AUTHOR is the key that signed the binding, never the origin rank the fold ranks by: a
-      // blessing is the receiving operator's own act, so both rows carry the operator's key and
-      // only `origin` tells them apart.
+      // The AUTHOR is the key that signed the binding, never the origin rank the fold ranks by: each
+      // binding is its own ground's act, so the root's row carries the operator's key and the
+      // channel's row the pool's own key.
+      expect(pool.operatorAuthor).not.toBe(me.operatorAuthor);
       for (const [row, ground] of [
         [fromRoot, me],
         [fromChannel, pool],
       ] as const) {
-        expect(row.author).toBe(me.operatorAuthor);
+        expect(row.author).toBe(ground.operatorAuthor);
         expect(row.author.startsWith("channel:")).toBe(false);
         const delta = bindingIn(ground, row.deltaId)!;
         expect(delta.claims.author).toBe(row.author);
@@ -235,7 +235,7 @@ describe("T204 — a contested name is named, with its origin", () => {
       const pool = ch.pool.gateway!;
       // The pool is a ground of its own, and it reads its OWN policy — the root's declaration does
       // not travel. Declaring here is what makes the pool's contest resolvable at all.
-      await declareConflicts(pool, OP_SEED);
+      await declareConflicts(pool);
       await pool.publishRegistration(
         bodyNamed("PoolOne"),
         named("alice:Shared"),
@@ -282,7 +282,7 @@ describe("T204 — a contested name is named, with its origin", () => {
       const ch = await me.openChannel({ into: "friends", prefix: "alice", source: feed(alice) });
       await ch.sync();
       const pool = ch.pool.gateway!;
-      await declareConflicts(pool, OP_SEED);
+      await declareConflicts(pool);
       // A BARE name — outside the channel's namespace. The pool holds a real contest over it.
       for (const n of ["One", "Two"]) {
         await pool.publishRegistration(
@@ -450,91 +450,77 @@ describe("T204 — a contested name is named, with its origin", () => {
   });
 
   it("a served name is MARKED, never dropped — and a bystander contest survives beside it", async () => {
-    // A channel pool is seeded with a COPY of the receiver's root ground, so a re-attach can put
-    // the ROOT's own binding into the pool as a second contender for a name the root is meanwhile
-    // serving. The pool then reads a contest the surface does not honour. The report must say both
-    // things: the contenders are named, and the one that actually serves is marked. Dropping the
-    // entry instead would let one more registration of your own erase a whole refusal.
-    // (The copying itself is §46/§47 ground, not this reading's to change.)
-    const home = mkdtempSync(join(tmpdir(), "loam-t204-"));
+    // A channel pool is seeded with a COPY of the receiver's root ground, and it reads the root's
+    // registrations and binding policy from that copy. The copy moves only on reseed, so when the
+    // root strikes its `conflicts` declaration the root serves one of its two contenders, while the
+    // pool still reads a contest over the same two deltas. The report must say both things: the
+    // contenders are named, and the one that actually serves is marked. Dropping the entry instead
+    // would let one more act of your own erase a whole refusal.
     const alice = await store(ALICE_SEED);
+    const me = await store(OP_SEED);
     try {
-      await alice.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
-      const genesis = assembleGenesis({ operatorSeed: OP_SEED, registrations: [] });
-      const backendFor = (pool: string): SqliteBackend =>
-        new SqliteBackend(join(home, `${pool.replace(/[^A-Za-z0-9._-]/g, "_")}.sqlite`));
-
-      const first = await Gateway.boot(new SqliteBackend(join(home, "store.sqlite")), genesis, {
-        channelBackend: backendFor,
-      });
-      await declareConflicts(first, OP_SEED);
-      const ch = await first.openChannel({
-        into: "friends",
-        prefix: "alice",
-        from: "https://peer.example/default",
-        source: feed(alice),
-      });
-      await ch.sync();
-      await first.publishRegistration(
-        bodyNamed("Rival"),
-        named("alice:Plant"),
-        [FERN],
-        undefined,
-        "hyperschema:Rival",
-      );
-      // A BYSTANDER contest, root-vs-root, that the re-attach does not touch. An over-deleter that
-      // clears the map rather than marking one row would take this down with it.
+      const declaration = await declareConflicts(me);
       for (const n of ["One", "Two"]) {
-        await first.publishRegistration(
+        await me.publishRegistration(
+          bodyNamed(`Shared${n}`),
+          named("alice:Shared"),
+          [FERN],
+          undefined,
+          `hyperschema:Shared${n}`,
+        );
+      }
+      const ch = await me.openChannel({ into: "friends", prefix: "alice", source: feed(alice) });
+      await ch.sync();
+      const pool = ch.pool.gateway!;
+      // A BYSTANDER contest, under the pool's own law, that the root's strike does not touch. An
+      // over-deleter that clears the map rather than marking one row would take this down with it.
+      await declareConflicts(pool);
+      for (const n of ["One", "Two"]) {
+        await pool.publishRegistration(
           bodyNamed(`Burdock${n}`),
-          named("burdock"),
+          named("alice:Burdock"),
           [FERN],
           undefined,
           `hyperschema:Burdock${n}`,
         );
       }
-      // Before the reboot this IS a live cross-origin contest, and the surface refuses the name.
-      expect(first.contestedNames().has("alice:Plant")).toBe(true);
-      expect(() => first.def("alice:Plant")).toThrow();
-      expect(contendersOf(first, "alice:Plant").some((r) => r.served)).toBe(false);
-      await first.close();
+      // Before the strike this IS a live contest at the root, and the surface refuses the name.
+      expect(me.contestedNames().has("alice:Shared")).toBe(true);
+      expect(() => me.def("alice:Shared")).toThrow();
+      expect(contendersOf(me, "alice:Shared").some((r) => r.served)).toBe(false);
 
-      const rebooted = await Gateway.boot(new SqliteBackend(join(home, "store.sqlite")), genesis, {
-        channelBackend: backendFor,
-        channelToken: () => "tok",
-      });
-      try {
-        const pool = rebooted.channelPools.get("channel:friends:alice")?.gateway;
-        expect(pool).toBeDefined();
-        // THE PREMISE, asserted rather than assumed: the re-attached pool's own ground still reads
-        // a contest over this name. Without this the test below could pass on a store where the
-        // pool simply lost its law, which proves nothing about marking.
-        expect(
-          readContestedBindings(pool!.reactor, pool!.validityNow(), pool!.operatorAuthor).has(
-            "alice:Plant",
-          ),
-        ).toBe(true);
-        // The re-attach changed which binding the fold sees, and the name now SERVES...
-        expect(rebooted.def("alice:Plant")).toBeDefined();
-        // ...so the report still lists it, with exactly one contender marked as the one serving.
-        const rows = contendersOf(rebooted, "alice:Plant");
-        expect(rows.length).toBeGreaterThan(1);
-        expect(rows.filter((r) => r.served)).toHaveLength(1);
-        // The marked row is the binding the door actually answers from, by content address, and it
-        // names the ROOT — the ground a person can withdraw it in, not the pool's copy of it.
-        const marked = rows.find((r) => r.served)!;
-        expect(marked.deltaId).toBe(rebooted.def("alice:Plant").boundId);
-        expect(marked.origin).toBe("root");
-        // Two-sided: the untouched contest is still whole, and still serves nobody.
-        expect(contendersOf(rebooted, "burdock")).toHaveLength(2);
-        expect(contendersOf(rebooted, "burdock").some((r) => r.served)).toBe(false);
-        expect(() => rebooted.def("burdock")).toThrow();
-      } finally {
-        await rebooted.close();
-      }
+      await me.append([
+        me.signer!.sign(
+          withStamp(me.stamp(), (t) => makeNegationClaims(me.operatorAuthor!, t, declaration.id)),
+        ),
+      ]);
+      me.replayRegistrations();
+      // THE PREMISE, asserted rather than assumed: the pool's ground still reads a contest over
+      // this name. Without this the test below could pass on a store where the pool simply lost
+      // its law, which proves nothing about marking.
+      expect(
+        readLawfulContested(pool.reactor, pool.validityNow(), pool.lawAuthors("registrations")).has(
+          "alice:Shared",
+        ),
+      ).toBe(true);
+      // The strike changed which binding the fold serves, and the name now SERVES...
+      expect(me.def("alice:Shared")).toBeDefined();
+      // ...so the report still lists it, with exactly one contender marked as the one serving.
+      const rows = contendersOf(me, "alice:Shared");
+      expect(rows.length).toBeGreaterThan(1);
+      expect(rows.filter((r) => r.served)).toHaveLength(1);
+      // The marked row is the binding the door actually answers from, by content address, and it
+      // names the ROOT — the ground a person can withdraw it in, not the pool's copy of it.
+      const marked = rows.find((r) => r.served)!;
+      expect(marked.deltaId).toBe(me.def("alice:Shared").boundId);
+      expect(marked.origin).toBe("root");
+      // Two-sided: the untouched contest is still whole, and still serves nobody.
+      expect(contendersOf(me, "alice:Burdock")).toHaveLength(2);
+      expect(contendersOf(me, "alice:Burdock").some((r) => r.served)).toBe(false);
+      expect(() => me.def("alice:Burdock")).toThrow();
     } finally {
       await alice.close();
-      rmSync(home, { recursive: true, force: true });
+      await me.close();
     }
   });
 
@@ -550,7 +536,7 @@ describe("T204 — a contested name is named, with its origin", () => {
       const ch = await me.openChannel({ into: "friends", prefix: "alice", source: feed(alice) });
       await ch.sync();
       const pool = ch.pool.gateway!;
-      await declareConflicts(pool, OP_SEED);
+      await declareConflicts(pool);
       for (const n of ["One", "Two"]) {
         await pool.publishRegistration(
           bodyNamed(`Pool${n}`),

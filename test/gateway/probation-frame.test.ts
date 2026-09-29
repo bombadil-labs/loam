@@ -124,6 +124,10 @@ const publicPrimary = async (): Promise<{ gw: Gateway; backend: MemoryBackend }>
   return made;
 };
 
+// `Plant` declared open to tokenless callers IN A POOL, signed by the key that governs its own law.
+const declarePublicIn = (pool: Gateway, ts: number): Promise<unknown> =>
+  pool.append([pool.signer!.sign(publicClaims(["Plant"], pool.operatorAuthor!, ts))]);
+
 // The primary's surviving `loam:public` declaration, for a rail that needs to strike it.
 const publicDeclarationIn = (gw: Gateway): string =>
   [...gw.reactor.snapshot()].find((d) =>
@@ -259,7 +263,7 @@ describe("T35 §24.7 — the frame, and the sentence it may never say", () => {
     // An ANONYMOUS caller learns the truth about what they are looking at and is handed no door into
     // the operator's controls — the same discipline the rest of the public door runs. (Declared public
     // IN THE POOL: a container mounts its own world, so its anonymous surface is its own to declare.)
-    await c.gateway!.append([signClaims(publicClaims(["Plant"], OP, 9_400), OP_SEED)]);
+    await declarePublicIn(c.gateway!, 9_400);
     const pub = bodyOf(await c.gateway!.serveRoute("stranger", FERN, "public"));
     expect(pub).toContain("the operator's own words"); // the route really served
     expect(pub).toContain("On probation");
@@ -274,7 +278,7 @@ describe("T35 §24.7 — the frame, and the sentence it may never say", () => {
     // withholds the promotion controls withholds what they point at.
     const { gw } = await primary();
     const c = await quarantine(gw);
-    await c.gateway!.append([signClaims(publicClaims(["Plant"], OP, 9_410), OP_SEED)]);
+    await declarePublicIn(c.gateway!, 9_410);
 
     const pub = bodyOf(await c.gateway!.serveRoute("stranger", FERN, "public"));
     expect(pub).not.toContain(CONTAINER);

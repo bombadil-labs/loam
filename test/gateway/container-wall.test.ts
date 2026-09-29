@@ -13,6 +13,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { readErasures } from "../../src/gateway/erase.js";
 import { containerClaims } from "../../src/gateway/container.js";
+import { POOL_KEYS_ENTITY, recordedPoolKey } from "../../src/gateway/pool-keys.js";
 import { retraction } from "./narrowing.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
@@ -94,9 +95,15 @@ describe("T32 criterion 5 — untrusted must be a wall, and a wall is real bytes
     // Real bytes: the wall's OWN store holds a copy of the member — discard-with-zero-trace is
     // the one thing sharing cannot provide, so the copy is the point, not an overhead.
     expect(await wallStore.holds(h.id)).toBe(true);
-    // And the primary's ground is unchanged by the wall's existence.
+    // And the primary's ground is unchanged by the wall's existence, save the one record of the
+    // key the wall governs itself under.
+    expect(recordedPoolKey(gw.reactor, OP, `container:${trust}-wall`)).toBe(
+      c.gateway!.operatorAuthor,
+    );
+    const keyRecords = [...gw.reactor.byTarget(POOL_KEYS_ENTITY)];
+    expect(keyRecords).toHaveLength(1);
     const primaryAfter = [...gw.reactor.snapshot()].map((d) => d.id).sort();
-    expect(primaryAfter).toEqual(primaryBefore);
+    expect(primaryAfter).toEqual([...primaryBefore, ...keyRecords].sort());
     await c.drop();
     await gw.close();
   };
@@ -137,7 +144,8 @@ describe("T32 criterion 14 — erasure reaches the generalized wall", () => {
     // Byte-verified on the wall's own tier, and the erasure landed there (the wall remembers
     // the hole and refuses re-entry, exactly as the preset always has).
     expect(await wallStore.holds(secret.id)).toBe(false);
-    expect(readErasures(c.gateway!.reactor, c.gateway!.validityNow(), OP).has(secret.id)).toBe(
+    const wall = c.gateway!;
+    expect(readErasures(wall.reactor, wall.validityNow(), wall.operatorAuthor).has(secret.id)).toBe(
       true,
     );
     await c.drop();
