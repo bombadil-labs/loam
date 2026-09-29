@@ -149,6 +149,22 @@ export function readTrustPolicyAt(
   return latest === undefined ? { mode: "open", roster } : { mode: latest.mode, roster };
 }
 
+/** Does `operator` declare a trust mode for this store (as opposed to the undeclared default)? */
+export function declaresTrust(reactor: Reactor, now: number, operator: string): boolean {
+  const negated = negatedAt(reactor, now, operator);
+  return lawfulDeltasAt(reactor, now, { entity: TRUST_ENTITY, context: CTX_TRUST }, operator).some(
+    (d) =>
+      !negated(d.id) &&
+      d.claims.pointers.some(
+        (p) =>
+          p.role === "mode" &&
+          p.target.kind === "primitive" &&
+          typeof p.target.value === "string" &&
+          MODES.has(p.target.value),
+      ),
+  );
+}
+
 // The roster as an eval-time predicate (rhizomatic 0.2.0 inView): satisfied when the
 // candidate delta's author is the operator, or appears among the `admit-author` pointers of
 // the operator's surviving trust declarations. The SAME deltas `readTrustPolicy` reads — so a
