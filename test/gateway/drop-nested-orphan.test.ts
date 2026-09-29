@@ -21,9 +21,10 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import type { StoreBackend } from "../../src/store/backend.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import { MemoryBackend } from "../../src/store/memory.js";
+import { overlay } from "../helpers/faultable-backend.js";
+import { inPoolVoice } from "../helpers/pool-voice.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { FERN, observed } from "../spike/garden.js";
@@ -70,7 +71,10 @@ describe("T162: drop() on an intermediate container discards the whole subtree, 
     const nestedPath = join(tmp, "nested.db");
     const nested = await mid.gateway!.openQuarantine({ backend: new SqliteBackend(nestedPath) });
     // The secret lives ONLY in the nested pool's own store — nothing above ever held it.
-    const secret = observed(FERN, "note", NESTED_MARKER, 1002, OP_SEED);
+    const secret = inPoolVoice(
+      nested.gateway,
+      observed(FERN, "note", NESTED_MARKER, 1002, OP_SEED),
+    );
     await nested.gateway.append([secret]);
     expect(await nested.gateway.backend.holds(secret.id)).toBe(true);
 
@@ -109,7 +113,7 @@ describe("T162: drop() on an intermediate container discards the whole subtree, 
     const child = await mid.gateway!.openQuarantine({ backend: new MemoryBackend() });
     const grandPath = join(tmp, "grandchild.db");
     const grand = await child.gateway.openQuarantine({ backend: new SqliteBackend(grandPath) });
-    const secret = observed(FERN, "note", NESTED_MARKER, 2001, OP_SEED);
+    const secret = inPoolVoice(grand.gateway, observed(FERN, "note", NESTED_MARKER, 2001, OP_SEED));
     await grand.gateway.append([secret]);
 
     await mid.drop();
@@ -134,17 +138,18 @@ describe("T162: drop() on an intermediate container discards the whole subtree, 
       posture: "separate",
       backend: new MemoryBackend(),
     });
-    const secret = observed(FERN, "note", NESTED_MARKER, 3001, OP_SEED);
+    const kept = new Set<string>();
     const inner = new MemoryBackend();
     // Purges everything EXCEPT the secret: the count looks honest, one byte remains (T40/T70).
-    const keepOne: StoreBackend = {
-      append: (d) => inner.append(d),
-      deltasSince: (k) => inner.deltasSince(k),
-      purge: async (ids) => inner.purge([...ids].filter((id) => id !== secret.id)),
-      holds: (id) => inner.holds(id),
-      close: () => inner.close(),
-    };
+    const keepOne = overlay(inner, {
+      purge: async (ids) => inner.purge([...ids].filter((id) => !kept.has(id))),
+    });
     const nested = await mid.gateway!.openQuarantine({ backend: keepOne });
+    const secret = inPoolVoice(
+      nested.gateway,
+      observed(FERN, "note", NESTED_MARKER, 3001, OP_SEED),
+    );
+    kept.add(secret.id);
     await nested.gateway.append([secret]);
 
     await expect(mid.drop()).rejects.toThrow(/drop refused:.*nested pool/s);
@@ -173,20 +178,21 @@ describe("T162: drop() on an intermediate container discards the whole subtree, 
       backend: new MemoryBackend(),
     });
     const first = await mid.gateway!.openQuarantine({ backend: new MemoryBackend() });
-    const secret = observed(FERN, "note", NESTED_MARKER, 4001, OP_SEED);
+    const kept = new Set<string>();
     const inner = new MemoryBackend();
     let retain = true; // the fault, clearable — so the retry path can be proven, not assumed
-    const flaky: StoreBackend = {
-      append: (d) => inner.append(d),
-      deltasSince: (k) => inner.deltasSince(k),
-      purge: async (ids) =>
-        inner.purge(retain ? [...ids].filter((id) => id !== secret.id) : [...ids]),
-      holds: (id) => inner.holds(id),
+    const flaky = overlay(inner, {
+      purge: async (ids) => inner.purge(retain ? [...ids].filter((id) => !kept.has(id)) : [...ids]),
       // A no-op close: `inner` stays open as the test's own inspection handle, so the
       // post-drop byte verdict below reads the store the drop actually swept.
       close: () => Promise.resolve(),
-    };
+    });
     const second = await mid.gateway!.openQuarantine({ backend: flaky });
+    const secret = inPoolVoice(
+      second.gateway,
+      observed(FERN, "note", NESTED_MARKER, 4001, OP_SEED),
+    );
+    kept.add(secret.id);
     await second.gateway.append([secret]);
 
     const failure = await mid.drop().then(

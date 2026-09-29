@@ -9,7 +9,8 @@
 // a purge's return is evidence, never the verdict), refusing loudly and LEAVING THE POOL ATTACHED
 // when it cannot prove discard (still in erasure reach — fail-safe). detach() is the deliberate
 // keep: close without purge — Myk's "temporary quarantine" for debugging a suspect pool — and
-// reattachment is just openQuarantine over the surviving store, which restores erasure reach.
+// reattachment is opening the named container again over the surviving store, which restores
+// erasure reach.
 // Deferred, named: the detach GROUND RECORD (who detached what) waits for T32's container
 // vocabulary mint rather than minting a one-off loam.* shape it would have to migrate.
 
@@ -21,8 +22,10 @@ import { afterAll, describe, expect, it } from "vitest";
 import type { StoreBackend } from "../../src/store/backend.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import { MemoryBackend } from "../../src/store/memory.js";
+import { overlay } from "../helpers/faultable-backend.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
+import { containerClaims } from "../../src/gateway/container.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 
@@ -90,13 +93,9 @@ describe("T72: drop() discards at the bytes, on every backend", () => {
     await gw.append([secret]);
     const inner = new MemoryBackend();
     // Purges everything EXCEPT the secret: count is honest-looking, one byte remains.
-    const keepOne: StoreBackend = {
-      append: (d) => inner.append(d),
-      deltasSince: (k) => inner.deltasSince(k),
+    const keepOne = overlay(inner, {
       purge: async (ids) => inner.purge([...ids].filter((id) => id !== secret.id)),
-      holds: (id) => inner.holds(id),
-      close: () => inner.close(),
-    };
+    });
     const pool = await gw.openQuarantine({ backend: keepOne });
 
     await expect(pool.drop()).rejects.toThrow(/still holds 1 of/);
@@ -109,13 +108,7 @@ describe("T72: drop() discards at the bytes, on every backend", () => {
     await gw.append([observed(FERN, "height", 30, 1000, OP_SEED)]);
     const inner = new MemoryBackend();
     // A store whose purge LIES — reports removal, deletes nothing (the shape T40/T70 hunt).
-    const lying: StoreBackend = {
-      append: (d) => inner.append(d),
-      deltasSince: (k) => inner.deltasSince(k),
-      purge: (ids) => Promise.resolve([...ids].length),
-      holds: (id) => inner.holds(id),
-      close: () => inner.close(),
-    };
+    const lying = overlay(inner, { purge: (ids) => Promise.resolve([...ids].length) });
     const pool = await gw.openQuarantine({ backend: lying });
 
     await expect(pool.drop()).rejects.toThrow(/still holds/);
@@ -131,9 +124,7 @@ describe("T72: drop() discards at the bytes, on every backend", () => {
     const secret = observed(FERN, "note", MARKER, 1000, OP_SEED);
     await gw.append([secret]);
     const inner = new MemoryBackend();
-    const keepOneBatch: StoreBackend = {
-      append: (d) => inner.append(d),
-      deltasSince: (k) => inner.deltasSince(k),
+    const keepOneBatch = overlay(inner, {
       purge: async (ids) => inner.purge([...ids].filter((id) => id !== secret.id)),
       holds: () => Promise.reject(new Error("per-id must not be consulted")), // batch answers
       heldAmong: async (ids) => {
@@ -141,8 +132,7 @@ describe("T72: drop() discards at the bytes, on every backend", () => {
         for (const id of ids) if (await inner.holds(id)) held.add(id);
         return held;
       },
-      close: () => inner.close(),
-    };
+    });
     const pool = await gw.openQuarantine({ backend: keepOneBatch });
 
     await expect(pool.drop()).rejects.toThrow(/still holds 1 of/);
@@ -154,14 +144,10 @@ describe("T72: drop() discards at the bytes, on every backend", () => {
     const gw = await boot();
     await gw.append([observed(FERN, "height", 30, 1000, OP_SEED)]);
     const inner = new MemoryBackend();
-    const mute: StoreBackend = {
-      append: (d) => inner.append(d),
-      deltasSince: (k) => inner.deltasSince(k),
-      purge: (ids) => inner.purge(ids),
+    const mute = overlay(inner, {
       holds: () => Promise.reject(new Error("pool store offline")),
       heldAmong: () => Promise.reject(new Error("pool store offline")),
-      close: () => inner.close(),
-    };
+    });
     const pool = await gw.openQuarantine({ backend: mute });
 
     await expect(pool.drop()).rejects.toThrow(/could not be proven clean/);
@@ -179,13 +165,11 @@ describe("T72: drop names MORE than the readable surface", () => {
     const secret = observed(FERN, "note", MARKER, 1000, OP_SEED);
     await gw.append([secret]);
     const inner = new MemoryBackend();
-    const blindRead: StoreBackend = {
-      append: (d) => inner.append(d),
+    const blindRead = overlay(inner, {
       deltasSince: () => Promise.resolve([]), // the read names NOTHING...
       purge: () => Promise.resolve(0), // ...and the purge quietly does nothing
-      holds: (id) => inner.holds(id), // ...while the bytes are honestly still there
-      close: () => inner.close(),
-    };
+      // ...while the bytes are honestly still there (`holds` is the store's own)
+    });
     const pool = await gw.openQuarantine({ backend: blindRead });
     expect(await inner.holds(secret.id)).toBe(true); // seeded: the tier holds the byte
 
@@ -216,16 +200,29 @@ describe("T72: drop names MORE than the readable surface", () => {
   });
 });
 
+// Reattaching opens the pool again under the key its host recorded, so these rails use a NAMED
+// container: an anonymous pool's key lives for its process only, and it never reopens.
+const SUSPECT = "container:suspect";
+const declareSuspect = (gw: Gateway, ts: number) =>
+  gw.signer!.sign(
+    containerClaims(
+      { container: SUSPECT, trust: "untrusted", posture: "separate" },
+      gw.operatorAuthor!,
+      ts,
+    ),
+  );
+
 describe("T72: detach() keeps the bytes deliberately, and reattachment restores the law's reach", () => {
   it("detach closes without purging; reattach + erase sweeps the surviving store", async () => {
     const gw = await boot();
     const secret = observed(FERN, "note", MARKER, 1000, OP_SEED);
     await gw.append([secret]);
     const path = join(tmp, "detached-pool.db");
-    const pool = await gw.openQuarantine({ backend: new SqliteBackend(path) });
+    await gw.append([declareSuspect(gw, 20_000)]);
+    const pool = await gw.openContainer({ name: SUSPECT, backend: new SqliteBackend(path) });
 
     await pool.detach();
-    expect(gw.quarantinePools.has(pool.gateway)).toBe(false); // out of the fan-out...
+    expect(gw.quarantinePools.has(pool.gateway!)).toBe(false); // out of the fan-out...
 
     // ...bytes deliberately KEPT: the temporary quarantine survives for debugging.
     const surviving = new SqliteBackend(path);
@@ -233,7 +230,7 @@ describe("T72: detach() keeps the bytes deliberately, and reattachment restores 
 
     // Ruled safe (or condemned): REATTACH is just opening a pool over the surviving store —
     // and the operator's erasure reaches through it again, proving the reach was restored.
-    const reattached = await gw.openQuarantine({ backend: surviving });
+    const reattached = await gw.openContainer({ name: SUSPECT, backend: surviving });
     await gw.erase(secret.id);
     expect(await surviving.holds(secret.id)).toBe(false); // swept through the reattached glass
     await reattached.drop();
@@ -248,16 +245,17 @@ describe("T72: detach() keeps the bytes deliberately, and reattachment restores 
     const secret = observed(FERN, "note", MARKER, 1000, OP_SEED);
     await gw.append([secret]);
     const path = join(tmp, "window-pool.db");
-    const pool = await gw.openQuarantine({ backend: new SqliteBackend(path) });
+    await gw.append([declareSuspect(gw, 20_000)]);
+    const pool = await gw.openContainer({ name: SUSPECT, backend: new SqliteBackend(path) });
     await pool.detach();
 
     await gw.erase(secret.id); // decided while the store was away — fans to NO pool
 
     const surviving = new SqliteBackend(path);
     expect(await surviving.holds(secret.id)).toBe(true); // premise: the byte truly survived the window
-    const reattached = await gw.openQuarantine({ backend: surviving });
+    const reattached = await gw.openContainer({ name: SUSPECT, backend: surviving });
     // Object level: the reattached pool's reader never saw the byte...
-    expect(reattached.gateway.reactor.has(secret.id)).toBe(false);
+    expect(reattached.gateway!.reactor.has(secret.id)).toBe(false);
     // ...and byte level: the store was swept before the reader existed.
     expect(await surviving.holds(secret.id)).toBe(false);
     await reattached.drop();

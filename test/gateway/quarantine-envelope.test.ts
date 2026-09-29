@@ -65,7 +65,9 @@ const declare = (
   subject: string,
   limits: Readonly<Record<string, number>>,
   ts = Date.now(),
-): Promise<unknown> => gw.append([signClaims(envelopeClaims(subject, limits, OP, ts), OP_SEED)]);
+): Promise<unknown> =>
+  // Signed in the ground's own voice: the primary's operator, or a pool's own key.
+  gw.append([gw.signer!.sign(envelopeClaims(subject, limits, gw.operatorAuthor!, ts))]);
 
 // One strike, the shape every reader in this repo suppresses on: a lone `negates` pointer, no
 // entity and no context — which is exactly why a per-entity candidate filter can never find it.
@@ -243,10 +245,15 @@ describe("T34 delta level: the envelope is one operator-authored declaration, re
     await declare(gw, ENVELOPE_ANY, { maxConcurrentRenders: 1, renderTimeoutMs: 3000 }, 1_000_000);
     const pool = await gw.openQuarantine();
 
-    // Lawful, well-formed, operator-signed — and landed on the POOL's ground, where it binds nothing.
+    // Lawful, well-formed, signed by the pool's own key — and landed on the POOL's ground, where it
+    // binds nothing.
     await declare(pool.gateway, ENVELOPE_ANY, { maxConcurrentRenders: 32 }, 3_000_000);
     expect(
-      readEnvelopePolicy(pool.gateway.reactor, pool.gateway.validityNow(), OP).get(ENVELOPE_ANY),
+      readEnvelopePolicy(
+        pool.gateway.reactor,
+        pool.gateway.validityNow(),
+        pool.gateway.operatorAuthor,
+      ).get(ENVELOPE_ANY),
     ).toEqual({
       maxConcurrentRenders: 32, // the pool's OWN ground really does say 32…
     });
@@ -712,13 +719,12 @@ describe("T34 reach: metering rides DOWN, whatever the child declares", () => {
     await declare(gw, ENVELOPE_ANY, { maxConcurrentRenders: 1, renderTimeoutMs: 3000 }, 9990);
     const pool = await gw.openQuarantine();
     await pool.gateway.append([
-      signClaims(
+      pool.gateway.signer!.sign(
         containerClaims(
           { container: "loam:pool:inner", trust: "curated", posture: "separate" },
-          OP,
+          pool.gateway.operatorAuthor!,
           9991,
         ),
-        OP_SEED,
       ),
     ]);
     const inner = await pool.gateway.openContainer({ name: "loam:pool:inner" });
@@ -758,13 +764,12 @@ describe("T34 reach: metering rides DOWN, whatever the child declares", () => {
     const pool = await gw.openQuarantine();
     expect(gw.envelopeReports()[0]!.envelope.maxConcurrentRenders).toBe(1);
     await pool.gateway.append([
-      signClaims(
+      pool.gateway.signer!.sign(
         containerClaims(
           { container: "loam:pool:big", trust: "untrusted", posture: "separate" },
-          OP,
+          pool.gateway.operatorAuthor!,
           9972,
         ),
-        OP_SEED,
       ),
     ]);
     const inner = await pool.gateway.openContainer({ name: "loam:pool:big" });

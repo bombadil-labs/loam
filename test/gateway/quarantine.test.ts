@@ -13,6 +13,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { eraseClaims, readErasures } from "../../src/gateway/erase.js";
 import { PLANT } from "./fixtures.js";
+import { inPoolVoice } from "../helpers/pool-voice.js";
 import { FERN, observed } from "../spike/garden.js";
 
 const OP_SEED = "0e".repeat(32);
@@ -60,7 +61,7 @@ describe("§24.1/§24.2 the quarantine pool — a separate store, one-way glass"
   it("the glass is ONE-WAY: a write in the pool never reaches the primary", async () => {
     const primary = await bootPrimary();
     const q = await primary.openQuarantine();
-    const poolWrite = observed(FERN, "height", 999, 5000, OP_SEED);
+    const poolWrite = inPoolVoice(q.gateway, observed(FERN, "height", 999, 5000, OP_SEED));
     await q.gateway.append([poolWrite]);
     expect(holds(q.gateway, poolWrite.id)).toBe(true); // the pool holds its own write
     expect(await heightOf(q.gateway)).toBe(999);
@@ -96,7 +97,11 @@ describe("§24.8 erasure reaches the quarantine — the law, no evasion", () => 
     await primary.erase(secret.id, { reason: "the subject asked to be forgotten" });
 
     // (a) the erasure propagated IN
-    expect(readErasures(q.gateway.reactor, q.gateway.validityNow(), OP).has(secret.id)).toBe(true);
+    expect(
+      readErasures(q.gateway.reactor, q.gateway.validityNow(), q.gateway.operatorAuthor).has(
+        secret.id,
+      ),
+    ).toBe(true);
     // (b) the byte is GONE from the pool — not in its ground, and not in its backend
     expect(holds(q.gateway, secret.id)).toBe(false);
     expect((await poolBackend.deltasSince(new Set())).some((d) => d.id === secret.id)).toBe(false);

@@ -38,6 +38,7 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { PLANT } from "./fixtures.js";
 import { isSuppressed, retraction } from "./narrowing.js";
+import { inPoolVoice } from "../helpers/pool-voice.js";
 import {
   FERN,
   GARDENER,
@@ -122,13 +123,17 @@ describe("§24.3 promotion asks SURVIVAL at the source (T39)", () => {
     const primary = await bootPrimary();
     const pool = await primary.openQuarantine();
     const fact = output("the reviewer said no to this", 2500);
-    const reject = retraction(fact.id, OP, OP_SEED, 2600);
+    // The operator acts in the pool through the pool's own key: the pool governs its own law.
+    const reject = inPoolVoice(pool.gateway, retraction(fact.id, OP, OP_SEED, 2600));
     // A bystander's strike that the operator has since struck: DEAD at the source, so the refusal must
     // not name it. Two strikes on one output, one of them inert, is the state that separates "list the
     // live strikes" from "list every negation present".
     const heckle = retraction(fact.id, SURVEYOR, SURVEYOR_SEED, 2610);
     await pool.gateway.federate([fact, heckle]);
-    await pool.gateway.append([reject, retraction(heckle.id, OP, OP_SEED, 2620)]);
+    await pool.gateway.append([
+      reject,
+      inPoolVoice(pool.gateway, retraction(heckle.id, OP, OP_SEED, 2620)),
+    ]);
     // Object level AT THE SOURCE: the pool's own door already serves nothing for it. A promotion that
     // succeeded here would disagree with the store it is reading from.
     expect(await messageOf(pool.gateway)).toBeNull();

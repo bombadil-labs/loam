@@ -18,13 +18,13 @@
 // is named AND a live bystander that does not dangle is not.
 
 import { describe, expect, it } from "vitest";
-import { signClaims, type Delta } from "@bombadil/rhizomatic";
+import type { Delta } from "@bombadil/rhizomatic";
+import type { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { arrivalClaims } from "../../src/federation/channel.js";
 import { FERN, observed } from "../spike/garden.js";
 import {
   BEFORE_DEADLINE,
-  OP,
   OP_SEED,
   bootSlateStore,
   declareContainer,
@@ -33,11 +33,15 @@ import {
 
 // A T207 arrival attestation, receiver-signed, naming one accepted delta by a delta-ref. This is the
 // exact stamp shape `channel.ts` writes into a channel's pool on every sync that accepts deltas — the
-// structural pool-resident citation this ticket exists to enumerate.
-const arrivalStamp = (targetId: string, ts: number): Delta =>
-  signClaims(
-    arrivalClaims({ channel: "peer-echo", from: "peer://echo", arrived: [targetId] }, OP, ts),
-    OP_SEED,
+// structural pool-resident citation this ticket exists to enumerate. The receiver signs it in its
+// own voice: the primary's operator, or a pool's own key.
+const arrivalStamp = (receiver: Gateway, targetId: string, ts: number): Delta =>
+  receiver.signer!.sign(
+    arrivalClaims(
+      { channel: "peer-echo", from: "peer://echo", arrived: [targetId] },
+      receiver.operatorAuthor!,
+      ts,
+    ),
   );
 
 const holdsInReactor = (gw: { reactor: { snapshot(): Iterable<Delta> } }, id: string): boolean =>
@@ -56,7 +60,7 @@ describe("T216 (a) — a POOL-resident citation is enumerated and named to its p
 
     // The stamp lives ONLY in the pool — nothing in the primary points at the target. Reverting the
     // enumeration to the primary alone therefore cannot find it, which is what makes this rail bite.
-    const stamp = arrivalStamp(target.id, 2000);
+    const stamp = arrivalStamp(pool.gateway, target.id, 2000);
     await pool.gateway.append([stamp]);
     expect(holdsInReactor(pool.gateway, stamp.id)).toBe(true);
 
@@ -91,7 +95,7 @@ describe("T216 (b) — a PRIMARY-resident citation still enumerates (no regressi
     const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
     await gw.append([target, bystander]);
     // A primary-resident delta pointing at the target — the danger the manifest has always enumerated.
-    const cite = arrivalStamp(target.id, 2000);
+    const cite = arrivalStamp(gw, target.id, 2000);
     await gw.append([cite]);
 
     const done = await gw.erase(target.id);
@@ -123,7 +127,7 @@ describe("T216 (c) — the slate receipt's citations name the same tier set as t
     const pool = await gw.openQuarantine({ backend: new MemoryBackend() });
     expect(await pool.gateway.backend.holds(member.id)).toBe(true);
     // A pool-resident stamp citing the member — survives the cut, dangles at the hole.
-    const stamp = arrivalStamp(member.id, 2000);
+    const stamp = arrivalStamp(pool.gateway, member.id, 2000);
     await pool.gateway.append([stamp]);
 
     const stood = await standSlate(gw, { members: [member], closes: ["egress"] });
@@ -215,7 +219,7 @@ describe("T216 (c) — the slate receipt's citations name the same tier set as t
     await gw.append([member, bystander]);
 
     const pool = await gw.openQuarantine({ backend: new MemoryBackend() });
-    const stamp = arrivalStamp(member.id, 2000);
+    const stamp = arrivalStamp(pool.gateway, member.id, 2000);
     await pool.gateway.append([stamp]);
 
     const stood = await standSlate(gw, { members: [member], closes: ["egress"] });

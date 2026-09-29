@@ -250,11 +250,20 @@ export async function promoteImpl(
         `publish the claim as your own act rather than adopt it.`,
     );
   }
-  const standing = dataStrikeWitnesses(
-    source.reactor,
-    sourceNow,
-    source.operator,
-  )(src.id).map((n) => n.id);
+  // Who may block a promotion: the source's own governor and its surviving grantees, and, where
+  // the source selects its hosts as reviewers, each host and its surviving grantees. Each governor
+  // is judged under its own grants; no reader treats {host, pool} as one governor.
+  const reviewers =
+    source.operator === undefined
+      ? [undefined]
+      : [source.operator, ...(source.childLaw?.hostReviews === true ? source.childLaw.hosts : [])];
+  const standing = [
+    ...new Set(
+      reviewers.flatMap((r) =>
+        dataStrikeWitnesses(source.reactor, sourceNow, r)(src.id).map((n) => n.id),
+      ),
+    ),
+  ];
   if (standing.length > 0) {
     throw new Error(
       `promotion refused: ${deltaId} — the source's own reading has it negated (${standing.join(", ")}), ` +
