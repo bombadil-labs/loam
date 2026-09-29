@@ -1,11 +1,26 @@
 # Step 6: the container split (design note)
 
-Status: design note, 2026-09-29, for Myk's review. No code. Ruling 13 (README) makes this the last
-part of step 6. It starts after merge 3 (new pools under their own key) lands.
+Status: design note, 2026-09-29, reviewed by Myk. No code. Ruling 13 (README) makes this the last
+part of step 6. Steps 1 and 2 start now; steps 3 to 7 start after merge 3 (new pools under their
+own key) lands.
+
+## Myk's direction (2026-09-29, in chat)
+
+"You can keep the gateway name but the important thing is that it stops being the god-object
+around which the entire store is organized. We could for instance have in theory the ability to
+different peers to open their own gateways on different ports within the same store, or a root
+gateway that uses container nesting as path nesting to serve different stuff, idk, but it's
+crucial that a single stateful Gateway no longer be the source of truth for everything." And:
+"sure do the split steps."
 
 ## The promise
 
 - A person sees no change. Every door, command and page answers as before.
+- No single stateful `Gateway` is the source of truth. The store is a tree of containers. A
+  `Gateway` is a serving facade over one container, and it holds no store state of its own.
+- So more than one `Gateway` can serve the same store: one per container on its own port, or one
+  root `Gateway` that maps container nesting to path nesting. The split makes both possible; it
+  does not build either.
 - Each container is one peer type. The host is only the root container. It has no special class.
 - A container does only its own work: its journal, its admission, its reads, its erasure and its
   law (ruling 11).
@@ -22,7 +37,8 @@ part of step 6. It starts after merge 3 (new pools under their own key) lands.
   second `Gateway`, and it holds its host in `attachedTo`.
 - 23 lines in 7 files use `attachedTo`, the link from a pool to its host.
 - 88 lines in 19 files read a host's child maps (`quarantinePools`, `channelPools`,
-  `connectionInboxes`) and then call into the child `Gateway`.
+  `connectionInboxes`) and then call into the child `Gateway`. Counted together with the
+  `attachedTo` lines, 105 distinct source lines touch a child map or the parent link.
 - The value-import cycle has 20 files and 74 edges. `container.ts` is its hub: 14 files in the
   cycle import it. Most of them take only pure readers from it, such as `readContainerTable`
   (11 files) and `containerClaims` (5 files). `container.ts` also opens pools, so it imports
@@ -63,8 +79,26 @@ What a container receives from its parent when it opens (ports, not the parent o
 - `rootContext`: what a renderer context needs from the root (replaces the root walks in
   `renderers.ts`).
 
-What the host keeps: a container table of `PeerHandle`s by name, in place of the three child maps.
-The identity checks in kind F become "is this handle still the one in my table?".
+The tree's shared services (one per store, owned by the store, not by any container or
+`Gateway`):
+
+- **The container table:** `PeerHandle`s by name and by parent, in place of the three child maps.
+  The identity checks in kind F become "is this handle still the one in the table?".
+- **The backend registry:** every store backend open in the tree. A new open is checked against
+  all of them, so a later drop can never purge a sibling's bytes (`container.ts` does this today
+  by walking to the root).
+- **The commit coordinator:** the per-channel commit queue that sync, drop and erase work share
+  across the tree (`channelCommitTails`, reached today by walking to the root in
+  `local-channel-events.ts`).
+- **Live root policy:** the reads a child must take from the root at use time, not at open time,
+  such as the leeway table behind a child's envelope ceiling. A later leeway change then takes
+  effect, as it does today.
+
+A container receives these as ports too. It never receives the root container itself.
+
+The facades: a `Gateway` serves doors (GraphQL, REST, MCP, pages) over one container, and reads
+the store through the peer interface and the shared services. It owns no deltas, no table and no
+queue. The CLI and `http.ts` keep calling `Gateway`, so their code does not change.
 
 ## The move order (each step is one small PR, and no step changes behaviour)
 
@@ -79,27 +113,25 @@ The identity checks in kind F become "is this handle still the one in my table?"
 4. **Writes as admission.** Host writes into a child (kind C) go through `admit`.
 5. **Erasure as delivery.** The fan-out (kind D) goes through `deliver`.
 6. **Reads as requests.** Reads across (kind B) go through `read`.
-7. **The split.** `Container` holds the per-peer core. `Gateway` stays as the root's public
-   facade for `http.ts`, the CLI and embedders, so their code does not change. Its child maps
-   become the container table.
+7. **The split.** `Container` holds the per-peer core. A `Store` object holds the tree and its
+   shared services. `Gateway` becomes a facade over one container of a store, for `http.ts`, the
+   CLI and embedders, so their code does not change. Its child maps become the container table.
 
 ## Rails
 
-- The census ratchet gains one count: lines outside `container-open.ts` that touch
-  `attachedTo` or a child map (88 today). It must fall with each PR, and it ends at 0.
+- The census ratchet gains one count: distinct source lines outside `container-open.ts` that
+  touch `attachedTo` or a child map (105 today). It must fall with each PR, and it ends at 0.
+- A test opens two `Gateway`s over one store, on two containers, and shows each serves its own
+  container while both see the same writes. It proves no state lives in a `Gateway`.
 - `importCycles` must fall to 0, and the ratchet then holds it there.
 - A new test asserts that no container module imports the host facade.
 - The full suite and every recording stay unchanged. A moved recording means a behaviour change,
   and that is a finding.
 
-## Questions for Myk
+## Myk's answers
 
-1. **The public name.** I propose to keep `Gateway` as the name of the root's facade, so callers do
-   not change, and to name the per-peer core `Container`. The other choice is to rename the facade
-   `Host`, which changes 46 source files and about 320 test files. My recommendation: keep `Gateway`.
-2. **Timing.** I propose to start after merge 3 lands, because merge 3 changes the same pool
-   opener. The other choice is to start with steps 1 and 2 now, because they touch only module
-   boundaries. My recommendation: start steps 1 and 2 now, in parallel with merge 3's review.
+1. The public name stays `Gateway`, and it stops being the god object (see "Myk's direction").
+2. Steps 1 and 2 start now.
 
 ## Size
 
