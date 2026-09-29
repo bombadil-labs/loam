@@ -162,6 +162,43 @@ describe("erasure through the journal, proven at the bytes", () => {
   });
 });
 
+describe("settle paths after an interrupted checkpoint, and against a stale head", () => {
+  it("sqlite: a WAL debt a busy checkpoint left behind clears on a later, uncontended settle", async () => {
+    const path = sqlitePath();
+    const first = new SqliteBackend(path);
+    await first.journalStore().compareAndAppend(OP, null, "", null, []);
+    await first.close();
+    // What a rebase leaves when its checkpoint meets a reader: the marker, still standing.
+    const db = new Database(path);
+    db.prepare("INSERT INTO meta (key, value) VALUES ('rebase-wal-outstanding', ?)").run(OP);
+    db.close();
+    const store = new SqliteBackend(path).journalStore();
+    const absent = note(9).id;
+    expect(await store.compareAndSettlePurge!(OP, "", "x", new Uint8Array([7]), absent, 1)).toEqual(
+      {
+        status: "durable",
+      },
+    );
+    expect(await store.readHead(OP)).toEqual({ status: "head", head: "x" });
+  });
+
+  it("mirror: a stale head is a conflict even while the shadow tier holds the target", async () => {
+    const shadow = new MemoryBackend();
+    const store = new MirrorBackend(new MemoryBackend(), shadow).journalStore();
+    await store.compareAndAppend(OP, null, "", null, []);
+    const d = note(10);
+    await shadow.append([d]);
+    const frame = new Uint8Array([7]);
+    expect(await store.compareAndSettlePurge!(OP, "stale", "x", frame, d.id, 1)).toEqual({
+      status: "conflict",
+    });
+    expect(await store.compareAndAppendErasure!(OP, "stale", "x", frame, [], [d.id])).toEqual({
+      status: "conflict",
+    });
+    expect(await store.readHead(OP)).toEqual({ status: "head", head: "" });
+  });
+});
+
 describe("a damaged admitted row degrades the open (§25)", () => {
   it("sqlite: a deleted admitted row is reported unavailable, and the rest is served", async () => {
     const path = sqlitePath();

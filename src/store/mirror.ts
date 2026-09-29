@@ -122,6 +122,10 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
         this.opts.onLag?.(err);
       }
     };
+    const headIs = async (peerId: string, expected: string): Promise<boolean> => {
+      const read = await inner.readHead(peerId);
+      return read.status === "head" && read.head === expected;
+    };
     return (this.#journal ??= {
       ...inner,
       compareAndAppend: async (peerId, expected, next, frame, rows) => {
@@ -130,6 +134,9 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
         return write;
       },
       compareAndAppendErasure: async (peerId, expected, next, frame, rows, absent) => {
+        // A stale head is a conflict before it is anything else: the caller reopens on a conflict
+        // and stays live on a refutation. The inner CAS still decides a head that moves after this.
+        if (!(await headIs(peerId, expected))) return { status: "conflict" };
         for (const id of absent) {
           if (await this.mirror.holds(id)) return { status: "absence-refuted", targetId: id };
         }
@@ -145,6 +152,7 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
         return write;
       },
       compareAndSettlePurge: async (peerId, expected, next, frame, targetId, generation) => {
+        if (!(await headIs(peerId, expected))) return { status: "conflict" };
         if (await this.mirror.holds(targetId)) return { status: "absence-refuted", targetId };
         return inner.compareAndSettlePurge!(peerId, expected, next, frame, targetId, generation);
       },

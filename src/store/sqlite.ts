@@ -790,11 +790,13 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
       },
       compareAndSettlePurge: async (peerId, expectedHead, nextHead, frame, targetId) => {
         this.assertOpen();
+        // A checkpoint cannot run inside a write transaction, so the WAL debt is paid first; the
+        // CAS below checks the marker again.
+        settleRebaseWal();
         this.db.exec("BEGIN IMMEDIATE");
         try {
           // "removed" is appended only if the bytes are provably gone, WAL debt included, and no
           // committed frame still carries the target: a frame holds the full admitted delta.
-          settleRebaseWal();
           if (headOf(peerId) !== expectedHead) {
             this.db.exec("ROLLBACK");
             return { status: "conflict" };
