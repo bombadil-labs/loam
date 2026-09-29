@@ -46,7 +46,7 @@ import {
   type RevivalReport,
   receiptLedger,
   standingErasures,
-  erasuresIn,
+  neverReturns,
   erasureTarget,
   isErasure,
   UNSWEPT_AUTH_SURFACES,
@@ -1151,27 +1151,49 @@ async function cmdInitGuided(parsed: Parsed, io: IO, options: RunOptions): Promi
 
 // Restore an empty host store from its archive, through a new peer journal. Returns the count
 // admitted; 0 when the store is not empty or the archive holds nothing living.
-async function restoreIntoJournal(
+/**
+ * Restore an empty host store from its archive, through a new peer journal. Returns the count
+ * admitted; 0 when there is nothing to restore. A marker file stands while the restore runs, so a
+ * restore a fault interrupted is resumed by the next serve rather than served half done.
+ * @internal — exported for its rail
+ */
+export async function restoreIntoJournal(
   primary: StoreBackend,
   archive: StoreBackend,
   dead: ReadonlySet<string>,
   seed: string,
+  marker?: string,
 ): Promise<number> {
   if (!holdsJournals(primary)) return 0;
-  if ((await primary.journalPeers()).length > 0 || (await primary.holdsAny?.()) !== false) return 0;
+  const resuming = marker !== undefined && existsSync(marker);
+  if (!resuming) {
+    if ((await primary.journalPeers()).length > 0 || (await primary.holdsAny?.()) !== false) {
+      return 0;
+    }
+  }
   const rows = (await archive.deltasSince(new Set())).filter((d) => !dead.has(d.id));
-  if (rows.length === 0) return 0;
+  if (rows.length === 0) {
+    if (marker !== undefined) rmSync(marker, { force: true });
+    return 0;
+  }
+  if (marker !== undefined && !resuming) writeFileSync(marker, "");
   const { peer } = await openHostPeer(primary.journalStore(), authorForSeed(seed));
+  const state = peer.journal.snapshot().base;
   // One transfer per delta: readers order events by arrival, and one transfer's arrivals are
   // simultaneous. The archive keeps no arrival order, so signed time order stands in for it.
-  const ordered = [...rows].sort(
-    (a, b) => a.claims.timestamp - b.claims.timestamp || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
-  );
+  const ordered = [...rows]
+    .filter((d) => !state.admitted.has(d.id) && !state.refusedIds.has(d.id))
+    .sort(
+      (a, b) => a.claims.timestamp - b.claims.timestamp || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    );
   const at = Date.now();
   for (const d of ordered) {
-    if (!isErasure(d.claims)) await admitLocal(peer, [d], at, () => false);
-    else {
-      const targetId = erasureTarget(d.claims)!;
+    // Only an order this store's law binds refuses its target; any other erasure-shaped delta is
+    // testimony, and arrives as an ordinary one.
+    const targetId = isErasure(d.claims) ? erasureTarget(d.claims) : undefined;
+    if (targetId === undefined || !dead.has(targetId)) {
+      await admitLocal(peer, [d], at, () => false);
+    } else {
       await admitErasureOrders(
         peer,
         [{ delta: d, targetId, surfaceHoldsBytes: false }],
@@ -1180,7 +1202,8 @@ async function restoreIntoJournal(
       );
     }
   }
-  return rows.length;
+  if (marker !== undefined) rmSync(marker, { force: true });
+  return ordered.length;
 }
 
 async function cmdServe(
@@ -1253,14 +1276,15 @@ async function cmdServe(
       // The law reaches the vault (SPEC §11): erased ids — read straight off BOTH tiers,
       // before any reactor exists — are excluded from the union, so a cold copy can never
       // replant what the operator erased.
-      const dead = erasuresIn(
+      // A negated erasure's target stays refused forever, so it is swept and never restored.
+      const dead = neverReturns(
         [...(await backend.deltasSince(new Set())), ...(await archive.deltasSince(new Set()))],
         Date.now(), // no gateway yet, so no validity floor: the wall clock is the read time
         authorForSeed(seed),
       );
       // A host store lives in its peer journal, and the archive keeps rows only. So a lost primary
       // is restored through a new journal, one local arrival per living row, in signed time order.
-      const restored = await restoreIntoJournal(backend, archive, dead, seed);
+      const restored = await restoreIntoJournal(backend, archive, dead, seed, `${path}.restoring`);
       if (restored > 0) {
         io.out(`loam: healed — ${restored} deltas restored from the archive into a new journal`);
       }

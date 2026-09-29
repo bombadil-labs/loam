@@ -960,6 +960,21 @@ export function erasuresIn(
   return readErasures(probe, now, operator);
 }
 
+/**
+ * What a boot sweep must never bring back, read off raw rows before any gateway exists: the
+ * target of every standing erasure, and every id the door refuses forever (`refusedIds`: the
+ * target of an erasure that ever bound, even one later negated).
+ */
+export function neverReturns(
+  deltas: Iterable<Delta>,
+  now: number,
+  operator: string | undefined,
+): Set<string> {
+  const probe = new Reactor();
+  for (const d of deltas) probe.ingest(d);
+  return new Set([...readErasures(probe, now, operator), ...refusedIds(probe, operator)]);
+}
+
 // Sealed authorship (degree 3): a commitment carried on an anonymous reassertion. Anonymous
 // today; reveal (salt, author) and anyone can recompute the hash — provably yours whenever
 // you choose, no new cryptography.
