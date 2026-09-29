@@ -250,13 +250,15 @@ function otherRootClaims(reactor: Reactor, operator: string, name: string, keep:
 
 // Strikes for good, valid from now: the stamp's ordering timestamp may run ahead of the clock, and
 // is never a validity time.
-const strikes = (gw: Gateway, operator: string, seed: string, ids: readonly string[]): Delta[] =>
-  [...new Set(ids)]
+// Strikes are the ground's own law: signed by its own signer, read with its own key.
+const strikes = (gw: Gateway, ids: readonly string[]): Delta[] => {
+  const law = gw.signer!;
+  return [...new Set(ids)]
     .filter(
       (id) =>
         !struckForGood(
           gw.reactor,
-          operator,
+          law.author,
           id,
           gw.validityNow(),
           // The ground's own withheld set (its erased-but-held deltas among them): an inbox's
@@ -265,11 +267,9 @@ const strikes = (gw: Gateway, operator: string, seed: string, ids: readonly stri
         ),
     )
     .map((id) =>
-      signClaims(
-        withStamp(gw.stamp(operator), (t) => makeNegationClaims(operator, t, id)),
-        seed,
-      ),
+      law.sign(withStamp(gw.stamp(law.author), (t) => makeNegationClaims(law.author, t, id))),
     );
+};
 
 function bindingClaims(root: string, key: string, t: number): Claims {
   return {
@@ -287,18 +287,14 @@ function bindingClaims(root: string, key: string, t: number): Claims {
   };
 }
 
-// A cut for `ground`: this store's incarnation, the recovery, and the key it retires.
-function signCut(
-  ground: Gateway,
-  operator: string,
-  seed: string,
-  spec: { attempt: string; recovery: string; key: string },
-): Delta {
-  const store = incarnationId(ground.reactor, operator, refusedIds(ground.reactor, operator));
+// A cut for `ground`: this store's incarnation, the recovery, and the key it retires. A cut is the
+// ground's own law, signed by its own signer.
+function signCut(ground: Gateway, spec: { attempt: string; recovery: string; key: string }): Delta {
+  const law = ground.signer!;
+  const store = incarnationId(ground.reactor, law.author, refusedIds(ground.reactor, law.author));
   if (store === undefined) throw new Error("the store has no incarnation marker to cut against");
-  return signClaims(
-    withStamp(ground.stamp(operator), (t) => cutClaims({ ...spec, store }, operator, t)),
-    seed,
+  return law.sign(
+    withStamp(ground.stamp(law.author), (t) => cutClaims({ ...spec, store }, law.author, t)),
   );
 }
 
@@ -306,13 +302,7 @@ function signCut(
 // report a cut whose outcome says otherwise as a conflict, never as settled. A committed attempt must
 // then read committed in every store it cut. Returns what is not settled, so the caller reports it
 // and keeps the journal.
-async function settleCuts(
-  gw: Gateway,
-  operator: string,
-  seed: string,
-  j: Journal,
-  outcome: Outcome,
-): Promise<string[]> {
+async function settleCuts(gw: Gateway, j: Journal, outcome: Outcome): Promise<string[]> {
   const pending: string[] = [];
   for (const [pool, ids] of Object.entries(j.cuts ?? {})) {
     const where = pool === HOST ? "the host" : pool;
@@ -321,6 +311,9 @@ async function settleCuts(
       pending.push(`the ${outcome} outcome in ${where} (not attached)`);
       continue;
     }
+    // Outcomes are the ground's own law, like its cuts.
+    const law = ground.signer!;
+    const operator = law.author;
     const erased = refusedIds(ground.reactor, operator);
     const open: string[] = [];
     let conflict = false;
@@ -339,9 +332,8 @@ async function settleCuts(
       if (open.length > 0) {
         await ground.append(
           open.map((id) =>
-            signClaims(
+            law.sign(
               withStamp(ground.stamp(operator), (t) => outcomeClaims(id, outcome, operator, t)),
-              seed,
             ),
           ),
         );
@@ -510,7 +502,7 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
     // by a cut the rerun does not know to settle.
     let j = readJournal(home, name)!;
     const cut = (ground: Gateway, pool: string): Delta => {
-      const d = signCut(ground, operator, opSeed, { attempt, recovery: record.id, key: previous! });
+      const d = signCut(ground, { attempt, recovery: record.id, key: previous! });
       j = { ...j, cuts: { ...j.cuts, [pool]: [...(j.cuts?.[pool] ?? []), d.id] } };
       updateJournal(home, name, j);
       return d;
@@ -539,7 +531,7 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
       withStamp(gw.stamp(operator), (t) => rootClaims(name, root, operator, t)),
       opSeed,
     );
-    const struck = strikes(gw, operator, opSeed, [
+    const struck = strikes(gw, [
       ...otherRootClaims(gw.reactor, operator, name, root),
       ...[...retired].flatMap((key) => standingOf(gw.reactor, key)),
     ]);
@@ -595,8 +587,7 @@ async function afterAppendError(
       // The bytes decide whether the append committed; erased-but-held still committed, and resume
       // reports what the readers make of it.
       committed = gw.reactor.get(journal.record) !== undefined;
-      if (!committed)
-        pending = await settleCuts(gw, authorForSeed(opSeed), opSeed, journal, "aborted");
+      if (!committed) pending = await settleCuts(gw, journal, "aborted");
     } finally {
       await gw.close().catch(() => {});
     }
@@ -675,7 +666,7 @@ async function resume(
       return 1;
     }
     if (!held) {
-      const pending = await settleCuts(gw, operator, opSeed, j, "aborted");
+      const pending = await settleCuts(gw, j, "aborted");
       if (pending.length > 0) return abortPending(o, "an earlier attempt stopped first", pending);
       rollback(o, j);
       io.err(
@@ -705,7 +696,7 @@ async function resume(
     }
     let journal = j;
     // The outcomes: the record landed, so every cut of this attempt is committed.
-    const pending: string[] = await settleCuts(gw, operator, opSeed, j, "committed");
+    const pending: string[] = await settleCuts(gw, j, "committed");
     // 8. Pools: strike the old key's standing in each attached inbox; name the ones not attached.
     if (j.retired.length > 0) {
       // An inbox the store declares but has not attached cannot be reached; the fence already
@@ -726,7 +717,7 @@ async function resume(
         }
         const ids = j.retired.flatMap((key) => standingOf(ground.reactor, key));
         try {
-          const deltas = strikes(ground, operator, opSeed, ids);
+          const deltas = strikes(ground, ids);
           if (deltas.length > 0) await ground.append(deltas);
           journal = { ...journal, pools: [...journal.pools, pool] };
           updateJournal(home, name, journal);

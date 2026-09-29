@@ -251,6 +251,24 @@ describe("revoking a connection negates its delegation", () => {
     await gw.close();
   });
 
+  it("the pool's own voice revokes: its signer strikes, and only that connection stops", async () => {
+    const gw = await home();
+    const conn = await bind(gw, CONN_SEED);
+    const other = await bind(gw, OTHER_SEED);
+    const pool = conn.gateway!;
+    const [d] = delegationsOf(pool, CONN);
+    await gw.revokeConnection({ inbox: conn, connectionKey: CONN, asPool: true });
+    // delta level: the strike is the pool's own law, signed by the pool's signer
+    const strikes = pool.reactor.negationsOf(d!.id).map((id) => pool.reactor.get(id)!);
+    expect(strikes.map((x) => x.claims.author)).toEqual([pool.signer!.author]);
+    // object level: the door refuses the connection; the other connection still writes
+    expect(await door(pool, observed(FERN, "height", 8, 1008, CONN_SEED))).toBe("refused");
+    expect(await door(other.gateway!, observed(FERN, "tag", "moss", 1009, OTHER_SEED))).toBe(
+      "admitted",
+    );
+    await gw.close();
+  });
+
   it("the operator's revoke still finds the delegation after the owner's own grant is struck", async () => {
     const gw = await home();
     const conn = await bind(gw, CONN_SEED);

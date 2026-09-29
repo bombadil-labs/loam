@@ -781,11 +781,20 @@ function recordBarrierDefect(
       batch: [] as readonly Delta[],
     })),
   ];
-  const liveBy = stores.map((s) =>
-    s.ground === undefined
+  // A cut is its ground's own law: each store's cuts are read with that store's own key.
+  const liveBy = stores.map((s) => {
+    const law = s.ground?.operatorAuthor;
+    return s.ground === undefined || law === undefined
       ? new Set<string>()
-      : liveCutIds(s.ground.reactor, op, s.batch, d.id, previous, refusedIds(s.ground.reactor, op)),
-  );
+      : liveCutIds(
+          s.ground.reactor,
+          law,
+          s.batch,
+          d.id,
+          previous,
+          refusedIds(s.ground.reactor, law),
+        );
+  });
   const live = new Set(liveBy.flatMap((ids) => [...ids]));
   let first: string | undefined;
   for (const named of manifests) {

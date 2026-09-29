@@ -4057,19 +4057,19 @@ async function cmdGrantRevoke(
         unreachablePools.push(grant.inbox);
         return;
       }
-      const revoke = (ownerSeed: string) =>
-        gateway.revokeConnection({ inbox: handle, connectionKey: grant.actor, ownerSeed });
+      const revoke = (voice: { ownerSeed: string } | { asPool: true }) =>
+        gateway.revokeConnection({ inbox: handle, connectionKey: grant.actor, ...voice });
       try {
         // The person's own voice first. If their seed was replaced since the bind, the new key
         // has no standing in the pool and did not sign what lets the connection write, so its
-        // strike is refused or does not bind. This command holds the operator seed, and the
-        // operator may strike any delegation in its store, so it strikes in that voice instead.
+        // strike is refused or does not bind. The pool's own governing voice may strike any
+        // delegation in it, so the command strikes in that voice instead, through the pool's signer.
         const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
-        await revoke(owner.seed).catch(async (first: unknown) => {
+        await revoke({ ownerSeed: owner.seed }).catch(async (first: unknown) => {
           if (/nothing in this inbox lets/.test(message(first))) throw first;
           // If the operator's retry finds nothing left to strike, the FIRST failure is the truth
           // about this pool: something the strike could not reach may still let the key write.
-          await revoke(seed).catch((second: unknown) => {
+          await revoke({ asPool: true }).catch((second: unknown) => {
             throw /nothing in this inbox lets/.test(message(second)) ? first : second;
           });
         });
