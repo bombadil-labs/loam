@@ -46,7 +46,7 @@ import {
   revocationClaims,
 } from "./accounts.js";
 import { STORE_ENTITY } from "./genesis.js";
-import { isErasure, readErasures } from "./erase.js";
+import { isErasure, orderForPool, readErasures } from "./erase.js";
 import {
   canonicalLeewayJson,
   parseLeeway,
@@ -1858,7 +1858,14 @@ async function openSeparate(
     return (d) => members.has(d.id);
   };
   const reseed = (): Promise<FederationReport> => {
-    const offer = gw.offeredDeltas();
+    // This ground's own erasures reach a pool under its own key as orders naming the pool.
+    const offer = gw
+      .offeredDeltas()
+      .map((d) =>
+        isErasure(d.claims) && d.claims.author === gw.operatorAuthor
+          ? orderForPool(gw, d, pool)
+          : d,
+      );
     const admit = memberAdmit(offer);
     return pool.federate(
       offer,

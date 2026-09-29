@@ -1618,6 +1618,27 @@ async function incompleteErasureFaults(
   return faults;
 }
 
+// The order a pool receives from this ground, in the fan-out and when the pool opens. A pool
+// governed by this ground's own key takes this ground's erasure as is. A pool under its own key
+// takes an order this ground signs as a pinned governor, naming that pool as its receiver: this
+// ground's own erasure is testimony there. The order keeps the erasure's own time, so the same
+// erasure always yields the same order for one pool: a reseed or a retried fan-out adds nothing.
+export function orderForPool(gw: Gateway, erasure: Delta, pool: Gateway): Delta {
+  if (pool.operatorAuthor === gw.operatorAuthor) return erasure;
+  // The same order in this ground's voice, every pointer kept (a local-control marker included),
+  // plus the one receiver it takes effect at.
+  const operator = gw.operatorAuthor!;
+  return gw.signer!.sign({
+    timestamp: erasure.claims.timestamp,
+    validFrom: erasure.claims.validFrom,
+    author: operator,
+    pointers: [
+      ...erasure.claims.pointers.filter((p) => p.role !== "receiver"),
+      { role: "receiver", target: { kind: "primitive" as const, value: pool.operatorAuthor! } },
+    ],
+  });
+}
+
 // Honor an erasure DECIDED by the primary operator (the body of `Gateway.eraseReplica`, SPEC §24.8),
 // called on a pool by the primary's fan-out: land the operator's erasure (so the pool remembers the
 // hole and refuses re-entry — the federation door already enforces that, §11), purge the byte, re-seat,
@@ -1633,27 +1654,6 @@ async function incompleteErasureFaults(
 // unconditionally, and a `closed` pool is still the operator's own replica); and if the lawful
 // erasure STILL did not land, the only remaining cause is the store itself failing — so it
 // THROWS, and the primary's `erase` rejects. Best-effort-and-loud, never a silent success.
-// The order a pool receives in the fan-out. A pool governed by this ground's own key takes this
-// ground's erasure as is. A pool under its own key takes an order this ground signs as a pinned
-// governor, naming that pool as its receiver: this ground's own erasure is testimony there.
-function orderForPool(gw: Gateway, erasure: Delta, pool: Gateway): Delta {
-  if (pool.operatorAuthor === gw.operatorAuthor) return erasure;
-  // The same order in this ground's voice, every pointer kept (a local-control marker included),
-  // plus the one receiver it takes effect at.
-  const operator = gw.operatorAuthor!;
-  return gw.signer!.sign(
-    withStamp(gw.stamp(operator), (t) => ({
-      timestamp: t,
-      validFrom: t,
-      author: operator,
-      pointers: [
-        ...erasure.claims.pointers.filter((p) => p.role !== "receiver"),
-        { role: "receiver", target: { kind: "primitive" as const, value: pool.operatorAuthor! } },
-      ],
-    })),
-  );
-}
-
 export async function eraseReplicaImpl(
   gw: Gateway,
   erasure: Delta,

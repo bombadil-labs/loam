@@ -126,9 +126,30 @@ describe("criterion 17: a fresh pool starts under its own key", () => {
   it("an anonymous quarantine pool starts under its own key, on its own journal", async () => {
     const gw = await hostWith(new MemoryBackend(), memoryPoolKeys());
     const q = await gw.openQuarantine();
-    const pool = q.gateway!;
+    const pool = q.gateway;
     expect(pool.operatorAuthor).not.toBe(OP);
     expect(pool.peer?.journal.peerId).toBe(pool.operatorAuthor);
+    await gw.close();
+  });
+
+  it("a pool opened after a host erasure receives it as an order naming the pool, and refuses the target", async () => {
+    const gw = await hostWith(new MemoryBackend(), memoryPoolKeys());
+    const target = note(40);
+    const bystander = note(41);
+    await gw.append([target]);
+    await gw.erase(target.id);
+    const pool = (await gw.openQuarantine()).gateway;
+    const orders = [...pool.reactor.snapshot()].filter((d) =>
+      d.claims.pointers.some((p) => p.role === "erases"),
+    );
+    expect(orders).toHaveLength(1);
+    expect(orders[0]!.claims.pointers.find((p) => p.role === "receiver")?.target).toEqual({
+      kind: "primitive",
+      value: pool.operatorAuthor,
+    });
+    // object level: the erased delta cannot come back into the pool; a bystander can
+    expect((await pool.federate([target], { admit: () => true })).accepted).toBe(0);
+    expect((await pool.federate([bystander], { admit: () => true })).accepted).toBe(1);
     await gw.close();
   });
 
