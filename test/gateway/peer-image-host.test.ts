@@ -234,19 +234,27 @@ describe("the journal is the authority over the rows", () => {
     expect(fileHash(path)).toBe(hash);
   });
 
-  it("an admitted row missing from the store fails the open closed", async () => {
+  it("an admitted row missing from the store degrades the open: not served, writes live (§25)", async () => {
     const path = sqliteHome();
     const gw = await boot(new SqliteBackend(path));
     const d = note(1);
+    const bystander = note(2);
     await gw.append([d]);
+    await gw.append([bystander]);
     await gw.close();
     const db = new Database(path);
     db.prepare("DELETE FROM deltas WHERE id = ?").run(d.id);
     db.close();
-    await expect(boot(new SqliteBackend(path))).rejects.toThrow(/admitted row mismatch/);
+    const again = await boot(new SqliteBackend(path));
+    expect(again.reactor.get(d.id)).toBeUndefined(); // nothing reconstructed from the journal
+    expect(again.reactor.get(bystander.id)).toBeDefined();
+    const late = note(3);
+    await again.append([late]); // admission stays live
+    expect(again.reactor.get(late.id)).toBeDefined();
+    await again.close();
   });
 
-  it("an admitted row whose signature changed in the file fails the open closed", async () => {
+  it("an admitted row whose signature changed in the file is set aside, never served", async () => {
     const path = sqliteHome();
     const gw = await boot(new SqliteBackend(path));
     const d = note(1);
@@ -255,7 +263,11 @@ describe("the journal is the authority over the rows", () => {
     const db = new Database(path);
     db.prepare("UPDATE deltas SET sig = ? WHERE id = ?").run(note(2).sig, d.id);
     db.close();
-    await expect(boot(new SqliteBackend(path))).rejects.toThrow(/admitted row mismatch/);
+    const backend = new SqliteBackend(path);
+    const again = await boot(backend);
+    expect(again.reactor.get(d.id)).toBeUndefined();
+    expect((await backend.quarantine()).map((r) => r.key)).toEqual([d.id]); // reported (§25)
+    await again.close();
   });
 
   it("a row the journal never admitted is not served", async () => {

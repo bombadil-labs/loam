@@ -104,6 +104,13 @@ export class MemoryBackend implements StoreBackend {
           return d === undefined ? [] : [d];
         });
       },
+      readAdmittedRowsDegraded: async (_peerId, ids) => {
+        this.assertOpen();
+        return ids.map((id) => {
+          const d = this.set.get(id);
+          return d === undefined ? { id, fault: "missing" } : { id, row: d };
+        });
+      },
       readHead: async (peerId) => {
         this.assertOpen();
         const j = this.journals.get(peerId);

@@ -630,6 +630,9 @@ export class Gateway {
       const opened = await openHostPeer(peerStore, peerId!);
       peer = opened.peer;
       replayed = opened.rows;
+      if (opened.unavailable.length > 0 && holdsJournals(backend)) {
+        backend.setAside?.(opened.unavailable);
+      }
       if (holdsJournals(backend)) {
         const admitted = new Set(replayed.map((d) => d.id));
         outsideJournal = [...(await backend.ids())].filter((id) => !admitted.has(id)).length;

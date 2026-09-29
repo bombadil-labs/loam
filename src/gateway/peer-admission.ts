@@ -30,23 +30,34 @@ export const peerIdOf = (author: string): string => author;
 export async function openHostPeer(
   store: DurableOrdinaryJournalStore,
   peerId: string,
-): Promise<{ peer: HostPeer; rows: Delta[] }> {
-  const opened = await OrdinaryJournalPeer.open(store, peerId);
+): Promise<{
+  peer: HostPeer;
+  rows: Delta[];
+  unavailable: readonly { id: string; reason: string }[];
+}> {
+  // Degraded, not refused (§25): a damaged admitted row is held out of serving and reported, while
+  // admission stays live. The verified journal copy is never served in its place.
+  const opened = await OrdinaryJournalPeer.open(store, peerId, { allowDegraded: true });
   if (opened.status === "rows-without-journal") {
     throw new Error(
       "peer journal: this store holds rows but no peer journal, so it cannot open as a single " +
         "peer. The trial path starts only from a fresh, empty store.",
     );
   }
-  if (opened.status !== "open") {
+  if (opened.status !== "open" && opened.status !== "degraded") {
     throw new Error(`peer journal: the open did not commit (${describe(opened)})`);
   }
-  // Arrival history keeps erased ids; only the ones still admitted are served.
-  const { base } = opened.peer.snapshot();
-  const order = base.arrivals.map((a) => a.id).filter((id) => base.admitted.has(id));
-  const byId = new Map((await store.readAdmittedRows(peerId, order)).map((d) => [d.id, d]));
-  const rows = order.map((id) => byId.get(id)!);
-  return { peer: { journal: opened.peer, store, tail: Promise.resolve() }, rows };
+  // Arrival history keeps erased ids; only the available admitted rows are served, in arrival order.
+  const available = opened.peer.availableDeltas();
+  const rows = opened.peer
+    .snapshot()
+    .base.arrivals.map((a) => available.get(a.id))
+    .filter((d): d is Delta => d !== undefined);
+  return {
+    peer: { journal: opened.peer, store, tail: Promise.resolve() },
+    rows,
+    unavailable: opened.status === "degraded" ? opened.unavailable : [],
+  };
 }
 
 // Another writer moved the journal's head. Nothing was admitted or refused; the caller reopens,

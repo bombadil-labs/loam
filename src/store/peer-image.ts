@@ -13,6 +13,8 @@ export interface JournalBackend extends StoreBackend {
   /** The peers whose journals live here. A journaled store opens only through its journal. */
   journalPeers(): Promise<string[]>;
   ids(): Promise<Set<string>>;
+  /** Report admitted rows the journal found unavailable, the way a boot read sets rows aside (§25). */
+  setAside?(rows: readonly { id: string; reason: string }[]): void;
 }
 
 export function holdsJournals(backend: StoreBackend): backend is JournalBackend {

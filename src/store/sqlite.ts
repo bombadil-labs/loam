@@ -28,7 +28,13 @@ import {
 } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "./backend.js";
 import { canonicalDelta } from "./canon.js";
-import { admit, previewOf, type QuarantinedRow, type RepairableBackend } from "./quarantine.js";
+import {
+  admit,
+  previewOf,
+  type QuarantinedRow,
+  type QuarantineReason,
+  type RepairableBackend,
+} from "./quarantine.js";
 
 interface DeltaRow {
   readonly id: string;
@@ -516,6 +522,24 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     return this.db.prepare("SELECT 1 FROM deltas WHERE id = ?").get(id) !== undefined;
   }
 
+  setAside(rows: readonly { id: string; reason: string }[]): void {
+    // A missing row has no bytes to set aside; a present one is reported the way a boot read
+    // reports it, with the journal's reason mapped onto the quarantine's.
+    const preview = this.db.prepare("SELECT claims FROM deltas WHERE id = ?");
+    const out: QuarantinedRow[] = [];
+    for (const { id, reason } of rows) {
+      const r = preview.get(id) as { claims: string } | undefined;
+      if (r === undefined) continue;
+      const why: QuarantineReason = /unparseable/i.test(reason)
+        ? "unparseable"
+        : /sig/i.test(reason)
+          ? "invalid-signature"
+          : "id-mismatch";
+      out.push({ key: id, reason: why, preview: previewOf(r.claims) });
+    }
+    this.lastQuarantine = out;
+  }
+
   async holds(id: string): Promise<boolean> {
     this.assertOpen();
     // An id whose truncation is owed may still have pre-delete page images in the `-wal`
@@ -669,6 +693,21 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
           }
         }
         return out;
+      },
+      readAdmittedRowsDegraded: async (_peerId, ids) => {
+        this.assertOpen();
+        // One answer per id: the stored row, or why it cannot be read. The journal compares each row
+        // with its verified copy and marks the rest unavailable.
+        return ids.map((id) => {
+          const row = rowFor.get(id) as DeltaRow | undefined;
+          if (row === undefined) return { id, fault: "missing" };
+          try {
+            const claims = parseClaims(JSON.parse(row.claims));
+            return { id, row: row.sig === null ? { id, claims } : { id, claims, sig: row.sig } };
+          } catch {
+            return { id, fault: "unparseable" };
+          }
+        });
       },
       readHead: async (peerId) => {
         this.assertOpen();
