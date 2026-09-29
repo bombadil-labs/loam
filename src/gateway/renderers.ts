@@ -18,7 +18,7 @@
 // of ADMITTED content addresses; what it hands a door is HTML or a refusal.
 
 import { seedSigner } from "./signer.js";
-import { authorForSeed, type Primitive } from "@bombadil/rhizomatic";
+import { authorForSeed, governedDeltas, type Primitive } from "@bombadil/rhizomatic";
 import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
 import { bytesEnvelope, findBytesByRef } from "./bytes.js";
 import { esmAddress } from "./esm.js";
@@ -297,9 +297,21 @@ const isRoute = (id: string): boolean => id.startsWith("renderer:");
 // latest registration per schema entity). Lawful slice only: in a governed store a foreign renderer
 // merges as data and mounts nothing (§8/§12 inert-by-default). A binding missing route/schema/bundle
 // binds nothing — unmounted, never a crash.
-export function readRenderers(reactor: Reactor, now: number, operator?: string): RendererBinding[] {
-  const negated = negatedAt(reactor, now, operator);
-  return latestPerRoute(lawfulSnapshot(reactor, now, operator), (d) => !negated(d.id));
+//
+// Given several law authors (a pool's own key and the hosts it selects, `lawAuthors`), their
+// bindings compete latest-per-route as one lawful slice, and any of them may strike one.
+export function readRenderers(
+  reactor: Reactor,
+  now: number,
+  operator?: string | readonly string[],
+): RendererBinding[] {
+  if (typeof operator !== "object") {
+    const negated = negatedAt(reactor, now, operator);
+    return latestPerRoute(lawfulSnapshot(reactor, now, operator), (d) => !negated(d.id));
+  }
+  const authors = new Set(operator);
+  const negated = reactor.negationPredicate(now, (n) => authors.has(n.claims.author));
+  return latestPerRoute(governedDeltas(reactor.snapshot(), now, authors), (d) => !negated(d.id));
 }
 
 /**

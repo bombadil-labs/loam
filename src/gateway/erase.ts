@@ -377,16 +377,37 @@ export function erasedInDeltas(
 
 // What a reading over a COMPOSED scope (a container over its pools) must not show: every id this
 // store refuses that appears anywhere in the scope, even when this store does not hold those bytes
-// itself; the scope's own lawful erasures; and the targets their held negations hold down.
+// itself; the scope's own lawful erasures; and the targets their held negations hold down. A pool
+// under its own key signs its own erasures, so `pools` names those keys (`poolGovernors`).
 export function erasedInScope(
   reactor: Reactor,
   operator: string | undefined,
   scope: readonly Delta[],
+  pools: readonly string[] = [],
 ): Set<string> {
   const byId = new Map(scope.map((d) => [d.id, d]));
   const hidden = erasedInDeltas(scope, operator);
+  for (const key of pools) {
+    if (key !== operator) for (const id of erasedInDeltas(scope, key)) hidden.add(id);
+  }
   for (const id of refusedIds(reactor, operator)) if (byId.has(id)) hidden.add(id);
   return withHeldDownTargets(hidden, (id) => byId.get(id));
+}
+
+/** The governing key of every pool attached beneath `gw`, at any depth. */
+export function poolGovernors(gw: Gateway): string[] {
+  const keys = new Set<string>();
+  const seen = new Set<Gateway>();
+  const walk = (g: Gateway): void => {
+    for (const pool of g.quarantinePools) {
+      if (seen.has(pool)) continue;
+      seen.add(pool);
+      if (pool.operatorAuthor !== undefined) keys.add(pool.operatorAuthor);
+      walk(pool);
+    }
+  };
+  walk(gw);
+  return [...keys];
 }
 
 // Adds, transitively, the target of every hidden negation that `get` can still find.
@@ -1098,7 +1119,10 @@ async function liveOpening(
     let stray = 0;
     for (const id of inventory) {
       if (owned.has(id) || gw.reactor.get(id) !== undefined) continue;
-      if (pool.reactor.get(id)?.claims.author === pool.operatorAuthor) continue;
+      // The pool's own law, or the host's (an order the host signed for this pool as receiver).
+      const author = pool.reactor.get(id)?.claims.author;
+      if (author !== undefined && (author === pool.operatorAuthor || author === gw.operatorAuthor))
+        continue;
       stray += 1;
     }
     if (stray > 0)

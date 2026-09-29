@@ -979,7 +979,7 @@ export class Gateway {
 
   // Every surviving renderer binding, latest per route, read live under this store's law.
   renderers(): RendererBinding[] {
-    return readRenderers(this.reactor, this.validityNow(), this.operatorAuthor);
+    return readRenderers(this.reactor, this.validityNow(), this.lawAuthors("renderers"));
   }
 
   // Declare lenses public (SPEC §12/§17/§23.8): the body — bare names pass, `Name@vN` freezes to the
