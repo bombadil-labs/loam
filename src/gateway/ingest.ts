@@ -64,7 +64,7 @@ import {
   slateDefect,
   slateRefusal,
 } from "./slate.js";
-import { readTrustPolicy } from "./trust.js";
+import { declaresTrust, readTrustPolicy } from "./trust.js";
 import { governedProgram, needsLowering } from "./governed-trust.js";
 import { recordPrevious, recoveryDefect, userGroundOf } from "./user-root.js";
 import { hasMemberOf, lowerMembershipJson } from "./member-of.js";
@@ -415,10 +415,17 @@ async function appendAdmitted(
 // closes the offered batch over what this predicate admits (see `federateImpl`) — otherwise a
 // rostered pull takes a post and refuses the off-roster retraction that withdrew it.
 export function admitForImpl(gw: Gateway): (d: Delta) => boolean {
-  const policy = readTrustPolicy(gw.reactor, gw.validityNow(), gw.operatorAuthor);
+  // The nearest key in the chain (own first, then selected hosts) that declares a policy governs.
+  const now = gw.validityNow();
+  const authors = gw.lawAuthors("trust");
+  const governor = authors.find((a) => declaresTrust(gw.reactor, now, a)) ?? authors[0];
+  const policy = readTrustPolicy(gw.reactor, now, governor);
   if (policy.mode === "open") return () => true;
   if (policy.mode === "closed") return () => false;
-  return (d) => d.claims.author === gw.operatorAuthor || policy.roster.has(d.claims.author);
+  // A roster passes the keys selected for trust: the child's own and, where it selects them, its
+  // hosts' seeded copies. An inbox selects none, so only its own key passes.
+  const trusted = new Set(authors);
+  return (d) => trusted.has(d.claims.author) || policy.roster.has(d.claims.author);
 }
 
 // A filter narrows what you SEE; it must never resurrect what was STRUCK (SPEC §28.4, ticket T38).

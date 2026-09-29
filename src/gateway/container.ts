@@ -22,6 +22,7 @@
 // gates on the knob and never from the roster.
 
 import { seedSigner } from "./signer.js";
+import { hostChain, inboxLaw, seededLaw } from "./child-law.js";
 import {
   authorForSeed,
   parseTerm,
@@ -1701,6 +1702,10 @@ async function openSeparate(
     ...(probationary && gw.options.pens !== undefined ? { pens: gw.options.pens } : {}),
   });
   pool.attachedTo = gw;
+  // The child's law policy: an inbox selects nothing from its host; every other pool holds seeded
+  // host copies and selects the host for them.
+  const hosts = hostChain(gw.signer.author, gw.childLaw);
+  pool.childLaw = spec.entity?.startsWith("inbox:") ? inboxLaw(hosts) : seededLaw(hosts);
   pool.readUsersFrom(gw.userGroundHost());
   // A probationary pool KNOWS it is one, for the renderer door's sequestered frame (SPEC §24.7).
   if (probationary) {

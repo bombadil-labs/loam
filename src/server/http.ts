@@ -553,12 +553,14 @@ function registerStanding(
   } catch {
     return undefined; // an actor that names no key holds no grant
   }
-  const granted = registerPrefixesOf(
-    gateway.reactor,
-    gateway.validityNow(),
-    author,
-    gateway.operatorAuthor,
-  );
+  // A container mount's grants: its own, and seeded host grants where it selects the host.
+  const granted = [
+    ...new Set(
+      gateway
+        .lawAuthors("grants")
+        .flatMap((law) => registerPrefixesOf(gateway.reactor, gateway.validityNow(), author, law)),
+    ),
+  ];
   return granted.length === 0 ? undefined : granted;
 }
 
@@ -585,12 +587,15 @@ function federateStanding(
   } catch {
     return undefined;
   }
-  const containers = federateContainersOf(
-    gateway.reactor,
-    gateway.validityNow(),
-    author,
-    gateway.operatorAuthor,
-  );
+  const containers = [
+    ...new Set(
+      gateway
+        .lawAuthors("grants")
+        .flatMap((law) =>
+          federateContainersOf(gateway.reactor, gateway.validityNow(), author, law),
+        ),
+    ),
+  ];
   return containers.length === 0 ? undefined : containers;
 }
 
