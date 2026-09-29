@@ -1353,7 +1353,8 @@ export class Gateway {
   async revokeConnection(opts: {
     inbox: Container;
     connectionKey: string;
-    ownerSeed: string;
+    ownerSeed?: string;
+    asPool?: boolean;
   }): Promise<void> {
     return revokeConnectionImpl(opts);
   }

@@ -1006,7 +1006,7 @@ async function liveOpening(
     let stray = 0;
     for (const id of inventory) {
       if (owned.has(id) || gw.reactor.get(id) !== undefined) continue;
-      if (pool.reactor.get(id)?.claims.author === gw.operatorAuthor) continue;
+      if (pool.reactor.get(id)?.claims.author === pool.operatorAuthor) continue;
       stray += 1;
     }
     if (stray > 0)
