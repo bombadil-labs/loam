@@ -70,6 +70,7 @@ export function buildPoolCarry(pool: Gateway): Promise<CarryResult> {
     };
     try {
       await pool.flush(); // every write that started before the fence is durable, or failed
+      await pool.drainPurges(); // and every purge already under way has settled
       const result = await capture(pool);
       if (result.status !== "carry") await release();
       return result.status === "carry" ? { ...result, release } : result;

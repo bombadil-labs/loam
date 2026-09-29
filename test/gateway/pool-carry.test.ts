@@ -158,4 +158,40 @@ describe("an existing pool's carry is complete", () => {
     expect(pool.fence).toBeUndefined(); // an undisposed carry lifts its fence
     await gw.close();
   });
+
+  it("a purge already under way settles before the carry reads, so no captured byte vanishes", async () => {
+    let entered!: () => void;
+    const inPurge = new Promise<void>((r) => (entered = r));
+    let open!: () => void;
+    const gate = new Promise<void>((r) => (open = r));
+    // A store whose purge pauses after it starts: an erasure worker caught mid-mutation.
+    class Gated extends MemoryBackend {
+      override async purge(ids: Iterable<string>): Promise<number> {
+        const batch = [...ids];
+        entered();
+        await gate;
+        return super.purge(batch);
+      }
+    }
+    const { gw, pool } = await hostAndPool(new Gated());
+    const target = note(10);
+    const bystander = note(11);
+    await gw.append([target, bystander]);
+    await pool.federate([target, bystander], { admit: () => true });
+    const erasing = gw.erase(target.id).catch(() => undefined);
+    await inPurge; // the pool's purge has started and is paused
+    const carrying = buildPoolCarry(pool);
+    setTimeout(open, 30);
+    const result = await carrying;
+    await erasing;
+    if (result.status !== "carry") throw new Error(result.reason);
+    // the carry read after the purge settled: the target is neither a holding nor owed
+    expect(result.carry.holdings.some((d) => d.id === target.id)).toBe(false);
+    expect(result.carry.obligations).toEqual([]);
+    // and every byte it captured is still held
+    for (const d of result.carry.holdings) expect(await pool.backend.holds(d.id)).toBe(true);
+    expect(result.carry.holdings.some((d) => d.id === bystander.id)).toBe(true);
+    await result.release();
+    await gw.close();
+  });
 });

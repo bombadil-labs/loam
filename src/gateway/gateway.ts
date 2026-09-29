@@ -1370,6 +1370,27 @@ export class Gateway {
    */
   fence: { readonly reason: string; readonly held: Delta[] } | undefined = undefined;
 
+  // Byte mutations in flight. A fence refuses new ones at the mutation itself, and a carry drains
+  // the ones already started, so none can delete a byte the carry captured.
+  private readonly purging = new Set<Promise<unknown>>();
+
+  /** @internal — purge `ids` from this surface's store: the one road to a byte mutation. */
+  purgeBytes(ids: readonly string[]): Promise<number> {
+    this.assertUnfenced("a purge");
+    const run = this.backend.purge(ids);
+    this.purging.add(run);
+    void run.then(
+      () => this.purging.delete(run),
+      () => this.purging.delete(run),
+    );
+    return run;
+  }
+
+  /** @internal — wait until every byte mutation already started has settled. */
+  async drainPurges(): Promise<void> {
+    while (this.purging.size > 0) await Promise.allSettled([...this.purging]);
+  }
+
   /** @internal — refuse a byte mutation while a fence stands. */
   assertUnfenced(what: string): void {
     if (this.fence !== undefined) {

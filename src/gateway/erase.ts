@@ -1276,7 +1276,7 @@ export async function eraseImpl(
   // erasure and the sweep to every attached pool — one tier's fault becoming every replica's leak.
   let localPurge: unknown;
   try {
-    await gw.backend.purge([id]);
+    await gw.purgeBytes([id]);
   } catch (err) {
     localPurge = err;
   }
@@ -1536,7 +1536,7 @@ export async function eraseReplicaImpl(
   }
   let localPurge: unknown;
   try {
-    await gw.backend.purge([id]);
+    await gw.purgeBytes([id]);
   } catch (err) {
     localPurge = err; // collected below — a pool tier's fault must not starve its own children
   }

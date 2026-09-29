@@ -1915,7 +1915,7 @@ async function openSeparate(
         }
         if (ids.size > 0) {
           const batch = [...ids];
-          await target.backend.purge(batch);
+          await target.purgeBytes(batch);
           // The verdict, H9-closed: a probe that cannot answer has proven nothing, so a
           // rejecting store refuses the drop exactly like a retaining one.
           let survivors: Set<string>;
