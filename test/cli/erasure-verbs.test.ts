@@ -1234,6 +1234,9 @@ describe("T206 (d) — `loam erasures` reads the receipt, never the record", () 
         ),
         OP_SEED,
       );
+      // The door pays the purge an order owes; this store's purge fails once, so the order stands
+      // over bytes that are still here.
+      vi.spyOn(gw.backend, "purge").mockRejectedValueOnce(new Error("the disk refused the purge"));
       await gw.append([tomb]);
       return { target: target.id, tomb: tomb.id };
     });
@@ -1968,8 +1971,8 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     // THE STATE A FAILED FIRST ORDER LEAVES: the erasure landed and the sweep did not run. §11
     // lands the receipt before it purges, so this is what an interrupted erase looks like on disk,
     // and the retry the help text calls safe walks straight into it. Staged by appending the
-    // receipt through the ordinary door rather than by breaking a tier, which no fixture can do
-    // portably — the door validates it exactly as it would the real one.
+    // receipt through the ordinary door while the store's purge fails once — the door validates
+    // it exactly as it would the real one.
     const world = await ground(home, async (gw) => {
       const target = await note(gw, "note:kit", "title", "kit-erased-marker");
       await note(gw, "note:vera", "title", "vera-bystander-marker");
@@ -1979,6 +1982,9 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
         ),
         OP_SEED,
       );
+      // The door pays the purge an order owes; this store's purge fails once, so the order stands
+      // over bytes that are still here.
+      vi.spyOn(gw.backend, "purge").mockRejectedValueOnce(new Error("the disk refused the purge"));
       await gw.append([tomb]);
       return { target: target.id, tomb: tomb.id };
     });
@@ -2033,6 +2039,9 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
         ),
         OP_SEED,
       );
+      // The door pays the purge an order owes; this store's purge fails once, so the order stands
+      // over bytes that are still here.
+      vi.spyOn(gw.backend, "purge").mockRejectedValueOnce(new Error("the disk refused the purge"));
       await gw.append([tomb]);
       // A declared SEPARATE container that nothing attaches. §27.7's completeness guard refuses the
       // sweep up front rather than report a completeness it never verified.

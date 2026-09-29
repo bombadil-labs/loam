@@ -9,6 +9,7 @@ import { localChannelEvidence } from "../../src/federation/local-channel-events.
 import { toWire } from "../../src/federation/wire.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
+import { plant } from "../helpers/plant.js";
 
 const SEED = "cc".repeat(32);
 const FROM = "https://peer.example/default";
@@ -82,7 +83,11 @@ describe("T288 resumed closed incarnation retains its identity", () => {
       expect(close).toBeDefined();
       const rootBackend = new MemoryBackend(),
         poolBackend = new MemoryBackend();
-      await rootBackend.append(await original.backend.deltasSince(new Set()));
+      await plant(
+        rootBackend,
+        await original.backend.deltasSince(new Set()),
+        original.operatorAuthor,
+      );
       await poolBackend.append(await pool.backend.deltasSince(new Set()));
       const restored = await Gateway.open(rootBackend, {
         seed: SEED,

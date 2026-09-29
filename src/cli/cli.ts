@@ -1162,22 +1162,23 @@ async function restoreIntoJournal(
   const rows = (await archive.deltasSince(new Set())).filter((d) => !dead.has(d.id));
   if (rows.length === 0) return 0;
   const { peer } = await openHostPeer(primary.journalStore(), authorForSeed(seed));
-  const orders = rows.filter((d) => isErasure(d.claims));
-  const ordinary = rows.filter((d) => !isErasure(d.claims));
+  // One transfer per delta: readers order events by arrival, and one transfer's arrivals are
+  // simultaneous. The archive keeps no arrival order, so signed time order stands in for it.
+  const ordered = [...rows].sort(
+    (a, b) => a.claims.timestamp - b.claims.timestamp || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
   const at = Date.now();
-  if (orders.length === 0) await admitLocal(peer, ordinary, at, () => false);
-  else {
-    await admitErasureOrders(
-      peer,
-      orders.map((d) => ({
-        delta: d,
-        targetId: erasureTarget(d.claims)!,
-        surfaceHoldsBytes: false,
-      })),
-      "local",
-      at,
-      ordinary,
-    );
+  for (const d of ordered) {
+    if (!isErasure(d.claims)) await admitLocal(peer, [d], at, () => false);
+    else {
+      const targetId = erasureTarget(d.claims)!;
+      await admitErasureOrders(
+        peer,
+        [{ delta: d, targetId, surfaceHoldsBytes: false }],
+        "local",
+        at,
+      );
+    }
   }
   return rows.length;
 }
@@ -1258,8 +1259,7 @@ async function cmdServe(
         authorForSeed(seed),
       );
       // A host store lives in its peer journal, and the archive keeps rows only. So a lost primary
-      // is restored through a new journal: the archive's living rows enter as one local transfer,
-      // erasure orders first. Their arrival order before the crash is not kept.
+      // is restored through a new journal, one local arrival per living row, in signed time order.
       const restored = await restoreIntoJournal(backend, archive, dead, seed);
       if (restored > 0) {
         io.out(`loam: healed — ${restored} deltas restored from the archive into a new journal`);

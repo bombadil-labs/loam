@@ -53,6 +53,7 @@ import {
   isErasure,
   refusedIds,
   erasuresOfErasures,
+  settleOwedPurges,
 } from "./erase.js";
 import {
   admitErasureOrders,
@@ -97,14 +98,18 @@ import {
 // this store; what the delta points at is not authorization's business (entities are unowned —
 // trust is the reader's). Authorization reads the state as it stands before the batch — a batch
 // cannot bootstrap its own permissions.
-export async function appendImpl(gw: Gateway, deltas: Iterable<Delta>): Promise<AppendReceipt> {
+export async function appendImpl(
+  gw: Gateway,
+  deltas: Iterable<Delta>,
+  opts: { settle?: boolean } = {},
+): Promise<AppendReceipt> {
   const batch = [...deltas];
   const protectedIds = protectedIngressIds(gw.reactor, batch);
   if (batch.some((d) => protectedIds.has(d.id)))
     throw new Error(
       "append rejected: protected local channel event/control requires the local service",
     );
-  return appendValidated(gw, batch);
+  return appendValidated(gw, batch, opts.settle ?? true);
 }
 
 type LifecycleEventInput =
@@ -175,7 +180,7 @@ async function persistChannelEvent(
   const parsed = parseLocalEvent(d, gw.operatorAuthor);
   if (parsed === undefined || (parsed.action === "open" && !openingAgrees(gw, parsed.opening)))
     throw new Error("invalid local channel event association");
-  const receipt = await appendValidated(gw, [d]);
+  const receipt = await appendValidated(gw, [d], true);
   if (receipt.accepted + receipt.duplicates !== 1 || !sameVerifiedDelta(gw.reactor.get(d.id), d))
     throw new Error("local channel event did not ingest");
   return d;
@@ -252,15 +257,21 @@ export async function receiveChannelOfferInCommit(
 export async function appendLocalErasure(gw: Gateway, erasure: Delta): Promise<void> {
   if (localEraseTarget(erasure, gw.reactor, gw.operatorAuthor) === undefined)
     throw new Error("invalid local erasure control");
-  await appendValidated(gw, [erasure]);
+  await appendValidated(gw, [erasure], false); // the erase that sent it pays the purge
   if (!sameVerifiedDelta(gw.reactor.get(erasure.id), erasure))
     throw new Error("local erasure did not ingest");
 }
-async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<AppendReceipt> {
+async function appendValidated(
+  gw: Gateway,
+  deltas: Iterable<Delta>,
+  settle: boolean,
+): Promise<AppendReceipt> {
   const batch = [...deltas];
   const { receipt, fresh } = await admitting(gw, () =>
     retrying(gw, (clock) => appendAdmitted(gw, batch, clock)),
   );
+  // An erasure order admitted here owes its target's purge (the journal recorded it).
+  if (settle && fresh.some((d) => isErasure(d.claims))) await settleOwedPurges(gw);
   // A landing slate that closes `read` ends live subscriptions the way an erase does (SPEC §29.3).
   // `reseat()` already solves precisely this one phase later — "a parked reader must not keep serving
   // a view built on the pre-erase ground" — and the reason is identical here: nothing in the slate's
@@ -938,6 +949,8 @@ export async function federateImpl(
   const { all, now, admitted, rejected, acceptedIds, admittedIds } = await admitting(gw, () =>
     retrying(gw, (clock) => federateAdmitted(gw, offered, opts, clock)),
   );
+  // An erasure order that crossed owes its target's purge here, as at append.
+  if (admitted.some((d) => isErasure(d.claims))) await settleOwedPurges(gw);
   // As at append: a batch that closes reads (a slate record or an erasure) touches no watched
   // entity, so open streams end and readers resubscribe into the narrowed reading.
   const freshIds = new Set(acceptedIds);

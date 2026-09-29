@@ -30,6 +30,8 @@ import {
   governedBootstrap,
   pickLatest,
 } from "./fixtures.js";
+import { plant } from "../helpers/plant.js";
+import { FaultableBackend } from "../helpers/faultable-backend.js";
 
 const QUERY = `{
   plant(entity: "${FERN}") {
@@ -83,7 +85,7 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
 
   it("boots by replaying the backend: a store written yesterday answers today", async () => {
     const backend = new MemoryBackend();
-    await backend.append(garden);
+    await plant(backend, garden);
     const gateway = await Gateway.open(backend);
     gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     expect((await queryPlant(gateway)).height).toBe(34);
@@ -288,11 +290,11 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
   });
 
   it("a failed write means nothing happened: not ingested, not served, retry welcome", async () => {
-    class FailingBackend extends MemoryBackend {
+    class FailingBackend extends FaultableBackend {
       failNow = false;
-      override append(deltas: Iterable<Delta>): Promise<number> {
-        if (this.failNow) return Promise.reject(new Error("disk failure"));
-        return super.append(deltas);
+      // eslint-disable-next-line @typescript-eslint/require-await
+      override async checkWrite(): Promise<void> {
+        if (this.failNow) throw new Error("disk failure");
       }
     }
     const backend = new FailingBackend();

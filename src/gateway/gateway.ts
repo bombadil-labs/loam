@@ -35,6 +35,7 @@ import {
   JournalConflict,
   openHostPeer,
   peerIdOf,
+  rereadHostPeer,
   type HostPeer,
 } from "./peer-admission.js";
 import { stampOn, type Stamp } from "./stamp.js";
@@ -224,6 +225,9 @@ export interface QueryResult {
   errors?: string[];
 }
 
+// How many times the write-through catches up and retries before it reports a write failure.
+const WRITE_THROUGH_RETRIES = 8;
+
 export interface GatewayOptions {
   /**
    * The ordinary journal store. Given, this gateway is a substrate peer under
@@ -231,6 +235,8 @@ export interface GatewayOptions {
    * host passes this; pools, quarantine and scratch gateways never do.
    */
   readonly peerStore?: DurableOrdinaryJournalStore;
+  /** @internal — a pool opens on its rows, not as a peer, until it takes its own key. */
+  readonly unjournaled?: boolean;
   /**
    * Where a FEDERATION CHANNEL's pool keeps its bytes, by pool name. A separate container defaults
    * to a fresh in-memory backend, which is right for a quarantine (transient by design) and WRONG
@@ -582,13 +588,15 @@ export class Gateway {
         .then(async () => {
           if (peer === undefined) return void (await this.backend.append([d]));
           // The same conflict rule as the doors: catch up, then retry at the first receive time.
+          // A catch-up that brings `d` in means another writer committed it: nothing is owed.
           const at = this.now();
           for (let attempt = 0; ; attempt += 1) {
             try {
               return await admitLocal(peer, [d], at, () => false);
             } catch (err) {
-              if (!(err instanceof JournalConflict) || attempt >= 3) throw err;
+              if (!(err instanceof JournalConflict) || attempt >= WRITE_THROUGH_RETRIES) throw err;
               await catchUp(this);
+              if (peer.journal.availableDeltas().has(d.id)) return;
             }
           }
         })
@@ -628,7 +636,12 @@ export class Gateway {
             `(${peerId}) names no journal here. Open it with its own operator seed.`,
         );
       }
-      if (peerStore === undefined && journals.length > 0) {
+      // A seeded open is a host's, and a host opens only as a peer: a fresh store starts its
+      // journal, and a store with rows and no journal is refused. Only a pool, which takes its
+      // own key later (step 6), still opens on the rows.
+      if (peerStore === undefined && journals.length === 0 && peerId !== undefined) {
+        if (options.unjournaled !== true) peerStore = backend.journalStore();
+      } else if (peerStore === undefined && journals.length > 0) {
         if (peerId === undefined) {
           if (journals.length > 1) {
             throw new Error(
@@ -652,7 +665,8 @@ export class Gateway {
       }
       if (holdsJournals(backend)) {
         const admitted = new Set(replayed.map((d) => d.id));
-        outsideJournal = [...(await backend.ids())].filter((id) => !admitted.has(id)).length;
+        const rows = await (backend.journalRowIds?.() ?? backend.ids());
+        outsideJournal = [...rows].filter((id) => !admitted.has(id)).length;
       }
     }
     for (const d of replayed) {
@@ -1462,9 +1476,7 @@ export class Gateway {
     // On the journal path the admitted set is the journal's, never the raw rows.
     const readAll = async (): Promise<Delta[]> => {
       if (this.peer === undefined) return this.backend.deltasSince(new Set());
-      const { peer, rows } = await openHostPeer(this.peer.store, this.peer.journal.peerId);
-      this.peer.journal = peer.journal;
-      return rows;
+      return rereadHostPeer(this.peer);
     };
     for (const d of await readAll()) {
       if (reactor.ingest(d).status === "rejected") {

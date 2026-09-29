@@ -45,9 +45,11 @@ describe("a previous-format store is refused, not booted empty", () => {
     };
     const path = join(tmp, "pre-mint.db");
     copyFileSync(join(golden, "store.db"), path); // never write beside the checked-in artifact
-    await expect(Gateway.boot(new SqliteBackend(path), genesis())).rejects.toThrow(
+    const refused = new SqliteBackend(path);
+    await expect(Gateway.boot(refused, genesis())).rejects.toThrow(
       /holds rows but no peer journal.*earlier Loam/s,
     );
+    await refused.close(); // a refused open leaves the handle with its caller
 
     const backend = new SqliteBackend(path);
     expect(await backend.deltasSince(new Set())).toEqual([]);

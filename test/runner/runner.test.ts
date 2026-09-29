@@ -16,6 +16,7 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER_SEED, SURVEYOR_SEED, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
+import { plant } from "../helpers/plant.js";
 
 const RUNNER_SEED = "0d".repeat(32);
 const RUNNER = authorForSeed(RUNNER_SEED);
@@ -125,14 +126,15 @@ describe("the runner: definitions in the store, execution in a peer client", () 
     await gateway.close();
   });
 
-  it("defense in depth: a definition planted while ungoverned does not install once governed", async () => {
+  it("defense in depth: a definition planted around the door does not install once governed", async () => {
     const OPERATOR_SEED = "0e".repeat(32);
     const backend = new MemoryBackend();
-    // planted while ungoverned — welcomed, since there was no operator to answer to
-    const free = await Gateway.open(backend);
-    free.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
-    await free.append([signClaims(bindingDefinitionClaims(SPEC, RUNNER, 1), RUNNER_SEED)]);
-    await free.flush();
+    // planted around the door, as rows from ungoverned days would arrive: no operator blessed it
+    await plant(
+      backend,
+      [signClaims(bindingDefinitionClaims(SPEC, RUNNER, 1), RUNNER_SEED)],
+      authorForSeed(OPERATOR_SEED),
+    );
 
     // an operator opens the same store and attaches a runner: the poison does not install
     const governed = await Gateway.open(backend, { seed: OPERATOR_SEED });
@@ -142,7 +144,6 @@ describe("the runner: definitions in the store, execution in a peer client", () 
       implementations: { "fn:avgHeight": avgHeight },
     });
     expect(runner.installed).toEqual([]); // the operator blessed nothing
-    await free.close();
     await governed.close();
   });
 

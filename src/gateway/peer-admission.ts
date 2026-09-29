@@ -26,6 +26,8 @@ export interface HostPeer {
 // A Loam author is already a canonical PeerId (`ed25519:<hex>`): the peer IS its governing key.
 export const peerIdOf = (author: string): string => author;
 
+const OPEN_RETRIES = 5;
+
 // Open the journal. Returns the peer and the rows it admitted, in arrival order.
 export async function openHostPeer(
   store: DurableOrdinaryJournalStore,
@@ -37,7 +39,13 @@ export async function openHostPeer(
 }> {
   // Degraded, not refused (§25): a damaged admitted row is held out of serving and reported, while
   // admission stays live. The verified journal copy is never served in its place.
-  const opened = await OrdinaryJournalPeer.open(store, peerId, { allowDegraded: true });
+  // An open can commit (a first journal, a recovery step), so another writer can move the head
+  // under it. That is a conflict, not a fault: open again, a bounded number of times.
+  let opened = await OrdinaryJournalPeer.open(store, peerId, { allowDegraded: true });
+  for (let attempt = 1; opened.status === "conflict" && attempt < OPEN_RETRIES; attempt += 1) {
+    opened = await OrdinaryJournalPeer.open(store, peerId, { allowDegraded: true });
+  }
+  if (opened.status === "conflict") throw new JournalConflict("the peer journal kept moving");
   if (opened.status === "rows-without-journal") {
     throw new Error(
       "peer journal: this store holds rows but no peer journal. It was written by an earlier " +
@@ -60,19 +68,31 @@ export async function openHostPeer(
   };
 }
 
+// Every step that reads or replaces `peer.journal` runs in the peer's one queue: a reopen that
+// swapped the journal under a commit in flight would leave that commit on a stale head.
+function queued<T>(peer: HostPeer, fn: () => Promise<T>): Promise<T> {
+  const run = peer.tail.then(fn);
+  peer.tail = run.catch(() => {});
+  return run;
+}
+
 // Another writer moved the journal's head. Nothing was admitted or refused; the caller reopens,
 // re-runs its checks and retries with the same receive time and origin.
 export class JournalConflict extends Error {}
 
 // Reopen at the latest head. Returns the admitted rows this process does not hold yet, in arrival
 // order.
-export async function reopenHostPeer(
-  peer: HostPeer,
-  holds: (id: string) => boolean,
-): Promise<Delta[]> {
-  const { peer: fresh, rows } = await openHostPeer(peer.store, peer.journal.peerId);
-  peer.journal = fresh.journal;
-  return rows.filter((d) => !holds(d.id));
+export function reopenHostPeer(peer: HostPeer, holds: (id: string) => boolean): Promise<Delta[]> {
+  return rereadHostPeer(peer).then((rows) => rows.filter((d) => !holds(d.id)));
+}
+
+// Reopen at the latest head, in the queue. Returns every admitted row, in arrival order.
+export function rereadHostPeer(peer: HostPeer): Promise<Delta[]> {
+  return queued(peer, async () => {
+    const { peer: fresh, rows } = await openHostPeer(peer.store, peer.journal.peerId);
+    peer.journal = fresh.journal;
+    return rows;
+  });
 }
 
 const LOCAL: ArrivalOrigin = { kind: "local" };
@@ -119,7 +139,7 @@ function transfer(
   isErasure: (d: Delta) => boolean,
   mode: "atomic" | "individual",
 ): Promise<OrdinaryJournalAdmissionResult> {
-  const run = peer.tail.then(() =>
+  return queued(peer, () =>
     peer.journal.admit({
       offered,
       origin,
@@ -131,8 +151,6 @@ function transfer(
       capacity: Number.MAX_SAFE_INTEGER,
     }),
   );
-  peer.tail = run.catch(() => {});
-  return run;
 }
 
 function describe(r: { status: string; reason?: string; fault?: string }): string {
@@ -149,7 +167,7 @@ export async function admitErasureOrders(
   arrivedAt: number,
   ordinary: readonly Delta[] = [],
 ): Promise<Set<string>> {
-  const run = peer.tail.then(() =>
+  const result = await queued(peer, () =>
     peer.journal.admitErasures({
       orders,
       // One transfer: its orders are considered before its ordinary deltas (SPEC-6), so a target
@@ -166,8 +184,6 @@ export async function admitErasureOrders(
       authorize: () => true,
     }),
   );
-  peer.tail = run.catch(() => {});
-  const result = await run;
   if (result.status === "conflict") throw new JournalConflict("the peer journal moved");
   if (result.status !== "committed") {
     throw new Error(`erasure refused by the peer journal: ${describe(result)}`);
@@ -187,13 +203,15 @@ export async function reportPurged(
   targetId: string,
   report: { readonly status: "removed" } | { readonly status: "failed"; readonly fault: string },
 ): Promise<void> {
-  const owed = peer.journal
-    .snapshot()
-    .obligations.find((o) => o.targetId === targetId && o.status !== "removed");
-  if (owed === undefined) return;
-  const run = peer.tail.then(() => peer.journal.reportPurge(targetId, owed.generation, report));
-  peer.tail = run.catch(() => {});
-  const result = await run;
+  const result = await queued(peer, async () => {
+    const owed = peer.journal
+      .snapshot()
+      .obligations.find((o) => o.targetId === targetId && o.status !== "removed");
+    return owed === undefined
+      ? undefined
+      : peer.journal.reportPurge(targetId, owed.generation, report);
+  });
+  if (result === undefined) return;
   if (result.status === "conflict") throw new JournalConflict("the peer journal moved");
   if (result.status === "absence-refuted") {
     throw new Error(`the bytes of ${targetId} are not proven gone; the purge stays owed`);
@@ -206,9 +224,7 @@ export async function reportPurged(
 // Replace the journal's payload-bearing frames with a checkpoint of the current state, so an
 // erased target's payload leaves the frames that admitted it. Its purge cannot settle before this.
 export async function rebaseHostPeer(peer: HostPeer): Promise<void> {
-  const run = peer.tail.then(() => peer.journal.rebase());
-  peer.tail = run.catch(() => {});
-  const result = await run;
+  const result = await queued(peer, () => peer.journal.rebase());
   if (result.status === "conflict") throw new JournalConflict("the peer journal moved");
   if (result.status !== "durable") {
     throw new Error(`rebase not committed: ${result.fault}`);

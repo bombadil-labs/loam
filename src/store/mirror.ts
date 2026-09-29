@@ -103,6 +103,16 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
   // rules as for append), and a purge settles only if the shadow tier holds no copy either.
   #journal: DurableOrdinaryJournalStore | undefined;
 
+  async journalRowIds(): Promise<Set<string>> {
+    if (!holdsJournals(this.primary))
+      throw new Error("mirror: the primary tier keeps no peer journal");
+    return this.primary.ids();
+  }
+
+  keepsJournals(): boolean {
+    return holdsJournals(this.primary);
+  }
+
   async journalPeers(): Promise<string[]> {
     return holdsJournals(this.primary) ? this.primary.journalPeers() : [];
   }

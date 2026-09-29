@@ -7,6 +7,7 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { FaultableBackend } from "../helpers/faultable-backend.js";
 import { FERN, observed } from "../spike/garden.js";
 import { withStamp } from "../../src/gateway/stamp.js";
+import { plant } from "../helpers/plant.js";
 
 const SEED = "cc".repeat(32);
 const inContext = (d: Delta, context: string) =>
@@ -116,7 +117,7 @@ describe("T288 R2 regression controls", () => {
         SEED,
       );
       // Trusted corrupted restore, deliberately outside guarded federation.
-      await gw.backend.append([unsupported]);
+      await plant(gw.backend, [unsupported]);
       gw.reactor.ingest(unsupported);
       expect(localChannelEvidence(gw, ch.name)).toEqual({
         state: "unavailable",

@@ -58,6 +58,7 @@ import {
   type Terms,
 } from "../../src/gateway/leeway.js";
 import { withStamp } from "../../src/gateway/stamp.js";
+import { plant } from "../helpers/plant.js";
 
 const OP_SEED = "b7".repeat(32);
 const OP = authorForSeed(OP_SEED);
@@ -205,7 +206,7 @@ describe("§58 — a leeway is a declaration on the container", () => {
     const withSeeded = async (make: (op: string) => Delta[]): Promise<Gateway> => {
       const backend = new MemoryBackend();
       const gw = await open(backend);
-      await backend.append(make(gw.operatorAuthor!));
+      await plant(backend, make(gw.operatorAuthor!));
       return open(backend);
     };
 
@@ -531,7 +532,7 @@ describe("§58 — a listing refresh carries a standing leeway forward", () => {
     );
     // Seeded while `gw` still holds the backend, then read by a SECOND gateway: closing this one
     // would close the store under it. `gw` is not used again after this point.
-    await backend.append([
+    await plant(backend, [
       signClaims(
         {
           ...base,

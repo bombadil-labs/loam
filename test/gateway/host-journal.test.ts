@@ -146,6 +146,28 @@ describe("a host opened with a peer journal admits through it", () => {
     await again.close();
   });
 
+  for (const door of ["append", "federate"] as const) {
+    it(`an operator order admitted at the ${door} door pays its purge; a bystander stays`, async () => {
+      const backend = new SqliteBackend(sqliteHome());
+      const gw = await boot(backend);
+      const target = note(3);
+      const bystander = note(4);
+      await gw.append([target, bystander]);
+      const order = signClaims(eraseClaims(target.id, OP, OP, 70_000), SEED);
+      if (door === "append") await gw.append([order]);
+      else await gw.federate([order], { admit: () => true });
+      // bytes: the target is gone, the bystander is held
+      expect(await backend.holds(target.id)).toBe(false);
+      expect(await backend.holds(bystander.id)).toBe(true);
+      // journal: the order is admitted, the target refused, and nothing is owed
+      const state = await stateOf(backend.journalStore());
+      expect(state.base.admitted.has(order.id)).toBe(true);
+      expect(state.base.refusedIds.has(target.id)).toBe(true);
+      expect(state.obligations.filter((o) => o.status !== "removed")).toEqual([]);
+      await gw.close();
+    });
+  }
+
   it("erase through the journal: the plaintext leaves every byte of the file, then settles", async () => {
     const path = sqliteHome();
     const backend = new SqliteBackend(path);
@@ -242,8 +264,28 @@ describe("the journal is the authority over the rows", () => {
     await plain.append([note(1)]); // rows written by a store that never had an image
     await plain.close();
     const hash = fileHash(path);
-    await expect(boot(new SqliteBackend(path))).rejects.toThrow(/rows but no peer journal/);
+    const refused = new SqliteBackend(path);
+    await expect(boot(refused)).rejects.toThrow(/rows but no peer journal/);
+    await refused.close();
     expect(fileHash(path)).toBe(hash);
+  });
+
+  it("a seeded open is a host's: rows with no journal are refused; a fresh store starts one", async () => {
+    const path = sqliteHome();
+    const plain = new SqliteBackend(path);
+    await plain.append([note(1)]);
+    await plain.close();
+    const hash = fileHash(path);
+    const refused = new SqliteBackend(path);
+    await expect(Gateway.open(refused, { seed: SEED })).rejects.toThrow(/rows but no peer journal/);
+    await refused.close();
+    expect(fileHash(path)).toBe(hash);
+    const fresh = new MemoryBackend();
+    const gw = await Gateway.open(fresh, { seed: SEED });
+    expect(await fresh.journalPeers()).toEqual([OP]);
+    await gw.append([note(2)]);
+    expect((await stateOf(fresh.journalStore())).base.admitted.has(note(2).id)).toBe(true);
+    await gw.close();
   });
 
   it("an admitted row missing from the store degrades the open: not served, writes live (§25)", async () => {

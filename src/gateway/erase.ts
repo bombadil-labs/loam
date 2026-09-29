@@ -1,4 +1,4 @@
-import { appendLocalErasure } from "./ingest.js";
+import { appendImpl, appendLocalErasure } from "./ingest.js";
 import { rebaseHostPeer, reportPurged } from "./peer-admission.js";
 import {
   withChannelCommit,
@@ -140,6 +140,45 @@ const erasureParts = (
   }
   return { targetId, spokenBy, slate, reasons, count };
 };
+
+/**
+ * Pay the purges this host's journal holds owed. An admitted erasure order whose target the store
+ * held records an obligation; `eraseImpl` pays its own, and this pays every other one (an order
+ * that came through the append or federation door). The journal is rebased first, so the frames
+ * that admitted a target go too. A step that fails leaves its obligation owed, and the erasure
+ * screens read it as still held; the next door that admits an order retries it, and
+ * `loam erase <id>` pays it (it anchors on the standing order).
+ */
+export async function settleOwedPurges(gw: Gateway): Promise<void> {
+  const peer = gw.peer;
+  if (peer === undefined) return;
+  const owed = peer.journal
+    .snapshot()
+    .obligations.filter((o) => o.status !== "removed")
+    .map((o) => o.targetId);
+  if (owed.length === 0) return;
+  try {
+    await rebaseHostPeer(peer);
+  } catch {
+    return;
+  }
+  let fault: string | undefined;
+  try {
+    await gw.backend.purge(owed);
+  } catch (err) {
+    fault = err instanceof Error ? err.message : String(err);
+  }
+  for (const id of owed) {
+    const gone = fault === undefined && !(await gw.backend.holds(id).catch(() => true));
+    await reportPurged(
+      peer,
+      id,
+      gone
+        ? { status: "removed" }
+        : { status: "failed", fault: fault ?? "the store still holds the bytes" },
+    ).catch(() => {});
+  }
+}
 
 /** The id an erasure erases, for readers that join on it (SPEC §29.6's arithmetic). */
 export function erasureTarget(claims: Claims): string | undefined {
@@ -1262,7 +1301,7 @@ export async function eraseImpl(
   const { citations, citationTiers } = danglingCitations(gw, id, (dId) => dId === erasure.id);
   if (already === undefined) {
     if (inLocalContext(erasure, LOCAL_CONTROL)) await appendLocalErasure(gw, erasure);
-    else await gw.append([erasure]);
+    else await appendImpl(gw, [erasure], { settle: false }); // this erase pays its own purge, below
     await gw.flush(); // the erasure must be ground before the target stops being ground
   }
   // The purge count is evidence of work, never the verdict: 0 means "never held" as often as
