@@ -267,6 +267,11 @@ async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<Ap
 // state (a pause, a budget, a recovery barrier) and both land. Only check, write and ingest run under
 // the lock: closing streams after it may await a reader, and a reader may append.
 const admissions = new WeakMap<Gateway, Promise<unknown>>();
+/** @internal — run `fn` under this ground's admission lock (a handoff freezes a surface here). */
+export function underAdmissionLock<T>(gw: Gateway, fn: () => Promise<T>): Promise<T> {
+  return admitting(gw, fn);
+}
+
 function admitting<T>(gw: Gateway, fn: () => Promise<T>): Promise<T> {
   const run = (admissions.get(gw) ?? Promise.resolve()).then(fn);
   admissions.set(
@@ -283,6 +288,7 @@ async function appendAdmitted(
   if (gw.writeFailure !== undefined) {
     throw new Error(`this gateway can no longer persist: ${gw.writeFailure.message}`);
   }
+  gw.assertUnfenced("append");
   const batch = [...deltas];
   // An erased id is refused re-entry forever (SPEC §11), through append as through federation, even
   // after its erasure is negated. An erasure in this same batch is checked once the batch is valid.
@@ -883,6 +889,7 @@ async function federateAdmitted(
   if (gw.writeFailure !== undefined) {
     throw new Error(`this gateway can no longer persist: ${gw.writeFailure.message}`);
   }
+  gw.assertUnfenced("federate");
   if (opts.admittedIds === true && opts.ids !== true)
     throw new Error("admittedIds requires ids: true");
   const all = [...deltas];

@@ -476,6 +476,11 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     return removed;
   }
 
+  /** The ids whose pre-delete page images may still sit in the -wal sidecar; unknown if unnamable. */
+  truncationDebt(): { ids: string[]; unknown: boolean } {
+    return { ids: [...this.truncationOwed].sort(), unknown: this.truncationUnknown };
+  }
+
   async holds(id: string): Promise<boolean> {
     this.assertOpen();
     // An id whose truncation is owed may still have pre-delete page images in the `-wal`
