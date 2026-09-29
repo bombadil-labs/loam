@@ -76,6 +76,7 @@ import {
   type LawFromRow,
 } from "./adopt-law.js";
 import {
+  pinErasureGovernors,
   erasedFromReading,
   eraseImpl,
   eraseReplicaImpl,
@@ -516,6 +517,12 @@ export class Gateway {
   }
   /** @internal — set by the child's opener (container.ts `openSeparate`); undefined at a root. */
   childLaw: ChildLaw | undefined = undefined;
+  private erasureGovernors: readonly string[] = [];
+  /** @internal — the keys this ground pins as erasure governors; kept across a reseat. */
+  pinErasureGovernors(keys: readonly string[]): void {
+    this.erasureGovernors = keys;
+    pinErasureGovernors(this._reactor, keys);
+  }
   /** The authors of `context` law here: this ground's own key, then a host it selects. */
   lawAuthors(context: LawContext): string[] {
     return lawAuthors(this.operatorAuthor, this.childLaw, context);
@@ -1511,6 +1518,7 @@ export class Gateway {
       }
     }
     this._reactor = reactor;
+    pinErasureGovernors(reactor, this.erasureGovernors); // the pins follow the ground
     if (this.delegationScope !== undefined) declarePrincipalScope(reactor, this.delegationScope);
     this.declareUsers(reactor);
     this.ingestVia = (d) => this.reactor.ingest(d);

@@ -1746,6 +1746,9 @@ async function openSeparate(
   // host copies and selects the host for them.
   const hosts = hostChain(gw.signer.author, gw.childLaw);
   pool.childLaw = spec.entity?.startsWith("inbox:") ? inboxLaw(hosts) : seededLaw(hosts);
+  // Every pool pins its host chain as erasure governors: a host's order binds here only when it
+  // names this pool as its receiver (SPEC-6 §3).
+  pool.pinErasureGovernors(hosts);
   pool.readUsersFrom(gw.userGroundHost());
   // A probationary pool KNOWS it is one, for the renderer door's sequestered frame (SPEC §24.7).
   if (probationary) {

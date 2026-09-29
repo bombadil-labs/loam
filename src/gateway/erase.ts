@@ -76,6 +76,7 @@ export function eraseClaims(
   timestamp: number,
   reason?: string,
   slate?: string,
+  receiver?: string,
 ): Claims {
   return {
     timestamp,
@@ -92,6 +93,11 @@ export function eraseClaims(
         ? []
         : [{ role: "reason", target: { kind: "primitive" as const, value: reason } }]),
       ...(slate === undefined ? [] : [slatePointer(slate)]),
+      // The one peer this order takes effect at (SPEC-6 §3). A governor other than the receiver's
+      // own key must name it; any other peer keeps the order as testimony only.
+      ...(receiver === undefined
+        ? []
+        : [{ role: "receiver", target: { kind: "primitive" as const, value: receiver } }]),
     ],
   };
 }
@@ -106,13 +112,15 @@ const erasureParts = (
   // §29.6 join, and says nothing about how many reasons an erasure carries — so a reader that took
   // one and dropped the rest would silently narrow a compliance record.
   reasons: string[];
-  count: { erases: number; spokenBy: number; slate: number };
+  receiver: string | undefined;
+  count: { erases: number; spokenBy: number; slate: number; receiver: number };
 } => {
   let targetId: string | undefined;
   let spokenBy: string | undefined;
   let slate: string | undefined;
+  let receiver: string | undefined;
   const reasons: string[] = [];
-  const count = { erases: 0, spokenBy: 0, slate: 0 };
+  const count = { erases: 0, spokenBy: 0, slate: 0, receiver: 0 };
   for (const p of claims.pointers) {
     if (p.role === "erases" && p.target.kind === "delta") {
       count.erases += 1;
@@ -137,9 +145,33 @@ const erasureParts = (
         slate = p.target.entity.id;
       }
     }
+    if (p.role === "receiver") {
+      count.receiver += 1;
+      if (p.target.kind === "primitive" && typeof p.target.value === "string") {
+        receiver = p.target.value;
+      }
+    }
   }
-  return { targetId, spokenBy, slate, reasons, count };
+  return { targetId, spokenBy, slate, reasons, receiver, count };
 };
+
+// The keys a ground pins as additional erasure governors (its host chain, for a pool). Held beside
+// the reactor, like the user ground, so every reader that takes a reactor sees the same pins.
+const erasureGovernors = new WeakMap<Reactor, readonly string[]>();
+export function pinErasureGovernors(reactor: Reactor, keys: readonly string[]): void {
+  erasureGovernors.set(reactor, keys);
+}
+
+/**
+ * Does erasure `d` bind at the ground `operator` governs (SPEC-6 §3)? Its own key binds with no
+ * receiver or with itself as receiver. A pinned governor binds only when the order names this
+ * ground as its receiver. Any other erasure is testimony here.
+ */
+export function orderBinds(d: Delta, reactor: Reactor, operator: string): boolean {
+  const receiver = erasureParts(d.claims).receiver;
+  if (d.claims.author === operator) return receiver === undefined || receiver === operator;
+  return receiver === operator && (erasureGovernors.get(reactor) ?? []).includes(d.claims.author);
+}
 
 /** The id an erasure erases, for readers that join on it (SPEC §29.6's arithmetic). */
 export function erasureTarget(claims: Claims): string | undefined {
@@ -189,7 +221,8 @@ export function eraseDefect(
   if (count.slate > 1 || (count.slate === 1 && slate === undefined)) {
     return `an erasure carries at most one \`slate\` pointer, an entity reference at ${CTX_SLATE}`;
   }
-  if (operator === undefined || delta.claims.author !== operator) {
+  if (count.receiver > 1) return "an erasure names at most one receiving peer";
+  if (operator === undefined || !orderBinds(delta, reactor, operator)) {
     return "erasure is the instance operator's alone: only the operator may order a record removed";
   }
   // The operator's erasure must still tell the truth about whose record it forgot, whenever
@@ -408,7 +441,7 @@ function boundErasures(
       // Generic preplanted strikes never become local negation when a marked order lands.
       if (localEraseTarget(delta, reactor, operator) === undefined) continue;
     } else if (negated(delta.id)) continue; // ordinary struck erasure = negated
-    if (delta.claims.author !== operator) continue; // erasure is the operator's alone
+    if (!orderBinds(delta, reactor, operator)) continue; // the operator's, or a pinned governor's for here
     const { targetId, count } = erasureParts(delta.claims);
     if (targetId === undefined || count.erases !== 1) continue; // shape the door enforces
     out.push(delta);
@@ -1316,7 +1349,7 @@ export async function eraseImpl(
   const targets = [...gw.quarantinePools].filter((pool) => !seen.has(pool));
   for (const pool of targets) seen.add(pool);
   const fanned = await Promise.allSettled(
-    targets.map((pool) => pool.eraseReplica(erasure, id, seen)),
+    targets.map((pool) => pool.eraseReplica(orderForPool(gw, erasure, pool), id, seen)),
   );
   // The verdict is asked of the BYTES, unconditionally — a purge count proves some tier removed
   // something, never that every tier did. Every fault lands in ONE report: the remedy is
@@ -1511,6 +1544,29 @@ async function incompleteErasureFaults(
 // unconditionally, and a `closed` pool is still the operator's own replica); and if the lawful
 // erasure STILL did not land, the only remaining cause is the store itself failing — so it
 // THROWS, and the primary's `erase` rejects. Best-effort-and-loud, never a silent success.
+// The order a pool receives in the fan-out. A pool governed by this ground's own key takes this
+// ground's erasure as is. A pool under its own key takes an order this ground signs as a pinned
+// governor, naming that pool as its receiver: this ground's own erasure is testimony there.
+function orderForPool(gw: Gateway, erasure: Delta, pool: Gateway): Delta {
+  if (pool.operatorAuthor === gw.operatorAuthor || inLocalContext(erasure, LOCAL_CONTROL)) {
+    return erasure;
+  }
+  const { targetId, spokenBy, slate, reasons } = erasureParts(erasure.claims);
+  return gw.signer!.sign(
+    withStamp(gw.stamp(gw.operatorAuthor), (t) =>
+      eraseClaims(
+        targetId!,
+        spokenBy!,
+        gw.operatorAuthor!,
+        t,
+        reasons[0],
+        slate,
+        pool.operatorAuthor,
+      ),
+    ),
+  );
+}
+
 export async function eraseReplicaImpl(
   gw: Gateway,
   erasure: Delta,
@@ -1569,7 +1625,7 @@ export async function eraseReplicaImpl(
   const nested = [...gw.quarantinePools].filter((pool) => !seen.has(pool));
   for (const pool of nested) seen.add(pool); // claimed at dispatch — see the eraseImpl note
   const walked = await Promise.allSettled(
-    nested.map((pool) => pool.eraseReplica(erasure, id, seen)),
+    nested.map((pool) => pool.eraseReplica(orderForPool(gw, erasure, pool), id, seen)),
   );
   // This tier's own bytes AND every nested refusal, in ONE report, via the collector shared with
   // `eraseImpl`. A pool is where §11 is easiest to evade — a silently-retaining replica must not

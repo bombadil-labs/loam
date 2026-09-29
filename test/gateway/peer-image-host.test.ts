@@ -37,6 +37,7 @@ import type { StoreBackend } from "../../src/store/backend.js";
 const SEED = "5a".repeat(32);
 const OP = authorForSeed(SEED);
 const OTHER_SEED = "6b".repeat(32);
+const OTHER_PEER = authorForSeed(OTHER_SEED);
 
 const note = (n: number, seed = SEED): Delta =>
   signClaims(
@@ -548,6 +549,40 @@ describe("criterion 17: a fresh pool starts under its own key", () => {
     const c = await gw.openContainer({ name: "container:k17c", backend: poolStore });
     expect(c.gateway!.operatorAuthor).toBe(OP);
     expect(recordedPoolKey(gw.reactor, OP, "container:k17c")).toBeUndefined();
+    await gw.close();
+  });
+
+  it("a host erasure reaches a K_p pool only as an order naming that pool (SPEC-6 §3)", async () => {
+    const gw = await hostWith(new MemoryBackend(), memoryPoolKeys());
+    await declare(gw, "container:k17d");
+    const c = await gw.openContainer({ name: "container:k17d", backend: new MemoryBackend() });
+    const pool = c.gateway!;
+    const kp = pool.operatorAuthor!;
+    const target = note(20);
+    const bystander = note(21);
+    await gw.append([target, bystander]);
+    await pool.federate([target, bystander], { admit: () => true });
+    // a host order with no receiver, or naming another peer, is testimony in the pool
+    const bare = signClaims(eraseClaims(target.id, OP, OP, 40_000), SEED);
+    const elsewhere = signClaims(
+      eraseClaims(target.id, OP, OP, 40_001, undefined, undefined, OTHER_PEER),
+      SEED,
+    );
+    await expect(pool.append([bare])).rejects.toThrow(/operator's alone/);
+    await expect(pool.append([elsewhere])).rejects.toThrow(/operator's alone/);
+    expect(pool.reactor.get(target.id)).toBeDefined();
+    // the host's erase fans out an order it signs for this pool, naming K_p
+    await gw.erase(target.id);
+    const orders = [...pool.reactor.snapshot()].filter(
+      (d) => d.claims.pointers.some((p) => p.role === "erases") && d.claims.author === OP,
+    );
+    expect(orders).toHaveLength(1);
+    expect(orders[0]!.claims.pointers.find((p) => p.role === "receiver")?.target).toEqual({
+      kind: "primitive",
+      value: kp,
+    });
+    expect(pool.reactor.get(target.id)).toBeUndefined();
+    expect(pool.reactor.get(bystander.id)).toBeDefined(); // two-sided
     await gw.close();
   });
 });
