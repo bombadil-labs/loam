@@ -136,6 +136,12 @@ Design:
      same pinned root, held deltas, read time, scope and suppression rule (SPEC-14 §6).
      Step 6 needs no locator. It reaches an already identified peer through an out-of-band
      transport endpoint, and it keeps that peer's authenticated key and provenance.
+   - **Deltas in one transfer are simultaneous** (Sol, 2026-09-29; SPEC-6 §3). A peer records
+     the arrivals of one transfer in ascending id order, and they share one transfer ordinal. The
+     sequence number is stable testimony, not a causal order. So Loam never relies on the order
+     inside one append. The recovery barrier writes its cut manifest in an earlier transfer than
+     the recovery record, and judges "before" by transfer ordinal. Design:
+     `audit/step6-host-trial.md`.
 
 ## What stays in force
 
