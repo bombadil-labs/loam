@@ -144,12 +144,13 @@ describe("§55(c) — the detail page carries the census; the dashboard tree doe
     // COPY of it does not steal it — a delta the primary holds is the primary's); the pool-only
     // scrap is physical elsewhere; both strays are dark across the whole gather.
     expect(html).toContain('data-census-physical="0"');
-    // Six linked: opal's stray plus the five primary law rows the pool's seeded copies compose
-    // back into the gather — primary-held, so the primary's bucket, never stolen by the copy.
-    expect(html).toContain('data-census-linked="6"');
+    // Seven linked: opal's stray plus the six primary law rows the pool's seeded copies compose
+    // back into the gather — primary-held, so the primary's bucket, never stolen by the copy. The
+    // sixth is the host's record of the pool's own key.
+    expect(html).toContain('data-census-linked="7"');
     expect(html).toContain('data-census-dark="2"');
-    // Six: the five before, plus the inbox pool's own incarnation marker (recovery-history.md).
-    expect(html).toContain('data-census-vocabulary="6"');
+    // Seven: the six law rows, plus the inbox pool's own incarnation marker (recovery-history.md).
+    expect(html).toContain('data-census-vocabulary="7"');
     // The full opening tags, not only the attributes: a mangled bracket inside the template
     // still carries the attribute text, and a person reads tags, not substrings.
     expect(html).toContain("<li data-census-physical=");

@@ -422,9 +422,11 @@ describe("§58 — the walls", () => {
     // and the nested pool's declaration lives where it is opened. The root's table never sees it,
     // so the walk climbs by the name's own colon — one step to `ada:journal:inbox`, one more to
     // `ada:journal`, which declared the size.
-    await outer.gateway!.append([
-      signClaims(
-        withStamp(outer.gateway!.stamp(), (t) =>
+    // The pool governs itself under its own key, so the declaration is in the pool's voice.
+    const pool = outer.gateway!;
+    await pool.append([
+      pool.signer!.sign(
+        withStamp(pool.stamp(), (t) =>
           containerClaims(
             {
               container: "ada:journal:inbox:nested",
@@ -432,11 +434,10 @@ describe("§58 — the walls", () => {
               posture: "separate",
               parent: "ada:journal:inbox",
             },
-            OPERATOR,
+            pool.operatorAuthor!,
             t,
           ),
         ),
-        OPERATOR_SEED,
       ),
     ]);
     const inner = await outer.gateway!.openContainer({

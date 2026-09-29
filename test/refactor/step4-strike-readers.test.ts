@@ -47,6 +47,7 @@ import {
   standSlate,
   strike as slateStrike,
 } from "../gateway/slating.js";
+import { inPoolVoice } from "../helpers/pool-voice.js";
 
 const OP_SEED = "4d".repeat(32);
 const OP = authorForSeed(OP_SEED);
@@ -140,11 +141,15 @@ describe("the source's data strike: the refusal names only strikes that hold now
     const pool = await primary.openQuarantine();
     const now = Date.now();
     const fact = observed(FERN, "message", "the reviewer said no", now - 5000, GARDENER_SEED);
-    const expired = timedStrike(OP_SEED, fact.id, now - 4000, {
-      validFrom: now - 4000,
-      validUntil: now - 3000,
-    });
-    const holding = timedStrike(OP_SEED, fact.id, now - 2000, { validFrom: now - 2000 });
+    // The operator strikes in the pool through the pool's own key.
+    const expired = inPoolVoice(
+      pool.gateway,
+      timedStrike(OP_SEED, fact.id, now - 4000, { validFrom: now - 4000, validUntil: now - 3000 }),
+    );
+    const holding = inPoolVoice(
+      pool.gateway,
+      timedStrike(OP_SEED, fact.id, now - 2000, { validFrom: now - 2000 }),
+    );
     await pool.gateway.federate([fact]);
     await pool.gateway.append([expired, holding]);
     expect(pool.gateway.reactor.negationsOf(fact.id).sort()).toEqual(

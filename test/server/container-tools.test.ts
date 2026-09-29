@@ -800,7 +800,7 @@ describe("§58 — the container roster", () => {
     await gateway.revokeConnection({
       inbox: gateway.connectionInboxes.get(grant.inbox!)!,
       connectionKey: grant.actor,
-      ownerSeed: OPERATOR_SEED,
+      asPool: true, // the operator's voice in the pool is the pool's own key
     });
 
     for (const [verb, args] of [
@@ -1675,7 +1675,7 @@ describe("§58 — the container roster", () => {
     await gateway.revokeConnection({
       inbox: gateway.connectionInboxes.get(grant.inbox!)!,
       connectionKey: grant.actor,
-      ownerSeed: OPERATOR_SEED,
+      asPool: true, // the operator's voice in the pool is the pool's own key
     });
     for (const verb of ["loam_container_receive", "loam_federate_connect"] as const) {
       const r = await callTool(base, ada, verb, {

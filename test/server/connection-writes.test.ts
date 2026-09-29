@@ -399,7 +399,14 @@ describe("S1b-ii — a bound connection's writes land in its inbox pool, never t
     // (test/cli/grant-ledger-58.test.ts) proves it now strikes too.
     const pool = poolOf(gateway, grant.inbox!);
     expect(
-      holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, grant.actor, "write", OPERATOR),
+      holdsGrant(
+        pool.reactor,
+        pool.validityNow(),
+        STORE_ENTITY,
+        grant.actor,
+        "write",
+        pool.operatorAuthor, // the pool governs its own grants under its own key
+      ),
     ).toBe(true);
   });
 });
