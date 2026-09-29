@@ -126,6 +126,12 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
       const read = await inner.readHead(peerId);
       return read.status === "head" && read.head === expected;
     };
+    // The shadow held the target while the head was `expected` only if the head is still
+    // `expected` after the read: a head never returns to an earlier value.
+    const refuted = async (peerId: string, expected: string, targetId: string) =>
+      (await headIs(peerId, expected))
+        ? { status: "absence-refuted" as const, targetId }
+        : { status: "conflict" as const };
     return (this.#journal ??= {
       ...inner,
       compareAndAppend: async (peerId, expected, next, frame, rows) => {
@@ -138,7 +144,7 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
         // and stays live on a refutation. The inner CAS still decides a head that moves after this.
         if (!(await headIs(peerId, expected))) return { status: "conflict" };
         for (const id of absent) {
-          if (await this.mirror.holds(id)) return { status: "absence-refuted", targetId: id };
+          if (await this.mirror.holds(id)) return refuted(peerId, expected, id);
         }
         const write = await inner.compareAndAppendErasure!(
           peerId,
@@ -153,7 +159,7 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
       },
       compareAndSettlePurge: async (peerId, expected, next, frame, targetId, generation) => {
         if (!(await headIs(peerId, expected))) return { status: "conflict" };
-        if (await this.mirror.holds(targetId)) return { status: "absence-refuted", targetId };
+        if (await this.mirror.holds(targetId)) return refuted(peerId, expected, targetId);
         return inner.compareAndSettlePurge!(peerId, expected, next, frame, targetId, generation);
       },
     });

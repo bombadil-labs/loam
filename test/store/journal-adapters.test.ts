@@ -199,6 +199,40 @@ describe("settle paths after an interrupted checkpoint, and against a stale head
   });
 });
 
+describe("a mirror head that moves while the shadow tier is asked", () => {
+  for (const method of ["settle", "erasure"] as const) {
+    it(`mirror ${method}: a head moved during the shadow read is a conflict, not a refutation`, async () => {
+      let release!: () => void;
+      const paused = new Promise<void>((r) => (release = r));
+      let asked!: () => void;
+      const reading = new Promise<void>((r) => (asked = r));
+      class SlowShadow extends MemoryBackend {
+        override async holds(id: string): Promise<boolean> {
+          asked();
+          await paused;
+          return super.holds(id);
+        }
+      }
+      const shadow = new SlowShadow();
+      const primary = new MemoryBackend();
+      const store = new MirrorBackend(primary, shadow).journalStore();
+      await store.compareAndAppend(OP, null, "", null, []);
+      const d = note(11);
+      await shadow.append([d]);
+      const frame = new Uint8Array([7]);
+      const result =
+        method === "settle"
+          ? store.compareAndSettlePurge!(OP, "", "x", frame, d.id, 1)
+          : store.compareAndAppendErasure!(OP, "", "x", frame, [], [d.id]);
+      await reading;
+      // Another writer moves the head through the primary while the shadow read is pending.
+      await primary.journalStore().compareAndAppend(OP, "", "moved", new Uint8Array([1]), []);
+      release();
+      expect(await result).toEqual({ status: "conflict" });
+    });
+  }
+});
+
 describe("a damaged admitted row degrades the open (§25)", () => {
   it("sqlite: a deleted admitted row is reported unavailable, and the rest is served", async () => {
     const path = sqlitePath();
