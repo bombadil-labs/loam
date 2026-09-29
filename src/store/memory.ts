@@ -105,6 +105,34 @@ export class MemoryBackend implements StoreBackend {
         const j = this.journals.get(peerId);
         return j === undefined ? { status: "missing" } : { status: "head", head: j.head };
       },
+      compareAndAppendErasure: async (
+        peerId,
+        expectedHead,
+        nextHead,
+        frame,
+        newlyAdmitted,
+        assertedAbsentTargetIds,
+      ) => {
+        this.assertOpen();
+        const j = this.journals.get(peerId);
+        if (j === undefined || j.head !== expectedHead) return { status: "conflict" };
+        if (assertedAbsentTargetIds.some((id) => this.set.has(id))) return { status: "conflict" };
+        const batch = newlyAdmitted.map(canonicalDelta);
+        for (const d of batch) this.set.add(d);
+        j.frames.push(Uint8Array.from(frame));
+        j.head = nextHead;
+        return { status: "durable" };
+      },
+      compareAndSettlePurge: async (peerId, expectedHead, nextHead, frame, targetId) => {
+        this.assertOpen();
+        const j = this.journals.get(peerId);
+        if (j === undefined || j.head !== expectedHead || this.set.has(targetId)) {
+          return { status: "conflict" };
+        }
+        j.frames.push(Uint8Array.from(frame));
+        j.head = nextHead;
+        return { status: "durable" };
+      },
       compareAndAppend: async (peerId, expectedHead, nextHead, frame, newlyAdmitted) => {
         this.assertOpen();
         const j = this.journals.get(peerId);

@@ -49,11 +49,18 @@ import {
   ERASE_ENTITY,
   eraseDefect,
   erasedInBatch,
+  erasureTarget,
   isErasure,
   refusedIds,
   erasuresOfErasures,
 } from "./erase.js";
-import { admitLocal, admitReceived, JournalConflict, reopenHostPeer } from "./peer-admission.js";
+import {
+  admitErasureOrders,
+  admitLocal,
+  admitReceived,
+  JournalConflict,
+  reopenHostPeer,
+} from "./peer-admission.js";
 import { Channel } from "./channel.js";
 import type { AppendReceipt, FederationReport, Gateway } from "./gateway.js";
 import { publicDefect } from "./public.js";
@@ -433,7 +440,7 @@ async function appendAdmitted(
   }
   // A throw here means NOTHING was ingested or served.
   if (gw.peer === undefined) await gw.backend.append(batch);
-  else await admitLocal(gw.peer, batch, at, (d) => isErasure(d.claims));
+  else await admitToJournal(gw, batch, at);
   let accepted = 0;
   let duplicates = 0;
   const fresh: Delta[] = [];
@@ -867,6 +874,59 @@ function recordBarrierDefect(
   return first;
 }
 
+// The local door on the journal path. Ordinary deltas are one atomic transfer. Erasure orders are
+// another, and never share a transfer with ordinary deltas (SPEC-6 treats one transfer as
+// simultaneous; a mixed atomic transfer is not offered yet).
+async function admitToJournal(gw: Gateway, batch: readonly Delta[], at: number): Promise<void> {
+  const erasures = batch.filter((d) => isErasure(d.claims));
+  if (erasures.length === 0) return admitLocal(gw.peer!, batch, at, () => false);
+  if (erasures.length !== batch.length) {
+    throw new Error(
+      "append rejected: an erasure travels in its own append, not beside other deltas",
+    );
+  }
+  await admitErasureOrders(gw.peer!, await ordersFor(gw, erasures), "local", at);
+}
+
+// Federation on the journal path: the ordinary deltas first, then the erasure orders, as two
+// transfers with one receive time. This approximates SPEC-6's simultaneous mixed transfer.
+async function receiveIntoJournal(
+  gw: Gateway,
+  admitted: readonly Delta[],
+  at: number,
+): Promise<Delta[]> {
+  const ordinary = admitted.filter((d) => !isErasure(d.claims));
+  const orders = admitted.filter((d) => isErasure(d.claims));
+  const ok = new Set<string>();
+  if (ordinary.length > 0) {
+    for (const id of await admitReceived(gw.peer!, ordinary, at, () => false)) ok.add(id);
+  }
+  if (orders.length > 0) {
+    const held = orders;
+    if (held.length > 0) {
+      for (const id of await admitErasureOrders(
+        gw.peer!,
+        await ordersFor(gw, held),
+        "unattributed",
+        at,
+      )) {
+        ok.add(id);
+      }
+    }
+  }
+  return admitted.filter((d) => ok.has(d.id));
+}
+
+async function ordersFor(gw: Gateway, erasures: readonly Delta[]) {
+  return Promise.all(
+    erasures.map(async (d) => {
+      const targetId = erasureTarget(d.claims)!;
+      // Conservative: a store that may hold the bytes records a purge obligation.
+      return { delta: d, targetId, surfaceHoldsBytes: await gw.backend.holds(targetId) };
+    }),
+  );
+}
+
 export async function federateImpl(
   gw: Gateway,
   deltas: Iterable<Delta>,
@@ -1019,9 +1079,7 @@ async function federateAdmitted(
   const landed =
     gw.peer === undefined || admitted.length === 0
       ? admitted
-      : await admitReceived(gw.peer, admitted, now, (d) => isErasure(d.claims)).then((ok) =>
-          admitted.filter((d) => ok.has(d.id)),
-        );
+      : await receiveIntoJournal(gw, admitted, now);
   const crossed = new Set(landed.map((d) => d.id));
   const rejected = all.reduce((n, d) => (crossed.has(d.id) ? n : n + 1), 0);
   // The ids are collected in THIS loop, from the same verdict that increments the count — so

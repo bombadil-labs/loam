@@ -2,14 +2,16 @@
 // Loam's own checks run first, under the gateway's admission lock; the substrate's ordinary
 // journal then admits, records arrivals and refusals, and commits a frame and the new rows.
 //
-// Erasure is not on this path: the substrate reports `unsupported-erasure`, and an erasure is
-// refused here rather than purged by Loam's older path while the journal still admits its target.
+// Erasure orders enter through `admitErasures`: Loam's erasure law runs first under the same lock,
+// and the journal records the refusal and any purge obligation. An order travels without ordinary
+// deltas beside it; Loam's purge then reports its result through `reportPurged`.
 
 import {
   OrdinaryJournalPeer,
   type ArrivalOrigin,
   type Delta,
   type DurableOrdinaryJournalStore,
+  type EffectiveErasureOrder,
   type OrdinaryJournalAdmissionResult,
 } from "@bombadil/rhizomatic";
 
@@ -39,7 +41,9 @@ export async function openHostPeer(
   if (opened.status !== "open") {
     throw new Error(`peer journal: the open did not commit (${describe(opened)})`);
   }
-  const order = opened.peer.snapshot().base.arrivals.map((a) => a.id);
+  // Arrival history keeps erased ids; only the ones still admitted are served.
+  const { base } = opened.peer.snapshot();
+  const order = base.arrivals.map((a) => a.id).filter((id) => base.admitted.has(id));
   const byId = new Map((await store.readAdmittedRows(peerId, order)).map((d) => [d.id, d]));
   const rows = order.map((id) => byId.get(id)!);
   return { peer: { journal: opened.peer, store, tail: Promise.resolve() }, rows };
@@ -122,4 +126,61 @@ function transfer(
 
 function describe(r: { status: string; reason?: string; fault?: string }): string {
   return r.reason ?? r.fault ?? r.status;
+}
+
+// Erasure orders: Loam's erasure law already cleared each one under the admission lock, so the
+// journal's own authorization accepts them (one order at a time; several interacting orders would
+// need the rule re-expressed over each round's admitted set). Loam erases only targets it holds.
+export async function admitErasureOrders(
+  peer: HostPeer,
+  orders: readonly EffectiveErasureOrder[],
+  origin: "local" | "unattributed",
+  arrivedAt: number,
+): Promise<Set<string>> {
+  const run = peer.tail.then(() =>
+    peer.journal.admitErasures({
+      orders,
+      origin: origin === "local" ? LOCAL : UNATTRIBUTED,
+      arrivedAt,
+      policyState: {},
+      guards: [],
+      mode: origin === "local" ? "atomic" : "individual",
+      targetBudget: Number.MAX_SAFE_INTEGER,
+      // Loam's door admits an erasure of a target it does not hold: the target is refused ahead.
+      advanceRefusalCap: Number.MAX_SAFE_INTEGER,
+      authorize: () => true,
+    }),
+  );
+  peer.tail = run.catch(() => {});
+  const result = await run;
+  if (result.status === "conflict") throw new JournalConflict("the peer journal moved");
+  if (result.status !== "committed") {
+    throw new Error(`erasure refused by the peer journal: ${describe(result)}`);
+  }
+  return new Set(
+    result.outcomes
+      .filter((o) => ["effective-erasure", "admitted", "duplicate"].includes(o.status))
+      .map((o) => o.id),
+  );
+}
+
+// Report what Loam's purge did to `targetId`'s bytes. "removed" settles the obligation only if the
+// store proves, in the same transaction, that the bytes are gone. No active obligation: nothing
+// was owed (the order asserted the target absent), so nothing is reported.
+export async function reportPurged(
+  peer: HostPeer,
+  targetId: string,
+  report: { readonly status: "removed" } | { readonly status: "failed"; readonly fault: string },
+): Promise<void> {
+  const owed = peer.journal
+    .snapshot()
+    .obligations.find((o) => o.targetId === targetId && o.status !== "removed");
+  if (owed === undefined) return;
+  const run = peer.tail.then(() => peer.journal.reportPurge(targetId, owed.generation, report));
+  peer.tail = run.catch(() => {});
+  const result = await run;
+  if (result.status === "conflict") throw new JournalConflict("the peer journal moved");
+  if (result.status !== "committed") {
+    throw new Error(`purge report not committed: ${describe(result)}`);
+  }
 }

@@ -1441,7 +1441,14 @@ export class Gateway {
     // and everything after it is destructive. Ordered the other way, a failed read leaves the
     // gateway half-torn-down — subscriptions killed, reactor still on pre-purge ground.
     const reactor = new Reactor();
-    for (const d of await this.backend.deltasSince(new Set())) {
+    // On the journal path the admitted set is the journal's, never the raw rows.
+    const readAll = async (): Promise<Delta[]> => {
+      if (this.peer === undefined) return this.backend.deltasSince(new Set());
+      const { peer, rows } = await openHostPeer(this.peer.store, this.peer.journal.peerId);
+      this.peer.journal = peer.journal;
+      return rows;
+    };
+    for (const d of await readAll()) {
       if (reactor.ingest(d).status === "rejected") {
         throw new Error(`reseat: the store handed back an unacceptable delta ${d.id}`);
       }
@@ -1466,7 +1473,7 @@ export class Gateway {
     // row is a hot loop that deserves the loud refusal.
     for (let round = 0; ; round += 1) {
       const known = new Set(reactor.snapshot().ids());
-      const stragglers = await this.backend.deltasSince(known);
+      const stragglers = (await readAll()).filter((d) => !known.has(d.id));
       if (stragglers.length === 0) break;
       if (round >= 10) {
         throw new Error("reseat: the store will not quiesce — something is appending in a loop");

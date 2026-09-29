@@ -1,4 +1,5 @@
 import { appendLocalErasure } from "./ingest.js";
+import { reportPurged } from "./peer-admission.js";
 import {
   withChannelCommit,
   parseLocalEvent,
@@ -1263,6 +1264,28 @@ export async function eraseImpl(
     await gw.backend.purge([id]);
   } catch (err) {
     localPurge = err;
+  }
+  // On the journal path the purge obligation is the journal's: "removed" settles only where the
+  // store proves the bytes gone; anything else is reported failed and stays owed.
+  if (gw.peer !== undefined) {
+    try {
+      const gone = localPurge === undefined && !(await gw.backend.holds(id));
+      await reportPurged(
+        gw.peer,
+        id,
+        gone
+          ? { status: "removed" }
+          : {
+              status: "failed",
+              fault:
+                localPurge instanceof Error
+                  ? localPurge.message
+                  : "the store still holds the bytes",
+            },
+      );
+    } catch (err) {
+      localPurge = localPurge ?? err;
+    }
   }
   try {
     await gw.reseat();

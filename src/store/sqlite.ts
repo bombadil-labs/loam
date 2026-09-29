@@ -487,6 +487,26 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     return removed;
   }
 
+  // `holds` without the await, for a check inside a transaction. It also counts truncation debt
+  // another handle recorded in the file: unprovable answers TRUE (H9).
+  private holdsNow(id: string): boolean {
+    if (this.truncationUnknown || this.truncationOwed.has(id)) return true;
+    const debt = this.db
+      .prepare("SELECT value FROM meta WHERE key = 'truncation-outstanding'")
+      .get() as { value: string } | undefined;
+    if (debt !== undefined) {
+      try {
+        const ids = JSON.parse(debt.value) as unknown;
+        if (!Array.isArray(ids) || ids.includes(id) || ids.some((x) => typeof x !== "string")) {
+          return true;
+        }
+      } catch {
+        return true;
+      }
+    }
+    return this.db.prepare("SELECT 1 FROM deltas WHERE id = ?").get(id) !== undefined;
+  }
+
   async holds(id: string): Promise<boolean> {
     this.assertOpen();
     // An id whose truncation is owed may still have pre-delete page images in the `-wal`
@@ -539,6 +559,44 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     const hasRows = (): boolean =>
       this.db.prepare("SELECT 1 FROM deltas LIMIT 1").get() !== undefined;
     const rowFor = this.db.prepare("SELECT id, claims, sig FROM deltas WHERE id = ?");
+    const rollback = (): void => {
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {
+        /* already rolled back */
+      }
+    };
+    // Inside an open transaction: the new rows, one immutable frame, the new head.
+    const commitFrame = (
+      peerId: string,
+      nextHead: string,
+      frame: Uint8Array | null,
+      rows: readonly Delta[],
+    ): string[] => {
+      const stored: string[] = [];
+      for (const d of rows) {
+        const info = this.insertDelta.run(
+          d.id,
+          JSON.stringify(claimsToJson(d.claims)),
+          d.sig ?? null,
+        );
+        if (info.changes > 0) stored.push(d.id);
+      }
+      if (frame !== null) {
+        const next = (
+          this.db
+            .prepare("SELECT COALESCE(MAX(n), -1) + 1 AS n FROM journal_frames WHERE peer = ?")
+            .get(peerId) as { n: number }
+        ).n;
+        this.db
+          .prepare("INSERT INTO journal_frames (peer, n, frame) VALUES (?, ?, ?)")
+          .run(peerId, next, Buffer.from(frame));
+      }
+      this.db
+        .prepare("INSERT OR REPLACE INTO journal_head (peer, head) VALUES (?, ?)")
+        .run(peerId, nextHead);
+      return stored;
+    };
     return (this.store ??= {
       readJournal: async (peerId) => {
         this.assertOpen();
@@ -582,6 +640,53 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
         this.assertOpen();
         const head = headOf(peerId);
         return head === undefined ? { status: "missing" } : { status: "head", head };
+      },
+      compareAndAppendErasure: async (
+        peerId,
+        expectedHead,
+        nextHead,
+        frame,
+        newlyAdmitted,
+        assertedAbsentTargetIds,
+      ) => {
+        this.assertOpen();
+        const batch = newlyAdmitted.map(canonicalDelta);
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          // A target the order says holds no bytes here must hold none, checked in this
+          // transaction; otherwise the order would record no purge obligation for real bytes.
+          if (
+            headOf(peerId) !== expectedHead ||
+            assertedAbsentTargetIds.some((id) => this.holdsNow(id))
+          ) {
+            this.db.exec("ROLLBACK");
+            return { status: "conflict" };
+          }
+          commitFrame(peerId, nextHead, frame, batch);
+          this.db.exec("COMMIT");
+        } catch (err) {
+          rollback();
+          throw err;
+        }
+        for (const d of batch) this.onDisk.add(d.id);
+        return { status: "durable" };
+      },
+      compareAndSettlePurge: async (peerId, expectedHead, nextHead, frame, targetId) => {
+        this.assertOpen();
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          // "removed" is appended only if the bytes are provably gone, WAL debt included.
+          if (headOf(peerId) !== expectedHead || this.holdsNow(targetId)) {
+            this.db.exec("ROLLBACK");
+            return { status: "conflict" };
+          }
+          commitFrame(peerId, nextHead, frame, []);
+          this.db.exec("COMMIT");
+        } catch (err) {
+          rollback();
+          throw err;
+        }
+        return { status: "durable" };
       },
       compareAndAppend: async (peerId, expectedHead, nextHead, frame, newlyAdmitted) => {
         this.assertOpen();

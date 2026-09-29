@@ -104,21 +104,47 @@ describe("a host opened with a peer journal admits through it", () => {
     await again.close();
   });
 
-  it("an atomic append with one refused candidate commits nothing", async () => {
+  it("a local append that mixes an erasure with other deltas commits nothing", async () => {
     const backend = new MemoryBackend();
     const gw = await boot(backend);
     const live = note(1);
     await gw.append([live]);
     const before = await image(backend.journalStore());
     const bystander = note(2);
-    // The image refuses an erasure in this trial, so the batch it rides in lands nowhere.
+    // One transfer is simultaneous; until a mixed transfer exists, an erasure travels alone.
     const erasure = signClaims(eraseClaims(live.id, OP, OP, 20_000), SEED);
-    await expect(gw.append([bystander, erasure])).rejects.toThrow(/peer journal/);
+    await expect(gw.append([bystander, erasure])).rejects.toThrow(/its own append/);
     expect(await image(backend.journalStore())).toEqual(before);
     expect(await backend.holds(bystander.id)).toBe(false);
     expect(gw.reactor.get(bystander.id)).toBeUndefined();
     expect(gw.reactor.get(live.id)).toBeDefined(); // the earlier delta is untouched
     await gw.close();
+  });
+
+  it("erase through the journal: the target is refused, its bytes go, a bystander stays", async () => {
+    const path = sqliteHome();
+    const backend = new SqliteBackend(path);
+    const gw = await boot(backend);
+    const target = note(1);
+    const bystander = note(2);
+    await gw.append([target]);
+    await gw.append([bystander]);
+    await gw.erase(target.id);
+    // delta level: the journal refuses the target and holds no obligation still owed
+    const state = await stateOf(backend.journalStore());
+    expect(state.base.refusedIds.has(target.id)).toBe(true);
+    expect(state.base.admitted.has(target.id)).toBe(false);
+    expect(state.obligations.filter((o) => o.targetId === target.id).map((o) => o.status)).toEqual([
+      "removed",
+    ]);
+    expect(await backend.holds(target.id)).toBe(false);
+    await gw.close();
+    // object level, after a reopen: the target never returns; the bystander is served
+    const again = await boot(new SqliteBackend(path));
+    expect(again.reactor.get(target.id)).toBeUndefined();
+    expect(again.reactor.get(bystander.id)).toBeDefined();
+    await expect(again.append([target])).rejects.toThrow(/erased/);
+    await again.close();
   });
 
   it("a federation arrival is unattributed, never a peer id", async () => {
