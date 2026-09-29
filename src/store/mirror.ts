@@ -18,8 +18,9 @@
 // One writing gateway per store still holds: the mirror is a shadow of one primary, not a
 // second live node. Two live nodes are federation's job.
 
-import type { Delta } from "@bombadil/rhizomatic";
+import type { Delta, DurableOrdinaryJournalStore } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "./backend.js";
+import { holdsJournals } from "./peer-image.js";
 import {
   DELTA_ID_LENGTH,
   isRepairable,
@@ -95,6 +96,63 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
   // swallowed error with extra steps, so `cmdServe` reads it beside `purgeFailures`.
   get lastRestore(): RestoreReport | undefined {
     return this.#lastRestore;
+  }
+
+  // THE JOURNAL LIVES ON THE PRIMARY (step 6 host trial). The mirror offers the primary's journal
+  // store with the tiers as one declared surface: newly admitted rows reach the shadow tier too (lag
+  // rules as for append), and a purge settles only if the shadow tier holds no copy either.
+  #journal: DurableOrdinaryJournalStore | undefined;
+
+  async journalPeers(): Promise<string[]> {
+    return holdsJournals(this.primary) ? this.primary.journalPeers() : [];
+  }
+
+  journalStore(): DurableOrdinaryJournalStore {
+    if (!holdsJournals(this.primary)) {
+      throw new Error("mirror: the primary tier keeps no peer journal");
+    }
+    const inner = this.primary.journalStore();
+    const shadow = async (rows: readonly Delta[]): Promise<void> => {
+      if (rows.length === 0) return;
+      try {
+        await this.mirror.append(rows);
+      } catch (err) {
+        this.#lagging = true;
+        this.#lagEpoch += 1;
+        this.opts.onLag?.(err);
+      }
+    };
+    return (this.#journal ??= {
+      ...inner,
+      compareAndAppend: async (peerId, expected, next, frame, rows) => {
+        const write = await inner.compareAndAppend(peerId, expected, next, frame, rows);
+        if (write.status === "durable") await shadow(rows);
+        return write;
+      },
+      compareAndAppendErasure: async (peerId, expected, next, frame, rows, absent) => {
+        for (const id of absent) {
+          if (await this.mirror.holds(id)) return { status: "absence-refuted", targetId: id };
+        }
+        const write = await inner.compareAndAppendErasure!(
+          peerId,
+          expected,
+          next,
+          frame,
+          rows,
+          absent,
+        );
+        if (write.status === "durable") await shadow(rows);
+        return write;
+      },
+      compareAndSettlePurge: async (peerId, expected, next, frame, targetId, generation) => {
+        if (await this.mirror.holds(targetId)) return { status: "absence-refuted", targetId };
+        return inner.compareAndSettlePurge!(peerId, expected, next, frame, targetId, generation);
+      },
+    });
+  }
+
+  setAside(rows: readonly { id: string; reason: string }[]): void {
+    if (holdsJournals(this.primary)) this.primary.setAside?.(rows);
   }
 
   async append(deltas: Iterable<Delta>): Promise<number> {

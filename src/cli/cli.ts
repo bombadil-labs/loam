@@ -5208,12 +5208,16 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
       // later run can say it: the re-run boots on the post-purge ground, where nothing came back.
       // A failed RE-SEAT leaves the old reactor in place, so this reading can be taken over ground
       // the purge already changed underneath it. Silence would then read as "nothing came back"
-      // when the honest answer is "this could not be measured" (H9). The cheap tell is the erased
-      // delta itself: if it is still in the reactor, the removal did not land here.
+      // when the honest answer is "this could not be measured" (H9). The tell is the erased delta's
+      // bytes: if a ground still holds them, the removal did not land there. (A reactor is not the
+      // tell: a journaled store drops an erased id from serving before its bytes go.)
       // EVERY GROUND THE SWEEP TOUCHED, not the host alone. A pool re-seats in its own turn and
       // a failure there is folded into the fault list, leaving no mark on the host — so asking the
       // host only reports "measured" about a reading taken over a pool the purge changed underneath.
-      if ([gateway, ...gateway.quarantinePools].some((g) => g.reactor.get(id) !== undefined)) {
+      const heldBy = await Promise.all(
+        [gateway, ...gateway.quarantinePools].map((g) => g.backend.holds(id).catch(() => true)),
+      );
+      if (heldBy.some(Boolean)) {
         io.err(
           `loam: the removal did not complete in this store's own ground, so the revival reading ` +
             `below was taken over a ground that may not reflect the purge. Treat an empty answer ` +
