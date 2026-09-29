@@ -30,6 +30,7 @@ import { graphql, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
 import { holdsJournals } from "../store/peer-image.js";
+import { memoryPoolKeys, type PoolKeySource } from "./pool-keys.js";
 import {
   admitLocal,
   JournalConflict,
@@ -231,6 +232,8 @@ export interface GatewayOptions {
    * host passes this; pools, quarantine and scratch gateways never do.
    */
   readonly peerStore?: DurableOrdinaryJournalStore;
+  /** Where each new pool's own key lives (step 6 host trial). Absent, pools stay on the host key. */
+  readonly poolKeys?: PoolKeySource;
   /**
    * Where a FEDERATION CHANNEL's pool keeps its bytes, by pool name. A separate container defaults
    * to a fresh in-memory backend, which is right for a quarantine (transient by design) and WRONG
@@ -735,9 +738,18 @@ export class Gateway {
       holdsJournals(backend)
         ? { peerStore: backend.journalStore() }
         : {};
+    // LOAM_POOL_KEYS=1 also gives each new pool its own key, held in memory for this process.
+    const poolKeys =
+      "peerStore" in trial &&
+      options.poolKeys === undefined &&
+      typeof process !== "undefined" &&
+      process.env.LOAM_POOL_KEYS === "1"
+        ? { poolKeys: memoryPoolKeys() }
+        : {};
     const gateway = await Gateway.open(backend, {
       ...options,
       ...trial,
+      ...poolKeys,
       seed: genesis.operatorSeed,
     });
     // A store with rows and none readable would boot empty, with a fresh genesis planted beside

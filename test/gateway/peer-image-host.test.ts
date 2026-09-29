@@ -25,6 +25,12 @@ import { eraseClaims } from "../../src/gateway/erase.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { MemoryBackend } from "../../src/store/memory.js";
+import {
+  memoryPoolKeys,
+  recordedPoolKey,
+  type PoolKeySource,
+} from "../../src/gateway/pool-keys.js";
+import { CTX_INCARNATION } from "../../src/gateway/recovery-cut.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import type { StoreBackend } from "../../src/store/backend.js";
 
@@ -478,6 +484,70 @@ describe("two writers on one journal: catch up, re-check, retry", () => {
     await expect(gw.append([d])).rejects.toThrow(/Nothing was admitted or refused; try again/);
     expect(await backend.holds(d.id)).toBe(false);
     expect(gw.reactor.get(d.id)).toBeUndefined();
+    await gw.close();
+  });
+});
+
+describe("criterion 17: a fresh pool starts under its own key", () => {
+  const hostWith = (backend: MemoryBackend, keys: PoolKeySource): Promise<Gateway> =>
+    Gateway.boot(backend, assembleGenesis({ operatorSeed: SEED }), {
+      peerStore: backend.journalStore(),
+      poolKeys: keys,
+    });
+  const declare = (gw: Gateway, name: string) =>
+    gw.append([
+      signClaims(
+        containerClaims({ container: name, trust: "untrusted", posture: "separate" }, OP, 12_000),
+        SEED,
+      ),
+    ]);
+
+  it("mints K_p, the host records it first, and the pool's own law is K_p's", async () => {
+    const gw = await hostWith(new MemoryBackend(), memoryPoolKeys());
+    await declare(gw, "container:k17");
+    const poolStore = new MemoryBackend();
+    const c = await gw.openContainer({ name: "container:k17", backend: poolStore });
+    const pool = c.gateway!;
+    const kp = pool.operatorAuthor!;
+    expect(kp).not.toBe(OP);
+    expect(recordedPoolKey(gw.reactor, OP, "container:k17")).toBe(kp); // the host's record
+    expect(pool.peer?.journal.peerId).toBe(kp); // its own journal peer
+    // its first incarnation marker is signed by K_p
+    const markers = [...pool.reactor.snapshot()].filter((d) =>
+      d.claims.pointers.some(
+        (p) => p.target.kind === "entity" && p.target.entity.context === CTX_INCARNATION,
+      ),
+    );
+    expect(markers.map((d) => d.claims.author)).toEqual([kp]);
+    // it admits a write into its own journal
+    const d = note(9);
+    await pool.federate([d], { admit: () => true });
+    const opened = await OrdinaryJournalPeer.open(poolStore.journalStore(), kp);
+    expect(opened.status === "open" && opened.peer.snapshot().base.admitted.has(d.id)).toBe(true);
+    await gw.close();
+  });
+
+  it("a pool the host recorded under a key it cannot load is refused, never reopened as the host", async () => {
+    const hostStore = new MemoryBackend();
+    const poolStore = new MemoryBackend();
+    const gw = await hostWith(hostStore, memoryPoolKeys());
+    await declare(gw, "container:k17b");
+    await gw.openContainer({ name: "container:k17b", backend: poolStore });
+    const other = await hostWith(hostStore, memoryPoolKeys()); // a key source that lost the key
+    await expect(
+      other.openContainer({ name: "container:k17b", backend: poolStore }),
+    ).rejects.toThrow(/its key is not here/);
+    await gw.close();
+  });
+
+  it("an existing pool (rows, no key record) stays on the host key", async () => {
+    const gw = await hostWith(new MemoryBackend(), memoryPoolKeys());
+    await declare(gw, "container:k17c");
+    const poolStore = new MemoryBackend();
+    await poolStore.append([note(8)]);
+    const c = await gw.openContainer({ name: "container:k17c", backend: poolStore });
+    expect(c.gateway!.operatorAuthor).toBe(OP);
+    expect(recordedPoolKey(gw.reactor, OP, "container:k17c")).toBeUndefined();
     await gw.close();
   });
 });
