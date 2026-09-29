@@ -25,3 +25,17 @@ export function holdsJournals(backend: StoreBackend): backend is JournalBackend 
   const b = backend as Partial<JournalBackend>;
   return typeof b.journalStore === "function" && (b.keepsJournals?.() ?? true);
 }
+
+/** Where a pool's key seed lives. A file-backed store keeps it beside itself; an embedder may pass its own. */
+export interface PoolKeySource {
+  load(pool: string): string | undefined;
+  create(pool: string): string;
+}
+
+/** A store that keeps its pools' keys itself, beside its own bytes (undefined: it keeps none). */
+export interface HoldsPoolKeys {
+  poolKeys(): PoolKeySource | undefined;
+}
+export function holdsPoolKeys(backend: object): backend is HoldsPoolKeys {
+  return typeof (backend as Partial<HoldsPoolKeys>).poolKeys === "function";
+}

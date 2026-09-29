@@ -20,7 +20,7 @@
 
 import type { Delta, DurableOrdinaryJournalStore } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "./backend.js";
-import { holdsJournals } from "./peer-image.js";
+import { holdsJournals, holdsPoolKeys, type PoolKeySource } from "./peer-image.js";
 import {
   DELTA_ID_LENGTH,
   isRepairable,
@@ -173,6 +173,11 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
         return inner.compareAndSettlePurge!(peerId, expected, next, frame, targetId, generation);
       },
     });
+  }
+
+  // A pool's key lives with the primary, like the journal.
+  poolKeys(): PoolKeySource | undefined {
+    return holdsPoolKeys(this.primary) ? this.primary.poolKeys() : undefined;
   }
 
   setAside(rows: readonly { id: string; reason: string }[]): void {

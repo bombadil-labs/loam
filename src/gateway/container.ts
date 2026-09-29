@@ -23,6 +23,8 @@
 
 import { seedSigner } from "./signer.js";
 import { hostChain, inboxLaw, seededLaw } from "./child-law.js";
+import { poolKeyClaims, recordedPoolKey } from "./pool-keys.js";
+import { holdsJournals, type JournalBackend } from "../store/peer-image.js";
 import {
   authorForSeed,
   parseTerm,
@@ -1599,6 +1601,48 @@ function openShared(
 // is the operator's own arena, so the operator's erasure stays authoritative there, §24.8). The edge
 // is inbound only — nothing is ever wired back. This is the T72 body, generalized: the settle, the
 // seeding closure, the drop-verify, and the detach are the invariants the lifting preserves.
+// Which key governs a pool, and whether it opens as its own journal peer. With a key source and a
+// journal-capable store: a pool the host recorded with a key must load that key (else it is
+// refused); a fresh, empty pool mints one, and the host records it first. A pool the host never
+// recorded, over a store that holds rows, was made by an earlier Loam and is refused (ruling 10).
+async function poolGovernor(
+  gw: Gateway,
+  name: string | undefined,
+  backend: StoreBackend,
+): Promise<{ seed: string; journal: boolean }> {
+  const host = { seed: gw.childSeed()!, journal: false };
+  const keys = gw.options.poolKeys;
+  if (keys === undefined || name === undefined || !holdsJournals(backend)) return host;
+  const recorded = recordedPoolKey(gw.reactor, gw.operatorAuthor, name);
+  if (recorded !== undefined) {
+    const seed = keys.load(name);
+    if (seed === undefined || authorForSeed(seed) !== recorded) {
+      throw new Error(
+        `${name}: this pool governs itself under ${recorded}, and its key is not here. It is ` +
+          "refused rather than reopened under the host's key.",
+      );
+    }
+    return { seed, journal: true };
+  }
+  const empty =
+    (await backend.journalPeers()).length === 0 && (await backend.holdsAny?.()) === false;
+  if (!empty) {
+    throw new Error(
+      `${name}: this pool's store holds bytes, and the host never recorded a key for it. It was ` +
+        "made by an earlier Loam, and this Loam does not carry old pools forward. It is refused.",
+    );
+  }
+  const seed = keys.create(name);
+  await gw.append([
+    gw.signer!.sign(
+      withStamp(gw.stamp(gw.operatorAuthor), (t) =>
+        poolKeyClaims(name, authorForSeed(seed), gw.operatorAuthor!, t),
+      ),
+    ),
+  ]);
+  return { seed, journal: true };
+}
+
 async function openSeparate(
   gw: Gateway,
   spec: {
@@ -1697,9 +1741,12 @@ async function openSeparate(
   // and it leaves a curated container and a §39 inbox pool — which build authority in their OWN
   // ground on purpose — exactly as they were.
   const probationary = spec.trust === "untrusted";
+  const own = await poolGovernor(gw, spec.entity, backend);
   const pool = await Gateway.open(backend, {
-    seed: gw.childSeed()!,
-    unjournaled: true,
+    seed: own.seed,
+    ...(own.journal
+      ? { peerStore: (backend as JournalBackend).journalStore() }
+      : { unjournaled: true }),
     ...(probationary && gw.options.pens !== undefined ? { pens: gw.options.pens } : {}),
   });
   pool.attachedTo = gw;
@@ -1707,6 +1754,9 @@ async function openSeparate(
   // host copies and selects the host for them.
   const hosts = hostChain(gw.signer.author, gw.childLaw);
   pool.childLaw = spec.entity?.startsWith("inbox:") ? inboxLaw(hosts) : seededLaw(hosts);
+  // Every pool pins its host chain as erasure governors: a host's order binds here only when it
+  // names this pool as its receiver (SPEC-6 §3).
+  pool.pinErasureGovernors(hosts);
   pool.readUsersFrom(gw.userGroundHost());
   // A probationary pool KNOWS it is one, for the renderer door's sequestered frame (SPEC §24.7).
   if (probationary) {

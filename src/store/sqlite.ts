@@ -14,7 +14,8 @@
 /* eslint-disable @typescript-eslint/require-await -- the async keyword is load-bearing: it
    turns every synchronous throw (SQLITE_BUSY, a closed handle, a refused delta) into the
    rejected promise the seam promises. */
-import { existsSync, mkdirSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
 import {
@@ -27,6 +28,7 @@ import {
   type DurableOrdinaryJournalStore,
 } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "./backend.js";
+import type { PoolKeySource } from "./peer-image.js";
 import { canonicalDelta } from "./canon.js";
 import {
   admit,
@@ -869,6 +871,26 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
         return { status: "durable" };
       },
     });
+  }
+
+  // Each pool's key seed, in one file beside this store (`<file>.poolkeys.json`), readable by its
+  // owner only. A key is written whole (temporary file, then rename) before the host records it,
+  // so a crash between the two leaves an unused key, never a record without its key.
+  poolKeys(): PoolKeySource {
+    const path = `${this.filePath}.poolkeys.json`;
+    const read = (): Record<string, string> =>
+      existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Record<string, string>) : {};
+    return {
+      load: (pool) => read()[pool],
+      create: (pool) => {
+        const all = read();
+        const seed = randomBytes(32).toString("hex");
+        all[pool] = seed;
+        writeFileSync(`${path}.tmp`, JSON.stringify(all), { mode: 0o600 });
+        renameSync(`${path}.tmp`, path);
+        return seed;
+      },
+    };
   }
 
   async close(): Promise<void> {

@@ -31,7 +31,7 @@ import { STORE_ENTITY } from "./genesis.js";
 import { CTX_GRANTS, dataStrikers, lawfulStrikersJson } from "./governed-trust.js";
 export { CTX_GRANTS, lawfulStrikersJson } from "./governed-trust.js";
 import { entityGatherBody } from "./gather.js";
-import { eraseDefect, erasedInBatch, refusedIds } from "./erase.js";
+import { isErasure, orderBinds, eraseDefect, erasedInBatch, refusedIds } from "./erase.js";
 import { publicDefect } from "./public.js";
 import { artifactDefect } from "./artifact.js";
 import { trustDefect } from "./trust.js";
@@ -775,6 +775,9 @@ export function authorize(
 
   const author = delta.claims.author;
   if (operator === undefined || author === operator) return { ok: true };
+  // An erasure order from a governor this ground pins, naming this ground as its receiver, takes
+  // its authority from the pin (SPEC-6 §3), not from a write grant. eraseDefect checked it above.
+  if (isErasure(delta.claims) && orderBinds(delta, reactor, operator)) return { ok: true };
   // Each root's chain is judged whole, under that root's strikes; a link under one root never
   // extends a chain rooted at another. Only this ground's own key stands by itself: a selected
   // host has no general authority here, only the grants its chain issued.

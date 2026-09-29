@@ -29,7 +29,8 @@ import {
 import { graphql, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
-import { holdsJournals } from "../store/peer-image.js";
+import { holdsJournals, holdsPoolKeys } from "../store/peer-image.js";
+import { memoryPoolKeysFor, type PoolKeySource } from "./pool-keys.js";
 import {
   admitLocal,
   JournalConflict,
@@ -76,6 +77,7 @@ import {
   type LawFromRow,
 } from "./adopt-law.js";
 import {
+  pinErasureGovernors,
   erasedFromReading,
   eraseImpl,
   eraseReplicaImpl,
@@ -237,6 +239,11 @@ export interface GatewayOptions {
   readonly peerStore?: DurableOrdinaryJournalStore;
   /** @internal — a pool opens on its rows, not as a peer, until it takes its own key. */
   readonly unjournaled?: boolean;
+  /**
+   * Where each new pool's own key lives. A host defaults to its store's own key file, or to
+   * process memory for a store with none. Absent on a pool, whose child pools stay on its key.
+   */
+  readonly poolKeys?: PoolKeySource;
   /**
    * Where a FEDERATION CHANNEL's pool keeps its bytes, by pool name. A separate container defaults
    * to a fresh in-memory backend, which is right for a quarantine (transient by design) and WRONG
@@ -519,6 +526,12 @@ export class Gateway {
   }
   /** @internal — set by the child's opener (container.ts `openSeparate`); undefined at a root. */
   childLaw: ChildLaw | undefined = undefined;
+  private erasureGovernors: readonly string[] = [];
+  /** @internal — the keys this ground pins as erasure governors; kept across a reseat. */
+  pinErasureGovernors(keys: readonly string[]): void {
+    this.erasureGovernors = keys;
+    pinErasureGovernors(this._reactor, keys);
+  }
   /** The authors of `context` law here: this ground's own key, then a host it selects. */
   lawAuthors(context: LawContext): string[] {
     return lawAuthors(this.operatorAuthor, this.childLaw, context);
@@ -753,9 +766,15 @@ export class Gateway {
       options.peerStore === undefined && holdsJournals(backend)
         ? { peerStore: backend.journalStore() }
         : {};
+    // Each new pool takes its own key; the host records it first (container.ts `poolGovernor`).
+    const poolKeys =
+      options.poolKeys ??
+      (holdsPoolKeys(backend) ? backend.poolKeys() : undefined) ??
+      memoryPoolKeysFor(backend);
     const gateway = await Gateway.open(backend, {
       ...options,
       ...journal,
+      poolKeys,
       seed: genesis.operatorSeed,
     });
     // A store with rows and none readable would boot empty, with a fresh genesis planted beside
@@ -1515,6 +1534,7 @@ export class Gateway {
       }
     }
     this._reactor = reactor;
+    pinErasureGovernors(reactor, this.erasureGovernors); // the pins follow the ground
     if (this.delegationScope !== undefined) declarePrincipalScope(reactor, this.delegationScope);
     this.declareUsers(reactor);
     this.ingestVia = (d) => this.reactor.ingest(d);
