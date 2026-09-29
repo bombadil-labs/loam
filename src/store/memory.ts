@@ -177,9 +177,11 @@ export class MemoryBackend implements StoreBackend {
         for (const d of batch) this.set.add(d);
         const frames = j?.frames ?? [];
         if (frame !== null) frames.push(Uint8Array.from(frame));
+        // Keep the checkpoint a rebase stored: later frames continue from it.
         this.journals.set(peerId, {
           head: nextHead,
           frames,
+          ...(j?.checkpoint === undefined ? {} : { checkpoint: j.checkpoint }),
           rebaseDebt: j?.rebaseDebt ?? new Set(),
         });
         return { status: "durable" };

@@ -192,6 +192,20 @@ describe("a host opened with a peer journal admits through it", () => {
     await again.close();
   });
 
+  it("after a rebase, later appends continue the chain, and the journal reopens (memory)", async () => {
+    const backend = new MemoryBackend();
+    const gw = await boot(backend);
+    const target = note(1);
+    await gw.append([target]);
+    await gw.erase(target.id);
+    const later = note(2);
+    await gw.append([later]);
+    const state = await stateOf(backend.journalStore()); // reopens from the checkpoint and frames
+    expect(state.base.admitted.has(later.id)).toBe(true);
+    expect(state.base.refusedIds.has(target.id)).toBe(true);
+    await gw.close();
+  });
+
   it("a federation arrival is unattributed, never a peer id", async () => {
     const backend = new MemoryBackend();
     const gw = await boot(backend);

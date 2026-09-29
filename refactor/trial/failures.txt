@@ -1,3 +1,4 @@
+# Trial-only failures, rhizomatic 5fea42c, LOAM_PEER_TRIAL=1
 
 ## B unsigned deltas ingested around the door (14)
 - test/gateway/user-recovery-readers.test.ts :: the shapes a door refuses are refused, and no reader disagrees about them an unsigned binding-shaped row does not make K1 K2's own
@@ -24,27 +25,15 @@
 - test/store/corrupt-row-recovery.test.ts :: T66: heal replaces a corrupt row from the mirror's healthy copy an UNPARSEABLE row is a squatter too — the pen reason that cannot name its own strike
 - test/store/corrupt-row-recovery.test.ts :: T66: heal replaces a corrupt row from the mirror's healthy copy a genuinely-new archive delta still federates in the SAME heal that repairs a corrupt row
 
-## E erasure paths still to adapt (pools, tiers, CLI erase) (18)
+## E erasure tiers, repair and reports still to adapt (6)
 - test/cli/erasure-verbs.test.ts :: T206 (d) — `loam erasures` reads the receipt, never the record states the absence when a receipt does not record whose record it forgot
 - test/cli/erasure-verbs.test.ts :: T206 (d) — `loam erasures` reads the receipt, never the record asks the COLD ARCHIVE before calling a receipt swept
 - test/cli/erasure-verbs.test.ts :: T206 (b) — `loam erase` removes the bytes at every local tier sweeps the primary AND the archive, prints the receipt, and leaves a named bystander whole
-- test/cli/erasure-verbs.test.ts :: T206 (b) — `loam erase` removes the bytes at every local tier prints the receipt's own reason on a REUSE, and says the new one was not recorded
 - test/cli/erasure-verbs.test.ts :: T206 (b) — `loam erase` removes the bytes at every local tier says a promised sweep is UNFINISHED rather than calling the record forgotten
-- test/cli/erasure-verbs.test.ts :: T206 (b) — `loam erase` removes the bytes at every local tier will not call a sweep settled over a tier it could not ask
-- test/cli/erasure-verbs.test.ts :: T206 (b) — `loam erase` removes the bytes at every local tier reaches a federation channel's own pool file, and spares the peer's other record
-- test/cli/erasure-verbs.test.ts :: T206 (b) — `loam erase` removes the bytes at every local tier names what a SLATE'S RECORD was withholding, when that record is erased
-- test/cli/erasure-verbs.test.ts :: T206 (b) — `loam erase` removes the bytes at every local tier does not report an id as absent while its bytes sit in the §25 pen
-- test/cli/erasure-verbs.test.ts :: T206 (c) — `loam erase` without a reason erases nothing refuses, names the flag it wants, and leaves the record exactly where it was
-- test/federation/local-channel-live-opening.test.ts :: spec 64: a live opening cannot be erased a fresh opening over a store an earlier incarnation left behind does not let that incarnation's erase report clean
-- test/federation/local-channel-live-opening.test.ts :: spec 64: after the drop, the erase takes the incarnation's lineage a pool a boot could not attach: the erase is refused as unreachable, the drop attaches and registers it, then the erase proceeds
-- test/federation/local-channel-live-opening.test.ts :: spec 64: after the drop, the erase takes the incarnation's lineage status and declaration both negated by hand in this process: the drop names the attached pool it cannot reach and the road out; the road works
-- test/federation/local-channel-live-opening.test.ts :: spec 64: after the drop, the erase takes the incarnation's lineage a mirror tier that kept a peer byte after the primary's purge keeps the opening live although the read shows nothing; the drop purges both tiers
-- test/federation/local-channel-live-opening.test.ts :: spec 64: after the drop, the erase takes the incarnation's lineage a store with no whole-store byte probe cannot prove its pool empty: the erase refuses although the read shows nothing
-- test/federation/local-channel-live-opening.test.ts :: spec 64: after the drop, the erase takes the incarnation's lineage status stamps and declaration negated by hand, no handle: the refusal names a fresh open, which attaches the store; the drop then purges it and the erase proceeds
-- test/federation/local-channel-receive-boundary.test.ts :: T288 receive service boundary receipt-stage refusal returns the actual successful source report and only a later offer can prove those bytes
-- test/server/app-asof.test.ts :: (c) an as-of window spanning an erasure confesses it, in the served bytes the purge reached the BYTES — the condemned text is not in the store file, the bystander is
+- test/gateway/container-compat.test.ts :: a previous-format store is refused, not booted empty boot refuses the pre-0.11 fixture, and plants nothing beside it
+- test/gateway/container-compat.test.ts :: a previous-format store is refused, not booted empty a store with one unreadable row among readable ones still opens
 
-## F test harness: rows purged or faults injected around the door (42)
+## F test harness: rows purged or faults injected around the door (20)
 - test/cli/recovery-barrier.test.ts :: other writers during a recovery a second writer that never saw the recovery: the old key's later write is never history
 - test/cli/recovery-barrier.test.ts :: other writers during a recovery a pool another writer declares during the recovery gets no cut, and the command says so
 - test/cli/user-recover.test.ts :: E8: the journal, the key files, and the append that may or may not have landed a failure BEFORE the append commits restores the old key file and leaves no journal
@@ -54,54 +43,25 @@
 - test/cli/user-recover.test.ts :: E6 and E9: inboxes a record erased after it landed: the rerun says so, keeps the journal, and claims nothing
 - test/cli/user-recover.test.ts :: E6 and E9: inboxes an abandon whose new attempt fails before it commits hands the journal back to the old attempt
 - test/federation/local-channel-events.test.ts :: T288 partial writes and shared channel commit order failed protected open leaves a real legacy pool and never auto-promotes partial retry
-- test/federation/local-channel-events.test.ts :: T288 partial writes and shared channel commit order source bytes commit before delayed receipt; failed receipt stays unproven until actually offered again
 - test/federation/local-channel-events.test.ts :: T288 partial writes and shared channel commit order failed close prevents purge; failed purge leaves closed attachment; retry adds no redundant close
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection reads independent complete open/received/close literals and ignores unrelated generic negations
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection refuses literal wrong reference kind as unavailable
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection refuses literal short reference as unavailable
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection refuses literal unknown role as unavailable
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection refuses literal duplicate version as unavailable
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection refuses literal pointer order as unavailable
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection refuses literal partial bound opener as unavailable
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection refuses literal root with bound attribution as unavailable
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection refuses literal uppercase nonce as unavailable
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection refuses literal short nonce as unavailable
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection refuses literal NUL source as unavailable
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection refuses literal empty prefix as unavailable
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection refuses literal wrong source association as unavailable
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection refuses literal fractional timestamp as unavailable
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection refuses literal negative timestamp as unavailable
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection refuses literal unknown version as unavailable
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection refuses received literal duplicates without returning a partial operand
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection refuses received literal unsorted without returning a partial operand
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection refuses received literal missing without returning a partial operand
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection refuses received literal wrong-channel without returning a partial operand
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection refuses received literal missing-opening without returning a partial operand
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection refuses received literal extra-role without returning a partial operand
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection refuses received literal wrong-kind without returning a partial operand
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection foreign-author reserved history cannot become a local act
-- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection two current matching opens are ambiguous even with different timestamps
-- test/federation/local-channel-events.test.ts :: T288 explicit trusted-local event erasure and protected controls failed purge's effective marked erasure suppresses held event bytes; generic negation still refuses
+- test/federation/local-channel-live-opening.test.ts :: spec 64: a live opening cannot be erased a fresh opening over a store an earlier incarnation left behind does not let that incarnation's erase report clean
 - test/federation/local-channel-live-opening.test.ts :: spec 64: a live opening cannot be erased both orphan states read the same after a restart: the erase refuses or the drop works, never a strand
-- test/federation/local-channel-live-opening.test.ts :: spec 64: after the drop, the erase takes the incarnation's lineage erases receipts and close first and the opening last; a fault before the opening's erasure leaves the history readable and a re-run finishes
-- test/federation/local-channel-live-opening.test.ts :: spec 64: after the drop, the erase takes the incarnation's lineage a member whose purge faulted is erased again on the re-run, never skipped for its erasure
+- test/federation/local-channel-live-opening.test.ts :: spec 64: after the drop, the erase takes the incarnation's lineage a pool a boot could not attach: the erase is refused as unreachable, the drop attaches and registers it, then the erase proceeds
+- test/federation/local-channel-live-opening.test.ts :: spec 64: after the drop, the erase takes the incarnation's lineage status and declaration both negated by hand in this process: the drop names the attached pool it cannot reach and the road out; the road works
+- test/federation/local-channel-live-opening.test.ts :: spec 64: after the drop, the erase takes the incarnation's lineage a mirror tier that kept a peer byte after the primary's purge keeps the opening live although the read shows nothing; the drop purges both tiers
+- test/federation/local-channel-live-opening.test.ts :: spec 64: after the drop, the erase takes the incarnation's lineage a store with no whole-store byte probe cannot prove its pool empty: the erase refuses although the read shows nothing
+- test/federation/local-channel-live-opening.test.ts :: spec 64: after the drop, the erase takes the incarnation's lineage status stamps and declaration negated by hand, no handle: the refusal names a fresh open, which attaches the store; the drop then purges it and the erase proceeds
 - test/federation/local-channel-live-opening.test.ts :: spec 64: after the drop, the erase takes the incarnation's lineage a drop whose declaration negation failed after the purge completes on re-run, and then the opening can be erased
 - test/federation/local-channel-r2-regressions.test.ts :: T288 R2 regression controls retry after failed status never promotes a partial opening
+- test/federation/local-channel-receive-boundary.test.ts :: T288 receive service boundary receipt-stage refusal returns the actual successful source report and only a later offer can prove those bytes
 
-## M mixed erasure + ordinary append refused (awaits mixed transfer) (2)
-- test/gateway/refused-forever.test.ts :: an erased id is refused forever append refuses a batch carrying an erasure and its target (erasure first)
-- test/gateway/refused-forever.test.ts :: an erased id is refused forever append refuses a batch carrying an erasure and its target (target first)
+## L load timeout in the full run (passes alone) (6)
+- test/federation/local-channel-events.test.ts :: T288 partial writes and shared channel commit order source bytes commit before delayed receipt; failed receipt stays unproven until actually offered again
+- test/gateway/peer-image-host.test.ts :: a host opened with a peer journal admits through it erase through the journal: the target is refused, and a bystander stays
+- test/refactor/step4-strike-readers.test.ts :: loam user remove-role strikes a role whose earlier strike expired the role leaves the reader, and a bystander keeps theirs
+- test/server/operator-keys.test.ts :: A/H — a fresh keypair, local only create --operator and assign-role --role=operator both mint a key that never enters the ground
+- test/server/owned-membership.test.ts :: provisioned containers name their user a user made by `user create` gets a home in the user form, and it follows a recovery
+- test/server/user-root.test.ts :: every road that mints a user a key names it as their root erasing the person and moving the key file away frees the name
 
-## S §25: a damaged admitted row fails the open closed (12)
-- test/cli/erasure-verbs.test.ts :: T206 (a) — `loam slate list` prints §29.1's record calls an unreadable condemned set UNKNOWN, and never zero
-- test/cli/erasure-verbs.test.ts :: T206 (a) — `loam slate list` prints §29.1's record points a lapsed slate with an unreadable set at the UNRESOLVED row
-- test/cli/erasure-verbs.test.ts :: T206 (d) — `loam erasures` reads the receipt, never the record declares the §25 rows it never saw, on both readers
-- test/cli/erasure-verbs.test.ts :: T206 (b) — `loam erase` removes the bytes at every local tier says the byte verdict could not see the §25 rows, and stays quiet when there are none
-- test/cli/honest-reports.test.ts :: serve names the rows boot set aside prints one line with the count and `loam repair list`; a clean store prints none
-- test/gateway/boot-resilience.test.ts :: boot degrades, it does not abort (SPEC §25) a store with a corrupt fact row still boots, and every good fact resolves
-- test/gateway/boot-resilience.test.ts :: boot degrades, it does not abort (SPEC §25) a partial store is a legal store: the quarantined delta reads as not-yet-synced
-- test/gateway/boot-resilience.test.ts :: boot degrades, it does not abort (SPEC §25) the constitutional core is the loud exception: an unreadable operator marker refuses boot
-- test/gateway/container-compat.test.ts :: a previous-format store is refused, not booted empty boot refuses the pre-0.11 fixture, and plants nothing beside it
-- test/gateway/container-compat.test.ts :: a previous-format store is refused, not booted empty a store with one unreadable row among readable ones still opens
-- test/gateway/slate-cut.test.ts :: T64 criterion 9 — the pre-flight is all-or-refuse and leaves the ground byte-identical a DANGLING membershipAt refuses before any erasure lands
+## X fixed since this run (memory checkpoint kept) (1)
 - test/gateway/slate-receipt.test.ts :: T64 — the RE-ISSUE path must confess what the CUT was allowed to refuse an UNREADABLE frozen set is not a clean one — the arithmetic fails closed
