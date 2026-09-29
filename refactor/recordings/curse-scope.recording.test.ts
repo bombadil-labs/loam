@@ -63,13 +63,17 @@ const lensAt = (d: Delta): string | undefined => {
   return id.startsWith("schema:") ? id.slice("schema:".length) : id;
 };
 
-/** Every registration binding in `reactor`, as lens name + live or struck (by an operator
- * negation that survives) at `now`, the scope's own validity time, sorted. */
-function bindings(reactor: Reactor, now: number): string[] {
-  const struck = negatedAt(reactor, now, KEY.operator);
+/** Every registration binding in a ground, as lens name + live or struck at `now`, the scope's
+ * own validity time, sorted. Struck means a surviving negation by the binding's own author or by
+ * the ground's own key (a pool governs the copies it holds, ruling 11). */
+function bindings(reactor: Reactor, now: number, groundKey: string): string[] {
+  const byGround = negatedAt(reactor, now, groundKey);
   return [...reactor.snapshot()]
     .filter((d) => isRegistrationBinding(d.claims))
-    .map((d) => `${lensAt(d)}: ${struck(d.id) ? "struck" : "live"}`)
+    .map((d) => {
+      const struck = byGround(d.id) || negatedAt(reactor, now, d.claims.author)(d.id);
+      return `${lensAt(d)}: ${struck ? "struck" : "live"}`;
+    })
     .sort();
 }
 
@@ -106,8 +110,11 @@ async function observe(gw: Gateway, channel: string) {
   };
   return {
     delta: {
-      pool: pool === undefined ? "no pool" : bindings(pool.reactor, pool.validityNow()),
-      root: bindings(gw.reactor, gw.validityNow()),
+      pool:
+        pool === undefined
+          ? "no pool"
+          : bindings(pool.reactor, pool.validityNow(), pool.operatorAuthor!),
+      root: bindings(gw.reactor, gw.validityNow(), gw.operatorAuthor!),
       "pool strikes": pool === undefined ? "no pool" : strikes(pool.reactor),
       "root strikes": strikes(gw.reactor),
     },

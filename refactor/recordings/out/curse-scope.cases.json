@@ -78,9 +78,11 @@
       "delta": {
         "pool": [
           "Plant: live",
+          "alice:Plant: struck",
           "alice:Plant: struck"
         ],
         "pool strikes": [
+          "negation of alice:Plant",
           "negation of alice:Plant"
         ],
         "root": [
@@ -114,6 +116,7 @@
       "delta": {
         "pool": [
           "Plant: live",
+          "alice:Plant: live",
           "alice:Plant: live"
         ],
         "pool strikes": [],
@@ -148,7 +151,9 @@
     "curse": "resolved",
     "root publish": "published",
     "sync": {
-      "bound": [],
+      "bound": [
+        "alice:Plant"
+      ],
       "parked": []
     }
   },
