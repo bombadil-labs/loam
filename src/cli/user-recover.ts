@@ -10,9 +10,10 @@
 //   4. The cuts (recovery-history.md): one in every declared inbox pool, each journaled before it
 //      is written. From its cut on, a pool pauses the old key. A pool that is not attached refuses
 //      the recovery in step 1, because it could not be cut.
-//   5. One atomic operator append: the host's own cut, the cut manifest (every cut that landed), the
-//      record, its lineage, the new root claim, and strikes of the old key's standing in the host.
-//      The door admits the record only if the manifest names a live cut in this store and in every
+//   5. Two operator appends. First the host's own cut and the cut manifest (every cut that landed).
+//      Then the record, its lineage, the new root claim, and strikes of the old key's standing in
+//      the host. One append's arrivals are simultaneous, so the manifest needs its own. The door
+//      admits the record only if a held manifest names a live cut in this store and in every
 //      declared pool, so a pool declared since step 1 refuses the commit. From here the fence holds
 //      everywhere.
 //   6. The outcomes: `committed` beside every cut once the record landed, `aborted` once it provably
@@ -527,7 +528,7 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
       await o.afterCuts?.(gw);
     }
 
-    // 5. One atomic operator append, led by the host's own cut.
+    // 5. The barrier append (the host's cut and the manifest), then the record's.
     const lineage = signClaims(
       withStamp(gw.stamp(operator), (t) =>
         lineageClaims({ name, recovery: record.id, root, retired: [...retired] }, operator, t),
@@ -543,8 +544,8 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
       ...[...retired].flatMap((key) => standingOf(gw.reactor, key)),
     ]);
     try {
-      // The manifest names every cut this attempt landed, the host's included, and goes ahead of
-      // the record: the door admits the record only behind it.
+      // The manifest names every cut this attempt landed, the host's included. The door admits the
+      // record only behind a manifest it already holds.
       const barrier: Delta[] = [];
       if (previous !== undefined) {
         const hostCut = cut(gw, HOST);
@@ -563,7 +564,10 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
           ),
         );
       }
-      await gw.append([...barrier, record, lineage, rootClaim, ...struck]);
+      // One transfer's arrivals are simultaneous (SPEC-6 §3): the cuts and the manifest land in
+      // their own append, before the record's.
+      if (barrier.length > 0) await gw.append(barrier);
+      await gw.append([record, lineage, rootClaim, ...struck]);
     } catch (err) {
       await gw.close().catch(() => {});
       // 7. Read before undoing.

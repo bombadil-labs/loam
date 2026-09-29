@@ -7,7 +7,7 @@
 // case also reads a bystander user, bea, whose signed claims must stand.
 
 import { afterEach, describe, expect, it } from "vitest";
-import { withHostCut } from "../helpers/recovery-cut.js";
+import { appendWithHostCut } from "../helpers/recovery-cut.js";
 import {
   authorForSeed,
   makeDelta,
@@ -138,7 +138,7 @@ describe("an unsigned operator root claim changes no user's root", () => {
     const lineage = op(
       lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30),
     );
-    await gw.append(withHostCut(gw, OP_SEED, [record, lineage]));
+    await appendWithHostCut(gw, OP_SEED, [record, lineage]);
     ingest(gw, unsigned(rootClaims("ada", K2, OP, 31)));
     expect(readers(gw, "ada")).toEqual({ index: undefined, view: undefined, raw: [] });
     expect(writes(gw, K2)).toBe(false);

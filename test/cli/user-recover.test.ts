@@ -117,8 +117,9 @@ function faulty(mode: {
         if (prop === "append" && mode.append !== undefined && !appendsFailed) {
           return async (deltas: Iterable<Delta>) => {
             const batch = [...deltas];
-            // Only the recovery's own atomic append fails; genesis writes pass.
-            if (!batch.some((d) => d.claims.pointers.some((p) => p.role === "attempt"))) {
+            // Only the record's append fails (it alone carries `retired`); genesis and the
+            // barrier append before it pass.
+            if (!batch.some((d) => d.claims.pointers.some((p) => p.role === "retired"))) {
               return target.append(batch);
             }
             appendsFailed = true;
