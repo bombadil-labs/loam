@@ -1902,7 +1902,6 @@ async function openSeparate(
       // as corrupt, still legible bytes on disk — is swept by its own door, since no id-keyed
       // purge can reach a row whose id was never returned.
       const discardBytes = async (target: Gateway, who: string): Promise<void> => {
-        target.assertUnfenced("a drop's purge");
         const ids = new Set((await target.backend.deltasSince(new Set())).map((d) => d.id));
         for (const d of target.reactor.snapshot()) ids.add(d.id);
         if (isRepairable(target.backend)) {
@@ -1915,7 +1914,7 @@ async function openSeparate(
         }
         if (ids.size > 0) {
           const batch = [...ids];
-          await target.purgeBytes(batch);
+          await target.backend.purge(batch);
           // The verdict, H9-closed: a probe that cannot answer has proven nothing, so a
           // rejecting store refuses the drop exactly like a retaining one.
           let survivors: Set<string>;

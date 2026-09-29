@@ -243,17 +243,6 @@ export function readErasures(
 // DERIVED, NOT PERSISTED, and that rests on one premise: an erasure can never itself be erased (§11).
 // If that ever changes, this list must be kept in its own store, or an erasure can be undone.
 // A batch that carries an erasure and its target is handled by `erasedInBatch`.
-/** Every erasure order that binds here, ever (negated ones included): the refusal events. */
-export function bindingErasureOrders(
-  reactor: Reactor,
-  operator: string | undefined,
-): { targetId: string; order: Delta }[] {
-  return boundErasures(reactor, operator, undefined).map((order) => ({
-    targetId: erasureParts(order.claims).targetId!,
-    order,
-  }));
-}
-
 export function refusedIds(reactor: Reactor, operator: string | undefined): Set<string> {
   const refused = new Set<string>();
   for (const tomb of boundErasures(reactor, operator, undefined)) {
@@ -1120,7 +1109,6 @@ export async function eraseImpl(
   reasons: string[];
   spokenBy?: string;
 }> {
-  gw.assertUnfenced("an erasure");
   // Erasure is the operator's alone (SPEC §11): destructive, so the only signer is the store's
   // own operator. A data subject's request is honored BY the operator, never by the subject
   // directly — there is no actor override here on purpose.
@@ -1276,7 +1264,7 @@ export async function eraseImpl(
   // erasure and the sweep to every attached pool — one tier's fault becoming every replica's leak.
   let localPurge: unknown;
   try {
-    await gw.purgeBytes([id]);
+    await gw.backend.purge([id]);
   } catch (err) {
     localPurge = err;
   }
@@ -1501,7 +1489,6 @@ export async function eraseReplicaImpl(
   id: string,
   seen: Set<Gateway>,
 ): Promise<void> {
-  gw.assertUnfenced("a replica erasure");
   // Authorization first, on its own: a forged or foreign removal-order is refused WITHOUT purging
   // — loudly, since only a hostile direct caller can reach this branch (the primary's fan-out only
   // ever hands over the erasure its own erase door just validated).
@@ -1536,7 +1523,7 @@ export async function eraseReplicaImpl(
   }
   let localPurge: unknown;
   try {
-    await gw.purgeBytes([id]);
+    await gw.backend.purge([id]);
   } catch (err) {
     localPurge = err; // collected below — a pool tier's fault must not starve its own children
   }

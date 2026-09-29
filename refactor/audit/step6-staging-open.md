@@ -1,5 +1,8 @@
 # Step 6: the read-only staging open (design note)
 
+**Retired (Myk, 2026-09-29, ruling 10 in `refactor/README.md`):** existing pools are not handed off.
+A store with an older pool is refused at boot. This note is kept as history.
+
 Status: design note, reviewed by Sol (#651), 2026-09-28. No code. It details the constructor obligation in
 `step6-handoff.md` (#648), step 3.
 

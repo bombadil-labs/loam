@@ -557,11 +557,6 @@ export class Gateway {
       // cached read; the next tokenless request recomputes. Once per WRITE, not per read.
       this.publicOpen = undefined;
       if (this.justPersisted.delete(d.id)) return;
-      // A fenced surface writes nothing: an emission is held, and released with the fence.
-      if (this.fence !== undefined) {
-        this.fence.held.push(d);
-        return;
-      }
       this.writes = this.writes
         .then(() => this.backend.append([d]))
         .then(
@@ -1363,43 +1358,7 @@ export class Gateway {
   // re-attaches, and any animating host is detached (it watched the old reactor — the caller
   // re-attaches its runner, as the village does after the crash).
   /** @internal — T19 seam (erase.ts) */
-  /**
-   * @internal — a handoff's fence on this surface (step6-handoff.md, step 2). While it stands the
-   * surface admits nothing, writes nothing through, and refuses any byte mutation; an emission is
-   * held in `held`, in order.
-   */
-  fence: { readonly reason: string; readonly held: Delta[] } | undefined = undefined;
-
-  // Byte mutations in flight. A fence refuses new ones at the mutation itself, and a carry drains
-  // the ones already started, so none can delete a byte the carry captured.
-  private readonly purging = new Set<Promise<unknown>>();
-
-  /** @internal — purge `ids` from this surface's store: the one road to a byte mutation. */
-  purgeBytes(ids: readonly string[]): Promise<number> {
-    this.assertUnfenced("a purge");
-    const run = this.backend.purge(ids);
-    this.purging.add(run);
-    void run.then(
-      () => this.purging.delete(run),
-      () => this.purging.delete(run),
-    );
-    return run;
-  }
-
-  /** @internal — wait until every byte mutation already started has settled. */
-  async drainPurges(): Promise<void> {
-    while (this.purging.size > 0) await Promise.allSettled([...this.purging]);
-  }
-
-  /** @internal — refuse a byte mutation while a fence stands. */
-  assertUnfenced(what: string): void {
-    if (this.fence !== undefined) {
-      throw new Error(`${what} refused: this surface is fenced (${this.fence.reason})`);
-    }
-  }
-
   async reseat(): Promise<void> {
-    this.assertUnfenced("reseat");
     // READ FIRST, TEAR DOWN AFTER, CATCH UP LAST: the read is the one step here that can fail,
     // and everything after it is destructive. Ordered the other way, a failed read leaves the
     // gateway half-torn-down — subscriptions killed, reactor still on pre-purge ground.
