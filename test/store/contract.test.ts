@@ -256,15 +256,18 @@ for (const makeHarness of harnesses) {
     });
 
     it("a lone surrogate is refused: its bytes and its identity disagree", async () => {
-      const torn = makeDelta({
-        timestamp: 6000,
-        validFrom: 6000,
-        author: "did:key:zAnon",
-        pointers: [{ role: "value", target: { kind: "primitive", value: "\ud800" } }],
-      });
+      // Since rhizomatic 0.11.0-next.6 the substrate refuses it when the delta is made, before any
+      // store sees it; the store is left untouched either way.
+      expect(() =>
+        makeDelta({
+          timestamp: 6000,
+          validFrom: 6000,
+          author: "did:key:zAnon",
+          pointers: [{ role: "value", target: { kind: "primitive", value: "\ud800" } }],
+        }),
+      ).toThrow(/well-formed Unicode|lone surrogate/);
       const h = makeHarness();
       const store = h.open();
-      await expect(store.append([torn])).rejects.toThrow(/lone surrogate/);
       expect(await store.deltasSince(new Set())).toEqual([]);
       await store.close();
     });
