@@ -146,10 +146,11 @@ Design:
 ## Rulings (Myk, 2026-09-29, in chat)
 
 10. **No handoff of existing pools.** The greenfield ruling covers it: moving a pool governed by
-    the host key to its own key is a migration of old data. Every pool created from step 6 on
-    starts under its own key, on an empty journal. A store that holds an older pool is refused at
-    boot, like every other old store. The handoff design (`audit/step6-handoff.md`,
-    `audit/step6-staging-open.md`) is retired, and its code (#663) is removed.
+    the host key to its own key is a migration of old data. The rule, to be enforced when pool
+    keys switch on: every pool created from then on starts under its own key, on an empty journal,
+    and a store that holds an older pool is refused at boot, like every other old store. Neither
+    is built yet. The handoff design (`audit/step6-handoff.md`, `audit/step6-staging-open.md`) is
+    retired, and its code (#663) is removed.
 
 ## What stays in force
 

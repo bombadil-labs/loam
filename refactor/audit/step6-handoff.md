@@ -1,7 +1,8 @@
 # Step 6: the pool handoff (working spec)
 
 **Retired (Myk, 2026-09-29, ruling 10 in `refactor/README.md`):** existing pools are not handed off.
-A store with an older pool is refused at boot. This note is kept as history.
+The planned rule, not built yet: a store with an older pool will be refused at boot. This note is
+kept as history.
 
 Status: working spec, reviewed by Sol (#648). No constructor changes until the substrate's prerelease peer API.
 It builds on Sol's contract and the inventory (`step6-inventory.md`, #647).
