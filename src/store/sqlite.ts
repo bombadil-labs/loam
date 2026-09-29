@@ -160,6 +160,15 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
         peer TEXT PRIMARY KEY,
         head TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS journal_checkpoint (
+        peer       TEXT PRIMARY KEY,
+        checkpoint BLOB NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS journal_rebase_debt (
+        peer   TEXT NOT NULL,
+        target TEXT NOT NULL,
+        PRIMARY KEY (peer, target)
+      );
       CREATE TABLE IF NOT EXISTS journal_frames (
         peer  TEXT NOT NULL,
         n     INTEGER NOT NULL,
@@ -559,6 +568,21 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     const hasRows = (): boolean =>
       this.db.prepare("SELECT 1 FROM deltas LIMIT 1").get() !== undefined;
     const rowFor = this.db.prepare("SELECT id, claims, sig FROM deltas WHERE id = ?");
+    // Fold the -wal sidecar into the file and truncate it, so the rebase's deleted frame pages
+    // leave the sidecar too. Contention leaves the debt standing (a busy checkpoint returns, it
+    // does not throw), and a purge cannot settle until it clears.
+    const settleRebaseWal = (): void => {
+      if (
+        this.db.prepare("SELECT 1 FROM meta WHERE key = 'rebase-wal-outstanding'").get() ===
+        undefined
+      ) {
+        return;
+      }
+      const [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
+      if (status !== undefined && status.busy === 0) {
+        this.db.prepare("DELETE FROM meta WHERE key = 'rebase-wal-outstanding'").run();
+      }
+    };
     const rollback = (): void => {
       try {
         this.db.exec("ROLLBACK");
@@ -613,7 +637,17 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
               .prepare("SELECT frame FROM journal_frames WHERE peer = ? ORDER BY n")
               .all(peerId) as { frame: Buffer }[]
           ).map((r) => new Uint8Array(r.frame));
-          return { status: "journal", head, frames } as const;
+          const cp = this.db
+            .prepare("SELECT checkpoint FROM journal_checkpoint WHERE peer = ?")
+            .get(peerId) as { checkpoint: Buffer } | undefined;
+          return cp === undefined
+            ? ({ status: "journal", head, frames } as const)
+            : ({
+                status: "journal",
+                head,
+                frames,
+                checkpoint: new Uint8Array(cp.checkpoint),
+              } as const);
         })();
       },
       readAdmittedRows: async (_peerId, ids) => {
@@ -663,6 +697,18 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
             return { status: "conflict" };
           }
           commitFrame(peerId, nextHead, frame, batch);
+          // Each erased target's payload still sits in the frame that admitted it, until a rebase
+          // replaces the frames.
+          const debt = this.db.prepare(
+            "INSERT OR IGNORE INTO journal_rebase_debt (peer, target) VALUES (?, ?)",
+          );
+          for (const d of batch) {
+            for (const p of d.claims.pointers) {
+              if (p.role === "erases" && p.target.kind === "delta") {
+                debt.run(peerId, p.target.deltaRef.delta);
+              }
+            }
+          }
           this.db.exec("COMMIT");
         } catch (err) {
           rollback();
@@ -671,18 +717,53 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
         for (const d of batch) this.onDisk.add(d.id);
         return { status: "durable" };
       },
+      compareAndRebase: async (peerId, expectedHead, nextHead, checkpoint) => {
+        this.assertOpen();
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          if (headOf(peerId) !== expectedHead) {
+            this.db.exec("ROLLBACK");
+            return { status: "conflict" };
+          }
+          // secure_delete zeroes the freed frame pages in the database file.
+          this.db.prepare("DELETE FROM journal_frames WHERE peer = ?").run(peerId);
+          this.db
+            .prepare("INSERT OR REPLACE INTO journal_checkpoint (peer, checkpoint) VALUES (?, ?)")
+            .run(peerId, Buffer.from(checkpoint));
+          this.db
+            .prepare("INSERT OR REPLACE INTO journal_head (peer, head) VALUES (?, ?)")
+            .run(peerId, nextHead);
+          this.db.prepare("DELETE FROM journal_rebase_debt WHERE peer = ?").run(peerId);
+          this.db
+            .prepare(
+              "INSERT OR REPLACE INTO meta (key, value) VALUES ('rebase-wal-outstanding', ?)",
+            )
+            .run(peerId);
+          this.db.exec("COMMIT");
+        } catch (err) {
+          rollback();
+          throw err;
+        }
+        settleRebaseWal();
+        return { status: "durable" };
+      },
       compareAndSettlePurge: async (peerId, expectedHead, nextHead, frame, targetId) => {
         this.assertOpen();
         this.db.exec("BEGIN IMMEDIATE");
         try {
           // "removed" is appended only if the bytes are provably gone, WAL debt included, and no
           // committed frame still carries the target: a frame holds the full admitted delta.
+          settleRebaseWal();
           if (
             headOf(peerId) !== expectedHead ||
             this.holdsNow(targetId) ||
+            // the frame that admitted it is still stored: no rebase since the order
             this.db
-              .prepare("SELECT 1 FROM journal_frames WHERE peer = ? AND instr(frame, ?) > 0")
-              .get(peerId, Buffer.from(targetId)) !== undefined
+              .prepare("SELECT 1 FROM journal_rebase_debt WHERE peer = ? AND target = ?")
+              .get(peerId, targetId) !== undefined ||
+            // the old frames' pages may still be in the -wal sidecar
+            this.db.prepare("SELECT 1 FROM meta WHERE key = 'rebase-wal-outstanding'").get() !==
+              undefined
           ) {
             this.db.exec("ROLLBACK");
             return { status: "conflict" };

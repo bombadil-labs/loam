@@ -184,3 +184,15 @@ export async function reportPurged(
     throw new Error(`purge report not committed: ${describe(result)}`);
   }
 }
+
+// Replace the journal's payload-bearing frames with a checkpoint of the current state, so an
+// erased target's payload leaves the frames that admitted it. Its purge cannot settle before this.
+export async function rebaseHostPeer(peer: HostPeer): Promise<void> {
+  const run = peer.tail.then(() => peer.journal.rebase());
+  peer.tail = run.catch(() => {});
+  const result = await run;
+  if (result.status === "conflict") throw new JournalConflict("the peer journal moved");
+  if (result.status !== "durable") {
+    throw new Error(`rebase not committed: ${result.fault}`);
+  }
+}

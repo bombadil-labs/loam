@@ -1,5 +1,5 @@
 import { appendLocalErasure } from "./ingest.js";
-import { reportPurged } from "./peer-admission.js";
+import { rebaseHostPeer, reportPurged } from "./peer-admission.js";
 import {
   withChannelCommit,
   parseLocalEvent,
@@ -1260,10 +1260,19 @@ export async function eraseImpl(
   // A local refusal is a fault to COLLECT, never an abort: thrown here it would deny the
   // erasure and the sweep to every attached pool — one tier's fault becoming every replica's leak.
   let localPurge: unknown;
+  // On the journal path the frame that admitted the target still carries it: rebase first, so the
+  // purge and its WAL truncation reach the old frames too.
+  if (gw.peer !== undefined) {
+    try {
+      await rebaseHostPeer(gw.peer);
+    } catch (err) {
+      localPurge = err;
+    }
+  }
   try {
     await gw.backend.purge([id]);
   } catch (err) {
-    localPurge = err;
+    localPurge = localPurge ?? err;
   }
   // On the journal path the purge obligation is the journal's: "removed" settles only where the
   // store proves the bytes gone; anything else is reported failed and stays owed.

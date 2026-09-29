@@ -71,7 +71,10 @@ export class MemoryBackend implements StoreBackend {
   // One journal per peer: a head and its committed frames, which never change once written. The
   // compare, the frame, the head and the rows change with no await between them, so they are one
   // step for every other caller.
-  private journals = new Map<string, { head: string; frames: Uint8Array[] }>();
+  private journals = new Map<
+    string,
+    { head: string; frames: Uint8Array[]; checkpoint?: Uint8Array; rebaseDebt: Set<string> }
+  >();
   private store: DurableOrdinaryJournalStore | undefined;
 
   async journalPeers(): Promise<string[]> {
@@ -89,6 +92,7 @@ export class MemoryBackend implements StoreBackend {
             status: "journal",
             head: j.head,
             frames: j.frames.map((f) => Uint8Array.from(f)),
+            ...(j.checkpoint === undefined ? {} : { checkpoint: Uint8Array.from(j.checkpoint) }),
           };
         }
         return this.set.size > 0 ? { status: "rows-without-journal" } : { status: "empty" };
@@ -119,23 +123,37 @@ export class MemoryBackend implements StoreBackend {
         if (assertedAbsentTargetIds.some((id) => this.set.has(id))) return { status: "conflict" };
         const batch = newlyAdmitted.map(canonicalDelta);
         for (const d of batch) this.set.add(d);
+        // Each erased target's payload sits in its admitting frame until a rebase replaces them.
+        for (const d of batch) {
+          for (const p of d.claims.pointers) {
+            if (p.role === "erases" && p.target.kind === "delta") {
+              j.rebaseDebt.add(p.target.deltaRef.delta);
+            }
+          }
+        }
         j.frames.push(Uint8Array.from(frame));
         j.head = nextHead;
+        return { status: "durable" };
+      },
+      compareAndRebase: async (peerId, expectedHead, nextHead, checkpoint) => {
+        this.assertOpen();
+        const j = this.journals.get(peerId);
+        if (j === undefined || j.head !== expectedHead) return { status: "conflict" };
+        j.frames = [];
+        j.checkpoint = Uint8Array.from(checkpoint);
+        j.head = nextHead;
+        j.rebaseDebt.clear();
         return { status: "durable" };
       },
       compareAndSettlePurge: async (peerId, expectedHead, nextHead, frame, targetId) => {
         this.assertOpen();
         const j = this.journals.get(peerId);
-        // A committed frame holds the full admitted delta: while one carries the target, its
-        // bytes are not gone.
-        const needle = new TextEncoder().encode(targetId);
-        const inFrame = (f: Uint8Array): boolean =>
-          f.some((_, i) => needle.every((b, k) => f[i + k] === b));
+        // The frame that admitted the target holds its payload until a rebase replaces the frames.
         if (
           j === undefined ||
           j.head !== expectedHead ||
           this.set.has(targetId) ||
-          j.frames.some(inFrame)
+          j.rebaseDebt.has(targetId)
         ) {
           return { status: "conflict" };
         }
@@ -155,7 +173,11 @@ export class MemoryBackend implements StoreBackend {
         for (const d of batch) this.set.add(d);
         const frames = j?.frames ?? [];
         if (frame !== null) frames.push(Uint8Array.from(frame));
-        this.journals.set(peerId, { head: nextHead, frames });
+        this.journals.set(peerId, {
+          head: nextHead,
+          frames,
+          rebaseDebt: j?.rebaseDebt ?? new Set(),
+        });
         return { status: "durable" };
       },
     });

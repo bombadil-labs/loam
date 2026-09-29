@@ -5,7 +5,7 @@
 // Not covered here: erasure, which the journal refuses by design in this trial.
 
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -121,7 +121,7 @@ describe("a host opened with a peer journal admits through it", () => {
     await gw.close();
   });
 
-  it("erase through the journal: the target is refused, a bystander stays, and no false removal", async () => {
+  it("erase through the journal: the target is refused, and a bystander stays", async () => {
     const path = sqliteHome();
     const backend = new SqliteBackend(path);
     const gw = await boot(backend);
@@ -135,24 +135,57 @@ describe("a host opened with a peer journal admits through it", () => {
     expect(state.base.refusedIds.has(target.id)).toBe(true);
     expect(state.base.admitted.has(target.id)).toBe(false);
     expect(await backend.holds(target.id)).toBe(false);
-    // the bytes: while a committed frame still carries the target, its purge never reads
-    // "removed" (the frames are immutable and hold the full admitted delta)
-    const db = new Database(path);
-    const inFrame =
-      db
-        .prepare("SELECT 1 FROM journal_frames WHERE instr(frame, ?) > 0")
-        .get(Buffer.from(target.id)) !== undefined;
-    db.close();
-    const removed = state.obligations.some(
-      (o) => o.targetId === target.id && o.status === "removed",
-    );
-    expect(inFrame && removed).toBe(false);
+    // The bytes themselves are checked in the plaintext rail below.
     await gw.close();
     // object level, after a reopen: the target never returns; the bystander is served
     const again = await boot(new SqliteBackend(path));
     expect(again.reactor.get(target.id)).toBeUndefined();
     expect(again.reactor.get(bystander.id)).toBeDefined();
     await expect(again.append([target])).rejects.toThrow(/erased/);
+    await again.close();
+  });
+
+  it("erase through the journal: the plaintext leaves every byte of the file, then settles", async () => {
+    const path = sqliteHome();
+    const backend = new SqliteBackend(path);
+    const gw = await boot(backend);
+    const secret = "CONDEMNED-SECRET-MARKER";
+    const kept = "BYSTANDER-KEPT-MARKER";
+    const target = signClaims(
+      {
+        timestamp: 30_000,
+        validFrom: 30_000,
+        author: OP,
+        pointers: [{ role: "v", target: { kind: "primitive", value: secret } }],
+      },
+      SEED,
+    );
+    const bystander = signClaims(
+      {
+        timestamp: 30_001,
+        validFrom: 30_001,
+        author: OP,
+        pointers: [{ role: "v", target: { kind: "primitive", value: kept } }],
+      },
+      SEED,
+    );
+    await gw.append([target]);
+    await gw.append([bystander]);
+    await gw.erase(target.id);
+    const state = await stateOf(backend.journalStore());
+    await gw.close();
+    const bytes = (f: string): Buffer => (existsSync(f) ? readFileSync(f) : Buffer.alloc(0));
+    const file = Buffer.concat([bytes(path), bytes(`${path}-wal`)]);
+    // the bytes: the target's plaintext is nowhere in the file or its sidecar; the bystander's is
+    expect(file.includes(Buffer.from(secret))).toBe(false);
+    expect(file.includes(Buffer.from(kept))).toBe(true);
+    // and only then does the obligation read removed
+    expect(state.obligations.filter((o) => o.targetId === target.id).map((o) => o.status)).toEqual([
+      "removed",
+    ]);
+    const again = await boot(new SqliteBackend(path));
+    expect(again.reactor.get(bystander.id)).toBeDefined();
+    expect(again.reactor.get(target.id)).toBeUndefined();
     await again.close();
   });
 
