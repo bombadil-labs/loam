@@ -121,8 +121,10 @@ queue. The CLI and `http.ts` keep calling `Gateway`, so their code does not chan
 
 - The census ratchet gains one count: distinct source lines outside `container-open.ts` that
   touch `attachedTo` or a child map (105 today). It must fall with each PR, and it ends at 0.
-- A test opens two `Gateway`s over one store, on two containers, and shows each serves its own
-  container while both see the same writes. It proves no state lives in a `Gateway`.
+- Two rails prove that no state lives in a `Gateway`:
+  - Two `Gateway`s over the SAME container: a write through one is served through the other.
+  - Two `Gateway`s over two containers: a write admitted to one is not served through the other,
+    unless the other composes it explicitly (ruling 11: an operation is scoped to its peer).
 - `importCycles` must fall to 0, and the ratchet then holds it there.
 - A new test asserts that no container module imports the host facade.
 - The full suite and every recording stay unchanged. A moved recording means a behaviour change,
