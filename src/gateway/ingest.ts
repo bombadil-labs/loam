@@ -76,7 +76,7 @@ import {
   isStoreLocal,
   lateCutDefect,
   liveCutIds,
-  manifestAhead,
+  manifestsFor,
   manifestDefect,
   pausedKeys,
 } from "./recovery-cut.js";
@@ -398,54 +398,8 @@ async function appendAdmitted(
       );
     if (defect !== undefined) throw new Error(`append rejected: ${defect}`);
     for (const d of batch) {
-      const previous = d.claims.author === op ? recordPrevious(d) : undefined;
-      if (previous === undefined) continue;
-      const named = manifestAhead(gw.reactor, op, d, refused);
-      if (named === undefined) {
-        throw new Error(
-          `append rejected: recovery ${d.id} retires ${previous} and no cut manifest for it is ` +
-            `held. \`loam user recover\` writes the cuts and the manifest in an earlier append.`,
-        );
-      }
-      const stores = [
-        { name: "this store", ground: gw as Gateway | undefined, batch },
-        ...declaredInboxes(readContainerTable(gw.reactor, gw.validityNow(), op)).map((pool) => ({
-          name: pool,
-          ground: attachedPool(gw, pool),
-          batch: [] as Delta[],
-        })),
-      ];
-      const live = new Set<string>();
-      const uncut: string[] = [];
-      for (const s of stores) {
-        const ids =
-          s.ground === undefined
-            ? new Set<string>()
-            : liveCutIds(
-                s.ground.reactor,
-                op,
-                s.batch,
-                d.id,
-                previous,
-                refusedIds(s.ground.reactor, op),
-              );
-        for (const id of ids) live.add(id);
-        if (![...ids].some((id) => named.has(id))) uncut.push(s.name);
-      }
-      if (uncut.length > 0) {
-        throw new Error(
-          `append rejected: recovery ${d.id} retires ${previous}, and ${uncut.join(", ")} ` +
-            `holds no live cut for it in its manifest (or is not attached), so ${previous} could ` +
-            `write there unseen. \`loam user recover\` writes the cuts first.`,
-        );
-      }
-      const unwritten = [...named].filter((id) => !live.has(id));
-      if (unwritten.length > 0) {
-        throw new Error(
-          `append rejected: the cut manifest for ${d.id} names ${unwritten.join(", ")}, which no ` +
-            `store here holds as a live cut`,
-        );
-      }
+      const defect = recordBarrierDefect(gw, op, d, batch, refused);
+      if (defect !== undefined) throw new Error(`append rejected: ${defect}`);
     }
   }
   // Door resource budgets (SPEC §25): a granted author the operator has metered may not append
@@ -854,6 +808,56 @@ export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], v
 // judgment by importing what the caller refused. Such a caller owns the closure, like every other
 // holder of a raw delta set; `PullOptions.admit` says so where a caller will read it. Closing that
 // asymmetry needs read-time authority-scoped suppression, which is substrate work (rhizomatic#2).
+// Why a retiring operator record `d` may not land here, or undefined. It commits only behind a HELD
+// manifest that names a live cut in this store and in every declared pool, and names no cut that is
+// not live. Both doors ask it: a record that skipped the barrier would move a user's root with no
+// history line drawn. `batch` holds cuts arriving beside the record in this store's own append.
+function recordBarrierDefect(
+  gw: Gateway,
+  op: string,
+  d: Delta,
+  batch: readonly Delta[],
+  refused: ReadonlySet<string>,
+): string | undefined {
+  const previous = d.claims.author === op ? recordPrevious(d) : undefined;
+  if (previous === undefined) return undefined;
+  const manifests = manifestsFor(gw.reactor, op, d, refused);
+  if (manifests.length === 0) {
+    return (
+      `recovery ${d.id} retires ${previous} and no cut manifest for it is held. ` +
+      "`loam user recover` writes the cuts and the manifest in an earlier append."
+    );
+  }
+  const stores = [
+    { name: "this store", ground: gw as Gateway | undefined, batch },
+    ...declaredInboxes(readContainerTable(gw.reactor, gw.validityNow(), op)).map((pool) => ({
+      name: pool,
+      ground: attachedPool(gw, pool),
+      batch: [] as readonly Delta[],
+    })),
+  ];
+  const liveBy = stores.map((s) =>
+    s.ground === undefined
+      ? new Set<string>()
+      : liveCutIds(s.ground.reactor, op, s.batch, d.id, previous, refusedIds(s.ground.reactor, op)),
+  );
+  const live = new Set(liveBy.flatMap((ids) => [...ids]));
+  let first: string | undefined;
+  for (const named of manifests) {
+    const uncut = stores.filter((_, i) => ![...liveBy[i]!].some((id) => named.has(id)));
+    const unwritten = [...named].filter((id) => !live.has(id));
+    if (uncut.length === 0 && unwritten.length === 0) return undefined;
+    first ??=
+      uncut.length > 0
+        ? `recovery ${d.id} retires ${previous}, and ${uncut.map((s) => s.name).join(", ")} ` +
+          `holds no live cut for it in its manifest (or is not attached), so ${previous} could ` +
+          "write there unseen. `loam user recover` writes the cuts first."
+        : `the cut manifest for ${d.id} names ${unwritten.join(", ")}, which no store here ` +
+          "holds as a live cut";
+  }
+  return first;
+}
+
 export async function federateImpl(
   gw: Gateway,
   deltas: Iterable<Delta>,
@@ -950,6 +954,8 @@ async function federateAdmitted(
       (isErasure(d.claims) && eraseDefect(d, gw.reactor, gw.operatorAuthor, all) !== undefined) ||
       slateDefect(d, gw.reactor, gw.validityNow(), gw.operatorAuthor) !== undefined ||
       recoveryDefect(d, gw.reactor, gw.operatorAuthor, all) !== undefined ||
+      (gw.operatorAuthor !== undefined &&
+        recordBarrierDefect(gw, gw.operatorAuthor, d, [], dead) !== undefined) ||
       paused.has(d.claims.author) ||
       // A cut for this store is written by this store's own append, before its record; one that
       // arrives by federation could come after the record and count what came between.

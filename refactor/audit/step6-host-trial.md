@@ -151,6 +151,42 @@ The host's recovery barrier and `erasureStandings` read pool state, and pool res
    admitted delta rows together. For sqlite that is one transaction. For `MemoryBackend` it is one
    synchronous swap.
 
+## Results (2026-09-29)
+
+The trial ran on rhizomatic `7e7f098`, on the unmerged branch `claude/step6-host-trial`. Its
+`refactor/trial/RESULTS.md` holds the numbers. In short:
+
+- On a 4,042-delta store, one append takes about 1.2 s on the image path, against 3.3 ms today.
+  Each commit re-verifies every admitted signature and re-encodes the whole image. Sol accepts
+  this as a merge blocker, and works on an incremental storage contract.
+- The image records the arrivals of one transfer in id order. This broke the recovery barrier
+  after a reopen (see below).
+- Loam must serialize its own commits per peer: the door and the write-through both commit.
+
+## The recovery barrier and transfers (settled with Sol, 2026-09-29)
+
+SPEC-6 §3 orders the arrivals of one transfer by ascending id. They share one transfer ordinal
+and are simultaneous. Today `loam user recover` writes the host's cut, the cut manifest and the
+recovery record in ONE append, and the door requires the manifest AHEAD of the record in that
+batch (`manifestAhead`, `manifestDefect`, recovery-cut.ts). On the image path that order is lost.
+
+The change, before the host moves to the image path:
+
+- `loam user recover` writes the cuts and the manifest in one transfer, the host's own cut
+  included, and the record in a later transfer.
+- The door admits a manifest only if every cut it names is already held, or is admitted in the
+  manifest's own transfer. A manifest can never bind a cut that arrives after it.
+- The door admits a retiring record only behind a manifest held from an EARLIER transfer, and
+  only if that manifest passed the rule above. A manifest in the same transfer as its record no
+  longer counts. The record's admission keeps that proof: the manifest id and its transfer.
+- This rule lives at the door, because direct operator-signed appends do not pass through
+  `loam user recover`. The recover journal only settles a failed CLI attempt (rerun or abort).
+- Every "arrived before" question in the barrier compares transfer ordinals, never positions
+  inside one transfer.
+
+This change reopens a design that took four review rounds (#640), so it lands as its own design
+note and PR, with the barrier's rails.
+
 ## Trial rails
 
 - The recordings run against the trial branch and against main. Every move is explained.

@@ -427,20 +427,20 @@ export function liveCutIds(
 export const isCutManifest = (d: Delta): boolean => inContext(d, CTX_CUT_MANIFEST);
 
 /**
- * The manifest a retiring `record` commits behind: an operator manifest for it, HELD before this
+ * The manifests a retiring `record` may commit behind: operator manifests for it, HELD before this
  * append. The arrivals of one transfer are simultaneous (SPEC-6 §3), so a manifest in the record's
- * own append does not count. Returns the cut ids it names, or undefined when there is none.
+ * own append does not count. Each entry is the set of cut ids one manifest names; any one that
+ * covers every store qualifies, so an earlier, narrower manifest cannot block a later, complete one.
  */
-export function manifestAhead(
+export function manifestsFor(
   reactor: Reactor,
   operator: string,
   record: Delta,
   erased: ReadonlySet<string>,
-): ReadonlySet<string> | undefined {
-  const m = held(reactor, operator, CTX_CUT_MANIFEST, erased).find(
-    (d) => field(d, "recovery") === record.id,
-  );
-  return m === undefined ? undefined : new Set(fields(m, "cut"));
+): ReadonlySet<string>[] {
+  return held(reactor, operator, CTX_CUT_MANIFEST, erased)
+    .filter((d) => field(d, "recovery") === record.id)
+    .map((m) => new Set(fields(m, "cut")));
 }
 
 /**
