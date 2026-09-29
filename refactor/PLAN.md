@@ -231,19 +231,17 @@ level. Loam then consumes it through the barrel and compares its recordings.
      cases in it should move: a rotated user keeps its containers and can retract its own values.
 6. **Peer and admission.** The peer model, the guard pipeline, arrival testimony. Loam's
    containers become peers, and the import cycle breaks.
-   Decided (rulings 11 and 12, README): a curse is pool-local, and received law keeps the peer's
-   signed start time. The container split closes the step (ruling 13).
-   Decide the scope of a channel curse. `curseChannelLawImpl` also strikes a matching binding in
-   the root ground, and current code can still publish one there. First pin a root-binding
-   bystander and the pool binding, at the delta and the served-view levels. The lean is a
-   pool-local curse under the peer model.
-   Decide what time received law is valid from. Today a blessed definition keeps the peer's
-   `validFrom`, so law from a peer whose clock runs ahead parks until our clock passes it, and the
-   next sync binds it (measured with a 5 s skew). The park reason says "no surviving schema
-   definition", which is false: the definition exists and is valid later. The reason must name
-   the definition's `validFrom` and the current validity time. The peer's signed validity and
-   arrival testimony stay separate axes. Starting a local adoption at arrival would be a Loam
-   policy, chosen explicitly, never a rewrite of the peer's claim.
+   The curse scope is decided (ruling 11, README): a curse strikes only in the channel's pool.
+   `curseChannelLawImpl` also strikes a matching binding in the root ground today; that search is
+   removed. The rail pins a root-binding bystander and the pool binding, at the delta and the
+   served-view levels (the curse-scope recording, #597, shows the change).
+   The start time of received law is decided (ruling 12): a blessed definition keeps the peer's
+   signed `validFrom`. Law from a peer whose clock runs ahead parks until our clock passes it, and
+   the next sync binds it (measured with a 5 s skew). The park reason names the definition's
+   `validFrom` and the current validity time (#598). The peer's signed validity and arrival
+   testimony stay separate axes.
+   The step closes with the container split (ruling 13): one container type behind a small peer
+   interface, and no import cycle. A design note comes first, for Myk's review.
 7. **Publish and subscribe.** Per-subscriber lenses, the declared closure rule, a closure audit
    of the exact transferable set and its future additions, signed peer messages, the set digest,
    and a revised HTTP binding. The current HTTP helper does not meet SPEC-6 §4. Loam adopts the

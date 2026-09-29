@@ -1,9 +1,9 @@
 # The refactor map
 
-Updated 2026-09-29. Loam main is on `@bombadil/rhizomatic@0.11.0-next.5`. Step 5 is done in both
-repos. Step 6 is in progress: Loam's pool law and recovery barrier are merged; the host and
-new-pool journal work runs as an unmerged trial on Sol's step 6 builds, and waits for Sol's
-prerelease (rhizomatic #53). The handoff of existing pools is dropped (ruling 10).
+Updated 2026-09-29. Loam main is on `@bombadil/rhizomatic@0.11.0-next.6`, Sol's step 6 prerelease.
+Step 5 is done in both repos. Step 6 is done in rhizomatic and in progress in Loam: the journal
+store adapters are merged (#666); the host on its journal, new pools under their own key, and the
+container split remain. The handoff of existing pools is dropped (ruling 10).
 
 The refactor moves in three directions at once:
 
