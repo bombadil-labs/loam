@@ -1612,8 +1612,17 @@ async function poolGovernor(
 ): Promise<{ seed: string; journal: boolean }> {
   const host = { seed: gw.childSeed()!, journal: false };
   const keys = gw.options.poolKeys;
+  const recorded =
+    name === undefined ? undefined : recordedPoolKey(gw.reactor, gw.operatorAuthor, name);
+  // A pool the host recorded under its own key never reopens under the host's key, whatever
+  // this opener can offer.
+  if (recorded !== undefined && (keys === undefined || !holdsJournals(backend))) {
+    throw new Error(
+      `${name}: this pool governs itself under ${recorded}, and this opener has no key source or ` +
+        "no journal for it. It is refused rather than reopened under the host's key.",
+    );
+  }
   if (keys === undefined || name === undefined || !holdsJournals(backend)) return host;
-  const recorded = recordedPoolKey(gw.reactor, gw.operatorAuthor, name);
   if (recorded !== undefined) {
     const seed = keys.load(name);
     if (seed === undefined || authorForSeed(seed) !== recorded) {

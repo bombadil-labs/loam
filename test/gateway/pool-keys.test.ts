@@ -91,6 +91,19 @@ describe("criterion 17: a fresh pool starts under its own key", () => {
     await gw.close();
   });
 
+  it("a recorded pool opened by a host with no key source is refused, never reopened as the host", async () => {
+    const hostStore = new MemoryBackend();
+    const poolStore = new MemoryBackend();
+    const gw = await hostWith(hostStore, memoryPoolKeys());
+    await declare(gw, "container:k17e");
+    await gw.openContainer({ name: "container:k17e", backend: poolStore });
+    const bare = await Gateway.open(hostStore, { seed: SEED }); // no poolKeys: an embedder's open
+    await expect(
+      bare.openContainer({ name: "container:k17e", backend: poolStore }),
+    ).rejects.toThrow(/no key source or no journal/);
+    await gw.close();
+  });
+
   it("an older pool (bytes, no key record) is refused, and its bytes do not change", async () => {
     const gw = await hostWith(new MemoryBackend(), memoryPoolKeys());
     await declare(gw, "container:k17c");
