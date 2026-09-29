@@ -151,6 +151,18 @@ Design:
     and a store that holds an older pool is refused at boot, like every other old store. Neither
     is built yet. The handoff design (`audit/step6-handoff.md`, `audit/step6-staging-open.md`) is
     retired, and its code (#663) is removed.
+11. **Every operation is scoped to the peer where it takes place.** Myk: "Curse is always
+    peer-local, it should not apply upstream. All operations are scoped to the peer/container where
+    they take place." A curse strikes only in the channel's pool, never a root binding that shares
+    the lens name. An operation reaches another container only as a delta that container admits
+    (a host erasure reaches a pool as an order naming that pool, SPEC-6 §3).
+12. **Received law keeps the peer's signed start time.** A blessed definition keeps the peer's
+    `validFrom`. Law from a peer whose clock runs ahead parks until the local clock passes it, and
+    the park reason names that time (#598). Loam never rewrites a peer's signed claim.
+13. **Step 6 ends with the container split.** Myk agreed that the import cycle marks the real
+    bottleneck: one `Gateway` class plays host, pool, quarantine and inbox, and host and pool reach
+    into each other's members. Step 6 closes when each container is one peer type behind a small
+    peer interface and the import cycle count is 0. A design note comes first, for Myk's review.
 
 ## What stays in force
 
