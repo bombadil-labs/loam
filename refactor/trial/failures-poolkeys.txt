@@ -1,0 +1,179 @@
+# Pool-key-only failures: LOAM_PEER_TRIAL=1 LOAM_POOL_KEYS=1 vs LOAM_PEER_TRIAL=1, rhizomatic 5fea42c
+
+## E erasure: a host erasure fanned into a pool is refused (pinned host governor not built) (16)
+- test/federation/local-channel-container-scope.test.ts :: spec 64: lifecycle events name their parent container a bound connection's lineage read lists the channels opened into its container and no others; the operator's read filters by container
+- test/federation/local-channel-drop-erased-source.test.ts :: T288 channel cleanup after real received-source erasure closes the exact valid lifecycle before purging despite unavailable receive evidence; root and sibling keep working
+- test/federation/local-channel-events.test.ts :: T288 honest local received operand source erasure leaves exact receipt citation dangling and makes the whole operand unavailable
+- test/federation/local-channel-events.test.ts :: T288 strict literal history and exact attachment projection exact historical status must exist but later lawful status stamps do not invalidate it
+- test/federation/local-channel-events.test.ts :: T288 explicit trusted-local event erasure and protected controls a scope holding a local-control erasure and its event's bytes hides the event
+- test/federation/local-channel-events.test.ts :: T288 explicit trusted-local event erasure and protected controls erase(received) forgets that operand contribution, preserves bystanders and marks the exact erasure
+- test/federation/local-channel-events.test.ts :: T288 explicit trusted-local event erasure and protected controls erasing a received-strike event deliberately exposes earlier received source support
+- test/federation/local-channel-events.test.ts :: T288 explicit trusted-local event erasure and protected controls erase(close) revives only its still-attached exact opening, never a successfully dropped pool
+- test/federation/local-channel-events.test.ts :: T288 explicit trusted-local event erasure and protected controls a preplanted strike of a future marked erasure cannot negate it after failed purge or trusted reopen
+- test/federation/local-channel-events.test.ts :: T288 durable trusted history, distinct from content import SQLite restart replays exact opening/received lineage and supported event erasure solely from deltas
+- test/federation/local-channel-live-opening.test.ts :: spec 64: a live opening cannot be erased a stranger's byte in the root rides the seed into every later pool and does not keep an earlier opening live
+- test/federation/local-channel-live-opening.test.ts :: spec 64: after the drop, the erase takes the incarnation's lineage a later incarnation of the same name keeps receiving after the earlier one's opening is erased
+- test/federation/local-channel-live-opening.test.ts :: spec 64: after the drop, the erase takes the incarnation's lineage a later LIVE incarnation detached in this process: the earlier opening's refusal names re-attach, not a drop, and the re-attached pool keeps its bytes
+- test/federation/local-channel-r2-regressions.test.ts :: T288 R2 regression controls reserved negation corrupts otherwise usable receipt-erasure history
+- test/gateway/adopt-law.test.ts :: T33 criterion 2 — the ordinary publish path, with the source's timestamps adoption deltas mirror a direct publish modulo timestamps, and erase-then-re-bless refuses
+- test/gateway/container-wall.test.ts :: T32 criterion 14 — erasure reaches the generalized wall an untrusted container opened through the Container surface receives the fan-out
+
+## G grants: a pool reads write standing with its own key only (seeded host grants) (37)
+- test/cli/grant-ledger-58.test.ts :: §58 — the ledger reads the pool, because that is where the standing is a live bound connection reads as holding write standing in its inbox, not as holding none
+- test/cli/grant-ledger-58.test.ts :: §58 — revoke negates the grant that IS the standing, and reports what it negated the pool's write grant is negated, and the sentence names the inbox rather than the store
+- test/federation/install-by-federation.test.ts :: T209 — the prefix reaches a blessed app and nothing else a blessed app answers the token door and never the anonymous one
+- test/federation/local-channel-receive-boundary.test.ts :: T288 receive service boundary actual roster policy carries forward negation closure while refusing an unrelated author and forged strike
+- test/gateway/adopt-law.test.ts :: T33 criterion 7 — a blessing crosses a wall only by re-signing root-signed twins land; the module's own deltas and its own reading are untouched
+- test/gateway/bound-fold.test.ts :: §58 — two pools in one container contest a name by who staked it first a dependency whose FIRST binding is struck still sorts where its dependent needs it
+- test/gateway/bound-fold.test.ts :: §58 — two pools in one container contest a name by who staked it first two pools refused under one name are each told their own fault
+- test/gateway/connection-delegation.test.ts :: revoking a connection negates its delegation the operator's revoke still finds the delegation after the owner's own grant is struck
+- test/gateway/connection-delegation.test.ts :: revoking a connection negates its delegation a strike with an end does not let a replaced root back in once it lapses
+- test/gateway/connection-delegation.test.ts :: revoking a connection negates its delegation an operator strike that is itself undone, now or later, does not count as for good
+- test/gateway/connection-delegation.test.ts :: revoking a connection negates its delegation an admin grant the NEW owner gave the old root is struck too, whoever issued it
+- test/gateway/connection-delegation.test.ts :: revoking a connection negates its delegation a bind strikes a second root's delegation and admin grant, even when the owner's stands
+- test/gateway/inbox-authority.test.ts :: inbox composition by authority an owner's strike and an operator's strike of a connection write both cross into the parent
+- test/gateway/inbox-authority.test.ts :: inbox composition by authority a pool with no owner grant, or two owners, fails the parent read; two grants to one owner do not
+- test/gateway/user-grants.test.ts :: a pool reads its host's users an inbox owner named as a user follows a re-point at the host
+- test/gateway/user-grants.test.ts :: a pool reads its host's users a re-bind keeps the owner's user-named grant, and revoke finds the delegation through it
+- test/gateway/user-grants.test.ts :: a pool reads its host's users revoke finds a delegation from a re-pointed root that no grant names literally
+- test/gateway/user-grants.test.ts :: a pool reads its host's users a user unreadable for a while keeps their grant at bind, and revoke refuses to guess
+- test/gateway/user-grants.test.ts :: a pool reads its host's users a connection cannot block its own revoke by filing grants that bind nothing
+- test/gateway/user-grants.test.ts :: a pool reads its host's users a counter-strike by an admin whose standing lapses for a while still revives the grant
+- test/gateway/user-grants.test.ts :: a pool reads its host's users admin held only through an unreadable user can still undo a strike, so revoke refuses
+- test/gateway/user-grants.test.ts :: a pool reads its host's users a user whose root is or may become the connection's own key a root claim naming the connection that becomes valid later makes revoke refuse
+- test/gateway/user-grants.test.ts :: a pool reads its host's users a user whose root is or may become the connection's own key a root claim naming the connection while the user is struck for a while makes revoke refuse
+- test/gateway/user-grants.test.ts :: a pool reads its host's users a user whose root is or may become the connection's own key striking that root claim for good, as the refusal advises, lets revoke proceed
+- test/gateway/user-grants.test.ts :: a pool reads its host's users a user whose root is or may become the connection's own key control: with no root claim naming the connection, revoke proceeds
+- test/gateway/user-grants.test.ts :: a pool reads its host's users authority that may activate later a pre-signed delegation from a root a timed re-point selects later makes an owner revoke refuse
+- test/gateway/user-grants.test.ts :: a pool reads its host's users authority that may activate later once the operator strikes that timed re-point for good, an owner revoke proceeds
+- test/gateway/user-grants.test.ts :: a pool reads its host's users authority that may activate later the operator's revoke strikes that latent delegation too, so it stays dead after the re-point
+- test/gateway/user-grants.test.ts :: a pool reads its host's users authority that may activate later a delegation from a key whose admin grant is struck only for a while makes an owner revoke refuse
+- test/gateway/user-grants.test.ts :: a pool reads its host's users a strike that has not started is not a strike yet a future-start strike on a latent delegation counts only once it starts
+- test/gateway/user-grants.test.ts :: a pool reads its host's users a strike that has not started is not a strike yet a future-start strike on a timed re-point counts only once it starts
+- test/gateway/user-grants.test.ts :: a pool reads its host's users a strike that has not started is not a strike yet a future-start strike on a root claim naming the connection counts only once it starts
+- test/gateway/user-named-writers.test.ts :: bind names the owner by user when their root is the owner's key the admin grant names user:ada, and the door reads it as the gardener's
+- test/gateway/user-named-writers.test.ts :: bind names the owner by user when their root is the owner's key R11: a named user with no current root is refused; a caller naming no user binds by key
+- test/gateway/user-named-writers.test.ts :: bind names the owner by user when their root is the owner's key a stale key for a named user cannot bind a new inbox; the current root can
+- test/gateway/user-named-writers.test.ts :: R3: a re-point moves the user-named grant, and nothing else carries over the new root holds admin; the old key and its connection lose it
+- test/gateway/user-named-writers.test.ts :: R4 (M5, a control: it held before the writers switched): a connection's own strike does not count; the root's does in the inbox pool, as data
+
+## O other (mounts, arrival stamps, channels) (69)
+- refactor/recordings/curse-scope.recording.test.ts :: recordings: curse scope a channel curse, with and without a root bystander
+- refactor/recordings/principal.recording.test.ts :: recordings: principals key recovery: the operator re-points a lost key to a new one
+- test/cli/erasure-verbs.test.ts :: T206 (b) — `loam erase` removes the bytes at every local tier names a revival when the negation lived in a channel's pool as well
+- test/cli/erasure-verbs.test.ts :: T206 (b) — `loam erase` removes the bytes at every local tier reaches a federation channel's own pool file, and spares the peer's other record
+- test/cli/erasure-verbs.test.ts :: T206 (b) — `loam erase` removes the bytes at every local tier declares the §25 rows an ATTACHED POOL is holding, not the host's alone
+- test/cli/grant-revoke-replaced-seed.test.ts :: grant revoke after the person's seed was replaced strikes in the operator's voice, and the connection no longer writes
+- test/cli/honest-reports.test.ts :: federate drop and set refuse while a server holds the channel drop refuses, names the server, and the channel still stands; with no server it drops
+- test/federation/arrival-attestations.test.ts :: T207 — a sync that accepts deltas stamps its own custody (a) attests ceil(N/256) times, naming the channel, the peer address, and every accepted delta
+- test/federation/arrival-attestations.test.ts :: T207 — a sync that accepts deltas stamps its own custody (d) an attestation never binds as law and never re-exports as a blessing
+- test/federation/arrival-attestations.test.ts :: T207 — a sync that accepts deltas stamps its own custody records what a partial landing left unstamped, and heals it on the next sync
+- test/federation/channel-pool-signer.test.ts :: channel records are signed by their own ground arrival stamps in the pool by the pool's key; the pool's declaration on the host by the host's
+- test/federation/crash-window.test.ts :: T222 — a crash between federate and attest heals or names its own gap (a) a crash after arrivals land is healed on the next sync, and a clean bystander is not re-stamped
+- test/federation/drop-cli.test.ts :: §46 — severing a channel through the CLI drops a sqlite-backed channel from a booted store, and leaves a named bystander whole
+- test/federation/friend-scenario.test.ts :: §46 — the friend scenario, end to end a peer's law and data cross to a different operator, and READ from a fresh process
+- test/federation/install-by-federation-cli.test.ts :: T209 — the CLI names what arrived and mounts one app list says INERT with the recipe, bless-app mounts it, list says it serves
+- test/federation/install-by-federation-cli.test.ts :: T209 — the CLI names what arrived and mounts one app a flag this verb never reads is refused, in both halves of the parser
+- test/federation/install-by-federation-cli.test.ts :: T209 — the CLI names what arrived and mounts one app the resolvers act runs through the CLI, and reports only what the store answers
+- test/federation/install-by-federation-cli.test.ts :: T209 — the CLI names what arrived and mounts one app the peer ships new code, and --supersede is what moves the route onto it
+- test/federation/install-by-federation-cli.test.ts :: T209 — the CLI names what arrived and mounts one app a withdrawal is reported honestly, and drop purges the app at the bytes
+- test/federation/install-by-federation-cli.test.ts :: T209 — the CLI names what arrived and mounts one app --pen reaches the gateway as the second key, and its absence is what refuses
+- test/federation/install-by-federation-cli.test.ts :: T209 — the CLI says what it found, and never announces a mount it did not make a blocked route prints why, and a blessing that lands without serving exits 2
+- test/federation/install-by-federation.test.ts :: T209 — bless-app mounts behind the probation frame, writes sequestered to the pool a form write lands in the pool's store and in no tier of the receiver's
+- test/federation/install-by-federation.test.ts :: T209 — the blessing toggle does not extend to renderers an app whose lens is not blessed refuses, and mounts nothing
+- test/federation/install-by-federation.test.ts :: T209 — the prefix reaches a blessed app and nothing else the receiver's OWN app is not reachable under a channel prefix
+- test/federation/install-by-federation.test.ts :: T209 — a peer may not choose what the operator blesses the receiver's OWN route of the same name is never reported as what a channel runs
+- test/federation/install-by-federation.test.ts :: T209 — what an app IS, for the report and for the blessing a mounted app the receiver's own route later SHADOWS says so, and names what is in the way
+- test/federation/install-by-federation.test.ts :: T209 — what an app IS, for the report and for the blessing a route the receiver's OWN law answers inside the pool is refused in those words
+- test/federation/install-by-federation.test.ts :: T209 — a blessing outlives the process that made it a blessed app still serves after a restart, and the report never outruns the store
+- test/federation/install-by-federation.test.ts :: T209 — the pool's closed door outlives the process that opened it a REBOOTED store still refuses a tokenless caller at the pool's own mount
+- test/federation/local-channel-container-scope.test.ts :: spec 64: lifecycle events name their parent container an opening whose declaration is absent from the reactor is not standing
+- test/federation/local-channel-events.test.ts :: T288 partial writes and shared channel commit order source backend failure cannot mint a receipt; later successful commit does
+- test/federation/local-channel-events.test.ts :: T288 partial writes and shared channel commit order resumed and fresh handles plus scheduler serialize commit; drop cannot deadlock stopping queued sync
+- test/federation/local-channel-events.test.ts :: T288 explicit trusted-local event erasure and protected controls direct unattached eraseReplica cannot mint event deletion authority from a same-key fresh erasure
+- test/federation/local-channel-live-opening.test.ts :: spec 64: a live opening cannot be erased a declaration negated through the append door with the pool's bytes still held refuses and names the orphaned pool, attached or not
+- test/federation/local-channel-live-opening.test.ts :: spec 64: after the drop, the erase takes the incarnation's lineage a hand-made declaration that stands detached on the record with no handle: the erase names the drop, the drop works, then the erase proceeds
+- test/federation/local-channel-live-opening.test.ts :: spec 64: after the drop, the erase takes the incarnation's lineage a container attached by hand under the channel's name holds bytes: the erase says so; detached, the drop purges it and the erase proceeds
+- test/federation/local-channel-live-opening.test.ts :: spec 64: after the drop, the erase takes the incarnation's lineage status stamps negated by hand while the declaration stands: the drop is not refused as severed, purges the pool, and the name opens fresh afterwards
+- test/federation/local-channel-live-opening.test.ts :: spec 64: after the drop, the erase takes the incarnation's lineage a declaration by hand under a name that once was a channel is not the drop door's: separate with its own store, detached or not, and shared
+- test/federation/local-channel-live-opening.test.ts :: spec 64: after the drop, the erase takes the incarnation's lineage a container attached by hand under a live channel's name while its pool is detached: the erase names detach then drop, and that road works
+- test/federation/local-channel-opening-race.test.ts :: T288 exact freshly authored declaration across async pool attachment normal attachment records the exact declaration already authored before its seed append
+- test/federation/local-channel-opening-race.test.ts :: T288 exact freshly authored declaration across async pool attachment a same-name declaration arriving while the real seed append waits cannot replace the authored ID
+- test/federation/name-parked.test.ts :: §46 — names are the receiver's, and they are explicit a name already answered by DIFFERENT law is parked, never silently taken
+- test/federation/source-persisted.test.ts :: T196 — the source is persisted a booted store REBUILDS its channels, so the standing sync resumes
+- test/gateway/binding-container-scoped.test.ts :: §47 — a channel's blessing lives in the channel's pool criterion 6: the binding is in the pool's ground and absent from the root's
+- test/gateway/binding-contested-visibility.test.ts :: T204 — a contested name is named, with its origin (b) a root-vs-channel contest names both — the fold no longer discards it
+- test/gateway/binding-contested-visibility.test.ts :: T204 — a contested name is named, with its origin a served name is MARKED, never dropped — and a bystander contest survives beside it
+- test/gateway/container-wall.test.ts :: T32 criterion 5 — untrusted must be a wall, and a wall is real bytes an untrusted wall's members are byte copies in its own store
+- test/gateway/container-wall.test.ts :: T32 criterion 5 — untrusted must be a wall, and a wall is real bytes a curated wall pays the same copies, on purpose — the lawful tenant shape
+- test/gateway/inbox-grant-pool-key.test.ts :: inbox grants are read with the pool's key a bound connection stands, for the opener cascade and the connections panel: shared key (today)
+- test/gateway/quarantine-envelope-memory.test.ts :: T34: the declared memory ceiling reaches the Worker the same allocating bundle is refused under a small ceiling and served under the default
+- test/gateway/quarantine-envelope.test.ts :: T34 object level: what a caller meets, and what the operator can read closing a pool releases its envelope — the row goes, and the SAME pool reopens at zero
+- test/gateway/quarantine-envelope.test.ts :: T34 scope: the envelope meters the child that admits what its parent does not trust a CURATED separate container is not enveloped — it keeps the primary's ordinary budgets
+- test/gateway/quarantine-envelope.test.ts :: T34 suppression: a struck declaration stops binding, at both levels striking a per-pool declaration reverts that pool to the WILDCARD, not to the floor
+- test/gateway/quarantine-envelope.test.ts :: T34 suppression: a struck declaration stops binding, at both levels a pool under a CURATED container is clamped by the operator's LIVE ground, and named
+- test/gateway/read-erased-scope.test.ts :: serving reads outside the gathers never show an erased delta a bound connection's scope drops a claim that only its pool has erased
+- test/gateway/read-erased-scope.test.ts :: serving reads outside the gathers never show an erased delta a pool's erasure naming the wrong author does not hide a sibling pool's claim (a control: passes on the base; fails without the author check)
+- test/gateway/signer.test.ts :: a pool's own law is signed and authored by the pool's key bindConnection writes the owner grant in the pool under a pool key distinct from the host's
+- test/refactor/step4-strike-readers.test.ts :: lifting a curse ignores a counter-negation whose window ended the lift strikes the curse again, and the lens serves
+- test/server/connection-container.test.ts :: §39 criterion 7 — the connection's delegation and a store grant coexist, neither confused the connection's authority is an owner-signed sealed delegation scoped to its inbox, in the inbox ground
+- test/server/dynamic-mounts.test.ts :: T78 — a container's own gateway, mounted attaching a declared container makes it live at its own mount, serving its OWN ground
+- test/server/dynamic-mounts.test.ts :: T78 — a container's own gateway, mounted the anonymous door opens through a dynamically-mounted container too
+- test/server/dynamic-mounts.test.ts :: T78 — a container's own gateway, mounted striking loam:public at the HOST closes the container mount's anonymous door
+- test/server/dynamic-mounts.test.ts :: T78 — a container's own gateway, mounted a container attached to a DYNAMICALLY mounted host is served too
+- test/server/dynamic-mounts.test.ts :: T78 — a container's own gateway, mounted drop() takes the mount down with it — no zombie gateway, no 500
+- test/server/dynamic-mounts.test.ts :: T78 — a container's own gateway, mounted detach() takes the mount down too — the bytes are kept, the door is not
+- test/server/dynamic-mounts.test.ts :: T78 — a container's own gateway, mounted a container never shadows a mount the operator already named
+- test/server/dynamic-mounts.test.ts :: T78 — a container's own gateway, mounted removeMount refuses a container's mount — the container owns its own door
+- test/server/dynamic-mounts.test.ts :: T78 — a container's own gateway, mounted a wall outside the erasure registry serves nothing — liveness is BOTH questions
+- test/server/dynamic-mounts.test.ts :: T78 — a mount that vanishes mid-request a body still arriving cannot be answered from a container that was dropped
+
+## R registrations: a pool replays registrations with its own key only (19)
+- test/gateway/adopt-law.test.ts :: T33 criterion 3 — facts never need it a facts-only module reads AND serves its blob without any adoption; adoptLaw refuses 'exports no law'
+- test/gateway/binding-container-scoped.test.ts :: §47 — a channel's blessing lives in the channel's pool the aggregated lens survives a REBOOT — pools attach, then the surface folds them in
+- test/gateway/probation-frame.test.ts :: T35 §24.7 — the pen writes into the pool, never into canonical a quarantined route's write lands in the pool's store and nowhere in the primary's
+- test/gateway/probation-frame.test.ts :: T35 §24.7 — the pen writes into the pool, never into canonical the app reads its own write back — it is running, not painting a preview
+- test/gateway/probation-frame.test.ts :: T35 §24.7 — the pen writes into the pool, never into canonical dropping the pool under a live frame costs the primary nothing
+- test/gateway/probation-frame.test.ts :: T35 §24.7 — the frame, and the sentence it may never say says the writes are live in the pool, and never that they go nowhere
+- test/gateway/probation-frame.test.ts :: T35 §24.7 — the frame, and the sentence it may never say offers the promotion controls at the frame's edge, on the operator's door only
+- test/gateway/probation-frame.test.ts :: T35 §24.7 — the frame, and the sentence it may never say the anonymous door withholds the container's declared name, as it withholds the link
+- test/gateway/probation-frame.test.ts :: T35 §24.7 — the frame, and the sentence it may never say a container name is escaped into the banner, never injected as markup
+- test/gateway/probation-frame.test.ts :: T35 §24.7 — the frame, and the sentence it may never say a store that is not a quarantine frames nothing — canonical reads are untouched
+- test/gateway/probation-frame.test.ts :: T35 §24.7 — the pen's second key is asked of the HOST, live striking the grant in the primary refuses the pool's write, with no reseed
+- test/gateway/probation-frame.test.ts :: T35 §24.7 — the anonymous write door into a quarantine pool an anonymous form-write over a public route lands in the pool and nowhere else
+- test/gateway/probation-frame.test.ts :: T35 §24.7 — the anonymous write door into a quarantine pool striking the primary's public declaration closes the pool's anonymous write door
+- test/gateway/probation-frame.test.ts :: T35 §24.7 — the anonymous write door into a quarantine pool the closed anonymous door is the same 404 an absent route is — no oracle
+- test/gateway/probation-frame.test.ts :: T35 §24.7 — the anonymous write door into a quarantine pool a store refusal stays uniform on the anonymous door — the reason is the token door's
+- test/gateway/probation-frame.test.ts :: T35 §24.7 — the anonymous write door into a quarantine pool a pool whose chain is broken refuses the anonymous write, not just the token one
+- test/gateway/probation-frame.test.ts :: T35 §24.7 — the frame's other shapes the banner is the first thing in the body, fragment or whole document
+- test/gateway/probation-frame.test.ts :: T35 §24.7 — the frame's other shapes a probationary store refuses to pack a route into a standalone page
+- test/gateway/probation-frame.test.ts :: T35 §24.7 — erasure reaches through a mounted frame (§24.8) erasing in the primary forgets the byte behind a live probationary route
+
+## S a host seed signs into a pool (pattern 4 sites left) (3)
+- test/gateway/binding-contested-visibility.test.ts :: T204 — a contested name is named, with its origin a POOL-INTERNAL contest is named too, under the pool's own declared law
+- test/gateway/binding-contested-visibility.test.ts :: T204 — a contested name is named, with its origin a pool cannot name a contest outside its own prefix
+- test/gateway/binding-contested-visibility.test.ts :: T204 — a contested name is named, with its origin a contest a THIRD binding serves stays listed, with the report naming what answers
+
+## U recovery: cuts and strikes across pool keys (14)
+- test/cli/recovery-barrier.test.ts :: the recovery barrier a completed recovery leaves a committed cut with its outcome in the host and every pool
+- test/cli/recovery-barrier.test.ts :: the recovery barrier H3: a crash after the cuts and before the commit pauses the pool; the rerun aborts and rolls back
+- test/cli/recovery-barrier.test.ts :: the recovery barrier H4: a crash after the commit and before the outcomes: the pool reads its cut committed, and the rerun writes the outcome
+- test/cli/recovery-barrier.test.ts :: the recovery barrier H5: a pool declared between the cuts and the commit: the host refuses the record, the cuts abort, the rerun covers both
+- test/cli/recovery-barrier.test.ts :: the recovery barrier H8: after a restart, arrival order, cuts, outcomes and pauses read the same
+- test/cli/recovery-barrier.test.ts :: the recovery barrier a contrary outcome is a conflict: the rerun reports it, keeps the journal, and claims nothing
+- test/cli/recovery-barrier.test.ts :: other writers during a recovery a crashed server's record does not block recover
+- test/cli/user-recover.test.ts :: E6 and E9: inboxes K1's connection is refused after recovery; K1's delegation in the inbox is struck; K2 re-binds
+- test/cli/user-recover.test.ts :: E6 and E9: inboxes H6: an inbox not attached refuses the recovery before anything is written; attached, it completes
+- test/cli/user-recover.test.ts :: E6 and E9: inboxes an abandon whose new attempt is refused keeps the old journal
+- test/cli/user-recover.test.ts :: E6 and E9: inboxes an abandon finishes the predecessor's inbox cleanup as well as its own
+- test/cli/user-recover.test.ts :: E6 and E9: inboxes a history broken after the attempt landed: the rerun claims nothing and keeps the journal
+- test/cli/user-recover.test.ts :: E6 and E9: inboxes an erased strike in the inbox is not a strike: recovery lands a fresh one
+- test/cli/user-recover.test.ts :: E6 and E9: inboxes a struck root claim while the attempt is pending: the rerun claims nothing
+
+## V connection revoke voice across pool keys (6)
+- test/gateway/connection-delegation.test.ts :: binding a connection signs one sealed delegation, scoped to its inbox the pool holds the owner's delegation; the key writes there; an unbound key does not
+- test/gateway/connection-delegation.test.ts :: revoking a connection negates its delegation the operator's revoke binds too, and reaches only that connection
+- test/gateway/connection-delegation.test.ts :: revoking a connection negates its delegation after the owner's seed is replaced, a re-bind signs afresh, strikes the old, and the new key revokes
+- test/gateway/connection-delegation.test.ts :: a restart keeps the delegation honored a pool re-attached at boot admits the key and refuses an unbound one
+- test/gateway/revoke-struck-user.test.ts :: revoke after the operator strikes the owner's user record the operator's voice revokes; the revoke holds when the record comes back
+- test/gateway/revoke-struck-user.test.ts :: revoke after the operator strikes the owner's user record a delegation from a key no one names yet is struck too, so a later re-point does not revive it
