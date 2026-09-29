@@ -1691,6 +1691,9 @@ export async function eraseReplicaImpl(
   } catch (err) {
     localPurge = err; // collected below — a pool tier's fault must not starve its own children
   }
+  // A pool under its own key is a journal peer: its obligation settles only after a rebase takes
+  // the admitting frame, and only where the store proves the bytes gone.
+  await settleOwedPurges(gw);
   try {
     await gw.reseat();
   } catch (err) {
