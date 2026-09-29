@@ -1548,22 +1548,20 @@ async function incompleteErasureFaults(
 // ground's erasure as is. A pool under its own key takes an order this ground signs as a pinned
 // governor, naming that pool as its receiver: this ground's own erasure is testimony there.
 function orderForPool(gw: Gateway, erasure: Delta, pool: Gateway): Delta {
-  if (pool.operatorAuthor === gw.operatorAuthor || inLocalContext(erasure, LOCAL_CONTROL)) {
-    return erasure;
-  }
-  const { targetId, spokenBy, slate, reasons } = erasureParts(erasure.claims);
+  if (pool.operatorAuthor === gw.operatorAuthor) return erasure;
+  // The same order in this ground's voice, every pointer kept (a local-control marker included),
+  // plus the one receiver it takes effect at.
+  const operator = gw.operatorAuthor!;
   return gw.signer!.sign(
-    withStamp(gw.stamp(gw.operatorAuthor), (t) =>
-      eraseClaims(
-        targetId!,
-        spokenBy!,
-        gw.operatorAuthor!,
-        t,
-        reasons[0],
-        slate,
-        pool.operatorAuthor,
-      ),
-    ),
+    withStamp(gw.stamp(operator), (t) => ({
+      timestamp: t,
+      validFrom: t,
+      author: operator,
+      pointers: [
+        ...erasure.claims.pointers.filter((p) => p.role !== "receiver"),
+        { role: "receiver", target: { kind: "primitive" as const, value: pool.operatorAuthor! } },
+      ],
+    })),
   );
 }
 
@@ -1594,6 +1592,23 @@ export async function eraseReplicaImpl(
       const parent = cursor.attachedTo;
       if (!parent.quarantinePools.has(cursor)) break;
       if (sameVerifiedDelta(parent.reactor.get(erasure.id), erasure)) authorized = true;
+      // Or the parent's own order, re-signed for this pool: the parent holds a binding local-control
+      // erasure of the same id, and signed this one naming this pool as its receiver.
+      if (
+        cursor === gw &&
+        erasure.claims.author === parent.operatorAuthor &&
+        erasureParts(erasure.claims).receiver === gw.operatorAuthor &&
+        [...parent.reactor.byTarget(ERASE_ENTITY)].some((eid) => {
+          const held = parent.reactor.get(eid);
+          return (
+            held !== undefined &&
+            inLocalContext(held, LOCAL_CONTROL) &&
+            localEraseTarget(held, parent.reactor, parent.operatorAuthor) === id
+          );
+        })
+      ) {
+        authorized = true;
+      }
       cursor = parent;
     }
     if (!authorized) throw new Error("replica has no attached held local erasure authority");
