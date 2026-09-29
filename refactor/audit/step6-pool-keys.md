@@ -58,9 +58,9 @@ excludes both, `channel.ts:663`). Promotion uses the `review` rule above.
    it is refused) and its journal: an empty store with no journal resumes creation and gets its
    empty journal; a store with rows and no journal is refused. Only a pool the host never named
    with a key is an existing pool; it keeps the host key until the handoff. A pool whose journal
-   names K_p is refused if its key is missing, never reopened under the host key. The host never signs the pool's law again; a host command writes pool law
-   through the pool's own signer (inventory pattern 4). This stage lands behind the trial switch
-   and activates nothing.
+   names K_p is refused if its key is missing, never reopened under the host key. The host never
+   signs the pool's law again; a host command writes pool law through the pool's own signer
+   (inventory pattern 4). This stage lands behind the trial switch and activates nothing.
 3. **Activation: new pools on an empty journal under K_p.** `OrdinaryJournalPeer.open(store, K_p)`
    creates the empty journal; the backend checks for rows atomically (Sol, 2026-09-29). Only now
    does a new pool serve under K_p, because only now does a host erasure copied into it go through
