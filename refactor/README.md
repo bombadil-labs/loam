@@ -215,5 +215,6 @@ Get a fully green baseline first. A red baseline teaches you to ignore red.
 
 - `tools/`: the census scripts behind the journal's numbers. See `tools/README.md`.
 - `audit/`: Loam's side of the audit, and the step 6 build plan: `step6-inventory.md`,
-  `step6-handoff.md`, `step6-staging-open.md`, `step6-host-trial.md` and `step6-pool-keys.md`.
+  `step6-handoff.md`, `step6-staging-open.md`, `step6-host-trial.md`, `step6-pool-keys.md` and
+  `step6-container-split.md`.
 - `recordings/`: the recording harness and its outputs.
