@@ -1,8 +1,8 @@
-// An inbox's grants are its own law, read with the POOL's key (step 6 inventory, pattern 3). Under
-// today's shared key the host's and the pool's keys agree; under a pool key of its own (through
-// `childSeed`, as step 6 will give it) only the pool's key finds the grant. Both are pinned.
+// An inbox's grants are its own law, read with the POOL's key (step 6 inventory, pattern 3). Every
+// pool holds a key of its own, distinct from the host's, so only the pool's key finds the grant.
+// Both a minted key and one the key source supplies are pinned.
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed } from "@bombadil/rhizomatic";
 import { containerClaims, inboxName, openerStands } from "../../src/gateway/container.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
@@ -17,12 +17,15 @@ const CONN = authorForSeed("c1".repeat(32));
 
 const open: Gateway[] = [];
 afterEach(async () => {
-  vi.restoreAllMocks();
   for (const gw of open.splice(0)) await gw.close();
 });
 
 async function bound(poolSeed?: string) {
-  const gw = await Gateway.boot(new MemoryBackend(), assembleGenesis({ operatorSeed: SEED }));
+  const gw = await Gateway.boot(
+    new MemoryBackend(),
+    assembleGenesis({ operatorSeed: SEED }),
+    poolSeed === undefined ? {} : { poolKeys: { load: () => undefined, create: () => poolSeed } },
+  );
   open.push(gw);
   const op = gw.operatorAuthor!;
   await gw.append([
@@ -32,7 +35,6 @@ async function bound(poolSeed?: string) {
       containerClaims({ container: "home", trust: "curated", posture: "separate" }, op, 22),
     ),
   ]);
-  if (poolSeed !== undefined) vi.spyOn(gw, "childSeed").mockReturnValue(poolSeed);
   await gw.bindConnection({
     container: "home",
     connectionKey: CONN,
@@ -45,12 +47,13 @@ async function bound(poolSeed?: string) {
 
 describe("inbox grants are read with the pool's key", () => {
   for (const [label, poolSeed] of [
-    ["shared key (today)", undefined],
-    ["a pool key of its own", "7e".repeat(32)],
+    ["a minted pool key", undefined],
+    ["a supplied pool key", "7e".repeat(32)],
   ] as const) {
     it(`a bound connection stands, for the opener cascade and the connections panel: ${label}`, async () => {
       const { gw, name, pool } = await bound(poolSeed);
-      expect(pool.operatorAuthor === gw.operatorAuthor).toBe(poolSeed === undefined);
+      expect(pool.operatorAuthor).not.toBe(gw.operatorAuthor);
+      if (poolSeed !== undefined) expect(pool.operatorAuthor).toBe(authorForSeed(poolSeed));
       expect(openerStands(gw, { openedBy: "home", openedFrom: name })).toBe(true);
       expect(
         connectionGrantState(pool.reactor, pool.validityNow(), pool.operatorAuthor, CONN),

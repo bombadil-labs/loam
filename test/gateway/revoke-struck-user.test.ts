@@ -119,7 +119,7 @@ describe("revoke after the operator strikes the owner's user record", () => {
     // With ada's record struck, nothing names her key: no connection of hers writes.
     expect(await door(conn, observed(FERN, "height", 1, 1000, CONN_SEED))).toBe("refused");
 
-    await gw.revokeConnection({ inbox: connInbox, connectionKey: CONN, ownerSeed: OP_SEED });
+    await gw.revokeConnection({ inbox: connInbox, connectionKey: CONN, asPool: true });
     // delta: the gardener's delegation to CONN is struck
     const [d] = delegationsTo(conn, CONN);
     expect(conn.reactor.negationsOf(d!.id).length).toBeGreaterThan(0);
@@ -150,7 +150,7 @@ describe("revoke after the operator strikes the owner's user record", () => {
     const k3 = signClaims(delegationClaims(K3, CONN, connInbox.entity!, 650), K3_SEED);
     await conn.federate([k3]);
     await gw.append([op(makeNegationClaims(OP, 700, record.id))]);
-    await gw.revokeConnection({ inbox: connInbox, connectionKey: CONN, ownerSeed: OP_SEED });
+    await gw.revokeConnection({ inbox: connInbox, connectionKey: CONN, asPool: true });
     expect(conn.reactor.negationsOf(k3.id).length).toBeGreaterThan(0);
     // The operator gives ada a new record, rooted at K3.
     await gw.append([op(userClaims("ada", OP, 900)), op(rootClaims("ada", K3, OP, 900))]);

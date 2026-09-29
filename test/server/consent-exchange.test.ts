@@ -21,12 +21,13 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { authorForSeed, signClaims, type Claims, type Delta } from "@bombadil/rhizomatic";
+import { authorForSeed, signClaims, type Claims } from "@bombadil/rhizomatic";
 import { initHome, readUserSeed, userSeedPath } from "../../src/cli/config.js";
 import { holdsGrant } from "../../src/gateway/accounts.js";
 import { inboxName } from "../../src/gateway/container.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
+import { memoryPoolKeysFor } from "../../src/gateway/pool-keys.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import { hashPassword, writeCredentials, type ScryptParams } from "../../src/server/credentials.js";
@@ -39,6 +40,7 @@ import {
   type OAuthFile,
 } from "../../src/server/oauth-file.js";
 import { AUTHORIZE_PATH, revokeConnector } from "../../src/server/oauth.js";
+import { FaultableBackend } from "../helpers/faultable-backend.js";
 import { SAME_ORIGIN, signIn } from "../helpers/session-fixture.js";
 import { withStamp } from "../../src/gateway/stamp.js";
 
@@ -89,6 +91,7 @@ async function exchangeServer(
   const gateway = await Gateway.open(primary, {
     seed: OPERATOR_SEED,
     peerStore: primary.journalStore(), // a host, as `boot` opens one: a later boot reopens it
+    poolKeys: memoryPoolKeysFor(primary), // where `boot` keeps this store's pool keys
     ...(opts.sticky === true
       ? { channelBackend: (): MemoryBackend => new StickyBackend() }
       : opts.pools === undefined
@@ -147,11 +150,11 @@ class StickyBackend extends MemoryBackend {
 }
 
 /** A backend that can be told to refuse its next appends — a pool's store failing mid-act. */
-class RefusingBackend extends MemoryBackend {
+class RefusingBackend extends FaultableBackend {
   refuse = false;
-  override append(deltas: Iterable<Delta>): Promise<number> {
+  override checkWrite(): Promise<void> {
     if (this.refuse) return Promise.reject(new Error("the pool's store refused the append"));
-    return super.append(deltas);
+    return Promise.resolve();
   }
 }
 
@@ -332,7 +335,14 @@ describe("§58 S1b — the exchange honors the binding", () => {
     const pool = gateway.connectionInboxes.get(inbox)?.gateway;
     expect(pool).toBeDefined();
     expect(
-      holdsGrant(pool!.reactor, pool!.validityNow(), STORE_ENTITY, grant.actor, "write", OPERATOR),
+      holdsGrant(
+        pool!.reactor,
+        pool!.validityNow(),
+        STORE_ENTITY,
+        grant.actor,
+        "write",
+        pool!.operatorAuthor,
+      ),
     ).toBe(true);
     // The token acts — the door knows who it is.
     expect((await whoami(base, token)).status).toBe(200);
@@ -638,7 +648,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
         STORE_ENTITY,
         grant.actor,
         "write",
-        OPERATOR,
+        reattached.operatorAuthor,
       ),
     ).toBe(true);
     // A re-attached handle is the inbox kind, not a bare container: it refuses detach, and a drop
@@ -666,7 +676,14 @@ describe("§58 S1b — the exchange honors the binding", () => {
     const pool = gateway.connectionInboxes.get(first.inbox!)?.gateway;
     expect(pool).toBeDefined();
     expect(
-      holdsGrant(pool!.reactor, pool!.validityNow(), STORE_ENTITY, first.actor, "write", OPERATOR),
+      holdsGrant(
+        pool!.reactor,
+        pool!.validityNow(),
+        STORE_ENTITY,
+        first.actor,
+        "write",
+        pool!.operatorAuthor,
+      ),
     ).toBe(true);
     expect((await whoami(base, token)).status).toBe(200);
   });
@@ -688,7 +705,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
         STORE_ENTITY,
         ada.actor,
         "write",
-        OPERATOR,
+        poolOf(journalInbox).operatorAuthor,
       ),
     ).toBe(true);
     expect(
@@ -698,7 +715,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
         STORE_ENTITY,
         ada.actor,
         "write",
-        OPERATOR,
+        poolOf(otherInbox).operatorAuthor,
       ),
     ).toBe(true);
 
@@ -727,7 +744,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
         STORE_ENTITY,
         bea.actor,
         "write",
-        OPERATOR,
+        poolOf(bea.inbox!).operatorAuthor,
       ),
     ).toBe(true);
     // And at the GROUND: neither key ever held a store-wide grant (§58) — the pools are the whole
@@ -739,7 +756,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
         STORE_ENTITY,
         ada.actor,
         "write",
-        OPERATOR,
+        gateway.operatorAuthor,
       ),
     ).toBe(false);
     expect(
@@ -749,7 +766,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
         STORE_ENTITY,
         bea.actor,
         "write",
-        OPERATOR,
+        gateway.operatorAuthor,
       ),
     ).toBe(false);
     // Both of the key's pools are struck; bea's binding and token stand.
@@ -760,7 +777,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
         STORE_ENTITY,
         ada.actor,
         "write",
-        OPERATOR,
+        poolOf(journalInbox).operatorAuthor,
       ),
     ).toBe(false);
     expect(
@@ -770,7 +787,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
         STORE_ENTITY,
         ada.actor,
         "write",
-        OPERATOR,
+        poolOf(otherInbox).operatorAuthor,
       ),
     ).toBe(false);
     const file = readOAuthFile(connectorsHome);
@@ -798,7 +815,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
         STORE_ENTITY,
         grant.actor,
         "write",
-        OPERATOR,
+        handle.gateway!.operatorAuthor,
       ),
     ).toBe(true);
     const again = await connect(base, "ada", "journal");
@@ -841,7 +858,14 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect((await whoami(base, adaToken)).status).toBe(200);
     const oldPool = gateway.connectionInboxes.get(oldInbox)!.gateway!;
     expect(
-      holdsGrant(oldPool.reactor, oldPool.validityNow(), STORE_ENTITY, oldKey, "write", OPERATOR),
+      holdsGrant(
+        oldPool.reactor,
+        oldPool.validityNow(),
+        STORE_ENTITY,
+        oldKey,
+        "write",
+        oldPool.operatorAuthor,
+      ),
     ).toBe(false);
   });
 
@@ -888,7 +912,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
         STORE_ENTITY,
         ada.actor,
         "write",
-        OPERATOR,
+        foreignPool.operatorAuthor,
       ),
     ).toBe(true);
 
@@ -904,7 +928,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
         STORE_ENTITY,
         ada.actor,
         "write",
-        OPERATOR,
+        foreignPool.operatorAuthor,
       ),
     ).toBe(true);
   });
@@ -941,7 +965,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
         STORE_ENTITY,
         ada.actor,
         "write",
-        OPERATOR,
+        otherPool.operatorAuthor,
       ),
     ).toBe(true);
     expect((await whoami(base, adaToken)).status).toBe(200);
@@ -982,7 +1006,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
         STORE_ENTITY,
         ada.actor,
         "write",
-        OPERATOR,
+        otherPool.operatorAuthor,
       ),
     ).toBe(true);
     expect(readOAuthFile(connectorsHome).grants.map((g) => g.user)).toEqual(["ada"]);
@@ -1017,7 +1041,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
         STORE_ENTITY,
         ada.actor,
         "write",
-        OPERATOR,
+        journalPool.operatorAuthor,
       ),
     ).toBe(false);
     expect(
@@ -1027,7 +1051,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
         STORE_ENTITY,
         ada.actor,
         "write",
-        OPERATOR,
+        otherPool.operatorAuthor,
       ),
     ).toBe(true);
     expect((await whoami(base, adaToken)).status).toBe(401);
@@ -1098,7 +1122,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
         STORE_ENTITY,
         ada.actor,
         "write",
-        OPERATOR,
+        foreignPool.operatorAuthor,
       ),
     ).toBe(false);
     const file = readOAuthFile(connectorsHome);
@@ -1112,7 +1136,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
         STORE_ENTITY,
         ada.actor,
         "write",
-        OPERATOR,
+        adaPool.operatorAuthor,
       ),
     ).toBe(true);
     expect(
@@ -1122,7 +1146,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
         STORE_ENTITY,
         ada.actor,
         "write",
-        OPERATOR,
+        gateway.operatorAuthor,
       ),
     ).toBe(false);
   });

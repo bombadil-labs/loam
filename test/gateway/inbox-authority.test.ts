@@ -136,7 +136,9 @@ describe("inbox composition by authority", () => {
     const a = await writeIn(one.pool, CONN_SEED, 5);
     const b = await writeIn(one.pool, CONN_SEED, 6);
     const byOwner = signClaims(makeNegationClaims(ADA, 60, a.id), ADA_SEED);
-    const byOperator = op(makeNegationClaims(OP, 61, b.id));
+    const byOperator = one.pool.signer!.sign(
+      makeNegationClaims(one.pool.operatorAuthor!, 61, b.id),
+    );
     await one.pool.append([byOwner]);
     await one.pool.append([byOperator]);
     // The authority filter keeps both strikes beside their claims, in the scope and in the bound
@@ -157,12 +159,14 @@ describe("inbox composition by authority", () => {
   it("a pool with no owner grant, or two owners, fails the parent read; two grants to one owner do not", async () => {
     const { bind, scope } = await home();
     const one = await bind(CONN_SEED);
+    const P = one.pool.operatorAuthor!;
+    const law = (c: Claims): Delta => one.pool.signer!.sign(c);
     // A second grant to the same owner, by key: one owner still.
-    await one.pool.append([op(grantClaims(STORE_ENTITY, ADA, "admin", OP, 70))]);
+    await one.pool.append([law(grantClaims(STORE_ENTITY, ADA, "admin", P, 70))]);
     expect(poolOwner(one.pool)).toEqual({ key: ADA, user: "ada" });
     expect(() => scope()).not.toThrow();
     // A second owner.
-    await one.pool.append([op(grantClaims(STORE_ENTITY, CONN2, "admin", OP, 71))]);
+    await one.pool.append([law(grantClaims(STORE_ENTITY, CONN2, "admin", P, 71))]);
     expect(poolOwner(one.pool)).toHaveProperty("refusal");
     expect(() => scope()).toThrow(/containerScope refused: the inbox .* names 2 owners/);
     // No owner at all.
@@ -173,7 +177,7 @@ describe("inbox composition by authority", () => {
           (p) => p.role === "verb" && p.target.kind === "primitive" && p.target.value === "admin",
         ),
       );
-    await one.pool.append(grants.map((g, i) => op(makeNegationClaims(OP, 80 + i, g.id))));
+    await one.pool.append(grants.map((g, i) => law(makeNegationClaims(P, 80 + i, g.id))));
     expect(() => scope()).toThrow(/has no owner/);
   });
 
