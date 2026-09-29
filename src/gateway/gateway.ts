@@ -40,7 +40,7 @@ import {
   type HostPeer,
 } from "./peer-admission.js";
 import { stampOn, type Stamp } from "./stamp.js";
-import { markGateway } from "./gateway-brand.js";
+import { claimGatewayMarker } from "./gateway-brand.js";
 import { NUL } from "./nul.js";
 import { declarePrincipalScope } from "./principal.js";
 import { declareUserGround, userGroundOf } from "./user-root.js";
@@ -407,6 +407,9 @@ function erasedIdsOf(reactor: Reactor, operator: string | undefined): ReadonlySe
   erasedCache.set(reactor, { size: reactor.size, ids });
   return ids;
 }
+
+// This module alone can mark a real gateway (gateway-brand.ts).
+const markGateway = claimGatewayMarker();
 
 export class Gateway {
   /** @internal — T19 seam (renderers.ts) */
