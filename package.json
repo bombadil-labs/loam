@@ -71,7 +71,7 @@
     "prepublishOnly": "npm run check"
   },
   "dependencies": {
-    "@bombadil/rhizomatic": "file:../../../../tmp/rhizomatic-step6-trial-0efe-packs/bombadil-rhizomatic-0.11.0-next.6-trial.0efe140.tgz",
+    "@bombadil/rhizomatic": "file:../../../../tmp/rhizomatic-step6-trial-e09320c/bombadil-rhizomatic-0.11.0-next.6-trial.e09320c.tgz",
     "@noble/hashes": "^1.8.0",
     "better-sqlite3": "^12.11.1",
     "graphql": "^17.0.2"
