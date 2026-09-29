@@ -45,11 +45,11 @@
 
 import { describe, expect, it } from "vitest";
 import { signClaims } from "@bombadil/rhizomatic";
-import { readContainerTable } from "../../src/gateway/container.js";
+import { readContainerTable } from "../../src/gateway/container-law.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { SEALED_LEEWAY, type Leeway } from "../../src/gateway/leeway.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";

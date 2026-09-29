@@ -47,7 +47,7 @@ import {
 } from "@bombadil/rhizomatic";
 import { Gateway, type ConnectionBinding } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import { SEALED_LEEWAY, type Leeway } from "../../src/gateway/leeway.js";
 import { CTX_RENDERER, rendererBindingClaims } from "../../src/gateway/renderers.js";
 import { CTX_REGISTRATION, type LensName } from "../../src/gateway/registration.js";

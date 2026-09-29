@@ -18,7 +18,7 @@ import {
   containerClaims,
   survivingDeclarationIds,
   termClaims,
-} from "../../src/gateway/container.js";
+} from "../../src/gateway/container-law.js";
 import { SEALED_LEEWAY } from "../../src/gateway/leeway.js";
 import { frozenMembershipTerm, slateClaims } from "../../src/gateway/slate.js";
 import {

@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, makeNegationClaims } from "@bombadil/rhizomatic";
 import { grantClaims, holdsGrant } from "../../src/gateway/accounts.js";
-import { containerClaims, inboxName } from "../../src/gateway/container.js";
+import { containerClaims, inboxName } from "../../src/gateway/container-law.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { initHome } from "../../src/cli/config.js";

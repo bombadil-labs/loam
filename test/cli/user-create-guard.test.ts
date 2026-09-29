@@ -13,7 +13,7 @@ import { authorForSeed, makeNegationClaims, signClaims, type Claims } from "@bom
 import { run } from "../../src/cli/cli.js";
 import { readSeed, storePath } from "../../src/cli/config.js";
 import { grantClaims } from "../../src/gateway/accounts.js";
-import { containerClaims, termClaims } from "../../src/gateway/container.js";
+import { containerClaims, termClaims } from "../../src/gateway/container-law.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { writtenByUser } from "../../src/gateway/member-of.js";

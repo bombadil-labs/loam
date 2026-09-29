@@ -39,21 +39,15 @@ import {
   type Reactor,
   type Schema,
 } from "@bombadil/rhizomatic";
-import {
-  authorize,
-  grantClaims,
-  grantsHeldBy,
-  holdsGrant,
-  honoredStrikeOn,
-  type Verb,
-} from "../../src/gateway/accounts.js";
+import { authorize, grantClaims, grantsHeldBy, holdsGrant } from "../../src/gateway/accounts.js";
+import { honoredStrikeOn, type Verb } from "../../src/gateway/grants-law.js";
+import { containerScopeImpl } from "../../src/gateway/container.js";
 import {
   containerClaims,
   inboxName,
-  containerScopeImpl,
   readContainerTable,
   survivingWriteGrantIds,
-} from "../../src/gateway/container.js";
+} from "../../src/gateway/container-law.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { entityGatherBody } from "../../src/gateway/gather.js";
 import {

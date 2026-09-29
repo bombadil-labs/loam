@@ -44,13 +44,8 @@ import {
   type Reactor,
 } from "@bombadil/rhizomatic";
 import { freezeMembers } from "./container-identity.js";
-import {
-  CTX_CONTAINER,
-  readContainerTable,
-  containerScopeImpl,
-  survivingDeclarationIds,
-  unreachableStoreReport,
-} from "./container.js";
+import { containerScopeImpl, unreachableStoreReport } from "./container.js";
+import { CTX_CONTAINER, readContainerTable, survivingDeclarationIds } from "./container-law.js";
 import { ESM_RESIDENCY_DISCLOSURE, ERASURE_NON_CLAIMS } from "./erase.js";
 import {
   UNSWEPT_AUTH_SURFACES,

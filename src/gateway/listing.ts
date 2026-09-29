@@ -32,7 +32,7 @@ import {
   isContainerLaw,
   readContainerTable,
   type ContainerTable,
-} from "./container.js";
+} from "./container-law.js";
 import { erasedFromReading, erasedInScope, poolGovernors } from "./erase.js";
 import type { ConnectionBinding, Gateway } from "./gateway.js";
 import { groupPrograms } from "./lifecycle.js";

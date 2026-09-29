@@ -17,7 +17,7 @@ import { grantClaims } from "../../src/gateway/accounts.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import type { StoreBackend } from "../../src/store/backend.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import { standingErasures, erasureSlate, erasureTarget } from "../../src/gateway/erase.js";
 import { graveyardCompleteness } from "../../src/gateway/slate.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";

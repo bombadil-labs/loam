@@ -16,10 +16,9 @@ import {
   grantClaims,
   grantsHeldBy,
   holdsGrant,
-  honoredStrikeOn,
   VERBS,
-  type Verb,
 } from "../../src/gateway/accounts.js";
+import { honoredStrikeOn, type Verb } from "../../src/gateway/grants-law.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { readTrustPolicy, trustClaims, trustDefect } from "../../src/gateway/trust.js";
 import {

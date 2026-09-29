@@ -31,7 +31,7 @@ import { serve, type ServerHandle } from "../../src/server/http.js";
 import { hashPassword, writeCredentials, type ScryptParams } from "../../src/server/credentials.js";
 import { roleClaims, userClaims } from "../../src/server/users.js";
 import { PRESESSION_COOKIE, SESSION_COOKIE } from "../../src/server/session.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import { writeUserSeed } from "../../src/cli/config.js";
 import { signClaims } from "@bombadil/rhizomatic";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";

@@ -72,7 +72,7 @@ import {
 } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
-import { containerClaims, survivingDeclarationIds } from "../../src/gateway/container.js";
+import { containerClaims, survivingDeclarationIds } from "../../src/gateway/container-law.js";
 import { readErasures } from "../../src/gateway/erase.js";
 import { admitLocal, openHostPeer } from "../../src/gateway/peer-admission.js";
 import {

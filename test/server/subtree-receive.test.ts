@@ -49,7 +49,7 @@
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
-import { containerClaims, readContainerTable } from "../../src/gateway/container.js";
+import { containerClaims, readContainerTable } from "../../src/gateway/container-law.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { SEALED_LEEWAY, type Leeway } from "../../src/gateway/leeway.js";

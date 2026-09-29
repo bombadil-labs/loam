@@ -71,7 +71,7 @@ import {
   ENVELOPE_ANY,
   envelopeClaims,
 } from "../../src/gateway/envelope.js";
-import { containerClaims, inboxName, readContainerTable } from "../../src/gateway/container.js";
+import { containerClaims, inboxName, readContainerTable } from "../../src/gateway/container-law.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { SEALED_LEEWAY, type Leeway, type Terms } from "../../src/gateway/leeway.js";

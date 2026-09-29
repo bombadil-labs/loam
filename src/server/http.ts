@@ -83,7 +83,7 @@ import {
   treeRootsOf,
   withinSubtree,
   type ContainerTable,
-} from "../gateway/container.js";
+} from "../gateway/container-law.js";
 import { boundChannelAdmits, connectionStands } from "../gateway/connection-authority.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
 import { readSeed, readUserSeed, userSeedPath } from "../cli/config.js";

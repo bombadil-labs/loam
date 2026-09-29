@@ -12,7 +12,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { readUserSeed } from "../../src/cli/config.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import { FERN, observed } from "../spike/garden.js";
 import {
   OPERATOR,

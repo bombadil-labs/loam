@@ -8,7 +8,7 @@ import { signClaims, type Delta } from "@bombadil/rhizomatic";
 import { lookedClaims, readLookedImpl } from "../../src/gateway/attention.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import { readSlates, slateClaims } from "../../src/gateway/slate.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { channelRecordClaims, channelStatusImpl } from "../../src/federation/channel.js";

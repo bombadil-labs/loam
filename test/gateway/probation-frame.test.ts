@@ -23,7 +23,7 @@ import {
 } from "@bombadil/rhizomatic";
 import { grantClaims, holdsGrant } from "../../src/gateway/accounts.js";
 import { declareHostSizedBill } from "../helpers/pool-bill.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";

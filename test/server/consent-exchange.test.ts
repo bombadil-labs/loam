@@ -24,7 +24,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Claims } from "@bombadil/rhizomatic";
 import { initHome, readUserSeed, userSeedPath } from "../../src/cli/config.js";
 import { holdsGrant } from "../../src/gateway/accounts.js";
-import { inboxName } from "../../src/gateway/container.js";
+import { inboxName } from "../../src/gateway/container-law.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { memoryPoolKeysFor } from "../../src/gateway/pool-keys.js";

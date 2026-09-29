@@ -46,7 +46,7 @@ import {
   readTrustPolicyAt,
   trustClaims,
 } from "../../src/gateway/trust.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import {
   BUDGET_ENTITY,
   CTX_BUDGET,

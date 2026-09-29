@@ -64,7 +64,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { LEEWAY_CONTROLS, SWITCH_CONTROLS } from "../../src/gateway/leeway-copy.js";
-import { containerClaims, readContainerTable } from "../../src/gateway/container.js";
+import { containerClaims, readContainerTable } from "../../src/gateway/container-law.js";
 import { SEALED_LEEWAY } from "../../src/gateway/leeway.js";
 import { signClaims } from "@bombadil/rhizomatic";
 import { AUTHORIZE_PATH } from "../../src/server/oauth.js";

@@ -22,7 +22,7 @@ import { serve, type ServerHandle } from "../../src/server/http.js";
 import { hashPassword, writeCredentials, type ScryptParams } from "../../src/server/credentials.js";
 import { roleClaims, userClaims } from "../../src/server/users.js";
 import { PRESESSION_COOKIE, SESSION_COOKIE } from "../../src/server/session.js";
-import { containerClaims, detachClaims, CTX_CONTAINER } from "../../src/gateway/container.js";
+import { containerClaims, detachClaims, CTX_CONTAINER } from "../../src/gateway/container-law.js";
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { writeUserSeed } from "../../src/cli/config.js";

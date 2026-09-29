@@ -14,7 +14,7 @@ import {
   termClaims,
   type ContainerPosture,
   type ContainerTrust,
-} from "../../src/gateway/container.js";
+} from "../../src/gateway/container-law.js";
 import { frozenMembershipTerm, slateClaims, type SlateClosure } from "../../src/gateway/slate.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import type { StoreBackend } from "../../src/store/backend.js";

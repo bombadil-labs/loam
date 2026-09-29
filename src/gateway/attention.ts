@@ -26,7 +26,7 @@
 import type { Claims, Delta } from "@bombadil/rhizomatic";
 import type { Gateway } from "./gateway.js";
 import { negatedAt } from "./negation.js";
-import { CONTAINER_CONTEXTS } from "./container.js";
+import { CONTAINER_CONTEXTS } from "./container-law.js";
 
 export const CTX_LOOKED = "loam.looked";
 export const CTX_QUIET = "loam.quiet";

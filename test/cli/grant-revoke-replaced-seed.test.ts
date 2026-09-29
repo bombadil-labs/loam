@@ -14,7 +14,7 @@ import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { channelBackendFor, run } from "../../src/cli/cli.js";
 import { readSeed, writeUserSeed } from "../../src/cli/config.js";
 import { holdsGrant } from "../../src/gateway/accounts.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";

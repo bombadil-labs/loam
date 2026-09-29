@@ -51,7 +51,7 @@ import {
   containerClaims,
   readContainerTable,
   survivingDeclarationIds,
-} from "../../src/gateway/container.js";
+} from "../../src/gateway/container-law.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";

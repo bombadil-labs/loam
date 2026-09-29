@@ -151,7 +151,7 @@ import {
   everDeclared,
   readContainerTable,
   survivingDeclarationIds,
-} from "../../src/gateway/container.js";
+} from "../../src/gateway/container-law.js";
 import { subtreeOf } from "../../src/server/subtree.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";

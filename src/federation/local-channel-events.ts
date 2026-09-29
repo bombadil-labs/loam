@@ -9,7 +9,10 @@ import {
 } from "@bombadil/rhizomatic";
 import type { Gateway } from "../gateway/gateway.js";
 import { negatedAt } from "../gateway/negation.js";
-import { containerDeclarationName, currentContainerDeclarationId } from "../gateway/container.js";
+import {
+  containerDeclarationName,
+  currentContainerDeclarationId,
+} from "../gateway/container-law.js";
 import { channelStatusImpl } from "./channel.js";
 import { eraseDefect, isErasure, readErasures, erasureTarget } from "../gateway/erase.js";
 import { toWire } from "./wire.js";

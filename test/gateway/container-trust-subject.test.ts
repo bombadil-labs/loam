@@ -11,7 +11,7 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { CTX_TRUST, readTrustPolicy } from "../../src/gateway/trust.js";
-import { containerAdmission, containerClaims } from "../../src/gateway/container.js";
+import { containerAdmission, containerClaims } from "../../src/gateway/container-law.js";
 import { FERN, GARDENER, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 

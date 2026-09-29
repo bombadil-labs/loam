@@ -25,7 +25,7 @@ import { channelBackendFor } from "../../src/cli/cli.js";
 import { initHome, readSeed, storePath } from "../../src/cli/config.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
-import { survivingDeclarationIds } from "../../src/gateway/container.js";
+import { survivingDeclarationIds } from "../../src/gateway/container-law.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 
 let root: string;

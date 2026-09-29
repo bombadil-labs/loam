@@ -43,7 +43,7 @@ import { join } from "node:path";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { withStamp } from "../../src/gateway/stamp.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
-import { containerClaims, readContainerTable } from "../../src/gateway/container.js";
+import { containerClaims, readContainerTable } from "../../src/gateway/container-law.js";
 import { eraseClaims, erasedInDeltas, readErasures } from "../../src/gateway/erase.js";
 import { lawfulNegated } from "../../src/gateway/registration.js";
 import { SEALED_LEEWAY } from "../../src/gateway/leeway.js";

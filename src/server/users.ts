@@ -44,7 +44,7 @@ import {
 } from "../gateway/user-root.js";
 import { CTX_GRANTS } from "../gateway/governed-trust.js";
 import { membershipForValidation, namesMemberOf } from "../gateway/member-of.js";
-import { containerDeclarationName } from "../gateway/container.js";
+import { containerDeclarationName } from "../gateway/container-law.js";
 export { CTX_ROLE, CTX_ROOT, userEntity };
 
 const AUTHOR = /^ed25519:[0-9a-f]{64}$/;

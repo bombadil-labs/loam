@@ -40,7 +40,8 @@ import { evalTerm, parseTerm } from "@bombadil/rhizomatic";
 import { readLawfulRegistrations } from "./registration.js";
 import { negatedAt } from "./negation.js";
 import { programMaskJson } from "./listing.js";
-import { currentContainerDeclarationId, unreachableStoreReport } from "./container.js";
+import { unreachableStoreReport } from "./container.js";
+import { currentContainerDeclarationId } from "./container-law.js";
 import {
   CTX_SLATE,
   danglingCitations,

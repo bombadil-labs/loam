@@ -4,7 +4,7 @@
 // for every act it gates, and the consent page for the containers it may offer as a binding — so
 // the walk lives here, once.
 
-import type { ContainerTable } from "../gateway/container.js";
+import { type ContainerTable } from "../gateway/container-law.js";
 import { CONTROL } from "./oauth-file.js";
 
 /**

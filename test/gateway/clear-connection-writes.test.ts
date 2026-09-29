@@ -12,7 +12,7 @@ import {
   type Delta,
 } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway, type ConnectionBinding } from "../../src/gateway/gateway.js";
 import { writtenByUser } from "../../src/gateway/member-of.js";

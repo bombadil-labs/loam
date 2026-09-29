@@ -17,7 +17,7 @@ import { authorForSeed, signClaims, type Claims } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { STORE_ENTITY, assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import {
   CTX_ENVELOPE,
   DEFAULT_QUARANTINE_ENVELOPE,

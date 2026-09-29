@@ -12,7 +12,7 @@ import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { describe, expect, it } from "vitest";
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { PERIODIC_MIN, soupMeterImpl } from "../../src/gateway/soup-meter.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { MemoryBackend } from "../../src/store/memory.js";

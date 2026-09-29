@@ -28,7 +28,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { grantClaims, holdsGrant } from "../../src/gateway/accounts.js";
-import { inboxName } from "../../src/gateway/container.js";
+import { inboxName } from "../../src/gateway/container-law.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { toWire } from "../../src/federation/wire.js";
 import { readOAuthFile, writeOAuthFile } from "../../src/server/oauth-file.js";

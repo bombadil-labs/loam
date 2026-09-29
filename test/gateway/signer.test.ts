@@ -56,7 +56,7 @@ describe("the signing seam", () => {
 
 describe("a pool's own law is signed and authored by the pool's key", () => {
   it("bindConnection writes the owner grant in the pool under a pool key distinct from the host's", async () => {
-    const { containerClaims } = await import("../../src/gateway/container.js");
+    const { containerClaims } = await import("../../src/gateway/container-law.js");
     const POOL_SEED = "7e".repeat(32);
     const gw = await Gateway.boot(new MemoryBackend(), assembleGenesis({ operatorSeed: SEED }), {
       poolKeys: { load: () => undefined, create: () => POOL_SEED },
@@ -95,7 +95,7 @@ describe("a pool's own law is signed and authored by the pool's key", () => {
   });
 
   it("a named owner under a distinct pool key: the grant resolves through the host's users, and the connection writes", async () => {
-    const { containerClaims } = await import("../../src/gateway/container.js");
+    const { containerClaims } = await import("../../src/gateway/container-law.js");
     const { holdsGrant } = await import("../../src/gateway/accounts.js");
     const { rootClaims, userClaims } = await import("../../src/server/users.js");
     const { STORE_ENTITY } = await import("../../src/gateway/genesis.js");

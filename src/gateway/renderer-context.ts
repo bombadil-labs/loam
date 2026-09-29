@@ -1,5 +1,6 @@
-import { Gateway, type ConnectionBinding } from "./gateway.js";
-import { inboxName } from "./container.js";
+import type { ConnectionBinding, Gateway } from "./gateway.js";
+import { isGateway } from "./gateway-brand.js";
+import { inboxName } from "./container-law.js";
 import { connectionStands } from "./connection-authority.js";
 
 interface RootRendererContext {
@@ -32,11 +33,7 @@ export function createRootRendererContext(
   door: "full" | "public",
   now: () => number,
 ): RendererContext {
-  if (
-    !(gateway instanceof Gateway) ||
-    (door !== "full" && door !== "public") ||
-    typeof now !== "function"
-  ) {
+  if (!isGateway(gateway) || (door !== "full" && door !== "public") || typeof now !== "function") {
     throw rendererContextRefusal();
   }
   const context = Object.freeze({ kind: "root" as const, execution: gateway, door, now });
@@ -53,8 +50,8 @@ export function createBoundRendererContext(input: {
   readonly now: () => number;
 }): RendererContext {
   if (
-    !(input?.authority instanceof Gateway) ||
-    !(input.execution instanceof Gateway) ||
+    !isGateway(input?.authority) ||
+    !isGateway(input.execution) ||
     typeof input.destination !== "string" ||
     input.destination === "" ||
     typeof input.requester !== "string" ||
