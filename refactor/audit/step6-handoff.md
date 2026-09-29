@@ -1,5 +1,9 @@
 # Step 6: the pool handoff (working spec)
 
+**Retired (Myk, 2026-09-29, ruling 10 in `refactor/README.md`):** existing pools are not handed off.
+The planned rule, not built yet: a store with an older pool will be refused at boot. This note is
+kept as history.
+
 Status: working spec, reviewed by Sol (#648). No constructor changes until the substrate's prerelease peer API.
 It builds on Sol's contract and the inventory (`step6-inventory.md`, #647).
 
@@ -242,18 +246,6 @@ Loam's append door admits only signed deltas today, so Loam cannot hold an unsig
 under a signed covering bundle. The carry's bundle path is therefore the substrate's contract: an
 admitted unsigned member keeps its covering evidence, and the import verifies that evidence. Loam
 adds a rail when its door admits such members.
-
-## Existing pools: the carry is Loam's (Sol, 2026-09-29)
-
-An existing pool has no journal: it is a plain backend under its host's key, and each pool has its
-own. So the carry is application-supplied and source-qualified (option (a)). Under the pool's
-admission lock Loam freezes the surface and captures its holdings, every binding refusal event
-(with each order's signer), and every active obligation, sqlite -wal truncation debt included.
-Rhizomatic binds these bytes to the external source root and checks that they are internally
-valid; Loam's rails must prove its derivation is complete. A pool with an unreadable row, or debt
-it cannot name, is not carried until its disposition is explicit. No synthetic arrival history
-and no journal import. `src/gateway/pool-carry.ts` builds the carry;
-`test/gateway/pool-carry.test.ts` holds its completeness rails.
 
 ## Settled with Sol
 

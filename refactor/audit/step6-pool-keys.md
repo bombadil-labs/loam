@@ -10,7 +10,8 @@ owner grants, strikes, arrival stamps, its incarnation) is signed by K_p. Host d
 it stay host testimony. It reads them only where it explicitly selects the host for that law. User
 facts stay the host's. A person sees no change: the pool answers as before.
 
-An existing pool keeps the host key. It moves only by the barriered handoff (`step6-handoff.md`).
+An existing pool is not handed off (ruling 10). When pool keys switch on, a store holding one
+will be refused at boot.
 Replacing `childSeed()` alone is invalid (Sol's contract).
 
 ## The law policy of a child
@@ -57,7 +58,7 @@ excludes both, `channel.ts:663`). Promotion uses the `review` rule above.
    written before K_p is used. On resume, a pool the host names with K_p must have its key (else
    it is refused) and its journal: an empty store with no journal resumes creation and gets its
    empty journal; a store with rows and no journal is refused. Only a pool the host never named
-   with a key is an existing pool; it keeps the host key until the handoff. A pool whose journal
+   with a key is an existing pool; under ruling 10 its store will be refused at boot. A pool whose journal
    names K_p is refused if its key is missing, never reopened under the host key. The host never
    signs the pool's law again; a host command writes pool law through the pool's own signer
    (inventory pattern 4). This stage lands behind the trial switch and activates nothing.
@@ -71,7 +72,8 @@ excludes both, `channel.ts:663`). Promotion uses the `review` rule above.
    under K_p; a seeded host copy binds only in a selected context); a host or host-grantee review
    strike still blocks promotion; a K_p pool with its key missing refuses to open.
 
-Stages 1 and 2 need no new substrate API. Stage 3 and the handoff of existing pools do.
+Stages 1 and 2 need no new substrate API. Stage 3 does. The handoff of existing pools is retired
+(ruling 10).
 Nothing serves under K_p before stage 3.
 
 ## Stage 1b-ii: grants and registrations (plan)
