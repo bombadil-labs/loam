@@ -24,10 +24,13 @@ import {
   type Schema,
   type Primitive,
   type Term,
+  type DurablePeerStore,
 } from "@bombadil/rhizomatic";
 import { graphql, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
+import { holdsPeerImages } from "../store/peer-image.js";
+import { admitLocal, hostPeer, openHostPeer, peerIdOf, type HostPeer } from "./peer-admission.js";
 import { stampOn, type Stamp } from "./stamp.js";
 import { declarePrincipalScope } from "./principal.js";
 import { declareUserGround, userGroundOf } from "./user-root.js";
@@ -214,6 +217,12 @@ export interface QueryResult {
 }
 
 export interface GatewayOptions {
+  /**
+   * The single-peer image store (step 6 host trial). Given, this gateway is a substrate peer under
+   * its operator key: it opens from the image, and every write is admitted through it. Only a
+   * host passes this; pools, quarantine and scratch gateways never do.
+   */
+  readonly peerStore?: DurablePeerStore;
   /**
    * Where a FEDERATION CHANNEL's pool keeps its bytes, by pool name. A separate container defaults
    * to a fresh in-memory backend, which is right for a quarantine (transient by design) and WRONG
@@ -473,6 +482,8 @@ export class Gateway {
   // a future DerivationHost's emissions ride it into the ground).
   /** @internal — T19 seam (ingest.ts) */
   readonly justPersisted = new Set<string>();
+  /** @internal — the host's substrate peer (step 6 host trial); undefined off that path. */
+  peer: HostPeer | undefined = undefined;
   private unreadableRows = 0; // set by open: rows held, none readable
   /** @internal — T19 seam (erase.ts, adopt.ts) */
   readonly operatorAuthor: string | undefined;
@@ -546,8 +557,12 @@ export class Gateway {
       // cached read; the next tokenless request recomputes. Once per WRITE, not per read.
       this.publicOpen = undefined;
       if (this.justPersisted.delete(d.id)) return;
+      const peer = this.peer;
       this.writes = this.writes
-        .then(() => this.backend.append([d]))
+        .then(async () => {
+          if (peer === undefined) await this.backend.append([d]);
+          else await admitLocal(peer, [d], this.now(), () => false);
+        })
         .then(
           () => {},
           (err: unknown) => {
@@ -569,7 +584,19 @@ export class Gateway {
   static async open(backend: StoreBackend, options: GatewayOptions = {}): Promise<Gateway> {
     const seed = options.seed;
     const reactor = new Reactor();
-    const replayed = await backend.deltasSince(new Set());
+    if (options.peerStore !== undefined && seed === undefined) {
+      throw new Error(
+        "peer image: a single-peer store needs the operator seed that names the peer",
+      );
+    }
+    const peer: HostPeer | undefined =
+      options.peerStore === undefined
+        ? undefined
+        : hostPeer(options.peerStore, peerIdOf(authorForSeed(seed!)));
+    const replayed =
+      peer === undefined
+        ? await backend.deltasSince(new Set())
+        : await openHostPeer(peer.store, peer.peerId, backend);
     for (const d of replayed) {
       const result = reactor.ingest(d);
       if (result.status === "rejected") {
@@ -597,6 +624,7 @@ export class Gateway {
     // A governed store writes its own incarnation marker before it admits anything else, so a
     // replayed marker from an earlier incarnation can never be the lowest-arrival one
     // (recovery-history.md). Written straight to the backend and the reactor: no door runs yet.
+    let pendingMarker: Delta | undefined;
     if (
       seed !== undefined &&
       unreadableRows === 0 &&
@@ -606,10 +634,20 @@ export class Gateway {
       // Its time never matters (the reader orders markers by arrival), so no clock is read.
       const t = Math.max(1, ...replayed.map((d) => d.claims.timestamp + 1));
       const marker = signClaims(incarnationClaims(mintIncarnation(), operator, t), seed);
-      await backend.append([marker]);
-      reactor.ingest(marker);
+      if (peer === undefined) {
+        await backend.append([marker]);
+        reactor.ingest(marker);
+      } else pendingMarker = marker;
     }
     const gateway = new Gateway(backend, reactor, options);
+    gateway.peer = peer;
+    // On the peer image path the marker enters through local admission, at the gateway's clock.
+    if (peer !== undefined && pendingMarker !== undefined) {
+      await admitLocal(peer, [pendingMarker], gateway.now(), () => false);
+      gateway.justPersisted.add(pendingMarker.id);
+      reactor.ingest(pendingMarker);
+      gateway.justPersisted.delete(pendingMarker.id);
+    }
     gateway.unreadableRows = unreadableRows;
     gateway.seedAuthorClocks(replayed);
     gateway.replayRegistrations();
@@ -636,7 +674,19 @@ export class Gateway {
     genesis: Genesis,
     options: Omit<GatewayOptions, "seed"> = {},
   ): Promise<Gateway> {
-    const gateway = await Gateway.open(backend, { ...options, seed: genesis.operatorSeed });
+    // LOAM_PEER_TRIAL=1 puts every host this process boots on the single-peer path (trial only).
+    const trial =
+      options.peerStore === undefined &&
+      typeof process !== "undefined" &&
+      process.env.LOAM_PEER_TRIAL === "1" &&
+      holdsPeerImages(backend)
+        ? { peerStore: backend.peerStore() }
+        : {};
+    const gateway = await Gateway.open(backend, {
+      ...options,
+      ...trial,
+      seed: genesis.operatorSeed,
+    });
     // A store with rows and none readable would boot empty, with a fresh genesis planted beside
     // the rows it could not read.
     if (gateway.unreadableRows > 0) {

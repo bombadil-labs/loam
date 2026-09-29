@@ -4,9 +4,10 @@
 
 /* eslint-disable @typescript-eslint/require-await -- the async keyword is load-bearing: it
    turns every synchronous throw into the rejected promise the seam promises. */
-import { DeltaSet, type Delta } from "@bombadil/rhizomatic";
+import { DeltaSet, type Delta, type DurablePeerStore } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "./backend.js";
 import { canonicalDelta } from "./canon.js";
+import { sameBytes } from "./peer-image.js";
 
 export class MemoryBackend implements StoreBackend {
   private set = new DeltaSet();
@@ -66,5 +67,34 @@ export class MemoryBackend implements StoreBackend {
 
   async close(): Promise<void> {
     this.closed = true;
+  }
+
+  // One image per peer. The compare, the row insert and the image swap run with no await between
+  // them, so they are one step for every other caller.
+  private images = new Map<string, Uint8Array>();
+  private store: DurablePeerStore | undefined;
+
+  peerStore(): DurablePeerStore {
+    return (this.store ??= {
+      readImage: async (peerId) => {
+        this.assertOpen();
+        const image = this.images.get(peerId);
+        if (image !== undefined) return { status: "image", image: Uint8Array.from(image) };
+        return this.set.size > 0 ? { status: "rows-without-image" } : { status: "empty" };
+      },
+      compareAndSet: async (peerId, expectedPrior, nextImage, newlyAdmitted) => {
+        this.assertOpen();
+        const current = this.images.get(peerId);
+        const matches =
+          expectedPrior === null
+            ? current === undefined && this.set.size === 0
+            : current !== undefined && sameBytes(current, expectedPrior);
+        if (!matches) return { status: "conflict" };
+        const batch = newlyAdmitted.map(canonicalDelta);
+        for (const d of batch) this.set.add(d);
+        this.images.set(peerId, Uint8Array.from(nextImage));
+        return { status: "durable" };
+      },
+    });
   }
 }

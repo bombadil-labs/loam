@@ -1,0 +1,29 @@
+diff --git a/refactor/recordings/out/principal.gateway-operator.json b/refactor/recordings/out/principal.gateway-operator.json
+index e4f92b45..071e537c 100644
+--- a/refactor/recordings/out/principal.gateway-operator.json
++++ b/refactor/recordings/out/principal.gateway-operator.json
+@@ -10,15 +10,7 @@
+     "operatorAuthor": "@operator"
+   },
+   "rebooted with the stranger's genesis": {
+-    "appendSignedByOperatorSeed": {
+-      "refused": "append rejected: @operator is not permitted: publishing through this store requires write standing (a surviving grant at loam:store), and no surviving grant says so"
+-    },
+-    "appendSignedByStrangerSeed": "accepted",
+-    "markersInGround": [
+-      "@stranger",
+-      "@operator"
+-    ],
+-    "operatorAuthor": "@stranger"
++    "refused": "peer image: this store holds rows but no peer image, so it cannot open as a single peer. The trial path starts only from a fresh, empty store."
+   },
+   "reopened with no seed": {
+     "appendSignedByOperatorSeed": "accepted",
+@@ -46,7 +38,6 @@
+       "refused": "append rejected: @stranger is not permitted: publishing through this store requires write standing (a surviving grant at loam:store), and no surviving grant says so"
+     },
+     "markersInGround": [
+-      "@stranger",
+       "@operator"
+     ],
+     "operatorAuthor": "@operator"

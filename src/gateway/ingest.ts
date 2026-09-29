@@ -53,6 +53,7 @@ import {
   refusedIds,
   erasuresOfErasures,
 } from "./erase.js";
+import { admitLocal, admitReceived } from "./peer-admission.js";
 import { Channel } from "./channel.js";
 import type { AppendReceipt, FederationReport, Gateway } from "./gateway.js";
 import { publicDefect } from "./public.js";
@@ -293,7 +294,8 @@ async function appendAdmitted(
   // only parties who can trigger it are parties who could already read the target, so telling them
   // IS the notice; the mechanism and the warning turn out to be the same thing. The federation door
   // shares this ONE predicate and differs only in disclosure (see federateImpl).
-  const slates = readSlates(gw.reactor, gw.validityNow(), gw.operatorAuthor, Date.now());
+  const at = Date.now(); // the slate check, and the arrival time on the peer image path
+  const slates = readSlates(gw.reactor, gw.validityNow(), gw.operatorAuthor, at);
   for (const d of batch) {
     if (computeId(d.claims) !== d.id || verifyDelta(d) !== "verified") {
       throw new Error(
@@ -419,7 +421,9 @@ async function appendAdmitted(
         `and an erasure is permanent`,
     );
   }
-  await gw.backend.append(batch); // a throw here means NOTHING was ingested or served
+  // A throw here means NOTHING was ingested or served.
+  if (gw.peer === undefined) await gw.backend.append(batch);
+  else await admitLocal(gw.peer, batch, at, (d) => isErasure(d.claims));
   let accepted = 0;
   let duplicates = 0;
   const fresh: Delta[] = [];
@@ -938,19 +942,26 @@ async function federateAdmitted(
   }
   // Counted per offered delta rather than inferred from set sizes: the closure keys by id, so a peer
   // that offers the same delta twice would otherwise be reported as one refusal that never happened.
-  const crossed = new Set(admitted.map((d) => d.id));
+  // On the peer image path the image decides last: what it does not admit is not stored or served.
+  const landed =
+    gw.peer === undefined || admitted.length === 0
+      ? admitted
+      : await admitReceived(gw.peer, admitted, now, (d) => isErasure(d.claims)).then((ok) =>
+          admitted.filter((d) => ok.has(d.id)),
+        );
+  const crossed = new Set(landed.map((d) => d.id));
   const rejected = all.reduce((n, d) => (crossed.has(d.id) ? n : n + 1), 0);
   // The ids are collected in THIS loop, from the same verdict that increments the count — so
   // `acceptedIds` and `accepted` cannot disagree about which deltas newly landed. Anything that
   // recovered the set afterwards would be answering a different question a moment later.
   const acceptedIds: string[] = [];
   const admittedIds = new Set<string>();
-  if (admitted.length > 0) {
-    await gw.backend.append(admitted);
+  if (landed.length > 0) {
+    if (gw.peer === undefined) await gw.backend.append(landed);
     gw.advanceToNow(); // as at append
-    for (const d of admitted) gw.justPersisted.add(d.id);
+    for (const d of landed) gw.justPersisted.add(d.id);
     try {
-      for (const d of admitted) {
+      for (const d of landed) {
         const result = gw.ingestVia(d);
         if (result.status !== "rejected") {
           gw.noteAuthorTime(d);
@@ -963,10 +974,10 @@ async function federateAdmitted(
           admittedIds.add(d.id);
       }
     } finally {
-      for (const d of admitted) gw.justPersisted.delete(d.id);
+      for (const d of landed) gw.justPersisted.delete(d.id);
       gw.armValidityTimer(); // as at append
       if (acceptedIds.length > 0) gw.notifyUserDependents(); // as at append
     }
   }
-  return { all, now, admitted, rejected, acceptedIds, admittedIds };
+  return { all, now, admitted: landed, rejected, acceptedIds, admittedIds };
 }

@@ -24,9 +24,11 @@ import {
   parseClaims,
   verifyDelta,
   type Delta,
+  type DurablePeerStore,
 } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "./backend.js";
 import { canonicalDelta } from "./canon.js";
+import { sameBytes } from "./peer-image.js";
 import { admit, previewOf, type QuarantinedRow, type RepairableBackend } from "./quarantine.js";
 
 interface DeltaRow {
@@ -154,6 +156,10 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
       CREATE TABLE IF NOT EXISTS meta (
         key   TEXT PRIMARY KEY,
         value TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS peer_image (
+        peer  TEXT PRIMARY KEY,
+        image BLOB NOT NULL
       );
     `);
     this.insertDelta = this.db.prepare(
@@ -506,6 +512,66 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     for (const row of this.db.prepare("SELECT id FROM deltas").all() as { id: string }[])
       out.add(row.id);
     return out;
+  }
+
+  // One image per peer. The compare, the new rows and the image commit in one IMMEDIATE
+  // transaction, so a crash leaves either the old image and rows or the new ones.
+  private store: DurablePeerStore | undefined;
+
+  peerStore(): DurablePeerStore {
+    const imageOf = (peer: string): Uint8Array | undefined => {
+      const row = this.db.prepare("SELECT image FROM peer_image WHERE peer = ?").get(peer) as
+        { image: Buffer } | undefined;
+      return row === undefined ? undefined : new Uint8Array(row.image);
+    };
+    const hasRows = (): boolean =>
+      this.db.prepare("SELECT 1 FROM deltas LIMIT 1").get() !== undefined;
+    return (this.store ??= {
+      readImage: async (peerId) => {
+        this.assertOpen();
+        const image = imageOf(peerId);
+        if (image !== undefined) return { status: "image", image };
+        return hasRows() ? { status: "rows-without-image" } : { status: "empty" };
+      },
+      compareAndSet: async (peerId, expectedPrior, nextImage, newlyAdmitted) => {
+        this.assertOpen();
+        const batch = newlyAdmitted.map(canonicalDelta);
+        const stored: string[] = [];
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          const current = imageOf(peerId);
+          const matches =
+            expectedPrior === null
+              ? current === undefined && !hasRows()
+              : current !== undefined && sameBytes(current, expectedPrior);
+          if (!matches) {
+            this.db.exec("ROLLBACK");
+            return { status: "conflict" };
+          }
+          for (const d of batch) {
+            const info = this.insertDelta.run(
+              d.id,
+              JSON.stringify(claimsToJson(d.claims)),
+              d.sig ?? null,
+            );
+            if (info.changes > 0) stored.push(d.id);
+          }
+          this.db
+            .prepare("INSERT OR REPLACE INTO peer_image (peer, image) VALUES (?, ?)")
+            .run(peerId, Buffer.from(nextImage));
+          this.db.exec("COMMIT");
+        } catch (err) {
+          try {
+            this.db.exec("ROLLBACK");
+          } catch {
+            /* already rolled back */
+          }
+          throw err;
+        }
+        for (const id of stored) this.onDisk.add(id);
+        return { status: "durable" };
+      },
+    });
   }
 
   async close(): Promise<void> {
