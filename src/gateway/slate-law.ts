@@ -11,9 +11,9 @@ import {
 } from "@bombadil/rhizomatic";
 import { freezeMembers } from "./container-identity.js";
 import { CTX_CONTAINER, readContainerTable } from "./container-law.js";
-import { isErasure } from "./erase-law.js";
+import { isErasure, erasedFromReading, standingErasures, erasureTarget } from "./erase-law.js";
 import { withNegationClosure } from "./negation-closure.js";
-import { lawfulDeltasAt } from "./lawful.js";
+import { lawfulDeltasAt, lawfulHistory } from "./lawful.js";
 import { negatedAt } from "./negation.js";
 import { governedProgram } from "./governed-trust.js";
 import { userGroundOf } from "./user-root.js";
@@ -604,4 +604,249 @@ export function slateRefusal(
     }
   }
   return undefined;
+}
+
+// --- health (§29.4): the compliance clock in its OWN section -------------------------------------
+
+/** What a slate reader asks of a ground: its reactor, the instant validity reads at, its key. */
+export interface SlateGround {
+  readonly reactor: Reactor;
+  readonly operatorAuthor: string | undefined;
+  validityNow(): number;
+}
+
+export interface SlateHealth {
+  readonly open: number;
+  readonly lapsed: number;
+  /** The lapsed slates' container entities — operator-only, like `erasure.outstanding`. */
+  readonly lapsedIds: readonly string[];
+  /**
+   * Slates ENFORCING NOTHING because their condemned set cannot be read. Surfaced because the
+   * alternative is a slate reporting `closes: [cite, egress]` while all three doors stand open — a
+   * claim of protection never delivered, and the one state an operator most needs to see.
+   */
+  readonly unresolved: readonly string[];
+  /** Slates whose container was re-declared elsewhere. The record's pins still govern; this says so. */
+  readonly disagreeing: readonly string[];
+}
+
+export interface NegatedHealth {
+  /** Ids in some graveyard's frozen `version` whose erasure no longer survives. */
+  readonly count: number;
+  /** Of those, how many are PRESENT in the ground again. */
+  readonly present: number;
+  readonly ids: readonly string[];
+  /**
+   * Graveyards whose frozen set could NOT be read. Without this, `count: 0` means both "nothing has
+   * been negated" and "the one durable list of ids this store promised to forget is unreadable" —
+   * H9 in the instrument that exists to make an id whose erasure was negated visible at all.
+   */
+  readonly unreadable: readonly string[];
+}
+
+/**
+ * A lapsed slate does NOT move `status`, and the separation is the point. `settling` means a promise
+ * already MADE has not reached the bytes yet and the operator waits or repairs a tier; a lapsed
+ * slate means a promise has not been KEPT and the operator's job is to CUT. Routing a compliance
+ * clock through §11's byte-debt field would teach whoever watches `status` that `settling` sometimes
+ * just means someone filed a slate — which is how a field earns the right to be ignored.
+ */
+export function slateHealth(ground: SlateGround, now: number): SlateHealth {
+  const slates = readSlates(ground.reactor, ground.validityNow(), ground.operatorAuthor, now);
+  const lapsed = slates.filter((s) => s.lapsed);
+  return {
+    open: slates.length,
+    lapsed: lapsed.length,
+    lapsedIds: lapsed.map((s) => s.container).sort(),
+    unresolved: slates
+      .filter((s) => s.unresolved !== undefined)
+      .map((s) => s.container)
+      .sort(),
+    disagreeing: slates
+      .filter((s) => s.disagreement !== undefined)
+      .map((s) => s.container)
+      .sort(),
+  };
+}
+
+// --- the withheld set (egress and read share ONE closure) ---------------------------------------
+
+/**
+ * The condemned set CLOSED UNDER NEGATION TARGETS, transitively — H1 read from the other side.
+ *
+ * `withNegationClosure` maintains *if I offer `d`, I offer everything that negates `d`*. Its
+ * contrapositive is *if I withhold `n`, and `n` negates `d`, I withhold `d`*. Those are one rule,
+ * so a naive subtraction of a slated NEGATION would leave its target offered and hand the peer a
+ * live reading of a retracted claim. Transitive for the same reason the forward closure is (a
+ * struck strike revives, so one link would leave a revived claim wrongly offered), and terminating
+ * for the same reason (the set only grows, bounded by the snapshot, and content addressing forbids
+ * a cycle).
+ *
+ * This UNDER-represents the post-cut world for exactly the resurfacing set, and that is the correct
+ * direction: over-withholding cannot disclose, un-slating is FREE (§29.8), and a revocable act must
+ * not have an irrevocable effect.
+ */
+export function condemnedClosure(reactor: Reactor, seed: Iterable<string>): Set<string> {
+  const out = new Set(seed);
+  const pending = [...out];
+  while (pending.length > 0) {
+    const id = pending.pop() as string;
+    const d = reactor.get(id);
+    if (d === undefined) continue;
+    for (const p of d.claims.pointers) {
+      if (p.role !== "negates" || p.target.kind !== "delta") continue;
+      const target = p.target.deltaRef.delta;
+      if (out.has(target)) continue;
+      out.add(target);
+      pending.push(target);
+    }
+  }
+  return out;
+}
+
+const closureIds = (
+  reactor: Reactor,
+  slates: readonly Slate[],
+  door: SlateClosure,
+): Set<string> => {
+  const seed = new Set<string>();
+  for (const s of slates) {
+    if (!s.closes.has(door)) continue;
+    for (const id of s.members) seed.add(id);
+  }
+  return seed.size === 0 ? seed : condemnedClosure(reactor, seed);
+};
+
+/** What EGRESS closure withholds from `offeredDeltas` — the one site, and `openWall` inherits it. */
+export function egressWithheld(ground: SlateGround, now: number): Set<string> {
+  return closureIds(
+    ground.reactor,
+    readSlates(ground.reactor, ground.validityNow(), ground.operatorAuthor, now),
+    "egress",
+  );
+}
+
+/** What READ closure withholds from every gather that answers a read DOOR. */
+export function readClosedIds(ground: SlateGround, now: number): Set<string> {
+  requireMoment(now, "a read door");
+  const closed = closureIds(
+    ground.reactor,
+    readSlates(ground.reactor, ground.validityNow(), ground.operatorAuthor, now),
+    "read",
+  );
+  // Erased ids are never read, even while a purge has not yet removed their bytes.
+  for (const id of erasedFromReading(ground.reactor, ground.operatorAuthor)) closed.add(id);
+  return closed;
+}
+
+/**
+ * Did this batch just close `read` over something? A STREAM OPEN BEFORE THE SLATE re-resolves, or it
+ * serves the member forever (§29.3): nothing in a slate's own deltas touches the watched entity's
+ * materialization, so the sink never fires and the narrowing never takes effect. Asked cheaply —
+ * a batch with no slate record in it pays nothing.
+ */
+export function landsReadClosure(
+  ground: SlateGround,
+  fresh: readonly Delta[],
+  now: number,
+): boolean {
+  // `fresh` is only what this batch NEWLY ingested: a duplicate changes nothing, and must not end
+  // anyone's stream. An erasure narrows a reading only when its target's bytes are held here.
+  if (fresh.some((d) => isSlateRecord(d.claims))) return readClosedIds(ground, now).size > 0;
+  return fresh.some((d) => {
+    if (!isErasure(d.claims)) return false;
+    const target = erasureTarget(d.claims);
+    return target !== undefined && ground.reactor.get(target) !== undefined;
+  });
+}
+
+// --- the graveyard: durable, joinable, arithmetic ------------------------------------------------
+
+export interface GraveyardRecord {
+  readonly id: string;
+  readonly container: string;
+  readonly record: string;
+  readonly version: string;
+  readonly membershipAt: string;
+  readonly memberCount: number;
+  readonly opened: number;
+  readonly cutAt: number;
+  readonly closes: readonly SlateClosure[];
+  readonly affected: readonly string[];
+  readonly priorErasure: readonly { readonly member: string; readonly erasure: string }[];
+}
+
+export function readGraveyards(
+  reactor: Reactor,
+  now: number,
+  operator: string | undefined,
+): GraveyardRecord[] {
+  if (operator === undefined) return [];
+  const negated = negatedAt(reactor, now, operator);
+  const out: GraveyardRecord[] = [];
+  // A HISTORY read, as in `findGraveyard`: the record's own validity window never retires it.
+  for (const d of lawfulHistory(reactor, operator)) {
+    if (negated(d.id) || !isGraveyard(d.claims)) continue;
+    if (graveyardDefect(d.claims, operator) !== undefined) continue;
+    const cited = d.claims.pointers.find(
+      (p) => p.role === "slate-record" && p.target.kind === "delta",
+    );
+    out.push({
+      id: d.id,
+      container: at(d.claims, "graveyard", CTX_GRAVEYARD)!,
+      record: cited?.target.kind === "delta" ? cited.target.deltaRef.delta : "",
+      version: primitives(d.claims, "version")[0] as string,
+      membershipAt: primitives(d.claims, "membershipAt")[0] as string,
+      memberCount: primitives(d.claims, "member-count")[0] as number,
+      opened: primitives(d.claims, "opened")[0] as number,
+      cutAt: primitives(d.claims, "cut-at")[0] as number,
+      closes: primitives(d.claims, "closes").filter(
+        (c): c is SlateClosure => typeof c === "string" && CLOSURES.has(c),
+      ),
+      affected: entitiesAt(d.claims, "affected", CTX_CONTAINER),
+      priorErasure: primitives(d.claims, "prior-erasure")
+        .map((p) => (typeof p === "string" ? parsePriorPair(p) : undefined))
+        .filter((p): p is { member: string; erasure: string } => p !== undefined),
+    });
+  }
+  out.sort((a, b) => a.cutAt - b.cutAt || (a.id < b.id ? -1 : 1));
+  return out;
+}
+
+// --- negation reporting (§29.8): what a graveyard's frozen set says about the present -----
+
+/**
+ * Negation is LAWFUL, not debt — so this moves `status` no more than a slate does. But without it
+ * an id whose erasure was negated is invisible to every instrument the store has: negating an
+ * erasure removes the id from `readErasures` and therefore from `promised`, although the id stays
+ * refused forever. A graveyard's frozen `version` still lists it.
+ */
+export function negatedHealth(ground: SlateGround): NegatedHealth {
+  const operator = ground.operatorAuthor;
+  const empty = { count: 0, present: 0, ids: [], unreadable: [] };
+  if (operator === undefined) return empty;
+  const graves = readGraveyards(ground.reactor, ground.validityNow(), operator);
+  if (graves.length === 0) return empty;
+  const surviving = new Set(
+    standingErasures(ground.reactor, ground.validityNow(), operator).map((t) =>
+      erasureTarget(t.claims)!,
+    ),
+  );
+  const ids = new Set<string>();
+  const unreadable: string[] = [];
+  for (const grave of graves) {
+    const frozen = readFrozenTerm(ground.reactor, grave.membershipAt);
+    if (!frozen.ok) {
+      unreadable.push(grave.id); // never folded into "nothing negated" (H9)
+      continue;
+    }
+    for (const id of frozen.ids) if (!surviving.has(id)) ids.add(id);
+  }
+  const sorted = [...ids].sort();
+  return {
+    count: sorted.length,
+    present: sorted.filter((id) => ground.reactor.get(id) !== undefined).length,
+    ids: sorted,
+    unreadable: unreadable.sort(),
+  };
 }

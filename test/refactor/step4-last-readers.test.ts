@@ -33,7 +33,8 @@ import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { projectLiveReceiving } from "../../src/gateway/receive-policy.js";
 import { registrationDeltaClaims } from "../../src/gateway/registration.js";
-import { graveyardClaims, graveyardCompleteness, readGraveyards } from "../../src/gateway/slate.js";
+import { graveyardClaims, graveyardCompleteness } from "../../src/gateway/slate.js";
+import { readGraveyards } from "../../src/gateway/slate-law.js";
 import {
   connectionGrantState,
   unnegatedOperatorGrantIds,

@@ -45,16 +45,15 @@ import { negatedAt } from "./negation.js";
 import { programMaskJson } from "./program-mask.js";
 import { unreachableStoreReport } from "./container.js";
 import { currentContainerDeclarationId } from "./container-law.js";
+import { danglingCitations, type CitationTier } from "./tiers.js";
 import {
-  danglingCitations,
+  readSlates,
   negatedHealth,
   readClosedIds,
   slateHealth,
-  type CitationTier,
   type NegatedHealth,
   type SlateHealth,
-} from "./slate.js";
-import { readSlates } from "./slate-law.js";
+} from "./slate-law.js";
 import type { Gateway } from "./gateway.js";
 import type { StoreBackend } from "../store/backend.js";
 import { withStamp } from "./stamp.js";

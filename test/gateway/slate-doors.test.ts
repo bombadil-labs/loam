@@ -32,7 +32,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { publicClaims } from "../../src/gateway/public.js";
 import { gatherImpl } from "../../src/gateway/reads.js";
-import { readClosedIds } from "../../src/gateway/slate.js";
+import { readClosedIds } from "../../src/gateway/slate-law.js";
 import type { LensName } from "../../src/gateway/registration.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";

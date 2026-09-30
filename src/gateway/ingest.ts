@@ -64,8 +64,13 @@ import { Channel } from "./channel.js";
 import type { AppendReceipt, FederationReport, Gateway } from "./gateway.js";
 import { publicDefect } from "./public.js";
 import { artifactDefect } from "./artifact.js";
-import { egressWithheld, landsReadClosure } from "./slate.js";
-import { readSlates, slateDefect, slateRefusal } from "./slate-law.js";
+import {
+  readSlates,
+  slateDefect,
+  slateRefusal,
+  egressWithheld,
+  landsReadClosure,
+} from "./slate-law.js";
 import { declaresTrust, readTrustPolicy } from "./trust.js";
 import { governedProgram, needsLowering } from "./governed-trust.js";
 import { recordPrevious, recoveryDefect, userGroundOf } from "./user-root.js";

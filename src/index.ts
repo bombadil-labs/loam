@@ -89,24 +89,26 @@ export {
   frozenMembershipTerm,
   graveyardClaims,
   graveyardCompleteness,
-  readGraveyards,
   slateClaims,
   type ByteVerdict,
-  type CitationTier,
   type CompletenessCheck,
   type CutMemberReport,
   type CutReport,
   type Duplicate,
-  type NegatedHealth,
-  type GraveyardRecord,
   type GraveyardSpec,
   type Receipt,
   type ReceiptMember,
-  type SlateHealth,
   type SlateReport,
   type SlateSpec,
   type TierVerdict,
 } from "./gateway/slate.js";
+export { type CitationTier } from "./gateway/tiers.js";
+export {
+  readGraveyards,
+  type NegatedHealth,
+  type GraveyardRecord,
+  type SlateHealth,
+} from "./gateway/slate-law.js";
 export {
   CTX_GRAVEYARD,
   RECOMMENDED_CLOSES,
