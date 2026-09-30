@@ -202,13 +202,13 @@ export async function receiveChannelOfferInCommit(
 ): Promise<ChannelReceiveResult> {
   const expected = { ...opening };
   const offer = structuredClone([...offered]);
-  const pool = gw.channelPools.get(expected.channel);
+  const pool = gw.store.channels(gw).get(expected.channel);
   const ground = pool?.gateway;
   const currentEvidence = () => {
     const evidence = localChannelEvidence(gw, expected.channel);
     if (
       ground === undefined ||
-      gw.channelPools.get(expected.channel) !== pool ||
+      gw.store.channels(gw).get(expected.channel) !== pool ||
       pool?.gateway !== ground ||
       !gw.store.holds(gw, ground) ||
       evidence.state !== "open" ||

@@ -21,6 +21,7 @@
 // Admission resolves from the subject declaration and never from the knob; posture legality
 // gates on the knob and never from the roster.
 
+import type { Peer } from "./peer.js";
 import { seedSigner } from "./signer.js";
 import { hostChain, inboxLaw, seededLaw } from "./child-law.js";
 import { memoryPoolKeys, PoolKeyMissing, poolKeyClaims, recordedPoolKey } from "./pool-keys.js";
@@ -245,8 +246,8 @@ export function containerScopeImpl(
  * switch off, here as everywhere.
  */
 /** The attached gateway of pool `name` (a connection inbox or a channel pool), or undefined. */
-export function attachedPool(gw: Gateway, name: string): Gateway | undefined {
-  return gw.connectionInboxes.get(name)?.gateway ?? gw.channelPools.get(name)?.gateway;
+export function attachedPool(gw: Gateway, name: string): Peer | undefined {
+  return gw.store.inboxes(gw).get(name)?.gateway ?? gw.store.channels(gw).get(name)?.gateway;
 }
 
 /**
@@ -723,7 +724,7 @@ async function openSeparate(
   // below is resolved from the OPENER's live reactor and composed downward: every descendant is
   // bounded by what the operator's ground says right now, however stale the ground it sits on.
   // Nothing below the operator can widen; it can only tighten.
-  pool.poolHandle = spec.entity ?? `anonymous#${(gw.anonymousPoolsOpened += 1)}`;
+  pool.poolHandle = spec.entity ?? `anonymous#${(gw.store.tableOf(gw).anonymousOpened += 1)}`;
   // The ground is the ROOT's, passed down unchanged: a container's own reactor is a seeded copy, and
   // resolving a descendant's ceiling from it would read a declaration the operator struck after the
   // seeding as still live — at the report AND at the gate, so the two would agree on the wrong
@@ -910,7 +911,7 @@ async function openSeparate(
       // so the enumeration is their union; and the §25 quarantine pen — rows a read SET ASIDE
       // as corrupt, still legible bytes on disk — is swept by its own door, since no id-keyed
       // purge can reach a row whose id was never returned.
-      const discardBytes = async (target: Gateway, who: string): Promise<void> => {
+      const discardBytes = async (target: Peer, who: string): Promise<void> => {
         const ids = new Set((await target.backend.deltasSince(new Set())).map((d) => d.id));
         for (const d of target.reactor.snapshot()) ids.add(d.id);
         if (isRepairable(target.backend)) {
@@ -1069,7 +1070,7 @@ export interface PoolOwner {
  * or a user subject that resolves to no key is a refusal: a pool must never compose as if its owner
  * were someone.
  */
-export function poolOwner(pool: Gateway): PoolOwner | { readonly refusal: string } {
+export function poolOwner(pool: Peer): PoolOwner | { readonly refusal: string } {
   const operator = pool.operatorAuthor;
   const now = pool.validityNow();
   const owners = new Map<string, PoolOwner>();
@@ -1149,6 +1150,15 @@ export interface BindConnectionOptions {
 // a pool mid-drop (unregistered, its handle not yet cleared) both refuse. There is no fallback to
 // this store: a connection's write landing in the primary is exactly the leak the binding closes.
 export function poolForBindingImpl(gw: Gateway, binding: ConnectionBinding): Gateway {
+  return bindingPoolOf(gw, binding);
+}
+
+/** The pool a binding's writes land in, as a peer: the same answer `poolForBindingImpl` gives. */
+export function bindingPeer(gw: Gateway, binding: ConnectionBinding): Peer {
+  return bindingPoolOf(gw, binding);
+}
+
+function bindingPoolOf(gw: Gateway, binding: ConnectionBinding): Gateway {
   // THE CONTAINER FIRST. A pool outlives the container it was bound under: dropping a shared
   // container strikes its declaration and leaves the inbox declared and attached. Without this
   // the write lands durably in the pool and the read that follows it refuses by name, so the door

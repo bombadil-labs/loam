@@ -9,6 +9,7 @@
 // back into. Nothing is reachable except through what a registered (HyperSchema, Schema) pair
 // exposes.
 
+import type { Peer } from "./peer.js";
 import {
   signClaims,
   Reactor,
@@ -1141,27 +1142,28 @@ export class Gateway {
    */
   cutHold: (() => Promise<void>) | undefined = undefined;
 
-  // The separate-store gateways attached to this store (SPEC §24.8/§27): the operator's own one-way
-  // replicas that an erasure here must fan out to. This Set is the CANONICAL runtime registry of
-  // erasure reach — every attach inserts here, every drop/detach removes here, and the fan-out,
-  // the health probe, and the scope reads all walk it. It stays a real mutable Set (rails reach
-  // in to build fixtures); the named index below is bookkeeping over it, checked against it.
-  /** @internal — T19 seam (erase.ts, container.ts) */
-  readonly quarantinePools = new Set<Gateway>();
+  // This container's children live in the Store's table (store.ts). These getters are the
+  // facade's view of it, for doors, commands and rails; container code reads children only as
+  // peers, through the Store.
+  /** The separate-store children attached below this container: the registry of erasure reach. */
+  get quarantinePools(): Set<Gateway> {
+    return this.store.tableOf(this).pools;
+  }
 
-  // The NAMED attachments (SPEC §27, T32): declared container entity → the gateway over its own
-  // store. An entry here is meaningful only while its gateway is also in quarantinePools —
-  // readers ask both, so the two can never silently diverge on erasure reach.
-  /** @internal — T19 seam (container.ts) */
-  readonly attachedContainers = new Map<string, Gateway>();
+  /** The declared children, by container entity. */
+  get attachedContainers(): Map<string, Gateway> {
+    return this.store.tableOf(this).named;
+  }
 
-  // How many ANONYMOUS pools this store has ever opened. An anonymous pool has no container entity
-  // to name, and a nameless row in an envelope report would be exactly the unattributable failure
-  // §24.5's report exists to prevent — so each gets a stable synthetic handle (`anonymous#1`, …).
-  // Grow-only on purpose: reusing a handle after a drop would make two different pools' spending
-  // read as one pool's.
-  /** @internal — T34 seam (container.ts) */
-  anonymousPoolsOpened = 0;
+  /** The connection inbox handles (SPEC §39), by inbox name. */
+  get connectionInboxes(): Map<string, Container> {
+    return this.store.tableOf(this).inboxes;
+  }
+
+  /** The federation channel pools (§46), by pool name. */
+  get channelPools(): Map<string, Container> {
+    return this.store.tableOf(this).channels;
+  }
 
   // THIS gateway is a quarantine pool's own gateway (SPEC §24.7) — set by the attach that opened it,
   // and held for the pool's whole life. The renderer door reads it to wrap a served route in the
@@ -1171,40 +1173,13 @@ export class Gateway {
   /** @internal — T35 seam (container.ts, renderers.ts) */
   probation: Probation | undefined = undefined;
 
-  // The store THIS gateway was attached FROM, for a separate container's own gateway (SPEC §27).
-  // A pool holds a SEEDED COPY of the host's law, frozen until someone re-pulses the edge — and
-  // nothing re-pulses it on its own. So any question whose stale answer would make a REVOCATION
-  // never arrive must be asked of the host, live. One is asked through it today: does a renderer's
-  // pen still hold write standing (§23.3 × §24.7)? It is not a back-channel for reading the host's
-  // ground, which is the thing the one-way glass exists to prevent. Cleared when the container
-  // detaches — a detached pool is nobody's replica.
-  //
-  // THE CLASS IS NOT CLOSED, and nothing here should read as if it were: a pool's copy of the
-  // striker set, of the registrations, and of the public declarations is stale in exactly the same
-  // way, and those are READS. They are older than this field and are not fixed here.
-  /** @internal — T35 seam (container.ts, renderers.ts) */
   /** @internal — the store this container belongs to, and the services its tree shares. */
   store = new Store();
-
-  // The live per-connection inbox handles (SPEC §39), keyed by inbox name. A binding is DURABLE: a
-  // second bindConnection of the same (container, connection key) resumes the same handle rather than
-  // spawning a new pool. Cleared only by a drop().
-  /** @internal — T138 seam (container.ts) */
-  readonly connectionInboxes = new Map<string, Container>();
 
   /** Live federation channels by pool name (§46). Mirrors `connectionInboxes`: same shape, with a
    * peer on the other end instead of an MCP connection. (Named in full because `channels` is
    * already this class's live-stream set — two different things, one obvious word.) */
   readonly federationChannels = new Map<string, Channel>();
-
-  /**
-   * Attached channel POOLS by name (§46). Separate from `federationChannels` because a booted store
-   * has pools but no channels: `resumeChannels` can re-attach the bytes, and cannot rebuild a
-   * `Channel` because a channel's SOURCE is not in the ground (see T196). Without this map,
-   * `dropChannel` on a booted store re-opened a container that was already attached and was refused
-   * — the documented sever verb could not succeed anywhere it mattered.
-   */
-  readonly channelPools = new Map<string, Container>();
 
   /**
    * Set on a POOL's own gateway when it is a federation channel's pool (§46.1). It is what tells a
@@ -1259,7 +1234,7 @@ export class Gateway {
       try {
         // Through the one attach, which is also the one place a channel pool is MARKED — a resumed
         // pool is a channel's too, and this is the path a running server actually serves from.
-        this.channelPools.set(standing.name, await attachChannelPool(this, standing.name));
+        this.store.setChannel(this, standing.name, await attachChannelPool(this, standing.name));
         this.channelAttachFaults.delete(standing.name);
       } catch (err) {
         // Kept, so a report can name the cause rather than guess at one.
@@ -1282,7 +1257,7 @@ export class Gateway {
     // Boot's replay ran before any pool attached, so the aggregation saw none of them. Refold once,
     // after the loop — without this a rebooted store keeps the data and loses the LAW until the
     // next sync, which is T196's failure shape one layer up.
-    if (this.channelPools.size > 0) this.replayRegistrations();
+    if (this.store.channels(this).size > 0) this.replayRegistrations();
   }
 
   /** Keep accepting on every open channel until stopped. Polling today; the transport is
@@ -1346,7 +1321,7 @@ export class Gateway {
   /** The lenses on a channel whose peer-written resolvers are WITHHELD — decisions waiting on you. */
   withheldOn(channel: string): string[] {
     const status = channelStatusImpl(this, channel)[0];
-    const ground = this.channelPools.get(channel)?.gateway;
+    const ground = this.store.channels(this).get(channel)?.gateway;
     if (status === undefined || ground === undefined) return [];
     return withheldLenses(this, ground, status.prefix);
   }
@@ -1489,7 +1464,7 @@ export class Gateway {
 
   // Honor an erasure DECIDED by the primary operator (SPEC §24.8), called on a pool by the primary's
   // fan-out: the body — and the fan-out's re-derive-its-own-reach doctrine — lives in erase.ts.
-  async eraseReplica(erasure: Delta, id: string, seen: Set<Gateway> = new Set()): Promise<void> {
+  async eraseReplica(erasure: Delta, id: string, seen: Set<Peer> = new Set()): Promise<void> {
     return eraseReplicaImpl(this, erasure, id, seen);
   }
 
@@ -2334,16 +2309,8 @@ export class Gateway {
     // found it, as an EPERM deleting a temp directory whose files were still held.
     //
     // Tolerant of an already-closed pool: `drop()` closes the store it purged, so a dropped channel
-    // is normally in this map having already gone.
-    for (const pool of [...this.attachedContainers.values()]) {
-      try {
-        await pool.close();
-      } catch {
-        // already closed — a dropped pool, or a second close
-      }
-    }
-    this.attachedContainers.clear();
-    this.channelPools.clear();
+    // is normally in this table having already gone.
+    await this.store.closeChildren(this);
     this.federationChannels.clear();
     try {
       await this.flush();

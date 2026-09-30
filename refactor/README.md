@@ -163,6 +163,8 @@ Design:
     bottleneck: one `Gateway` class plays host, pool, quarantine and inbox, and host and pool reach
     into each other's members. Step 6 closes when each container is one peer type behind a small
     peer interface and the import cycle count is 0. A design note comes first, for Myk's review.
+    On 2026-09-30 Myk chose to narrow the peer interface before step 6 closes ("B"): four PRs, in
+    refactor/audit/step6-container-split.md.
 
 ## What stays in force
 

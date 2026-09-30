@@ -1,7 +1,8 @@
 // The tiers a §11 sweep walks: a ground's primary and each directly attached pool, and the citations
 // each tier holds of an erased id. A leaf: the erase door and the cut both read it.
 
-import type { Delta, Reactor } from "@bombadil/rhizomatic";
+import type { Delta } from "@bombadil/rhizomatic";
+import type { Peer } from "./peer.js";
 
 /**
  * The citations manifest, ATTRIBUTED to the tier each dangler lives on (T216). The flat `citations`
@@ -13,17 +14,6 @@ import type { Delta, Reactor } from "@bombadil/rhizomatic";
 export interface CitationTier {
   readonly tier: string;
   readonly citations: readonly string[];
-}
-
-/** A ground a sweep walks: its attached containers by name, and its quarantine pools. */
-export interface Tiered<G> {
-  readonly attachedContainers: ReadonlyMap<string, G>;
-  readonly quarantinePools: Iterable<G>;
-}
-
-/** A walkable ground whose tiers each hold a reactor. */
-export interface ReactorTiers extends Tiered<ReactorTiers> {
-  readonly reactor: Reactor;
 }
 
 // The DIRECT tiers a §11 sweep can WALK: this store's primary, then each attached quarantine pool (the
@@ -41,11 +31,11 @@ export interface ReactorTiers extends Tiered<ReactorTiers> {
 //     nested byte is still SWEPT and guaranteed by §11's recursive throw — it is just not a named row.
 //   - `pool:N` is SYNTHESIZED, so a container literally named `pool:1` collides with an anonymous
 //     pool's synthetic label — a consumer keying by tier name resolves it ambiguously (H8, low, old).
-export function reachableTiers<G extends Tiered<G>>(ground: G): { tier: string; gw: G }[] {
-  const out: { tier: string; gw: G }[] = [{ tier: "primary", gw: ground }];
-  const named = new Map([...ground.attachedContainers].map(([name, pool]) => [pool, name]));
+export function reachableTiers(ground: Peer): { tier: string; gw: Peer }[] {
+  const out: { tier: string; gw: Peer }[] = [{ tier: "primary", gw: ground }];
+  const named = new Map([...ground.store.namedPools(ground)].map(([name, pool]) => [pool, name]));
   let anon = 0;
-  for (const pool of ground.quarantinePools) {
+  for (const pool of ground.store.pools(ground)) {
     out.push({ tier: named.get(pool) ?? `pool:${(anon += 1)}`, gw: pool });
   }
   return out;
@@ -65,7 +55,7 @@ export function reachableTiers<G extends Tiered<G>>(ground: G): { tier: string; 
 // `exclude` drops a delta by identity on every tier (erase.ts excludes the erasure it mints from its
 // own manifest); a re-issue passes none.
 export function danglingCitations(
-  ground: ReactorTiers,
+  ground: Peer,
   id: string,
   exclude: (deltaId: string) => boolean = () => false,
 ): { citations: string[]; citationTiers: CitationTier[] } {

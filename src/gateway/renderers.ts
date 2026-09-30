@@ -17,6 +17,7 @@
 // realm, which has no filesystem, no network and no process authority. What this module holds is a set
 // of ADMITTED content addresses; what it hands a door is HTML or a refusal.
 
+import type { Peer } from "./peer.js";
 import { seedSigner } from "./signer.js";
 import { authorForSeed, type Primitive } from "@bombadil/rhizomatic";
 import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
@@ -414,7 +415,7 @@ function latestPerRoute(
  * blessing. That difference is exactly a mounted-but-shadowed app, and a caller that cannot see it
  * cannot say so.
  */
-export function readPoolRenderers(pool: Gateway, host: Gateway): RendererBinding[] {
+export function readPoolRenderers(pool: Peer, host: Gateway): RendererBinding[] {
   // No operator is no answer, not every answer: unscoped, `lawfulSnapshot` returns the whole pool
   // and a peer's own binding would count as something this store had mounted.
   if (pool.operatorAuthor === undefined) return [];
@@ -761,8 +762,8 @@ function channelApp(
   gw: Gateway,
   route: string,
   door: "full" | "public",
-): { pool: Gateway; route: string } | undefined {
-  if (door !== "full" || gw.channelPools.size === 0) return undefined;
+): { pool: Peer; route: string } | undefined {
+  if (door !== "full" || gw.store.channels(gw).size === 0) return undefined;
   if (!route.includes(":")) return undefined;
   // MATCH THE DECLARED PREFIX, never "everything before the first colon". A prefix may CONTAIN a
   // colon — nothing refuses one at `federate open` — and splitting instead of matching would look
@@ -784,7 +785,7 @@ function channelApp(
   }
   if (owner === undefined) return undefined;
   const bare = route.slice(owner.prefix.length + 1);
-  const pool = gw.channelPools.get(owner.name)?.gateway;
+  const pool = gw.store.channels(gw).get(owner.name)?.gateway;
   // No operator is no answer: `lawfulSnapshot` would otherwise hand back every delta in the pool,
   // and a peer's own binding would read as something this store had mounted.
   if (pool?.operatorAuthor === undefined) return undefined;
@@ -1200,7 +1201,7 @@ function resolveGesture(
 // pinned renderer's version must be publicly declared (public) or simply survive (full). writeRoute
 // reuses it so a stranger can only POST to a route they could GET, and an undeclared route stays 404.
 export function routeServableOn(
-  gw: Gateway,
+  gw: Peer,
   binding: RendererBinding,
   door: "full" | "public",
 ): boolean {
@@ -1225,9 +1226,8 @@ export function routeServableOn(
 // now the end of the chain. So each link must still be a live attachment, and the terminal store
 // must not itself be a pool. Undefined means "I cannot tell", which every caller must read as a
 // refusal rather than a permission (H9). A store that is no pool has no root authority above it.
-function rootAuthorityOf(gw: Gateway): Gateway | undefined {
-  if (gw.store.parentOf(gw) === undefined) return undefined;
-  const root = gw.store.verifiedRootOf(gw);
+function rootAuthorityOf(gw: Gateway): Peer | undefined {
+  const root = gw.store.authorityOf(gw);
   return root !== undefined && root.probation === undefined ? root : undefined;
 }
 

@@ -48,7 +48,6 @@ import {
 import { CTX_GRANTS, grantsNaming } from "../gateway/accounts.js";
 import { keysEverOf } from "../gateway/principal.js";
 import { withStamp } from "../gateway/stamp.js";
-import { attachedPool } from "../gateway/container.js";
 import { declaredInboxes, readContainerTable } from "../gateway/container-law.js";
 import { readErasures, refusedIds } from "../gateway/erase-law.js";
 import {
@@ -299,6 +298,11 @@ function signCut(ground: Gateway, spec: { attempt: string; recovery: string; key
   );
 }
 
+// The attached gateway of pool `name` (a connection inbox or a channel pool), or undefined. The CLI is
+// a facade over the store, so it reads a pool as its gateway.
+const poolGateway = (gw: Gateway, name: string): Gateway | undefined =>
+  gw.connectionInboxes.get(name)?.gateway ?? gw.channelPools.get(name)?.gateway;
+
 // Settle every cut of this attempt that a store holds: write `outcome` beside a cut with none, and
 // report a cut whose outcome says otherwise as a conflict, never as settled. A committed attempt must
 // then read committed in every store it cut. Returns what is not settled, so the caller reports it
@@ -307,7 +311,7 @@ async function settleCuts(gw: Gateway, j: Journal, outcome: Outcome): Promise<st
   const pending: string[] = [];
   for (const [pool, ids] of Object.entries(j.cuts ?? {})) {
     const where = pool === HOST ? "the host" : pool;
-    const ground = pool === HOST ? gw : attachedPool(gw, pool);
+    const ground = pool === HOST ? gw : poolGateway(gw, pool);
     if (ground === undefined) {
       pending.push(`the ${outcome} outcome in ${where} (not attached)`);
       continue;
@@ -435,7 +439,7 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
     // reachable now. A first root retires no key and cuts nothing.
     const roster =
       previous === undefined ? [] : declaredInboxes(readContainerTable(gw.reactor, now, operator));
-    const unreachable = roster.filter((pool) => attachedPool(gw, pool) === undefined);
+    const unreachable = roster.filter((pool) => poolGateway(gw, pool) === undefined);
     if (unreachable.length > 0) {
       return refuse(
         `the pools ${unreachable.join(", ")} are declared but not attached, so this recovery ` +
@@ -510,7 +514,7 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
     };
     if (previous !== undefined) {
       for (const pool of roster) {
-        const ground = attachedPool(gw, pool)!;
+        const ground = poolGateway(gw, pool)!;
         try {
           await ground.append([cut(ground, pool)]);
         } catch (err) {
@@ -544,7 +548,7 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
         const hostCut = cut(gw, HOST);
         const landed = roster.flatMap((pool) =>
           (j.cuts?.[pool] ?? []).filter(
-            (id) => attachedPool(gw, pool)!.reactor.get(id) !== undefined,
+            (id) => poolGateway(gw, pool)!.reactor.get(id) !== undefined,
           ),
         );
         barrier.push(

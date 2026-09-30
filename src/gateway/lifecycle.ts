@@ -14,6 +14,7 @@
 // to serve a surface. The bodies here reach the gateway only through its declared internals seam
 // (the `@internal` members on the class — see the seam note in gateway.ts).
 
+import type { Peer } from "./peer.js";
 import { seedSigner } from "./signer.js";
 import {
   DeltaSet,
@@ -441,7 +442,7 @@ const lastBindFailure = (gw: Gateway, key: string): string | undefined =>
 // them (`contestedNamesImpl` below). A second copy could only drift into a surface that disagrees
 // with the store it reports on.
 // A ground's registrations under its own law and its selected hosts' (readLawfulRegistrations).
-const lawfulRegistrations = (g: Gateway, boundary?: Boundary): Registration[] =>
+const lawfulRegistrations = (g: Peer, boundary?: Boundary): Registration[] =>
   readLawfulRegistrations(g.reactor, g.validityNow(), g.lawAuthors("registrations"), boundary);
 
 function storeBindings(gw: Gateway, boundary?: Boundary): Bound[] {
@@ -453,7 +454,7 @@ function storeBindings(gw: Gateway, boundary?: Boundary): Bound[] {
     // A channel a BOUND CONNECTION opened is not here either: its law serves only the container
     // it was opened from, in the bound fold below (SPEC §58 position 2).
     if (standing.openedBy !== undefined) continue;
-    const pool = gw.channelPools.get(standing.name)?.gateway;
+    const pool = gw.store.channels(gw).get(standing.name)?.gateway;
     if (pool === undefined) continue;
     const read = lawfulRegistrations(pool, boundary);
     for (const r of read) {
@@ -525,7 +526,7 @@ export function boundBindingsImpl(
   const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   const reach = new Set(subtreeUnder(table, container));
   const candidates: Bound[] = [];
-  for (const [name, inbox] of gw.connectionInboxes) {
+  for (const [name, inbox] of gw.store.inboxes(gw)) {
     const owner = table.containers.get(name)?.inboxOf;
     if (owner === undefined || !reach.has(owner) || inbox.gateway === undefined) continue;
     const prefix = `${owner}:`;
@@ -545,7 +546,7 @@ export function boundBindingsImpl(
     if (standing.openedBy === undefined || !reach.has(standing.openedBy)) continue;
     if (!openerStands(gw, standing)) continue; // the cascade: a revoked opener's channel serves nobody
     if (!receivesNow(table, standing.into)) continue; // and one whose container stopped receiving
-    const pool = gw.channelPools.get(standing.name)?.gateway;
+    const pool = gw.store.channels(gw).get(standing.name)?.gateway;
     if (pool === undefined) continue;
     for (const r of lawfulRegistrations(pool)) {
       if (!lensOf(r).startsWith(`${standing.prefix}:`)) continue;
@@ -554,7 +555,7 @@ export function boundBindingsImpl(
     }
   }
   // CONTESTS RESOLVE BY WHO STAKED THE NAME FIRST, never by attach order and never by who touched
-  // it last. Two pools in one container may name one lens. Iterating `connectionInboxes` let a
+  // it last. Two pools in one container may name one lens. Iterating the inboxes let a
   // later registrant on an earlier-attached inbox displace a sibling, and differently after a
   // reboot. Keying on the LATEST binding let the holder lose the name by republishing — even an
   // identical republish moved its claim later than the rival's, and nothing it did could win it
@@ -793,7 +794,7 @@ export function contestedNamesImpl(gw: Gateway): Map<string, ContestedNameReport
   // A pool is a ground of its own: it reads its OWN declared policy, and the prefix filter is the
   // one `storeBindings` aggregates by — a pool cannot name a contest outside its namespace.
   for (const standing of gw.channelStatus()) {
-    const pool = gw.channelPools.get(standing.name)?.gateway;
+    const pool = gw.store.channels(gw).get(standing.name)?.gateway;
     if (pool === undefined) continue;
     for (const [lens, list] of readLawfulContested(
       pool.reactor,

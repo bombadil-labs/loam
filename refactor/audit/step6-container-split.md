@@ -134,6 +134,33 @@ queue. The CLI and `http.ts` keep calling `Gateway`, so their code does not chan
 
 1. The public name stays `Gateway`, and it stops being the god object (see "Myk's direction").
 2. Steps 1 and 2 start now.
+3. (2026-09-30) Step 6 closes after the peer interface is small, not before ("B"). Reads keep a
+   read-only view of a child's rows; named read answers wait for the audit.
+
+## The narrowing (Myk's "B", 2026-09-30)
+
+Split steps 1 to 3, the gateway views and 0 import cycles landed first (#670, #674 to #677). The
+peer interface then narrows in four PRs:
+
+1. **Handles and reads.** Each container's table of children lives in the Store. Container code
+   (`src/gateway`, `src/federation`) holds a child only as a `Peer` (`src/gateway/peer.ts`), a
+   `Pick` of the `Gateway` members one container may use of another. The census counts them
+   (`peerSurface`). `Gateway` keeps its table names as getters over the Store, for the facades.
+2. **Pool operations.** A pool signs its own strikes, law adoptions and lens definitions. The host
+   asks; it no longer signs, stamps or appends in the pool's name. The write members leave `Peer`.
+3. **Erasure as delivery.** `deliver(order)` and `probe(id)`. The host no longer walks to a pool's
+   backend, and a pool no longer walks up for its authority. `eraseReplica` and `backend` leave
+   `Peer`.
+4. **Lock.** `treeReach` is 0, and a check types every child handle as a `Peer` and fails on any
+   container code that uses more.
+
+**The census, as of PR 1.** `treeReach` counts lines of container code that reach the tree as
+gateways: a table name, `tableOf`, a parent or root walk, a channel record, or a binding's pool as a
+gateway. The opener (`container.ts`) and the Store are exempt, and so is a facade's own definition
+of one of those names. The doors and commands (`src/server`, `src/cli`) are not counted: each is a
+facade over one container of the store, so it may look a container up in the table and serve it.
+This replaces the first definition above (all source outside the opener, 105 lines), which counted
+the facades as containers.
 
 ## Size
 

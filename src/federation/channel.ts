@@ -1,4 +1,5 @@
 import { issueChannelEvent, receiveChannelOfferInCommit } from "../gateway/ingest.js";
+import type { Peer } from "../gateway/peer.js";
 import {
   localChannelEvidence,
   localChannelLifecycle,
@@ -403,7 +404,7 @@ class UnattestedArrivals extends Error {
  */
 async function attestArrival(
   gw: Gateway,
-  ground: Gateway,
+  ground: Peer,
   name: string,
   from: string,
   report: FederationReport,
@@ -638,7 +639,7 @@ export const channelName = (into: string, prefix: string): string => `channel:${
  */
 async function bindArrived(
   gw: Gateway,
-  ground: Gateway,
+  ground: Peer,
   prefix: string,
 ): Promise<{ bound: string[]; parked: string[]; witnessed: string[] }> {
   // The manifest rows are the pool's own law: its governing key authors, signs and reads them.
@@ -834,7 +835,7 @@ const appIdentity = (r: RendererBinding): string =>
  * The operator's own slice is excluded, because a blessing lands in this same pool (§47.4) and
  * reading it back would report the receiver's act as a fresh arrival, forever.
  */
-function arrivedBindings(gw: Gateway, ground: Gateway): RendererBinding[] {
+function arrivedBindings(gw: Gateway, ground: Peer): RendererBinding[] {
   const operator = gw.operatorAuthor;
   // No operator is no answer, not an empty one: without one, "not the operator's" is every delta in
   // the pool, and the listing would report a peer's law and the receiver's own alike.
@@ -863,7 +864,7 @@ function arrivedBindings(gw: Gateway, ground: Gateway): RendererBinding[] {
  */
 function appsOf(
   gw: Gateway,
-  ground: Gateway,
+  ground: Peer,
   channel: string,
   prefix: string,
   siblings: readonly string[],
@@ -988,7 +989,7 @@ export function channelAppsImpl(gw: Gateway, channel?: string): ArrivedApp[] {
   // the whole set, so a per-channel answer computed without the others is a guess.
   const prefixes = channelStatusImpl(gw).map((c) => c.prefix);
   for (const status of channelStatusImpl(gw, channel)) {
-    const ground = gw.channelPools.get(status.name)?.gateway;
+    const ground = gw.store.channels(gw).get(status.name)?.gateway;
     // A channel whose pool this process has not attached is reported as carrying no apps rather
     // than guessed at — the pool is where the answer lives, and there is no second copy of it.
     if (ground === undefined) continue;
@@ -1039,7 +1040,7 @@ export async function blessChannelAppImpl(
   opts: { pen?: boolean; supersede?: boolean; expect?: string } = {},
 ): Promise<void> {
   const status = channelStatusImpl(gw, channel)[0];
-  const ground = gw.channelPools.get(channel)?.gateway;
+  const ground = gw.store.channels(gw).get(channel)?.gateway;
   if (status === undefined || ground === undefined) {
     throw new Error(
       `bless-app refused: this store holds no open channel named "${channel}" — ` +
@@ -1186,7 +1187,7 @@ export async function blessChannelResolversImpl(
   lens: string,
 ): Promise<string> {
   const status = channelStatusImpl(gw, channel)[0];
-  const ground = gw.channelPools.get(channel)?.gateway;
+  const ground = gw.store.channels(gw).get(channel)?.gateway;
   if (status === undefined || ground === undefined) {
     throw new Error(
       `bless-app refused: this store holds no open channel named "${channel}" — ` +
@@ -1232,7 +1233,7 @@ export async function blessChannelResolversImpl(
  * Read from the code that would run, not from a record beside it: a stub carries its own mark, so
  * the report cannot drift from what the store holds.
  */
-export function withheldLenses(gw: Gateway, ground: Gateway, prefix: string): string[] {
+export function withheldLenses(gw: Gateway, ground: Peer, prefix: string): string[] {
   const out: string[] = [];
   for (const r of ground.registered) {
     const specs = r.resolvers;
@@ -1263,7 +1264,7 @@ export function withheldLenses(gw: Gateway, ground: Gateway, prefix: string): st
  * against the next reader of this row going stale, and it is named as unrailed rather than dressed
  * up with a fixture built by hand into a state the doors cannot produce.
  */
-function resolves(ground: Gateway, lens: string): boolean {
+function resolves(ground: Peer, lens: string): boolean {
   try {
     ground.surface("full")?.hooks.resolve(lens, "loam:probe-no-such-entity", undefined);
     return true;
@@ -1457,7 +1458,7 @@ async function syncChannel(
     if (
       current === undefined ||
       ground === undefined ||
-      gw.channelPools.get(name) !== pool ||
+      gw.store.channels(gw).get(name) !== pool ||
       pool.declarationId !== declarationId ||
       currentPoolDeclaration(gw, name) !== declarationId ||
       !gw.store.holds(gw, ground) ||
@@ -1498,7 +1499,7 @@ async function syncChannel(
 
 async function syncChannelCommit(
   gw: Gateway,
-  ground: Gateway,
+  ground: Peer,
   name: string,
   opts: {
     into: string;
@@ -1866,7 +1867,7 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
   // A declaration can survive a failed attachment before any status exists. Retrying
   // may complete that legacy lifecycle, but it is not a fresh protected opening.
   const priorPoolLifecycle =
-    currentPoolDeclaration(gw, name) !== undefined || gw.channelPools.has(name);
+    currentPoolDeclaration(gw, name) !== undefined || gw.store.channels(gw).has(name);
   // A standing channel is re-opened only with the options it stands with: a cached handle and a
   // resumed one both sync with the caller's options against the standing record, and a mismatch
   // would either be ignored or refuse on every sync. A changed source or scope is a different
@@ -2050,8 +2051,8 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
   }
 
   if (standingBeforeOpen !== undefined) {
-    const pool = gw.channelPools.get(name) ?? (await attachChannelPool(gw, name));
-    gw.channelPools.set(name, pool);
+    const pool = gw.store.channelRecord(gw, name) ?? (await attachChannelPool(gw, name));
+    gw.store.setChannel(gw, name, pool);
     const state = localChannelEvidence(gw, name);
     const incarnation =
       state.state === "open" || state.state === "closed" ? state.opening : undefined;
@@ -2087,7 +2088,7 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
   // it rebuilds its channels, and a channel whose peer credential is missing is attached and
   // unresumed — so a second `federate open` in a fresh invocation found the pool already attached
   // and threw, contradicting the door's own "syncing again is safe". Reuse what is attached.
-  const pool = gw.channelPools.get(name) ?? (await attachChannelPool(gw, name));
+  const pool = gw.store.channelRecord(gw, name) ?? (await attachChannelPool(gw, name));
   const ground = pool.gateway;
   if (ground === undefined) {
     throw new Error(
@@ -2121,7 +2122,7 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
     true,
   );
 
-  gw.channelPools.set(name, pool);
+  gw.store.setChannel(gw, name, pool);
   let incarnation: LocalChannelOpening | undefined;
   // Legacy callers may use values outside the protected vocabulary or an invalid binding.
   // Keep their existing channel behavior without issuing protected custody for that association.
@@ -2183,7 +2184,7 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
   };
 
   gw.federationChannels.set(name, channel);
-  gw.channelPools.set(name, pool);
+  gw.store.setChannel(gw, name, pool);
   return channel;
 }
 
@@ -2225,7 +2226,7 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
   ) {
     // "Nothing left to remove" must be true at the bytes: a pool still attached here under the
     // name (its records struck by hand in this process) is named, with the road out.
-    const attached = gw.channelPools.get(name)?.gateway;
+    const attached = gw.store.channels(gw).get(name)?.gateway;
     const held =
       attached !== undefined && gw.store.holds(gw, attached) && attached.reactor.size !== 0;
     throw new Error(
@@ -2253,7 +2254,7 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
   // So: sever only through a handle that provably holds the real bytes. If this store cannot
   // produce one, it says so and removes nothing. An honest refusal is always available; a false
   // completion is not recoverable.
-  const attached = gw.channelPools.get(name);
+  const attached = gw.store.channels(gw).get(name);
   if (channel === undefined && attached === undefined && gw.options.channelBackend === undefined) {
     throw new Error(
       `dropChannel refused: this store has no live handle on "${name}" and no channelBackend to ` +
@@ -2274,7 +2275,7 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
     cached !== undefined && (cached.gateway === undefined || !gw.store.holds(gw, cached.gateway));
   if (stale) {
     gw.federationChannels.delete(name);
-    gw.channelPools.delete(name);
+    gw.store.dropChannel(gw, name);
     if (gw.options.channelBackend === undefined)
       throw new Error(
         `dropChannel refused: the handle on "${name}" is stale (its pool is no longer attached) ` +
@@ -2285,9 +2286,9 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
   const pool = stale
     ? await attachChannelPool(gw, name)
     : (cached ?? (await attachChannelPool(gw, name)));
-  // The lifecycle read asks channelPools, not the handle: a pool attached here (stale handle, or
+  // The lifecycle read asks the table, not the handle: a pool attached here (stale handle, or
   // none, as after a boot that could not read the store) is registered before it is read.
-  gw.channelPools.set(name, pool);
+  gw.store.setChannel(gw, name, pool);
   if (pool.drop === undefined) {
     throw new Error(
       `dropChannel refused: ${name} has no drop — only a SEPARATE container purges its own bytes, ` +
@@ -2317,7 +2318,7 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
     throw new Error(`dropChannel refused: ${evidence.reason}`);
   await pool.drop();
   gw.federationChannels.delete(name);
-  gw.channelPools.delete(name);
+  gw.store.dropChannel(gw, name);
   // The pool's bindings left with its bytes; refold so the surface stops serving them NOW rather
   // than at the next boot. This is what dissolved T199's retire-on-drop question: there is nothing
   // to retire, because the binding was never anywhere but the pool.
@@ -2590,7 +2591,7 @@ export async function curseChannelLawImpl(
     // re-syncing revives it. Negating the curse's own negation is the only thing that can.
     // A curse acts only in the channel's pool (ruling 11), so its lift does too. With no pool
     // attached the strike cannot be lifted, so the record must not be either: refuse first.
-    const liftPool = gw.channelPools.get(channel)?.gateway;
+    const liftPool = gw.store.channels(gw).get(channel)?.gateway;
     if (liftPool === undefined || !gw.store.holds(gw, liftPool)) {
       throw new Error(
         `curseChannelLaw refused: the pool of "${channel}" is not attached here, and a lift acts ` +
@@ -2675,7 +2676,7 @@ export async function curseChannelLawImpl(
   // A CURSE IS POOL-LOCAL (ruling 11): it strikes only in the channel's pool, where the blessing
   // landed, with the pool's own key. It never reaches the root, so a root registration that only
   // shares the name stays served. With no pool attached there is nothing it may strike.
-  const pool = gw.channelPools.get(channel)?.gateway;
+  const pool = gw.store.channels(gw).get(channel)?.gateway;
   if (pool === undefined || !gw.store.holds(gw, pool)) {
     throw new Error(
       `curseChannelLaw refused: the pool of "${channel}" is not attached here, and a curse acts ` +
@@ -2770,7 +2771,7 @@ export async function curseChannelLawImpl(
  * halves of a reversible act have to arrive in the same breath, or the reversal is not one.
  */
 function replayEverywhere(gw: Gateway): void {
-  for (const pool of gw.channelPools.values()) pool.gateway?.replayRegistrations();
+  for (const pool of gw.store.channels(gw).values()) pool.gateway?.replayRegistrations();
   gw.replayRegistrations();
 }
 
@@ -2860,7 +2861,7 @@ export function resumeChannelImpl(gw: Gateway, standing: ChannelStatus, token: s
   const incarnation =
     evidence.state === "open" || evidence.state === "closed" ? evidence.opening : undefined;
   const poolOf = (): Container => {
-    const held = gw.channelPools.get(standing.name);
+    const held = gw.store.channelRecord(gw, standing.name);
     if (held === undefined) {
       throw new Error(
         `${standing.name} is not attached in this process, so its bytes are unreadable — the ` +

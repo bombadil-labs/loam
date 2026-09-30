@@ -1,4 +1,5 @@
 import { appendImpl, appendLocalErasure } from "./ingest.js";
+import type { Peer } from "./peer.js";
 import { rebaseHostPeer, reportPurged } from "./peer-admission.js";
 import { settleOwedPurges } from "./purge-settle.js";
 import {
@@ -141,9 +142,9 @@ export function erasedInScope(
 /** The governing key of every pool attached beneath `gw`, at any depth. */
 export function poolGovernors(gw: Gateway): string[] {
   const keys = new Set<string>();
-  const seen = new Set<Gateway>();
-  const walk = (g: Gateway): void => {
-    for (const pool of g.quarantinePools) {
+  const seen = new Set<Peer>();
+  const walk = (g: Peer): void => {
+    for (const pool of g.store.pools(g)) {
       if (seen.has(pool)) continue;
       seen.add(pool);
       if (pool.operatorAuthor !== undefined) keys.add(pool.operatorAuthor);
@@ -190,7 +191,7 @@ export interface MaskReading {
 
 /** One GROUND's reading. Kept per-store on purpose — see `revivedAcross`. */
 export interface GroundReading {
-  readonly ground: Gateway;
+  readonly ground: Peer;
   /** Every id this store holds, whatever its suppression state. */
   readonly present: Set<string>;
   /** One entry per DISTINCT mask any reader of this store can hold. */
@@ -213,13 +214,13 @@ export interface GroundReading {
 /** A reading named on a boundary line, and the ground whose door it is. */
 export interface ReadingAt {
   readonly reading: string;
-  readonly ground: Gateway;
+  readonly ground: Peer;
 }
 
 /** One claim that came back, in one ground, and the readings that can see it there. */
 export interface Revival {
   readonly id: string;
-  readonly ground: Gateway;
+  readonly ground: Peer;
   /** Names a person can act on: lens names, and/or the floor's own label. */
   readonly readings: string[];
 }
@@ -266,7 +267,7 @@ export interface ExtraReading {
 }
 
 export function maskReadings(
-  gw: Gateway,
+  gw: Peer,
   extra: readonly ExtraReading[] = [],
 ): {
   masks: Map<string, MaskReading>;
@@ -347,10 +348,10 @@ export function maskReadings(
  * registrations, and borrowing the host's would describe a reader that store does not have.
  */
 export function readGrounds(
-  gw: Gateway,
+  gw: Peer,
   extra: readonly ExtraReading[] = [],
   now: number = Date.now(),
-  seen = new Set<Gateway>(),
+  seen = new Set<Peer>(),
 ): GroundReading[] {
   if (seen.has(gw)) return [];
   seen.add(gw);
@@ -401,7 +402,7 @@ export function readGrounds(
   // with them would name a reader that does not look there. NOT a general truth about pools: an
   // embedder can `serve({ users: { mount: "<container>" } })` and put §36's login door on a pool's
   // ground, and this reading would then miss a revival at it. The CLI cannot reach that shape.
-  for (const pool of gw.quarantinePools) out.push(...readGrounds(pool, [], now, seen));
+  for (const pool of gw.store.pools(gw)) out.push(...readGrounds(pool, [], now, seen));
   return out;
 }
 
@@ -466,8 +467,8 @@ export function revivedAcross(
   // the same reading name collapsed into one row — under-counting the doors this run could not
   // speak for, which is the exact opposite of what a boundary line is for.
   const withdrawn: ReadingAt[] = [];
-  const seenAt = new Map<Gateway, Set<string>>();
-  const once = (into: ReadingAt[], reading: string, ground: Gateway, tag: string): void => {
+  const seenAt = new Map<Peer, Set<string>>();
+  const once = (into: ReadingAt[], reading: string, ground: Peer, tag: string): void => {
     const here = seenAt.get(ground) ?? new Set<string>();
     seenAt.set(ground, here);
     // The TAG carries the identity where the caller has one, so two doors that share a label are
@@ -670,12 +671,12 @@ async function liveOpening(
     `extracted until then.`;
   // The same staleness test the drop applies: a handle whose pool was dropped or detached through
   // the container is a mirror of nothing, and reads as no handle.
-  const cached = gw.channelPools.get(o.channel);
+  const cached = gw.store.channels(gw).get(o.channel);
   const named =
     cached?.gateway !== undefined && gw.store.holds(gw, cached.gateway) ? cached : undefined;
   // A container attached BY HAND under the name (openContainer) is not the channel pool, but its
   // bytes are under the name all the same, and the drop cannot attach past it.
-  const byHand = gw.attachedContainers.get(o.channel);
+  const byHand = gw.store.namedPools(gw).get(o.channel);
   if (byHand !== undefined && byHand !== named?.gateway && byHand.reactor.size !== 0)
     return (
       "a container attached by hand under its name holds bytes: detach() it, then drop the " +
@@ -1042,8 +1043,8 @@ export async function eraseImpl(
   // not become every other replica's leak (`MirrorBackend.purge`/`close` compose the same way).
   // `seen` membership is claimed synchronously at dispatch: a pool attached beneath two parents
   // is reachable, and a claim recorded only after the child's awaits could dispatch it twice.
-  const seen = new Set<Gateway>([gw]);
-  const targets = [...gw.quarantinePools].filter((pool) => !seen.has(pool));
+  const seen = new Set<Peer>([gw]);
+  const targets = [...gw.store.pools(gw)].filter((pool) => !seen.has(pool));
   for (const pool of targets) seen.add(pool);
   const fanned = await Promise.allSettled(
     targets.map((pool) => pool.eraseReplica(orderForPool(gw, erasure, pool), id, seen)),
@@ -1096,7 +1097,7 @@ export async function eraseImpl(
 export async function erasureOutstanding(
   gw: Gateway,
   id: string,
-  seen = new Set<Gateway>(),
+  seen = new Set<Peer>(),
 ): Promise<boolean> {
   return (await erasureStanding(gw, id, seen)) !== "settled";
 }
@@ -1144,7 +1145,7 @@ export interface StandingReport {
 export async function erasureStanding(
   gw: Gateway,
   id: string,
-  seen = new Set<Gateway>(),
+  seen = new Set<Peer>(),
 ): Promise<ErasureStanding> {
   return (await erasureStandings(gw, [id], seen)).standings.get(id) ?? "settled";
 }
@@ -1164,9 +1165,9 @@ export async function erasureStanding(
  * driver offers it.
  */
 export async function erasureStandings(
-  gw: Gateway,
+  gw: Peer,
   ids: readonly string[],
-  seen = new Set<Gateway>(),
+  seen = new Set<Peer>(),
 ): Promise<StandingReport> {
   const standings = new Map<string, ErasureStanding>(ids.map((id) => [id, "settled"]));
   const unasked = new Set<string>();
@@ -1185,7 +1186,7 @@ export async function erasureStandings(
   // a ground with no receipt still owes the delivery whatever its disk would have said.
   const tombs = readErasures(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   for (const id of ids) if (!tombs.has(id)) note(id, "owed");
-  for (const pool of gw.quarantinePools) {
+  for (const pool of gw.store.pools(gw)) {
     const sub = await erasureStandings(pool, ids, seen);
     for (const [id, verdict] of sub.standings) note(id, verdict);
     for (const id of sub.unasked) unasked.add(id); // a refusal one ground down is still a refusal
@@ -1245,7 +1246,7 @@ export async function eraseReplicaImpl(
   gw: Gateway,
   erasure: Delta,
   id: string,
-  seen: Set<Gateway>,
+  seen: Set<Peer>,
 ): Promise<void> {
   // Authorization first, on its own: a forged or foreign removal-order is refused WITHOUT purging
   // — loudly, since only a hostile direct caller can reach this branch (the primary's fan-out only
@@ -1261,13 +1262,13 @@ export async function eraseReplicaImpl(
     if (localEraseTarget(erasure, gw.reactor, gw.operatorAuthor) !== id)
       throw new Error("replica requires exact marked local erasure");
     let cursor = gw;
-    const chain = new Set<Gateway>();
+    const chain = new Set<Peer>();
     let authorized = false;
     while (!chain.has(cursor)) {
       const parent = gw.store.parentOf(cursor);
       if (parent === undefined) break;
       chain.add(cursor);
-      if (!parent.quarantinePools.has(cursor)) break;
+      if (!gw.store.hasPool(parent, cursor)) break;
       if (sameVerifiedDelta(parent.reactor.get(erasure.id), erasure)) authorized = true;
       // Or the parent's own order, re-signed for this pool: the parent holds a binding local-control
       // erasure of the same id, and signed this one naming this pool as its receiver.
@@ -1317,7 +1318,7 @@ export async function eraseReplicaImpl(
   // against a cycle; the whole walk is settled, then reported, so one unprovable replica cannot
   // hide another.
   seen.add(gw);
-  const nested = [...gw.quarantinePools].filter((pool) => !seen.has(pool));
+  const nested = [...gw.store.pools(gw)].filter((pool) => !seen.has(pool));
   for (const pool of nested) seen.add(pool); // claimed at dispatch — see the eraseImpl note
   const walked = await Promise.allSettled(
     nested.map((pool) => pool.eraseReplica(orderForPool(gw, erasure, pool), id, seen)),
@@ -1395,7 +1396,7 @@ export interface StoreHealth {
 async function outstandingAmong(
   gw: Gateway,
   ids: readonly string[],
-  seen: Set<Gateway>,
+  seen: Set<Peer>,
 ): Promise<{ outstanding: Set<string>; unproven: boolean }> {
   const report = await erasureStandings(gw, ids, seen);
   const outstanding = new Set<string>();

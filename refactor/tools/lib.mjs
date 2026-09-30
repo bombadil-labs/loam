@@ -373,15 +373,37 @@ function member(node) {
   return undefined;
 }
 
-// The members that hold the container tree, and the files allowed to touch them.
+// The members that hold the container tree, the container code that may not touch them, and the
+// files allowed to. Container code reads a child only as a Peer, through the Store. The doors and
+// commands (src/server, src/cli) are facades over one container of the store, not containers, so
+// they may look a container up in the table (step6-container-split.md).
 const TREE_MEMBERS = new Set([
   "attachedTo",
   "parentOf",
   "quarantinePools",
+  "attachedContainers",
   "channelPools",
   "connectionInboxes",
+  "tableOf",
+  "channelRecord",
+  "rootOf",
+  "verifiedRootOf",
+  "poolForBinding",
+  "poolForBindingImpl",
 ]);
+const CONTAINER_CODE = /src\/(gateway|federation)\//;
 const TREE_OWNERS = /src\/gateway\/(container|store)\.ts$/;
+// The facade's own definitions: these members of class Gateway, in gateway.ts, serve the doors and
+// commands. A member is exempt only while its body is exactly the one-line definition below
+// (whitespace aside); any other body is counted like any other code. Nothing else is exempt.
+const FACADE_FILE = /src\/gateway\/gateway\.ts$/;
+const FACADE_DEFINITIONS = new Map([
+  ["quarantinePools", "{return this.store.tableOf(this).pools;}"],
+  ["attachedContainers", "{return this.store.tableOf(this).named;}"],
+  ["connectionInboxes", "{return this.store.tableOf(this).inboxes;}"],
+  ["channelPools", "{return this.store.tableOf(this).channels;}"],
+  ["poolForBinding", "{return poolForBindingImpl(this, binding);}"],
+]);
 
 // The ratchet's per-file counts. They are syntactic: a read through an alias the syntax tree
 // cannot see (a variable holding `options`, a computed key) is not counted.
@@ -392,9 +414,18 @@ export function couplingCountsOf(file, text) {
   // Lines that reach across containers: a parent link or a child map, read or written anywhere but
   // the opener and the store itself (step6-container-split.md). Distinct lines, not occurrences.
   const reachLines = new Set();
-  const opener = TREE_OWNERS.test(file.replace(/\\/g, "/"));
+  const unix = file.replace(/\\/g, "/");
+  const opener = !CONTAINER_CODE.test(unix) || TREE_OWNERS.test(unix);
+  const facade = FACADE_FILE.test(unix);
   const isClock = (recv) => ["Date", "performance"].includes(lastName(recv));
   const visit = (n) => {
+    if (facade && definesFacadeMember(n, sf)) return;
+    // A bare call counts too: an opener's function that hands a child out as a Gateway.
+    if (!opener && ts.isCallExpression(n) && ts.isIdentifier(n.expression)) {
+      if (TREE_MEMBERS.has(n.expression.text)) {
+        reachLines.add(sf.getLineAndCharacterOfPosition(n.getStart(sf)).line);
+      }
+    }
     const m = member(n);
     if (m !== undefined) {
       const [recv, name] = m;
@@ -426,6 +457,51 @@ export function couplingCountsOf(file, text) {
   return counts;
 }
 
+// Is `n` a getter or method of class Gateway whose body is exactly its facade definition?
+function definesFacadeMember(n, sf) {
+  if (!ts.isGetAccessorDeclaration(n) && !ts.isMethodDeclaration(n)) return false;
+  const owner = n.parent;
+  if (!ts.isClassDeclaration(owner) || owner.name?.text !== "Gateway") return false;
+  if (!ts.isIdentifier(n.name) || n.body === undefined) return false;
+  const squash = (text) => text.replace(/\s+/g, "");
+  const expected = FACADE_DEFINITIONS.get(n.name.text);
+  return expected !== undefined && squash(n.body.getText(sf)) === squash(expected);
+}
+
+// How many Gateway members one container may use of another: the members the `Peer` type in
+// src/gateway/peer.ts picks. 0 when the file is absent. Any other shape of `Peer` (an intersection,
+// an interface, a Pick of anything but string literals) fails the census rather than be miscounted.
+export function peerSurfaceOf(files) {
+  const file = files.find((f) => f.replace(/\\/g, "/").endsWith("src/gateway/peer.ts"));
+  if (file === undefined) return 0;
+  const sf = ts.createSourceFile(file, fs.readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
+  const refuse = (why) => {
+    throw new Error(
+      `census: ${file} must declare \`type Peer = Pick<Gateway, "a" | ...>\`; ${why}`,
+    );
+  };
+  const decls = sf.statements.filter(
+    (n) => (ts.isTypeAliasDeclaration(n) || ts.isInterfaceDeclaration(n)) && n.name.text === "Peer",
+  );
+  if (decls.length !== 1 || !ts.isTypeAliasDeclaration(decls[0]))
+    refuse("found none, or another kind");
+  const type = decls[0].type;
+  const isPick =
+    ts.isTypeReferenceNode(type) &&
+    ts.isIdentifier(type.typeName) &&
+    type.typeName.text === "Pick" &&
+    type.typeArguments?.length === 2 &&
+    ts.isTypeReferenceNode(type.typeArguments[0]) &&
+    type.typeArguments[0].typeName.getText(sf) === "Gateway";
+  if (!isPick) refuse("found another shape");
+  const picked = type.typeArguments[1];
+  const parts = ts.isUnionTypeNode(picked) ? picked.types : [picked];
+  if (!parts.every((t) => ts.isLiteralTypeNode(t) && ts.isStringLiteral(t.literal))) {
+    refuse("every picked member must be a string literal");
+  }
+  return parts.length;
+}
+
 // Every ratchet count over `files`.
 export function couplingCounts(files) {
   const cycles = stronglyConnected(importGraph(files).edges, false);
@@ -437,6 +513,7 @@ export function couplingCounts(files) {
     snapshotRefs: 0,
     coreClockReads: 0,
     treeReach: 0,
+    peerSurface: peerSurfaceOf(files),
   };
   for (const file of files) {
     const per = couplingCountsOf(file, fs.readFileSync(file, "utf8"));

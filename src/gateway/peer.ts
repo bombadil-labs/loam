@@ -1,0 +1,47 @@
+// What one container may use of another (ruling 13). Container code holds a child only as a
+// `Peer`, never as the child's `Gateway`, so this list is all that crosses between containers. The
+// host is only the root container, so it is a `Peer` too, and a walk over the tree takes one type.
+// The census counts the members; a change that adds one widens the boundary and must say why.
+
+import type { Container } from "./container.js";
+import type { Gateway } from "./gateway.js";
+
+export type Peer = Pick<
+  Gateway,
+  // Reads: the rows, the container's clock, its governing key, and what it binds and serves.
+  | "reactor"
+  | "validityNow"
+  | "operatorAuthor"
+  | "localAuthors"
+  | "lawAuthors"
+  | "registered"
+  | "registrationVersions"
+  | "renderers"
+  | "surface"
+  | "isPublicPin"
+  | "envelope"
+  | "poolHandle"
+  | "probation"
+  // The container serves its own app when a door routes to it.
+  | "prepareRoute"
+  | "serveRoute"
+  | "writeRoute"
+  // Lifecycle, and the tree's shared services.
+  | "close"
+  | "store"
+  // Writes made in the container's name by another container. To become operations it performs.
+  | "signer"
+  | "stamp"
+  | "append"
+  | "federate"
+  | "adoptLaw"
+  | "def"
+  | "preloadResolvers"
+  | "replayRegistrations"
+  // Erasure reaching into the container. To become a delivered order and a probe.
+  | "eraseReplica"
+  | "backend"
+>;
+
+/** A child's handle as container code sees it: the opener's handle, with the child as a `Peer`. */
+export type PeerEntry = Omit<Container, "gateway"> & { readonly gateway?: Peer };
