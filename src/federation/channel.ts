@@ -1303,14 +1303,17 @@ function markChannelPool(pool: Container): void {
  * this function's.
  */
 export async function attachChannelPool(gw: Gateway, name: string): Promise<Container> {
-  const pool = await gw.openContainer({
-    name,
-    // Durability is the store's choice, not the channel's: without a backend a separate container
-    // is in-memory, and a channel that forgets its peer on restart is not federation.
-    ...(gw.options.channelBackend === undefined
-      ? {}
-      : { backend: gw.options.channelBackend(name) }),
-  });
+  // Durability is the store's choice, not the channel's: without a backend a separate container
+  // is in-memory, and a channel that forgets its peer on restart is not federation.
+  const backend = gw.options.channelBackend?.(name);
+  let pool: Container;
+  try {
+    pool = await gw.openContainer({ name, ...(backend === undefined ? {} : { backend }) });
+  } catch (err) {
+    // A refused open (a lost key, an older pool) must not keep the store's file open behind it.
+    await backend?.close().catch(() => {});
+    throw err;
+  }
   markChannelPool(pool);
   return pool;
 }

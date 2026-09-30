@@ -1470,14 +1470,20 @@ async function cmdServe(
   for (const c of unresumed) {
     // An honest report of a channel that CANNOT sync, rather than a list that says `receiving`
     // about something nothing is polling (H9).
+    const fault = gateway.channelAttachFaults.get(c.name);
+    // A pool whose own key is missing stays refused whatever reopens it: the key must come back.
+    const road =
+      fault?.keyMissing === true
+        ? `Restore its key in ${path}.poolkeys.json, then restart.`
+        : "Re-open it with `loam federate open` to resume.";
     io.err(
       `loam: ${c.name} will not sync — ` +
         (c.from === ""
           ? "its record carries no peer address (opened before addresses were recorded)"
           : !gateway.channelPools.has(c.name)
-            ? "its pool did not open (is its file readable?)"
+            ? `its pool did not open: ${fault?.message ?? "no cause was recorded"}`
             : "this home holds no token for it") +
-        ". Re-open it with `loam federate open` to resume.",
+        `. ${road}`,
     );
   }
 

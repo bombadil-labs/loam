@@ -77,3 +77,6 @@ export function memoryPoolKeysFor(store: object): PoolKeySource {
   if (keys === undefined) memoryByStore.set(store, (keys = memoryPoolKeys()));
   return keys;
 }
+
+/** A pool the host recorded under its own key, whose key this opener cannot load. */
+export class PoolKeyMissing extends Error {}

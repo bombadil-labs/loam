@@ -7,9 +7,11 @@ import { authorForSeed, OrdinaryJournalPeer, signClaims, type Delta } from "@bom
 import { containerClaims } from "../../src/gateway/container-law.js";
 import { eraseClaims } from "../../src/gateway/erase-law.js";
 import { Gateway } from "../../src/gateway/gateway.js";
+import { attachChannelPool } from "../../src/federation/channel.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import {
   memoryPoolKeys,
+  PoolKeyMissing,
   recordedPoolKey,
   type PoolKeySource,
 } from "../../src/gateway/pool-keys.js";
@@ -87,7 +89,7 @@ describe("criterion 17: a fresh pool starts under its own key", () => {
     const other = await hostWith(hostStore, memoryPoolKeys()); // a key source that lost the key
     await expect(
       other.openContainer({ name: "container:k17b", backend: poolStore }),
-    ).rejects.toThrow(/its key is not here/);
+    ).rejects.toThrow(PoolKeyMissing); // a typed cause: a report never parses the message
     await gw.close();
   });
 
@@ -175,15 +177,46 @@ describe("criterion 17: a fresh pool starts under its own key", () => {
     await gw.close();
   });
 
+  it("a refused channel attach closes the pool store it opened", async () => {
+    // On Windows an open handle blocks the file's removal; the refusal must leave nothing open.
+    class Closing extends MemoryBackend {
+      wasClosed = false;
+      override async close(): Promise<void> {
+        this.wasClosed = true;
+        return super.close();
+      }
+    }
+    const hostStore = new MemoryBackend();
+    const poolStore = new MemoryBackend();
+    const gw = await hostWith(hostStore, memoryPoolKeys());
+    await declare(gw, "container:k17h");
+    await gw.openContainer({ name: "container:k17h", backend: poolStore });
+    const handles: Closing[] = [];
+    const lost = await Gateway.boot(hostStore, assembleGenesis({ operatorSeed: SEED }), {
+      poolKeys: memoryPoolKeys(), // the pool's key is not in this source
+      channelBackend: () => {
+        const b = new Closing();
+        handles.push(b);
+        return b;
+      },
+    });
+    await expect(attachChannelPool(lost, "container:k17h")).rejects.toThrow(PoolKeyMissing);
+    expect(handles.map((b) => b.wasClosed)).toEqual([true]);
+    await gw.close();
+  });
+
   it("an older pool (bytes, no key record) is refused, and its bytes do not change", async () => {
     const gw = await hostWith(new MemoryBackend(), memoryPoolKeys());
-    await declare(gw, "container:k17c");
+    // The name even carries the missing-key diagnostic: the cause is typed, never read off text.
+    const name = "container:its key is not here";
+    await declare(gw, name);
     const poolStore = new MemoryBackend();
     await poolStore.append([note(8)]);
-    await expect(gw.openContainer({ name: "container:k17c", backend: poolStore })).rejects.toThrow(
-      /earlier Loam/,
-    );
-    expect(recordedPoolKey(gw.reactor, OP, "container:k17c")).toBeUndefined();
+    const refusal = await gw.openContainer({ name, backend: poolStore }).catch((e: unknown) => e);
+    expect(refusal).toBeInstanceOf(Error);
+    expect((refusal as Error).message).toMatch(/earlier Loam/);
+    expect(refusal).not.toBeInstanceOf(PoolKeyMissing);
+    expect(recordedPoolKey(gw.reactor, OP, name)).toBeUndefined();
     expect([...(await poolStore.ids())]).toEqual([note(8).id]);
     expect(await poolStore.journalPeers()).toEqual([]);
     await gw.close();

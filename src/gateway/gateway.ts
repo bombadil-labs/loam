@@ -30,7 +30,7 @@ import { graphql, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
 import { holdsJournals, holdsPoolKeys } from "../store/peer-image.js";
-import { memoryPoolKeysFor, type PoolKeySource } from "./pool-keys.js";
+import { memoryPoolKeysFor, PoolKeyMissing, type PoolKeySource } from "./pool-keys.js";
 import {
   admitLocal,
   JournalConflict,
@@ -1239,6 +1239,9 @@ export class Gateway {
    * bytes are missing must not stop the store from booting, and anything that reads it will meet
    * containerScope's refusal by name — louder and more honest than a store that will not start.
    */
+  /** Why a standing channel's pool did not attach at the last resume, by channel name. */
+  readonly channelAttachFaults = new Map<string, { message: string; keyMissing: boolean }>();
+
   async resumeChannels(): Promise<void> {
     for (const standing of this.channelStatus()) {
       if (this.federationChannels.has(standing.name)) continue;
@@ -1256,7 +1259,13 @@ export class Gateway {
         // Through the one attach, which is also the one place a channel pool is MARKED — a resumed
         // pool is a channel's too, and this is the path a running server actually serves from.
         this.channelPools.set(standing.name, await attachChannelPool(this, standing.name));
-      } catch {
+        this.channelAttachFaults.delete(standing.name);
+      } catch (err) {
+        // Kept, so a report can name the cause rather than guess at one.
+        this.channelAttachFaults.set(standing.name, {
+          message: err instanceof Error ? err.message : String(err),
+          keyMissing: err instanceof PoolKeyMissing,
+        });
         // Deliberately left unattached; see above. And CRUCIALLY, left un-REGISTERED below: the
         // channel goes into `federationChannels` only once its pool is open. Registered first, a
         // channel with an unreadable pool evaded the CLI's cannot-sync report (which filters on
