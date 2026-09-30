@@ -393,6 +393,16 @@ const TREE_MEMBERS = new Set([
 ]);
 const CONTAINER_CODE = /src\/(gateway|federation)\//;
 const TREE_OWNERS = /src\/gateway\/(container|store)\.ts$/;
+// The facade's own definitions: these members of class Gateway, in gateway.ts, serve the doors and
+// commands. Their bodies are the definition, not a reach. Nothing else is exempt.
+const FACADE_FILE = /src\/gateway\/gateway\.ts$/;
+const FACADE_MEMBERS = new Set([
+  "quarantinePools",
+  "attachedContainers",
+  "connectionInboxes",
+  "channelPools",
+  "poolForBinding",
+]);
 
 // The ratchet's per-file counts. They are syntactic: a read through an alias the syntax tree
 // cannot see (a variable holding `options`, a computed key) is not counted.
@@ -405,11 +415,10 @@ export function couplingCountsOf(file, text) {
   const reachLines = new Set();
   const unix = file.replace(/\\/g, "/");
   const opener = !CONTAINER_CODE.test(unix) || TREE_OWNERS.test(unix);
+  const facade = FACADE_FILE.test(unix);
   const isClock = (recv) => ["Date", "performance"].includes(lastName(recv));
   const visit = (n) => {
-    // A getter or method that defines a tree member is the facade's definition of it, not a reach.
-    const defines = ts.isGetAccessorDeclaration(n) || ts.isMethodDeclaration(n);
-    if (defines && TREE_MEMBERS.has(n.name.getText(sf))) return;
+    if (facade && definesFacadeMember(n)) return;
     // A bare call counts too: an opener's function that hands a child out as a Gateway.
     if (!opener && ts.isCallExpression(n) && ts.isIdentifier(n.expression)) {
       if (TREE_MEMBERS.has(n.expression.text)) {
@@ -447,20 +456,50 @@ export function couplingCountsOf(file, text) {
   return counts;
 }
 
+// Is `n` a getter or method of class Gateway that defines one of the facade's members?
+function definesFacadeMember(n) {
+  if (!ts.isGetAccessorDeclaration(n) && !ts.isMethodDeclaration(n)) return false;
+  const owner = n.parent;
+  return (
+    ts.isClassDeclaration(owner) &&
+    owner.name?.text === "Gateway" &&
+    ts.isIdentifier(n.name) &&
+    FACADE_MEMBERS.has(n.name.text)
+  );
+}
+
 // How many Gateway members one container may use of another: the members the `Peer` type in
-// src/gateway/peer.ts picks. 0 when the file is absent.
+// src/gateway/peer.ts picks. 0 when the file is absent. Any other shape of `Peer` (an intersection,
+// an interface, a Pick of anything but string literals) fails the census rather than be miscounted.
 export function peerSurfaceOf(files) {
   const file = files.find((f) => f.replace(/\\/g, "/").endsWith("src/gateway/peer.ts"));
   if (file === undefined) return 0;
   const sf = ts.createSourceFile(file, fs.readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
-  let members = 0;
-  sf.forEachChild((n) => {
-    if (!ts.isTypeAliasDeclaration(n) || n.name.text !== "Peer") return;
-    const picked = ts.isTypeReferenceNode(n.type) ? n.type.typeArguments?.[1] : undefined;
-    const parts = picked === undefined ? [] : ts.isUnionTypeNode(picked) ? picked.types : [picked];
-    members = parts.filter((t) => ts.isLiteralTypeNode(t) && ts.isStringLiteral(t.literal)).length;
-  });
-  return members;
+  const refuse = (why) => {
+    throw new Error(
+      `census: ${file} must declare \`type Peer = Pick<Gateway, "a" | ...>\`; ${why}`,
+    );
+  };
+  const decls = sf.statements.filter(
+    (n) => (ts.isTypeAliasDeclaration(n) || ts.isInterfaceDeclaration(n)) && n.name.text === "Peer",
+  );
+  if (decls.length !== 1 || !ts.isTypeAliasDeclaration(decls[0]))
+    refuse("found none, or another kind");
+  const type = decls[0].type;
+  const isPick =
+    ts.isTypeReferenceNode(type) &&
+    ts.isIdentifier(type.typeName) &&
+    type.typeName.text === "Pick" &&
+    type.typeArguments?.length === 2 &&
+    ts.isTypeReferenceNode(type.typeArguments[0]) &&
+    type.typeArguments[0].typeName.getText(sf) === "Gateway";
+  if (!isPick) refuse("found another shape");
+  const picked = type.typeArguments[1];
+  const parts = ts.isUnionTypeNode(picked) ? picked.types : [picked];
+  if (!parts.every((t) => ts.isLiteralTypeNode(t) && ts.isStringLiteral(t.literal))) {
+    refuse("every picked member must be a string literal");
+  }
+  return parts.length;
 }
 
 // Every ratchet count over `files`.

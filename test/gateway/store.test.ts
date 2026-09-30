@@ -75,6 +75,18 @@ describe("the store of a container tree", () => {
     await gw.close();
   });
 
+  it("a table view taken before any child attaches is live", async () => {
+    const gw = await host();
+    const p = (await gw.openQuarantine()).gateway;
+    const pools = gw.store.pools(p);
+    const channels = gw.store.channels(p);
+    const q = (await p.openQuarantine()).gateway;
+    expect(pools.has(q)).toBe(true);
+    gw.store.setChannel(p, "channel:y", { trust: "curated", posture: "separate" } as never);
+    expect(channels.has("channel:y")).toBe(true);
+    await gw.close();
+  });
+
   it("the authority for a container is its verified root, and nothing for a root or a broken chain", async () => {
     const gw = await host();
     const p = (await gw.openQuarantine()).gateway;

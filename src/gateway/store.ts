@@ -39,6 +39,11 @@ export class Store {
 
   /** `parent`'s table of children, created empty on first use. For the opener and the facades. */
   tableOf(parent: Gateway): ContainerTable {
+    return this.table(parent);
+  }
+
+  // Every read of a table creates it, so a view taken before the first child attaches is live.
+  private table(parent: Peer): ContainerTable {
     let table = this.tables.get(parent);
     if (table === undefined) {
       table = {
@@ -80,17 +85,17 @@ export class Store {
 
   /** The children attached below `parent`, as peers: the live set, read-only. */
   pools(parent: Peer): ReadonlySet<Peer> {
-    return this.tables.get(parent)?.pools ?? new Set();
+    return this.table(parent).pools;
   }
 
   /** The declared containers attached below `parent`, by entity, as peers. */
   namedPools(parent: Peer): ReadonlyMap<string, Peer> {
-    return this.tables.get(parent)?.named ?? new Map();
+    return this.table(parent).named;
   }
 
   /** `parent`'s federation channel pools, by pool name, each with its child as a peer. */
   channels(parent: Peer): ReadonlyMap<string, PeerEntry> {
-    return this.tables.get(parent)?.channels ?? new Map();
+    return this.table(parent).channels;
   }
 
   /**
@@ -103,7 +108,7 @@ export class Store {
 
   /** `parent`'s connection inboxes, by inbox name, each with its child as a peer. */
   inboxes(parent: Peer): ReadonlyMap<string, PeerEntry> {
-    return this.tables.get(parent)?.inboxes ?? new Map();
+    return this.table(parent).inboxes;
   }
 
   /**

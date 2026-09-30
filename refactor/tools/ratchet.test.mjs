@@ -81,7 +81,7 @@ describe("census ratchet counts", () => {
     expect(count(text, "src/cli/cli.ts").treeReach).toBe(0);
   });
 
-  it("does not count a facade's own definition of a tree member", () => {
+  it("does not count the facade's own definitions, and nothing else by that name", () => {
     const text = [
       "class Gateway {",
       "  get quarantinePools() { return this.store.tableOf(this).pools; }",
@@ -89,16 +89,33 @@ describe("census ratchet counts", () => {
       "  other() { return this.store.tableOf(this).named; }",
       "}",
     ].join("\n");
-    expect(count(text).treeReach).toBe(1);
+    expect(count(text, "src/gateway/gateway.ts").treeReach).toBe(1);
+    // The same definitions anywhere else, or on another class, are reaches like any other.
+    expect(count(text).treeReach).toBe(3);
+    const other = "class X { poolForBinding(b) { return this.quarantinePools.has(b); } }";
+    expect(count(other).treeReach).toBe(1);
+    expect(count(other, "src/gateway/gateway.ts").treeReach).toBe(1);
   });
 
-  it("counts the members the Peer type picks", () => {
+  it("counts the members the Peer type picks, and refuses any other shape of Peer", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "census-peer-"));
     const file = path.join(dir, "src", "gateway", "peer.ts");
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, 'export type Peer = Pick<Gateway, "reactor" | "store" | "close">;\n');
-    expect(peerSurfaceOf([file])).toBe(3);
+    const surface = (text) => {
+      fs.writeFileSync(file, text);
+      return peerSurfaceOf([file]);
+    };
+    expect(surface('export type Peer = Pick<Gateway, "reactor" | "store" | "close">;\n')).toBe(3);
     expect(peerSurfaceOf([path.join(dir, "src", "gateway", "other.ts")])).toBe(0);
+    for (const widened of [
+      'export type Peer = Pick<Gateway, "reactor"> & { extra: Gateway["close"] };',
+      'export interface Peer { reactor: Gateway["reactor"] }',
+      'export type Peer = Pick<Other, "reactor">;',
+      'export type Peer = Pick<Gateway, "reactor" | Keys>;',
+      "export type Peer = Gateway;",
+    ]) {
+      expect(() => surface(widened), widened).toThrow(/must declare/);
+    }
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });
