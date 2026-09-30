@@ -2597,9 +2597,16 @@ export async function curseChannelLawImpl(
     // curse struck. Measured: the id is byte-identical, and the blessing then refuses with "the
     // blessed law persisted but does not serve". The binding is born dead, and no amount of
     // re-syncing revives it. Negating the curse's own negation is the only thing that can.
-    // A curse acts only in the channel's pool (ruling 11), so its lift does too.
+    // A curse acts only in the channel's pool (ruling 11), so its lift does too. With no pool
+    // attached the strike cannot be lifted, so the record must not be either: refuse first.
     const liftPool = gw.channelPools.get(channel)?.gateway;
-    for (const g of liftPool === undefined ? [] : [liftPool]) {
+    if (liftPool === undefined || liftPool.attachedTo !== gw) {
+      throw new Error(
+        `curseChannelLaw refused: the pool of "${channel}" is not attached here, and a lift acts ` +
+          `only in that pool. Open the channel again, then lift. Nothing was changed.`,
+      );
+    }
+    for (const g of [liftPool]) {
       // A strike is already lifted only while a counter-negation holds at the read time. An expired
       // or not-yet-valid counter lifts nothing, so the strike is negated again.
       const lifted = negatedAt(g.reactor, g.validityNow(), undefined);

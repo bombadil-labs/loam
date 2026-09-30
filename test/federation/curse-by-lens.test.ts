@@ -96,7 +96,7 @@ describe("T194 — cursing keys on the lens, not the entity", () => {
     }
   });
 
-  it("acts only in the channel's pool: with the pool detached it refuses and records nothing", async () => {
+  it("acts only in the channel's pool: with the pool detached, a curse and a lift refuse and change nothing", async () => {
     // Ruling 11: a curse is pool-local. It never reaches into the root for a binding that only
     // shares the name, so with no pool attached it has nowhere lawful to strike.
     const alice = await peerWithTwoVersions();
@@ -108,10 +108,15 @@ describe("T194 — cursing keys on the lens, not the entity", () => {
         source: { pull: () => Promise.resolve(alice.reactor.arrivalLog()) },
       });
       await ch.sync();
+      await me.curseChannelLaw(ch.name, "alice:Plant"); // a standing curse, to lift below
       await ch.pool.detach("kept for the rail");
       const before = [...me.reactor.snapshot()].length;
       await expect(me.curseChannelLaw(ch.name, "alice:Plant")).rejects.toThrow(
         /not attached here, and a curse acts only in that pool/,
+      );
+      // The lift refuses too, before it touches the record: the pool's strike cannot be lifted.
+      await expect(me.curseChannelLaw(ch.name, "alice:Plant", { lift: true })).rejects.toThrow(
+        /not attached here, and a lift acts only in that pool/,
       );
       expect([...me.reactor.snapshot()].length).toBe(before); // nothing recorded, nothing struck
     } finally {
