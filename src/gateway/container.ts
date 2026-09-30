@@ -23,7 +23,7 @@
 
 import { seedSigner } from "./signer.js";
 import { hostChain, inboxLaw, seededLaw } from "./child-law.js";
-import { memoryPoolKeys, poolKeyClaims, recordedPoolKey } from "./pool-keys.js";
+import { memoryPoolKeys, PoolKeyMissing, poolKeyClaims, recordedPoolKey } from "./pool-keys.js";
 import { holdsJournals, type JournalBackend } from "../store/peer-image.js";
 import {
   authorForSeed,
@@ -567,7 +567,7 @@ async function poolGovernor(
   if (recorded !== undefined) {
     const seed = keys.load(name!);
     if (seed === undefined || authorForSeed(seed) !== recorded) {
-      throw new Error(
+      throw new PoolKeyMissing(
         `${name}: this pool governs itself under ${recorded}, and its key is not here. It is ` +
           "refused rather than reopened under the host's key.",
       );

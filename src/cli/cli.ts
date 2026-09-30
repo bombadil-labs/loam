@@ -1470,15 +1470,16 @@ async function cmdServe(
     // about something nothing is polling (H9).
     const fault = gateway.channelAttachFaults.get(c.name);
     // A pool whose own key is missing stays refused whatever reopens it: the key must come back.
-    const road = /its key is not here/.test(fault ?? "")
-      ? `Restore its key in ${path}.poolkeys.json, then restart.`
-      : "Re-open it with `loam federate open` to resume.";
+    const road =
+      fault?.keyMissing === true
+        ? `Restore its key in ${path}.poolkeys.json, then restart.`
+        : "Re-open it with `loam federate open` to resume.";
     io.err(
       `loam: ${c.name} will not sync — ` +
         (c.from === ""
           ? "its record carries no peer address (opened before addresses were recorded)"
           : !gateway.channelPools.has(c.name)
-            ? `its pool did not open: ${fault ?? "no cause was recorded"}`
+            ? `its pool did not open: ${fault?.message ?? "no cause was recorded"}`
             : "this home holds no token for it") +
         `. ${road}`,
     );

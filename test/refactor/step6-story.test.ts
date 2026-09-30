@@ -13,6 +13,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
+import { authorForSeed } from "@bombadil/rhizomatic";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { run } from "../../src/cli/cli.js";
 import { storePath } from "../../src/cli/config.js";
@@ -62,6 +63,18 @@ async function writeNotes(home: string, token: string, notes: readonly [string, 
     expect(res.ok).toBe(true);
   }
   return handle;
+}
+
+/** The peers whose journals a sqlite store file holds. */
+function journalPeers(file: string): string[] {
+  const db = new Database(file, { readonly: true });
+  try {
+    return (db.prepare("SELECT peer FROM journal_head").all() as { peer: string }[]).map(
+      (r) => r.peer,
+    );
+  } finally {
+    db.close();
+  }
 }
 
 /** The id of the one row in a sqlite file whose claims carry `needle`. */
@@ -128,6 +141,12 @@ describe("step 6: a channel pool is its own peer, end to end", () => {
     // The premise: my note is in my store's file and in the pool's file.
     const [poolName] = readdirSync(join(me, "channels")).filter((n) => n.endsWith(".sqlite"));
     const pool = join(me, "channels", poolName!);
+    // The pool's journal belongs to the saved key's peer; my store's journal to my operator key.
+    const poolKey = authorForSeed(keys["channel:friends:alice"]!);
+    const operator = authorForSeed(readFileSync(join(me, "operator.seed"), "utf8").trim());
+    expect(journalPeers(pool)).toEqual([poolKey]);
+    expect(journalPeers(storePath(me))).toEqual([operator]);
+    expect(poolKey).not.toBe(operator);
     expect(readFileSync(pool).includes("ERASED-STORY-MARKER")).toBe(true);
     expect(homeHolds(me, "ALICE-STORY-MARKER")).toBe(true);
 

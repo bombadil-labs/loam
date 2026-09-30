@@ -30,7 +30,7 @@ import { graphql, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
 import { holdsJournals, holdsPoolKeys } from "../store/peer-image.js";
-import { memoryPoolKeysFor, type PoolKeySource } from "./pool-keys.js";
+import { memoryPoolKeysFor, PoolKeyMissing, type PoolKeySource } from "./pool-keys.js";
 import {
   admitLocal,
   JournalConflict,
@@ -1246,7 +1246,7 @@ export class Gateway {
    * containerScope's refusal by name — louder and more honest than a store that will not start.
    */
   /** Why a standing channel's pool did not attach at the last resume, by channel name. */
-  readonly channelAttachFaults = new Map<string, string>();
+  readonly channelAttachFaults = new Map<string, { message: string; keyMissing: boolean }>();
 
   async resumeChannels(): Promise<void> {
     for (const standing of this.channelStatus()) {
@@ -1268,10 +1268,10 @@ export class Gateway {
         this.channelAttachFaults.delete(standing.name);
       } catch (err) {
         // Kept, so a report can name the cause rather than guess at one.
-        this.channelAttachFaults.set(
-          standing.name,
-          err instanceof Error ? err.message : String(err),
-        );
+        this.channelAttachFaults.set(standing.name, {
+          message: err instanceof Error ? err.message : String(err),
+          keyMissing: err instanceof PoolKeyMissing,
+        });
         // Deliberately left unattached; see above. And CRUCIALLY, left un-REGISTERED below: the
         // channel goes into `federationChannels` only once its pool is open. Registered first, a
         // channel with an unreadable pool evaded the CLI's cannot-sync report (which filters on

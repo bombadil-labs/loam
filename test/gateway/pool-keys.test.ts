@@ -10,6 +10,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import {
   memoryPoolKeys,
+  PoolKeyMissing,
   recordedPoolKey,
   type PoolKeySource,
 } from "../../src/gateway/pool-keys.js";
@@ -87,7 +88,7 @@ describe("criterion 17: a fresh pool starts under its own key", () => {
     const other = await hostWith(hostStore, memoryPoolKeys()); // a key source that lost the key
     await expect(
       other.openContainer({ name: "container:k17b", backend: poolStore }),
-    ).rejects.toThrow(/its key is not here/);
+    ).rejects.toThrow(PoolKeyMissing); // a typed cause: a report never parses the message
     await gw.close();
   });
 
@@ -177,13 +178,16 @@ describe("criterion 17: a fresh pool starts under its own key", () => {
 
   it("an older pool (bytes, no key record) is refused, and its bytes do not change", async () => {
     const gw = await hostWith(new MemoryBackend(), memoryPoolKeys());
-    await declare(gw, "container:k17c");
+    // The name even carries the missing-key diagnostic: the cause is typed, never read off text.
+    const name = "container:its key is not here";
+    await declare(gw, name);
     const poolStore = new MemoryBackend();
     await poolStore.append([note(8)]);
-    await expect(gw.openContainer({ name: "container:k17c", backend: poolStore })).rejects.toThrow(
-      /earlier Loam/,
-    );
-    expect(recordedPoolKey(gw.reactor, OP, "container:k17c")).toBeUndefined();
+    const refusal = await gw.openContainer({ name, backend: poolStore }).catch((e: unknown) => e);
+    expect(refusal).toBeInstanceOf(Error);
+    expect((refusal as Error).message).toMatch(/earlier Loam/);
+    expect(refusal).not.toBeInstanceOf(PoolKeyMissing);
+    expect(recordedPoolKey(gw.reactor, OP, name)).toBeUndefined();
     expect([...(await poolStore.ids())]).toEqual([note(8).id]);
     expect(await poolStore.journalPeers()).toEqual([]);
     await gw.close();
