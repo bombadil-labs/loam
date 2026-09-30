@@ -47,6 +47,19 @@ describe("gateways are views of a container's journal", () => {
     await a.close();
   });
 
+  it("a lens published through one gateway binds in the other's view of the same container", async () => {
+    const file = join(mkdtempSync(join(tmpdir(), "loam-views-")), "store.sqlite");
+    const a = await Gateway.boot(new SqliteBackend(file), assembleGenesis({ operatorSeed: SEED }));
+    const b = await Gateway.open(new SqliteBackend(file), { seed: SEED });
+    await a.publishRegistration(PLANT, PLANT_POLICY, [FERN], undefined, undefined, undefined, [
+      ...PLANT_WRITABLE,
+    ]);
+    await a.append([observed(FERN, "height", 9, 1000, SEED)]);
+    expect(await height(b)).toBe(9);
+    await b.close();
+    await a.close();
+  });
+
   it("two gateways over different containers: a write admitted to one is not served by the other", async () => {
     const host = await Gateway.boot(new MemoryBackend(), genesis());
     const p = (await host.openQuarantine()).gateway;

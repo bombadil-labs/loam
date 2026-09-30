@@ -330,7 +330,11 @@ export function refreshImpl(gw: Gateway): Promise<void> {
   if (peer === undefined) return Promise.resolve();
   return admitting(gw, async () => {
     const read = await peer.store.readHead(peer.journal.peerId);
-    if (read.status === "head" && read.head !== peer.journal.currentHead()) await catchUp(gw);
+    if (read.status !== "head" || read.head === peer.journal.currentHead()) return;
+    const before = gw.reactor.size;
+    await catchUp(gw);
+    // Rows another gateway wrote may bind, rebind or retire a lens: refold, as a boot does.
+    if (gw.reactor.size !== before) gw.replayRegistrations();
   });
 }
 
