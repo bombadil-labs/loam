@@ -1,8 +1,8 @@
 // T103(a) — A PULL INTO A SERVED HOME SAYS SO. `loam pull` and `loam register` open their own
-// sqlite handle, so a `loam serve` holding the same store keeps answering from boot-time memory:
-// the deltas land, the report says "accepted", and the running server serves none of it. The
-// repair railed here is the honest sentence — a stderr warning that a server will not see what
-// just landed until it restarts — never a refusal: the pull still succeeds, exit 0, count printed.
+// sqlite handle beside any `loam serve` holding the same store. That server reads the new deltas
+// on its next request, but what it loaded at boot does not grow from them until a restart. The
+// rail is the honest sentence — a stderr warning that names the server and what waits for a
+// restart — never a refusal: the pull still succeeds, exit 0, count printed.
 //
 // The detection direction is the rail's real subject (H9, inverted for a probe whose SILENCE is
 // the hazard): only two silences are earned — no serving record at all, and a record whose pid is
@@ -30,7 +30,7 @@ import { MemoryBackend } from "../../src/store/memory.js";
 
 vi.setConfig({ testTimeout: 20_000 }); // real sqlite homes and a real HTTP server
 
-const WARNING = /will not see what just landed until it restarts/;
+const WARNING = /waits for a restart/;
 
 let dir: string;
 let home: string;

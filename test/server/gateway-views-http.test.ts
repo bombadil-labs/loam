@@ -12,11 +12,15 @@ import { containerClaims } from "../../src/gateway/container-law.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { publicClaims } from "../../src/gateway/public.js";
+import { writeUserSeed } from "../../src/cli/config.js";
+import { hashPassword, writeCredentials } from "../../src/server/credentials.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
+import { roleClaims, userClaims } from "../../src/server/users.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
+import { signIn } from "../helpers/session-fixture.js";
 
 const OP_SEED = "7d".repeat(32);
 const OP = authorForSeed(OP_SEED);
@@ -46,15 +50,19 @@ const twoViews = async (): Promise<{ a: Gateway; b: Gateway }> => {
   return { a, b };
 };
 
-const serving = async (b: Gateway): Promise<(path: string) => Promise<string>> => {
+const serving = async (
+  b: Gateway,
+  home?: string,
+): Promise<((path: string) => Promise<string>) & { base: string }> => {
   const handle: ServerHandle = await serve({
     mounts: { garden: b },
     tokens: { "op-token": { operator: true } },
     port: 0,
     host: "127.0.0.1",
+    ...(home === undefined ? {} : { users: { home, mount: "garden" } }),
   });
   opened.push(handle);
-  return async (path) => {
+  const ask = async (path: string): Promise<string> => {
     const res = await fetch(`${handle.url}${path}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -62,6 +70,7 @@ const serving = async (b: Gateway): Promise<(path: string) => Promise<string>> =
     });
     return `${res.status} ${await res.text()}`;
   };
+  return Object.assign(ask, { base: handle.url });
 };
 
 const openDoor = async (gw: Gateway, ts: number): Promise<Delta> => {
@@ -99,5 +108,23 @@ describe("the HTTP doors read refreshed views", () => {
     await a.append([signClaims(makeNegationClaims(OP, 10_200, door.id), OP_SEED)]);
     expect(await ask("/commons/graphql")).toBe(await ask("/nowhere/graphql"));
     await commons.drop();
+  });
+
+  it("a user created through one gateway signs in at the other's login door", async () => {
+    const { a, b } = await twoViews();
+    const home = mkdtempSync(join(tmpdir(), "loam-views-http-home-"));
+    const password = "correct horse";
+    writeCredentials(home, {
+      version: 1,
+      users: { ada: await hashPassword(password, { N: 1024, r: 8, p: 1, keylen: 32 }) },
+    });
+    writeUserSeed(home, "ada", "ad".repeat(32));
+    const { base } = await serving(b, home);
+    await expect(signIn(base, "ada", password)).rejects.toThrow(/refused ada/);
+    await a.append([
+      signClaims(userClaims("ada", OP, 10_300), OP_SEED),
+      signClaims(roleClaims("ada", "actor", OP, 10_301), OP_SEED),
+    ]);
+    expect(await signIn(base, "ada", password)).toMatch(/./);
   });
 });

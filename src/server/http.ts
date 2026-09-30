@@ -2899,6 +2899,12 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         discovery.handle(url.pathname, req, res);
         return;
       }
+      // The store's own doors below read the users mount's gateway. A gateway is a view of its
+      // container's journal, which another process may have moved, so they read it refreshed.
+      if ([userDoors, admin, consent, tokenExchange].some((d) => d?.owns(url.pathname) === true)) {
+        const users = options.users === undefined ? undefined : mounts.resolve(options.users.mount);
+        await users?.gateway.refresh();
+      }
       // The login doors (SPEC §36 phase 5), answered before mount routing — they are the store's
       // own pages, not a mount's. A bare `/login` never resolved to anything (mount doors live at
       // /:mount/:verb), so claiming the exact path shadows nobody. Absent `users`, the name falls

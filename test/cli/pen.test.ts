@@ -287,7 +287,7 @@ describe("loam pen create", () => {
       err.length = 0;
       const code = await run(["pen", "create", "late-pen", "--home", home], io());
       expect(code).toBe(0);
-      expect(err.join("\n")).toMatch(/will not see what just landed until it restarts/);
+      expect(err.join("\n")).toMatch(/waits for a restart/);
     } finally {
       await handle.close();
     }

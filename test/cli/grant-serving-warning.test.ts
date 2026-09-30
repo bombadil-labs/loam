@@ -1,9 +1,7 @@
-// T243 — A GRANT INTO A SERVED HOME SAYS SO. `loam grant` (mint and revoke) appends ground deltas
-// through its own sqlite handle, exactly like `pull`/`register`/`pen` — and a `loam serve` holding
-// the same store answers from boot-time memory, so the grant "succeeds" while the running fence
-// keeps refusing. T103(a) built the honest sentence and wired it into five verbs; `grant` was the
-// sixth writer and the one left silent. Measured cost, 2026-08-25: a register grant minted under a
-// live server drew the constitutional refusal until a restart nobody knew was owed.
+// A GRANT INTO A SERVED HOME SAYS SO. `loam grant` (mint and revoke) appends ground deltas
+// through its own sqlite handle, like `pull`/`register`/`pen`. A `loam serve` holding the same
+// store reads the grant on its next request, but what it loaded at boot waits for a restart, and
+// the warning names the server that is running.
 //
 // Same discipline as the frozen T103(a) rail (serve-staleness-warning.test.ts, which these cases
 // deliberately do not touch): the warning is stderr prose, never a refusal — the grant still lands,
@@ -11,8 +9,7 @@
 // earned silences stay silent (no record at all; a provably dead pid).
 //
 // Deliberately not asserted here: the record-present-but-unreadable branch (no portable fixture —
-// see the T103(a) header); and that a live server later sees the grant (it does not; restart is
-// the recipe, and the warning says so).
+// see the T103(a) header). That a live server sees a new grant is client-mint.test.ts's (a2).
 
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -25,7 +22,7 @@ import { storePath } from "../../src/cli/config.js";
 
 vi.setConfig({ testTimeout: 20_000 }); // real sqlite homes
 
-const WARNING = /will not see what just landed until it restarts/;
+const WARNING = /waits for a restart/;
 const CLIENT = "connector-00000000000000000000000000000001";
 
 let dir: string;

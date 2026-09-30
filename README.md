@@ -309,11 +309,10 @@ meta-resolves each referenced entity via `loadSchema` over the surviving definit
 consequences are the whole point:
 
 - **Evolution is append.** Republish a definition at the same entity and the surface serves the
-  new shape. The schema's identity is the _entity_, not the name. Two of the three doors serve it
-  **live, with no restart** — `publishRegistration` and `POST /:mount/register`, both of which go
-  through the running gateway. **`loam register` does not.** It writes the deltas to the store
-  file, and a server already running answers from the memory it booted with, so it keeps serving
-  the old shape until you restart it. The CLI says so when it sees a live server.
+  new shape. The schema's identity is the _entity_, not the name. All three doors serve it
+  **live, with no restart** — `publishRegistration` and `POST /:mount/register` go through the
+  running gateway, and `loam register` writes the deltas to the store file, which a running server
+  reads on its next request.
 - **Deprecation is negation.** Negate a definition and its registration is unbound; the type
   drops from the surface. Nothing is deleted; the store only learns.
 - **Foreign law stays inert.** In a governed store only operator-authored definitions and
