@@ -705,11 +705,7 @@ async function liveOpening(
   // the container is a mirror of nothing, and reads as no handle.
   const cached = gw.channelPools.get(o.channel);
   const named =
-    cached?.gateway !== undefined &&
-    cached.gateway.attachedTo === gw &&
-    gw.quarantinePools.has(cached.gateway)
-      ? cached
-      : undefined;
+    cached?.gateway !== undefined && gw.store.holds(gw, cached.gateway) ? cached : undefined;
   // A container attached BY HAND under the name (openContainer) is not the channel pool, but its
   // bytes are under the name all the same, and the drop cannot attach past it.
   const byHand = gw.attachedContainers.get(o.channel);
@@ -1321,9 +1317,10 @@ export async function eraseReplicaImpl(
     let cursor = gw;
     const chain = new Set<Gateway>();
     let authorized = false;
-    while (cursor.attachedTo !== undefined && !chain.has(cursor)) {
+    while (!chain.has(cursor)) {
+      const parent = gw.store.parentOf(cursor);
+      if (parent === undefined) break;
       chain.add(cursor);
-      const parent = cursor.attachedTo;
       if (!parent.quarantinePools.has(cursor)) break;
       if (sameVerifiedDelta(parent.reactor.get(erasure.id), erasure)) authorized = true;
       // Or the parent's own order, re-signed for this pool: the parent holds a binding local-control

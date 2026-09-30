@@ -1460,8 +1460,7 @@ async function syncChannel(
       gw.channelPools.get(name) !== pool ||
       pool.declarationId !== declarationId ||
       currentPoolDeclaration(gw, name) !== declarationId ||
-      ground.attachedTo !== gw ||
-      !gw.quarantinePools.has(ground) ||
+      !gw.store.holds(gw, ground) ||
       current.into !== opts.into ||
       current.prefix !== opts.prefix ||
       fromDisagrees(current.from, opts) ||
@@ -2142,8 +2141,7 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
     if (
       pool.declarationId !== poolDeclaration.id ||
       currentPoolDeclaration(gw, name) !== poolDeclaration.id ||
-      ground.attachedTo !== gw ||
-      !gw.quarantinePools.has(ground)
+      !gw.store.holds(gw, ground)
     )
       throw new Error(`openChannel: ${name} changed its exact pool association during opening`);
     const event = await issueChannelEvent(gw, {
@@ -2229,10 +2227,7 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
     // name (its records struck by hand in this process) is named, with the road out.
     const attached = gw.channelPools.get(name)?.gateway;
     const held =
-      attached !== undefined &&
-      attached.attachedTo === gw &&
-      gw.quarantinePools.has(attached) &&
-      attached.reactor.size !== 0;
+      attached !== undefined && gw.store.holds(gw, attached) && attached.reactor.size !== 0;
     throw new Error(
       severed === undefined
         ? `dropChannel refused: this store has no channel named "${name}" — ` +
@@ -2276,10 +2271,7 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
   // over the emptied store, and settles the listing (spec 64).
   const cached = channel?.pool ?? attached;
   const stale =
-    cached !== undefined &&
-    (cached.gateway === undefined ||
-      !gw.quarantinePools.has(cached.gateway) ||
-      cached.gateway.attachedTo !== gw);
+    cached !== undefined && (cached.gateway === undefined || !gw.store.holds(gw, cached.gateway));
   if (stale) {
     gw.federationChannels.delete(name);
     gw.channelPools.delete(name);
@@ -2599,7 +2591,7 @@ export async function curseChannelLawImpl(
     // A curse acts only in the channel's pool (ruling 11), so its lift does too. With no pool
     // attached the strike cannot be lifted, so the record must not be either: refuse first.
     const liftPool = gw.channelPools.get(channel)?.gateway;
-    if (liftPool === undefined || liftPool.attachedTo !== gw) {
+    if (liftPool === undefined || !gw.store.holds(gw, liftPool)) {
       throw new Error(
         `curseChannelLaw refused: the pool of "${channel}" is not attached here, and a lift acts ` +
           `only in that pool. Open the channel again, then lift. Nothing was changed.`,
@@ -2684,7 +2676,7 @@ export async function curseChannelLawImpl(
   // landed, with the pool's own key. It never reaches the root, so a root registration that only
   // shares the name stays served. With no pool attached there is nothing it may strike.
   const pool = gw.channelPools.get(channel)?.gateway;
-  if (pool === undefined || pool.attachedTo !== gw) {
+  if (pool === undefined || !gw.store.holds(gw, pool)) {
     throw new Error(
       `curseChannelLaw refused: the pool of "${channel}" is not attached here, and a curse acts ` +
         `only in that pool. Open the channel again, then curse. Nothing was negated and nothing ` +

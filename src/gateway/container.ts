@@ -634,8 +634,7 @@ async function openSeparate(
           `bytes must be discardable without touching the host's`,
       );
     }
-    let root: Gateway = gw;
-    while (root.attachedTo !== undefined) root = root.attachedTo;
+    const root = gw.store.rootOf(gw);
     if (
       spec.backend === root.backend ||
       [...poolsBeneath(root)].some(({ pool: p }) => p.backend === spec.backend)
@@ -689,7 +688,7 @@ async function openSeparate(
   // seed, which is strictly stronger custody than any pen, so carrying the pens across adds no key the
   // pool did not have. Authorization is NOT loosened either, and the door is where that is enforced:
   // the pen's grant reaches the pool as data, but a seeded copy is frozen until someone re-pulses the
-  // edge, so `writeRouteImpl` asks the ROOT store's live word through `attachedTo` before it signs —
+  // edge, so `writeRouteImpl` asks the ROOT store's live word through the store's verified chain before it signs —
   // the same call mounts.ts makes about §12 publicness, for the same reason (a revocation must
   // arrive). The pens travel only into an UNTRUSTED pool: that is the container the frame exists for,
   // and it leaves a curated container and a §39 inbox pool — which build authority in their OWN
@@ -701,7 +700,7 @@ async function openSeparate(
     peerStore: (backend as JournalBackend).journalStore(),
     ...(probationary && gw.options.pens !== undefined ? { pens: gw.options.pens } : {}),
   });
-  pool.attachedTo = gw;
+  gw.store.attach(pool, gw);
   // The child's law policy: an inbox selects nothing from its host; every other pool holds seeded
   // host copies and selects the host for them.
   const hosts = hostChain(gw.signer.author, gw.childLaw);
@@ -748,9 +747,7 @@ async function openSeparate(
   // operator's ceiling, and a size change is a delta the next render obeys. A pool the root's
   // table does not hold (one nested inside a pool) is placed by its NAME, which climbs to the
   // nearest container the root does hold.
-  let root: Gateway = gw;
-  while (root.attachedTo !== undefined) root = root.attachedTo;
-  const rootGateway = root;
+  const rootGateway = gw.store.rootOf(gw);
   const ceiling =
     spec.entity === undefined
       ? operatorsCeiling
@@ -834,7 +831,7 @@ async function openSeparate(
     if (spec.entity !== undefined) gw.attachedContainers.delete(spec.entity);
     // The back-pointer goes with the attachment. A detached pool is nobody's replica, and a stale
     // host would be a live handle into a store this one no longer reaches.
-    pool.attachedTo = undefined;
+    gw.store.detach(pool);
   };
 
   if (spec.entity !== undefined) {
@@ -1004,7 +1001,7 @@ async function openSeparate(
       // The whole subtree closes with the drop, deepest first: a nested pool proven empty must
       // not survive as a live handle on a discarded store.
       for (const { pool: nested } of [...beneath].reverse()) {
-        nested.attachedTo = undefined;
+        gw.store.detach(nested);
         await nested.close();
       }
       await pool.close();

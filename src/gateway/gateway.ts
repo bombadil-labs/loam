@@ -41,6 +41,7 @@ import {
 } from "./peer-admission.js";
 import { stampOn, type Stamp } from "./stamp.js";
 import { claimGatewayMarker } from "./gateway-brand.js";
+import { Store } from "./store.js";
 import { NUL } from "./alphabet.js";
 import { declarePrincipalScope } from "./principal.js";
 import { declareUserGround, userGroundOf } from "./user-root.js";
@@ -629,8 +630,10 @@ export class Gateway {
   // constitution, and that is a failure the operator must see, not one to boot past.
   /** @internal — a child ground over `backend`: the pool opener reaches the class through its
    * parent, so it needs only the type. */
-  openChild(backend: StoreBackend, options: GatewayOptions): Promise<Gateway> {
-    return Gateway.open(backend, options);
+  async openChild(backend: StoreBackend, options: GatewayOptions): Promise<Gateway> {
+    const child = await Gateway.open(backend, options);
+    child.store = this.store; // one store for the whole tree
+    return child;
   }
 
   static async open(backend: StoreBackend, options: GatewayOptions = {}): Promise<Gateway> {
@@ -1181,7 +1184,8 @@ export class Gateway {
   // striker set, of the registrations, and of the public declarations is stale in exactly the same
   // way, and those are READS. They are older than this field and are not fixed here.
   /** @internal — T35 seam (container.ts, renderers.ts) */
-  attachedTo: Gateway | undefined = undefined;
+  /** @internal — the store this container belongs to, and the services its tree shares. */
+  store = new Store();
 
   // The live per-connection inbox handles (SPEC §39), keyed by inbox name. A binding is DURABLE: a
   // second bindConnection of the same (container, connection key) resumes the same handle rather than
@@ -1202,8 +1206,6 @@ export class Gateway {
    * — the documented sever verb could not succeed anywhere it mattered.
    */
   readonly channelPools = new Map<string, Container>();
-  /** Ordering only; replay authority remains the protected deltas. */
-  readonly channelCommitTails = new Map<string, Promise<void>>();
 
   /**
    * Set on a POOL's own gateway when it is a federation channel's pool (§46.1). It is what tells a

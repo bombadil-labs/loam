@@ -1220,21 +1220,15 @@ export function routeServableOn(
 // law, frozen until someone re-pulses the edge, and nothing re-pulses it on its own — so any question
 // whose stale answer would make a REVOCATION never arrive is asked of the root instead.
 //
-// The chain is VERIFIED, not chased. Following `attachedTo` alone would trust whatever store the
-// pointer lands on, and a detached intermediate is exactly that: still readable, permanently frozen,
-// and now the end of the chain. So each link must still be a live attachment, and the terminal store
+// The chain is VERIFIED, not chased. Following the parent links alone would trust whatever store
+// they land on, and a detached intermediate is exactly that: still readable, permanently frozen, and
+// now the end of the chain. So each link must still be a live attachment, and the terminal store
 // must not itself be a pool. Undefined means "I cannot tell", which every caller must read as a
-// refusal rather than a permission (H9).
+// refusal rather than a permission (H9). A store that is no pool has no root authority above it.
 function rootAuthorityOf(gw: Gateway): Gateway | undefined {
-  let child = gw;
-  let root = gw.attachedTo;
-  while (root !== undefined && root.quarantinePools.has(child) && root.attachedTo !== undefined) {
-    child = root;
-    root = root.attachedTo;
-  }
-  return root !== undefined && root.quarantinePools.has(child) && root.probation === undefined
-    ? root
-    : undefined;
+  if (gw.store.parentOf(gw) === undefined) return undefined;
+  const root = gw.store.verifiedRootOf(gw);
+  return root !== undefined && root.probation === undefined ? root : undefined;
 }
 
 // Write through a rendered route (the body of `Gateway.writeRoute`, SPEC §23.3): a form on a mounted
