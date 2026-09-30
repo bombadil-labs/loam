@@ -1,7 +1,7 @@
 // A signing seam: one object that signs in one key's voice. It refuses claims authored by any other
-// key, so no caller can produce a delta that names one author and is signed by another. It is a seam,
-// not key protection: the seed it signs with stays readable where it came from (a gateway's
-// `options`), until a later step stops exposing it.
+// key, so no caller can produce a delta that names one author and is signed by another. A gateway
+// keeps its seed only here: its options drop the seed once the signer is made. It is a seam, not key
+// protection: the process still holds the seed in memory, and the key file stays where it was read.
 
 import { authorForSeed, signClaims, type Claims, type Delta } from "@bombadil/rhizomatic";
 
