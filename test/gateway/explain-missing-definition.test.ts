@@ -11,7 +11,7 @@ import {
   signClaims,
   type Delta,
 } from "@bombadil/rhizomatic";
-import { explainMissingDefinition } from "../../src/gateway/adopt-law.js";
+import { explainMissingDefinition } from "../../src/gateway/adopt-vocab.js";
 import { PLANT } from "./fixtures.js";
 
 const SEED = "c4".repeat(32);

@@ -27,7 +27,7 @@ import {
   type Delta,
 } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
-import { manifestExportClaims, readManifest } from "../../src/gateway/adopt-law.js";
+import { manifestExportClaims, readManifest } from "../../src/gateway/adopt-vocab.js";
 import { refusedIds, standingErasures } from "../../src/gateway/erase-law.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";

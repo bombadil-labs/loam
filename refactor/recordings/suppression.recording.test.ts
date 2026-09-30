@@ -7,7 +7,7 @@ import { describe, it } from "vitest";
 import type { Claims, Delta } from "@bombadil/rhizomatic";
 import { dataStruck, grantClaims } from "../../src/gateway/accounts.js";
 import { honoredStrikeOn } from "../../src/gateway/grants-law.js";
-import { survivalOver } from "../../src/gateway/adopt-law.js";
+import { survivalOver } from "../../src/gateway/adopt-vocab.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { lawfulNegated } from "../../src/gateway/registration.js";
 import { bothOrders, idsOf, KEY, record, signed, strike, type Who } from "./corpus.js";

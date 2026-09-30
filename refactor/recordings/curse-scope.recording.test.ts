@@ -28,7 +28,7 @@
 
 import { afterEach, describe, it, vi } from "vitest";
 import type { Delta, Reactor } from "@bombadil/rhizomatic";
-import { isRegistrationBinding } from "../../src/gateway/adopt-law.js";
+import { isRegistrationBinding } from "../../src/gateway/adopt-vocab.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { lensOf } from "../../src/gateway/registration.js";

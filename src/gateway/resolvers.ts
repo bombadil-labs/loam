@@ -33,7 +33,7 @@ import {
   type Schema,
   type View,
 } from "@bombadil/rhizomatic";
-import { isWithheldResolver } from "./adopt-law.js";
+import { isWithheldResolver } from "./adopt-vocab.js";
 import { importEsm } from "./esm.js";
 import type { ResolverOutputType, ResolverSpecs } from "./registration.js";
 

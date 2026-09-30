@@ -44,7 +44,7 @@ import {
   isWithheldResolver,
   manifestExportClaims,
   readManifest,
-} from "../gateway/adopt-law.js";
+} from "../gateway/adopt-vocab.js";
 import { CTX_REGISTRATION, lensOf } from "../gateway/registration.js";
 import { lawfulHistory, lawfulSnapshot } from "../gateway/lawful.js";
 import { negatedAt } from "../gateway/negation.js";

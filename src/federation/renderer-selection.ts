@@ -16,8 +16,8 @@ import {
   classifyExactReceivedSchema,
   readLawAdoptions,
   sameSchemaLaw,
-  survivalOver,
 } from "../gateway/adopt-law.js";
+import { survivalOver } from "../gateway/adopt-vocab.js";
 import { boundChannelAdmits } from "../gateway/connection-authority.js";
 import { inboxName, readContainerTable, withinSubtree } from "../gateway/container-law.js";
 import type { ConnectionBinding, Gateway } from "../gateway/gateway.js";

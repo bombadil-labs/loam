@@ -18,7 +18,7 @@ import {
   signClaims,
   type Schema,
 } from "@bombadil/rhizomatic";
-import { manifestExportClaims } from "../../src/gateway/adopt-law.js";
+import { manifestExportClaims } from "../../src/gateway/adopt-vocab.js";
 import { containerClaims } from "../../src/gateway/container-law.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
