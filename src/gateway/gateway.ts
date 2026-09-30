@@ -17,6 +17,7 @@ import {
   authorForSeed,
   computeId,
   evalTermRaw,
+  makeNegationClaims,
   type Delta,
   type HView,
   type HyperSchema,
@@ -40,7 +41,8 @@ import {
   rereadHostPeer,
   type HostPeer,
 } from "./peer-admission.js";
-import { stampOn, type Stamp } from "./stamp.js";
+import { stampOn, withStamp, type Stamp } from "./stamp.js";
+import { manifestExportClaims, type ManifestExport } from "./adopt-vocab.js";
 import { claimGatewayMarker } from "./gateway-brand.js";
 import { Store } from "./store.js";
 import { NUL } from "./alphabet.js";
@@ -48,6 +50,7 @@ import { declarePrincipalScope } from "./principal.js";
 import { declareUserGround, userGroundOf } from "./user-root.js";
 import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
 import {
+  arrivalClaims,
   blessChannelAppImpl,
   attachChannelPool,
   blessChannelResolversImpl,
@@ -84,6 +87,8 @@ import { eraseImpl, eraseReplicaImpl, healthImpl, type StoreHealth } from "./era
 import { pinErasureGovernors, erasedFromReading } from "./erase-law.js";
 import type { LiveStream } from "./channel.js";
 import { STORE_ENTITY, operatorMarkerClaims, type Genesis } from "./genesis.js";
+import { grantClaims, revocationClaims } from "./accounts.js";
+import type { Verb } from "./grants-law.js";
 import {
   admitForImpl,
   appendImpl,
@@ -1412,6 +1417,81 @@ export class Gateway {
   adoptions(): Adoption[] {
     if (this.operatorAuthor === undefined) return [];
     return readAdoptions(this.reactor, this.validityNow(), this.operatorAuthor);
+  }
+
+  // --- operations another container asks of this one ----------------------------------------------
+  // Each signs with THIS container's governing key, inside this container. Another container asks;
+  // it never holds this one's key or signs in its name (ruling 11).
+
+  /**
+   * Strike `ids` here in one batch: a negation apiece on one stamp of this container's clock,
+   * through its own door. Signed with this container's key, or with `by`: a key its caller holds
+   * for itself, such as a person retracting their own writes. Never another container's key.
+   */
+  async strike(ids: readonly string[], by: Signer | undefined = this.signer): Promise<void> {
+    if (by === undefined) throw new Error("strike: this container has no governing key");
+    const stamp = this.stamp(by.author);
+    await this.append(
+      ids.map((id) => by.sign(withStamp(stamp, (t) => makeNegationClaims(by.author, t, id)))),
+    );
+  }
+
+  /** Grant `subject` the right `verb` over this container's store, signed with its own key. */
+  async issueGrant(subject: string, verb: Verb): Promise<void> {
+    const signer = this.signer;
+    if (signer === undefined) throw new Error("issueGrant: this container has no governing key");
+    await this.append([
+      signer.sign(
+        withStamp(this.stamp(signer.author), (t) =>
+          grantClaims(STORE_ENTITY, subject, verb, signer.author, t),
+        ),
+      ),
+    ]);
+  }
+
+  /**
+   * Revocations of `ids` here, each on its own stamp, signed with this container's key. Returned
+   * unadmitted, so the caller admits them in its own batch beside what it signs itself.
+   */
+  revocations(ids: readonly string[]): Delta[] {
+    const signer = this.signer;
+    if (signer === undefined) throw new Error("revocations: this container has no governing key");
+    return ids.map((id) =>
+      signer.sign(
+        withStamp(this.stamp(signer.author), (t) => revocationClaims(id, signer.author, t)),
+      ),
+    );
+  }
+
+  /** Record manifest export rows here (§27.8) in one batch, signed with this container's key. */
+  async exportManifestRows(rows: readonly ManifestExport[]): Promise<void> {
+    const signer = this.signer;
+    if (signer === undefined) {
+      throw new Error("exportManifestRows: this container has no governing key");
+    }
+    await this.federate(
+      rows.map((row) =>
+        signer.sign(
+          withStamp(this.stamp(signer.author), (t) => manifestExportClaims(row, signer.author, t)),
+        ),
+      ),
+    );
+  }
+
+  /**
+   * Arrival stamps for a sync on `channel` from `from` (§46): one per chunk of refs, all on one
+   * stamp of this container's clock, signed with its key. Returned unadmitted: the caller sends
+   * them through this container's federation door and settles what did not land.
+   */
+  arrivalStamps(channel: string, from: string, chunks: readonly (readonly string[])[]): Delta[] {
+    const signer = this.signer;
+    if (signer === undefined) throw new Error("arrivalStamps: this container has no governing key");
+    const at = this.stamp(signer.author);
+    return chunks.map((arrived) =>
+      signer.sign(
+        withStamp(at, (t) => arrivalClaims({ channel, from, arrived }, signer.author, t)),
+      ),
+    );
   }
 
   // --- promote-law (SPEC §24.4 × §27.8, ticket T33) ------------------------------------------------
