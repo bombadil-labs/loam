@@ -2947,6 +2947,12 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
         gone: () =>
           identity === undefined ? refused(res) : json(res, 404, { errors: ["no such mount"] }),
       };
+      // A gateway is a view of its container's journal. Every door reads a caught-up view, and a
+      // container mount reads its host's too: the host decides whether the mount is open.
+      const refreshViews = async (): Promise<void> => {
+        await resolved?.host?.refresh();
+        await gateway?.refresh();
+      };
       if (identity === undefined) {
         // A presented-but-wrong token is refused outright — bad credentials never downgrade
         // to anonymous. A caller with NO token reaches exactly one thing: the restricted read
@@ -2969,10 +2975,20 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
           json(res, 200, whoamiFor(undefined, undefined, undefined));
           return;
         }
+        // The openness checks below read views that another gateway over this store may have
+        // moved since, so they read refreshed ones. A failed refresh, or a mount gone during it,
+        // gets the same refusal as a name that never existed.
+        try {
+          await refreshViews();
+        } catch {
+          refused(res, verb);
+          return;
+        }
         if (
           req.headers.authorization !== undefined ||
           resolved === undefined ||
           gateway === undefined ||
+          !guard.live() ||
           (resolved.host !== undefined && !resolved.host.hasPublicSurface()) ||
           !gateway.hasPublicSurface()
         ) {
@@ -3111,6 +3127,11 @@ export async function serve(options: ServeOptions): Promise<ServerHandle> {
       }
       if (gateway === undefined) {
         json(res, 404, { errors: ["no such mount"] });
+        return;
+      }
+      await refreshViews();
+      if (!guard.live()) {
+        guard.gone();
         return;
       }
       switch (verb) {
