@@ -522,14 +522,6 @@ export class Gateway {
    */
   readonly signer: Signer | undefined;
 
-  /**
-   * The governing seed, for opening a child ground (a pool, a channel) that is governed by the same
-   * key today. The one place a seed leaves the gateway; at step 6 each child gets its own key.
-   * @internal
-   */
-  childSeed(): string | undefined {
-    return this.options.seed;
-  }
   /** @internal — set by the child's opener (container.ts `openSeparate`); undefined at a root. */
   childLaw: ChildLaw | undefined = undefined;
   private erasureGovernors: readonly string[] = [];
@@ -558,16 +550,23 @@ export class Gateway {
     return this._reactor;
   }
 
+  /**
+   * The options this gateway was opened with, less its seed: the seed becomes the signer and is
+   * kept nowhere else, so no code that holds a gateway can read its key.
+   * @internal — T19 seam (erase.ts, quarantine-pool.ts, adopt.ts)
+   */
+  readonly options: Readonly<Omit<GatewayOptions, "seed">>;
+
   private constructor(
     /** @internal — T19 seam (erase.ts) */
     readonly backend: StoreBackend,
     reactor: Reactor,
-    /** @internal — T19 seam (erase.ts, quarantine-pool.ts, adopt.ts) */
-    readonly options: GatewayOptions,
+    options: GatewayOptions,
   ) {
     markGateway(this);
     this._reactor = reactor;
-    const seed = options.seed;
+    const { seed, ...kept } = options;
+    this.options = kept;
     this.signer = seed === undefined ? undefined : seedSigner(seed);
     this.operatorAuthor = this.signer?.author;
     this.declareUsers(reactor);

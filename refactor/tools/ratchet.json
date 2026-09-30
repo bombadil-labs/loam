@@ -2,7 +2,7 @@
   "largestImportCycle": 0,
   "importCycles": 0,
   "cyclicFiles": 0,
-  "seedReads": 5,
+  "seedReads": 4,
   "snapshotRefs": 42,
   "coreClockReads": 15,
   "treeReach": 0,
