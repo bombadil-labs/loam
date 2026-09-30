@@ -43,7 +43,7 @@ import {
 } from "@bombadil/rhizomatic";
 import { authorize } from "./accounts.js";
 import { budgetRefusal } from "./budget.js";
-import { settleOwedPurges } from "./erase.js";
+import { settleOwedPurges } from "./purge-settle.js";
 import {
   ERASE_ENTITY,
   eraseDefect,
