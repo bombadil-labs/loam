@@ -85,7 +85,7 @@ describe("census ratchet counts", () => {
     const text = [
       "class Gateway {",
       "  get quarantinePools() { return this.store.tableOf(this).pools; }",
-      "  poolForBinding(b) { return poolForBindingImpl(this, b); }",
+      "  poolForBinding(binding) { return poolForBindingImpl(this, binding); }",
       "  other() { return this.store.tableOf(this).named; }",
       "}",
     ].join("\n");
@@ -95,6 +95,14 @@ describe("census ratchet counts", () => {
     const other = "class X { poolForBinding(b) { return this.quarantinePools.has(b); } }";
     expect(count(other).treeReach).toBe(1);
     expect(count(other, "src/gateway/gateway.ts").treeReach).toBe(1);
+    // In class Gateway itself, a facade member with any other body is counted.
+    for (const body of [
+      "class Gateway { poolForBinding(b) { return this.quarantinePools.has(b); } }",
+      "class Gateway { get channelPools() { return this.quarantinePools; } }",
+      "class Gateway { get quarantinePools() { return this.store.tableOf(this).named; } }",
+    ]) {
+      expect(count(body, "src/gateway/gateway.ts").treeReach, body).toBe(1);
+    }
   });
 
   it("counts the members the Peer type picks, and refuses any other shape of Peer", () => {

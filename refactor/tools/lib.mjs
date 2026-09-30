@@ -394,14 +394,15 @@ const TREE_MEMBERS = new Set([
 const CONTAINER_CODE = /src\/(gateway|federation)\//;
 const TREE_OWNERS = /src\/gateway\/(container|store)\.ts$/;
 // The facade's own definitions: these members of class Gateway, in gateway.ts, serve the doors and
-// commands. Their bodies are the definition, not a reach. Nothing else is exempt.
+// commands. A member is exempt only while its body is exactly the one-line definition below
+// (whitespace aside); any other body is counted like any other code. Nothing else is exempt.
 const FACADE_FILE = /src\/gateway\/gateway\.ts$/;
-const FACADE_MEMBERS = new Set([
-  "quarantinePools",
-  "attachedContainers",
-  "connectionInboxes",
-  "channelPools",
-  "poolForBinding",
+const FACADE_DEFINITIONS = new Map([
+  ["quarantinePools", "{return this.store.tableOf(this).pools;}"],
+  ["attachedContainers", "{return this.store.tableOf(this).named;}"],
+  ["connectionInboxes", "{return this.store.tableOf(this).inboxes;}"],
+  ["channelPools", "{return this.store.tableOf(this).channels;}"],
+  ["poolForBinding", "{return poolForBindingImpl(this, binding);}"],
 ]);
 
 // The ratchet's per-file counts. They are syntactic: a read through an alias the syntax tree
@@ -418,7 +419,7 @@ export function couplingCountsOf(file, text) {
   const facade = FACADE_FILE.test(unix);
   const isClock = (recv) => ["Date", "performance"].includes(lastName(recv));
   const visit = (n) => {
-    if (facade && definesFacadeMember(n)) return;
+    if (facade && definesFacadeMember(n, sf)) return;
     // A bare call counts too: an opener's function that hands a child out as a Gateway.
     if (!opener && ts.isCallExpression(n) && ts.isIdentifier(n.expression)) {
       if (TREE_MEMBERS.has(n.expression.text)) {
@@ -456,16 +457,15 @@ export function couplingCountsOf(file, text) {
   return counts;
 }
 
-// Is `n` a getter or method of class Gateway that defines one of the facade's members?
-function definesFacadeMember(n) {
+// Is `n` a getter or method of class Gateway whose body is exactly its facade definition?
+function definesFacadeMember(n, sf) {
   if (!ts.isGetAccessorDeclaration(n) && !ts.isMethodDeclaration(n)) return false;
   const owner = n.parent;
-  return (
-    ts.isClassDeclaration(owner) &&
-    owner.name?.text === "Gateway" &&
-    ts.isIdentifier(n.name) &&
-    FACADE_MEMBERS.has(n.name.text)
-  );
+  if (!ts.isClassDeclaration(owner) || owner.name?.text !== "Gateway") return false;
+  if (!ts.isIdentifier(n.name) || n.body === undefined) return false;
+  const squash = (text) => text.replace(/\s+/g, "");
+  const expected = FACADE_DEFINITIONS.get(n.name.text);
+  return expected !== undefined && squash(n.body.getText(sf)) === squash(expected);
 }
 
 // How many Gateway members one container may use of another: the members the `Peer` type in
