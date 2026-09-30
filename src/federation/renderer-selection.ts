@@ -190,7 +190,7 @@ export function selectRendererForActivation(
   const opening = evidence.opening;
   const received = evidence.received;
   const survives = survivalOver(received, gw.validityNow());
-  const pool = gw.channelPools.get(input.channel)?.gateway;
+  const pool = gw.store.channels(gw).get(input.channel)?.gateway;
   if (pool?.operatorAuthor === undefined)
     throw refusal("source_unavailable", `${input.channel} has no attached pool`);
   // WHAT THE RECEIPTS DO NOT SAY. Survival is decided over the received operand alone, so a strike

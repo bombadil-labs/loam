@@ -1,5 +1,6 @@
 // Protected local history. Raw restore is a trusted host capability; wire signatures alone
 // never establish that an event was issued by this home's channel service.
+import type { Peer } from "../gateway/peer.js";
 import { computeId, type Claims, type Delta, type Reactor } from "@bombadil/rhizomatic";
 import type { Gateway } from "../gateway/gateway.js";
 import { negatedAt } from "../gateway/negation.js";
@@ -357,7 +358,7 @@ type LocalChannelHistory =
   | {
       readonly state: "open";
       readonly opening: LocalChannelOpening;
-      readonly ground: Gateway;
+      readonly ground: Peer;
       readonly receivedIds: readonly string[];
     };
 
@@ -418,7 +419,7 @@ function projectLocalChannelHistory(gw: Gateway, channel: string): LocalChannelH
   for (const event of events)
     if (event.action === "open" && !openingAgrees(gw, event.opening))
       return unavailable("opening association disagrees with referenced status/pool");
-  const pool = gw.channelPools.get(channel),
+  const pool = gw.store.channels(gw).get(channel),
     status = gw.channelStatus(channel)[0];
   if (pool?.gateway === undefined || status === undefined || !gw.store.holds(gw, pool.gateway))
     return unavailable("opening has no exact attached pool/status");

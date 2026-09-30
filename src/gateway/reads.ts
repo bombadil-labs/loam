@@ -10,6 +10,7 @@
 // gateway only through its declared internals seam (the `@internal` members on the class — see the
 // seam note in gateway.ts).
 
+import type { Peer } from "./peer.js";
 import { parse, subscribe, type ExecutionResult, type GraphQLSchema } from "graphql";
 import {
   contentAddress,
@@ -460,7 +461,7 @@ export function gatherPoolForRetraction(
   name: string,
   entity: string,
   binding: ConnectionBinding,
-  pool: Gateway,
+  pool: Peer,
   now: number = gw.validityNow(),
 ): HView {
   const def = gw.def(name, binding);

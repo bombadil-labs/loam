@@ -45,6 +45,7 @@
 // What is still NOT bounded by either half: CPU inside the realm past the clock (`terminate()` is the
 // answer, and it is the timeout's), and §22 resolvers, which are not confined at all (`esm.ts`).
 
+import type { Peer } from "./peer.js";
 import type { Claims, Reactor } from "@bombadil/rhizomatic";
 import type { Gateway } from "./gateway.js";
 import { lawfulDeltasAt } from "./lawful.js";
@@ -342,7 +343,7 @@ export const clampedTo =
     };
   };
 
-// THE ONE TRAVERSAL of the runtime container tree: `quarantinePools`, the canonical registry of
+// THE ONE TRAVERSAL of the runtime container tree: the Store's pool sets, the canonical registry of
 // attachment, walked recursively because a pool may open a pool. Two consumers on purpose — the
 // §24.5 envelope report and drop()'s discard fan-out (container.ts) — so they cannot drift: a
 // second hand-rolled walk is a second registry, and two registries disagree in exactly the
@@ -351,11 +352,11 @@ export const clampedTo =
 // container is still attributable; an unnamed prefix would collide across two such containers and
 // read two pools as one. `seen` guards a cycle the attach rules already forbid.
 export function* poolsBeneath(
-  gw: Gateway,
+  gw: Peer,
   prefix = "",
-  seen = new Set<Gateway>(),
-): Generator<{ pool: Gateway; handle: string }> {
-  for (const pool of gw.quarantinePools) {
+  seen = new Set<Peer>(),
+): Generator<{ pool: Peer; handle: string }> {
+  for (const pool of gw.store.pools(gw)) {
     if (seen.has(pool)) continue;
     seen.add(pool);
     const handle = pool.poolHandle ?? "?";

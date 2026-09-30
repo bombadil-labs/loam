@@ -97,8 +97,8 @@ export function containerCensusImpl(gw: Gateway, name: string): ContainerCensus 
     // process attached without registering as a quarantine, contributes nothing to the scope,
     // and intersecting against it would move members into an "elsewhere" the reader never saw.
     if (table.detached.has(poolName)) continue;
-    const pool = gw.attachedContainers.get(poolName);
-    if (pool === undefined || !gw.quarantinePools.has(pool)) continue;
+    const pool = gw.store.namedPools(gw).get(poolName);
+    if (pool === undefined || !gw.store.hasPool(gw, pool)) continue;
     poolMembers.set(poolName, new Set([...pool.reactor.snapshot()].map((d) => d.id)));
   }
 

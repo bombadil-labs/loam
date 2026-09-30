@@ -13,6 +13,7 @@
 // through its declared internals seam (the `@internal` members on the class — see the seam note in
 // gateway.ts).
 
+import type { Peer } from "./peer.js";
 import { seedSigner } from "./signer.js";
 import { makeNegationClaims } from "@bombadil/rhizomatic";
 import type { HVEntry, Primitive } from "@bombadil/rhizomatic";
@@ -21,7 +22,7 @@ import { legalNameFor, queryFieldFor, type ClaimPointerSpec, type ResolvedNode }
 import { edgeRoles, lensOf, referenceProps, type ReferenceProp } from "./registration.js";
 import { delegatesEverOf, keysEverOf } from "./principal.js";
 import { gatherPoolForRetraction } from "./reads.js";
-import { attachedPool, poolOwner } from "./container.js";
+import { attachedPool, bindingPeer, poolOwner } from "./container.js";
 import { declaredInboxes, readContainerTable } from "./container-law.js";
 import { withStamp } from "./stamp.js";
 
@@ -34,7 +35,7 @@ function sinkFor(
   gw: Gateway,
   actorSeed: string | undefined,
   binding: ConnectionBinding | undefined,
-): Gateway {
+): Peer {
   if (binding === undefined) return gw;
   if (actorSeed === undefined) {
     throw new Error(
@@ -42,7 +43,7 @@ function sinkFor(
         `connection's own key writes into its inbox`,
     );
   }
-  return gw.poolForBinding(binding);
+  return bindingPeer(gw, binding);
 }
 
 // One signed property-claim delta per provided property, signed as the ACTOR (or the
@@ -121,7 +122,7 @@ async function retract(
   // The owner's clear reaches her connections' writes in her inbox pools (README ruling 8, M2):
   // for an unbound call, or a bound one signed by that pool's owner. Checked before anything is
   // signed, so a refusal here leaves nothing behind.
-  const ownerCall = binding === undefined || ownerOf(gw.poolForBinding(binding)) === author;
+  const ownerCall = binding === undefined || ownerOf(bindingPeer(gw, binding)) === author;
   const pools = ownerCall ? ownedPools(gw, author) : [];
   // UNNARROWED (SPEC §29.3): a read-closing slate must not turn this strike into a silent no-op —
   // the member would be absent from a narrowed hview, so nothing would be targeted and nothing signed.
@@ -194,7 +195,7 @@ async function retract(
 }
 
 // The key that owns inbox pool `pool`, or undefined when it has none readable.
-function ownerOf(pool: Gateway): string | undefined {
+function ownerOf(pool: Peer): string | undefined {
   const owner = poolOwner(pool);
   return "refusal" in owner ? undefined : owner.key;
 }
@@ -206,9 +207,9 @@ function ownerOf(pool: Gateway): string | undefined {
 function ownedPools(
   gw: Gateway,
   author: string,
-): { readonly name: string; readonly parent: string; readonly ground: Gateway }[] {
+): { readonly name: string; readonly parent: string; readonly ground: Peer }[] {
   const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
-  const out: { name: string; parent: string; ground: Gateway }[] = [];
+  const out: { name: string; parent: string; ground: Peer }[] = [];
   const unreadable: string[] = [];
   for (const name of declaredInboxes(table)) {
     if (!name.startsWith("inbox:")) continue;

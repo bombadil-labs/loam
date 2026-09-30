@@ -1,8 +1,11 @@
 // Probes for the census ratchet: each form it claims to count must move its count. A form the
 // ratchet misses is a coupling that can rise while `npm run check` stays green.
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { couplingCountsOf } from "./lib.mjs";
+import { couplingCountsOf, peerSurfaceOf } from "./lib.mjs";
 
 const CORE = "src/gateway/probe.ts";
 const count = (text, file = CORE) => couplingCountsOf(file, text);
@@ -57,17 +60,45 @@ describe("census ratchet counts", () => {
     expect(count("Date.now();", "src/server/probe.ts").coreClockReads).toBe(0);
   });
 
-  it("counts each line that reaches across containers, once, outside the opener and the store", () => {
+  it("counts each line of container code that reaches the tree as gateways, once, outside the opener and the store", () => {
     const text = [
       "gw.quarantinePools.has(p) && gw.channelPools.get(n);",
       "pool.attachedTo;",
       "gw.store.parentOf(p);",
       "gw.connectionInboxes.size;",
       "gw.attachedContainers;",
+      "gw.store.tableOf(gw).pools;",
+      "poolForBindingImpl(gw, binding);",
+      "gw.store.pools(gw);",
       "// gw.quarantinePools",
     ].join("\n");
-    expect(count(text).treeReach).toBe(4); // two members on the first line count once
+    expect(count(text).treeReach).toBe(7); // two members on the first line count once
+    expect(count(text, "src/federation/channel.ts").treeReach).toBe(7);
     expect(count(text, "src/gateway/container.ts").treeReach).toBe(0);
     expect(count(text, "src/gateway/store.ts").treeReach).toBe(0);
+    // A door or a command is a facade over one container, not a container.
+    expect(count(text, "src/server/admin.ts").treeReach).toBe(0);
+    expect(count(text, "src/cli/cli.ts").treeReach).toBe(0);
+  });
+
+  it("does not count a facade's own definition of a tree member", () => {
+    const text = [
+      "class Gateway {",
+      "  get quarantinePools() { return this.store.tableOf(this).pools; }",
+      "  poolForBinding(b) { return poolForBindingImpl(this, b); }",
+      "  other() { return this.store.tableOf(this).named; }",
+      "}",
+    ].join("\n");
+    expect(count(text).treeReach).toBe(1);
+  });
+
+  it("counts the members the Peer type picks", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "census-peer-"));
+    const file = path.join(dir, "src", "gateway", "peer.ts");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'export type Peer = Pick<Gateway, "reactor" | "store" | "close">;\n');
+    expect(peerSurfaceOf([file])).toBe(3);
+    expect(peerSurfaceOf([path.join(dir, "src", "gateway", "other.ts")])).toBe(0);
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });

@@ -373,14 +373,25 @@ function member(node) {
   return undefined;
 }
 
-// The members that hold the container tree, and the files allowed to touch them.
+// The members that hold the container tree, the container code that may not touch them, and the
+// files allowed to. Container code reads a child only as a Peer, through the Store. The doors and
+// commands (src/server, src/cli) are facades over one container of the store, not containers, so
+// they may look a container up in the table (step6-container-split.md).
 const TREE_MEMBERS = new Set([
   "attachedTo",
   "parentOf",
   "quarantinePools",
+  "attachedContainers",
   "channelPools",
   "connectionInboxes",
+  "tableOf",
+  "channelRecord",
+  "rootOf",
+  "verifiedRootOf",
+  "poolForBinding",
+  "poolForBindingImpl",
 ]);
+const CONTAINER_CODE = /src\/(gateway|federation)\//;
 const TREE_OWNERS = /src\/gateway\/(container|store)\.ts$/;
 
 // The ratchet's per-file counts. They are syntactic: a read through an alias the syntax tree
@@ -392,9 +403,19 @@ export function couplingCountsOf(file, text) {
   // Lines that reach across containers: a parent link or a child map, read or written anywhere but
   // the opener and the store itself (step6-container-split.md). Distinct lines, not occurrences.
   const reachLines = new Set();
-  const opener = TREE_OWNERS.test(file.replace(/\\/g, "/"));
+  const unix = file.replace(/\\/g, "/");
+  const opener = !CONTAINER_CODE.test(unix) || TREE_OWNERS.test(unix);
   const isClock = (recv) => ["Date", "performance"].includes(lastName(recv));
   const visit = (n) => {
+    // A getter or method that defines a tree member is the facade's definition of it, not a reach.
+    const defines = ts.isGetAccessorDeclaration(n) || ts.isMethodDeclaration(n);
+    if (defines && TREE_MEMBERS.has(n.name.getText(sf))) return;
+    // A bare call counts too: an opener's function that hands a child out as a Gateway.
+    if (!opener && ts.isCallExpression(n) && ts.isIdentifier(n.expression)) {
+      if (TREE_MEMBERS.has(n.expression.text)) {
+        reachLines.add(sf.getLineAndCharacterOfPosition(n.getStart(sf)).line);
+      }
+    }
     const m = member(n);
     if (m !== undefined) {
       const [recv, name] = m;
@@ -426,6 +447,22 @@ export function couplingCountsOf(file, text) {
   return counts;
 }
 
+// How many Gateway members one container may use of another: the members the `Peer` type in
+// src/gateway/peer.ts picks. 0 when the file is absent.
+export function peerSurfaceOf(files) {
+  const file = files.find((f) => f.replace(/\\/g, "/").endsWith("src/gateway/peer.ts"));
+  if (file === undefined) return 0;
+  const sf = ts.createSourceFile(file, fs.readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
+  let members = 0;
+  sf.forEachChild((n) => {
+    if (!ts.isTypeAliasDeclaration(n) || n.name.text !== "Peer") return;
+    const picked = ts.isTypeReferenceNode(n.type) ? n.type.typeArguments?.[1] : undefined;
+    const parts = picked === undefined ? [] : ts.isUnionTypeNode(picked) ? picked.types : [picked];
+    members = parts.filter((t) => ts.isLiteralTypeNode(t) && ts.isStringLiteral(t.literal)).length;
+  });
+  return members;
+}
+
 // Every ratchet count over `files`.
 export function couplingCounts(files) {
   const cycles = stronglyConnected(importGraph(files).edges, false);
@@ -437,6 +474,7 @@ export function couplingCounts(files) {
     snapshotRefs: 0,
     coreClockReads: 0,
     treeReach: 0,
+    peerSurface: peerSurfaceOf(files),
   };
   for (const file of files) {
     const per = couplingCountsOf(file, fs.readFileSync(file, "utf8"));

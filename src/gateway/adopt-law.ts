@@ -468,8 +468,8 @@ const latestAt = (src: Source, role: string, entity: string): Delta | undefined 
 // text; a version frozen over ground no attached container holds records the nameless label.
 function containerOf(gw: Gateway, version: ModuleVersion): string | undefined {
   const hits: string[] = [];
-  for (const [entity, pool] of gw.attachedContainers) {
-    if (!gw.quarantinePools.has(pool)) continue;
+  for (const [entity, pool] of gw.store.namedPools(gw)) {
+    if (!gw.store.hasPool(gw, pool)) continue;
     if (version.members.every((d) => pool.reactor.get(d.id) !== undefined)) hits.push(entity);
   }
   hits.sort();
