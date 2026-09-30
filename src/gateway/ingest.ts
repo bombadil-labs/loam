@@ -77,7 +77,8 @@ import { declaresTrust, readTrustPolicy } from "./trust.js";
 import { governedProgram, needsLowering } from "./governed-trust.js";
 import { recordPrevious, recoveryDefect, userGroundOf } from "./user-root.js";
 import { hasMemberOf, lowerMembershipJson } from "./member-of.js";
-import { attachedPool, declaredInboxes, readContainerTable } from "./container.js";
+import { attachedPool } from "./container.js";
+import { declaredInboxes, readContainerTable } from "./container-law.js";
 import {
   cutForHere,
   isCutManifest,

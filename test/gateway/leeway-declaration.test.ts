@@ -44,7 +44,7 @@ import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { containerClaims, readContainerTable } from "../../src/gateway/container.js";
+import { containerClaims, readContainerTable } from "../../src/gateway/container-law.js";
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { listingContainerName } from "../../src/gateway/listing.js";

@@ -40,6 +40,8 @@ import {
   type HostPeer,
 } from "./peer-admission.js";
 import { stampOn, type Stamp } from "./stamp.js";
+import { claimGatewayMarker } from "./gateway-brand.js";
+import { NUL } from "./alphabet.js";
 import { declarePrincipalScope } from "./principal.js";
 import { declareUserGround, userGroundOf } from "./user-root.js";
 import { promoteImpl, readAdoptions, type Adoption } from "./adopt.js";
@@ -168,13 +170,12 @@ import {
   connectionScopeImpl,
   containerScopeImpl,
   openContainerImpl,
-  readContainerTable,
   revokeConnectionImpl,
   type BindConnectionOptions,
   type Container,
   type ContainerOptions,
-  type ContainerTable,
 } from "./container.js";
+import { readContainerTable, type ContainerTable } from "./container-law.js";
 import type { Probation } from "./probation.js";
 import {
   declareArtifactImpl,
@@ -355,10 +356,7 @@ export class NothingPublic extends Error {
   }
 }
 
-// The gateway's own alphabet: NUL separates the segments of internal materialization names and
-// comparison keys, and register() refuses it in schema names, so nothing user-supplied collides.
-/** @internal - T19 seam (lifecycle.ts) */
-export const NUL = "\u0000";
+export { NUL } from "./alphabet.js";
 
 // What the gateway holds bound: a registration plus where it came from. Manual registrations
 // (register()) live only in this process; store-derived ones are re-generated from deltas on
@@ -409,6 +407,9 @@ function erasedIdsOf(reactor: Reactor, operator: string | undefined): ReadonlySe
   erasedCache.set(reactor, { size: reactor.size, ids });
   return ids;
 }
+
+// This module alone can mark a real gateway (gateway-brand.ts).
+const markGateway = claimGatewayMarker();
 
 export class Gateway {
   /** @internal — T19 seam (renderers.ts) */
@@ -559,6 +560,7 @@ export class Gateway {
     /** @internal — T19 seam (erase.ts, quarantine-pool.ts, adopt.ts) */
     readonly options: GatewayOptions,
   ) {
+    markGateway(this);
     this._reactor = reactor;
     const seed = options.seed;
     this.signer = seed === undefined ? undefined : seedSigner(seed);
@@ -631,6 +633,12 @@ export class Gateway {
   // core — the operator marker at `loam:store`/`loam.operator` that says who governs this store.
   // If a governed store's own read quarantined that marker, the store cannot know its own
   // constitution, and that is a failure the operator must see, not one to boot past.
+  /** @internal — a child ground over `backend`: the pool opener reaches the class through its
+   * parent, so it needs only the type. */
+  openChild(backend: StoreBackend, options: GatewayOptions): Promise<Gateway> {
+    return Gateway.open(backend, options);
+  }
+
   static async open(backend: StoreBackend, options: GatewayOptions = {}): Promise<Gateway> {
     const seed = options.seed;
     const reactor = new Reactor();

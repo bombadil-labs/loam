@@ -24,7 +24,7 @@ import { hashPassword, writeCredentials, type ScryptParams } from "../../src/ser
 import { roleClaims, userClaims } from "../../src/server/users.js";
 import { PRESESSION_COOKIE, SESSION_COOKIE } from "../../src/server/session.js";
 import { grantClaims } from "../../src/gateway/accounts.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import { writeUserSeed } from "../../src/cli/config.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE, garden } from "./../gateway/fixtures.js";

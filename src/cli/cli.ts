@@ -64,9 +64,8 @@ import {
   grantClaims,
   grantsNaming,
   holdsGrant,
-  honoredStrikeOn,
-  validAt,
 } from "../gateway/accounts.js";
+import { honoredStrikeOn, validAt } from "../gateway/grants-law.js";
 import { negatedAt } from "../gateway/negation.js";
 import {
   lensNameFor,

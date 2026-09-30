@@ -65,14 +65,14 @@ import {
   quietClaims,
   quietContainersImpl,
 } from "../gateway/attention.js";
+import { type Container } from "../gateway/container.js";
 import {
   containerClaims,
   detachClaims,
   survivingDeclarationIds,
-  type Container,
   type ContainerTable,
   type ResolvedContainer,
-} from "../gateway/container.js";
+} from "../gateway/container-law.js";
 import { Gateway } from "../gateway/gateway.js";
 import { queryFieldFor } from "../gateway/gql.js";
 import {

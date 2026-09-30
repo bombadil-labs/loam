@@ -41,8 +41,8 @@ export {
   holdsGrant,
   membershipClaims,
   revocationClaims,
-  type Verb,
 } from "../gateway/accounts.js";
+export { type Verb } from "../gateway/grants-law.js";
 export { publicClaims } from "../gateway/public.js";
 export { eraseClaims, readErasures } from "../gateway/erase.js";
 export {

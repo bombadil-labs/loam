@@ -185,7 +185,7 @@ import { SqliteBackend } from "../../src/store/sqlite.js";
 import { admitLocal, openHostPeer } from "../../src/gateway/peer-admission.js";
 import type { ScryptParams } from "../../src/server/credentials.js";
 import type { StoreBackend } from "../../src/store/backend.js";
-import { termClaims } from "../../src/gateway/container.js";
+import { termClaims } from "../../src/gateway/container-law.js";
 import { entityGatherJson } from "../../src/gateway/gather.js";
 import {
   BEFORE_DEADLINE,

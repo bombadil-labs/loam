@@ -52,7 +52,7 @@ import {
 } from "@bombadil/rhizomatic";
 import { TENANT, TENANT_POLICY, tenantSchemaFor } from "../../src/gateway/accounts.js";
 import { manifestExportClaims } from "../../src/gateway/adopt-law.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import {

@@ -1,6 +1,7 @@
 import type { ChannelStatus } from "../federation/channel.js";
 import type { ConnectionBinding, Gateway } from "./gateway.js";
-import { chainBreaksAt, openerStands, readContainerTable, receivesNow } from "./container.js";
+import { openerStands } from "./container.js";
+import { chainBreaksAt, readContainerTable, receivesNow } from "./container-law.js";
 
 /**
  * Does this connection still stand? TWO QUESTIONS, NOT ONE, and every road that acts on a

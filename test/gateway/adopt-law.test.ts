@@ -40,7 +40,8 @@ import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { bytesRefOf } from "../../src/gateway/bytes.js";
 import { isAdoption } from "../../src/gateway/adopt.js";
-import { containerClaims, type Container } from "../../src/gateway/container.js";
+import { type Container } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import {
   lensOf,
   registrationDeltaClaims,

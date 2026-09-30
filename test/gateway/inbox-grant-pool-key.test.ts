@@ -4,7 +4,8 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed } from "@bombadil/rhizomatic";
-import { containerClaims, inboxName, openerStands } from "../../src/gateway/container.js";
+import { openerStands } from "../../src/gateway/container.js";
+import { containerClaims, inboxName } from "../../src/gateway/container-law.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { connectionGrantState } from "../../src/server/admin-federation.js";

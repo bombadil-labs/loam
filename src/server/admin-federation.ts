@@ -23,12 +23,12 @@ import { parseOffer } from "../federation/offer.js";
 import { CTX_GRANTS, holdsGrant, struckAt } from "../gateway/accounts.js";
 import { delegationStatesFor } from "../gateway/principal.js";
 import { withBatchNegationClosure } from "../gateway/ingest.js";
+import { type Container } from "../gateway/container.js";
 import {
-  type Container,
   type ContainerTable,
   type ResolvedContainer,
   grantRoots,
-} from "../gateway/container.js";
+} from "../gateway/container-law.js";
 import { Gateway, type FederationReport } from "../gateway/gateway.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
 import { clientFor, readOAuthFile, type OAuthFile } from "./oauth-file.js";

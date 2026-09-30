@@ -16,7 +16,7 @@ import {
   CTX_CONTAINER_EXCLUDED,
   containerClaims,
   exclusionClaims,
-} from "../../src/gateway/container.js";
+} from "../../src/gateway/container-law.js";
 import { channelRecordClaims } from "../../src/federation/channel.js";
 import {
   currentPoolDeclaration,

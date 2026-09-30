@@ -60,7 +60,7 @@ import {
 } from "@bombadil/rhizomatic";
 import { ADOPTION_ENTITY, CTX_ADOPTION, isAdoption } from "./adopt.js";
 import { bytesRefOf } from "./bytes.js";
-import { CTX_CONTAINER } from "./container.js";
+import { CTX_CONTAINER } from "./container-law.js";
 import type { ModuleVersion } from "./container-identity.js";
 import type { Gateway } from "./gateway.js";
 import { publishRegistrationImpl } from "./lifecycle.js";

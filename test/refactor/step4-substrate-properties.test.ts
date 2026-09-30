@@ -15,7 +15,8 @@ import {
   signClaims,
   type Delta,
 } from "@bombadil/rhizomatic";
-import { dataStruck, honoredStrikeOn } from "../../src/gateway/accounts.js";
+import { dataStruck } from "../../src/gateway/accounts.js";
+import { honoredStrikeOn } from "../../src/gateway/grants-law.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { lawfulNegated, negatedAt } from "../../src/gateway/negation.js";

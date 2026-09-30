@@ -35,7 +35,7 @@ import {
   inboxName,
   survivingWriteGrantIds,
   termClaims,
-} from "../../src/gateway/container.js";
+} from "../../src/gateway/container-law.js";
 import { Gateway, type ConnectionBinding } from "../../src/gateway/gateway.js";
 import { entityGatherBody } from "../../src/gateway/gather.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";

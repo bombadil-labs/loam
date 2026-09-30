@@ -19,12 +19,8 @@
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
-import {
-  containerClaims,
-  CTX_CONTAINER,
-  inboxName,
-  type Container,
-} from "../../src/gateway/container.js";
+import { type Container } from "../../src/gateway/container.js";
+import { containerClaims, CTX_CONTAINER, inboxName } from "../../src/gateway/container-law.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway, type ConnectionBinding } from "../../src/gateway/gateway.js";
 import { lensOf } from "../../src/gateway/registration.js";

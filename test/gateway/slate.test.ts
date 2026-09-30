@@ -16,7 +16,7 @@
 import { describe, expect, it } from "vitest";
 import { signClaims } from "@bombadil/rhizomatic";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { CONTAINER_CONTEXTS, termClaims } from "../../src/gateway/container.js";
+import { CONTAINER_CONTEXTS, termClaims } from "../../src/gateway/container-law.js";
 import { eraseClaims } from "../../src/gateway/erase.js";
 import {
   CTX_GRAVEYARD,

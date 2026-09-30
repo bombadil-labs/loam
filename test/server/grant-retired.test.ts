@@ -4,8 +4,8 @@ import { signClaims } from "@bombadil/rhizomatic";
 import { readRegistrations } from "../../src/gateway/registration.js";
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
-import { readContainerTable } from "../../src/gateway/container.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { readContainerTable } from "../../src/gateway/container-law.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import { SEALED_LEEWAY, type Leeway } from "../../src/gateway/leeway.js";
 import type { Gateway } from "../../src/gateway/gateway.js";
 import {

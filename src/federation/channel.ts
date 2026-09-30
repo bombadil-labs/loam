@@ -26,14 +26,14 @@ import type { Delta } from "@bombadil/rhizomatic";
 import type { Claims } from "@bombadil/rhizomatic";
 import { contentAddress, DeltaSet, makeNegationClaims } from "@bombadil/rhizomatic";
 import type { Container } from "../gateway/container.js";
+import { openerStands } from "../gateway/container.js";
 import {
   containerClaims,
   danglingAncestor,
   everDeclared,
-  openerStands,
   readContainerTable,
   receivesNow,
-} from "../gateway/container.js";
+} from "../gateway/container-law.js";
 import type { FederationReport, Gateway } from "../gateway/gateway.js";
 import { legalNameFor } from "../gateway/gql.js";
 import { parseOffer } from "./offer.js";

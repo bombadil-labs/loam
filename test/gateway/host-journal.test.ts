@@ -18,7 +18,7 @@ import {
   type DurablePeerState,
 } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import { eraseClaims } from "../../src/gateway/erase.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";

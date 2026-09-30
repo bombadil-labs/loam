@@ -48,7 +48,8 @@ import {
 import { CTX_GRANTS, grantsNaming } from "../gateway/accounts.js";
 import { keysEverOf } from "../gateway/principal.js";
 import { withStamp } from "../gateway/stamp.js";
-import { attachedPool, declaredInboxes, readContainerTable } from "../gateway/container.js";
+import { attachedPool } from "../gateway/container.js";
+import { declaredInboxes, readContainerTable } from "../gateway/container-law.js";
 import { readErasures, refusedIds } from "../gateway/erase.js";
 import {
   cutClaims,

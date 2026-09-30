@@ -43,7 +43,7 @@ import { declareOwned, ensureUserKey, LEAF_RE } from "./provision.js";
 import { bindableOf, isBindableName, subtreeOf } from "./subtree.js";
 import { leewayFields, leewayFromFields } from "./leeway-form.js";
 import { canonicalLeewayJson, SEALED_LEEWAY, type Leeway } from "../gateway/leeway.js";
-import { governingLeeway } from "../gateway/container.js";
+import { governingLeeway } from "../gateway/container-law.js";
 
 /** The one scope §37 ships. A scope LIST replaces it when a second one exists. */
 export const CONNECTOR_SCOPE = "loam.connector";

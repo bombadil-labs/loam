@@ -20,7 +20,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { holdsGrant } from "../../src/gateway/accounts.js";
-import { inboxName } from "../../src/gateway/container.js";
+import { inboxName } from "../../src/gateway/container-law.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";

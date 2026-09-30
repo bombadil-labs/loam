@@ -40,7 +40,7 @@ import {
   listingPageImpl,
   projectListingEntities,
 } from "../../src/gateway/listing.js";
-import { containerClaims, exclusionClaims } from "../../src/gateway/container.js";
+import { containerClaims, exclusionClaims } from "../../src/gateway/container-law.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE, pickLatest } from "./fixtures.js";

@@ -14,7 +14,7 @@ import { readSeed, readUserSeed, storePath, userSeedPath } from "../../src/cli/c
 import { recoverUser, type RecoverOptions } from "../../src/cli/user-recover.js";
 import { writtenByUser } from "../../src/gateway/member-of.js";
 import { FERN, observed } from "../spike/garden.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import { refusedIds } from "../../src/gateway/erase.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";

@@ -14,7 +14,7 @@ import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { describe, expect, it } from "vitest";
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { containerCensusImpl, survivingContextsOf } from "../../src/gateway/container-census.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { MemoryBackend } from "../../src/store/memory.js";

@@ -30,7 +30,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { authorForSeed, parseTerm, signClaims } from "@bombadil/rhizomatic";
 import { Gateway, type ConnectionBinding } from "../../src/gateway/gateway.js";
-import { containerClaims, readContainerTable } from "../../src/gateway/container.js";
+import { containerClaims, readContainerTable } from "../../src/gateway/container-law.js";
 import { revocationClaims } from "../../src/gateway/accounts.js";
 import { ENVELOPE_ANY, envelopeClaims } from "../../src/gateway/envelope.js";
 import {

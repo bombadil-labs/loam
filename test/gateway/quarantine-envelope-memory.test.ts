@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import { DEFAULT_QUARANTINE_ENVELOPE, envelopeClaims } from "../../src/gateway/envelope.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";

@@ -12,7 +12,7 @@ import { rmSync } from "node:fs";
 import { authorForSeed } from "@bombadil/rhizomatic";
 import { readUserSeed, userSeedPath, writeUserSeed } from "../cli/config.js";
 import { grantClaims } from "../gateway/accounts.js";
-import { containerClaims } from "../gateway/container.js";
+import { containerClaims } from "../gateway/container-law.js";
 import type { Gateway } from "../gateway/gateway.js";
 import { STORE_ENTITY } from "../gateway/genesis.js";
 import type { Leeway } from "../gateway/leeway.js";

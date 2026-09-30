@@ -19,7 +19,7 @@ import {
   type Schema,
 } from "@bombadil/rhizomatic";
 import { manifestExportClaims } from "../../src/gateway/adopt-law.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { registrationDeltaClaims } from "../../src/gateway/registration.js";

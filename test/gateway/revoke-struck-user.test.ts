@@ -8,7 +8,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { delegationClaims } from "../../src/gateway/principal.js";

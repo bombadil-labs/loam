@@ -17,7 +17,7 @@ import {
 import { grantClaims, grantsHeldBy, grantsNaming, holdsGrant } from "../../src/gateway/accounts.js";
 import { connectionGrantState } from "../../src/server/admin-federation.js";
 import { eraseClaims } from "../../src/gateway/erase.js";
-import { containerClaims, inboxName } from "../../src/gateway/container.js";
+import { containerClaims, inboxName } from "../../src/gateway/container-law.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { delegationClaims } from "../../src/gateway/principal.js";

@@ -13,7 +13,8 @@ import {
   type DerivedFn,
   type Reactor,
 } from "@bombadil/rhizomatic";
-import { NUL, type Gateway } from "../gateway/gateway.js";
+import type { Gateway } from "../gateway/gateway.js";
+import { NUL } from "../gateway/alphabet.js";
 import { negatedAt } from "../gateway/negation.js";
 
 export const CTX_BINDING = "loam.binding";

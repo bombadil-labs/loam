@@ -54,7 +54,7 @@ import {
   governingLeeway,
   inboxName,
   readContainerTable,
-} from "../../src/gateway/container.js";
+} from "../../src/gateway/container-law.js";
 import {
   DEFAULT_QUARANTINE_ENVELOPE,
   ENVELOPE_ANY,

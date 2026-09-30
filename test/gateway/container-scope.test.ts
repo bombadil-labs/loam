@@ -16,7 +16,7 @@ import {
   detachClaims,
   exclusionClaims,
   termClaims,
-} from "../../src/gateway/container.js";
+} from "../../src/gateway/container-law.js";
 import { assertClosureDoesNotLeak, assertPreservesSuppression, retraction } from "./narrowing.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";

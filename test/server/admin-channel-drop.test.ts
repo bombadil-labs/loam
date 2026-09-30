@@ -20,7 +20,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Claims, type Delta } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { writeUserSeed } from "../../src/cli/config.js";

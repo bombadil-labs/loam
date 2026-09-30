@@ -12,8 +12,8 @@ export {
   revocationClaims,
   tenantOf,
   tenantSchemaFor,
-  type Verb,
 } from "./gateway/accounts.js";
+export { type Verb } from "./gateway/grants-law.js";
 // The gather, named: the hyperschema body every plain entity wants, and the edge-field shape over
 // it. Public because the alternative is what the tree did for a year — retype a five-level Term
 // literal per schema, in two dialects, and hope the copies stay the same program.
@@ -126,6 +126,7 @@ export {
 // body takes a `Gateway` because two modules in this package share one implementation, and
 // `withLivingNames` writes an `@internal` seam field — publishing either would freeze a seam as
 // API, so neither appears here however public the compiler thinks it is.
+export { type Container, type ContainerOptions } from "./gateway/container.js";
 export {
   CONTAINER_CONTEXTS,
   CTX_CONTAINER,
@@ -138,15 +139,13 @@ export {
   exclusionClaims,
   readContainerTable,
   termClaims,
-  type Container,
-  type ContainerOptions,
   type ContainerPosture,
   type ContainerSpec,
   type ContainerTable,
   type ContainerTrust,
   type DetachRecord,
   type ResolvedContainer,
-} from "./gateway/container.js";
+} from "./gateway/container-law.js";
 export {
   leewayFits,
   parseLeeway,

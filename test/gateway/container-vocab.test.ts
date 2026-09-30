@@ -27,7 +27,7 @@ import {
   containerClaims,
   detachClaims,
   exclusionClaims,
-} from "../../src/gateway/container.js";
+} from "../../src/gateway/container-law.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 

@@ -31,7 +31,7 @@ import { FERN, observed } from "../spike/garden.js";
 import { authorForSeed, Reactor, signClaims, type Claims } from "@bombadil/rhizomatic";
 import { userSeedPath } from "../../src/cli/config.js";
 import { holdsGrant } from "../../src/gateway/accounts.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { MemoryBackend } from "../../src/store/memory.js";

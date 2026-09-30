@@ -37,7 +37,7 @@ import {
   detachClaims,
   exclusionClaims,
   termClaims,
-} from "../../src/gateway/container.js";
+} from "../../src/gateway/container-law.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE, pickLatest } from "./fixtures.js";

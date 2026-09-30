@@ -19,7 +19,7 @@ import {
   survivalOver,
 } from "../gateway/adopt-law.js";
 import { boundChannelAdmits } from "../gateway/connection-authority.js";
-import { inboxName, readContainerTable, withinSubtree } from "../gateway/container.js";
+import { inboxName, readContainerTable, withinSubtree } from "../gateway/container-law.js";
 import type { ConnectionBinding, Gateway } from "../gateway/gateway.js";
 import { CTX_RENDERER } from "../gateway/renderers.js";
 import { channelStatusImpl } from "./channel.js";

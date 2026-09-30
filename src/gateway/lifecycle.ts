@@ -29,9 +29,11 @@ import {
   type Primitive,
   type Schema,
 } from "@bombadil/rhizomatic";
-import { openerStands, readContainerTable, receivesNow, subtreeUnder } from "./container.js";
+import { openerStands } from "./container.js";
+import { readContainerTable, receivesNow, subtreeUnder } from "./container-law.js";
 import { fenceAdmits } from "./accounts.js";
-import { NUL, type Bound, type Gateway, type RequestContext } from "./gateway.js";
+import type { Bound, Gateway, RequestContext } from "./gateway.js";
+import { NUL } from "./alphabet.js";
 import { buildGqlSchema } from "./gql.js";
 import {
   readLawfulContested,

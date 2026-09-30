@@ -21,7 +21,8 @@ import { legalNameFor, queryFieldFor, type ClaimPointerSpec, type ResolvedNode }
 import { edgeRoles, lensOf, referenceProps, type ReferenceProp } from "./registration.js";
 import { delegatesEverOf, keysEverOf } from "./principal.js";
 import { gatherPoolForRetraction } from "./reads.js";
-import { attachedPool, declaredInboxes, poolOwner, readContainerTable } from "./container.js";
+import { attachedPool, poolOwner } from "./container.js";
+import { declaredInboxes, readContainerTable } from "./container-law.js";
 import { withStamp } from "./stamp.js";
 
 // Where a write LANDS (SPEC §58): a bound connection's deltas go into its inbox pool — the pool's

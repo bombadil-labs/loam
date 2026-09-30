@@ -20,7 +20,7 @@ import { channelBackendFor, run } from "../../src/cli/cli.js";
 import { readSeed, readUserSeed, storePath, userSeedPath } from "../../src/cli/config.js";
 import { recoverUser, type RecoverOptions } from "../../src/cli/user-recover.js";
 import { grantClaims, holdsGrant } from "../../src/gateway/accounts.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import { eraseClaims } from "../../src/gateway/erase.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";

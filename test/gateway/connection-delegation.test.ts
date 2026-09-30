@@ -20,7 +20,7 @@ import {
 } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { delegationClaims } from "../../src/gateway/principal.js";
-import { containerClaims, inboxName } from "../../src/gateway/container.js";
+import { containerClaims, inboxName } from "../../src/gateway/container-law.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { connectionGrantState } from "../../src/server/admin-federation.js";

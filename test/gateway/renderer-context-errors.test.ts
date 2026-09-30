@@ -3,7 +3,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
-import { containerClaims } from "../../src/gateway/container.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
 import { ENVELOPE_ANY, envelopeClaims } from "../../src/gateway/envelope.js";
 import {
   createBoundRendererContext,
