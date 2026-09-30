@@ -245,6 +245,10 @@ export function containerScopeImpl(
  * fold and the doors ask again, exactly as the open request asked. An absent leeway is every
  * switch off, here as everywhere.
  */
+// The opener's walk over the tree: each child as its gateway, because the opener attaches, discards
+// and closes them. Only this file walks children this way; container code walks peers.
+const openerPools = (parent: Gateway): Iterable<Gateway> => parent.store.tableOf(parent).pools;
+
 /** The attached gateway of pool `name` (a connection inbox or a channel pool), or undefined. */
 export function attachedPool(gw: Gateway, name: string): Peer | undefined {
   return gw.store.inboxes(gw).get(name)?.gateway ?? gw.store.channels(gw).get(name)?.gateway;
@@ -637,7 +641,7 @@ async function openSeparate(
     const root = gw.store.rootOf(gw);
     if (
       spec.backend === root.backend ||
-      [...poolsBeneath(root)].some(({ pool: p }) => p.backend === spec.backend)
+      [...poolsBeneath(root, openerPools)].some(({ pool: p }) => p.backend === spec.backend)
     ) {
       throw new Error(
         `${voice}: a separate container may not take a store already inside this tree as its ` +
@@ -911,7 +915,7 @@ async function openSeparate(
       // so the enumeration is their union; and the §25 quarantine pen — rows a read SET ASIDE
       // as corrupt, still legible bytes on disk — is swept by its own door, since no id-keyed
       // purge can reach a row whose id was never returned.
-      const discardBytes = async (target: Peer, who: string): Promise<void> => {
+      const discardBytes = async (target: Gateway, who: string): Promise<void> => {
         const ids = new Set((await target.backend.deltasSince(new Set())).map((d) => d.id));
         for (const d of target.reactor.snapshot()) ids.add(d.id);
         if (isRepairable(target.backend)) {
@@ -979,7 +983,7 @@ async function openSeparate(
       // The subtree, in the SAME walk the §24.5 envelope report runs (`poolsBeneath` — one
       // traversal, two consumers, so what a report can bill a drop can always reach). Collected
       // before anything is purged: a pool attached mid-drop is outside this order's jurisdiction.
-      const beneath = [...poolsBeneath(pool, `${pool.poolHandle ?? "?"}/`)];
+      const beneath = [...poolsBeneath(pool, openerPools, `${pool.poolHandle ?? "?"}/`)];
       try {
         for (const { pool: nested, handle } of beneath) {
           await discardBytes(nested, `the nested pool "${handle}"`);

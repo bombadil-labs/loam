@@ -31,6 +31,8 @@ describe("operations a container performs when another asks", () => {
       p.stamp,
       // @ts-expect-error a Peer has no def: a read of what it serves goes through `registered`
       p.def,
+      // @ts-expect-error a Peer has no backend: another container asks `probe`, and never purges
+      p.backend,
     ];
     expect(typeof reach).toBe("function");
   });
@@ -82,6 +84,26 @@ describe("operations a container performs when another asks", () => {
     const revs = pool.revocations([grant!.id]);
     expect(revs.map((d) => d.claims.author)).toEqual([pool.operatorAuthor]);
     expect(pool.reactor.get(revs[0]!.id)).toBeUndefined(); // returned, not admitted
+    await host.close();
+  });
+
+  it("probe answers from the container's own store only", async () => {
+    const { host, pool } = await tree();
+    const inPool = observed(FERN, "height", 3, 1000, SEED);
+    const inHost = observed(FERN, "height", 4, 1001, SEED);
+    expect((await pool.federate([inPool], { admit: () => true })).accepted).toBe(1);
+    await host.append([inHost]);
+    const peer: Peer = pool;
+    expect(await peer.probe({ holds: inPool.id })).toBe(true);
+    expect(await peer.probe({ holds: inHost.id })).toBe(false);
+    const retention = await peer.probe({ retention: [inPool.id, inHost.id] });
+    expect([...retention.held]).toEqual([inPool.id]);
+    expect(await peer.probe("any")).toBe(true);
+    const inventory = await peer.probe("inventory");
+    expect(typeof inventory === "string" ? inventory : inventory.has(inPool.id)).toBe(true);
+    expect(typeof inventory === "string" ? inventory : inventory.has(inHost.id)).toBe(false);
+    expect(await host.probe({ holds: inPool.id })).toBe(false);
+    expect(await host.probe({ holds: inHost.id })).toBe(true);
     await host.close();
   });
 

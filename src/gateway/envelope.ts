@@ -350,18 +350,20 @@ export const clampedTo =
 // direction that costs bytes — a pool the report bills but no discard reaches (T162). Every
 // separate container carries a handle, enveloped or not, so a pool nested under a CURATED
 // container is still attributable; an unnamed prefix would collide across two such containers and
-// read two pools as one. `seen` guards a cycle the attach rules already forbid.
-export function* poolsBeneath(
-  gw: Peer,
+// read two pools as one. `seen` guards a cycle the attach rules already forbid. The report walks
+// peers; the opener's drop passes its own table, which is the one walk with a child's store in hand.
+export function* poolsBeneath<P extends Pick<Peer, "poolHandle">>(
+  gw: P,
+  childrenOf: (parent: P) => Iterable<P>,
   prefix = "",
-  seen = new Set<Peer>(),
-): Generator<{ pool: Peer; handle: string }> {
-  for (const pool of gw.store.pools(gw)) {
+  seen = new Set<P>(),
+): Generator<{ pool: P; handle: string }> {
+  for (const pool of childrenOf(gw)) {
     if (seen.has(pool)) continue;
     seen.add(pool);
     const handle = pool.poolHandle ?? "?";
     yield { pool, handle: prefix + handle };
-    yield* poolsBeneath(pool, `${prefix}${handle}/`, seen);
+    yield* poolsBeneath(pool, childrenOf, `${prefix}${handle}/`, seen);
   }
 }
 
@@ -370,7 +372,7 @@ export function* poolsBeneath(
 // it. A separate container that is not untrusted carries no envelope and is absent by construction.
 export function envelopeReportsImpl(gw: Gateway): EnvelopeReport[] {
   const rows: EnvelopeReport[] = [];
-  for (const { pool, handle } of poolsBeneath(gw)) {
+  for (const { pool, handle } of poolsBeneath<Peer>(gw, (p) => p.store.pools(p))) {
     const env = pool.envelope;
     if (env === undefined) continue;
     rows.push({

@@ -103,6 +103,24 @@ describe("the store of a container tree", () => {
     await gw.close();
   });
 
+  it("the chain above a container runs nearest first and stops at a broken link or a loop", async () => {
+    const gw = await host();
+    const p = (await gw.openQuarantine()).gateway;
+    const q = (await p.openQuarantine()).gateway;
+    expect(gw.store.chainAbove(q)).toEqual([p, gw]);
+    expect(gw.store.chainAbove(gw)).toEqual([]);
+    gw.quarantinePools.delete(p); // gw no longer holds p: the walk stops below gw
+    expect(gw.store.chainAbove(q)).toEqual([p]);
+    gw.quarantinePools.add(p);
+    // A loop (gw attached below q): each container is visited once, and the walk ends.
+    gw.store.attach(gw, q);
+    q.quarantinePools.add(gw);
+    expect(gw.store.chainAbove(q)).toEqual([p, gw, q]);
+    q.quarantinePools.delete(gw);
+    gw.store.detach(gw);
+    await gw.close();
+  });
+
   it("a channel pool is recorded, read as a peer entry, and dropped through the store", async () => {
     const gw = await host();
     const handle = await gw.openQuarantine();

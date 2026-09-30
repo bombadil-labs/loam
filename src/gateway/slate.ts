@@ -831,7 +831,7 @@ async function tierVerdicts(
   const out: TierVerdict[] = [];
   for (const { tier, gw: g } of reachableTiers(gw)) {
     try {
-      out.push({ tier, holds: await g.backend.holds(id) });
+      out.push({ tier, holds: await g.probe({ holds: id }) });
     } catch {
       out.push({ tier, holds: "unproven" }); // proven nothing (H9), never proven clean
     }

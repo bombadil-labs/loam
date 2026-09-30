@@ -43,6 +43,11 @@ import {
 } from "./peer-admission.js";
 import { stampOn, withStamp, type Stamp } from "./stamp.js";
 import { manifestExportClaims, type ManifestExport } from "./adopt-vocab.js";
+import { probePhysicalRetention, storeHoldsAny, storeInventory } from "./custody.js";
+
+/** A question `Gateway.probe` answers about a container's own stored bytes. */
+type ProbeQuestion =
+  { readonly holds: string } | { readonly retention: readonly string[] } | "any" | "inventory";
 import { claimGatewayMarker } from "./gateway-brand.js";
 import { Store } from "./store.js";
 import { NUL } from "./alphabet.js";
@@ -1461,6 +1466,26 @@ export class Gateway {
         withStamp(this.stamp(signer.author), (t) => revocationClaims(id, signer.author, t)),
       ),
     );
+  }
+
+  /**
+   * Answer a read-only question about the bytes this container's own store holds, on every tier:
+   * one id (`holds`, which throws when the store cannot answer), a batch (`retention`, whose
+   * unanswerable ids come back `unasked`), whether it holds any bytes at all (`any`: unprovable
+   * reads as true), or every id it holds (`inventory`: the reason, when it cannot be listed).
+   * Another container asks; none reaches this one's store.
+   */
+  probe(q: { readonly holds: string }): Promise<boolean>;
+  probe(q: {
+    readonly retention: readonly string[];
+  }): Promise<{ held: Set<string>; unasked: Set<string> }>;
+  probe(q: "any"): Promise<boolean>;
+  probe(q: "inventory"): Promise<Set<string> | string>;
+  probe(q: ProbeQuestion): Promise<unknown> {
+    if (q === "any") return storeHoldsAny(this.backend);
+    if (q === "inventory") return storeInventory(this.backend);
+    if ("holds" in q) return this.backend.holds(q.holds);
+    return probePhysicalRetention(this.backend, q.retention);
   }
 
   /** Record manifest export rows here (§27.8) in one batch, signed with this container's key. */

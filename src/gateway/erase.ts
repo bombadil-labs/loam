@@ -37,7 +37,7 @@ import {
 // preimage; partial redaction = reassert with values replaced.
 
 import { sha256 } from "@noble/hashes/sha2.js";
-import { probePhysicalRetention } from "./custody.js";
+import { storeHoldsAny } from "./custody.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { DeltaSet, Reactor } from "@bombadil/rhizomatic";
 import type { Claims, Delta } from "@bombadil/rhizomatic";
@@ -57,7 +57,6 @@ import {
   type SlateHealth,
 } from "./slate-law.js";
 import type { Gateway } from "./gateway.js";
-import type { StoreBackend } from "../store/backend.js";
 import { withStamp } from "./stamp.js";
 import { governedProgram } from "./governed-trust.js";
 import { userGroundOf } from "./user-root.js";
@@ -695,10 +694,7 @@ async function liveOpening(
     !orphanedDeclaration(gw, named.declarationId!);
   const attached = named !== undefined && !another ? named.gateway : undefined;
   // The reactor mirrors one tier's read; the bytes question is the backend's, on every tier.
-  if (
-    attached !== undefined &&
-    (attached.reactor.size !== 0 || (await storeHoldsAny(attached.backend)))
-  )
+  if (attached !== undefined && (attached.reactor.size !== 0 || (await attached.probe("any"))))
     return named!.declarationId === o.poolDeclaration
       ? `its pool is still attached and holds bytes. ${drop}`
       : `a pool no opening names is attached under its name and holds bytes. ${drop}`;
@@ -718,7 +714,7 @@ async function liveOpening(
     // cannot be accounted for, and that refuses too (H9).
     const owned = receiptsNaming(gw, named.declarationId!);
     const pool = named.gateway!;
-    const inventory = await storeInventory(pool.backend);
+    const inventory = await pool.probe("inventory");
     if (typeof inventory === "string")
       return (
         "a later incarnation under its name holds a store whose bytes cannot be listed on every " +
@@ -784,26 +780,6 @@ async function liveOpening(
     }
   }
   return undefined;
-}
-// Every id a store holds on any tier, or undefined when it cannot be listed: a backend with no
-// inventory, or a tier that refuses, cannot be accounted for (H9).
-async function storeInventory(backend: StoreBackend): Promise<Set<string> | string> {
-  if (backend.ids === undefined) return "the store offers no inventory";
-  try {
-    return await backend.ids();
-  } catch (err) {
-    return err instanceof Error ? err.message : String(err);
-  }
-}
-// Does a store hold bytes on any tier? Unprovable is TRUE: a backend with no whole-store probe,
-// or a tier that refuses the question, cannot license an erasure (H9).
-async function storeHoldsAny(backend: StoreBackend): Promise<boolean> {
-  if (backend.holdsAny === undefined) return true;
-  try {
-    return await backend.holdsAny();
-  } catch {
-    return true;
-  }
 }
 /** The received and close events that reference one opening and still stand. */
 async function incarnationMembers(gw: Gateway, openingId: string): Promise<string[]> {
@@ -1179,7 +1155,7 @@ export async function erasureStandings(
   };
   if (ids.length === 0 || seen.has(gw)) return { standings, unasked };
   seen.add(gw);
-  const physical = await probePhysicalRetention(gw.backend, ids);
+  const physical = await gw.probe({ retention: ids });
   for (const id of physical.held) note(id, "held");
   for (const id of physical.unasked) note(id, "unasked");
   // ASKED EVEN WHERE THE BYTES COULD NOT BE. The reactor is a separate question from the tier, and
@@ -1242,6 +1218,40 @@ async function incompleteErasureFaults(
 // unconditionally, and a `closed` pool is still the operator's own replica); and if the lawful
 // erasure STILL did not land, the only remaining cause is the store itself failing — so it
 // THROWS, and the primary's `erase` rejects. Best-effort-and-loud, never a silent success.
+/**
+ * May a replica admit this local-control order? Only when a container above it holds the very same
+ * order, or its NEAREST parent holds a binding local-control erasure of `id` and signed this order
+ * naming the replica (`receiver`) as its receiver. `chain` is the verified chain above the replica,
+ * nearest first (`Store.chainAbove`). An order re-signed further up does not reach past the parent.
+ */
+export function localOrderAuthorized(
+  chain: readonly Pick<Peer, "reactor" | "operatorAuthor">[],
+  erasure: Delta,
+  receiver: string | undefined,
+  id: string,
+): boolean {
+  let authorized = false;
+  for (const [depth, parent] of chain.entries()) {
+    if (sameVerifiedDelta(parent.reactor.get(erasure.id), erasure)) authorized = true;
+    if (
+      depth === 0 &&
+      erasure.claims.author === parent.operatorAuthor &&
+      erasureParts(erasure.claims).receiver === receiver &&
+      [...parent.reactor.byTarget(ERASE_ENTITY)].some((eid) => {
+        const held = parent.reactor.get(eid);
+        return (
+          held !== undefined &&
+          inLocalContext(held, LOCAL_CONTROL) &&
+          localEraseTarget(held, parent.reactor, parent.operatorAuthor) === id
+        );
+      })
+    ) {
+      authorized = true;
+    }
+  }
+  return authorized;
+}
+
 export async function eraseReplicaImpl(
   gw: Gateway,
   erasure: Delta,
@@ -1261,35 +1271,8 @@ export async function eraseReplicaImpl(
   ) {
     if (localEraseTarget(erasure, gw.reactor, gw.operatorAuthor) !== id)
       throw new Error("replica requires exact marked local erasure");
-    let cursor = gw;
-    const chain = new Set<Peer>();
-    let authorized = false;
-    while (!chain.has(cursor)) {
-      const parent = gw.store.parentOf(cursor);
-      if (parent === undefined) break;
-      chain.add(cursor);
-      if (!gw.store.hasPool(parent, cursor)) break;
-      if (sameVerifiedDelta(parent.reactor.get(erasure.id), erasure)) authorized = true;
-      // Or the parent's own order, re-signed for this pool: the parent holds a binding local-control
-      // erasure of the same id, and signed this one naming this pool as its receiver.
-      if (
-        cursor === gw &&
-        erasure.claims.author === parent.operatorAuthor &&
-        erasureParts(erasure.claims).receiver === gw.operatorAuthor &&
-        [...parent.reactor.byTarget(ERASE_ENTITY)].some((eid) => {
-          const held = parent.reactor.get(eid);
-          return (
-            held !== undefined &&
-            inLocalContext(held, LOCAL_CONTROL) &&
-            localEraseTarget(held, parent.reactor, parent.operatorAuthor) === id
-          );
-        })
-      ) {
-        authorized = true;
-      }
-      cursor = parent;
-    }
-    if (!authorized) throw new Error("replica has no attached held local erasure authority");
+    if (!localOrderAuthorized(gw.store.chainAbove(gw), erasure, gw.operatorAuthor, id))
+      throw new Error("replica has no attached held local erasure authority");
     await appendLocalErasure(gw, erasure);
   } else await gw.federate([erasure], { admit: () => true });
   await gw.flush();
