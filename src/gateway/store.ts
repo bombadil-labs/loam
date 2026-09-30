@@ -98,14 +98,6 @@ export class Store {
     return this.table(parent).channels;
   }
 
-  /**
-   * The opener's handle for `parent`'s channel pool `name`, for a Channel record handed to a caller.
-   * Container code reads the child through `channels`; the census counts every use of this.
-   */
-  channelRecord(parent: Peer, name: string): Container | undefined {
-    return this.tables.get(parent)?.channels.get(name);
-  }
-
   /** `parent`'s connection inboxes, by inbox name, each with its child as a peer. */
   inboxes(parent: Peer): ReadonlyMap<string, PeerEntry> {
     return this.table(parent).inboxes;

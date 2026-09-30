@@ -36,6 +36,7 @@ import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
+import { gatewayOf } from "../helpers/pool-gateway.js";
 
 const ME_SEED = "cc".repeat(32);
 const ALICE_SEED = "a1".repeat(32);
@@ -253,7 +254,7 @@ describe("T222 — a crash between federate and attest heals or names its own ga
         from: "https://alice.example/loam",
         source,
       });
-      const pool = channel.pool.gateway!;
+      const pool = gatewayOf(channel.pool);
 
       // A clean first sync stamps X once — X is the BYSTANDER the crash-heal must not touch.
       const x = observed(FERN, "height", 10, 1000, ALICE_SEED);
@@ -325,7 +326,7 @@ describe("T222 — a crash between federate and attest heals or names its own ga
         from: "https://alice.example/loam",
         source,
       });
-      const pool = channel.pool.gateway!;
+      const pool = gatewayOf(channel.pool);
 
       // A REPORTED failure: the deltas land, the stamp door refuses, the debt is written down.
       const a = observed(FERN, "height", 30, 1000, ALICE_SEED);
@@ -491,7 +492,7 @@ describe("T222 — a crash between federate and attest heals or names its own ga
         from: "https://alice.example/loam",
         source,
       });
-      const pool = channel.pool.gateway!;
+      const pool = gatewayOf(channel.pool);
 
       // Two arrivals are journalled, then the crash lands before `federate` takes either. W will be
       // re-offered and must heal; V vanishes (a rejected or withdrawn delta) and must NEVER stamp.

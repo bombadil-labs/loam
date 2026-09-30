@@ -57,6 +57,7 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "./fixtures.js";
 import { withStamp } from "../../src/gateway/stamp.js";
+import { gatewayOf } from "../helpers/pool-gateway.js";
 
 const OP_SEED = "cc".repeat(32);
 const ALICE_SEED = "a1".repeat(32);
@@ -186,7 +187,7 @@ describe("T204 — a contested name is named, with its origin", () => {
       // lens leaves the surface with the challenger.
       expect(() => me.def("alice:Plant")).toThrow();
 
-      const pool = ch.pool.gateway!;
+      const pool = gatewayOf(ch.pool);
       const rows = contendersOf(me, "alice:Plant");
       expect(rows).toHaveLength(2);
       const byOrigin = new Map(rows.map((r) => [r.origin, r]));
@@ -232,7 +233,7 @@ describe("T204 — a contested name is named, with its origin", () => {
       await alice.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
       const ch = await me.openChannel({ into: "friends", prefix: "alice", source: feed(alice) });
       await ch.sync();
-      const pool = ch.pool.gateway!;
+      const pool = gatewayOf(ch.pool);
       // The pool is a ground of its own, and it reads its OWN policy — the root's declaration does
       // not travel. Declaring here is what makes the pool's contest resolvable at all.
       await declareConflicts(pool);
@@ -281,7 +282,7 @@ describe("T204 — a contested name is named, with its origin", () => {
       await alice.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
       const ch = await me.openChannel({ into: "friends", prefix: "alice", source: feed(alice) });
       await ch.sync();
-      const pool = ch.pool.gateway!;
+      const pool = gatewayOf(ch.pool);
       await declareConflicts(pool);
       // A BARE name — outside the channel's namespace. The pool holds a real contest over it.
       for (const n of ["One", "Two"]) {
@@ -417,14 +418,14 @@ describe("T204 — a contested name is named, with its origin", () => {
       // clocks that could stamp the blessing are walked past the root's binding first: whichever
       // one the adoption uses, the result is the same on every run.
       for (let t = 0; t <= rootAt + 1000;) t = alice.nextTimestamp();
-      for (let t = 0; t <= rootAt + 1000;) t = ch.pool.gateway!.nextTimestamp();
+      for (let t = 0; t <= rootAt + 1000;) t = gatewayOf(ch.pool).nextTimestamp();
       await alice.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
       // Those stamps sit ahead of the wall clock, so the blessing is not yet valid anywhere. Move
       // the wall clock past them: every store then reads it as in force.
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(rootAt + 5_000);
       await ch.sync();
-      const pool = ch.pool.gateway!;
+      const pool = gatewayOf(ch.pool);
       const channelRow = readRegistrations(
         pool.reactor,
         pool.validityNow(),
@@ -471,7 +472,7 @@ describe("T204 — a contested name is named, with its origin", () => {
       }
       const ch = await me.openChannel({ into: "friends", prefix: "alice", source: feed(alice) });
       await ch.sync();
-      const pool = ch.pool.gateway!;
+      const pool = gatewayOf(ch.pool);
       // A BYSTANDER contest, under the pool's own law, that the root's strike does not touch. An
       // over-deleter that clears the map rather than marking one row would take this down with it.
       await declareConflicts(pool);
@@ -535,7 +536,7 @@ describe("T204 — a contested name is named, with its origin", () => {
       await alice.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
       const ch = await me.openChannel({ into: "friends", prefix: "alice", source: feed(alice) });
       await ch.sync();
-      const pool = ch.pool.gateway!;
+      const pool = gatewayOf(ch.pool);
       await declareConflicts(pool);
       for (const n of ["One", "Two"]) {
         await pool.publishRegistration(

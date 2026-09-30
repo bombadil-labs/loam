@@ -1,5 +1,5 @@
 import { issueChannelEvent, receiveChannelOfferInCommit } from "../gateway/ingest.js";
-import type { Peer } from "../gateway/peer.js";
+import type { Peer, PeerEntry } from "../gateway/peer.js";
 import {
   localChannelEvidence,
   localChannelLifecycle,
@@ -584,7 +584,7 @@ export interface Channel {
   readonly name: string;
   readonly into: string;
   readonly prefix: string;
-  readonly pool: Container;
+  readonly pool: PeerEntry;
   sync(): Promise<SyncReport>;
 }
 
@@ -1246,34 +1246,16 @@ function resolves(ground: Peer, lens: string): boolean {
 }
 
 /**
- * Mark a pool as a CHANNEL's, on its own gateway.
- *
- * A pool is an attached container and therefore a mount in its own right, so the mark has to ride
- * the pool rather than a lookup on the parent — the door that reaches it may never consult the
- * parent at all. ONE caller: `attachChannelPool`, which is the one place a channel's pool is
- * attached. A mark written at each attach site instead is a mark that gets missed at the next one.
- */
-function markChannelPool(pool: Container): void {
-  if (pool.gateway !== undefined) pool.gateway.channelPool = true;
-}
-
-/**
- * ATTACH A CHANNEL'S POOL — the one place that does it, and therefore the one place that marks it.
+ * ATTACH A CHANNEL'S POOL — the one place that does it, and therefore the one place that asks for
+ * the mark.
  *
  * A pool becomes a MOUNT the moment it attaches, so a pool attached without its mark is an
  * anonymously-readable copy of this store's ground for as long as the process lives. There are
  * three sites that need one — opening a channel, resuming one at boot, and the drop path's
  * re-open — and a mark written at each of them is a mark that will be missed at a fourth. This
- * function exists so there is nothing to remember.
- *
- * The mark lands just AFTER the attach publishes the mount, not before it, so there is a window in
- * which the pool is routable and unmarked — and a channel IS opened against a live router today,
- * by the connect tool. What keeps the window shut is narrower than it looks, and worth naming
- * because a future door could open it: the re-attach path awaits a real append only when a DETACH
- * record has to be struck, and nothing in this tree detaches a channel pool, so the span from
- * mount-published to marked crosses microtasks and never a turn that serves a request. Closing it
- * properly means the container primitive learning what a channel pool is — §27's business, not
- * this function's.
+ * function exists so there is nothing to remember. The mark rides the pool, not a lookup on the
+ * parent, because the door that reaches a pool may never consult the parent; the opener sets it
+ * before the attach publishes the mount, so no door can see the pool unmarked.
  */
 export async function attachChannelPool(gw: Gateway, name: string): Promise<Container> {
   // Durability is the store's choice, not the channel's: without a backend a separate container
@@ -1281,13 +1263,16 @@ export async function attachChannelPool(gw: Gateway, name: string): Promise<Cont
   const backend = gw.options.channelBackend?.(name);
   let pool: Container;
   try {
-    pool = await gw.openContainer({ name, ...(backend === undefined ? {} : { backend }) });
+    pool = await gw.openContainer({
+      name,
+      channelPool: true,
+      ...(backend === undefined ? {} : { backend }),
+    });
   } catch (err) {
     // A refused open (a lost key, an older pool) must not keep the store's file open behind it.
     await backend?.close().catch(() => {});
     throw err;
   }
-  markChannelPool(pool);
   return pool;
 }
 
@@ -1407,7 +1392,7 @@ export function prefixOfChannelName(name: string): string | undefined {
  */
 async function syncChannel(
   gw: Gateway,
-  pool: Container,
+  pool: PeerEntry,
   declarationId: string | undefined,
   name: string,
   opts: OpenChannelOptions,
@@ -2023,7 +2008,7 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
   }
 
   if (standingBeforeOpen !== undefined) {
-    const pool = gw.store.channelRecord(gw, name) ?? (await attachChannelPool(gw, name));
+    const pool = gw.store.channels(gw).get(name) ?? (await attachChannelPool(gw, name));
     gw.store.setChannel(gw, name, pool);
     const state = localChannelEvidence(gw, name);
     const incarnation =
@@ -2060,7 +2045,7 @@ async function openChannelCommit(gw: Gateway, opts: OpenChannelOptions): Promise
   // it rebuilds its channels, and a channel whose peer credential is missing is attached and
   // unresumed — so a second `federate open` in a fresh invocation found the pool already attached
   // and threw, contradicting the door's own "syncing again is safe". Reuse what is attached.
-  const pool = gw.store.channelRecord(gw, name) ?? (await attachChannelPool(gw, name));
+  const pool = gw.store.channels(gw).get(name) ?? (await attachChannelPool(gw, name));
   const ground = pool.gateway;
   if (ground === undefined) {
     throw new Error(
@@ -2813,8 +2798,8 @@ export function resumeChannelImpl(gw: Gateway, standing: ChannelStatus, token: s
   const evidence = localChannelEvidence(gw, standing.name);
   const incarnation =
     evidence.state === "open" || evidence.state === "closed" ? evidence.opening : undefined;
-  const poolOf = (): Container => {
-    const held = gw.store.channelRecord(gw, standing.name);
+  const poolOf = (): PeerEntry => {
+    const held = gw.store.channels(gw).get(standing.name);
     if (held === undefined) {
       throw new Error(
         `${standing.name} is not attached in this process, so its bytes are unreadable — the ` +
@@ -2844,7 +2829,7 @@ export function resumeChannelImpl(gw: Gateway, standing: ChannelStatus, token: s
     into: standing.into,
     prefix: standing.prefix,
     ...opener(standing),
-    get pool(): Container {
+    get pool(): PeerEntry {
       return poolOf();
     },
     sync: () => syncChannel(gw, pool, declarationId, standing.name, opts, incarnation),

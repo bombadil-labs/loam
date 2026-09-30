@@ -340,6 +340,11 @@ export interface ContainerOptions {
   /** Anonymous containers name their knobs explicitly (the preset path). */
   readonly trust?: ContainerTrust;
   readonly posture?: ContainerPosture;
+  /**
+   * A federation channel's pool (§46.1). The opener marks it before it attaches, so no door that
+   * routes to it can see it unmarked.
+   */
+  readonly channelPool?: true;
 }
 
 export interface Container {
@@ -448,6 +453,7 @@ export async function openContainerImpl(
       ...(entity !== undefined ? { entity } : {}),
       ...(opts.admit !== undefined ? { admit: opts.admit } : {}),
       ...(opts.backend !== undefined ? { backend: opts.backend } : {}),
+      ...(opts.channelPool === true ? { channelPool: true as const } : {}),
     },
     voice,
   );
@@ -609,6 +615,7 @@ async function openSeparate(
     membership: unknown;
     admit?: (d: Delta) => boolean;
     backend?: StoreBackend;
+    channelPool?: true;
   },
   voice: "openContainer" | "openQuarantine",
 ): Promise<Container> {
@@ -704,6 +711,9 @@ async function openSeparate(
     peerStore: (backend as JournalBackend).journalStore(),
     ...(probationary && gw.options.pens !== undefined ? { pens: gw.options.pens } : {}),
   });
+  // Marked before anything attaches it: a pool becomes a mount the moment it attaches, and a channel
+  // pool seen unmarked would serve an anonymous copy of this store's ground.
+  if (spec.channelPool === true) pool.channelPool = true;
   gw.store.attach(pool, gw);
   // The child's law policy: an inbox selects nothing from its host; every other pool holds seeded
   // host copies and selects the host for them.

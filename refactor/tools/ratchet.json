@@ -5,6 +5,6 @@
   "seedReads": 5,
   "snapshotRefs": 42,
   "coreClockReads": 15,
-  "treeReach": 3,
+  "treeReach": 0,
   "peerSurface": 28
 }

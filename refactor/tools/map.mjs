@@ -49,7 +49,7 @@ const ROWS = [
     loam: "Containers, pools, channels",
     tier: "federation",
     what: "peers, admission, arrival",
-    status: "doing",
+    status: "done",
   },
   {
     step: "7",

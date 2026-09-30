@@ -385,7 +385,6 @@ const TREE_MEMBERS = new Set([
   "channelPools",
   "connectionInboxes",
   "tableOf",
-  "channelRecord",
   "rootOf",
   "verifiedRootOf",
   "poolForBinding",

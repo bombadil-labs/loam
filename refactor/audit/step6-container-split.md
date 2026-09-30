@@ -158,8 +158,11 @@ peer interface then narrows in four PRs:
    `Peer`: only the opener, which attaches, discards and closes a pool, reaches a child's store.
    A pool reads the chain above it as peers (`Store.chainAbove`); the rule for which local-control
    orders it admits is one function (`localOrderAuthorized`), railed case by case.
-4. **Lock.** `treeReach` is 0, and a check types every child handle as a `Peer` and fails on any
-   container code that uses more.
+4. **Lock.** `treeReach` is 0 and the ratchet holds it there. A channel's record carries its
+   pool as a `PeerEntry`, so container code builds no record from the opener's table. The opener
+   marks a channel pool before it attaches it. `npm run peer-probe` type-checks `src/` with each
+   child handle typed as a `Peer` and fails on any container code, outside the opener, that uses
+   more. Step 6 is closed.
 
 **The census, as of PR 1.** `treeReach` counts lines of container code that reach the tree as
 gateways: a table name, `tableOf`, a parent or root walk, a channel record, or a binding's pool as a

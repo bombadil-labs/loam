@@ -8,6 +8,7 @@ import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
+import { gatewayOf } from "../helpers/pool-gateway.js";
 
 const SEED = "cc".repeat(32);
 const POOL_SEED = "7e".repeat(32);
@@ -37,7 +38,7 @@ describe("channel records are signed by their own ground", () => {
       source: { pull: () => Promise.resolve([fact]) },
     });
     await ch.sync();
-    const pool = ch.pool.gateway!;
+    const pool = gatewayOf(ch.pool);
     expect(pool.signer!.author).toBe(authorForSeed(POOL_SEED));
     expect(pool.reactor.get(fact.id)).toBeDefined();
     const stamps = pool.reactor

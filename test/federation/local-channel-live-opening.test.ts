@@ -86,6 +86,7 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { MirrorBackend } from "../../src/store/mirror.js";
 import { FERN, observed } from "../spike/garden.js";
 import { withStamp } from "../../src/gateway/stamp.js";
+import { gatewayOf } from "../helpers/pool-gateway.js";
 
 const SEED = "cc".repeat(32);
 const OP = authorForSeed(SEED);
@@ -256,7 +257,7 @@ async function channel(gw: Gateway, prefix = "peer") {
     from: `https://peer.example/${prefix}`,
     source: feed.source,
   });
-  return { ch, ...feed, pool: ch.pool.gateway! };
+  return { ch, ...feed, pool: gatewayOf(ch.pool) };
 }
 // The operator's status stamps of one channel, by id: what a strike by hand negates.
 const statusIds = (gw: Gateway, name: string) =>
@@ -382,7 +383,7 @@ describe("spec 64: a live opening cannot be erased", () => {
         source,
       }),
     ).rejects.toThrow(/no surviving declaration/);
-    gw.attachedContainers.set(ch.name, ch.pool.gateway!);
+    gw.attachedContainers.set(ch.name, gatewayOf(ch.pool));
     await gw.append([
       signClaims(
         withStamp(gw.stamp(OP), (t) =>
@@ -395,7 +396,7 @@ describe("spec 64: a live opening cannot be erased", () => {
         SEED,
       ),
     ]);
-    gw.channelPools.set(ch.name, ch.pool);
+    gw.store.setChannel(gw, ch.name, ch.pool);
     gw.federationChannels.set(ch.name, ch);
     await gw.dropChannel(ch.name);
     expect(holds(ch.name, fact(1).id)).toBe(false);
@@ -538,7 +539,7 @@ describe("spec 64: a live opening cannot be erased", () => {
     feed.offering.push(fact(2));
     await again.sync();
     // The seed copied the stranger's byte into the new pool; no receipt names it; the root holds it.
-    expect(again.pool.gateway!.reactor.get(stranger.id)).toBeDefined();
+    expect(gatewayOf(again.pool).reactor.get(stranger.id)).toBeDefined();
     await gw.erase(first.id);
     expect(gw.reactor.get(first.id)).toBeUndefined();
     feed.offering.push(fact(3));

@@ -127,7 +127,6 @@ describe("the store of a container tree", () => {
     const record = { ...handle, trust: "curated", posture: "separate" } as const;
     gw.store.setChannel(gw, "channel:x", record as never);
     expect(gw.store.channels(gw).get("channel:x")?.gateway).toBe(handle.gateway);
-    expect(gw.store.channelRecord(gw, "channel:x")).toBe(record);
     expect(gw.channelPools.get("channel:x")).toBe(record); // the facade reads the same table
     gw.store.dropChannel(gw, "channel:x");
     expect(gw.store.channels(gw).size).toBe(0);

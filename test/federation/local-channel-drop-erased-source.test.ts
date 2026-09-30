@@ -7,6 +7,7 @@ import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { localChannelEvidence } from "../../src/federation/local-channel-events.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
+import { gatewayOf } from "../helpers/pool-gateway.js";
 
 const OP_SEED = "cc".repeat(32);
 const PEER_SEED = "a1".repeat(32);
@@ -62,7 +63,7 @@ describe("T288 channel cleanup after real received-source erasure", () => {
       const siblingBefore = localChannelEvidence(gw, sibling.name);
       expect(siblingBefore.state).toBe("open");
       const receipt = localEvents(gw, target.name, "received")[0]!;
-      const targetPool = target.pool.gateway!;
+      const targetPool = gatewayOf(target.pool);
       const targetBackend = targetPool.backend;
 
       // Existing root erase requires root-held target bytes. Holding the exact already-received
@@ -85,7 +86,7 @@ describe("T288 channel cleanup after real received-source erasure", () => {
       expect(unavailable).not.toHaveProperty("received");
       expect(localChannelEvidence(gw, sibling.name)).toEqual(siblingBefore);
       expect(await primary.holds(root.id)).toBe(true);
-      expect(await sibling.pool.gateway!.backend.holds(siblingSource.id)).toBe(true);
+      expect(await gatewayOf(sibling.pool).backend.holds(siblingSource.id)).toBe(true);
 
       // Install the observer AFTER source erasure: it witnesses drop's actual physical purge,
       // not the earlier exact-ID erasure. The backend still contains ordinary seeded bytes.
@@ -133,7 +134,7 @@ describe("T288 channel cleanup after real received-source erasure", () => {
       expect(gw.reactor.get(receipt.id)).toBeDefined();
       expect(await primary.holds(root.id)).toBe(true);
       expect(localChannelEvidence(gw, sibling.name)).toEqual(siblingBefore);
-      expect(await sibling.pool.gateway!.backend.holds(siblingSource.id)).toBe(true);
+      expect(await gatewayOf(sibling.pool).backend.holds(siblingSource.id)).toBe(true);
       const next = observed(FERN, "height", 40, 4000, PEER_SEED);
       siblingOffer.push(next);
       expect((await sibling.sync()).accepted).toBe(1);

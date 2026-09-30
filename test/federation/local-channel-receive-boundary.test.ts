@@ -14,6 +14,7 @@ import {
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
 import { withStamp } from "../../src/gateway/stamp.js";
+import { gatewayOf } from "../helpers/pool-gateway.js";
 
 const SEED = "cc".repeat(32);
 const PEER_SEED = "a1".repeat(32);
@@ -50,7 +51,7 @@ async function fixture() {
     from: "https://peer.example/default",
     source: { pull: () => Promise.resolve([...offering]) },
   });
-  return { gw, ch, offering, pool: ch.pool.gateway!, opening: evidence(gw, ch.name).opening };
+  return { gw, ch, offering, pool: gatewayOf(ch.pool), opening: evidence(gw, ch.name).opening };
 }
 type ReceiveResult =
   | { ok: true; report: FederationReport }

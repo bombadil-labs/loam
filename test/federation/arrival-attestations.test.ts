@@ -42,6 +42,7 @@ import { Gateway, type FederationReport } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
+import { gatewayOf } from "../helpers/pool-gateway.js";
 
 const ME_SEED = "cc".repeat(32);
 const ALICE_SEED = "a1".repeat(32);
@@ -196,7 +197,7 @@ describe("T207 — a sync that accepts deltas stamps its own custody", () => {
       const report = await channel.sync();
       expect(report.accepted).toBeGreaterThan(FAN); // the premise: this sync exercises the cap
 
-      const pool = channel.pool.gateway!;
+      const pool = gatewayOf(channel.pool);
       const stamps = stampsIn(pool);
 
       // ONE STAMP PER SYNC, fanned by the cap and not by anything else.
@@ -261,7 +262,7 @@ describe("T207 — a sync that accepts deltas stamps its own custody", () => {
       });
       const first = await channel.sync();
       expect(first.accepted).toBeGreaterThan(0);
-      const pool = channel.pool.gateway!;
+      const pool = gatewayOf(channel.pool);
       const after1 = stampsIn(pool)
         .map((s) => s.deltaId)
         .sort();
@@ -313,8 +314,8 @@ describe("T207 — a sync that accepts deltas stamps its own custody", () => {
       await one.sync();
       await two.sync();
 
-      const aliceStamps = stampsIn(one.pool.gateway!);
-      const bobPool = two.pool.gateway!;
+      const aliceStamps = stampsIn(gatewayOf(one.pool));
+      const bobPool = gatewayOf(two.pool);
       const bobStamps = stampsIn(bobPool);
       expect(aliceStamps.length).toBeGreaterThan(0);
       expect(bobStamps.length).toBeGreaterThan(0);
@@ -363,7 +364,7 @@ describe("T207 — a sync that accepts deltas stamps its own custody", () => {
       const first = await channel.sync();
       expect(first.bound).toContain("alice:Plant");
 
-      const pool = channel.pool.gateway!;
+      const pool = gatewayOf(channel.pool);
       const stamps = stampsIn(pool);
       expect(stamps.length).toBeGreaterThan(0);
       const bindings = bindingIdsIn(pool);
@@ -418,7 +419,7 @@ describe("T207 — a sync that accepts deltas stamps its own custody", () => {
       });
       const first = await channel.sync();
       expect(first.accepted).toBeGreaterThan(0);
-      const pool = channel.pool.gateway!;
+      const pool = gatewayOf(channel.pool);
       const stampsAfterFirst = stampsIn(pool);
       expect(stampsAfterFirst.length).toBeGreaterThan(0);
       const between = Math.max(...stampsAfterFirst.map((s) => s.at));
@@ -471,7 +472,7 @@ describe("T207 — a sync that accepts deltas stamps its own custody", () => {
         from: "https://alice.example/loam",
         source: feed(alice),
       });
-      const pool = channel.pool.gateway!;
+      const pool = gatewayOf(channel.pool);
       bendReport(pool, (r) =>
         r.acceptedIds !== undefined && r.acceptedIds.length > 0
           ? { ...r, acceptedIds: r.acceptedIds.slice(1) }
@@ -509,7 +510,7 @@ describe("T207 — a sync that accepts deltas stamps its own custody", () => {
         from: "https://alice.example/loam",
         source: feed(alice),
       });
-      const pool = channel.pool.gateway!;
+      const pool = gatewayOf(channel.pool);
       const swallowed = swallowLastStamp(pool);
 
       await expect(channel.sync()).rejects.toThrow(/took 1 of 2 attestation\(s\)/);
@@ -581,7 +582,7 @@ describe("T207 — a sync that accepts deltas stamps its own custody", () => {
         from: "https://alice.example/loam",
         source: feed(alice),
       });
-      const pool = channel.pool.gateway!;
+      const pool = gatewayOf(channel.pool);
       const first = await channel.sync();
       expect(first.accepted).toBeGreaterThan(0);
       const synced = me.channelStatus(channel.name)[0]!.lastSyncedAt;
@@ -640,7 +641,7 @@ describe("T207 — a sync that accepts deltas stamps its own custody", () => {
         from: "https://alice.example/loam",
         source: feed(alice),
       });
-      const pool = channel.pool.gateway!;
+      const pool = gatewayOf(channel.pool);
       // The counts alone — the key is DROPPED, not set to undefined, which is what a door that
       // never learned to name its arrivals would return.
       bendReport(pool, (r) => ({
