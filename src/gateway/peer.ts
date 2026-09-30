@@ -29,13 +29,16 @@ export type Peer = Pick<
   // Lifecycle, and the tree's shared services.
   | "close"
   | "store"
-  // Writes made in the container's name by another container. To become operations it performs.
-  | "signer"
-  | "stamp"
+  // Its doors, which admit deltas their authors signed.
   | "append"
   | "federate"
+  // Operations it performs with its own key when another container asks. No container holds
+  // another's key or signs in its name (ruling 11).
+  | "strike"
+  | "exportManifestRows"
+  | "arrivalStamps"
   | "adoptLaw"
-  | "def"
+  // It refreshes what it derives from its own law.
   | "preloadResolvers"
   | "replayRegistrations"
   // Erasure reaching into the container. To become a delivered order and a probe.

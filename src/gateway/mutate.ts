@@ -173,12 +173,7 @@ async function retract(
     }
     if (ids.size === 0) continue;
     try {
-      const stamp = pool.ground.stamp(author);
-      await pool.ground.append(
-        [...ids].map((id) =>
-          signer.sign(withStamp(stamp, (t) => makeNegationClaims(author, t, id))),
-        ),
-      );
+      await pool.ground.strike([...ids], signer);
       landed.push(pool.name);
     } catch (err) {
       failed.push(`${pool.name} (${err instanceof Error ? err.message : String(err)})`);

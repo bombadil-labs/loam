@@ -43,7 +43,6 @@ import {
   explainMissingDefinition,
   isRegistrationBinding,
   isWithheldResolver,
-  manifestExportClaims,
   readManifest,
 } from "../gateway/adopt-vocab.js";
 import { CTX_REGISTRATION, lensOf } from "../gateway/registration.js";
@@ -434,21 +433,11 @@ async function attestArrival(
   // sync obeys the same fan as any other. A carried ref is stamped LATE and says so only by the
   // stamp's own timestamp: the moment is the sync that recorded it, not the sync it arrived on.
   const union = [...new Set([...owed, ...arrived])];
-  // Arrival stamps are the pool's own law: its governing key authors and signs them.
-  const poolSigner = ground.signer!;
-  const at = ground.stamp(poolSigner.author);
-  const batch: { refs: string[]; stamp: Delta }[] = [];
-  for (let i = 0; i < union.length; i += ARRIVAL_FAN) {
-    const refs = union.slice(i, i + ARRIVAL_FAN);
-    batch.push({
-      refs,
-      stamp: poolSigner.sign(
-        withStamp(at, (t) =>
-          arrivalClaims({ channel: name, from, arrived: refs }, poolSigner.author, t),
-        ),
-      ),
-    });
-  }
+  // Arrival stamps are the pool's own law: the pool authors and signs them with its governing key.
+  const chunks: string[][] = [];
+  for (let i = 0; i < union.length; i += ARRIVAL_FAN) chunks.push(union.slice(i, i + ARRIVAL_FAN));
+  const stamps = ground.arrivalStamps(name, from, chunks);
+  const batch = chunks.map((refs, i) => ({ refs, stamp: stamps[i]! }));
   // `federate`, like the manifest rows the channel writes beside them: the pool is a separate
   // ground, and this is the door the receiver's own writes into it already take. `ids: true` for
   // the same reason the arrivals call asks: a PARTIAL landing must name which stamps stand, or the
@@ -643,8 +632,8 @@ async function bindArrived(
   prefix: string,
 ): Promise<{ bound: string[]; parked: string[]; witnessed: string[] }> {
   // The manifest rows are the pool's own law: its governing key authors, signs and reads them.
-  const poolSigner = ground.signer!;
-  const operator = poolSigner.author;
+  const operator = ground.operatorAuthor;
+  if (operator === undefined) throw new Error("bindArrived: this pool has no governing key");
   const bound: string[] = [];
   const parked: string[] = [];
   const witnessed: string[] = [];
@@ -698,14 +687,8 @@ async function bindArrived(
       !members.some((d) => d.claims.author === operator && manifestAliasOf(d.claims) === alias),
   );
   if (pending.length > 0) {
-    await ground.federate(
-      pending.map(([alias, entity]) =>
-        poolSigner.sign(
-          withStamp(ground.stamp(operator), (t) =>
-            manifestExportClaims({ alias, targetEntity: entity, kind: "schema" }, operator, t),
-          ),
-        ),
-      ),
+    await ground.exportManifestRows(
+      pending.map(([alias, entity]) => ({ alias, targetEntity: entity, kind: "schema" })),
     );
   }
 
@@ -1097,9 +1080,8 @@ export async function blessChannelAppImpl(
     );
   }
   // The manifest row lives in the pool: the pool's governing key authors, signs and reads it.
-  const poolSigner = ground.signer;
-  const operator = poolSigner?.author;
-  if (gw.signer === undefined || poolSigner === undefined || operator === undefined) {
+  const operator = ground.operatorAuthor;
+  if (gw.signer === undefined || operator === undefined) {
     throw new Error("only an operated store may bless an app (a blessing is the operator's claim)");
   }
   // The manifest row a peer never sent, minted in the POOL — the same shape `bindArrived` mints for
@@ -1120,17 +1102,7 @@ export async function blessChannelAppImpl(
     gw.validityNow(),
   );
   if (mine.find((r) => r.alias === alias)?.target !== app.deltaId) {
-    await ground.federate([
-      poolSigner.sign(
-        withStamp(ground.stamp(operator), (t) =>
-          manifestExportClaims(
-            { alias, targetAddress: app.deltaId, kind: "renderer" },
-            operator,
-            t,
-          ),
-        ),
-      ),
-    ]);
+    await ground.exportManifestRows([{ alias, targetAddress: app.deltaId, kind: "renderer" }]);
   }
   const frozen = [...ground.reactor.snapshot()];
   const version = freezeMembers(frozen);
@@ -2612,15 +2584,8 @@ export async function curseChannelLawImpl(
         if (lens !== living) continue;
         for (const negationId of g.reactor.negationsOf(binding.id)) {
           if (lifted(negationId)) continue;
-          // Each ground's own law: its governing key lifts the strike there.
-          const signer = g.signer!;
-          await g.append([
-            signer.sign(
-              withStamp(g.stamp(signer.author), (t) =>
-                makeNegationClaims(signer.author, t, negationId),
-              ),
-            ),
-          ]);
+          // Each ground's own law: it lifts the strike there, with its own governing key.
+          await g.strike([negationId]);
         }
       }
     }
@@ -2688,15 +2653,8 @@ export async function curseChannelLawImpl(
     {
       reactor: pool.reactor,
       now: pool.validityNow(),
-      governor: pool.signer!.author,
-      sign: async (id: string): Promise<void> => {
-        const signer = pool.signer!;
-        await pool.append([
-          signer.sign(
-            withStamp(pool.stamp(signer.author), (t) => makeNegationClaims(signer.author, t, id)),
-          ),
-        ]);
-      },
+      governor: pool.operatorAuthor!,
+      sign: (id: string): Promise<void> => pool.strike([id]),
     },
   ];
   const bindings: { id: string; sign: (id: string) => Promise<void> }[] = [];
@@ -2745,12 +2703,7 @@ export async function curseChannelLawImpl(
   // when it is still being served.
   // Asked of what THIS CHANNEL serves: its pool's own surface, and the root's rows that come from
   // this channel. A root registration of the same name is not the channel's, and stays served.
-  let poolServes = true;
-  try {
-    pool.def(living);
-  } catch {
-    poolServes = false;
-  }
+  const poolServes = pool.registered.some((r) => lensOf(r) === living);
   const rootServes = gw.registered.some((r) => r.channel === channel && lensOf(r) === living);
   if (poolServes || rootServes) {
     throw new Error(
