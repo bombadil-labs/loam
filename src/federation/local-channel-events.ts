@@ -421,12 +421,7 @@ function projectLocalChannelHistory(gw: Gateway, channel: string): LocalChannelH
       return unavailable("opening association disagrees with referenced status/pool");
   const pool = gw.channelPools.get(channel),
     status = channelStatusImpl(gw, channel)[0];
-  if (
-    pool?.gateway === undefined ||
-    status === undefined ||
-    !gw.quarantinePools.has(pool.gateway) ||
-    pool.gateway.attachedTo !== gw
-  )
+  if (pool?.gateway === undefined || status === undefined || !gw.store.holds(gw, pool.gateway))
     return unavailable("opening has no exact attached pool/status");
   const declaration = currentPoolDeclaration(gw, channel);
   if (declaration === undefined || pool.declarationId !== declaration)
@@ -502,24 +497,7 @@ export function withChannelCommit<T>(
   channel: string,
   body: () => Promise<T>,
 ): Promise<T> {
-  const seen = new Set<Gateway>();
-  while (gw.attachedTo !== undefined) {
-    if (seen.has(gw) || !gw.attachedTo.quarantinePools.has(gw))
-      throw new Error("channel commit requires a legitimate authority attachment");
-    seen.add(gw);
-    gw = gw.attachedTo;
-  }
-  const prior = gw.channelCommitTails.get(channel) ?? Promise.resolve();
-  const next = prior.then(body);
-  const tail = next.then(
-    () => {},
-    () => {},
-  );
-  gw.channelCommitTails.set(channel, tail);
-  void tail.then(() => {
-    if (gw.channelCommitTails.get(channel) === tail) gw.channelCommitTails.delete(channel);
-  });
-  return next;
+  return gw.store.commit(gw, channel, body);
 }
 export const eventPrimitive = (
   role: string,

@@ -373,12 +373,26 @@ function member(node) {
   return undefined;
 }
 
+// The members that hold the container tree, and the files allowed to touch them.
+const TREE_MEMBERS = new Set([
+  "attachedTo",
+  "parentOf",
+  "quarantinePools",
+  "channelPools",
+  "connectionInboxes",
+]);
+const TREE_OWNERS = /src\/gateway\/(container|store)\.ts$/;
+
 // The ratchet's per-file counts. They are syntactic: a read through an alias the syntax tree
 // cannot see (a variable holding `options`, a computed key) is not counted.
 export function couplingCountsOf(file, text) {
   const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
   const core = CORE.test(file.replace(/\\/g, "/"));
-  const counts = { seedReads: 0, snapshotRefs: 0, coreClockReads: 0 };
+  const counts = { seedReads: 0, snapshotRefs: 0, coreClockReads: 0, treeReach: 0 };
+  // Lines that reach across containers: a parent link or a child map, read or written anywhere but
+  // the opener and the store itself (step6-container-split.md). Distinct lines, not occurrences.
+  const reachLines = new Set();
+  const opener = TREE_OWNERS.test(file.replace(/\\/g, "/"));
   const isClock = (recv) => ["Date", "performance"].includes(lastName(recv));
   const visit = (n) => {
     const m = member(n);
@@ -387,6 +401,9 @@ export function couplingCountsOf(file, text) {
       if (name === "seed" && lastName(recv) === "options") counts.seedReads++;
       if (name === "snapshot" && /reactor$/i.test(lastName(recv) ?? "")) counts.snapshotRefs++;
       if (core && name === "now" && isClock(recv)) counts.coreClockReads++;
+      if (!opener && TREE_MEMBERS.has(name)) {
+        reachLines.add(sf.getLineAndCharacterOfPosition(n.getStart(sf)).line);
+      }
     }
     // `const { seed } = options`, `const { now } = Date`
     if (ts.isVariableDeclaration(n) && ts.isObjectBindingPattern(n.name) && n.initializer) {
@@ -405,6 +422,7 @@ export function couplingCountsOf(file, text) {
     ts.forEachChild(n, visit);
   };
   visit(sf);
+  counts.treeReach = reachLines.size;
   return counts;
 }
 
@@ -418,6 +436,7 @@ export function couplingCounts(files) {
     seedReads: 0,
     snapshotRefs: 0,
     coreClockReads: 0,
+    treeReach: 0,
   };
   for (const file of files) {
     const per = couplingCountsOf(file, fs.readFileSync(file, "utf8"));

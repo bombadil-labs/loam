@@ -4,5 +4,6 @@
   "cyclicFiles": 14,
   "seedReads": 5,
   "snapshotRefs": 42,
-  "coreClockReads": 15
+  "coreClockReads": 15,
+  "treeReach": 68
 }

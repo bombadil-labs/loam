@@ -53,7 +53,21 @@ describe("census ratchet counts", () => {
       "// options.seed reactor.snapshot() Date.now()",
       'const s = "options.seed";',
     ].join("\n");
-    expect(count(text)).toEqual({ seedReads: 0, snapshotRefs: 0, coreClockReads: 0 });
+    expect(count(text)).toEqual({ seedReads: 0, snapshotRefs: 0, coreClockReads: 0, treeReach: 0 });
     expect(count("Date.now();", "src/server/probe.ts").coreClockReads).toBe(0);
+  });
+
+  it("counts each line that reaches across containers, once, outside the opener and the store", () => {
+    const text = [
+      "gw.quarantinePools.has(p) && gw.channelPools.get(n);",
+      "pool.attachedTo;",
+      "gw.store.parentOf(p);",
+      "gw.connectionInboxes.size;",
+      "gw.attachedContainers;",
+      "// gw.quarantinePools",
+    ].join("\n");
+    expect(count(text).treeReach).toBe(4); // two members on the first line count once
+    expect(count(text, "src/gateway/container.ts").treeReach).toBe(0);
+    expect(count(text, "src/gateway/store.ts").treeReach).toBe(0);
   });
 });

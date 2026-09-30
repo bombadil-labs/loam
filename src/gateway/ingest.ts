@@ -205,8 +205,7 @@ export async function receiveChannelOfferInCommit(
       ground === undefined ||
       gw.channelPools.get(expected.channel) !== pool ||
       pool?.gateway !== ground ||
-      ground.attachedTo !== gw ||
-      !gw.quarantinePools.has(ground) ||
+      !gw.store.holds(gw, ground) ||
       evidence.state !== "open" ||
       evidence.opening.id !== expected.id ||
       evidence.opening.channel !== expected.channel ||
