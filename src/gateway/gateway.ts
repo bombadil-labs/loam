@@ -87,6 +87,8 @@ import { eraseImpl, eraseReplicaImpl, healthImpl, type StoreHealth } from "./era
 import { pinErasureGovernors, erasedFromReading } from "./erase-law.js";
 import type { LiveStream } from "./channel.js";
 import { STORE_ENTITY, operatorMarkerClaims, type Genesis } from "./genesis.js";
+import { grantClaims, revocationClaims } from "./accounts.js";
+import type { Verb } from "./grants-law.js";
 import {
   admitForImpl,
   appendImpl,
@@ -1431,6 +1433,33 @@ export class Gateway {
     const stamp = this.stamp(by.author);
     await this.append(
       ids.map((id) => by.sign(withStamp(stamp, (t) => makeNegationClaims(by.author, t, id)))),
+    );
+  }
+
+  /** Grant `subject` the right `verb` over this container's store, signed with its own key. */
+  async issueGrant(subject: string, verb: Verb): Promise<void> {
+    const signer = this.signer;
+    if (signer === undefined) throw new Error("issueGrant: this container has no governing key");
+    await this.append([
+      signer.sign(
+        withStamp(this.stamp(signer.author), (t) =>
+          grantClaims(STORE_ENTITY, subject, verb, signer.author, t),
+        ),
+      ),
+    ]);
+  }
+
+  /**
+   * Revocations of `ids` here, each on its own stamp, signed with this container's key. Returned
+   * unadmitted, so the caller admits them in its own batch beside what it signs itself.
+   */
+  revocations(ids: readonly string[]): Delta[] {
+    const signer = this.signer;
+    if (signer === undefined) throw new Error("revocations: this container has no governing key");
+    return ids.map((id) =>
+      signer.sign(
+        withStamp(this.stamp(signer.author), (t) => revocationClaims(id, signer.author, t)),
+      ),
     );
   }
 

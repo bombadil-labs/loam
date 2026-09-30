@@ -146,10 +146,12 @@ peer interface then narrows in four PRs:
    (`src/gateway`, `src/federation`) holds a child only as a `Peer` (`src/gateway/peer.ts`), a
    `Pick` of the `Gateway` members one container may use of another. The census counts them
    (`peerSurface`). `Gateway` keeps its table names as getters over the Store, for the facades.
-2. **Pool operations.** A pool signs its own strikes, manifest rows and arrival stamps (`strike`,
-   `exportManifestRows`, `arrivalStamps`), and it already adopts law itself (`adoptLaw`). The host
-   asks; no container reads another's key or clock. `signer`, `stamp` and `def` leave `Peer`. The
-   doors (`append`, `federate`) stay: they admit deltas their own authors signed.
+2. **Pool operations.** A pool signs its own strikes, manifest rows, arrival stamps, grants and
+   revocations (`strike`, `exportManifestRows`, `arrivalStamps`, `issueGrant`, `revocations`), and it
+   already adopts law itself (`adoptLaw`). No code signs with a pool's key except the pool's own
+   operations, the opener included. `signer`, `stamp` and `def` leave `Peer`. The doors (`append`,
+   `federate`) stay: they admit deltas their own authors signed. The opener still stamps a
+   person's own delegation or revocation with the pool's clock, when that person signs it.
 3. **Erasure as delivery.** `deliver(order)` and `probe(id)`. The host no longer walks to a pool's
    backend, and a pool no longer walks up for its authority. `eraseReplica` and `backend` leave
    `Peer`.

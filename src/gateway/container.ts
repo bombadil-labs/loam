@@ -36,7 +36,7 @@ import {
 import type { StoreBackend } from "../store/backend.js";
 import { MemoryBackend } from "../store/memory.js";
 import { isRepairable } from "../store/quarantine.js";
-import { effectiveGrantsAt, grantClaims, holdsGrant, revocationClaims } from "./accounts.js";
+import { effectiveGrantsAt, holdsGrant, revocationClaims } from "./accounts.js";
 import { grantSubjects } from "./grants-law.js";
 import { STORE_ENTITY } from "./genesis.js";
 import { orderForPool, isErasure, orderBinds, readErasures } from "./erase-law.js";
@@ -1329,7 +1329,7 @@ export async function bindConnectionImpl(
   // The pool's own law (the owner grant, the strikes, and the checks that read them) is authored
   // and judged by the POOL's governing key; users stay host facts, resolved with the host's key.
   // The two keys are equal until step 6.
-  const poolLaw = pool.signer!.author;
+  const poolLaw = pool.operatorAuthor!;
   // The authority chain, in the pool's OWN ground (decision 2): the operator authors the owner's
   // ADMIN grant, then the OWNER — the user's root — signs a sealed DELEGATION to the connection key,
   // scoped to this pool's name (README ruling 6). The pool is its own gateway with its own store
@@ -1340,13 +1340,7 @@ export async function bindConnectionImpl(
   // follows them across a re-point; a caller that names no user gets a grant naming the key.
   const ownerSubject = userSubject ?? owner;
   if (!holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, owner, "admin", poolLaw)) {
-    await pool.append([
-      pool.signer!.sign(
-        withStamp(pool.stamp(poolLaw), (t) =>
-          grantClaims(STORE_ENTITY, ownerSubject, "admin", poolLaw, t),
-        ),
-      ),
-    ]);
+    await pool.issueGrant(ownerSubject, "admin");
   }
   // ONE OWNER PER POOL. The pool's name carries the connection key, and a key belongs to one
   // person, so any other root here is that person's REPLACED seed. After a replacement the old key
@@ -1400,9 +1394,7 @@ export async function bindConnectionImpl(
             ),
           ]
         : []),
-      ...stale.map((id) =>
-        pool.signer!.sign(withStamp(pool.stamp(poolLaw), (t) => revocationClaims(id, poolLaw, t))),
-      ),
+      ...pool.revocations(stale),
     ]);
   }
 
@@ -1491,17 +1483,13 @@ export async function revokeConnectionImpl(opts: {
   if (pool === undefined) {
     throw new Error("revokeConnection: the inbox has no pool of its own — nothing to revoke (§39)");
   }
-  // The pool's own voice is its signer, never a host seed: the pool's law is its own (step 6).
+  // The pool's own voice signs inside the pool, never with a host seed: its law is its own (step 6).
   const voice =
-    opts.asPool === true
-      ? pool.signer
-      : opts.ownerSeed === undefined
-        ? undefined
-        : seedSigner(opts.ownerSeed);
-  if (voice === undefined) {
+    opts.asPool === true || opts.ownerSeed === undefined ? undefined : seedSigner(opts.ownerSeed);
+  const owner = opts.asPool === true ? pool.operatorAuthor : voice?.author;
+  if (owner === undefined) {
     throw new Error("revokeConnection: name the owner's seed, or revoke in the pool's own voice");
   }
-  const owner = voice.author;
   const now = pool.validityNow();
   const scope = principalScopeOf(pool.reactor);
   // A grant naming a user whose root cannot be read right now may stand again later, and the
@@ -1615,10 +1603,13 @@ export async function revokeConnectionImpl(opts: {
         `write grant and no standing delegation names it`,
     );
   }
+  const struckIds = [...new Set(ids)];
   await pool.append(
-    [...new Set(ids)].map((id) =>
-      voice.sign(withStamp(pool.stamp(owner), (t) => revocationClaims(id, owner, t))),
-    ),
+    voice === undefined
+      ? pool.revocations(struckIds)
+      : struckIds.map((id) =>
+          voice.sign(withStamp(pool.stamp(owner), (t) => revocationClaims(id, owner, t))),
+        ),
   );
   // The strikes landed; whether they BIND is the suppression rule's call (the signer or the
   // operator only). Report success only once the door refuses the key.

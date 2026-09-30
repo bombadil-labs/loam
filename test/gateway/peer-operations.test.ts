@@ -69,6 +69,22 @@ describe("operations a container performs when another asks", () => {
     await host.close();
   });
 
+  it("a grant and revocations are signed with the child's own key", async () => {
+    const { host, pool } = await tree();
+    await pool.issueGrant(ACTOR.author, "write");
+    const grant = [...pool.reactor.snapshot()].find((d) =>
+      d.claims.pointers.some(
+        (p) => p.target.kind === "primitive" && p.target.value === ACTOR.author,
+      ),
+    );
+    expect(grant?.claims.author).toBe(pool.operatorAuthor);
+    expect(host.reactor.get(grant!.id)).toBeUndefined();
+    const revs = pool.revocations([grant!.id]);
+    expect(revs.map((d) => d.claims.author)).toEqual([pool.operatorAuthor]);
+    expect(pool.reactor.get(revs[0]!.id)).toBeUndefined(); // returned, not admitted
+    await host.close();
+  });
+
   it("arrival stamps are the child's own claims, returned unadmitted", async () => {
     const { host, pool } = await tree();
     const stamps = pool.arrivalStamps("channel:x", "", [["a".repeat(64)], ["b".repeat(64)]]);
