@@ -163,6 +163,25 @@ export class Store {
   }
 
   /**
+   * The containers above `child`, nearest first, while each still holds the one below it. The walk
+   * stops at a broken link (that parent is not included) or where the chain loops.
+   */
+  chainAbove(child: Peer): Peer[] {
+    const out: Peer[] = [];
+    const seen = new Set<Peer>();
+    let cursor = child;
+    while (!seen.has(cursor)) {
+      const parent = this.parents.get(cursor);
+      if (parent === undefined) break;
+      seen.add(cursor);
+      if (!this.pooled(parent, cursor)) break;
+      out.push(parent);
+      cursor = parent;
+    }
+    return out;
+  }
+
+  /**
    * The container that answers for `child` live: the verified root of its chain. Undefined when
    * `child` is attached to nothing, or when a link is broken or loops (H9).
    */

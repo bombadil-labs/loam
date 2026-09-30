@@ -152,9 +152,12 @@ peer interface then narrows in four PRs:
    operations, the opener included. `signer`, `stamp` and `def` leave `Peer`. The doors (`append`,
    `federate`) stay: they admit deltas their own authors signed. The opener still stamps a
    person's own delegation or revocation with the pool's clock, when that person signs it.
-3. **Erasure as delivery.** `deliver(order)` and `probe(id)`. The host no longer walks to a pool's
-   backend, and a pool no longer walks up for its authority. `eraseReplica` and `backend` leave
-   `Peer`.
+3. **Erasure as delivery.** A pool answers read-only questions about its own stored bytes
+   (`probe`: one id, a batch, any bytes at all, the inventory), and it still takes an erasure as a
+   delivered order (`eraseReplica`) that it admits, purges and settles itself. `backend` leaves
+   `Peer`: only the opener, which attaches, discards and closes a pool, reaches a child's store.
+   A pool reads the chain above it as peers (`Store.chainAbove`); the rule for which local-control
+   orders it admits is one function (`localOrderAuthorized`), railed case by case.
 4. **Lock.** `treeReach` is 0, and a check types every child handle as a `Peer` and fails on any
    container code that uses more.
 

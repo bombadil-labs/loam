@@ -41,9 +41,10 @@ export type Peer = Pick<
   // It refreshes what it derives from its own law.
   | "preloadResolvers"
   | "replayRegistrations"
-  // Erasure reaching into the container. To become a delivered order and a probe.
+  // Erasure: an order delivered to it, and read-only questions about the bytes it holds. The
+  // container purges and settles itself; no other container reaches its store.
   | "eraseReplica"
-  | "backend"
+  | "probe"
 >;
 
 /** A child's handle as container code sees it: the opener's handle, with the child as a `Peer`. */

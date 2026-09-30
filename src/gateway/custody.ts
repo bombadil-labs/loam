@@ -26,3 +26,24 @@ export async function probePhysicalRetention(
   }
   return { held, unasked };
 }
+
+// Every id a store holds on any tier, or undefined when it cannot be listed: a backend with no
+// inventory, or a tier that refuses, cannot be accounted for (H9).
+export async function storeInventory(backend: StoreBackend): Promise<Set<string> | string> {
+  if (backend.ids === undefined) return "the store offers no inventory";
+  try {
+    return await backend.ids();
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+// Does a store hold bytes on any tier? Unprovable is TRUE: a backend with no whole-store probe,
+// or a tier that refuses the question, cannot license an erasure (H9).
+export async function storeHoldsAny(backend: StoreBackend): Promise<boolean> {
+  if (backend.holdsAny === undefined) return true;
+  try {
+    return await backend.holdsAny();
+  } catch {
+    return true;
+  }
+}
