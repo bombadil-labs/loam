@@ -27,13 +27,14 @@ import {
   type Delta,
 } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
-import { manifestExportClaims, readManifest } from "../../src/gateway/adopt-law.js";
+import { manifestExportClaims, readManifest } from "../../src/gateway/adopt-vocab.js";
 import { refusedIds, standingErasures } from "../../src/gateway/erase-law.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { projectLiveReceiving } from "../../src/gateway/receive-policy.js";
 import { registrationDeltaClaims } from "../../src/gateway/registration.js";
-import { graveyardClaims, graveyardCompleteness, readGraveyards } from "../../src/gateway/slate.js";
+import { graveyardClaims, graveyardCompleteness } from "../../src/gateway/slate.js";
+import { readGraveyards } from "../../src/gateway/slate-law.js";
 import {
   connectionGrantState,
   unnegatedOperatorGrantIds,

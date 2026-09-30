@@ -49,7 +49,7 @@ import {
   type ResolverSpecs,
 } from "../../src/gateway/registration.js";
 import { rendererBindingClaims } from "../../src/gateway/renderers.js";
-import { CTX_MANIFEST, manifestExportClaims } from "../../src/gateway/adopt-law.js";
+import { CTX_MANIFEST, manifestExportClaims } from "../../src/gateway/adopt-vocab.js";
 import type { ModuleVersion } from "../../src/gateway/container-identity.js";
 import { handleRest } from "../../src/surface/rest.js";
 import { retraction } from "./narrowing.js";

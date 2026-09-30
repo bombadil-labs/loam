@@ -89,24 +89,26 @@ export {
   frozenMembershipTerm,
   graveyardClaims,
   graveyardCompleteness,
-  readGraveyards,
   slateClaims,
   type ByteVerdict,
-  type CitationTier,
   type CompletenessCheck,
   type CutMemberReport,
   type CutReport,
   type Duplicate,
-  type NegatedHealth,
-  type GraveyardRecord,
   type GraveyardSpec,
   type Receipt,
   type ReceiptMember,
-  type SlateHealth,
   type SlateReport,
   type SlateSpec,
   type TierVerdict,
 } from "./gateway/slate.js";
+export { type CitationTier } from "./gateway/tiers.js";
+export {
+  readGraveyards,
+  type NegatedHealth,
+  type GraveyardRecord,
+  type SlateHealth,
+} from "./gateway/slate-law.js";
 export {
   CTX_GRAVEYARD,
   RECOMMENDED_CLOSES,
@@ -161,24 +163,26 @@ export {
   listingContainerName,
   listingContexts,
   listingMembershipJson,
-  programMaskJson,
   type ListOptions,
 } from "./gateway/listing.js";
+export { programMaskJson } from "./gateway/program-mask.js";
 export {
-  CTX_MANIFEST,
-  MANIFEST_ENTITY,
-  manifestExportClaims,
   readLawAdoptions,
-  readManifest,
   type AdoptLawOptions,
   type AdoptionOutcome,
   type BlessAllOptions,
   type BlessAllReport,
   type LawAdoption,
   type LawFromRow,
+} from "./gateway/adopt-law.js";
+export {
+  CTX_MANIFEST,
+  MANIFEST_ENTITY,
+  manifestExportClaims,
+  readManifest,
   type ManifestExport,
   type ManifestRow,
-} from "./gateway/adopt-law.js";
+} from "./gateway/adopt-vocab.js";
 export {
   CTX_TRANSLATION,
   parseEmitTemplate,

@@ -10,7 +10,7 @@ import { describe, it } from "vitest";
 import { Reactor, type Claims, type Delta } from "@bombadil/rhizomatic";
 import { forgottenSince, receiptLedger, sealCommitment } from "../../src/gateway/erase.js";
 import { eraseClaims, eraseDefect, readErasures, erasuresIn } from "../../src/gateway/erase-law.js";
-import { condemnedClosure } from "../../src/gateway/slate.js";
+import { condemnedClosure } from "../../src/gateway/slate-law.js";
 import { dataStruck } from "../../src/gateway/accounts.js";
 import { lawfulNegated } from "../../src/gateway/registration.js";
 import {

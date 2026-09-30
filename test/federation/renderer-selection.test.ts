@@ -51,11 +51,8 @@ import { containerClaims } from "../../src/gateway/container-law.js";
 import { SEALED_LEEWAY, type Leeway } from "../../src/gateway/leeway.js";
 import { CTX_RENDERER, rendererBindingClaims } from "../../src/gateway/renderers.js";
 import { CTX_REGISTRATION, type LensName } from "../../src/gateway/registration.js";
-import {
-  classifyExactReceivedSchema,
-  isWithheldResolver,
-  readLawAdoptions,
-} from "../../src/gateway/adopt-law.js";
+import { classifyExactReceivedSchema, readLawAdoptions } from "../../src/gateway/adopt-law.js";
+import { isWithheldResolver } from "../../src/gateway/adopt-vocab.js";
 import { freezeMembers } from "../../src/gateway/container-identity.js";
 import { localChannelEvidence } from "../../src/federation/local-channel-events.js";
 import { channelRecordClaims } from "../../src/federation/channel.js";

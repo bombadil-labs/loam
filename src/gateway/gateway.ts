@@ -130,15 +130,13 @@ import {
 import {
   cutImpl,
   deriveReceiptImpl,
-  readClosedIds,
-  readGraveyards,
   slateReportsImpl,
-  type CitationTier,
   type CutReport,
-  type GraveyardRecord,
   type Receipt,
   type SlateReport,
 } from "./slate.js";
+import type { CitationTier } from "./tiers.js";
+import { readClosedIds, readGraveyards, type GraveyardRecord } from "./slate-law.js";
 import {
   lensOf,
   programOf,

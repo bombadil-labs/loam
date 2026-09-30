@@ -31,7 +31,7 @@ import {
   type GraphQLOutputType,
 } from "graphql";
 import type { Primitive, Policy } from "@bombadil/rhizomatic";
-import { isWithheldResolver } from "./adopt-law.js";
+import { isWithheldResolver } from "./adopt-vocab.js";
 import type { ConnectionBinding } from "./gateway.js";
 import { bytesEnvelope } from "./bytes.js";
 import {

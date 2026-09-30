@@ -7,6 +7,7 @@ import { toWire } from "../federation/wire.js";
 import { negatedAt } from "./negation.js";
 import { CTX_SLATE, slatePointer } from "./slate-vocab.js";
 import { cutErasureDefect, isStoreLocal } from "./recovery-cut.js";
+import type { Signer } from "./signer.js";
 
 export const ERASE_ENTITY = "loam:erasure";
 
@@ -522,4 +523,29 @@ export function localEraseTarget(
   )
     return;
   return target;
+}
+
+// The order a pool receives from this ground, in the fan-out and when the pool opens. A pool
+// governed by this ground's own key takes this ground's erasure as is. A pool under its own key
+// takes an order this ground signs as a pinned governor, naming that pool as its receiver: this
+// ground's own erasure is testimony there. The order keeps the erasure's own time, so the same
+// erasure always yields the same order for one pool: a reseed or a retried fan-out adds nothing.
+export function orderForPool(
+  ground: { readonly operatorAuthor: string | undefined; readonly signer: Signer | undefined },
+  erasure: Delta,
+  pool: { readonly operatorAuthor: string | undefined },
+): Delta {
+  if (pool.operatorAuthor === ground.operatorAuthor) return erasure;
+  // The same order in this ground's voice, every pointer kept (a local-control marker included),
+  // plus the one receiver it takes effect at.
+  const operator = ground.operatorAuthor!;
+  return ground.signer!.sign({
+    timestamp: erasure.claims.timestamp,
+    validFrom: erasure.claims.validFrom,
+    author: operator,
+    pointers: [
+      ...erasure.claims.pointers.filter((p) => p.role !== "receiver"),
+      { role: "receiver", target: { kind: "primitive" as const, value: pool.operatorAuthor! } },
+    ],
+  });
 }

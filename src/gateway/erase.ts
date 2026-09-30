@@ -1,5 +1,6 @@
 import { appendImpl, appendLocalErasure } from "./ingest.js";
 import { rebaseHostPeer, reportPurged } from "./peer-admission.js";
+import { settleOwedPurges } from "./purge-settle.js";
 import {
   withChannelCommit,
   parseLocalEvent,
@@ -7,7 +8,13 @@ import {
   orphanedDeclaration,
   receiptsNaming,
 } from "../federation/local-channel-events.js";
-import { LOCAL_CONTROL, inLocalContext, localEraseTarget, sameVerifiedDelta } from "./erase-law.js";
+import {
+  LOCAL_CONTROL,
+  inLocalContext,
+  localEraseTarget,
+  orderForPool,
+  sameVerifiedDelta,
+} from "./erase-law.js";
 // Erasure — degrees of forgetting (SPEC §11). The store remembers THAT it forgot — who asked,
 // when, which id — never what. A ERASURE is an append-only claim at `loam:erasure` naming
 // the erased delta; the bytes themselves are purged from every tier (the seam's purge, PR
@@ -36,19 +43,18 @@ import type { Claims, Delta } from "@bombadil/rhizomatic";
 import { evalTerm, parseTerm } from "@bombadil/rhizomatic";
 import { readLawfulRegistrations } from "./registration.js";
 import { negatedAt } from "./negation.js";
-import { programMaskJson } from "./listing.js";
+import { programMaskJson } from "./program-mask.js";
 import { unreachableStoreReport } from "./container.js";
 import { currentContainerDeclarationId } from "./container-law.js";
+import { danglingCitations, type CitationTier } from "./tiers.js";
 import {
-  danglingCitations,
+  readSlates,
   negatedHealth,
   readClosedIds,
   slateHealth,
-  type CitationTier,
   type NegatedHealth,
   type SlateHealth,
-} from "./slate.js";
-import { readSlates } from "./slate-law.js";
+} from "./slate-law.js";
 import type { Gateway } from "./gateway.js";
 import type { StoreBackend } from "../store/backend.js";
 import { withStamp } from "./stamp.js";
@@ -68,45 +74,6 @@ import {
   erasureTarget,
   eraseDefect,
 } from "./erase-law.js";
-
-/**
- * Pay the purges this host's journal holds owed. An admitted erasure order whose target the store
- * held records an obligation; `eraseImpl` pays its own, and this pays every other one (an order
- * that came through the append or federation door). The journal is rebased first, so the frames
- * that admitted a target go too. A step that fails leaves its obligation owed, and the erasure
- * screens read it as still held; the next door that admits an order retries it, and
- * `loam erase <id>` pays it (it anchors on the standing order).
- */
-export async function settleOwedPurges(gw: Gateway): Promise<void> {
-  const peer = gw.peer;
-  if (peer === undefined) return;
-  const owed = peer.journal
-    .snapshot()
-    .obligations.filter((o) => o.status !== "removed")
-    .map((o) => o.targetId);
-  if (owed.length === 0) return;
-  try {
-    await rebaseHostPeer(peer);
-  } catch {
-    return;
-  }
-  let fault: string | undefined;
-  try {
-    await gw.backend.purge(owed);
-  } catch (err) {
-    fault = err instanceof Error ? err.message : String(err);
-  }
-  for (const id of owed) {
-    const gone = fault === undefined && !(await gw.backend.holds(id).catch(() => true));
-    await reportPurged(
-      peer,
-      id,
-      gone
-        ? { status: "removed" }
-        : { status: "failed", fault: fault ?? "the store still holds the bytes" },
-    ).catch(() => {});
-  }
-}
 
 /** The slate an erasure was minted BY, when it was one member of a cut (SPEC §29.6's join). */
 export function erasureSlate(claims: Claims): string | undefined {
@@ -1257,27 +1224,6 @@ async function incompleteErasureFaults(
     }
   }
   return faults;
-}
-
-// The order a pool receives from this ground, in the fan-out and when the pool opens. A pool
-// governed by this ground's own key takes this ground's erasure as is. A pool under its own key
-// takes an order this ground signs as a pinned governor, naming that pool as its receiver: this
-// ground's own erasure is testimony there. The order keeps the erasure's own time, so the same
-// erasure always yields the same order for one pool: a reseed or a retried fan-out adds nothing.
-export function orderForPool(gw: Gateway, erasure: Delta, pool: Gateway): Delta {
-  if (pool.operatorAuthor === gw.operatorAuthor) return erasure;
-  // The same order in this ground's voice, every pointer kept (a local-control marker included),
-  // plus the one receiver it takes effect at.
-  const operator = gw.operatorAuthor!;
-  return gw.signer!.sign({
-    timestamp: erasure.claims.timestamp,
-    validFrom: erasure.claims.validFrom,
-    author: operator,
-    pointers: [
-      ...erasure.claims.pointers.filter((p) => p.role !== "receiver"),
-      { role: "receiver", target: { kind: "primitive" as const, value: pool.operatorAuthor! } },
-    ],
-  });
 }
 
 // Honor an erasure DECIDED by the primary operator (the body of `Gateway.eraseReplica`, SPEC §24.8),

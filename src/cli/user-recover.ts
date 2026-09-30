@@ -60,7 +60,7 @@ import {
   outcomesOf,
   type Outcome,
 } from "../gateway/recovery-cut.js";
-import { readClosedIds } from "../gateway/slate.js";
+import { readClosedIds } from "../gateway/slate-law.js";
 import { assembleGenesis } from "../gateway/genesis.js";
 import { Gateway } from "../gateway/gateway.js";
 import {

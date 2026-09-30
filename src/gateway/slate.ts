@@ -38,15 +38,15 @@
 import { DeltaSet, type Claims, type Delta, type Reactor } from "@bombadil/rhizomatic";
 import { containerScopeImpl, unreachableStoreReport } from "./container.js";
 import { CTX_CONTAINER, readContainerTable, survivingDeclarationIds } from "./container-law.js";
-import { ESM_RESIDENCY_DISCLOSURE, ERASURE_NON_CLAIMS } from "./erase-law.js";
-import { eraseImpl, erasureOutstanding } from "./erase.js";
 import {
+  ESM_RESIDENCY_DISCLOSURE,
+  ERASURE_NON_CLAIMS,
   UNSWEPT_AUTH_SURFACES,
-  erasedFromReading,
   isErasure,
   standingErasures,
   erasureTarget,
 } from "./erase-law.js";
+import { eraseImpl, erasureOutstanding } from "./erase.js";
 import { lawfulHistory } from "./lawful.js";
 import { negatedAt } from "./negation.js";
 import type { Gateway } from "./gateway.js";
@@ -63,15 +63,13 @@ import {
   evalMembership,
   readFrozenTerm,
   primitives,
-  CLOSURES,
-  isSlateRecord,
-  graveyardDefect,
-  parsePriorPair,
   readSlates,
-  entitiesAt,
   requireMoment,
+  readClosedIds,
+  readGraveyards,
 } from "./slate-law.js";
 import { CTX_SLATE, entityPtr } from "./slate-vocab.js";
+import { type CitationTier, reachableTiers, danglingCitations } from "./tiers.js";
 
 // The whole mint, enumerable — the vocabulary rail asserts the prefix discipline over this list.
 export const SLATE_CONTEXTS = [CTX_SLATE, CTX_GRAVEYARD] as const;
@@ -378,131 +376,7 @@ function duplicatesFor(gw: Gateway, slates: readonly ReadonlySet<string>[]): Dup
   return out;
 }
 
-// --- health (§29.4): the compliance clock in its OWN section -------------------------------------
-
-export interface SlateHealth {
-  readonly open: number;
-  readonly lapsed: number;
-  /** The lapsed slates' container entities — operator-only, like `erasure.outstanding`. */
-  readonly lapsedIds: readonly string[];
-  /**
-   * Slates ENFORCING NOTHING because their condemned set cannot be read. Surfaced because the
-   * alternative is a slate reporting `closes: [cite, egress]` while all three doors stand open — a
-   * claim of protection never delivered, and the one state an operator most needs to see.
-   */
-  readonly unresolved: readonly string[];
-  /** Slates whose container was re-declared elsewhere. The record's pins still govern; this says so. */
-  readonly disagreeing: readonly string[];
-}
-
-export interface NegatedHealth {
-  /** Ids in some graveyard's frozen `version` whose erasure no longer survives. */
-  readonly count: number;
-  /** Of those, how many are PRESENT in the ground again. */
-  readonly present: number;
-  readonly ids: readonly string[];
-  /**
-   * Graveyards whose frozen set could NOT be read. Without this, `count: 0` means both "nothing has
-   * been negated" and "the one durable list of ids this store promised to forget is unreadable" —
-   * H9 in the instrument that exists to make an id whose erasure was negated visible at all.
-   */
-  readonly unreadable: readonly string[];
-}
-
-/**
- * A lapsed slate does NOT move `status`, and the separation is the point. `settling` means a promise
- * already MADE has not reached the bytes yet and the operator waits or repairs a tier; a lapsed
- * slate means a promise has not been KEPT and the operator's job is to CUT. Routing a compliance
- * clock through §11's byte-debt field would teach whoever watches `status` that `settling` sometimes
- * just means someone filed a slate — which is how a field earns the right to be ignored.
- */
-export function slateHealth(gw: Gateway, now: number): SlateHealth {
-  const slates = readSlates(gw.reactor, gw.validityNow(), gw.operatorAuthor, now);
-  const lapsed = slates.filter((s) => s.lapsed);
-  return {
-    open: slates.length,
-    lapsed: lapsed.length,
-    lapsedIds: lapsed.map((s) => s.container).sort(),
-    unresolved: slates
-      .filter((s) => s.unresolved !== undefined)
-      .map((s) => s.container)
-      .sort(),
-    disagreeing: slates
-      .filter((s) => s.disagreement !== undefined)
-      .map((s) => s.container)
-      .sort(),
-  };
-}
-
-// --- the withheld set (egress and read share ONE closure) ---------------------------------------
-
-/**
- * The condemned set CLOSED UNDER NEGATION TARGETS, transitively — H1 read from the other side.
- *
- * `withNegationClosure` maintains *if I offer `d`, I offer everything that negates `d`*. Its
- * contrapositive is *if I withhold `n`, and `n` negates `d`, I withhold `d`*. Those are one rule,
- * so a naive subtraction of a slated NEGATION would leave its target offered and hand the peer a
- * live reading of a retracted claim. Transitive for the same reason the forward closure is (a
- * struck strike revives, so one link would leave a revived claim wrongly offered), and terminating
- * for the same reason (the set only grows, bounded by the snapshot, and content addressing forbids
- * a cycle).
- *
- * This UNDER-represents the post-cut world for exactly the resurfacing set, and that is the correct
- * direction: over-withholding cannot disclose, un-slating is FREE (§29.8), and a revocable act must
- * not have an irrevocable effect.
- */
-export function condemnedClosure(reactor: Reactor, seed: Iterable<string>): Set<string> {
-  const out = new Set(seed);
-  const pending = [...out];
-  while (pending.length > 0) {
-    const id = pending.pop() as string;
-    const d = reactor.get(id);
-    if (d === undefined) continue;
-    for (const p of d.claims.pointers) {
-      if (p.role !== "negates" || p.target.kind !== "delta") continue;
-      const target = p.target.deltaRef.delta;
-      if (out.has(target)) continue;
-      out.add(target);
-      pending.push(target);
-    }
-  }
-  return out;
-}
-
-const closureIds = (
-  reactor: Reactor,
-  slates: readonly Slate[],
-  door: SlateClosure,
-): Set<string> => {
-  const seed = new Set<string>();
-  for (const s of slates) {
-    if (!s.closes.has(door)) continue;
-    for (const id of s.members) seed.add(id);
-  }
-  return seed.size === 0 ? seed : condemnedClosure(reactor, seed);
-};
-
-/** What EGRESS closure withholds from `offeredDeltas` — the one site, and `openWall` inherits it. */
-export function egressWithheld(gw: Gateway, now: number): Set<string> {
-  return closureIds(
-    gw.reactor,
-    readSlates(gw.reactor, gw.validityNow(), gw.operatorAuthor, now),
-    "egress",
-  );
-}
-
-/** What READ closure withholds from every gather that answers a read DOOR. */
-export function readClosedIds(gw: Gateway, now: number): Set<string> {
-  requireMoment(now, "a read door");
-  const closed = closureIds(
-    gw.reactor,
-    readSlates(gw.reactor, gw.validityNow(), gw.operatorAuthor, now),
-    "read",
-  );
-  // Erased ids are never read, even while a purge has not yet removed their bytes.
-  for (const id of erasedFromReading(gw.reactor, gw.operatorAuthor)) closed.add(id);
-  return closed;
-}
+// --- the read ground -----------------------------------------------------------------------------
 
 /**
  * `snapshot ∖ readClosed` — the ONE helper every gather that answers a READ door evaluates over.
@@ -536,23 +410,6 @@ export function readGroundAsOf(gw: Gateway, asOfGround: DeltaSet, now: number): 
 const groundWithout = (ground: DeltaSet, closed: ReadonlySet<string>): DeltaSet =>
   closed.size === 0 ? ground : DeltaSet.from([...ground].filter((d) => !closed.has(d.id)));
 
-/**
- * Did this batch just close `read` over something? A STREAM OPEN BEFORE THE SLATE re-resolves, or it
- * serves the member forever (§29.3): nothing in a slate's own deltas touches the watched entity's
- * materialization, so the sink never fires and the narrowing never takes effect. Asked cheaply —
- * a batch with no slate record in it pays nothing.
- */
-export function landsReadClosure(gw: Gateway, fresh: readonly Delta[], now: number): boolean {
-  // `fresh` is only what this batch NEWLY ingested: a duplicate changes nothing, and must not end
-  // anyone's stream. An erasure narrows a reading only when its target's bytes are held here.
-  if (fresh.some((d) => isSlateRecord(d.claims))) return readClosedIds(gw, now).size > 0;
-  return fresh.some((d) => {
-    if (!isErasure(d.claims)) return false;
-    const target = erasureTarget(d.claims);
-    return target !== undefined && gw.reactor.get(target) !== undefined;
-  });
-}
-
 // --- the cut -------------------------------------------------------------------------------------
 
 /**
@@ -566,18 +423,6 @@ export type ByteVerdict = false | true | "unproven";
 export interface TierVerdict {
   readonly tier: string;
   readonly holds: ByteVerdict;
-}
-
-/**
- * The citations manifest, ATTRIBUTED to the tier each dangler lives on (T216). The flat `citations`
- * id list stays a bare `string[]` (a frozen T64 shape), and this rides beside it — one entry per tier
- * the byte verdict walks, so a reader can never learn absence multi-tier while reading danglers
- * single-tier. `citations` carries no `holds`, so it is not a byte verdict and never a §29.7
- * observation field: it names WHICH deltas point at the hole on WHICH tier, a fact about the ground.
- */
-export interface CitationTier {
-  readonly tier: string;
-  readonly citations: readonly string[];
 }
 
 export interface CutMemberReport {
@@ -975,69 +820,6 @@ const spokenByOf = (claims: Claims): string | undefined => {
     : undefined;
 };
 
-// The DIRECT tiers a §11 sweep can WALK: this store's primary, then each attached quarantine pool (the
-// operator's own replicas), labeled by the pool's declared container name or `pool:N` when anonymous.
-// Named ONCE, here, so the byte verdict and the citations manifest walk the SAME set — a walkable tier
-// the verdict probes is a walkable tier the manifest enumerates, and neither can name one the other
-// skips. Two limits are inherited from the old `tierVerdicts`, not introduced here:
-//   - A WALL (unreachable — a `kept`/faulted store) is not walkable, so it is NOT in this set. The
-//     byte verdict adds walls as `unproven` (`notReached`, added by callers); the manifest cannot
-//     enumerate a store it cannot reach, so it carries no entry for one. `tiers` is therefore a strict
-//     superset of `citationTiers` BY TIER NAME whenever a wall stands — the honest relation, since a
-//     store you cannot reach cannot be proven clean OR enumerated for danglers.
-//   - This reach is FLAT: primary plus the DIRECTLY-attached pools. The erase fan-out and `health()`
-//     recurse into nested pools; the verdict and the manifest do not itemize a pool-of-a-pool. The
-//     nested byte is still SWEPT and guaranteed by §11's recursive throw — it is just not a named row.
-//   - `pool:N` is SYNTHESIZED, so a container literally named `pool:1` collides with an anonymous
-//     pool's synthetic label — a consumer keying by tier name resolves it ambiguously (H8, low, old).
-export function reachableTiers(gw: Gateway): { tier: string; gw: Gateway }[] {
-  const out: { tier: string; gw: Gateway }[] = [{ tier: "primary", gw }];
-  const named = new Map([...gw.attachedContainers].map(([name, pool]) => [pool, name]));
-  let anon = 0;
-  for (const pool of gw.quarantinePools) {
-    out.push({ tier: named.get(pool) ?? `pool:${(anon += 1)}`, gw: pool });
-  }
-  return out;
-}
-
-// Every surviving delta that dangles at the hole `id` leaves, enumerated across every WALKABLE tier
-// (T216) — the same reachable set the byte verdict walks (`reachableTiers`: primary plus the directly-
-// attached pools). Before this, both callers walked the primary's reactor alone, so a pool-resident
-// citation (a T207 arrival stamp echoing an erased delta, a federated negation) was omitted while a
-// gather still served a signed pointer at the hole.
-//
-// The flat `citations` list is deduplicated across tiers and sorted, so it is stable across a re-issue
-// and a bare `string[]` (the frozen T64 shape). `citationTiers` carries one entry PER walkable tier,
-// empty ones included. It is NOT the verdict's whole tier set: the verdict additionally names any WALL
-// (`notReached`) as `unproven`, and a wall cannot be walked for citations, so `citationTiers` covers
-// the walkable tiers and the verdict's `tiers` is a superset by tier name whenever a wall stands.
-// `exclude` drops a delta by identity on every tier (erase.ts excludes the erasure it mints from its
-// own manifest); a re-issue passes none.
-export function danglingCitations(
-  gw: Gateway,
-  id: string,
-  exclude: (deltaId: string) => boolean = () => false,
-): { citations: string[]; citationTiers: CitationTier[] } {
-  const seen = new Set<string>();
-  const flat: string[] = [];
-  const citationTiers: CitationTier[] = [];
-  const cites = (d: Delta): boolean =>
-    d.claims.pointers.some((p) => p.target.kind === "delta" && p.target.deltaRef.delta === id);
-  for (const { tier, gw: g } of reachableTiers(gw)) {
-    const here: string[] = [];
-    for (const d of g.reactor.snapshot()) {
-      if (exclude(d.id) || !cites(d)) continue;
-      here.push(d.id);
-      if (!seen.has(d.id)) {
-        seen.add(d.id);
-        flat.push(d.id);
-      }
-    }
-    citationTiers.push({ tier, citations: here.sort() });
-  }
-  return { citations: flat.sort(), citationTiers };
-}
-
 // The per-tier byte verdict, asked of the BYTES and tri-state. A tier that cannot answer is
 // `unproven`, never `false` — and a `kept` wall the operator signed `accepts-incomplete` over is
 // `unproven` too, because nobody looked.
@@ -1078,57 +860,6 @@ function findGraveyard(
 }
 
 // --- the graveyard: durable, joinable, arithmetic ------------------------------------------------
-
-export interface GraveyardRecord {
-  readonly id: string;
-  readonly container: string;
-  readonly record: string;
-  readonly version: string;
-  readonly membershipAt: string;
-  readonly memberCount: number;
-  readonly opened: number;
-  readonly cutAt: number;
-  readonly closes: readonly SlateClosure[];
-  readonly affected: readonly string[];
-  readonly priorErasure: readonly { readonly member: string; readonly erasure: string }[];
-}
-
-export function readGraveyards(
-  reactor: Reactor,
-  now: number,
-  operator: string | undefined,
-): GraveyardRecord[] {
-  if (operator === undefined) return [];
-  const negated = negatedAt(reactor, now, operator);
-  const out: GraveyardRecord[] = [];
-  // A HISTORY read, as in `findGraveyard`: the record's own validity window never retires it.
-  for (const d of lawfulHistory(reactor, operator)) {
-    if (negated(d.id) || !isGraveyard(d.claims)) continue;
-    if (graveyardDefect(d.claims, operator) !== undefined) continue;
-    const cited = d.claims.pointers.find(
-      (p) => p.role === "slate-record" && p.target.kind === "delta",
-    );
-    out.push({
-      id: d.id,
-      container: at(d.claims, "graveyard", CTX_GRAVEYARD)!,
-      record: cited?.target.kind === "delta" ? cited.target.deltaRef.delta : "",
-      version: primitives(d.claims, "version")[0] as string,
-      membershipAt: primitives(d.claims, "membershipAt")[0] as string,
-      memberCount: primitives(d.claims, "member-count")[0] as number,
-      opened: primitives(d.claims, "opened")[0] as number,
-      cutAt: primitives(d.claims, "cut-at")[0] as number,
-      closes: primitives(d.claims, "closes").filter(
-        (c): c is SlateClosure => typeof c === "string" && CLOSURES.has(c),
-      ),
-      affected: entitiesAt(d.claims, "affected", CTX_CONTAINER),
-      priorErasure: primitives(d.claims, "prior-erasure")
-        .map((p) => (typeof p === "string" ? parsePriorPair(p) : undefined))
-        .filter((p): p is { member: string; erasure: string } => p !== undefined),
-    });
-  }
-  out.sort((a, b) => a.cutAt - b.cutAt || (a.id < b.id ? -1 : 1));
-  return out;
-}
 
 export interface CompletenessCheck {
   /**
@@ -1398,41 +1129,5 @@ export async function deriveReceiptImpl(
       // list reads as exhaustive while a forgotten user's password hash still sits in credentials.json.
       ...UNSWEPT_AUTH_SURFACES,
     ],
-  };
-}
-
-// --- negation reporting (§29.8): what a graveyard's frozen set says about the present -----
-
-/**
- * Negation is LAWFUL, not debt — so this moves `status` no more than a slate does. But without it
- * an id whose erasure was negated is invisible to every instrument the store has: negating an
- * erasure removes the id from `readErasures` and therefore from `promised`, although the id stays
- * refused forever. A graveyard's frozen `version` still lists it.
- */
-export function negatedHealth(gw: Gateway): NegatedHealth {
-  const operator = gw.operatorAuthor;
-  const empty = { count: 0, present: 0, ids: [], unreadable: [] };
-  if (operator === undefined) return empty;
-  const graves = readGraveyards(gw.reactor, gw.validityNow(), operator);
-  if (graves.length === 0) return empty;
-  const surviving = new Set(
-    standingErasures(gw.reactor, gw.validityNow(), operator).map((t) => erasureTarget(t.claims)!),
-  );
-  const ids = new Set<string>();
-  const unreadable: string[] = [];
-  for (const grave of graves) {
-    const frozen = readFrozenTerm(gw.reactor, grave.membershipAt);
-    if (!frozen.ok) {
-      unreadable.push(grave.id); // never folded into "nothing negated" (H9)
-      continue;
-    }
-    for (const id of frozen.ids) if (!surviving.has(id)) ids.add(id);
-  }
-  const sorted = [...ids].sort();
-  return {
-    count: sorted.length,
-    present: sorted.filter((id) => gw.reactor.get(id) !== undefined).length,
-    ids: sorted,
-    unreadable: unreadable.sort(),
   };
 }
