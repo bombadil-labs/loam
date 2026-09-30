@@ -723,9 +723,9 @@ function openStore(path: string, io: IO): SqliteBackend {
 
 // WHO IS SERVING THIS HOME. `loam serve` leaves a record beside config.json; the offline
 // commands (pull, register) consult it so a success report can say the one thing sqlite cannot:
-// a running server answers from the memory it booted with, and nothing lands in that memory
-// through a second handle. Removed on clean shutdown; a crash leaves it behind, and the dead-pid
-// check below is what keeps the stale record quiet.
+// a running server reads new deltas on its next request, but what it loaded at boot does not
+// change through a second handle. Removed on clean shutdown; a crash leaves it behind, and the
+// dead-pid check below is what keeps the stale record quiet.
 const servingFile = (home: string): string => join(home, "serving.json");
 
 const recordServing = (home: string, url: string, store: string): void => {
@@ -4509,7 +4509,7 @@ async function cmdClientRevoke(
         ? `  its ${struckCount} surviving grant${struckCount === 1 ? " is" : "s are"} negated in ${path}\n`
         : `  no standing held by this key in ${path} — nothing needed negating\n`) +
       `  its past deltas are untouched — they keep naming their author\n` +
-      `  a server already running honors the negated GRANTS until a restart; the bearer needs none`,
+      `  a server already running reads the negated grants on its next request, with no restart`,
   );
   const staleness = servingWarning(home, path);
   if (staleness !== undefined) io.err(`loam: ${staleness}`);
@@ -5545,7 +5545,8 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
     io.out(`loam: ${staleness}`);
     io.out(
       "loam: for an erasure that is worse than a stale read — a running server can still SERVE " +
-        "the bytes this command removed, out of the memory it booted with. Restart it.",
+        "the bytes this command removed: a new request does not clear them from its memory. " +
+        "Restart it.",
     );
   }
   return 0;
