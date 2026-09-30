@@ -8,7 +8,7 @@
 // Nothing in this module imports admin.ts, so there is no cycle: the door imports this group and
 // wires its `connectionsPanelHtml` into the page factory.
 
-import { refusedIds } from "../gateway/erase.js";
+import { refusedIds } from "../gateway/erase-law.js";
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import {
   evalTermRaw,

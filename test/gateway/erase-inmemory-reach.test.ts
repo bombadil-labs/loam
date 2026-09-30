@@ -51,7 +51,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { Channel } from "../../src/gateway/channel.js";
-import { eraseClaims } from "../../src/gateway/erase.js";
+import { eraseClaims } from "../../src/gateway/erase-law.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER_SEED, SURVEYOR, SURVEYOR_SEED, observed } from "../spike/garden.js";

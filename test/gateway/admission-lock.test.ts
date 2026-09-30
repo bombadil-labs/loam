@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Claims, type Delta } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
-import { refusedIds } from "../../src/gateway/erase.js";
+import { refusedIds } from "../../src/gateway/erase-law.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { activeIncarnation, cutClaims, pausedKeys } from "../../src/gateway/recovery-cut.js";

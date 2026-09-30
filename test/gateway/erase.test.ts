@@ -13,14 +13,14 @@ import {
   type Delta,
 } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
+import { sealCommitment } from "../../src/gateway/erase.js";
 import {
   ERASE_ENTITY,
   eraseClaims,
   isErasure,
   readErasures,
-  sealCommitment,
   erasuresIn,
-} from "../../src/gateway/erase.js";
+} from "../../src/gateway/erase-law.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";

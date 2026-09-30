@@ -15,7 +15,7 @@ import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FaultableBackend } from "../helpers/faultable-backend.js";
-import { isErasure, readErasures } from "../../src/gateway/erase.js";
+import { isErasure, readErasures } from "../../src/gateway/erase-law.js";
 import { trustClaims } from "../../src/gateway/trust.js";
 import { PLANT } from "./fixtures.js";
 import { FERN, observed } from "../spike/garden.js";

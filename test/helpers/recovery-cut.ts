@@ -5,7 +5,7 @@
 // in each, which the command writes and a rail must write too.
 
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
-import { refusedIds } from "../../src/gateway/erase.js";
+import { refusedIds } from "../../src/gateway/erase-law.js";
 import type { Gateway } from "../../src/gateway/gateway.js";
 import { cutClaims, incarnationId, manifestClaims } from "../../src/gateway/recovery-cut.js";
 import { recordPrevious } from "../../src/gateway/user-root.js";

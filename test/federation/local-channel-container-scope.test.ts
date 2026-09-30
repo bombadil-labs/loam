@@ -22,8 +22,6 @@ import {
 import { SEALED_LEEWAY } from "../../src/gateway/leeway.js";
 import { frozenMembershipTerm, slateClaims } from "../../src/gateway/slate.js";
 import {
-  inLocalContext,
-  LOCAL_CONTROL,
   LOCAL_EVENT,
   localChannelEvidence,
   localChannelsInContainer,
@@ -31,6 +29,7 @@ import {
   PARENT_CONTAINER,
   parseLocalEvent,
 } from "../../src/federation/local-channel-events.js";
+import { inLocalContext, LOCAL_CONTROL } from "../../src/gateway/erase-law.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
 import { withStamp } from "../../src/gateway/stamp.js";

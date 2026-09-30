@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
-import { eraseClaims } from "../../src/gateway/erase.js";
+import { eraseClaims } from "../../src/gateway/erase-law.js";
 import { operatorMarkerClaims, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { publicClaims } from "../../src/gateway/public.js";
 import { registrationDeltaClaims } from "../../src/gateway/registration.js";

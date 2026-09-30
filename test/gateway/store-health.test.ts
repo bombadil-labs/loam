@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from "vitest";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
-import { isErasure } from "../../src/gateway/erase.js";
+import { isErasure } from "../../src/gateway/erase-law.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { MirrorBackend } from "../../src/store/mirror.js";

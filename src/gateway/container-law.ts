@@ -16,7 +16,7 @@ import {
   type Terms,
   isSealed,
 } from "./leeway.js";
-import { lawfulDeltasAt, lawfulHistoryAt, lawfulSnapshot } from "./registration.js";
+import { lawfulDeltasAt, lawfulHistoryAt, lawfulSnapshot } from "./lawful.js";
 import { negatedAt } from "./negation.js";
 import { readTrustPolicyAt, type TrustPolicy } from "./trust.js";
 import { subjectKeyAt, USER_PREFIX } from "./user-root.js";

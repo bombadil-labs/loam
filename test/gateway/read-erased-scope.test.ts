@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { authorForSeed, Reactor, signClaims } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { containerClaims } from "../../src/gateway/container-law.js";
-import { eraseClaims } from "../../src/gateway/erase.js";
+import { eraseClaims } from "../../src/gateway/erase-law.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { listingPageImpl } from "../../src/gateway/listing.js";

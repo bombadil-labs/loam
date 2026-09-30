@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { authorForSeed, OrdinaryJournalPeer, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { containerClaims } from "../../src/gateway/container-law.js";
-import { eraseClaims } from "../../src/gateway/erase.js";
+import { eraseClaims } from "../../src/gateway/erase-law.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import {

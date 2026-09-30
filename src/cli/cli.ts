@@ -32,12 +32,10 @@ import { parseOffer } from "../federation/offer.js";
 import { pullFrom } from "../federation/pull.js";
 import { sourceFor } from "../federation/channel.js";
 import {
-  ERASURE_NON_CLAIMS,
   erasureStanding,
   erasureStandings,
   type ErasureStanding,
   type StandingReport,
-  ESM_RESIDENCY_DISCLOSURE,
   readGrounds,
   revivedAcross,
   type ExtraReading,
@@ -45,13 +43,17 @@ import {
   type ReadingAt,
   type RevivalReport,
   receiptLedger,
+  type ErasureReceipt,
+} from "../gateway/erase.js";
+import {
+  ERASURE_NON_CLAIMS,
+  ESM_RESIDENCY_DISCLOSURE,
   standingErasures,
   neverReturns,
   erasureTarget,
   isErasure,
   UNSWEPT_AUTH_SURFACES,
-  type ErasureReceipt,
-} from "../gateway/erase.js";
+} from "../gateway/erase-law.js";
 import type { SlateReport } from "../gateway/slate.js";
 import { programMaskJson } from "../gateway/listing.js";
 import { unreachableStoreReport } from "../gateway/container.js";

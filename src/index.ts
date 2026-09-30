@@ -56,6 +56,7 @@ export { toWire, fromWire, type WireDelta } from "./federation/wire.js";
 // (`ErasureHealth` here, `SlateHealth` / `NegatedHealth` in the slate block below) are what a
 // caller needs to READ what it answers. The bodies computing them (`healthImpl`, `slateHealth`,
 // `negatedHealth`) take a `Gateway` seam and stay out.
+export { sealCommitment, type ErasureHealth, type StoreHealth } from "./gateway/erase.js";
 export {
   CTX_ERASE,
   ERASE_ENTITY,
@@ -63,11 +64,8 @@ export {
   eraseDefect,
   isErasure,
   readErasures,
-  sealCommitment,
   erasuresIn,
-  type ErasureHealth,
-  type StoreHealth,
-} from "./gateway/erase.js";
+} from "./gateway/erase-law.js";
 export {
   CTX_TRUST,
   TRUST_ENTITY,
@@ -85,23 +83,14 @@ export {
 // publishing any of them would freeze a seam as API, so none appears here however public the
 // compiler thinks it is.
 export {
-  CTX_GRAVEYARD,
-  CTX_SLATE,
   RECEIPT_FIELDS,
-  RECOMMENDED_CLOSES,
   SLATE_CONTEXTS,
-  SLATE_ENTITY,
   enforcedBy,
   frozenMembershipTerm,
   graveyardClaims,
   graveyardCompleteness,
-  isGraveyard,
-  isSlateRecord,
   readGraveyards,
-  readSlates,
   slateClaims,
-  slateDefect,
-  slatePointer,
   type ByteVerdict,
   type CitationTier,
   type CompletenessCheck,
@@ -113,13 +102,23 @@ export {
   type GraveyardSpec,
   type Receipt,
   type ReceiptMember,
-  type Slate,
-  type SlateClosure,
   type SlateHealth,
   type SlateReport,
   type SlateSpec,
   type TierVerdict,
 } from "./gateway/slate.js";
+export {
+  CTX_GRAVEYARD,
+  RECOMMENDED_CLOSES,
+  SLATE_ENTITY,
+  isGraveyard,
+  isSlateRecord,
+  readSlates,
+  slateDefect,
+  type Slate,
+  type SlateClosure,
+} from "./gateway/slate-law.js";
+export { CTX_SLATE, slatePointer } from "./gateway/slate-vocab.js";
 // The DOOR and its vocabulary, never the plumbing behind it. `Gateway.openContainer` /
 // `.containers` / `.adoptLaw` / `.blessAll` / `.lawFrom` are the reachable surface (SPEC §27); what
 // follows is what a caller needs to DESCRIBE, SIGN, and READ what those doors answer. A `*Impl`
@@ -210,7 +209,6 @@ export type {
 } from "./surface/surface.js";
 export {
   lawfulNegated,
-  lawfulSnapshot,
   parseClaimTemplates,
   parseRefs,
   parseRegistrationInput,
@@ -238,6 +236,7 @@ export {
   type ResolverSpec,
   type ResolverSpecs,
 } from "./gateway/registration.js";
+export { lawfulSnapshot } from "./gateway/lawful.js";
 export { SEALED_CHANNELS, realmProgram, sealRealm } from "./gateway/artifact-realm.js";
 export {
   ARTIFACT_ENTITY,

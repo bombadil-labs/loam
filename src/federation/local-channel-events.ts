@@ -1,12 +1,6 @@
 // Protected local history. Raw restore is a trusted host capability; wire signatures alone
 // never establish that an event was issued by this home's channel service.
-import {
-  computeId,
-  verifyDelta,
-  type Claims,
-  type Delta,
-  type Reactor,
-} from "@bombadil/rhizomatic";
+import { computeId, type Claims, type Delta, type Reactor } from "@bombadil/rhizomatic";
 import type { Gateway } from "../gateway/gateway.js";
 import { negatedAt } from "../gateway/negation.js";
 import {
@@ -14,35 +8,20 @@ import {
   currentContainerDeclarationId,
 } from "../gateway/container-law.js";
 import { channelStatusImpl } from "./channel.js";
-import { eraseDefect, isErasure, readErasures, erasureTarget } from "../gateway/erase.js";
-import { toWire } from "./wire.js";
+import { readErasures, erasureTarget } from "../gateway/erase-law.js";
+import {
+  localEraseTarget,
+  text,
+  address,
+  LOCAL_CONTROL,
+  sameVerifiedDelta,
+  verified,
+  inLocalContext,
+} from "../gateway/erase-law.js";
 
 export const LOCAL_EVENT = "loam.local.channel.event";
-export const LOCAL_CONTROL = "loam.local.channel.control";
-const address = (v: unknown): v is string => typeof v === "string" && /^1e20[0-9a-f]{64}$/.test(v);
-const text = (v: unknown, empty = false): v is string =>
-  typeof v === "string" && (empty || v.length > 0) && !v.includes("\0");
-export const inLocalContext = (d: Delta, context: string): boolean =>
-  d.claims.pointers.some((p) => p.target.kind === "entity" && p.target.entity.context === context);
 export const reservedLocal = (d: Delta): boolean =>
   inLocalContext(d, LOCAL_EVENT) || inLocalContext(d, LOCAL_CONTROL);
-// A verdict is a function of id, claims and signature alone, and claims that recompute to the id
-// are the claims that were signed. So an object that verified once keeps its verdict while its id
-// and signature are unchanged and its claims still recompute: a content hash, not an ed25519
-// check. Deltas are not frozen, which is why the recompute stays: an object mutated since it
-// verified misses the memo and takes the full check.
-const verifiedAs = new WeakMap<Delta, { readonly id: string; readonly sig: string | undefined }>();
-function verified(d: Delta): boolean {
-  const memo = verifiedAs.get(d);
-  if (memo !== undefined && memo.id === d.id && memo.sig === d.sig && computeId(d.claims) === d.id)
-    return true;
-  if (computeId(d.claims) !== d.id || verifyDelta(d) !== "verified") return false;
-  verifiedAs.set(d, { id: d.id, sig: d.sig });
-  return true;
-}
-export function sameVerifiedDelta(a: Delta | undefined, b: Delta): boolean {
-  return a !== undefined && verified(a) && JSON.stringify(toWire(a)) === JSON.stringify(toWire(b));
-}
 /**
  * Does this offered delta verify? One with the id and signature of a verified held delta, whose
  * claims recompute to that id, has the held delta's verdict — so a re-offer of what the ground
@@ -326,48 +305,6 @@ export function receiptsNaming(gw: Gateway, declaration: string): Set<string> {
     if (e.action === "received" && openings.has(e.opening))
       for (const id of e.received) named.add(id);
   return named;
-}
-export function localEraseTarget(
-  d: Delta,
-  reactor: Reactor,
-  operator: string | undefined,
-): string | undefined {
-  if (
-    !isErasure(d.claims) ||
-    !sameVerifiedDelta(d, d) ||
-    eraseDefect(d, reactor, operator) !== undefined
-  )
-    return;
-  const markers = d.claims.pointers.filter(
-    (p) => p.target.kind === "entity" && p.target.entity.context === LOCAL_CONTROL,
-  );
-  const versions = d.claims.pointers.filter((p) => p.role === "local-control-version");
-  const kinds = d.claims.pointers.filter((p) => p.role === "local-control-kind");
-  const channels = d.claims.pointers.filter((p) => p.role === "local-control-channel");
-  const marker = markers[0],
-    version = versions[0],
-    kind = kinds[0],
-    channel = channels[0],
-    target = erasureTarget(d.claims);
-  if (
-    markers.length !== 1 ||
-    marker?.role !== "local-control" ||
-    marker.target.kind !== "entity" ||
-    marker.target.entity.id !== target ||
-    !address(target) ||
-    versions.length !== 1 ||
-    version?.target.kind !== "primitive" ||
-    version.target.value !== 1 ||
-    kinds.length !== 1 ||
-    kind?.target.kind !== "primitive" ||
-    kind.target.value !== "erase" ||
-    channels.length !== 1 ||
-    channel?.target.kind !== "primitive" ||
-    !text(channel.target.value) ||
-    !channel.target.value.startsWith("channel:")
-  )
-    return;
-  return target;
 }
 /** The channel entity id a validated local-control marker names; call after localEraseTarget. */
 export function localControlChannel(d: Delta): string | undefined {

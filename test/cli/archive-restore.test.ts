@@ -16,7 +16,7 @@ import {
 } from "@bombadil/rhizomatic";
 import { restoreIntoJournal, run } from "../../src/cli/cli.js";
 import { storePath } from "../../src/cli/config.js";
-import { eraseClaims, neverReturns } from "../../src/gateway/erase.js";
+import { eraseClaims, neverReturns } from "../../src/gateway/erase-law.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { ArchiveBackend } from "../../src/store/archive.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";

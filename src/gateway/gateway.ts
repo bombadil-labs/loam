@@ -78,14 +78,8 @@ import {
   type LawAdoption,
   type LawFromRow,
 } from "./adopt-law.js";
-import {
-  pinErasureGovernors,
-  erasedFromReading,
-  eraseImpl,
-  eraseReplicaImpl,
-  healthImpl,
-  type StoreHealth,
-} from "./erase.js";
+import { eraseImpl, eraseReplicaImpl, healthImpl, type StoreHealth } from "./erase.js";
+import { pinErasureGovernors, erasedFromReading } from "./erase-law.js";
 import type { LiveStream } from "./channel.js";
 import { STORE_ENTITY, operatorMarkerClaims, type Genesis } from "./genesis.js";
 import {
@@ -96,8 +90,8 @@ import {
   offeredDeltasImpl,
   selectImpl,
   watchImpl,
-  withNegationClosure,
 } from "./ingest.js";
+import { withNegationClosure } from "./negation-closure.js";
 import { freezeMembers, type ModuleVersion } from "./container-identity.js";
 import {
   boundKey,

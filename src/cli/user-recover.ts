@@ -50,7 +50,7 @@ import { keysEverOf } from "../gateway/principal.js";
 import { withStamp } from "../gateway/stamp.js";
 import { attachedPool } from "../gateway/container.js";
 import { declaredInboxes, readContainerTable } from "../gateway/container-law.js";
-import { readErasures, refusedIds } from "../gateway/erase.js";
+import { readErasures, refusedIds } from "../gateway/erase-law.js";
 import {
   cutClaims,
   cutsHere,

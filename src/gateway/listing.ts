@@ -33,7 +33,8 @@ import {
   readContainerTable,
   type ContainerTable,
 } from "./container-law.js";
-import { erasedFromReading, erasedInScope, poolGovernors } from "./erase.js";
+import { erasedInScope, poolGovernors } from "./erase.js";
+import { erasedFromReading } from "./erase-law.js";
 import type { ConnectionBinding, Gateway } from "./gateway.js";
 import { groupPrograms } from "./lifecycle.js";
 import { programOf, type ProgramName } from "./registration.js";

@@ -13,7 +13,7 @@
 // names stay a build-time collision, and no reader's surface changes shape by upgrading.
 
 import type { Claims, Reactor } from "@bombadil/rhizomatic";
-import { lawfulDeltasAt } from "./registration.js";
+import { lawfulDeltasAt } from "./lawful.js";
 import { negatedAt } from "./negation.js";
 
 export const BINDING_POLICY_ENTITY = "loam:binding-policy";

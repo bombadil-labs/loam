@@ -12,7 +12,7 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { overlay } from "../helpers/faultable-backend.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
-import { readErasures } from "../../src/gateway/erase.js";
+import { readErasures } from "../../src/gateway/erase-law.js";
 import { containerClaims } from "../../src/gateway/container-law.js";
 import { POOL_KEYS_ENTITY, recordedPoolKey } from "../../src/gateway/pool-keys.js";
 import { retraction } from "./narrowing.js";

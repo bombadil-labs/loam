@@ -27,7 +27,7 @@ import {
   type Reactor,
 } from "@bombadil/rhizomatic";
 import type { AppendReceipt, Gateway } from "../gateway/gateway.js";
-import { lawfulSnapshot } from "../gateway/registration.js";
+import { lawfulSnapshot } from "../gateway/lawful.js";
 import { negatedAt } from "../gateway/negation.js";
 import { dataStruck } from "../gateway/accounts.js";
 import { keysEverOf } from "../gateway/principal.js";

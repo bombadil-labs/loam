@@ -41,7 +41,6 @@ import {
   type Registration,
   lensOf,
   programOf,
-  lawfulSnapshot,
   readinglessExpandRole,
   parseClaimTemplates,
   type Boundary,
@@ -54,6 +53,7 @@ import {
   type ResolverSpecs,
   lensNameFor,
 } from "./registration.js";
+import { lawfulSnapshot } from "./lawful.js";
 import {
   admitRenderers,
   readRenderers,

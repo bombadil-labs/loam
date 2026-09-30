@@ -17,16 +17,15 @@ import { describe, expect, it } from "vitest";
 import { signClaims } from "@bombadil/rhizomatic";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { CONTAINER_CONTEXTS, termClaims } from "../../src/gateway/container-law.js";
-import { eraseClaims } from "../../src/gateway/erase.js";
+import { eraseClaims } from "../../src/gateway/erase-law.js";
 import {
-  CTX_GRAVEYARD,
-  CTX_SLATE,
   SLATE_CONTEXTS,
   frozenMembershipTerm,
   graveyardCompleteness,
-  readSlates,
   slateClaims,
 } from "../../src/gateway/slate.js";
+import { CTX_GRAVEYARD, readSlates } from "../../src/gateway/slate-law.js";
+import { CTX_SLATE } from "../../src/gateway/slate-vocab.js";
 import { FERN, observed } from "../spike/garden.js";
 import {
   AFTER_DEADLINE,

@@ -47,7 +47,7 @@
 
 import type { Claims, Reactor } from "@bombadil/rhizomatic";
 import type { Gateway } from "./gateway.js";
-import { lawfulDeltasAt } from "./registration.js";
+import { lawfulDeltasAt } from "./lawful.js";
 import { negatedAt } from "./negation.js";
 import type { EnvelopeSize } from "./leeway.js";
 

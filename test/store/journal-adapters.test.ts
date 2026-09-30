@@ -16,7 +16,7 @@ import {
   type Delta,
   type DurableOrdinaryJournalStore,
 } from "@bombadil/rhizomatic";
-import { eraseClaims } from "../../src/gateway/erase.js";
+import { eraseClaims } from "../../src/gateway/erase-law.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { MirrorBackend } from "../../src/store/mirror.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";

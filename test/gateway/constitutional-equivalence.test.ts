@@ -38,7 +38,8 @@ import {
 } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { lawfulDeltasAt, lawfulNegated, lawfulSnapshot } from "../../src/gateway/registration.js";
+import { lawfulNegated } from "../../src/gateway/registration.js";
+import { lawfulDeltasAt, lawfulSnapshot } from "../../src/gateway/lawful.js";
 import {
   CTX_TRUST,
   TRUST_ENTITY,

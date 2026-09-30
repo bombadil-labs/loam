@@ -25,7 +25,7 @@ import { describe, expect, it } from "vitest";
 import { authorForSeed, type Delta } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
-import { withNegationClosure } from "../../src/gateway/ingest.js";
+import { withNegationClosure } from "../../src/gateway/negation-closure.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 import { FERN, observed } from "../spike/garden.js";

@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 import { makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
-import { eraseClaims } from "../../src/gateway/erase.js";
+import { eraseClaims } from "../../src/gateway/erase-law.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";

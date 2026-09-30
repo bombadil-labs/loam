@@ -7,7 +7,7 @@
 // the rows directly.
 
 import type { Delta } from "@bombadil/rhizomatic";
-import { erasureTarget, isErasure } from "../../src/gateway/erase.js";
+import { erasureTarget, isErasure } from "../../src/gateway/erase-law.js";
 import { admitErasureOrders, admitLocal, openHostPeer } from "../../src/gateway/peer-admission.js";
 import type { StoreBackend } from "../../src/store/backend.js";
 import { holdsJournals } from "../../src/store/peer-image.js";

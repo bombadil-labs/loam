@@ -11,7 +11,7 @@ import { authorForSeed, signClaims, type Policy, type Schema } from "@bombadil/r
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { eraseClaims, readErasures } from "../../src/gateway/erase.js";
+import { eraseClaims, readErasures } from "../../src/gateway/erase-law.js";
 import { PLANT } from "./fixtures.js";
 import { inPoolVoice } from "../helpers/pool-voice.js";
 import { FERN, observed } from "../spike/garden.js";
