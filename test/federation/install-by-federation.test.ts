@@ -66,6 +66,7 @@ import {
   store,
   tmpdir,
 } from "./t209-fixtures.js";
+import { gatewayOf } from "../helpers/pool-gateway.js";
 
 describe("T209 — an arriving renderer is present at the bytes and 404 at the door", () => {
   it("lands in the pool, serves nowhere, and serves everywhere once blessed", async () => {
@@ -74,7 +75,7 @@ describe("T209 — an arriving renderer is present at the bytes and 404 at the d
     try {
       const channel = await link(bob, alice, "alice");
       await channel.sync();
-      const pool = channel.pool.gateway!;
+      const pool = gatewayOf(channel.pool);
       const arrived = bindingOf(alice, "hello");
 
       // BYTES, both sides: the peer's renderer binding is really in the pool's store, and no tier of
@@ -296,7 +297,11 @@ describe("T209 — bless-app mounts behind the probation frame, writes sequester
 
       // DELTA LEVEL: the blessing lives in the pool, and the receiver's own store gained no renderer.
       expect(bob.renderers().some((r) => r.route.includes("hello"))).toBe(false);
-      expect(channel.pool.gateway!.renderers().some((r) => r.route === "hello")).toBe(true);
+      expect(
+        gatewayOf(channel.pool)
+          .renderers()
+          .some((r) => r.route === "hello"),
+      ).toBe(true);
     } finally {
       await alice.close();
       await bob.close();
@@ -311,7 +316,7 @@ describe("T209 — bless-app mounts behind the probation frame, writes sequester
       const channel = await link(bob, alice, "alice");
       await channel.sync();
       await bob.blessChannelApp(CHANNEL, "hello", { pen: true });
-      const pool = channel.pool.gateway!;
+      const pool = gatewayOf(channel.pool);
       const before = new Set((await bob.backend.deltasSince(new Set())).map((d) => d.id));
 
       const wrote = await bob.writeRoute("alice:hello", FERN, { height: 71 }, "full");
@@ -374,7 +379,11 @@ describe("T209 — the blessing toggle does not extend to renderers", () => {
       expect(report.apps.map((a) => a.blessed)).toEqual([false]);
 
       // Not merely unreported: nothing binds it in the pool either, and no door answers.
-      expect(channel.pool.gateway!.renderers().some((r) => r.route === "hello")).toBe(false);
+      expect(
+        gatewayOf(channel.pool)
+          .renderers()
+          .some((r) => r.route === "hello"),
+      ).toBe(false);
       expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(404);
 
       // A standing sync must not drift into it either: poll again, still inert.
@@ -411,22 +420,28 @@ describe("T209 — the blessing toggle does not extend to renderers", () => {
       );
       const channel = await link(bob, alice, "alice", false);
       await channel.sync();
-      expect(channel.pool.gateway!.registered.some((r) => r.schema.name === "Plant")).toBe(true);
+      expect(gatewayOf(channel.pool).registered.some((r) => r.schema.name === "Plant")).toBe(true);
 
       await expect(bob.blessChannelApp(CHANNEL, "hello")).rejects.toThrow(
         /carries no definition of it/,
       );
       expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(404);
-      expect(channel.pool.gateway!.renderers().some((r) => r.route === "hello")).toBe(false);
+      expect(
+        gatewayOf(channel.pool)
+          .renderers()
+          .some((r) => r.route === "hello"),
+      ).toBe(false);
 
       // Two-sided: turn blessing on, sync, and the same call now mounts it — reading ALICE's lens.
       await bob.setChannel(CHANNEL, { blessing: true });
       await channel.sync();
       await bob.blessChannelApp(CHANNEL, "hello");
       expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(200);
-      expect(channel.pool.gateway!.renderers().find((r) => r.route === "hello")!.schemaName).toBe(
-        "alice:Plant",
-      );
+      expect(
+        gatewayOf(channel.pool)
+          .renderers()
+          .find((r) => r.route === "hello")!.schemaName,
+      ).toBe("alice:Plant");
     } finally {
       await alice.close();
       await bob.close();
@@ -448,7 +463,11 @@ describe("T209 — the blessing toggle does not extend to renderers", () => {
       await expect(bob.blessChannelApp(CHANNEL, "hello")).rejects.toThrow(
         /blesses one export at a time/,
       );
-      expect(channel.pool.gateway!.renderers().some((r) => r.route === "hello")).toBe(false);
+      expect(
+        gatewayOf(channel.pool)
+          .renderers()
+          .some((r) => r.route === "hello"),
+      ).toBe(false);
       // Two-sided: lift the curse, sync, and the same call mounts it.
       await bob.curseChannelLaw(CHANNEL, "alice:Plant", { lift: true });
       await channel.sync();
@@ -517,7 +536,7 @@ describe("T209 — an alias a peer chose cannot turn one blessing into another",
       const channel = await link(bob, alice, "alice");
       await channel.sync();
       await bob.blessChannelApp(CHANNEL, "hello");
-      const pool = channel.pool.gateway!;
+      const pool = gatewayOf(channel.pool);
       const version = freezeMembers([...pool.reactor.snapshot()]);
 
       await expect(pool.adoptLaw(version, "app:hello", { expect: "schema" })).rejects.toThrow(
@@ -554,7 +573,11 @@ describe("T209 — the prefix reaches a blessed app and nothing else", () => {
       await channel.sync();
 
       // The twin really is in the pool — this rail is about a reachable thing, not an absent one.
-      expect(channel.pool.gateway!.renderers().some((r) => r.route === "mine")).toBe(true);
+      expect(
+        gatewayOf(channel.pool)
+          .renderers()
+          .some((r) => r.route === "mine"),
+      ).toBe(true);
       expect(bob.channelApps(CHANNEL).some((a) => a.route === "mine")).toBe(false);
 
       // And the prefixed name answers nothing, on either door.
@@ -582,7 +605,7 @@ describe("T209 — the prefix reaches a blessed app and nothing else", () => {
       await channel.sync();
       await bob.blessChannelApp(CHANNEL, "hello");
       // Declared public IN THE POOL, which is the strongest case an anonymous caller could have.
-      const pool = channel.pool.gateway!;
+      const pool = gatewayOf(channel.pool);
       await pool.append([
         pool.signer!.sign(publicClaims(["alice:Plant"], pool.operatorAuthor!, 9_400)),
       ]);
@@ -749,7 +772,7 @@ describe("T209 — a peer may not choose what the operator blesses", () => {
       ]);
       const channel = await link(bob, alice, "alice");
       await channel.sync();
-      const pool = channel.pool.gateway!;
+      const pool = gatewayOf(channel.pool);
 
       // THE PLANT IS LIVE, asserted rather than assumed. Without this the rail would keep passing in
       // a world where the row never reached the pool at all — an empty-set pass, and the guard would
@@ -800,7 +823,7 @@ describe("T209 — a peer may not choose what the operator blesses", () => {
       ]);
       const channel = await link(bob, alice, "alice");
       const report = await channel.sync();
-      const members = [...channel.pool.gateway!.reactor.snapshot()];
+      const members = [...gatewayOf(channel.pool).reactor.snapshot()];
 
       // The plant is live and it WINS the alias unscoped — the premise, asserted.
       expect(readManifest(members, Date.now()).find((r) => r.alias === "Plant")?.target).toBe(
@@ -809,7 +832,11 @@ describe("T209 — a peer may not choose what the operator blesses", () => {
       // The lens still binds under the receiver's own name — the pass did its job…
       expect(report.bound).toContain("alice:Plant");
       // …and mounted nothing.
-      expect(channel.pool.gateway!.renderers().some((r) => r.route === "hello")).toBe(false);
+      expect(
+        gatewayOf(channel.pool)
+          .renderers()
+          .some((r) => r.route === "hello"),
+      ).toBe(false);
       expect((await bob.serveRoute("alice:hello", FERN, "full")).status).toBe(404);
     } finally {
       await alice.close();
@@ -837,7 +864,7 @@ describe("T209 — a peer may not choose what the operator blesses", () => {
       ]);
       const channel = await link(bob, alice, "alice");
       await channel.sync();
-      const members = [...channel.pool.gateway!.reactor.snapshot()];
+      const members = [...gatewayOf(channel.pool).reactor.snapshot()];
       expect(readManifest(members, Date.now()).find((r) => r.alias === "app:hello")?.author).toBe(
         authorForSeed(ALICE_SEED),
       );
@@ -871,7 +898,11 @@ describe("T209 — a peer may not choose what the operator blesses", () => {
       await channel.sync();
 
       // The twin is really in the pool and really servable there — this is about a reachable thing.
-      expect(channel.pool.gateway!.renderers().some((r) => r.route === "hello")).toBe(true);
+      expect(
+        gatewayOf(channel.pool)
+          .renderers()
+          .some((r) => r.route === "hello"),
+      ).toBe(true);
       const row = bob.channelApps(CHANNEL)[0]!;
       expect(row.hash).toBe(appIdOf(APP));
       expect(row.serving).toBeUndefined(); // nothing of THIS channel runs there
@@ -930,7 +961,7 @@ describe("T209 — a peer may not choose what the operator blesses", () => {
       await channel.sync();
       await bob.blessChannelApp(CHANNEL, "hello");
 
-      const pool = channel.pool.gateway!;
+      const pool = gatewayOf(channel.pool);
       const bound = pool.renderers().find((r) => r.route === "hello")!;
       expect(bound.schemaName).toBe("alice:Plant");
       expect(bound.schemaName).not.toBe("Plant");
@@ -1436,7 +1467,7 @@ describe("T209 — a channel pool is not a door for strangers", () => {
       // THE PREMISE, READ FROM THE GROUND. `isPublicLatest` is one of the readers this closes, so
       // asking it would assert the fix rather than the state the fix is about: the declaration is
       // really in the pool's own deltas, and the door refuses anyway.
-      expect(publicDeltas(channel.pool.gateway!)).toBeGreaterThan(0);
+      expect(publicDeltas(gatewayOf(channel.pool))).toBeGreaterThan(0);
 
       const door = await serve({
         mounts: { default: bob },
@@ -1628,8 +1659,8 @@ describe("T209 — dropping the channel unmounts the app and purges its bytes", 
       await carolChannel.sync();
       await bob.blessChannelApp("channel:friends:carol", "board");
 
-      const alicePool = aliceChannel.pool.gateway!;
-      const carolPool = carolChannel.pool.gateway!;
+      const alicePool = gatewayOf(aliceChannel.pool);
+      const carolPool = gatewayOf(carolChannel.pool);
       const aliceApp = bindingOf(alice, "hello");
       const carolApp = bindingOf(carol, "board");
       expect(await alicePool.backend.holds(aliceApp)).toBe(true);

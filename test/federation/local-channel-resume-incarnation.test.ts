@@ -10,6 +10,7 @@ import { toWire } from "../../src/federation/wire.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
 import { plant } from "../helpers/plant.js";
+import { gatewayOf } from "../helpers/pool-gateway.js";
 
 const SEED = "cc".repeat(32);
 const FROM = "https://peer.example/default";
@@ -73,7 +74,7 @@ describe("T288 resumed closed incarnation retains its identity", () => {
       const initial = localChannelEvidence(original, ch.name);
       expect(initial.state).toBe("open");
       if (initial.state !== "open") throw new Error("valid opening required");
-      const pool = ch.pool.gateway!;
+      const pool = gatewayOf(ch.pool);
       const purge = pool.backend.purge.bind(pool.backend);
       pool.backend.purge = () => Promise.reject(new Error("fixture failed drop purge"));
       await expect(original.dropChannel(ch.name)).rejects.toThrow();
@@ -108,11 +109,11 @@ describe("T288 resumed closed incarnation retains its identity", () => {
       expect(handle).toBeDefined();
       expect(localChannelEvidence(restored, ch.name).state).toBe("closed");
       const beforeRoot = ids(restored),
-        beforePool = ids(handle.pool.gateway!);
+        beforePool = ids(gatewayOf(handle.pool));
       await expect(handle.sync()).rejects.toThrow();
       expect(ids(restored)).toEqual(beforeRoot);
-      expect(ids(handle.pool.gateway!)).toEqual(beforePool);
-      expect(handle.pool.gateway!.reactor.get(offered.id)).toBeUndefined();
+      expect(ids(gatewayOf(handle.pool))).toEqual(beforePool);
+      expect(gatewayOf(handle.pool).reactor.get(offered.id)).toBeUndefined();
       await restored.erase(close.id);
       const revived = localChannelEvidence(restored, ch.name);
       expect(revived.state).toBe("open");
@@ -123,7 +124,7 @@ describe("T288 resumed closed incarnation retains its identity", () => {
       expect(received.state).toBe("open");
       if (received.state === "open")
         expect(received.received.map((d) => d.id)).toEqual([offered.id]);
-      expect(handle.pool.gateway!.reactor.get(offered.id)).toBeDefined();
+      expect(gatewayOf(handle.pool).reactor.get(offered.id)).toBeDefined();
       expect((await handle.sync()).accepted).toBe(0);
       expect(events(restored, ch.name, "received")).toHaveLength(1);
     },
@@ -150,8 +151,8 @@ describe("T288 legacy handle exact declaration and attachment", () => {
         kind === "fresh" ? fresh : resumeChannelImpl(gw, gw.channelStatus(fresh.name)[0]!, "token");
       expect(localChannelEvidence(gw, fresh.name)).toEqual({ state: "legacy" });
       expect((await handle.sync()).accepted).toBe(1);
-      expect(handle.pool.gateway!.reactor.get(fact(1).id)).toBeDefined();
-      const originalPool = fresh.pool.gateway!;
+      expect(gatewayOf(handle.pool).reactor.get(fact(1).id)).toBeDefined();
+      const originalPool = gatewayOf(fresh.pool);
       const originalDeclaration = fresh.pool.declarationId!;
       expect(originalDeclaration).toBeDefined();
       const entered = deferred<void>(),
@@ -187,7 +188,7 @@ describe("T288 legacy handle exact declaration and attachment", () => {
         expect(await gw.backend.holds(changed.id)).toBe(true);
       }
       const beforeRoot = ids(gw),
-        beforePool = ids(current.pool.gateway!);
+        beforePool = ids(gatewayOf(current.pool));
       const status = gw.channelStatus(current.name);
       const offered = fact(2);
       if (failure) network.reject(new Error("fixture old peer failure"));
@@ -197,17 +198,17 @@ describe("T288 legacy handle exact declaration and attachment", () => {
       if (result.state === "rejected")
         expect.soft(String(result.error)).toMatch(/stale channel operation/);
       expect.soft(ids(gw)).toEqual(beforeRoot);
-      expect.soft(ids(current.pool.gateway!)).toEqual(beforePool);
+      expect.soft(ids(gatewayOf(current.pool))).toEqual(beforePool);
       expect.soft(gw.channelStatus(current.name)).toEqual(status);
-      expect.soft(current.pool.gateway!.reactor.get(offered.id)).toBeUndefined();
-      expect.soft(await current.pool.gateway!.backend.holds(offered.id)).toBe(false);
+      expect.soft(gatewayOf(current.pool).reactor.get(offered.id)).toBeUndefined();
+      expect.soft(await gatewayOf(current.pool).backend.holds(offered.id)).toBe(false);
       expect(events(gw, current.name, "received")).toEqual([]);
       // The replacement attachment remains a usable legacy channel; stale refusal is not a
       // blanket ban on receives. Same-declaration mutation intentionally leaves old handles stale.
       if (replacement === "attachment") {
         pull = () => Promise.resolve([fact(3)]);
         expect((await current.sync()).accepted).toBe(1);
-        expect(current.pool.gateway!.reactor.get(fact(3).id)).toBeDefined();
+        expect(gatewayOf(current.pool).reactor.get(fact(3).id)).toBeDefined();
       }
     },
   );

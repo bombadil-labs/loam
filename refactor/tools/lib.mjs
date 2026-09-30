@@ -385,11 +385,11 @@ const TREE_MEMBERS = new Set([
   "channelPools",
   "connectionInboxes",
   "tableOf",
-  "channelRecord",
   "rootOf",
   "verifiedRootOf",
   "poolForBinding",
   "poolForBindingImpl",
+  "openChild",
 ]);
 const CONTAINER_CODE = /src\/(gateway|federation)\//;
 const TREE_OWNERS = /src\/gateway\/(container|store)\.ts$/;

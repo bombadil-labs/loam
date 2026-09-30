@@ -65,6 +65,7 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "../gateway/fixtures.js";
 import { withStamp, type Stamp } from "../../src/gateway/stamp.js";
+import { gatewayOf } from "../helpers/pool-gateway.js";
 
 const OP_SEED = "3a".repeat(32);
 const OP = authorForSeed(OP_SEED);
@@ -235,7 +236,7 @@ async function world(alice?: Gateway, opts: { rootTwin?: boolean } = {}): Promis
     binding,
     inbox,
     channel: ch.name,
-    pool: ch.pool.gateway!,
+    pool: gatewayOf(ch.pool),
     sync,
     received,
     select,
@@ -978,7 +979,7 @@ describe("T278 — exact received renderer selection", () => {
       openedFrom: w.inbox,
     });
     await other.sync();
-    await forge(other.pool.gateway!, adoption, {});
+    await forge(gatewayOf(other.pool), adoption, {});
     expect(w.refusal("hello").code).toBe("law_unavailable");
     // And a faithful duplicate in THIS pool restores the join: same exact result, one answer.
     await forge(w.pool, adoption, {});

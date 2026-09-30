@@ -33,6 +33,7 @@ import { inLocalContext, LOCAL_CONTROL } from "../../src/gateway/erase-law.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
 import { withStamp } from "../../src/gateway/stamp.js";
+import { gatewayOf } from "../helpers/pool-gateway.js";
 
 const SEED = "cc".repeat(32);
 const OP = authorForSeed(SEED);
@@ -212,7 +213,7 @@ describe("spec 64: lifecycle events name their parent container", () => {
     offering.push(fact(1));
     await ch.sync();
     // Refused drop: the close lands first, the purge refuses, the declaration and the pool stand.
-    const pool = ch.pool.gateway!.backend as MemoryBackend & { failPurge?: boolean };
+    const pool = gatewayOf(ch.pool).backend as MemoryBackend & { failPurge?: boolean };
     const purge = pool.purge.bind(pool);
     pool.purge = () => Promise.reject(new Error("fixture purge failure"));
     await expect(gw.dropChannel(ch.name)).rejects.toThrow(/could not be proven clean/);

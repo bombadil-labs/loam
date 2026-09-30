@@ -62,6 +62,7 @@ import { FaultableBackend } from "../helpers/faultable-backend.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import { FERN, observed } from "../spike/garden.js";
 import { plant } from "../helpers/plant.js";
+import { gatewayOf } from "../helpers/pool-gateway.js";
 
 const SEED = "cc".repeat(32);
 const OP = authorForSeed(SEED);
@@ -246,7 +247,7 @@ async function channel(gw: Gateway, feed = peer(), prefix = "peer") {
     from: "https://peer.example/default",
     source: feed.source,
   });
-  return { ch, ...feed, pool: ch.pool.gateway! };
+  return { ch, ...feed, pool: gatewayOf(ch.pool) };
 }
 function deferred<T>() {
   let resolve!: (v: T) => void;
@@ -468,7 +469,7 @@ describe("T288 exact local lifecycle and independent v1 vocabulary", () => {
       "pool-declaration",
     ]);
     expect(value(d, "opener-kind")).toBe("bound");
-    expect(ch.pool.gateway!.reactor.get(a.id)).toBeDefined();
+    expect(gatewayOf(ch.pool).reactor.get(a.id)).toBeDefined();
     expect(gw.reactor.get(a.id)).toBeUndefined();
   });
   it("legacy resume and unresumed attachment do not mint evidence; a deliberate drop/new open does", async () => {
@@ -1350,7 +1351,7 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     )!;
     await gw.erase(receipt.id);
     expect(sourceStanding(gw, ch.name, a.id)).toBe(true);
-    expect(ch.pool.gateway!.reactor.get(s.id)).toBeDefined();
+    expect(gatewayOf(ch.pool).reactor.get(s.id)).toBeDefined();
   });
   it("erase(open) on a LIVE channel refuses and removes nothing; after the drop it takes the incarnation's receipts and close with it", async () => {
     const { gw } = await home();
@@ -1758,7 +1759,7 @@ describe("T288 durable trusted history, distinct from content import", () => {
     const root = new MemoryBackend();
     await plant(root, await original.primary.deltasSince(new Set()), OP);
     const pool = new MemoryBackend();
-    const source = ch.pool.gateway!;
+    const source = gatewayOf(ch.pool);
     await plant(pool, await source.backend.deltasSince(new Set()), source.operatorAuthor);
     const restored = await Gateway.open(root, {
       seed: SEED,
