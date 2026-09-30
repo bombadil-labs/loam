@@ -7,6 +7,7 @@ import { authorForSeed, OrdinaryJournalPeer, signClaims, type Delta } from "@bom
 import { containerClaims } from "../../src/gateway/container-law.js";
 import { eraseClaims } from "../../src/gateway/erase.js";
 import { Gateway } from "../../src/gateway/gateway.js";
+import { attachChannelPool } from "../../src/federation/channel.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import {
   memoryPoolKeys,
@@ -173,6 +174,34 @@ describe("criterion 17: a fresh pool starts under its own key", () => {
     });
     expect((await q.federate([target], { admit: () => true })).accepted).toBe(0);
     expect((await q.federate([note(43)], { admit: () => true })).accepted).toBe(1); // bystander
+    await gw.close();
+  });
+
+  it("a refused channel attach closes the pool store it opened", async () => {
+    // On Windows an open handle blocks the file's removal; the refusal must leave nothing open.
+    class Closing extends MemoryBackend {
+      wasClosed = false;
+      override async close(): Promise<void> {
+        this.wasClosed = true;
+        return super.close();
+      }
+    }
+    const hostStore = new MemoryBackend();
+    const poolStore = new MemoryBackend();
+    const gw = await hostWith(hostStore, memoryPoolKeys());
+    await declare(gw, "container:k17h");
+    await gw.openContainer({ name: "container:k17h", backend: poolStore });
+    const handles: Closing[] = [];
+    const lost = await Gateway.boot(hostStore, assembleGenesis({ operatorSeed: SEED }), {
+      poolKeys: memoryPoolKeys(), // the pool's key is not in this source
+      channelBackend: () => {
+        const b = new Closing();
+        handles.push(b);
+        return b;
+      },
+    });
+    await expect(attachChannelPool(lost, "container:k17h")).rejects.toThrow(PoolKeyMissing);
+    expect(handles.map((b) => b.wasClosed)).toEqual([true]);
     await gw.close();
   });
 
