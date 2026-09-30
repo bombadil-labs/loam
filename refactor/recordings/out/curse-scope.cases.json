@@ -86,28 +86,29 @@
           "negation of alice:Plant"
         ],
         "root": [
-          "alice:Plant: struck"
+          "alice:Plant: live"
         ],
-        "root strikes": [
-          "negation of alice:Plant"
-        ]
+        "root strikes": []
       },
       "served": {
         "alice_Plant query": {
-          "errors": [
-            "Type Query must define one or more fields.",
-            "Type Subscription must define one or more fields."
-          ]
+          "alice_Plant": {
+            "tag": [
+              "alice's tag",
+              "root tag"
+            ]
+          }
         },
         "def": {
           "Sprout": false,
-          "alice:Plant": false
+          "alice:Plant": true
         },
-        "root surface": [],
+        "root surface": [
+          "alice:Plant from root (hyperschema:RootPlant)"
+        ],
         "sprout query": {
           "errors": [
-            "Type Query must define one or more fields.",
-            "Type Subscription must define one or more fields."
+            "Cannot query field \"sprout\" on type \"Query\"."
           ]
         }
       }
@@ -168,28 +169,29 @@
           "negation of alice:Plant"
         ],
         "root": [
-          "alice:Plant: struck"
+          "alice:Plant: live"
         ],
-        "root strikes": [
-          "negation of alice:Plant"
-        ]
+        "root strikes": []
       },
       "served": {
         "alice_Plant query": {
-          "errors": [
-            "Type Query must define one or more fields.",
-            "Type Subscription must define one or more fields."
-          ]
+          "alice_Plant": {
+            "tag": [
+              "alice's tag",
+              "root tag"
+            ]
+          }
         },
         "def": {
           "Sprout": false,
-          "alice:Plant": false
+          "alice:Plant": true
         },
-        "root surface": [],
+        "root surface": [
+          "alice:Plant from root (hyperschema:RootPlant)"
+        ],
         "sprout query": {
           "errors": [
-            "Type Query must define one or more fields.",
-            "Type Subscription must define one or more fields."
+            "Cannot query field \"sprout\" on type \"Query\"."
           ]
         }
       }

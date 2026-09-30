@@ -232,9 +232,9 @@ level. Loam then consumes it through the barrel and compares its recordings.
 6. **Peer and admission.** The peer model, the guard pipeline, arrival testimony. Loam's
    containers become peers, and the import cycle breaks.
    The curse scope is decided (ruling 11, README): a curse strikes only in the channel's pool.
-   `curseChannelLawImpl` also strikes a matching binding in the root ground today; the curse PR
-   removes that search. Its rail pins a root-binding bystander and the pool binding, at the delta and the
-   served-view levels (the curse-scope recording, #597, shows the change).
+   `curseChannelLawImpl` strikes only in the channel's pool, and a curse with no attached pool
+   refuses; the curse-scope recording (#597) pins the root-binding bystander and the pool binding,
+   at the delta and the served-view levels.
    The start time of received law is decided (ruling 12): a blessed definition keeps the peer's
    signed `validFrom`. Law from a peer whose clock runs ahead parks until our clock passes it, and
    the next sync binds it (measured with a 5 s skew). The park reason names the definition's

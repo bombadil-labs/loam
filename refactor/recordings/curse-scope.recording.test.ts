@@ -1,8 +1,6 @@
-// Records the scope of a channel curse before step 6 decides it. `curseChannelLaw` strikes the
-// cursed lens's live registration bindings in the channel's POOL, and it also searches the ROOT
-// ground for a live binding under the same lens name, so an older store's pre-pool blessings are
-// reached. The root search does not ask where a root binding came from. The question for step 6:
-// does a curse on a channel strike an independent root registration that only shares the name?
+// Records the scope of a channel curse. Ruling 11 decided it: a curse is pool-local.
+// `curseChannelLaw` strikes the cursed lens's live registration bindings in the channel's POOL only,
+// with the pool's own key; a ROOT registration that only shares the name stays live and served.
 //
 // Cast: `peer` is alice, a real gateway that publishes the lens `Plant` and the tag "alice's tag"
 // on the fern. `operator` is this store; it opens the channel `friends` with prefix `alice`, so the
