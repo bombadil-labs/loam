@@ -47,6 +47,7 @@ import {
   standSlate,
   strike as slateStrike,
 } from "../gateway/slating.js";
+import { inPoolVoice } from "../helpers/pool-voice.js";
 
 const OP_SEED = "4d".repeat(32);
 const OP = authorForSeed(OP_SEED);
@@ -140,11 +141,15 @@ describe("the source's data strike: the refusal names only strikes that hold now
     const pool = await primary.openQuarantine();
     const now = Date.now();
     const fact = observed(FERN, "message", "the reviewer said no", now - 5000, GARDENER_SEED);
-    const expired = timedStrike(OP_SEED, fact.id, now - 4000, {
-      validFrom: now - 4000,
-      validUntil: now - 3000,
-    });
-    const holding = timedStrike(OP_SEED, fact.id, now - 2000, { validFrom: now - 2000 });
+    // The operator strikes in the pool through the pool's own key.
+    const expired = inPoolVoice(
+      pool.gateway,
+      timedStrike(OP_SEED, fact.id, now - 4000, { validFrom: now - 4000, validUntil: now - 3000 }),
+    );
+    const holding = inPoolVoice(
+      pool.gateway,
+      timedStrike(OP_SEED, fact.id, now - 2000, { validFrom: now - 2000 }),
+    );
     await pool.gateway.federate([fact]);
     await pool.gateway.append([expired, holding]);
     expect(pool.gateway.reactor.negationsOf(fact.id).sort()).toEqual(
@@ -356,20 +361,25 @@ describe("lifting a curse ignores a counter-negation whose window ended", () => 
       expect(() => me.def("alice:Plant")).toThrow();
 
       // Every curse strike, wherever it landed, gets a counter-negation whose window has ended: an
-      // earlier lift that no longer holds.
+      // earlier lift that no longer holds. Each ground's curse and counter are its own key's.
       const now = Date.now();
       const grounds = [me.channelPools.get(ch.name)?.gateway, me].filter(
         (g): g is Gateway => g !== undefined,
       );
       let planted = 0;
       for (const g of grounds) {
+        const own = g.signer!;
         for (const d of [...g.reactor.snapshot()]) {
           for (const n of g.reactor.negationsOf(d.id)) {
             const curse = g.reactor.get(n)!;
-            if (curse.claims.author !== authorForSeed(meSeed)) continue;
+            if (curse.claims.author !== own.author) continue;
             if (g.reactor.negationsOf(n).length > 0) continue;
             await g.append([
-              timedStrike(meSeed, n, now - 2000, { validFrom: now - 2000, validUntil: now - 1000 }),
+              own.sign({
+                ...makeNegationClaims(own.author, now - 2000, n),
+                validFrom: now - 2000,
+                validUntil: now - 1000,
+              }),
             ]);
             planted += 1;
           }

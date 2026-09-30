@@ -604,11 +604,11 @@ describe("§58 — leeway fits its parent's terms, and cascades", () => {
       grants.length,
       "premise: a delegation lets the connection write in its pool",
     ).toBeGreaterThan(0);
+    // Struck in the pool's own voice: the pool governs itself under its own key.
     await pool.append(
       grants.map((id) =>
-        signClaims(
-          withStamp(pool.stamp(OPERATOR), (t) => makeNegationClaims(OPERATOR, t, id)),
-          OPERATOR_SEED,
+        pool.signer!.sign(
+          withStamp(pool.stamp(), (t) => makeNegationClaims(pool.operatorAuthor!, t, id)),
         ),
       ),
     );

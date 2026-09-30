@@ -1083,7 +1083,7 @@ export async function preloadResolversImpl(gw: Gateway): Promise<void> {
   // between "the peer sent code that reaches for the filesystem" and "my store is broken". The write
   // goes through `reportUnmounted` — host-guarded, because a peer that has no `process` still binds,
   // and both peer-chosen strings scrubbed before a person reads them.
-  const bindings = readRenderers(gw.reactor, gw.validityNow(), gw.operatorAuthor);
+  const bindings = readRenderers(gw.reactor, gw.validityNow(), gw.lawAuthors("renderers"));
   const refused = await admitRenderers(
     bindings.map((r) => r.bundle),
     rendererAdmissionBudget(gw),

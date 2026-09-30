@@ -138,8 +138,10 @@ async function adminServer(
   const inbox = await gateway.openContainer({ name: INBOX });
   // A real inbox carries its owner's admin grant (bindConnection writes it): the parent composes
   // the pool by that owner's authority, and a pool with no owner fails the read.
-  await inbox.gateway!.append([
-    signClaims(grantClaims(STORE_ENTITY, KEYS.ada, "admin", OPERATOR, ts++), OPERATOR_SEED),
+  // The pool governs itself under its own key, so the grant is signed in the pool's voice.
+  const pool = inbox.gateway!;
+  await pool.append([
+    pool.signer!.sign(grantClaims(STORE_ENTITY, KEYS.ada, "admin", pool.operatorAuthor!, ts++)),
   ]);
 
   const home = mkdtempSync(join(tmpdir(), "loam-admin-"));

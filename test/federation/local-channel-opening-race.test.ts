@@ -6,6 +6,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { localChannelEvidence } from "../../src/federation/local-channel-events.js";
 import { MemoryBackend } from "../../src/store/memory.js";
+import { FaultableBackend } from "../helpers/faultable-backend.js";
 
 const SEED = "cc".repeat(32);
 function declarations(gw: Gateway, name: string): Delta[] {
@@ -43,18 +44,17 @@ function signal() {
   });
   return { promise, resolve };
 }
-class DelayedSeedBackend extends MemoryBackend {
+// The pool writes through its peer journal, so the delay sits on the write hook both paths share.
+class DelayedSeedBackend extends FaultableBackend {
   readonly entered = signal();
   readonly release = signal();
   private first = true;
-  override async append(batch: Iterable<Delta>): Promise<number> {
-    const deltas = [...batch];
-    if (this.first && deltas.length > 0) {
+  override async checkWrite(batch: readonly Delta[]): Promise<void> {
+    if (this.first && batch.length > 0) {
       this.first = false;
       this.entered.resolve();
       await this.release.promise;
     }
-    return super.append(deltas);
   }
 }
 

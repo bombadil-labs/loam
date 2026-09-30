@@ -374,8 +374,8 @@ describe("the journal is the authority over the rows", () => {
   });
 });
 
-describe("pools stay on today's path", () => {
-  it("a pool of an image host has no peer, and its writes touch no image", async () => {
+describe("a pool is its own peer", () => {
+  it("a pool of a host has its own journal peer, and its writes touch the host's journal not at all", async () => {
     const backend = new MemoryBackend();
     const gw = await boot(backend);
     await gw.append([
@@ -388,15 +388,15 @@ describe("pools stay on today's path", () => {
         SEED,
       ),
     ]);
-    const before = await image(backend.journalStore());
     const c = await gw.openContainer({ name: "container:trial" });
     const pool = c.gateway!;
-    expect(pool.peer).toBeUndefined();
-    expect(gw.peer).toBeDefined();
+    expect(pool.peer?.journal.peerId).toBe(pool.operatorAuthor);
+    expect(pool.operatorAuthor).not.toBe(OP);
+    const before = await image(backend.journalStore()); // after the host recorded the pool's key
     const d = note(9);
     await pool.federate([d], { admit: () => true });
     expect(pool.reactor.get(d.id)).toBeDefined();
-    // the host's image did not see the pool's write
+    // the host's journal did not see the pool's write
     expect(await image(backend.journalStore())).toEqual(before);
     await gw.close();
   });

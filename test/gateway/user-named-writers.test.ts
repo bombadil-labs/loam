@@ -93,7 +93,7 @@ const adminSubjects = (pool: Gateway): unknown[] =>
       (d) =>
         d.claims.pointers.some(
           (p) => p.role === "verb" && p.target.kind === "primitive" && p.target.value === "admin",
-        ) && d.claims.author === OP,
+        ) && d.claims.author === pool.operatorAuthor,
     )
     .map((d) => {
       const s = d.claims.pointers.find((p) => p.role === "subject")?.target;
@@ -114,9 +114,16 @@ describe("bind names the owner by user when their root is the owner's key", () =
     const gw = await home();
     const pool = await bind(gw, CONN_SEED, "ada");
     expect(adminSubjects(pool)).toEqual(["user:ada"]);
-    expect(holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, GARDENER, "admin", OP)).toBe(
-      true,
-    );
+    expect(
+      holdsGrant(
+        pool.reactor,
+        pool.validityNow(),
+        STORE_ENTITY,
+        GARDENER,
+        "admin",
+        pool.operatorAuthor,
+      ),
+    ).toBe(true);
     expect(await door(pool, observed(FERN, "height", 1, 1000, CONN_SEED))).toBe("admitted");
     await gw.close();
   });
@@ -225,8 +232,12 @@ describe("R3: a re-point moves the user-named grant, and nothing else carries ov
     const bystanderPool = await bind(gw, OTHER_SEED);
     await gw.append([op(rootClaims("ada", K2, OP, 800))]);
     const now = pool.validityNow();
-    expect(holdsGrant(pool.reactor, now, STORE_ENTITY, K2, "admin", OP)).toBe(true);
-    expect(holdsGrant(pool.reactor, now, STORE_ENTITY, GARDENER, "admin", OP)).toBe(false);
+    expect(holdsGrant(pool.reactor, now, STORE_ENTITY, K2, "admin", pool.operatorAuthor)).toBe(
+      true,
+    );
+    expect(
+      holdsGrant(pool.reactor, now, STORE_ENTITY, GARDENER, "admin", pool.operatorAuthor),
+    ).toBe(false);
     // The connection wrote by the OLD root's delegation; a recovered user re-authorizes (PLAN).
     expect(await door(pool, observed(FERN, "height", 2, 1001, CONN_SEED))).toBe("refused");
     // Bystander: a connection bound without a user name keeps the gardener's key grant, and writes.
@@ -249,7 +260,7 @@ describe("R4 (M5, a control: it held before the writers switched): a connection'
       signClaims(makeNegationClaims(GARDENER, 1101, b.id), GARDENER_SEED),
     ]);
     expect(pool.reactor.negationsOf(a.id)).toHaveLength(1);
-    const struck = dataStruck(pool.reactor, pool.validityNow(), OP);
+    const struck = dataStruck(pool.reactor, pool.validityNow(), pool.operatorAuthor);
     expect(struck(a.id)).toBe(false);
     expect(struck(b.id)).toBe(true);
     await gw.close();

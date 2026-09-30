@@ -159,11 +159,10 @@ describe("T288 receive service boundary", () => {
   it("actual roster policy carries forward negation closure while refusing an unrelated author and forged strike", async () => {
     const f = await fixture();
     await f.pool.append([
-      signClaims(
-        withStamp(f.pool.stamp(authorForSeed(SEED)), (t) =>
-          trustClaims("roster", [PEER], authorForSeed(SEED), t),
+      f.pool.signer!.sign(
+        withStamp(f.pool.stamp(f.pool.operatorAuthor), (t) =>
+          trustClaims("roster", [PEER], f.pool.operatorAuthor!, t),
         ),
-        SEED,
       ),
     ]);
     const a = fact(6);

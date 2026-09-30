@@ -29,7 +29,8 @@ import {
 import { graphql, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
-import { holdsJournals } from "../store/peer-image.js";
+import { holdsJournals, holdsPoolKeys } from "../store/peer-image.js";
+import { memoryPoolKeysFor, type PoolKeySource } from "./pool-keys.js";
 import {
   admitLocal,
   JournalConflict,
@@ -76,6 +77,7 @@ import {
   type LawFromRow,
 } from "./adopt-law.js";
 import {
+  pinErasureGovernors,
   erasedFromReading,
   eraseImpl,
   eraseReplicaImpl,
@@ -235,8 +237,11 @@ export interface GatewayOptions {
    * host passes this; pools, quarantine and scratch gateways never do.
    */
   readonly peerStore?: DurableOrdinaryJournalStore;
-  /** @internal — a pool opens on its rows, not as a peer, until it takes its own key. */
-  readonly unjournaled?: boolean;
+  /**
+   * Where each new pool's own key lives. A host defaults to its store's own key file, or to
+   * process memory for a store with none. Absent on a pool, whose child pools stay on its key.
+   */
+  readonly poolKeys?: PoolKeySource;
   /**
    * Where a FEDERATION CHANNEL's pool keeps its bytes, by pool name. A separate container defaults
    * to a fresh in-memory backend, which is right for a quarantine (transient by design) and WRONG
@@ -498,6 +503,8 @@ export class Gateway {
   readonly justPersisted = new Set<string>();
   /** @internal — the host's substrate peer; undefined off that path. */
   peer: HostPeer | undefined = undefined;
+  /** @internal — where this ground's new pools keep their own keys (container.ts). */
+  poolKeys: PoolKeySource = memoryPoolKeysFor(this);
   /** Stored rows the host's journal never admitted: held, never served. */
   rowsOutsideJournal = 0;
   private unreadableRows = 0; // set by open: rows held, none readable
@@ -519,6 +526,12 @@ export class Gateway {
   }
   /** @internal — set by the child's opener (container.ts `openSeparate`); undefined at a root. */
   childLaw: ChildLaw | undefined = undefined;
+  private erasureGovernors: readonly string[] = [];
+  /** @internal — the keys this ground pins as erasure governors; kept across a reseat. */
+  pinErasureGovernors(keys: readonly string[]): void {
+    this.erasureGovernors = keys;
+    pinErasureGovernors(this._reactor, keys);
+  }
   /** The authors of `context` law here: this ground's own key, then a host it selects. */
   lawAuthors(context: LawContext): string[] {
     return lawAuthors(this.operatorAuthor, this.childLaw, context);
@@ -636,11 +649,10 @@ export class Gateway {
             `(${peerId}) names no journal here. Open it with its own operator seed.`,
         );
       }
-      // A seeded open is a host's, and a host opens only as a peer: a fresh store starts its
-      // journal, and a store with rows and no journal is refused. Only a pool, which takes its
-      // own key later (step 6), still opens on the rows.
+      // A seeded open is a peer's, host or pool: a fresh store starts its journal, and a store
+      // with rows and no journal is refused.
       if (peerStore === undefined && journals.length === 0 && peerId !== undefined) {
-        if (options.unjournaled !== true) peerStore = backend.journalStore();
+        peerStore = backend.journalStore();
       } else if (peerStore === undefined && journals.length > 0) {
         if (peerId === undefined) {
           if (journals.length > 1) {
@@ -714,6 +726,12 @@ export class Gateway {
     const gateway = new Gateway(backend, reactor, options);
     gateway.peer = peer;
     gateway.rowsOutsideJournal = outsideJournal;
+    // Each new pool takes its own key; this ground records it first (container.ts
+    // `poolGovernor`). The store keeps the keys beside itself, or this process holds them.
+    gateway.poolKeys =
+      options.poolKeys ??
+      (holdsPoolKeys(backend) ? backend.poolKeys() : undefined) ??
+      memoryPoolKeysFor(backend);
     // On the journal path the marker enters through local admission, at the gateway's clock.
     if (peer !== undefined && pendingMarker !== undefined) {
       await admitLocal(peer, [pendingMarker], gateway.now(), () => false);
@@ -960,7 +978,7 @@ export class Gateway {
 
   // Every surviving renderer binding, latest per route, read live under this store's law.
   renderers(): RendererBinding[] {
-    return readRenderers(this.reactor, this.validityNow(), this.operatorAuthor);
+    return readRenderers(this.reactor, this.validityNow(), this.lawAuthors("renderers"));
   }
 
   // Declare lenses public (SPEC §12/§17/§23.8): the body — bare names pass, `Name@vN` freezes to the
@@ -1515,6 +1533,7 @@ export class Gateway {
       }
     }
     this._reactor = reactor;
+    pinErasureGovernors(reactor, this.erasureGovernors); // the pins follow the ground
     if (this.delegationScope !== undefined) declarePrincipalScope(reactor, this.delegationScope);
     this.declareUsers(reactor);
     this.ingestVia = (d) => this.reactor.ingest(d);
@@ -2162,7 +2181,7 @@ export class Gateway {
       now >= this.publicOpen.until
     ) {
       this.publicOpen = {
-        open: readPublicSchemas(this.reactor, now, this.operatorAuthor),
+        open: readPublicSchemas(this.reactor, now, this.lawAuthors("public")),
         from: now,
         until: this.reactor.nextValidityBoundary(now) ?? Infinity,
       };

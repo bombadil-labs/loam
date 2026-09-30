@@ -95,31 +95,22 @@ const homes: Gateway[] = [];
 afterEach(async () => {
   for (const gw of homes.splice(0)) await gw.close();
 });
-// A driver with no whole-store byte probe: "empty" cannot be proven through it.
-class BlindBackend implements StoreBackend {
-  private readonly inner: MemoryBackend;
-  constructor(private readonly file: Delta[]) {
-    this.inner = new MemoryBackend();
-    void this.inner.append(file);
-  }
-  async append(deltas: Iterable<Delta>): Promise<number> {
-    const batch = [...deltas];
-    const n = await this.inner.append(batch);
-    for (const d of batch) if (!this.file.some((f) => f.id === d.id)) this.file.push(d);
-    return n;
-  }
-  deltasSince(known: ReadonlySet<string>): Promise<Delta[]> {
-    return this.inner.deltasSince(known);
-  }
-  purge(ids: Iterable<string>): Promise<number> {
-    return this.inner.purge(ids);
-  }
-  holds(id: string): Promise<boolean> {
-    return this.inner.holds(id);
-  }
-  close(): Promise<void> {
-    return this.inner.close();
-  }
+// A view of a store with no inventory and no whole-store byte probe: "empty" cannot be proven
+// through it. It keeps the store's journal, so a pool under its own key still opens over it.
+const BLIND = new Set(["ids", "holdsAny", "heldAmong"]);
+function blindView<B extends StoreBackend>(store: B): B {
+  return new Proxy(store, {
+    get(target, prop) {
+      if (typeof prop === "string" && BLIND.has(prop)) return undefined;
+      if (prop === "holdsAnyRow") return () => Promise.resolve(true); // unprovable reads as held
+      // The journal machinery still lists the rows beside its own journal.
+      if (prop === "journalRowIds") return () => (target as unknown as MemoryBackend).ids();
+      const value: unknown = Reflect.get(target, prop, target);
+      return typeof value === "function"
+        ? (value as (...a: unknown[]) => unknown).bind(target)
+        : value;
+    },
+  });
 }
 class FaultBackend extends MemoryBackend {
   failPurgeAfter = Number.POSITIVE_INFINITY;
@@ -144,10 +135,15 @@ class FaultBackend extends MemoryBackend {
     for (const d of batch) if (!this.file.some((f) => f.id === d.id)) this.file.push(d);
     return n;
   }
-  // A host writes through its peer journal, so the retraction fault reaches that path too.
+  // A peer writes through its journal, so the retraction fault and the file reach that path too.
+  #journal: DurableOrdinaryJournalStore | undefined;
   override journalStore(): DurableOrdinaryJournalStore {
     const inner = super.journalStore();
-    return {
+    const record = (rows: readonly Delta[], status: string) => {
+      if (status !== "durable") return;
+      for (const d of rows) if (!this.file.some((f) => f.id === d.id)) this.file.push(d);
+    };
+    return (this.#journal ??= {
       ...inner,
       compareAndAppend: async (peer, expected, next, frame, rows) => {
         if (
@@ -157,9 +153,23 @@ class FaultBackend extends MemoryBackend {
           this.failNextRetraction = false;
           throw new Error("fixture retraction failure");
         }
-        return inner.compareAndAppend(peer, expected, next, frame, rows);
+        const result = await inner.compareAndAppend(peer, expected, next, frame, rows);
+        record(rows, result.status);
+        return result;
       },
-    };
+      compareAndAppendErasure: async (peer, expected, next, frame, rows, absent) => {
+        const result = await inner.compareAndAppendErasure!(
+          peer,
+          expected,
+          next,
+          frame,
+          rows,
+          absent,
+        );
+        record(rows, result.status);
+        return result;
+      },
+    });
   }
   override async purge(ids: Iterable<string>): Promise<number> {
     if (this.purges >= this.failPurgeAfter) throw new Error("fixture purge failure");
@@ -176,6 +186,9 @@ class FaultBackend extends MemoryBackend {
 class HostFile extends FaultBackend {
   override async close(): Promise<void> {}
 }
+class PoolFile extends FaultBackend {
+  override async close(): Promise<void> {}
+}
 async function home() {
   const primary = new HostFile();
   const files = new Map<string, Delta[]>();
@@ -185,10 +198,15 @@ async function home() {
   const mirrors = new Map<string, Delta[]>();
   // Names whose store offers no whole-store byte probe.
   const blind = new Set<string>();
+  // One store per name, journal included, that outlives every handle over it: a pool reopened
+  // by name finds its own journal, the way a sqlite file does.
+  const disks = new Map<string, PoolFile>();
   const storeFor = (name: string): StoreBackend => {
     const file = files.get(name) ?? [];
     files.set(name, file);
-    const primary = blind.has(name) ? new BlindBackend(file) : new FaultBackend(file);
+    const disk = disks.get(name) ?? new PoolFile(file);
+    disks.set(name, disk);
+    const primary = blind.has(name) ? blindView(disk) : disk;
     const mirror = mirrors.get(name);
     return mirror === undefined ? primary : new MirrorBackend(primary, new FaultBackend(mirror));
   };
@@ -222,7 +240,9 @@ async function home() {
     homes.push(again);
     return again;
   };
-  return { gw, primary, holds, restart, failAttach, files, mirrors, blind };
+  // Remove rows from a pool's file by hand, around every door.
+  const cut = (name: string, ids: Iterable<string>) => disks.get(name)!.purge(ids);
+  return { gw, primary, holds, restart, failAttach, files, mirrors, blind, cut, disks };
 }
 function peer() {
   const offering: Delta[] = [];
@@ -314,7 +334,7 @@ describe("spec 64: a live opening cannot be erased", () => {
     expect(bytes(siblingPool)).toEqual(before.sibling);
   });
   it("a declaration negated through the append door with the pool's bytes still held refuses and names the orphaned pool, attached or not", async () => {
-    const { gw, holds, files } = await home();
+    const { gw, holds, files, cut } = await home();
     const { ch, offering, pool, source } = await channel(gw);
     offering.push(fact(1));
     await ch.sync();
@@ -343,7 +363,10 @@ describe("spec 64: a live opening cannot be erased", () => {
     expect(gw.reactor.get(opening.id)).toBeDefined();
     // ONE byte is enough. The seed never leaves a store this small; a hand-written one can be.
     const file = files.get(ch.name)!;
-    file.splice(0, file.length, ...file.filter((d) => d.id === fact(1).id));
+    await cut(
+      ch.name,
+      file.filter((d) => d.id !== fact(1).id).map((d) => d.id),
+    );
     expect(file).toHaveLength(1);
     const oneByte = await gw.erase(opening.id).catch((e: Error) => e.message);
     expect(oneByte).toContain("still holds bytes although its declaration was negated");
@@ -1086,7 +1109,10 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     // The primary purged, the mirror did not: the read path shows nothing, the bytes remain.
     const file = first.files.get(ch.name)!;
     first.mirrors.set(ch.name, [...file]);
-    file.splice(0, file.length);
+    await first.cut(
+      ch.name,
+      file.map((d) => d.id),
+    );
     const gw = await first.restart();
     expect(gw.channelPools.get(ch.name)).toBeUndefined();
     const refusal = await gw.erase(opening.id).catch((e: Error) => e.message);
@@ -1126,7 +1152,7 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     );
     expect(first.mirrors.get(ch.name)!.some((d) => d.id === fact(1).id)).toBe(true);
     await new MirrorBackend(
-      new FaultBackend(file),
+      first.disks.get(ch.name)!,
       new FaultBackend(first.mirrors.get(ch.name)),
     ).heal();
     expect(file.some((d) => d.id === fact(1).id)).toBe(true);
@@ -1184,14 +1210,28 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
           SEED,
         ),
       ]);
-    first.files.get(ch.name)!.splice(0);
+    await first.cut(
+      ch.name,
+      first.files.get(ch.name)!.map((d) => d.id),
+    );
     first.blind.add(ch.name);
     const gw = await first.restart();
     await expect(gw.erase(opening.id)).rejects.toThrow(
       /still holds bytes although its declaration was negated/,
     );
     expect(gw.reactor.get(opening.id)).toBeDefined();
+    // With the probe back, the store still answers "held": its rows are cut, but the pool's own
+    // journal still carries them. The road the refusal names: open again, drop, then erase.
     first.blind.delete(ch.name);
+    await expect(gw.erase(opening.id)).rejects.toThrow(/open the channel again under this name/);
+    const feed = peer();
+    await gw.openChannel({
+      into: "friends",
+      prefix: "peer",
+      from: "https://peer.example/peer",
+      source: feed.source,
+    });
+    await gw.dropChannel(ch.name);
     await gw.erase(opening.id);
     expect(gw.reactor.get(opening.id)).toBeUndefined();
   });

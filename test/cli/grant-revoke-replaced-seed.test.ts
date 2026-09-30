@@ -1,7 +1,7 @@
 // `loam grant revoke` after the person's seed was replaced. What lets the connection write is a
-// delegation the OLD seed signed, and only its signer or the operator can strike it, so a revoke in
-// the person's current voice does not bind. The command holds the operator seed and strikes in that
-// voice instead. Asked at both levels: the pool no longer lets the key write, and the report names
+// delegation the OLD seed signed, and only its signer or the pool's own key can strike it, so a
+// revoke in the person's current voice does not bind. The command strikes in the pool's own voice
+// instead. Asked at both levels: the pool no longer lets the key write, and the report names
 // the inbox it struck and exits 0.
 //
 // Erasure standing rule: every store here is this file's own mkdtemp fixture.
@@ -87,7 +87,7 @@ async function poolLetsWrite(inbox: string): Promise<boolean> {
   const pool = gw.connectionInboxes.get(inbox)?.gateway;
   const held =
     pool !== undefined &&
-    holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, CONN, "write", gw.operatorAuthor);
+    holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, CONN, "write", pool.operatorAuthor);
   await gw.close();
   return held;
 }

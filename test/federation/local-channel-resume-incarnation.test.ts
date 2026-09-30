@@ -88,9 +88,10 @@ describe("T288 resumed closed incarnation retains its identity", () => {
         await original.backend.deltasSince(new Set()),
         original.operatorAuthor,
       );
-      await poolBackend.append(await pool.backend.deltasSince(new Set()));
+      await plant(poolBackend, await pool.backend.deltasSince(new Set()), pool.operatorAuthor);
       const restored = await Gateway.open(rootBackend, {
         seed: SEED,
+        poolKeys: original.poolKeys,
         channelBackend: () => poolBackend,
         ...(path === "resumeChannels" ? { channelToken: () => "token" } : {}),
       });

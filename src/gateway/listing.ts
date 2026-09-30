@@ -33,7 +33,7 @@ import {
   readContainerTable,
   type ContainerTable,
 } from "./container.js";
-import { erasedFromReading, erasedInScope } from "./erase.js";
+import { erasedFromReading, erasedInScope, poolGovernors } from "./erase.js";
 import type { ConnectionBinding, Gateway } from "./gateway.js";
 import { groupPrograms } from "./lifecycle.js";
 import { programOf, type ProgramName } from "./registration.js";
@@ -595,7 +595,7 @@ export async function listingPageImpl(
 
 // A composed scope with its erased deltas removed (see `erasedInScope`).
 function withoutErasedScope(gw: Gateway, scope: readonly Delta[]): Delta[] {
-  const hidden = erasedInScope(gw.reactor, gw.operatorAuthor, scope);
+  const hidden = erasedInScope(gw.reactor, gw.operatorAuthor, scope, poolGovernors(gw));
   return hidden.size === 0 ? [...scope] : scope.filter((d) => !hidden.has(d.id));
 }
 

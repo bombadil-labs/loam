@@ -10,6 +10,7 @@ import {
   authorForSeed,
   makeNegationClaims,
   signClaims,
+  type Claims,
   type Delta,
   type Pointer,
 } from "@bombadil/rhizomatic";
@@ -54,6 +55,8 @@ async function store(): Promise<Gateway> {
 }
 
 const op = (claims: Parameters<typeof signClaims>[0]) => signClaims(claims, OP_SEED);
+/** A pool's own law, signed by the pool's key. */
+const law = (pool: Gateway, claims: Claims): Delta => pool.signer!.sign(claims);
 const both = (gw: Gateway, name: string) => {
   const now = gw.validityNow();
   return { index: userRootAt(gw.reactor, now, OP, name), view: rootOf(gw.reactor, OP, now, name) };
@@ -305,19 +308,21 @@ describe("a pool reads its host's users", () => {
     });
     const pool = conn.gateway!;
     // The pool's owner grant now names the user, not the key.
-    await pool.append([op(grantClaims(STORE_ENTITY, "user:ada", "admin", OP, 20))]);
+    await pool.append([
+      law(pool, grantClaims(STORE_ENTITY, "user:ada", "admin", pool.operatorAuthor!, 20)),
+    ]);
     expect(await door(pool, observed(FERN, "height", 9, 108, CONN_SEED))).toBe("admitted");
     // Re-pointing ada at the HOST reaches the pool: K1's delegation no longer carries standing
     // through the user-named grant. (The key-literal owner grant bind wrote is struck first, so
     // only the user-named grant is left to consult.)
     const literal = [...pool.reactor.snapshot()].find(
       (d) =>
-        d.claims.author === OP &&
+        d.claims.author === pool.operatorAuthor &&
         d.claims.pointers.some(
           (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === K1,
         ),
     )!;
-    await pool.append([op(makeNegationClaims(OP, 21, literal.id))]);
+    await pool.append([law(pool, makeNegationClaims(pool.operatorAuthor!, 21, literal.id))]);
     expect(await door(pool, observed(FERN, "height", 10, 109, CONN_SEED))).toBe("admitted");
     await gw.append([op(rootClaims("ada", K2, OP, 22))]);
     expect(await door(pool, observed(FERN, "height", 11, 110, CONN_SEED))).toBe("refused");
@@ -358,22 +363,27 @@ describe("a pool reads its host's users", () => {
       ownerSeed: K1_SEED,
     });
     const pool = conn.gateway!;
-    const named = op(grantClaims(STORE_ENTITY, "user:ada", "admin", OP, 20));
+    const named = law(
+      pool,
+      grantClaims(STORE_ENTITY, "user:ada", "admin", pool.operatorAuthor!, 20),
+    );
     await pool.append([named]);
     const literal = [...pool.reactor.snapshot()].find(
       (d) =>
-        d.claims.author === OP &&
+        d.claims.author === pool.operatorAuthor &&
         d.claims.pointers.some(
           (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === K1,
         ),
     )!;
-    await pool.append([op(makeNegationClaims(OP, 21, literal.id))]);
+    await pool.append([law(pool, makeNegationClaims(pool.operatorAuthor!, 21, literal.id))]);
     await gw.bindConnection({ container: "home:ada", connectionKey: CONN, ownerSeed: K1_SEED });
     expect(pool.reactor.negationsOf(named.id)).toEqual([]); // the owner's own grant is kept
     expect(await door(pool, observed(FERN, "height", 13, 112, CONN_SEED))).toBe("admitted");
     await gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED });
     expect(await door(pool, observed(FERN, "height", 14, 113, CONN_SEED))).toBe("refused");
-    expect(connectionGrantState(pool.reactor, pool.validityNow(), OP, CONN)).toBe("revoked");
+    expect(connectionGrantState(pool.reactor, pool.validityNow(), pool.operatorAuthor, CONN)).toBe(
+      "revoked",
+    );
     await gw.close();
   });
 
@@ -406,15 +416,17 @@ describe("a pool reads its host's users", () => {
       ownerSeed: K1_SEED,
     });
     const pool = conn.gateway!;
-    await pool.append([op(grantClaims(STORE_ENTITY, "user:ada", "admin", OP, 20))]);
+    await pool.append([
+      law(pool, grantClaims(STORE_ENTITY, "user:ada", "admin", pool.operatorAuthor!, 20)),
+    ]);
     const literal = [...pool.reactor.snapshot()].find(
       (d) =>
-        d.claims.author === OP &&
+        d.claims.author === pool.operatorAuthor &&
         d.claims.pointers.some(
           (p) => p.role === "subject" && p.target.kind === "primitive" && p.target.value === K1,
         ),
     )!;
-    await pool.append([op(makeNegationClaims(OP, 20, literal.id))]);
+    await pool.append([law(pool, makeNegationClaims(pool.operatorAuthor!, 20, literal.id))]);
     await gw.append([op(rootClaims("ada", K2, OP, 21))]);
     await pool.append([
       signClaims(delegationClaims(K2, CONN, inboxName("home:ada", CONN), 22), K2_SEED),
@@ -461,7 +473,10 @@ describe("a pool reads its host's users", () => {
       ownerSeed: K1_SEED,
     });
     const pool = conn.gateway!;
-    const named = op(grantClaims(STORE_ENTITY, "user:ada", "admin", OP, T0 + 10));
+    const named = law(
+      pool,
+      grantClaims(STORE_ENTITY, "user:ada", "admin", pool.operatorAuthor!, T0 + 10),
+    );
     await pool.append([named]);
     // Ada's record is struck until T0+1000: for now her root cannot be read.
     vi.setSystemTime(T0 + 20);
@@ -476,7 +491,10 @@ describe("a pool reads its host's users", () => {
     // Striking the owner grant itself for a while does not let revoke claim success: it stands
     // again when the strike lapses.
     await pool.append([
-      signClaims({ ...makeNegationClaims(OP, T0 + 21, named.id), validUntil: T0 + 1000 }, OP_SEED),
+      law(pool, {
+        ...makeNegationClaims(pool.operatorAuthor!, T0 + 21, named.id),
+        validUntil: T0 + 1000,
+      }),
     ]);
     await expect(
       gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED }),
@@ -528,8 +546,11 @@ describe("a pool reads its host's users", () => {
     }
     // An owner-side grant for a ghost the operator struck for good stays dead, even when the
     // connection counter-strikes that strike.
-    const ghost = op(grantClaims(STORE_ENTITY, "user:ghost", "admin", OP, 31));
-    const forGood = op(makeNegationClaims(OP, 32, ghost.id));
+    const ghost = law(
+      pool,
+      grantClaims(STORE_ENTITY, "user:ghost", "admin", pool.operatorAuthor!, 31),
+    );
+    const forGood = law(pool, makeNegationClaims(pool.operatorAuthor!, 32, ghost.id));
     await pool.append([ghost, forGood]);
     expect(await door(pool, signClaims(makeNegationClaims(CONN, 33, forGood.id), CONN_SEED))).toBe(
       "admitted",
@@ -611,17 +632,23 @@ describe("a pool reads its host's users", () => {
     });
     const pool = conn.gateway!;
     vi.setSystemTime(T0 + 100);
-    const k3Admin = op(grantClaims(STORE_ENTITY, K2, "admin", OP, T0 + 10));
-    const ghost = op(grantClaims(STORE_ENTITY, "user:ghost", "admin", OP, T0 + 11));
-    const strike = op(makeNegationClaims(OP, T0 + 12, ghost.id));
+    const k3Admin = law(
+      pool,
+      grantClaims(STORE_ENTITY, K2, "admin", pool.operatorAuthor!, T0 + 10),
+    );
+    const ghost = law(
+      pool,
+      grantClaims(STORE_ENTITY, "user:ghost", "admin", pool.operatorAuthor!, T0 + 11),
+    );
+    const strike = law(pool, makeNegationClaims(pool.operatorAuthor!, T0 + 12, ghost.id));
     await pool.append([k3Admin, ghost, strike]);
     // K2, holding admin, undoes the operator's strike; then K2's own admin is struck for a while.
     await pool.append([signClaims(makeNegationClaims(K2, T0 + 13, strike.id), K2_SEED)]);
     await pool.append([
-      signClaims(
-        { ...makeNegationClaims(OP, T0 + 14, k3Admin.id), validUntil: T0 + 10_000 },
-        OP_SEED,
-      ),
+      law(pool, {
+        ...makeNegationClaims(pool.operatorAuthor!, T0 + 14, k3Admin.id),
+        validUntil: T0 + 10_000,
+      }),
     ]);
     await expect(
       gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED }),
@@ -666,14 +693,20 @@ describe("a pool reads its host's users", () => {
     const pool = conn.gateway!;
     vi.setSystemTime(T0 + 100);
     // K2 is admin here only as user x, through two grants.
-    const g1 = op(grantClaims(STORE_ENTITY, "user:x", "admin", OP, T0 + 10));
-    const g2 = op(grantClaims(STORE_ENTITY, "user:x", "admin", OP, T0 + 11));
+    const g1 = law(
+      pool,
+      grantClaims(STORE_ENTITY, "user:x", "admin", pool.operatorAuthor!, T0 + 10),
+    );
+    const g2 = law(
+      pool,
+      grantClaims(STORE_ENTITY, "user:x", "admin", pool.operatorAuthor!, T0 + 11),
+    );
     await pool.append([g1, g2]);
     // The operator strikes each for good; K2, still admin through the other, undoes each strike.
-    const s1 = op(makeNegationClaims(OP, T0 + 12, g1.id));
+    const s1 = law(pool, makeNegationClaims(pool.operatorAuthor!, T0 + 12, g1.id));
     await pool.append([s1]);
     await pool.append([signClaims(makeNegationClaims(K2, T0 + 13, s1.id), K2_SEED)]);
-    const s2 = op(makeNegationClaims(OP, T0 + 14, g2.id));
+    const s2 = law(pool, makeNegationClaims(pool.operatorAuthor!, T0 + 14, g2.id));
     await pool.append([s2]);
     await pool.append([signClaims(makeNegationClaims(K2, T0 + 15, s2.id), K2_SEED)]);
     // Now x cannot be read for a while.
@@ -722,7 +755,12 @@ describe("a pool reads its host's users", () => {
         ownerSeed: K1_SEED,
       });
       vi.setSystemTime(T0 + 100);
-      await conn.gateway!.append([op(grantClaims(STORE_ENTITY, "user:ada", "write", OP, T0 + 10))]);
+      await conn.gateway!.append([
+        law(
+          conn.gateway!,
+          grantClaims(STORE_ENTITY, "user:ada", "write", conn.gateway!.operatorAuthor!, T0 + 10),
+        ),
+      ]);
       return { gw, conn, adaRecord };
     }
 
@@ -815,8 +853,8 @@ describe("a pool reads its host's users", () => {
       const { gw, conn, pool } = await inbox(T0);
       // A user-named owner grant, and K2 with write standing that pre-signs a delegation.
       await pool.append([
-        op(grantClaims(STORE_ENTITY, "user:ada", "admin", OP, T0 + 10)),
-        op(grantClaims(STORE_ENTITY, K2, "write", OP, T0 + 11)),
+        law(pool, grantClaims(STORE_ENTITY, "user:ada", "admin", pool.operatorAuthor!, T0 + 10)),
+        law(pool, grantClaims(STORE_ENTITY, K2, "write", pool.operatorAuthor!, T0 + 11)),
       ]);
       await pool.append([
         signClaims(delegationClaims(K2, CONN, inboxName("home:ada", CONN), T0 + 12), K2_SEED),
@@ -846,9 +884,10 @@ describe("a pool reads its host's users", () => {
       await gw.append([op(makeNegationClaims(OP, T0 + 20, later.id))]);
       await pool.append([
         // K2's literal write grant is not admin; only the user-named grant could have carried it.
-        op(
+        law(
+          pool,
           makeNegationClaims(
-            OP,
+            pool.operatorAuthor!,
             T0 + 21,
             [...pool.reactor.snapshot()].find((d) =>
               d.claims.pointers.some(
@@ -867,7 +906,7 @@ describe("a pool reads its host's users", () => {
     it("the operator's revoke strikes that latent delegation too, so it stays dead after the re-point", async () => {
       const T0 = Date.now();
       const { gw, conn, pool } = await futureRoot(T0);
-      await gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: OP_SEED });
+      await gw.revokeConnection({ inbox: conn, connectionKey: CONN, asPool: true });
       vi.setSystemTime(T0 + 20_000);
       expect(await door(pool, observed(FERN, "height", 40, T0 + 20_001, CONN_SEED))).toBe(
         "refused",
@@ -878,16 +917,19 @@ describe("a pool reads its host's users", () => {
     it("a delegation from a key whose admin grant is struck only for a while makes an owner revoke refuse", async () => {
       const T0 = Date.now();
       const { gw, conn, pool } = await inbox(T0);
-      const k2Admin = op(grantClaims(STORE_ENTITY, K2, "admin", OP, T0 + 10));
+      const k2Admin = law(
+        pool,
+        grantClaims(STORE_ENTITY, K2, "admin", pool.operatorAuthor!, T0 + 10),
+      );
       await pool.append([k2Admin]);
       await pool.append([
         signClaims(delegationClaims(K2, CONN, inboxName("home:ada", CONN), T0 + 11), K2_SEED),
       ]);
       await pool.append([
-        signClaims(
-          { ...makeNegationClaims(OP, T0 + 12, k2Admin.id), validUntil: T0 + 10_000 },
-          OP_SEED,
-        ),
+        law(pool, {
+          ...makeNegationClaims(pool.operatorAuthor!, T0 + 12, k2Admin.id),
+          validUntil: T0 + 10_000,
+        }),
       ]);
       await expect(
         gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED }),
@@ -945,15 +987,20 @@ describe("a pool reads its host's users", () => {
       for (const at of [T0 + 20, T0 + 2000]) {
         const { gw, conn, pool } = await inbox(T0);
         await pool.append([
-          op(grantClaims(STORE_ENTITY, "user:ada", "admin", OP, T0 + 4)),
-          op(grantClaims(STORE_ENTITY, K2, "write", OP, T0 + 5)),
+          law(pool, grantClaims(STORE_ENTITY, "user:ada", "admin", pool.operatorAuthor!, T0 + 4)),
+          law(pool, grantClaims(STORE_ENTITY, K2, "write", pool.operatorAuthor!, T0 + 5)),
         ]);
         const d = signClaims(
           delegationClaims(K2, CONN, inboxName("home:ada", CONN), T0 + 6),
           K2_SEED,
         );
         await pool.append([d]);
-        await pool.append([op({ ...makeNegationClaims(OP, T0 + 7, d.id), validFrom: T0 + 2000 })]);
+        await pool.append([
+          law(pool, {
+            ...makeNegationClaims(pool.operatorAuthor!, T0 + 7, d.id),
+            validFrom: T0 + 2000,
+          }),
+        ]);
         await gw.append([op({ ...rootClaims("ada", K2, OP, T0 + 8), validFrom: T0 + 1000 })]);
         vi.setSystemTime(at);
         results.push(await outcome(gw, conn));
@@ -968,8 +1015,8 @@ describe("a pool reads its host's users", () => {
       for (const at of [T0 + 20, T0 + 2000]) {
         const { gw, conn, pool } = await inbox(T0);
         await pool.append([
-          op(grantClaims(STORE_ENTITY, "user:ada", "admin", OP, T0 + 4)),
-          op(grantClaims(STORE_ENTITY, K2, "write", OP, T0 + 5)),
+          law(pool, grantClaims(STORE_ENTITY, "user:ada", "admin", pool.operatorAuthor!, T0 + 4)),
+          law(pool, grantClaims(STORE_ENTITY, K2, "write", pool.operatorAuthor!, T0 + 5)),
         ]);
         await pool.append([
           signClaims(delegationClaims(K2, CONN, inboxName("home:ada", CONN), T0 + 6), K2_SEED),
@@ -991,7 +1038,9 @@ describe("a pool reads its host's users", () => {
       const results: string[] = [];
       for (const at of [T0 + 20, T0 + 2000]) {
         const { gw, conn, pool } = await inbox(T0);
-        await pool.append([op(grantClaims(STORE_ENTITY, "user:ada", "write", OP, T0 + 4))]);
+        await pool.append([
+          law(pool, grantClaims(STORE_ENTITY, "user:ada", "write", pool.operatorAuthor!, T0 + 4)),
+        ]);
         const bad = op({ ...rootClaims("ada", CONN, OP, T0 + 5), validFrom: T0 + 1000 });
         await gw.append([bad]);
         await gw.append([op({ ...makeNegationClaims(OP, T0 + 6, bad.id), validFrom: T0 + 2000 })]);

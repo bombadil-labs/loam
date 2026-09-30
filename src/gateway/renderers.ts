@@ -297,9 +297,31 @@ const isRoute = (id: string): boolean => id.startsWith("renderer:");
 // latest registration per schema entity). Lawful slice only: in a governed store a foreign renderer
 // merges as data and mounts nothing (§8/§12 inert-by-default). A binding missing route/schema/bundle
 // binds nothing — unmounted, never a crash.
-export function readRenderers(reactor: Reactor, now: number, operator?: string): RendererBinding[] {
-  const negated = negatedAt(reactor, now, operator);
-  return latestPerRoute(lawfulSnapshot(reactor, now, operator), (d) => !negated(d.id));
+//
+// Given several law authors (a pool's own key and the hosts it selects, `lawAuthors`), their
+// bindings compete latest-per-route as one lawful slice, and any of them may strike one.
+export function readRenderers(
+  reactor: Reactor,
+  now: number,
+  operator?: string | readonly string[],
+): RendererBinding[] {
+  if (typeof operator !== "object") {
+    const negated = negatedAt(reactor, now, operator);
+    return latestPerRoute(lawfulSnapshot(reactor, now, operator), (d) => !negated(d.id));
+  }
+  // Several governors (a ground's own key first, then the hosts it selects for renderers): each
+  // binding is struck only under its own author's strikes or the holding ground's (ruling 11), so
+  // one governor never retires another's binding in a ground it does not hold.
+  const holder = operator[0];
+  const byAuthor = new Map<string, (id: string) => boolean>();
+  const strikesOf = (author: string) => {
+    let f = byAuthor.get(author);
+    if (f === undefined) byAuthor.set(author, (f = negatedAt(reactor, now, author)));
+    return f;
+  };
+  const struck = (d: Delta): boolean =>
+    strikesOf(d.claims.author)(d.id) || (holder !== undefined && strikesOf(holder)(d.id));
+  return latestPerRoute(lawfulSnapshot(reactor, now, operator), (d) => !struck(d));
 }
 
 /**

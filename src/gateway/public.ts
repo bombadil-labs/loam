@@ -74,32 +74,37 @@ export function publicDefect(claims: Claims): string | undefined {
 
 // The schemas currently open to tokenless reads: the union of `schema` pointers across ALL
 // surviving lawful declarations. Governed stores only — an ungoverned store answers with the
-// empty set, always.
+// empty set, always. `operator` may be several authors (a pool's own key, then the host keys it
+// selects for public law): the set is the union of each one's declarations, each read under that
+// author's own strikes.
 export function readPublicSchemas(
   reactor: Reactor,
   now: number,
-  operator?: string,
+  operator?: string | readonly string[],
 ): ReadonlySet<string> {
   const open = new Set<string>();
-  if (operator === undefined) return open;
-  const negated = negatedAt(reactor, now, operator);
-  for (const delta of lawfulDeltasAt(
-    reactor,
-    now,
-    { entity: PUBLIC_ENTITY, context: CTX_PUBLIC },
-    operator,
-  )) {
-    if (negated(delta.id)) continue;
-    for (const p of delta.claims.pointers) {
-      // The same shape the door enforces (publicDefect): non-empty strings only, so a
-      // declaration that slipped past a door somewhere still reads exactly as the law says.
-      if (
-        p.role === "schema" &&
-        p.target.kind === "primitive" &&
-        typeof p.target.value === "string" &&
-        p.target.value !== ""
-      ) {
-        open.add(p.target.value);
+  const authors =
+    operator === undefined ? [] : typeof operator === "string" ? [operator] : operator;
+  for (const author of authors) {
+    const negated = negatedAt(reactor, now, author);
+    for (const delta of lawfulDeltasAt(
+      reactor,
+      now,
+      { entity: PUBLIC_ENTITY, context: CTX_PUBLIC },
+      author,
+    )) {
+      if (negated(delta.id)) continue;
+      for (const p of delta.claims.pointers) {
+        // The same shape the door enforces (publicDefect): non-empty strings only, so a
+        // declaration that slipped past a door somewhere still reads exactly as the law says.
+        if (
+          p.role === "schema" &&
+          p.target.kind === "primitive" &&
+          typeof p.target.value === "string" &&
+          p.target.value !== ""
+        ) {
+          open.add(p.target.value);
+        }
       }
     }
   }

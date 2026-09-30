@@ -35,12 +35,13 @@ describe("§47 — a channel's blessing lives in the channel's pool", () => {
       const report = await ch.sync();
       expect(report.bound).toContain("alice:Plant");
 
-      // DELTA LEVEL, both sides. The binding deltas are in the POOL...
-      const inPool = [...ch.pool.gateway!.reactor.snapshot()].some(
+      // DELTA LEVEL, both sides. The binding deltas are in the POOL, signed by its own key...
+      const pool = ch.pool.gateway!;
+      const inPool = [...pool.reactor.snapshot()].some(
         (d) =>
           d.claims.pointers.some(
             (p) => p.target.kind === "entity" && p.target.entity.context === "loam.registration",
-          ) && d.claims.author === me.operatorAuthor,
+          ) && d.claims.author === pool.operatorAuthor,
       );
       expect(inPool).toBe(true);
       // ...and the ROOT ground holds no registration binding for the channel's name.

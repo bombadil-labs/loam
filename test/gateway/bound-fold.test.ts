@@ -151,17 +151,14 @@ const expanding = (name: string, into: string): typeof PLANT => ({
     },
   }),
 });
-/** Strike one registration delta in a pool out of band, signed by the root operator. */
+/** Strike one registration delta in a pool out of band, signed by the pool's own key. */
 const strike = (p: Gateway, deltaId: string): Promise<unknown> =>
   p.append([
-    signClaims(
-      {
-        ...p.stamp(OP),
-        author: OP,
-        pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: deltaId } } }],
-      },
-      OP_SEED,
-    ),
+    p.signer!.sign({
+      ...p.stamp(p.operatorAuthor),
+      author: p.operatorAuthor!,
+      pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: deltaId } } }],
+    }),
   ]);
 const servedBy = (gw: Gateway, asker: string, lens: string): string | undefined =>
   gw.boundSurface({ container: HOME, inbox: asker }).registered.find((r) => lensOf(r) === lens)

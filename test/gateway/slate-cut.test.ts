@@ -65,6 +65,17 @@ class RefusingBackend implements StoreBackend {
   }
 }
 
+/**
+ * A wall's own store: a memory backend (so the wall, its own journal peer, opens over it) whose
+ * bytes survive close() while `keepOpen` holds, so a detached wall stays readable to the rail.
+ */
+class DurableWallBackend extends MemoryBackend {
+  keepOpen = true;
+  override async close(): Promise<void> {
+    if (!this.keepOpen) await super.close();
+  }
+}
+
 /** The bystander a cut must never touch, read THROUGH A SCHEMA — the object level, at the door. */
 const tagThrough = async (gw: Gateway): Promise<string[] | null> => {
   const res = await gw.query(`{ plant(entity: "${FERN}") { tag } }`);
@@ -356,8 +367,7 @@ describe("T64 criterion 20 — a detached wall that demonstrably holds a member 
         OP_SEED,
       ),
     ]);
-    const shelfBytes = new RefusingBackend();
-    shelfBytes.keepOpen = true; // a durable store: detach() must not make its bytes unreadable
+    const shelfBytes = new DurableWallBackend(); // detach() must not make its bytes unreadable
     const shelf = await gw.openContainer({ name: "container:shelf", backend: shelfBytes });
     // ASSERTED BY READING THE WALL'S OWN STORE, never by trusting the seed.
     expect(shelf.gateway!.reactor.get(member.id)).toBeDefined();

@@ -23,6 +23,8 @@
 
 import { seedSigner } from "./signer.js";
 import { hostChain, inboxLaw, seededLaw } from "./child-law.js";
+import { memoryPoolKeys, poolKeyClaims, recordedPoolKey } from "./pool-keys.js";
+import { holdsJournals, type JournalBackend } from "../store/peer-image.js";
 import {
   authorForSeed,
   parseTerm,
@@ -44,7 +46,7 @@ import {
   revocationClaims,
 } from "./accounts.js";
 import { STORE_ENTITY } from "./genesis.js";
-import { isErasure, readErasures } from "./erase.js";
+import { isErasure, orderBinds, orderForPool, readErasures } from "./erase.js";
 import {
   canonicalLeewayJson,
   parseLeeway,
@@ -1599,6 +1601,57 @@ function openShared(
 // is the operator's own arena, so the operator's erasure stays authoritative there, §24.8). The edge
 // is inbound only — nothing is ever wired back. This is the T72 body, generalized: the settle, the
 // seeding closure, the drop-verify, and the detach are the invariants the lifting preserves.
+// Which key governs a pool. Every pool is its own journal peer under its own key: a store that
+// cannot keep a journal is refused. A pool the host recorded must load that key (else it is
+// refused); a fresh, empty pool mints one, and the host records it first; an anonymous pool's key
+// lives for this process. A store that holds bytes the host never recorded was made by an earlier
+// Loam and is refused (ruling 10). No pool ever opens under the host's key.
+async function poolGovernor(
+  gw: Gateway,
+  name: string | undefined,
+  backend: StoreBackend,
+): Promise<{ seed: string }> {
+  if (!holdsJournals(backend)) {
+    throw new Error(
+      `${name ?? "a pool"}: this store cannot keep a peer journal, and every pool is its own peer ` +
+        "under its own key. It is refused rather than opened under the host's key.",
+    );
+  }
+  const keys = gw.poolKeys;
+  const recorded =
+    name === undefined ? undefined : recordedPoolKey(gw.reactor, gw.operatorAuthor, name);
+  if (recorded !== undefined) {
+    const seed = keys.load(name!);
+    if (seed === undefined || authorForSeed(seed) !== recorded) {
+      throw new Error(
+        `${name}: this pool governs itself under ${recorded}, and its key is not here. It is ` +
+          "refused rather than reopened under the host's key.",
+      );
+    }
+    return { seed };
+  }
+  const empty =
+    (await backend.journalPeers()).length === 0 && (await backend.holdsAny?.()) === false;
+  if (!empty) {
+    throw new Error(
+      `${name ?? "a pool"}: this pool's store holds bytes, and the host never recorded a key for ` +
+        "it. It was made by an earlier Loam, and this Loam does not carry old pools forward. It " +
+        "is refused.",
+    );
+  }
+  // An anonymous pool never reopens, so its key lives for this process only and needs no record.
+  if (name === undefined) return { seed: memoryPoolKeys().create("anonymous") };
+  const seed = keys.create(name);
+  await gw.append([
+    gw.signer!.sign(
+      withStamp(gw.stamp(gw.operatorAuthor), (t) =>
+        poolKeyClaims(name, authorForSeed(seed), gw.operatorAuthor!, t),
+      ),
+    ),
+  ]);
+  return { seed };
+}
+
 async function openSeparate(
   gw: Gateway,
   spec: {
@@ -1697,9 +1750,10 @@ async function openSeparate(
   // and it leaves a curated container and a §39 inbox pool — which build authority in their OWN
   // ground on purpose — exactly as they were.
   const probationary = spec.trust === "untrusted";
+  const own = await poolGovernor(gw, spec.entity, backend);
   const pool = await Gateway.open(backend, {
-    seed: gw.childSeed()!,
-    unjournaled: true,
+    seed: own.seed,
+    peerStore: (backend as JournalBackend).journalStore(),
     ...(probationary && gw.options.pens !== undefined ? { pens: gw.options.pens } : {}),
   });
   pool.attachedTo = gw;
@@ -1707,6 +1761,9 @@ async function openSeparate(
   // host copies and selects the host for them.
   const hosts = hostChain(gw.signer.author, gw.childLaw);
   pool.childLaw = spec.entity?.startsWith("inbox:") ? inboxLaw(hosts) : seededLaw(hosts);
+  // Every pool pins its host chain as erasure governors: a host's order binds here only when it
+  // names this pool as its receiver (SPEC-6 §3).
+  pool.pinErasureGovernors(hosts);
   pool.readUsersFrom(gw.userGroundHost());
   // A probationary pool KNOWS it is one, for the renderer door's sequestered frame (SPEC §24.7).
   if (probationary) {
@@ -1801,7 +1858,17 @@ async function openSeparate(
     return (d) => members.has(d.id);
   };
   const reseed = (): Promise<FederationReport> => {
-    const offer = gw.offeredDeltas();
+    // Every erasure that binds here, this ground's own or a host's order naming this ground,
+    // reaches a pool under its own key as this ground's order naming that pool.
+    const offer = gw
+      .offeredDeltas()
+      .map((d) =>
+        isErasure(d.claims) &&
+        gw.operatorAuthor !== undefined &&
+        orderBinds(d, gw.reactor, gw.operatorAuthor)
+          ? orderForPool(gw, d, pool)
+          : d,
+      );
     const admit = memberAdmit(offer);
     return pool.federate(
       offer,
@@ -1945,6 +2012,19 @@ async function openSeparate(
         // The whole-store verdict: a byte no read and no session named (a mirror tier a partial
         // purge left behind) is still this store's, and a drop that reported it clean would be
         // false at the bytes (H7). A driver without the probe leaves that byte to heal, as before.
+        // A journaled pool: every row on every tier first, then the journal, and then nothing at
+        // all may remain. The journal goes last, because a store left with rows and no journal
+        // cannot reopen, and a refused drop must leave its pool reopenable.
+        const journaled = holdsJournals(target.backend);
+        if (journaled && (await target.backend.holdsAnyRow())) {
+          refuse(
+            `${who}'s store still holds bytes that no read named after the sweep (a tier a partial ` +
+              `purge left behind). To discard it: take it out of scope first (detach()), heal its ` +
+              `store while nothing is attached to it so every tier shows what it holds, open it ` +
+              `again, then drop again`,
+          );
+        }
+        if (journaled) await target.backend.discardJournals();
         if (target.backend.holdsAny !== undefined && (await target.backend.holdsAny())) {
           refuse(
             `${who}'s store still holds bytes that no read named after the sweep (a tier a partial ` +

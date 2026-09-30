@@ -117,7 +117,9 @@ const direct = (extra: Partial<RecoverOptions> = {}): RecoverOptions => ({
 });
 
 // What one store says about the cuts for `key`: each cut's state and whether it has an outcome.
-function cutsOf(g: Gateway, op: string, key: string) {
+// Each store reads its own law, signed by its own governing key.
+function cutsOf(g: Gateway, key: string) {
+  const op = g.operatorAuthor!;
   const erased = refusedIds(g.reactor, op);
   return cutsHere(g.reactor, op, erased)
     .filter((c) => c.key === key)
@@ -127,16 +129,19 @@ function cutsOf(g: Gateway, op: string, key: string) {
     }));
 }
 const pool = (gw: Gateway, name: string): Gateway => gw.connectionInboxes.get(name)!.gateway!;
-const paused = (g: Gateway, op: string) => pausedKeys(g.reactor, op, refusedIds(g.reactor, op));
+const paused = (g: Gateway) => {
+  const op = g.operatorAuthor!;
+  return pausedKeys(g.reactor, op, refusedIds(g.reactor, op));
+};
 
 describe("the recovery barrier", () => {
   it("a completed recovery leaves a committed cut with its outcome in the host and every pool", async () => {
     const { k1, pool: p } = await world();
     expect(await recoverUser(direct())).toBe(0);
-    await ground((gw, op) => {
+    await ground((gw) => {
       for (const g of [gw, pool(gw, p)]) {
-        expect(cutsOf(g, op, k1)).toEqual([{ state: "committed", outcome: "committed" }]);
-        expect(paused(g, op).has(k1)).toBe(false);
+        expect(cutsOf(g, k1)).toEqual([{ state: "committed", outcome: "committed" }]);
+        expect(paused(g).has(k1)).toBe(false);
       }
     });
   });
@@ -153,10 +158,10 @@ describe("the recovery barrier", () => {
       ),
     ).rejects.toThrow(/machine stopped/);
     expect(existsSync(journal())).toBe(true);
-    await ground((gw, op) => {
-      expect(cutsOf(pool(gw, p), op, k1)).toEqual([{ state: "prepared", outcome: "none" }]);
-      expect(paused(pool(gw, p), op).has(k1)).toBe(true);
-      expect(cutsOf(gw, op, k1)).toEqual([]); // the host cut rides in the commit, which never ran
+    await ground((gw) => {
+      expect(cutsOf(pool(gw, p), k1)).toEqual([{ state: "prepared", outcome: "none" }]);
+      expect(paused(pool(gw, p)).has(k1)).toBe(true);
+      expect(cutsOf(gw, k1)).toEqual([]); // the host cut rides in the commit, which never ran
     });
     expect(await recoverUser(direct())).toBe(1);
     expect(err.join("\n")).toMatch(/did not land/);
@@ -166,8 +171,8 @@ describe("the recovery barrier", () => {
       expect(
         userRootAt(gw.reactor, gw.validityNow(), op, "ada", userGroundOf(gw.reactor).erased()),
       ).toBe(k1);
-      expect(cutsOf(pool(gw, p), op, k1)).toEqual([{ state: "aborted", outcome: "aborted" }]);
-      expect(paused(pool(gw, p), op).has(k1)).toBe(false);
+      expect(cutsOf(pool(gw, p), k1)).toEqual([{ state: "aborted", outcome: "aborted" }]);
+      expect(paused(pool(gw, p)).has(k1)).toBe(false);
     });
   });
 
@@ -180,14 +185,14 @@ describe("the recovery barrier", () => {
       (opens++ === 0 ? real(name) : undefined) as unknown as StoreBackend;
     expect(await recoverUser(direct({ channelBackend: once }))).toBe(1);
     expect(err.join("\n")).toMatch(/PENDING/);
-    await ground((gw, op) => {
-      expect(cutsOf(pool(gw, p), op, k1)).toEqual([{ state: "committed", outcome: "none" }]);
-      expect(paused(pool(gw, p), op).has(k1)).toBe(false);
-      expect(cutsOf(gw, op, k1)).toEqual([{ state: "committed", outcome: "committed" }]);
+    await ground((gw) => {
+      expect(cutsOf(pool(gw, p), k1)).toEqual([{ state: "committed", outcome: "none" }]);
+      expect(paused(pool(gw, p)).has(k1)).toBe(false);
+      expect(cutsOf(gw, k1)).toEqual([{ state: "committed", outcome: "committed" }]);
     });
     expect(await recoverUser(direct())).toBe(0);
-    await ground((gw, op) => {
-      expect(cutsOf(pool(gw, p), op, k1)).toEqual([{ state: "committed", outcome: "committed" }]);
+    await ground((gw) => {
+      expect(cutsOf(pool(gw, p), k1)).toEqual([{ state: "committed", outcome: "committed" }]);
     });
   });
 
@@ -213,15 +218,15 @@ describe("the recovery barrier", () => {
     );
     expect(existsSync(journal())).toBe(false);
     expect(seedKey()).toBe(k1);
-    await ground((gw, op) => {
-      expect(cutsOf(pool(gw, p), op, k1)).toEqual([{ state: "aborted", outcome: "aborted" }]);
-      expect(paused(pool(gw, p), op).has(k1)).toBe(false);
+    await ground((gw) => {
+      expect(cutsOf(pool(gw, p), k1)).toEqual([{ state: "aborted", outcome: "aborted" }]);
+      expect(paused(pool(gw, p)).has(k1)).toBe(false);
     });
     err.length = 0;
     expect(await recoverUser(direct())).toBe(0);
-    await ground((gw, op) => {
+    await ground((gw) => {
       for (const g of [gw, pool(gw, p), pool(gw, late)]) {
-        expect(cutsOf(g, op, k1).filter((c) => c.state === "committed")).toEqual([
+        expect(cutsOf(g, k1).filter((c) => c.state === "committed")).toEqual([
           { state: "committed", outcome: "committed" },
         ]);
       }
@@ -232,15 +237,17 @@ describe("the recovery barrier", () => {
     const { k1, pool: p } = await world();
     expect(await recoverUser(direct())).toBe(0);
     const read = () =>
-      ground((gw, op) =>
+      ground((gw) =>
         [gw, pool(gw, p)].map((g) => ({
           log: g.reactor.arrivalLog().map((d: Delta) => d.id),
-          cuts: cutsHere(g.reactor, op, refusedIds(g.reactor, op)).map((c) => ({
-            id: c.delta.id,
-            index: c.index,
-            state: c.state,
-          })),
-          paused: [...paused(g, op)],
+          cuts: cutsHere(g.reactor, g.operatorAuthor, refusedIds(g.reactor, g.operatorAuthor)).map(
+            (c) => ({
+              id: c.delta.id,
+              index: c.index,
+              state: c.state,
+            }),
+          ),
+          paused: [...paused(g)],
           k1: k1,
         })),
       );
@@ -286,14 +293,12 @@ describe("the recovery barrier", () => {
     const once = (name: string): StoreBackend =>
       (opens++ === 0 ? real(name) : undefined) as unknown as StoreBackend;
     expect(await recoverUser(direct({ channelBackend: once }))).toBe(1); // the pool's outcome waits
-    await ground(async (gw, op) => {
+    await ground(async (gw) => {
       const g = pool(gw, p);
+      const op = g.operatorAuthor!;
       const [cut] = cutsHere(g.reactor, op, refusedIds(g.reactor, op)).filter((c) => c.key === k1);
       await g.append([
-        signClaims(
-          outcomeClaims(cut!.delta.id, "aborted", op, g.stamp(op).timestamp),
-          readSeed(home),
-        ),
+        g.signer!.sign(outcomeClaims(cut!.delta.id, "aborted", op, g.stamp(op).timestamp)),
       ]);
     });
     out.length = 0;
@@ -302,8 +307,8 @@ describe("the recovery barrier", () => {
     expect(err.join("\n")).toMatch(/a conflict in .*reads aborted, not committed/);
     expect(out.join("\n")).toMatch(/now signs with/); // the landing is reported, never completion
     expect(existsSync(journal())).toBe(true);
-    await ground((gw, op) => {
-      expect(cutsOf(pool(gw, p), op, k1)).toEqual([{ state: "aborted", outcome: "aborted" }]);
+    await ground((gw) => {
+      expect(cutsOf(pool(gw, p), k1)).toEqual([{ state: "aborted", outcome: "aborted" }]);
     });
   });
 });
@@ -394,12 +399,10 @@ describe("other writers during a recovery", () => {
     expect(seedKey()).toBe(k1);
     // A rerun cuts every pool, the late one included, and lands.
     expect(await recoverUser(direct())).toBe(0);
-    await ground((gw, op) => {
-      expect(cutsOf(pool(gw, late), op, k1)).toEqual([
-        { state: "committed", outcome: "committed" },
-      ]);
+    await ground((gw) => {
+      expect(cutsOf(pool(gw, late), k1)).toEqual([{ state: "committed", outcome: "committed" }]);
       // The refused attempt's cut in the first pool is aborted; the rerun's is committed.
-      expect(cutsOf(pool(gw, p), op, k1).sort((a, b) => a.state.localeCompare(b.state))).toEqual([
+      expect(cutsOf(pool(gw, p), k1).sort((a, b) => a.state.localeCompare(b.state))).toEqual([
         { state: "aborted", outcome: "aborted" },
         { state: "committed", outcome: "committed" },
       ]);

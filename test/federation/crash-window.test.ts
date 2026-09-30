@@ -268,7 +268,7 @@ describe("T222 — a crash between federate and attest heals or names its own ga
       // Y arrives, and the process crashes after it lands but before it is stamped.
       const y = observed(FERN, "height", 20, 2000, ALICE_SEED);
       offering.push(y);
-      const crash = crashAfterArrivalsLand(pool, me.operator!);
+      const crash = crashAfterArrivalsLand(pool, pool.operatorAuthor!);
       await expect(channel.sync()).rejects.toThrow(/simulated crash/);
       expect(crash.seen.hits).toBe(1); // the premise: the crash fired exactly once
       crash.restore();
@@ -298,7 +298,7 @@ describe("T222 — a crash between federate and attest heals or names its own ga
       const yStamp = healed.find((s) => s.arrived.includes(y.id))!;
       expect(yStamp.channel).toBe(channel.name);
       expect(yStamp.from).toBe("https://alice.example/loam");
-      expect(yStamp.author).toBe(me.operator);
+      expect(yStamp.author).toBe(pool.operatorAuthor);
       expect(yStamp.author).not.toBe(ALICE);
       expect(verifyDelta(pool.reactor.get(yStamp.deltaId)!)).toBe("verified");
 
@@ -344,7 +344,7 @@ describe("T222 — a crash between federate and attest heals or names its own ga
       // A NEW delta arrives, and the process crashes after it lands.
       const z = observed(FERN, "height", 32, 2000, ALICE_SEED);
       offering.push(z);
-      const crash = crashAfterArrivalsLand(pool, me.operator!);
+      const crash = crashAfterArrivalsLand(pool, pool.operatorAuthor!);
       await expect(channel.sync()).rejects.toThrow(/simulated crash/);
       expect(crash.seen.hits).toBe(1);
       crash.restore();
@@ -498,7 +498,7 @@ describe("T222 — a crash between federate and attest heals or names its own ga
       const w = observed(FERN, "height", 50, 1000, ALICE_SEED);
       const v = observed(FERN, "height", 51, 1001, ALICE_SEED);
       offering.push(w, v);
-      const crash = crashBeforeIngest(pool, me.operator!);
+      const crash = crashBeforeIngest(pool, pool.operatorAuthor!);
       await expect(channel.sync()).rejects.toThrow(/before federate/);
       expect(crash.seen.hits).toBe(1);
       crash.restore();

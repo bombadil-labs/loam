@@ -802,11 +802,17 @@ export function parseRegistrationInput(raw: unknown): RegistrationInput {
 // foreign negation can no more retire the operator's schema than a foreign definition can
 // replace it.
 /** The operator's deltas that hold at `now`. */
-export function lawfulSnapshot(reactor: Reactor, now: number, operator?: string): DeltaSet {
+export function lawfulSnapshot(
+  reactor: Reactor,
+  now: number,
+  operator?: string | readonly string[],
+): DeltaSet {
   return governedDeltas(
     reactor.snapshot(),
     now,
-    operator === undefined ? () => true : new Set([operator]),
+    operator === undefined
+      ? () => true
+      : new Set(typeof operator === "string" ? [operator] : operator),
   );
 }
 
@@ -939,11 +945,16 @@ function survivingCandidates(
   operator?: string,
   withdrawn?: Candidate[],
   boundary?: Boundary,
+  alsoStruckBy?: string,
 ): Map<string, Candidate[]> {
   // History, not the snapshot: a claim that starts or stops later must still be seen, so that
   // `boundary` can name when to read again. Validity is applied per delta below.
   const lawful = lawfulHistory(reactor, operator);
-  const negated = negatedAt(reactor, now, operator);
+  // A ground that holds another governor's copy may retire it in its own reading (ruling 11): a
+  // copy counts as struck under its author's strikes or under the holding ground's.
+  const byAuthor = negatedAt(reactor, now, operator);
+  const byHolder = alsoStruckBy === undefined ? undefined : negatedAt(reactor, now, alsoStruckBy);
+  const negated = (id: string): boolean => byAuthor(id) || (byHolder?.(id) ?? false);
   const groups = new Map<string, Candidate[]>();
   for (const delta of lawful) {
     // Valid over [validFrom, validUntil). A binding outside its interval binds nothing now, and
@@ -1129,11 +1140,12 @@ export function readContestedBindings(
   reactor: Reactor,
   now: number,
   operator?: string,
+  alsoStruckBy?: string,
 ): Map<string, ContestedBinding[]> {
   const mode = readBindingPolicy(reactor, now, operator);
   const out = new Map<string, ContestedBinding[]>();
   if (mode !== "conflicts") return out;
-  const groups = survivingCandidates(reactor, now, operator);
+  const groups = survivingCandidates(reactor, now, operator, undefined, undefined, alsoStruckBy);
   const latest = new Map<string, Candidate>();
   for (const [key, group] of groups) {
     for (const cand of group) latest.set([key, lensNameOf(cand)].join(NUL_SEP), cand);
@@ -1176,11 +1188,20 @@ export function readLawfulContested(
   if (governors.length === 0) return readContestedBindings(reactor, now, undefined);
   const out = new Map<string, ContestedBinding[]>();
   const claimed = new Set<LensName>();
+  const holder = governors[0];
   for (const governor of governors) {
-    for (const [lens, list] of readContestedBindings(reactor, now, governor)) {
+    const also = governor === holder ? undefined : holder;
+    for (const [lens, list] of readContestedBindings(reactor, now, governor, also)) {
       if (!claimed.has(lens as LensName) && !out.has(lens)) out.set(lens, list);
     }
-    for (const group of survivingCandidates(reactor, now, governor).values()) {
+    for (const group of survivingCandidates(
+      reactor,
+      now,
+      governor,
+      undefined,
+      undefined,
+      also,
+    ).values()) {
       for (const cand of group) claimed.add(lensNameOf(cand));
     }
   }
@@ -1202,11 +1223,20 @@ export function readLawfulRegistrations(
   if (governors.length === 0) return readRegistrations(reactor, now, undefined, boundary);
   const rows: Registration[] = [];
   const claimed = new Set<LensName>();
+  const holder = governors[0];
   for (const governor of governors) {
-    for (const r of readRegistrations(reactor, now, governor, boundary)) {
+    const also = governor === holder ? undefined : holder;
+    for (const r of readRegistrations(reactor, now, governor, boundary, also)) {
       if (!claimed.has(lensOf(r))) rows.push(r);
     }
-    for (const group of survivingCandidates(reactor, now, governor, undefined, boundary).values()) {
+    for (const group of survivingCandidates(
+      reactor,
+      now,
+      governor,
+      undefined,
+      boundary,
+      also,
+    ).values()) {
       for (const cand of group) claimed.add(lensNameOf(cand));
     }
   }
@@ -1218,9 +1248,10 @@ export function readRegistrations(
   now: number,
   operator?: string,
   boundary?: Boundary,
+  alsoStruckBy?: string,
 ): Registration[] {
   const lawful = lawfulSnapshot(reactor, now, operator);
-  const groups = survivingCandidates(reactor, now, operator, undefined, boundary);
+  const groups = survivingCandidates(reactor, now, operator, undefined, boundary, alsoStruckBy);
   // Latest-wins narrows to latest-PER-LENS (§21.7): within one registration entity's group, each
   // lens name (the living `schema:<name>` pointer, in the bytes since slice 2prime) keeps its own
   // latest survivor — registering FilmClassic no longer evicts Film. A pre-coexistence store's

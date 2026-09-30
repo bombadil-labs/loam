@@ -20,7 +20,7 @@
 
 import type { Delta, DurableOrdinaryJournalStore } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "./backend.js";
-import { holdsJournals } from "./peer-image.js";
+import { holdsJournals, holdsPoolKeys, type PoolKeySource } from "./peer-image.js";
 import {
   DELTA_ID_LENGTH,
   isRepairable,
@@ -109,6 +109,20 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
     return this.primary.ids();
   }
 
+  // Rows only on the primary (its journal aside), and anything at all on the other tier.
+  async holdsAnyRow(): Promise<boolean> {
+    const primary = holdsJournals(this.primary)
+      ? await this.primary.holdsAnyRow()
+      : await this.primary.holdsAny?.();
+    if (primary !== false) return true;
+    return (await this.mirror.holdsAny?.()) !== false;
+  }
+
+  async discardJournals(): Promise<void> {
+    if (!holdsJournals(this.primary)) return;
+    await this.primary.discardJournals();
+  }
+
   keepsJournals(): boolean {
     return holdsJournals(this.primary);
   }
@@ -173,6 +187,11 @@ export class MirrorBackend implements StoreBackend, RepairableBackend {
         return inner.compareAndSettlePurge!(peerId, expected, next, frame, targetId, generation);
       },
     });
+  }
+
+  // A pool's key lives with the primary, like the journal.
+  poolKeys(): PoolKeySource | undefined {
+    return holdsPoolKeys(this.primary) ? this.primary.poolKeys() : undefined;
   }
 
   setAside(rows: readonly { id: string; reason: string }[]): void {

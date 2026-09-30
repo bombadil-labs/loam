@@ -3,6 +3,7 @@
 // wrapped `append` would never fire there.
 
 import type { Delta, DurableOrdinaryJournalStore } from "@bombadil/rhizomatic";
+import type { StoreBackend } from "../../src/store/backend.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 
 export class FaultableBackend extends MemoryBackend {
@@ -31,4 +32,24 @@ export class FaultableBackend extends MemoryBackend {
       },
     });
   }
+}
+
+// A view of a memory backend that replaces only the probes a fault fixture is about (a purge that
+// lies, a blind read, a mute probe, a pen that never empties). Everything else, the peer journal
+// included, is the backend's own, so a pool, which is always its own journal peer, still opens
+// over it.
+export function overlay<B extends MemoryBackend>(
+  backend: B,
+  over: Partial<StoreBackend> & Record<string, unknown>,
+): B {
+  return new Proxy(backend, {
+    get(target, prop) {
+      if (Object.hasOwn(over, prop)) return over[prop as string];
+      const value: unknown = Reflect.get(target, prop, target);
+      return typeof value === "function"
+        ? (value as (...a: unknown[]) => unknown).bind(target)
+        : value;
+    },
+    has: (target, prop) => Object.hasOwn(over, prop) || Reflect.has(target, prop),
+  });
 }

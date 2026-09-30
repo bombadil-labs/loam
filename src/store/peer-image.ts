@@ -17,6 +17,10 @@ export interface JournalBackend extends StoreBackend {
   setAside?(rows: readonly { id: string; reason: string }[]): void;
   /** The rows beside the journal, where they differ from `ids` (a mirror: its primary tier's). */
   journalRowIds?(): Promise<Set<string>>;
+  /** Rows only, journal aside (every tier but the journal's). Unprovable answers true. */
+  holdsAnyRow(): Promise<boolean>;
+  /** Discard every peer journal here (a whole-store discard). Throws if it cannot prove it. */
+  discardJournals(): Promise<void>;
   /** A wrapper answers for its inner store: false when that store keeps no journal. */
   keepsJournals?(): boolean;
 }
@@ -24,4 +28,18 @@ export interface JournalBackend extends StoreBackend {
 export function holdsJournals(backend: StoreBackend): backend is JournalBackend {
   const b = backend as Partial<JournalBackend>;
   return typeof b.journalStore === "function" && (b.keepsJournals?.() ?? true);
+}
+
+/** Where a pool's key seed lives. A file-backed store keeps it beside itself; an embedder may pass its own. */
+export interface PoolKeySource {
+  load(pool: string): string | undefined;
+  create(pool: string): string;
+}
+
+/** A store that keeps its pools' keys itself, beside its own bytes (undefined: it keeps none). */
+export interface HoldsPoolKeys {
+  poolKeys(): PoolKeySource | undefined;
+}
+export function holdsPoolKeys(backend: object): backend is HoldsPoolKeys {
+  return typeof (backend as Partial<HoldsPoolKeys>).poolKeys === "function";
 }

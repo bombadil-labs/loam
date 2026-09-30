@@ -582,8 +582,9 @@ describe("T209 — the prefix reaches a blessed app and nothing else", () => {
       await channel.sync();
       await bob.blessChannelApp(CHANNEL, "hello");
       // Declared public IN THE POOL, which is the strongest case an anonymous caller could have.
-      await channel.pool.gateway!.append([
-        signClaims(publicClaims(["alice:Plant"], BOB, 9_400), BOB_SEED),
+      const pool = channel.pool.gateway!;
+      await pool.append([
+        pool.signer!.sign(publicClaims(["alice:Plant"], pool.operatorAuthor!, 9_400)),
       ]);
 
       expect((await bob.serveRoute("alice:hello", FERN, "public")).status).toBe(404);

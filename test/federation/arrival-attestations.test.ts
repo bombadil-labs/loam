@@ -211,8 +211,9 @@ describe("T207 — a sync that accepts deltas stamps its own custody", () => {
         expect(s.channel).toBe(channel.name);
         expect(s.from).toBe("https://alice.example/loam");
         expect(s.at).toBeGreaterThan(0);
-        // RECEIVER-SIGNED: the custody claim is the receiving operator's act, never the peer's.
-        expect(s.author).toBe(me.operator);
+        // RECEIVER-SIGNED: the custody claim is the receiving pool's act under its own key, never
+        // the peer's.
+        expect(s.author).toBe(pool.operatorAuthor);
         expect(s.author).not.toBe(alice.operator);
         expect(verifyDelta(pool.reactor.get(s.deltaId)!)).toBe("verified");
       }
@@ -393,7 +394,7 @@ describe("T207 — a sync that accepts deltas stamps its own custody", () => {
       // being written at all.
       expect(aliasRows).toBeGreaterThan(0);
       // The mechanism the exclusion rests on, stated so a change to it goes red here too.
-      for (const s of stamps) expect(s.author).toBe(me.operator);
+      for (const s of stamps) expect(s.author).toBe(pool.operatorAuthor);
     } finally {
       await alice.close();
       await me.close();
@@ -546,7 +547,7 @@ describe("T207 — a sync that accepts deltas stamps its own custody", () => {
       expect(healed[0]!.arrived.slice().sort()).toEqual([...failed.unattested].sort());
       expect(healed[0]!.channel).toBe(channel.name);
       expect(healed[0]!.from).toBe("https://alice.example/loam");
-      expect(healed[0]!.author).toBe(me.operator);
+      expect(healed[0]!.author).toBe(pool.operatorAuthor);
       expect(verifyDelta(pool.reactor.get(healed[0]!.deltaId)!)).toBe("verified");
 
       // THE TRAIL IS WHOLE: every arrival named exactly once, no ref stamped twice.

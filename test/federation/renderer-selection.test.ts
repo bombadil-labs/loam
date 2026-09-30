@@ -329,7 +329,7 @@ const currentAdoption = (w: World, lens = "alice:Plant") => {
   const row = w.gw.boundSurface(w.binding).registered.find((r) => String(r.lensName) === lens)!;
   const adoption = [...w.pool.reactor.snapshot()].find(
     (d) =>
-      d.claims.author === OP &&
+      d.claims.author === w.pool.operatorAuthor &&
       d.claims.pointers.some(
         (p) =>
           p.role === "adopted" &&
@@ -340,21 +340,27 @@ const currentAdoption = (w: World, lens = "alice:Plant") => {
   if (adoption === undefined) throw new Error(`fixture: no adoption record for ${lens}`);
   return { row, adoption };
 };
-/** An adoption record re-signed by the operator with one field changed, filed in `pool`. */
+/** An adoption record re-signed in the pool's own voice with one field changed, filed in `pool`. */
 async function forge(pool: Gateway, from: Delta, edit: Record<string, string>): Promise<Delta> {
   const claims: Claims = {
     ...from.claims,
-    ...pool.stamp(OP),
+    ...pool.stamp(),
+    author: pool.operatorAuthor!,
     pointers: from.claims.pointers.map((p) =>
       p.role in edit && p.target.kind === "primitive"
         ? { ...p, target: { kind: "primitive", value: edit[p.role]! } }
         : p,
     ),
   };
-  const d = signClaims(claims, OP_SEED);
+  const d = pool.signer!.sign(claims);
   await pool.append([d]);
   return d;
 }
+/** A strike in the pool's own voice: a pool governs its own law under its own key. */
+const poolStrike = (pool: Gateway, target: string): Delta =>
+  pool.signer!.sign(
+    withStamp(pool.stamp(), (t) => makeNegationClaims(pool.operatorAuthor!, t, target)),
+  );
 
 describe("T278 — exact received renderer selection", () => {
   it("criterion 1: names the renderer, the opening, both registrations and the whole lineage, in full, and writes nothing", async () => {
@@ -781,10 +787,14 @@ describe("T278 — exact received renderer selection", () => {
     await w.sync();
     expect(w.received().some((d) => d.id === narrow.id)).toBe(true);
     expect(w.refusal("narrow").code).toBe("law_unavailable");
-    expect(readLawAdoptions(w.pool.reactor, w.pool.validityNow(), OP).length).toBeGreaterThan(0);
+    expect(
+      readLawAdoptions(w.pool.reactor, w.pool.validityNow(), w.pool.operatorAuthor!).length,
+    ).toBeGreaterThan(0);
     await w.gw.curseChannelLaw(w.channel, "alice:Plant");
     expect(w.refusal("hello").code).toBe("law_unavailable");
-    expect(readLawAdoptions(w.pool.reactor, w.pool.validityNow(), OP).length).toBeGreaterThan(0);
+    expect(
+      readLawAdoptions(w.pool.reactor, w.pool.validityNow(), w.pool.operatorAuthor!).length,
+    ).toBeGreaterThan(0);
   });
 
   it("criterion 12: an absent route in complete evidence is renderer_ineligible, not source_unavailable", async () => {
@@ -898,11 +908,11 @@ describe("T278 — exact received renderer selection", () => {
   it("criterion 6: a destination definition rewritten under an unchanged bound id no longer matches the adoption's law", async () => {
     const w = await world();
     const { row } = currentAdoption(w);
-    // The pool's own copy of the destination hyperschema, re-published by the operator with a
+    // The pool's own copy of the destination hyperschema, re-published in the pool's voice with a
     // different gather body: the bound row keeps its id and its law moves under it.
     await w.pool.append([
-      signClaims(
-        withStamp(w.pool.stamp(OP), (t) =>
+      w.pool.signer!.sign(
+        withStamp(w.pool.stamp(), (t) =>
           publishHyperSchemaClaims(
             {
               ...PLANT,
@@ -913,11 +923,10 @@ describe("T278 — exact received renderer selection", () => {
               }),
             },
             row.entity!,
-            OP,
+            w.pool.operatorAuthor!,
             t,
           ),
         ),
-        OP_SEED,
       ),
     ]);
     w.pool.replayRegistrations();
@@ -935,7 +944,7 @@ describe("T278 — exact received renderer selection", () => {
     const w = await world();
     const { adoption } = currentAdoption(w);
     const good = w.select("hello");
-    await w.pool.append([strike(OP, OP_SEED, adoption.id, w.pool.stamp(OP))]);
+    await w.pool.append([poolStrike(w.pool, adoption.id)]);
     expect(w.refusal("hello").code).toBe("law_unavailable");
     const [v1] = registrations(w.received());
     const [renderer] = rendererAt(w.received(), "hello");
@@ -956,7 +965,7 @@ describe("T278 — exact received renderer selection", () => {
         // A stale law-address alone is not disqualifying — the CONTENT is compared — so this
         // shape, faithful in every field the join reads, passes; the others do not.
         expect(w.select("hello").sourceRegistration).toBe(good.sourceRegistration);
-        await w.pool.append([strike(OP, OP_SEED, forged.id, w.pool.stamp(OP))]);
+        await w.pool.append([poolStrike(w.pool, forged.id)]);
       } else {
         expect(w.refusal("hello").code, JSON.stringify(edit)).toBe("law_unavailable");
       }
