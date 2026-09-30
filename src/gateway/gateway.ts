@@ -87,6 +87,7 @@ import {
   admitForImpl,
   appendImpl,
   catchUp,
+  refreshImpl,
   federateImpl,
   offeredDeltasImpl,
   selectImpl,
@@ -2232,6 +2233,7 @@ export class Gateway {
   // A tokenless query: the restricted surface, and NEVER an acting identity — there is no one
   // to sign as, and nothing to sign with.
   async queryPublic(source: string, variables?: Record<string, unknown>): Promise<QueryResult> {
+    await this.refresh();
     const result = await graphql({
       schema: this.publicSurfaceOrThrow(),
       source,
@@ -2248,7 +2250,17 @@ export class Gateway {
     source: string,
     variables?: Record<string, unknown>,
   ): Promise<AsyncGenerator<Record<string, unknown>>> {
+    await this.refresh();
     return this.subscribeVia(this.publicSurfaceOrThrow(), source, variables);
+  }
+
+  /**
+   * Take in what other gateways committed to this container since this one last read it. The
+   * container's journal is the source of truth, and this gateway's reactor is a view of it, so
+   * several gateways can serve one container. Every GraphQL door calls this first.
+   */
+  refresh(): Promise<void> {
+    return refreshImpl(this);
   }
 
   async query(
@@ -2256,6 +2268,7 @@ export class Gateway {
     variables?: Record<string, unknown>,
     context?: RequestContext,
   ): Promise<QueryResult> {
+    await this.refresh();
     const result = await graphql({
       // A bound connection queries its CONTAINER'S surface, never the store's (§58 position 2).
       schema:
@@ -2289,6 +2302,7 @@ export class Gateway {
           `poll the query door instead`,
       );
     }
+    await this.refresh();
     return this.subscribeVia(this.schemaOrThrow(), source, variables);
   }
 
