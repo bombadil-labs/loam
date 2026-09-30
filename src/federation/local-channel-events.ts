@@ -7,7 +7,6 @@ import {
   containerDeclarationName,
   currentContainerDeclarationId,
 } from "../gateway/container-law.js";
-import { channelStatusImpl } from "./channel.js";
 import { readErasures, erasureTarget } from "../gateway/erase-law.js";
 import {
   localEraseTarget,
@@ -420,7 +419,7 @@ function projectLocalChannelHistory(gw: Gateway, channel: string): LocalChannelH
     if (event.action === "open" && !openingAgrees(gw, event.opening))
       return unavailable("opening association disagrees with referenced status/pool");
   const pool = gw.channelPools.get(channel),
-    status = channelStatusImpl(gw, channel)[0];
+    status = gw.channelStatus(channel)[0];
   if (pool?.gateway === undefined || status === undefined || !gw.store.holds(gw, pool.gateway))
     return unavailable("opening has no exact attached pool/status");
   const declaration = currentPoolDeclaration(gw, channel);
