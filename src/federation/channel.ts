@@ -2597,9 +2597,9 @@ export async function curseChannelLawImpl(
     // curse struck. Measured: the id is byte-identical, and the blessing then refuses with "the
     // blessed law persisted but does not serve". The binding is born dead, and no amount of
     // re-syncing revives it. Negating the curse's own negation is the only thing that can.
+    // A curse acts only in the channel's pool (ruling 11), so its lift does too.
     const liftPool = gw.channelPools.get(channel)?.gateway;
-    const liftGrounds = liftPool === undefined ? [gw] : [liftPool, gw];
-    for (const g of liftGrounds) {
+    for (const g of liftPool === undefined ? [] : [liftPool]) {
       // A strike is already lifted only while a counter-negation holds at the read time. An expired
       // or not-yet-valid counter lifts nothing, so the strike is negated again.
       const lifted = negatedAt(g.reactor, g.validityNow(), undefined);
@@ -2674,45 +2674,27 @@ export async function curseChannelLawImpl(
     const id = p.target.entity.id;
     return id.startsWith("schema:") ? id.slice("schema:".length) : id;
   };
-  // THE BINDINGS LIVE IN THE POOL now (§47 slice 3), so the strike lands there — the same ground
-  // the blessing landed in, which is what keeps a curse and a drop composable: both act on the
-  // container that owns the law. The root ground is searched too, for a store carrying bindings
-  // blessed before the move; a curse must reach law wherever an older store put it.
+  // A CURSE IS POOL-LOCAL (ruling 11): it strikes only in the channel's pool, where the blessing
+  // landed, with the pool's own key. It never reaches the root, so a root registration that only
+  // shares the name stays served. With no pool attached there is nothing it may strike.
   const pool = gw.channelPools.get(channel)?.gateway;
-  // Each ground strikes its own bindings with its own governing key, and reads its strikes by it.
-  const grounds: {
-    reactor: Gateway["reactor"];
-    now: number;
-    governor: string | undefined;
-    sign: (id: string) => Promise<void>;
-  }[] = [
-    ...(pool === undefined
-      ? []
-      : [
-          {
-            reactor: pool.reactor,
-            now: pool.validityNow(),
-            governor: pool.signer!.author,
-            sign: async (id: string): Promise<void> => {
-              const signer = pool.signer!;
-              await pool.append([
-                signer.sign(
-                  withStamp(pool.stamp(signer.author), (t) =>
-                    makeNegationClaims(signer.author, t, id),
-                  ),
-                ),
-              ]);
-            },
-          },
-        ]),
+  if (pool === undefined || pool.attachedTo !== gw) {
+    throw new Error(
+      `curseChannelLaw refused: the pool of "${channel}" is not attached here, and a curse acts ` +
+        `only in that pool. Open the channel again, then curse. Nothing was negated and nothing ` +
+        `was recorded.`,
+    );
+  }
+  const grounds = [
     {
-      reactor: gw.reactor,
-      now: gw.validityNow(),
-      governor: gw.operatorAuthor,
+      reactor: pool.reactor,
+      now: pool.validityNow(),
+      governor: pool.signer!.author,
       sign: async (id: string): Promise<void> => {
-        await gw.append([
-          gw.signer!.sign(
-            withStamp(gw.stamp(), (t) => makeNegationClaims(gw.operatorAuthor!, t, id)),
+        const signer = pool.signer!;
+        await pool.append([
+          signer.sign(
+            withStamp(pool.stamp(signer.author), (t) => makeNegationClaims(signer.author, t, id)),
           ),
         ]);
       },
@@ -2762,13 +2744,16 @@ export async function curseChannelLawImpl(
   // THE VERDICT IS THE SURFACE, NOT THE COUNT. A purge's count is evidence, never the verdict (T70),
   // and the same holds for a retirement: this refuses rather than reporting a lens left the surface
   // when it is still being served.
-  let stillServes = true;
+  // Asked of what THIS CHANNEL serves: its pool's own surface, and the root's rows that come from
+  // this channel. A root registration of the same name is not the channel's, and stays served.
+  let poolServes = true;
   try {
-    gw.def(living);
+    pool.def(living);
   } catch {
-    stillServes = false;
+    poolServes = false;
   }
-  if (stillServes) {
+  const rootServes = gw.registered.some((r) => r.channel === channel && lensOf(r) === living);
+  if (poolServes || rootServes) {
     throw new Error(
       `curseChannelLaw refused: negated ${bindings.length} binding(s) for "${living}" and the lens ` +
         `is STILL SERVED. Something else binds that name — the curse is recorded, so the standing ` +
