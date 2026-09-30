@@ -4,13 +4,14 @@
 // which follows the maintained view. Every case names a bystander that must stay.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
+import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { CTX_REGISTRATION } from "../../src/gateway/registration.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
+import { plant } from "../helpers/plant.js";
 
 const OP_SEED = "6b".repeat(32);
 const T0 = 1_000_000;
@@ -129,7 +130,11 @@ describe("a registration binds over its own interval", () => {
     expect(shrub).toHaveLength(1);
     const timed = signClaims({ ...shrub[0]!.claims, ...interval }, OP_SEED);
     const backend = new MemoryBackend();
-    await backend.append(plain.deltas.flatMap((d) => (d !== shrub[0] ? [d] : hold ? [] : [timed])));
+    await plant(
+      backend,
+      plain.deltas.flatMap((d) => (d !== shrub[0] ? [d] : hold ? [] : [timed])),
+      authorForSeed(OP_SEED),
+    );
     return { backend, timed };
   };
   const storeWithShrub = async (interval: { validFrom?: number; validUntil?: number }) =>

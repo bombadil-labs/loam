@@ -45,9 +45,11 @@ describe("a previous-format store is refused, not booted empty", () => {
     };
     const path = join(tmp, "pre-mint.db");
     copyFileSync(join(golden, "store.db"), path); // never write beside the checked-in artifact
-    await expect(Gateway.boot(new SqliteBackend(path), genesis())).rejects.toThrow(
-      /8 rows and none of them is readable.*before rhizomatic 0\.11/s,
+    const refused = new SqliteBackend(path);
+    await expect(Gateway.boot(refused, genesis())).rejects.toThrow(
+      /holds rows but no peer journal.*earlier Loam/s,
     );
+    await refused.close(); // a refused open leaves the handle with its caller
 
     const backend = new SqliteBackend(path);
     expect(await backend.deltasSince(new Set())).toEqual([]);
@@ -56,20 +58,39 @@ describe("a previous-format store is refused, not booted empty", () => {
     await backend.close();
   });
 
-  it("a store with one unreadable row among readable ones still opens", async () => {
+  it("a store with one damaged admitted row still opens; the row is set aside, the rest served", async () => {
     const path = join(tmp, "one-bad-row.db");
     const first = await Gateway.boot(new SqliteBackend(path), genesis());
     const fact = observed(FERN, "height", 30, 1000, OP_SEED);
-    await first.append([fact]);
+    const bystander = observed(FERN, "height", 31, 1001, OP_SEED);
+    await first.append([fact, bystander]);
     await first.close();
     const raw = new Database(path);
-    raw.prepare("INSERT INTO deltas (id, claims, sig) VALUES (?, ?, ?)").run("1e20bad", "{", null);
+    raw.prepare("UPDATE deltas SET claims = ? WHERE id = ?").run("{", fact.id);
     raw.close();
 
     const backend = new SqliteBackend(path);
     const gw = await Gateway.open(backend, { seed: OP_SEED });
-    expect(gw.reactor.get(fact.id)).toBeDefined();
-    expect((await backend.quarantine()).map((r) => r.key)).toEqual(["1e20bad"]);
+    expect(gw.reactor.get(fact.id)).toBeUndefined();
+    expect(gw.reactor.get(bystander.id)).toBeDefined();
+    expect((await backend.quarantine()).map((r) => r.key)).toContain(fact.id);
+    await gw.close();
+  });
+
+  it("a row written around the door is outside the journal: counted, never served", async () => {
+    const path = join(tmp, "around-the-door.db");
+    const first = await Gateway.boot(new SqliteBackend(path), genesis());
+    await first.close();
+    const planted = observed(FERN, "height", 32, 1002, OP_SEED);
+    const raw = new Database(path);
+    raw
+      .prepare("INSERT INTO deltas (id, claims, sig) VALUES (?, ?, ?)")
+      .run(planted.id, JSON.stringify(planted.claims), planted.sig ?? null);
+    raw.close();
+
+    const gw = await Gateway.open(new SqliteBackend(path), { seed: OP_SEED });
+    expect(gw.rowsOutsideJournal).toBe(1);
+    expect(gw.reactor.get(planted.id)).toBeUndefined();
     await gw.close();
   });
 });

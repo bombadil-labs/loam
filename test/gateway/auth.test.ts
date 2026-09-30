@@ -317,7 +317,7 @@ describe("standing: deny is the default, permission is an artifact", () => {
     await gateway.close();
   });
 
-  it("poisoned ground: standing minted while ungoverned roots nowhere once an operator opens", async () => {
+  it("poisoned ground: a store written while ungoverned cannot be opened by an operator", async () => {
     const backend = new MemoryBackend();
     const free = await Gateway.open(backend); // mallory writes her own constitution
     const MALLORY = authorForSeed(MALLORY_SEED);
@@ -326,15 +326,12 @@ describe("standing: deny is the default, permission is an artifact", () => {
     ]);
     await free.flush();
 
-    const governed = await Gateway.open(backend, { seed: OPERATOR_SEED });
-    governed.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
-    const denied = await governed.query(
-      `mutation { plant(entity: "${FERN}", height: 66) { height } }`,
-      undefined,
-      { actor: MALLORY_SEED },
+    // A host opens only as a journal peer, and this ground has rows and no journal: an operator
+    // cannot adopt it, so mallory's standing never roots anywhere.
+    await expect(Gateway.open(backend, { seed: OPERATOR_SEED })).rejects.toThrow(
+      /rows but no peer journal/,
     );
-    expect(denied.errors?.join(" ")).toMatch(/not permitted/);
-    await governed.close();
+    expect(await backend.journalPeers()).toEqual([]);
   });
 
   it("a hostile strike from ungoverned days has no standing against the operator's grant", async () => {

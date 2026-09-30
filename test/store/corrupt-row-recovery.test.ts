@@ -213,7 +213,7 @@ describe("T66: heal replaces a corrupt row from the mirror's healthy copy", () =
     await source.close();
   });
 
-  it("a genuinely-new archive delta still federates in the SAME heal that repairs a corrupt row", async () => {
+  it("a genuinely-new archive delta is planted in the SAME heal that repairs a corrupt row, and the journal does not serve it", async () => {
     // `fromMirror` is a MIXED set — a squatted id AND deltas the primary never held. Both paths must
     // run: `append(replant)` plants the new fact, `restoreQuarantined` replaces the squatter. This is
     // the rail that fails if the restore were wired in PLACE of the append rather than beside it.
@@ -235,8 +235,11 @@ describe("T66: heal replaces a corrupt row from the mirror's healthy copy", () =
     const dest = await Gateway.boot(new SqliteBackend(path), GENESIS());
     const view = await dest.query(`{ plant(entity: "${FERN}") { height tag } }`);
     const plant = view.data?.plant as { height: unknown; tag: unknown };
-    expect(plant.tag).toEqual(["shade", "fronds"]); // the new fact joined the bystander
-    expect(plant.height).toBeNull(); // ...and the restored strike still suppresses
+    // The host journal never admitted the new fact, so it is held outside the journal and not
+    // served; boot counts it. The restored strike is an admitted row and suppresses again.
+    expect(plant.tag).toEqual(["shade"]);
+    expect(dest.rowsOutsideJournal).toBe(1);
+    expect(plant.height).toBeNull();
     await dest.close();
   });
 

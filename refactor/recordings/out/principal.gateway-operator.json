@@ -10,15 +10,7 @@
     "operatorAuthor": "@operator"
   },
   "rebooted with the stranger's genesis": {
-    "appendSignedByOperatorSeed": {
-      "refused": "append rejected: @operator is not permitted: publishing through this store requires write standing (a surviving grant at loam:store), and no surviving grant says so"
-    },
-    "appendSignedByStrangerSeed": "accepted",
-    "markersInGround": [
-      "@stranger",
-      "@operator"
-    ],
-    "operatorAuthor": "@stranger"
+    "refused": "peer journal: this store belongs to @operator, and the key given (@stranger) names no journal here. Open it with its own operator seed."
   },
   "reopened with no seed": {
     "appendSignedByOperatorSeed": "accepted",
@@ -31,14 +23,7 @@
     }
   },
   "reopened with the stranger seed": {
-    "appendSignedByOperatorSeed": {
-      "refused": "append rejected: @operator is not permitted: publishing through this store requires write standing (a surviving grant at loam:store), and no surviving grant says so"
-    },
-    "appendSignedByStrangerSeed": "accepted",
-    "markersInGround": [
-      "@operator"
-    ],
-    "operatorAuthor": "@stranger"
+    "refused": "peer journal: this store belongs to @operator, and the key given (@stranger) names no journal here. Open it with its own operator seed."
   },
   "then reopened with the operator seed": {
     "appendSignedByOperatorSeed": "accepted",
@@ -46,7 +31,6 @@
       "refused": "append rejected: @stranger is not permitted: publishing through this store requires write standing (a surviving grant at loam:store), and no surviving grant says so"
     },
     "markersInGround": [
-      "@stranger",
       "@operator"
     ],
     "operatorAuthor": "@operator"

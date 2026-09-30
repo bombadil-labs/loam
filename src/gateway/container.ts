@@ -1699,6 +1699,7 @@ async function openSeparate(
   const probationary = spec.trust === "untrusted";
   const pool = await Gateway.open(backend, {
     seed: gw.childSeed()!,
+    unjournaled: true,
     ...(probationary && gw.options.pens !== undefined ? { pens: gw.options.pens } : {}),
   });
   pool.attachedTo = gw;

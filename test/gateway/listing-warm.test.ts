@@ -44,6 +44,7 @@ import { containerClaims, exclusionClaims } from "../../src/gateway/container.js
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE, pickLatest } from "./fixtures.js";
+import { plant } from "../helpers/plant.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
@@ -65,7 +66,7 @@ async function governedGarden(backend = new MemoryBackend()): Promise<Gateway> {
 // read (a copy rather than the shared backend, so closing the twin does not close the store).
 async function coldTwin(gw: Gateway): Promise<Gateway> {
   const copy = new MemoryBackend();
-  await copy.append(await gw.backend.deltasSince(new Set()));
+  await plant(copy, await gw.backend.deltasSince(new Set()), gw.operatorAuthor);
   const twin = await Gateway.open(copy, { seed: OPERATOR_SEED });
   twin.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
   return twin;

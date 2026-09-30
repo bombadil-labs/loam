@@ -29,6 +29,8 @@ import {
 } from "../../src/gateway/user-root.js";
 import { rootClaims, rootOf, userClaims } from "../../src/server/users.js";
 import { MemoryBackend } from "../../src/store/memory.js";
+import type { StoreBackend } from "../../src/store/backend.js";
+import { unjournaled } from "../helpers/unjournaled.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 
@@ -76,9 +78,9 @@ afterEach(async () => {
 
 // ada, root K1 (via user-named grants), and bea, a bystander with a literal grant on key B. K1 also
 // holds a literal write grant, which a recovery must neutralize without striking it.
-async function world(): Promise<Gateway> {
+async function world(backend: StoreBackend = new MemoryBackend()): Promise<Gateway> {
   const gw = await Gateway.boot(
-    new MemoryBackend(),
+    backend,
     assembleGenesis({
       operatorSeed: OP_SEED,
       registrations: [
@@ -411,7 +413,7 @@ describe("the shapes a door refuses are refused, and no reader disagrees about t
   });
 
   it("an unsigned binding-shaped row does not make K1 K2's own", async () => {
-    const gw = await world();
+    const gw = await world(unjournaled(new MemoryBackend())); // a journaled host refuses the row
     await recover(gw, { previous: K1, root: K2, retired: [K1] }, 30);
     const signed = binding(K2_SEED, K1, 32);
     const unsigned = makeDelta(binding(K2_SEED, K1, 33).claims);
@@ -454,7 +456,8 @@ describe("evidence the readers must not take at face value", () => {
   });
 
   it("an unsigned recovery record and lineage claim, ingested raw, change no standing", async () => {
-    const gw = await world();
+    // A journaled host refuses these rows at admission; an unjournaled ground holds them.
+    const gw = await world(unjournaled(new MemoryBackend()));
     const record = makeDelta(
       recoveryClaims({ name: "ada", attempt: "u", previous: K1, root: K2, retired: [K1] }, OP, 30),
     );

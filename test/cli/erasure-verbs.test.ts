@@ -182,6 +182,7 @@ import { exportOffer } from "../../src/federation/offer.js";
 import { ArchiveBackend } from "../../src/store/archive.js";
 import { MirrorBackend } from "../../src/store/mirror.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
+import { admitLocal, openHostPeer } from "../../src/gateway/peer-admission.js";
 import type { ScryptParams } from "../../src/server/credentials.js";
 import type { StoreBackend } from "../../src/store/backend.js";
 import { termClaims } from "../../src/gateway/container.js";
@@ -1136,7 +1137,7 @@ describe("T206 (d) — `loam erasures` reads the receipt, never the record", () 
     const home = await noteHome("anonymous");
     // The DOOR requires `spoken-by`; replay does not. A receipt replanted from a cold copy, or
     // written by an older version, can stand without one — so the reader meets a receipt the door
-    // would refuse. Planted through the driver rather than the door, which is exactly how such a
+    // would refuse. Planted through the host's journal rather than the door, which is how such a
     // receipt arrives.
     const tomb = await ground(home, async (gw) => {
       const target = await note(gw, "note:kit", "title", "kit-erased-marker");
@@ -1159,7 +1160,8 @@ describe("T206 (d) — `loam erasures` reads the receipt, never the record", () 
       OP_SEED,
     );
     const backend = new SqliteBackend(storePath(home));
-    await backend.append([bare]);
+    const { peer } = await openHostPeer(backend.journalStore(), OP);
+    await admitLocal(peer, [bare], 9_500_000, () => false);
     await backend.close();
 
     expect(await run(["erasures", "list", "--home", home], io()), printed()).toBe(0);
@@ -1232,6 +1234,9 @@ describe("T206 (d) — `loam erasures` reads the receipt, never the record", () 
         ),
         OP_SEED,
       );
+      // The door pays the purge an order owes; this store's purge fails once, so the order stands
+      // over bytes that are still here.
+      vi.spyOn(gw.backend, "purge").mockRejectedValueOnce(new Error("the disk refused the purge"));
       await gw.append([tomb]);
       return { target: target.id, tomb: tomb.id };
     });
@@ -1966,8 +1971,8 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
     // THE STATE A FAILED FIRST ORDER LEAVES: the erasure landed and the sweep did not run. §11
     // lands the receipt before it purges, so this is what an interrupted erase looks like on disk,
     // and the retry the help text calls safe walks straight into it. Staged by appending the
-    // receipt through the ordinary door rather than by breaking a tier, which no fixture can do
-    // portably — the door validates it exactly as it would the real one.
+    // receipt through the ordinary door while the store's purge fails once — the door validates
+    // it exactly as it would the real one.
     const world = await ground(home, async (gw) => {
       const target = await note(gw, "note:kit", "title", "kit-erased-marker");
       await note(gw, "note:vera", "title", "vera-bystander-marker");
@@ -1977,6 +1982,9 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
         ),
         OP_SEED,
       );
+      // The door pays the purge an order owes; this store's purge fails once, so the order stands
+      // over bytes that are still here.
+      vi.spyOn(gw.backend, "purge").mockRejectedValueOnce(new Error("the disk refused the purge"));
       await gw.append([tomb]);
       return { target: target.id, tomb: tomb.id };
     });
@@ -2031,6 +2039,9 @@ describe("T206 (b) — `loam erase` removes the bytes at every local tier", () =
         ),
         OP_SEED,
       );
+      // The door pays the purge an order owes; this store's purge fails once, so the order stands
+      // over bytes that are still here.
+      vi.spyOn(gw.backend, "purge").mockRejectedValueOnce(new Error("the disk refused the purge"));
       await gw.append([tomb]);
       // A declared SEPARATE container that nothing attaches. §27.7's completeness guard refuses the
       // sweep up front rather than report a completeness it never verified.

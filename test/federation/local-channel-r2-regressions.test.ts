@@ -4,8 +4,10 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { localChannelEvidence } from "../../src/federation/local-channel-events.js";
 import { MemoryBackend } from "../../src/store/memory.js";
+import { FaultableBackend } from "../helpers/faultable-backend.js";
 import { FERN, observed } from "../spike/garden.js";
 import { withStamp } from "../../src/gateway/stamp.js";
+import { plant } from "../helpers/plant.js";
 
 const SEED = "cc".repeat(32);
 const inContext = (d: Delta, context: string) =>
@@ -15,15 +17,14 @@ describe("T288 R2 regression controls", () => {
   it.each(["attachment", "status"])(
     "retry after failed %s never promotes a partial opening",
     async (fault) => {
-      class Primary extends MemoryBackend {
+      class Primary extends FaultableBackend {
         failStatus = fault === "status";
-        override async append(deltas: Iterable<Delta>): Promise<number> {
-          const batch = [...deltas];
+        // eslint-disable-next-line @typescript-eslint/require-await
+        override async checkWrite(batch: readonly Delta[]): Promise<void> {
           if (this.failStatus && batch.some((d) => inContext(d, "loam.channel"))) {
             this.failStatus = false;
             throw new Error("fixture status failure");
           }
-          return super.append(batch);
         }
       }
       let failAttachment = fault === "attachment";
@@ -116,7 +117,7 @@ describe("T288 R2 regression controls", () => {
         SEED,
       );
       // Trusted corrupted restore, deliberately outside guarded federation.
-      await gw.backend.append([unsupported]);
+      await plant(gw.backend, [unsupported]);
       gw.reactor.ingest(unsupported);
       expect(localChannelEvidence(gw, ch.name)).toEqual({
         state: "unavailable",

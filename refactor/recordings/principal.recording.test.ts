@@ -263,10 +263,16 @@ describe("recordings: principals", () => {
     });
     const out: Record<string, unknown> = {};
     out["booted with the operator seed"] = await probe(booted, NOW + 1);
-    out["reopened with the stranger seed"] = await probe(
-      await Gateway.open(backend, { seed: SEEDS.stranger }),
-      NOW + 2,
-    );
+    try {
+      out["reopened with the stranger seed"] = await probe(
+        await Gateway.open(backend, { seed: SEEDS.stranger }),
+        NOW + 2,
+      );
+    } catch (err) {
+      out["reopened with the stranger seed"] = {
+        refused: nameOf(err instanceof Error ? err.message : String(err)),
+      };
+    }
     out["reopened with no seed"] = await probe(await Gateway.open(backend, {}), NOW + 3);
     try {
       out["rebooted with the stranger's genesis"] = await probe(

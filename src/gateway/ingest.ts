@@ -49,10 +49,19 @@ import {
   ERASE_ENTITY,
   eraseDefect,
   erasedInBatch,
+  erasureTarget,
   isErasure,
   refusedIds,
   erasuresOfErasures,
+  settleOwedPurges,
 } from "./erase.js";
+import {
+  admitErasureOrders,
+  admitLocal,
+  admitReceived,
+  JournalConflict,
+  reopenHostPeer,
+} from "./peer-admission.js";
 import { Channel } from "./channel.js";
 import type { AppendReceipt, FederationReport, Gateway } from "./gateway.js";
 import { publicDefect } from "./public.js";
@@ -89,14 +98,18 @@ import {
 // this store; what the delta points at is not authorization's business (entities are unowned —
 // trust is the reader's). Authorization reads the state as it stands before the batch — a batch
 // cannot bootstrap its own permissions.
-export async function appendImpl(gw: Gateway, deltas: Iterable<Delta>): Promise<AppendReceipt> {
+export async function appendImpl(
+  gw: Gateway,
+  deltas: Iterable<Delta>,
+  opts: { settle?: boolean } = {},
+): Promise<AppendReceipt> {
   const batch = [...deltas];
   const protectedIds = protectedIngressIds(gw.reactor, batch);
   if (batch.some((d) => protectedIds.has(d.id)))
     throw new Error(
       "append rejected: protected local channel event/control requires the local service",
     );
-  return appendValidated(gw, batch);
+  return appendValidated(gw, batch, opts.settle ?? true);
 }
 
 type LifecycleEventInput =
@@ -167,7 +180,7 @@ async function persistChannelEvent(
   const parsed = parseLocalEvent(d, gw.operatorAuthor);
   if (parsed === undefined || (parsed.action === "open" && !openingAgrees(gw, parsed.opening)))
     throw new Error("invalid local channel event association");
-  const receipt = await appendValidated(gw, [d]);
+  const receipt = await appendValidated(gw, [d], true);
   if (receipt.accepted + receipt.duplicates !== 1 || !sameVerifiedDelta(gw.reactor.get(d.id), d))
     throw new Error("local channel event did not ingest");
   return d;
@@ -244,12 +257,21 @@ export async function receiveChannelOfferInCommit(
 export async function appendLocalErasure(gw: Gateway, erasure: Delta): Promise<void> {
   if (localEraseTarget(erasure, gw.reactor, gw.operatorAuthor) === undefined)
     throw new Error("invalid local erasure control");
-  await appendValidated(gw, [erasure]);
+  await appendValidated(gw, [erasure], false); // the erase that sent it pays the purge
   if (!sameVerifiedDelta(gw.reactor.get(erasure.id), erasure))
     throw new Error("local erasure did not ingest");
 }
-async function appendValidated(gw: Gateway, deltas: Iterable<Delta>): Promise<AppendReceipt> {
-  const { receipt, fresh } = await admitting(gw, () => appendAdmitted(gw, deltas));
+async function appendValidated(
+  gw: Gateway,
+  deltas: Iterable<Delta>,
+  settle: boolean,
+): Promise<AppendReceipt> {
+  const batch = [...deltas];
+  const { receipt, fresh } = await admitting(gw, () =>
+    retrying(gw, (clock) => appendAdmitted(gw, batch, clock)),
+  );
+  // An erasure order admitted here owes its target's purge (the journal recorded it).
+  if (settle && fresh.some((d) => isErasure(d.claims))) await settleOwedPurges(gw);
   // A landing slate that closes `read` ends live subscriptions the way an erase does (SPEC §29.3).
   // `reseat()` already solves precisely this one phase later — "a parked reader must not keep serving
   // a view built on the pre-erase ground" — and the reason is identical here: nothing in the slate's
@@ -276,9 +298,57 @@ function admitting<T>(gw: Gateway, fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
+// The one receive time of an admission, kept across its retries.
+interface ArrivalClock {
+  at?: number;
+}
+
+const CONFLICT_RETRIES = 3;
+
+// Another writer on the same peer journal moved its head. Reopen, take in what it admitted, and run
+// the whole admission again (Loam's checks, then the journal's), with the first receive time. A
+// conflict is neither a refusal nor a write; past the bound it surfaces as a retryable error.
+async function retrying<T>(gw: Gateway, fn: (clock: ArrivalClock) => Promise<T>): Promise<T> {
+  const clock: ArrivalClock = {};
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await fn(clock);
+    } catch (err) {
+      if (!(err instanceof JournalConflict)) throw err;
+      if (attempt >= CONFLICT_RETRIES) {
+        throw new Error(
+          `not committed: another writer changed this store ${attempt + 1} times during the ` +
+            "admission. Nothing was admitted or refused; try again.",
+        );
+      }
+      await catchUp(gw);
+    }
+  }
+}
+
+/** @internal — take in what another writer admitted to this host's journal. */
+export async function catchUp(gw: Gateway): Promise<void> {
+  const rows = await reopenHostPeer(gw.peer!, (id) => gw.reactor.get(id) !== undefined);
+  if (rows.length === 0) return;
+  gw.advanceToNow();
+  for (const d of rows) gw.justPersisted.add(d.id);
+  try {
+    for (const d of rows) {
+      gw.ingestVia(d);
+      gw.noteAuthorTime(d);
+      gw.noteRegistrationTime(d);
+    }
+  } finally {
+    for (const d of rows) gw.justPersisted.delete(d.id);
+    gw.armValidityTimer();
+    gw.notifyUserDependents();
+  }
+}
+
 async function appendAdmitted(
   gw: Gateway,
   deltas: Iterable<Delta>,
+  clock: ArrivalClock,
 ): Promise<{ receipt: AppendReceipt; fresh: Delta[] }> {
   if (gw.writeFailure !== undefined) {
     throw new Error(`this gateway can no longer persist: ${gw.writeFailure.message}`);
@@ -293,7 +363,8 @@ async function appendAdmitted(
   // only parties who can trigger it are parties who could already read the target, so telling them
   // IS the notice; the mechanism and the warning turn out to be the same thing. The federation door
   // shares this ONE predicate and differs only in disclosure (see federateImpl).
-  const slates = readSlates(gw.reactor, gw.validityNow(), gw.operatorAuthor, Date.now());
+  const at = (clock.at ??= Date.now()); // the slate check, and the journal's receive time
+  const slates = readSlates(gw.reactor, gw.validityNow(), gw.operatorAuthor, at);
   for (const d of batch) {
     if (computeId(d.claims) !== d.id || verifyDelta(d) !== "verified") {
       throw new Error(
@@ -385,7 +456,9 @@ async function appendAdmitted(
         `and an erasure is permanent`,
     );
   }
-  await gw.backend.append(batch); // a throw here means NOTHING was ingested or served
+  // A throw here means NOTHING was ingested or served.
+  if (gw.peer === undefined) await gw.backend.append(batch);
+  else await admitToJournal(gw, batch, at);
   let accepted = 0;
   let duplicates = 0;
   const fresh: Delta[] = [];
@@ -826,14 +899,58 @@ function recordBarrierDefect(
   return first;
 }
 
+// The local door on the journal path: one atomic transfer. Ordinary deltas alone go through
+// `admit`; an append carrying erasure orders goes through the mixed transfer, orders first.
+async function admitToJournal(gw: Gateway, batch: readonly Delta[], at: number): Promise<void> {
+  const orders = batch.filter((d) => isErasure(d.claims));
+  if (orders.length === 0) return admitLocal(gw.peer!, batch, at, () => false);
+  const ordinary = batch.filter((d) => !isErasure(d.claims));
+  await admitErasureOrders(gw.peer!, await ordersFor(gw, orders), "local", at, ordinary);
+}
+
+// Federation on the journal path: one transfer. Ordinary deltas alone go through `admit`; a pull
+// that carries erasure orders goes through the mixed transfer, orders first.
+async function receiveIntoJournal(
+  gw: Gateway,
+  admitted: readonly Delta[],
+  at: number,
+): Promise<Delta[]> {
+  const ordinary = admitted.filter((d) => !isErasure(d.claims));
+  const orders = admitted.filter((d) => isErasure(d.claims));
+  const ok =
+    orders.length === 0
+      ? await admitReceived(gw.peer!, ordinary, at, () => false)
+      : await admitErasureOrders(
+          gw.peer!,
+          await ordersFor(gw, orders),
+          "unattributed",
+          at,
+          ordinary,
+        );
+  return admitted.filter((d) => ok.has(d.id));
+}
+
+async function ordersFor(gw: Gateway, erasures: readonly Delta[]) {
+  return Promise.all(
+    erasures.map(async (d) => {
+      const targetId = erasureTarget(d.claims)!;
+      // Conservative: a store that may hold the bytes records a purge obligation.
+      return { delta: d, targetId, surfaceHoldsBytes: await gw.backend.holds(targetId) };
+    }),
+  );
+}
+
 export async function federateImpl(
   gw: Gateway,
   deltas: Iterable<Delta>,
   opts: { admit?: (d: Delta) => boolean; ids?: boolean; admittedIds?: boolean } = {},
 ): Promise<FederationReport> {
+  const offered = [...deltas];
   const { all, now, admitted, rejected, acceptedIds, admittedIds } = await admitting(gw, () =>
-    federateAdmitted(gw, deltas, opts),
+    retrying(gw, (clock) => federateAdmitted(gw, offered, opts, clock)),
   );
+  // An erasure order that crossed owes its target's purge here, as at append.
+  if (admitted.some((d) => isErasure(d.claims))) await settleOwedPurges(gw);
   // As at append: a batch that closes reads (a slate record or an erasure) touches no watched
   // entity, so open streams end and readers resubscribe into the narrowed reading.
   const freshIds = new Set(acceptedIds);
@@ -872,6 +989,7 @@ async function federateAdmitted(
   gw: Gateway,
   deltas: Iterable<Delta>,
   opts: { admit?: (d: Delta) => boolean; ids?: boolean; admittedIds?: boolean },
+  clock: ArrivalClock,
 ): Promise<{
   all: Delta[];
   now: number;
@@ -899,7 +1017,7 @@ async function federateAdmitted(
   // read access to the target, so a distinguishable refusal would announce that something exists and
   // is on its way out. It costs nothing to be uniform — this door already returns counts and no
   // message, so a slate refusal is indistinguishable from any other rejection.
-  const now = Date.now(); // one moment for the slate check and the stream closure below
+  const now = (clock.at ??= Date.now()); // one moment for the slate check, the stream closure and the journal
   const slates = readSlates(gw.reactor, gw.validityNow(), gw.operatorAuthor, now);
   const lawful: Delta[] = [];
   let admitted: Delta[] = [];
@@ -972,19 +1090,24 @@ async function federateAdmitted(
   }
   // Counted per offered delta rather than inferred from set sizes: the closure keys by id, so a peer
   // that offers the same delta twice would otherwise be reported as one refusal that never happened.
-  const crossed = new Set(admitted.map((d) => d.id));
+  // On the journal path the journal decides last: what it does not admit is not stored or served.
+  const landed =
+    gw.peer === undefined || admitted.length === 0
+      ? admitted
+      : await receiveIntoJournal(gw, admitted, now);
+  const crossed = new Set(landed.map((d) => d.id));
   const rejected = all.reduce((n, d) => (crossed.has(d.id) ? n : n + 1), 0);
   // The ids are collected in THIS loop, from the same verdict that increments the count — so
   // `acceptedIds` and `accepted` cannot disagree about which deltas newly landed. Anything that
   // recovered the set afterwards would be answering a different question a moment later.
   const acceptedIds: string[] = [];
   const admittedIds = new Set<string>();
-  if (admitted.length > 0) {
-    await gw.backend.append(admitted);
+  if (landed.length > 0) {
+    if (gw.peer === undefined) await gw.backend.append(landed);
     gw.advanceToNow(); // as at append
-    for (const d of admitted) gw.justPersisted.add(d.id);
+    for (const d of landed) gw.justPersisted.add(d.id);
     try {
-      for (const d of admitted) {
+      for (const d of landed) {
         const result = gw.ingestVia(d);
         if (result.status !== "rejected") {
           gw.noteAuthorTime(d);
@@ -997,10 +1120,10 @@ async function federateAdmitted(
           admittedIds.add(d.id);
       }
     } finally {
-      for (const d of admitted) gw.justPersisted.delete(d.id);
+      for (const d of landed) gw.justPersisted.delete(d.id);
       gw.armValidityTimer(); // as at append
       if (acceptedIds.length > 0) gw.notifyUserDependents(); // as at append
     }
   }
-  return { all, now, admitted, rejected, acceptedIds, admittedIds };
+  return { all, now, admitted: landed, rejected, acceptedIds, admittedIds };
 }

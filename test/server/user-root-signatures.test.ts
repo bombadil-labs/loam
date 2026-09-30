@@ -38,6 +38,7 @@ import {
   userClaims,
 } from "../../src/server/users.js";
 import { MemoryBackend } from "../../src/store/memory.js";
+import { unjournaled } from "../helpers/unjournaled.js";
 import { FERN } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 
@@ -62,7 +63,7 @@ afterEach(async () => {
 // a user-named write grant and the operator role. Every claim here is signed by the operator.
 async function world(): Promise<Gateway> {
   const gw = await Gateway.boot(
-    new MemoryBackend(),
+    unjournaled(new MemoryBackend()),
     assembleGenesis({
       operatorSeed: OP_SEED,
       registrations: [

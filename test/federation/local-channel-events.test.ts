@@ -58,8 +58,10 @@ import {
 import { toWire } from "../../src/federation/wire.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import { MemoryBackend } from "../../src/store/memory.js";
+import { FaultableBackend } from "../helpers/faultable-backend.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import { FERN, observed } from "../spike/garden.js";
+import { plant } from "../helpers/plant.js";
 
 const SEED = "cc".repeat(32);
 const OP = authorForSeed(SEED);
@@ -81,12 +83,11 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-class FaultBackend extends MemoryBackend {
+class FaultBackend extends FaultableBackend {
   failAction: string | undefined;
   failPurge = false;
   beforeAppend: ((batch: readonly Delta[]) => Promise<void>) | undefined;
-  override async append(deltas: Iterable<Delta>): Promise<number> {
-    const batch = [...deltas];
+  override async checkWrite(batch: readonly Delta[]): Promise<void> {
     if (
       this.failAction !== undefined &&
       batch.some((d) => inContext(d, EVENT) && value(d, "action") === this.failAction)
@@ -94,7 +95,6 @@ class FaultBackend extends MemoryBackend {
       throw new Error(`fixture ${this.failAction} append failure`);
     }
     await this.beforeAppend?.(batch);
-    return super.append(batch);
   }
   override async purge(ids: Iterable<string>): Promise<number> {
     if (this.failPurge) throw new Error("fixture purge failure");
@@ -213,7 +213,7 @@ function markedErase(target: Delta): Delta {
   });
 }
 async function raw(gw: Gateway, batch: readonly Delta[]) {
-  await gw.backend.append(batch);
+  await plant(gw.backend, batch);
   for (const d of batch) expect(gw.reactor.ingest(d).status).not.toBe("rejected");
 }
 function opened(gw: Gateway, name: string) {
@@ -254,7 +254,7 @@ async function legacyFixture(gw: Gateway) {
   await gw.backend.purge(protectedIds);
   // Reopen a copied, trusted old history to avoid inventing a reactor deletion API.
   const root = new MemoryBackend();
-  await root.append(await gw.backend.deltasSince(new Set()));
+  await plant(root, await gw.backend.deltasSince(new Set()), gw.operatorAuthor);
   const poolBytes = await fixture.pool.backend.deltasSince(new Set());
   let poolBackend = new MemoryBackend();
   await poolBackend.append(poolBytes);
@@ -1481,7 +1481,8 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     const receipt = events(gw, "received")[0]!;
     primary.failPurge = true;
     await expect(gw.erase(receipt.id)).rejects.toThrow();
-    expect(gw.reactor.get(receipt.id)).toBeDefined();
+    // The order is admitted, so the reading drops the receipt; its bytes stay held and owed.
+    expect(gw.reactor.get(receipt.id)).toBeUndefined();
     expect(await primary.holds(receipt.id)).toBe(true);
     expect(opened(gw, ch.name).received).toEqual([]);
     const erasure = [...gw.reactor.snapshot()].find(
@@ -1497,6 +1498,7 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     primary.failPurge = false;
     await gw.erase(receipt.id);
     expect(gw.reactor.get(receipt.id)).toBeUndefined();
+    expect(await primary.holds(receipt.id)).toBe(false);
   });
   it("direct unattached eraseReplica cannot mint event deletion authority from a same-key fresh erasure", async () => {
     const { gw } = await home();
@@ -1617,7 +1619,7 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     await expect(gw.append([strike(preplant, SEED, 70001)])).rejects.toThrow();
     const root = new MemoryBackend(),
       restoredPool = new MemoryBackend();
-    await root.append(await primary.deltasSince(new Set()));
+    await plant(root, await primary.deltasSince(new Set()), OP);
     await restoredPool.append(await pool.backend.deltasSince(new Set()));
     const restored = await Gateway.open(root, { seed: SEED, channelBackend: () => restoredPool });
     homes.push(restored);
@@ -1724,7 +1726,7 @@ describe("T288 durable trusted history, distinct from content import", () => {
     original.primary.failPurge = true;
     await expect(original.gw.erase(receipt.id)).rejects.toThrow();
     const root = new MemoryBackend();
-    await root.append(await original.primary.deltasSince(new Set()));
+    await plant(root, await original.primary.deltasSince(new Set()), OP);
     const pool = new MemoryBackend();
     await pool.append(await ch.pool.gateway!.backend.deltasSince(new Set()));
     const restored = await Gateway.open(root, { seed: SEED, channelBackend: () => pool });

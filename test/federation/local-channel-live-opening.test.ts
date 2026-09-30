@@ -63,11 +63,18 @@
 // store reopened by name with no handle in memory (the fixture keeps one store per name, as the
 // CLI's sqlite file does).
 import { afterEach, describe, expect, it } from "vitest";
-import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
+import {
+  authorForSeed,
+  makeNegationClaims,
+  signClaims,
+  type Delta,
+  type DurableOrdinaryJournalStore,
+} from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { containerClaims, survivingDeclarationIds } from "../../src/gateway/container.js";
 import { readErasures } from "../../src/gateway/erase.js";
+import { admitLocal, openHostPeer } from "../../src/gateway/peer-admission.js";
 import {
   inLocalContext,
   LOCAL_CONTROL,
@@ -137,6 +144,23 @@ class FaultBackend extends MemoryBackend {
     for (const d of batch) if (!this.file.some((f) => f.id === d.id)) this.file.push(d);
     return n;
   }
+  // A host writes through its peer journal, so the retraction fault reaches that path too.
+  override journalStore(): DurableOrdinaryJournalStore {
+    const inner = super.journalStore();
+    return {
+      ...inner,
+      compareAndAppend: async (peer, expected, next, frame, rows) => {
+        if (
+          this.failNextRetraction &&
+          rows.some((d) => d.claims.pointers.some((p) => p.role === "negates"))
+        ) {
+          this.failNextRetraction = false;
+          throw new Error("fixture retraction failure");
+        }
+        return inner.compareAndAppend(peer, expected, next, frame, rows);
+      },
+    };
+  }
   override async purge(ids: Iterable<string>): Promise<number> {
     if (this.purges >= this.failPurgeAfter) throw new Error("fixture purge failure");
     this.purges += 1;
@@ -147,9 +171,13 @@ class FaultBackend extends MemoryBackend {
     return n;
   }
 }
+// THE HOST'S FILE: one store, journal included, that outlives each gateway over it, the way a
+// sqlite file outlives a process. A restart boots a new gateway over the same store.
+class HostFile extends FaultBackend {
+  override async close(): Promise<void> {}
+}
 async function home() {
-  const primaryFile: Delta[] = [];
-  const primary = new FaultBackend(primaryFile);
+  const primary = new HostFile();
   const files = new Map<string, Delta[]>();
   // Names whose NEXT store open fails once: a pool a boot cannot read is left unattached.
   const failAttach = new Set<string>();
@@ -182,7 +210,7 @@ async function home() {
     await gw.close();
     homes.splice(homes.indexOf(gw), 1);
     const again = await Gateway.boot(
-      new FaultBackend(primaryFile),
+      primary,
       assembleGenesis({ operatorSeed: SEED, registrations: [] }),
       {
         channelBackend: (name) => {
@@ -451,8 +479,8 @@ describe("spec 64: a live opening cannot be erased", () => {
         SEED,
       ),
     ]);
-    // Plant, through the trusted restore boundary, an open literal this parser cannot read: it
-    // lacks the parent-container pointer. Then restart, so boot reads it as history.
+    // Plant, through the host's peer journal and around the door, an open literal this parser
+    // cannot read: it lacks the parent-container pointer. Then restart, so boot reads it as history.
     const held = first.gw.reactor.get(opening.id)!;
     const unreadable = signClaims(
       {
@@ -462,7 +490,8 @@ describe("spec 64: a live opening cannot be erased", () => {
       },
       SEED,
     );
-    await first.primary.append([unreadable]);
+    const { peer } = await openHostPeer(first.primary.journalStore(), OP);
+    await admitLocal(peer, [unreadable], Date.now(), () => false);
     const gw = await first.restart();
     await expect(gw.dropChannel(a.ch.name)).rejects.toThrow(/dropChannel refused/);
     expect(first.holds(a.ch.name, fact(1).id)).toBe(true);
@@ -512,7 +541,8 @@ describe("spec 64: a live opening cannot be erased", () => {
       },
       SEED,
     );
-    await first.primary.append([unreadable]);
+    const { peer } = await openHostPeer(first.primary.journalStore(), OP);
+    await admitLocal(peer, [unreadable], Date.now(), () => false);
     const a = await channel(first.gw);
     a.offering.push(fact(1));
     await a.ch.sync();
@@ -623,7 +653,9 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     await expect(gw.erase(opening.id)).rejects.toThrow();
     expect(gw.reactor.get(receipt.id)).toBeUndefined();
     expect(gw.reactor.get(close.id)).toBeUndefined();
-    expect(gw.reactor.get(opening.id)).toBeDefined();
+    // The opening's order is admitted, so the reading drops it; its bytes stay held and owed.
+    expect(gw.reactor.get(opening.id)).toBeUndefined();
+    expect(await primary.holds(opening.id)).toBe(true);
     // The history is still readable: the opening resolves, so no receipt names a hole.
     expect(localChannelEvidence(gw, ch.name)).not.toEqual({
       state: "unavailable",
@@ -670,7 +702,8 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     const held = [receipt, close].filter((m) => dead.has(m.id));
     expect(held).toHaveLength(1);
     expect(await primary.holds(held[0]!.id)).toBe(true);
-    expect(gw.reactor.get(held[0]!.id)).toBeDefined();
+    // Its order is admitted, so the reading drops it while its bytes stay held.
+    expect(gw.reactor.get(held[0]!.id)).toBeUndefined();
     expect(gw.reactor.get(opening.id)).toBeDefined();
     // The re-run erases that member again, anchoring on its erasure, then finishes.
     primary.failPurgeAfter = Number.POSITIVE_INFINITY;

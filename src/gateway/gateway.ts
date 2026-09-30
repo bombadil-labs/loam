@@ -24,10 +24,20 @@ import {
   type Schema,
   type Primitive,
   type Term,
+  type DurableOrdinaryJournalStore,
 } from "@bombadil/rhizomatic";
 import { graphql, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
 import { isRepairable } from "../store/quarantine.js";
+import { holdsJournals } from "../store/peer-image.js";
+import {
+  admitLocal,
+  JournalConflict,
+  openHostPeer,
+  peerIdOf,
+  rereadHostPeer,
+  type HostPeer,
+} from "./peer-admission.js";
 import { stampOn, type Stamp } from "./stamp.js";
 import { declarePrincipalScope } from "./principal.js";
 import { declareUserGround, userGroundOf } from "./user-root.js";
@@ -77,6 +87,7 @@ import { STORE_ENTITY, operatorMarkerClaims, type Genesis } from "./genesis.js";
 import {
   admitForImpl,
   appendImpl,
+  catchUp,
   federateImpl,
   offeredDeltasImpl,
   selectImpl,
@@ -214,7 +225,18 @@ export interface QueryResult {
   errors?: string[];
 }
 
+// How many times the write-through catches up and retries before it reports a write failure.
+const WRITE_THROUGH_RETRIES = 8;
+
 export interface GatewayOptions {
+  /**
+   * The ordinary journal store. Given, this gateway is a substrate peer under
+   * its operator key: it opens from the journal, and every write is admitted through it. Only a
+   * host passes this; pools, quarantine and scratch gateways never do.
+   */
+  readonly peerStore?: DurableOrdinaryJournalStore;
+  /** @internal — a pool opens on its rows, not as a peer, until it takes its own key. */
+  readonly unjournaled?: boolean;
   /**
    * Where a FEDERATION CHANNEL's pool keeps its bytes, by pool name. A separate container defaults
    * to a fresh in-memory backend, which is right for a quarantine (transient by design) and WRONG
@@ -474,6 +496,10 @@ export class Gateway {
   // a future DerivationHost's emissions ride it into the ground).
   /** @internal — T19 seam (ingest.ts) */
   readonly justPersisted = new Set<string>();
+  /** @internal — the host's substrate peer; undefined off that path. */
+  peer: HostPeer | undefined = undefined;
+  /** Stored rows the host's journal never admitted: held, never served. */
+  rowsOutsideJournal = 0;
   private unreadableRows = 0; // set by open: rows held, none readable
   /** @internal — T19 seam (erase.ts, adopt.ts) */
   readonly operatorAuthor: string | undefined;
@@ -557,8 +583,23 @@ export class Gateway {
       // cached read; the next tokenless request recomputes. Once per WRITE, not per read.
       this.publicOpen = undefined;
       if (this.justPersisted.delete(d.id)) return;
+      const peer = this.peer;
       this.writes = this.writes
-        .then(() => this.backend.append([d]))
+        .then(async () => {
+          if (peer === undefined) return void (await this.backend.append([d]));
+          // The same conflict rule as the doors: catch up, then retry at the first receive time.
+          // A catch-up that brings `d` in means another writer committed it: nothing is owed.
+          const at = this.now();
+          for (let attempt = 0; ; attempt += 1) {
+            try {
+              return await admitLocal(peer, [d], at, () => false);
+            } catch (err) {
+              if (!(err instanceof JournalConflict) || attempt >= WRITE_THROUGH_RETRIES) throw err;
+              await catchUp(this);
+              if (peer.journal.availableDeltas().has(d.id)) return;
+            }
+          }
+        })
         .then(
           () => {},
           (err: unknown) => {
@@ -580,7 +621,54 @@ export class Gateway {
   static async open(backend: StoreBackend, options: GatewayOptions = {}): Promise<Gateway> {
     const seed = options.seed;
     const reactor = new Reactor();
-    const replayed = await backend.deltasSince(new Set());
+    let peer: HostPeer | undefined;
+    let replayed: Delta[];
+    let outsideJournal = 0;
+    // A journaled store's raw rows are not its admitted set, so it always opens through its
+    // journal. With a seed, that seed names the peer; without one, the store's only journal does.
+    let peerStore = options.peerStore;
+    let peerId = seed === undefined ? undefined : peerIdOf(authorForSeed(seed));
+    if (holdsJournals(backend)) {
+      const journals = await backend.journalPeers();
+      if (peerId !== undefined && journals.length > 0 && !journals.includes(peerId)) {
+        throw new Error(
+          `peer journal: this store belongs to ${journals.join(", ")}, and the key given ` +
+            `(${peerId}) names no journal here. Open it with its own operator seed.`,
+        );
+      }
+      // A seeded open is a host's, and a host opens only as a peer: a fresh store starts its
+      // journal, and a store with rows and no journal is refused. Only a pool, which takes its
+      // own key later (step 6), still opens on the rows.
+      if (peerStore === undefined && journals.length === 0 && peerId !== undefined) {
+        if (options.unjournaled !== true) peerStore = backend.journalStore();
+      } else if (peerStore === undefined && journals.length > 0) {
+        if (peerId === undefined) {
+          if (journals.length > 1) {
+            throw new Error(
+              "peer journal: this store holds several peer journals; open it with the operator " +
+                "seed that names one",
+            );
+          }
+          peerId = journals[0]!;
+        }
+        peerStore = backend.journalStore();
+      }
+    }
+    if (peerStore === undefined) {
+      replayed = await backend.deltasSince(new Set());
+    } else {
+      const opened = await openHostPeer(peerStore, peerId!);
+      peer = opened.peer;
+      replayed = opened.rows;
+      if (opened.unavailable.length > 0 && holdsJournals(backend)) {
+        backend.setAside?.(opened.unavailable);
+      }
+      if (holdsJournals(backend)) {
+        const admitted = new Set(replayed.map((d) => d.id));
+        const rows = await (backend.journalRowIds?.() ?? backend.ids());
+        outsideJournal = [...rows].filter((id) => !admitted.has(id)).length;
+      }
+    }
     for (const d of replayed) {
       const result = reactor.ingest(d);
       if (result.status === "rejected") {
@@ -608,6 +696,7 @@ export class Gateway {
     // A governed store writes its own incarnation marker before it admits anything else, so a
     // replayed marker from an earlier incarnation can never be the lowest-arrival one
     // (recovery-history.md). Written straight to the backend and the reactor: no door runs yet.
+    let pendingMarker: Delta | undefined;
     if (
       seed !== undefined &&
       unreadableRows === 0 &&
@@ -617,10 +706,21 @@ export class Gateway {
       // Its time never matters (the reader orders markers by arrival), so no clock is read.
       const t = Math.max(1, ...replayed.map((d) => d.claims.timestamp + 1));
       const marker = signClaims(incarnationClaims(mintIncarnation(), operator, t), seed);
-      await backend.append([marker]);
-      reactor.ingest(marker);
+      if (peer === undefined) {
+        await backend.append([marker]);
+        reactor.ingest(marker);
+      } else pendingMarker = marker;
     }
     const gateway = new Gateway(backend, reactor, options);
+    gateway.peer = peer;
+    gateway.rowsOutsideJournal = outsideJournal;
+    // On the journal path the marker enters through local admission, at the gateway's clock.
+    if (peer !== undefined && pendingMarker !== undefined) {
+      await admitLocal(peer, [pendingMarker], gateway.now(), () => false);
+      gateway.justPersisted.add(pendingMarker.id);
+      reactor.ingest(pendingMarker);
+      gateway.justPersisted.delete(pendingMarker.id);
+    }
     gateway.unreadableRows = unreadableRows;
     gateway.seedAuthorClocks(replayed);
     gateway.replayRegistrations();
@@ -647,7 +747,17 @@ export class Gateway {
     genesis: Genesis,
     options: Omit<GatewayOptions, "seed"> = {},
   ): Promise<Gateway> {
-    const gateway = await Gateway.open(backend, { ...options, seed: genesis.operatorSeed });
+    // Every host is one substrate peer under its operator key: its store opens only through its
+    // peer journal, and a store that holds rows with no journal is refused (greenfield, ruling 10).
+    const journal =
+      options.peerStore === undefined && holdsJournals(backend)
+        ? { peerStore: backend.journalStore() }
+        : {};
+    const gateway = await Gateway.open(backend, {
+      ...options,
+      ...journal,
+      seed: genesis.operatorSeed,
+    });
     // A store with rows and none readable would boot empty, with a fresh genesis planted beside
     // the rows it could not read.
     if (gateway.unreadableRows > 0) {
@@ -1363,7 +1473,12 @@ export class Gateway {
     // and everything after it is destructive. Ordered the other way, a failed read leaves the
     // gateway half-torn-down — subscriptions killed, reactor still on pre-purge ground.
     const reactor = new Reactor();
-    for (const d of await this.backend.deltasSince(new Set())) {
+    // On the journal path the admitted set is the journal's, never the raw rows.
+    const readAll = async (): Promise<Delta[]> => {
+      if (this.peer === undefined) return this.backend.deltasSince(new Set());
+      return rereadHostPeer(this.peer);
+    };
+    for (const d of await readAll()) {
       if (reactor.ingest(d).status === "rejected") {
         throw new Error(`reseat: the store handed back an unacceptable delta ${d.id}`);
       }
@@ -1388,7 +1503,7 @@ export class Gateway {
     // row is a hot loop that deserves the loud refusal.
     for (let round = 0; ; round += 1) {
       const known = new Set(reactor.snapshot().ids());
-      const stragglers = await this.backend.deltasSince(known);
+      const stragglers = (await readAll()).filter((d) => !known.has(d.id));
       if (stragglers.length === 0) break;
       if (round >= 10) {
         throw new Error("reseat: the store will not quiesce — something is appending in a loop");

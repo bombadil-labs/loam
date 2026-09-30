@@ -1,4 +1,4 @@
-// The ordinary journal seam (step 6 host trial). A backend that can hold a peer journal offers one
+// The ordinary journal seam. A backend that can hold a peer journal offers one
 // `DurableOrdinaryJournalStore` per store object; the substrate plans, and the adapter commits the
 // head, the frame and the newly admitted rows in one transaction.
 //
@@ -15,8 +15,13 @@ export interface JournalBackend extends StoreBackend {
   ids(): Promise<Set<string>>;
   /** Report admitted rows the journal found unavailable, the way a boot read sets rows aside (§25). */
   setAside?(rows: readonly { id: string; reason: string }[]): void;
+  /** The rows beside the journal, where they differ from `ids` (a mirror: its primary tier's). */
+  journalRowIds?(): Promise<Set<string>>;
+  /** A wrapper answers for its inner store: false when that store keeps no journal. */
+  keepsJournals?(): boolean;
 }
 
 export function holdsJournals(backend: StoreBackend): backend is JournalBackend {
-  return typeof (backend as Partial<JournalBackend>).journalStore === "function";
+  const b = backend as Partial<JournalBackend>;
+  return typeof b.journalStore === "function" && (b.keepsJournals?.() ?? true);
 }

@@ -14,6 +14,7 @@ import {
   signClaims,
   type Claims,
   type Delta,
+  type DurableOrdinaryJournalStore,
 } from "@bombadil/rhizomatic";
 import { channelBackendFor, run } from "../../src/cli/cli.js";
 import { readSeed, readUserSeed, storePath, userSeedPath } from "../../src/cli/config.js";
@@ -96,35 +97,53 @@ function faulty(mode: {
     opens += 1;
     if (mode.reopen === "fail" && opens > 1) throw new Error("the disk is not answering");
     const real = new SqliteBackend(path);
+    // One rule for both write paths: a direct append, and a commit through the host's journal.
+    const guard = async <T>(batch: readonly Delta[], commit: () => Promise<T>): Promise<T> => {
+      if (mode.binding === "after") {
+        const binds = batch.some((d) =>
+          d.claims.pointers.some(
+            (p) =>
+              p.role === "kind" && p.target.kind === "primitive" && p.target.value === "binding",
+          ),
+        );
+        const n = await commit();
+        if (binds) throw new Error("the store failed after writing the binding");
+        return n;
+      }
+      // Only the record's append fails (it alone carries `retired`); genesis and the barrier
+      // append before it pass.
+      if (
+        mode.append === undefined ||
+        appendsFailed ||
+        !batch.some((d) => d.claims.pointers.some((p) => p.role === "retired"))
+      ) {
+        return commit();
+      }
+      appendsFailed = true;
+      if (mode.append === "after") await commit();
+      throw new Error(`the store failed ${mode.append} writing`);
+    };
+    let journal: DurableOrdinaryJournalStore | undefined;
     return new Proxy(real, {
       get(target, prop, receiver) {
-        if (prop === "append" && mode.binding === "after") {
-          return async (deltas: Iterable<Delta>) => {
+        if (prop === "append") {
+          return (deltas: Iterable<Delta>) => {
             const batch = [...deltas];
-            const binds = batch.some((d) =>
-              d.claims.pointers.some(
-                (p) =>
-                  p.role === "kind" &&
-                  p.target.kind === "primitive" &&
-                  p.target.value === "binding",
-              ),
-            );
-            const n = await target.append(batch);
-            if (binds) throw new Error("the store failed after writing the binding");
-            return n;
+            return guard(batch, () => target.append(batch));
           };
         }
-        if (prop === "append" && mode.append !== undefined && !appendsFailed) {
-          return async (deltas: Iterable<Delta>) => {
-            const batch = [...deltas];
-            // Only the record's append fails (it alone carries `retired`); genesis and the
-            // barrier append before it pass.
-            if (!batch.some((d) => d.claims.pointers.some((p) => p.role === "retired"))) {
-              return target.append(batch);
-            }
-            appendsFailed = true;
-            if (mode.append === "after") await target.append(batch);
-            throw new Error(`the store failed ${mode.append} writing`);
+        if (prop === "journalStore") {
+          return () => {
+            const inner = target.journalStore();
+            return (journal ??= {
+              ...inner,
+              compareAndAppend: (peer, expected, next, frame, rows) =>
+                guard(rows, () => inner.compareAndAppend(peer, expected, next, frame, rows)),
+              compareAndAppendErasure: (peer, expected, next, frame, rows, absent) =>
+                guard(rows, () =>
+                  inner.compareAndAppendErasure!(peer, expected, next, frame, rows, absent),
+                ),
+            });
           };
         }
         const v = Reflect.get(target, prop, receiver) as unknown;

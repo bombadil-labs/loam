@@ -177,6 +177,7 @@ import {
 } from "../helpers/connection-fixture.js";
 import { FERN, observed } from "../spike/garden.js";
 import { withStamp } from "../../src/gateway/stamp.js";
+import { plant } from "../helpers/plant.js";
 
 const PEER_SEED = "7a".repeat(32);
 const PEER_TOKEN = "peer-door-token";
@@ -1820,24 +1821,28 @@ describe("§58 — the container roster", () => {
     // door would refuse to write them.
     const legacy = "wall";
     const backend = new MemoryBackend();
-    await backend.append([
-      signClaims(
-        {
-          timestamp: 9000,
-          validFrom: 9000,
-          author: OPERATOR,
-          pointers: [
-            {
-              role: "container",
-              target: { kind: "entity", entity: { id: "ada:legacy", context: "loam.container" } },
-            },
-            { role: "trust", target: { kind: "primitive", value: "curated" } },
-            { role: "posture", target: { kind: "primitive", value: legacy } },
-          ],
-        },
-        OPERATOR_SEED,
-      ),
-    ]);
+    await plant(
+      backend,
+      [
+        signClaims(
+          {
+            timestamp: 9000,
+            validFrom: 9000,
+            author: OPERATOR,
+            pointers: [
+              {
+                role: "container",
+                target: { kind: "entity", entity: { id: "ada:legacy", context: "loam.container" } },
+              },
+              { role: "trust", target: { kind: "primitive", value: "curated" } },
+              { role: "posture", target: { kind: "primitive", value: legacy } },
+            ],
+          },
+          OPERATOR_SEED,
+        ),
+      ],
+      OPERATOR,
+    );
     const gw = await Gateway.open(backend, { seed: OPERATOR_SEED });
     const op = gw.operatorAuthor!;
     expect(recOf(gw, "ada:legacy"), "the reader binds nothing").toBeUndefined();

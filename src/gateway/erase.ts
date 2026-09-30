@@ -1,4 +1,5 @@
-import { appendLocalErasure } from "./ingest.js";
+import { appendImpl, appendLocalErasure } from "./ingest.js";
+import { rebaseHostPeer, reportPurged } from "./peer-admission.js";
 import {
   withChannelCommit,
   parseLocalEvent,
@@ -139,6 +140,45 @@ const erasureParts = (
   }
   return { targetId, spokenBy, slate, reasons, count };
 };
+
+/**
+ * Pay the purges this host's journal holds owed. An admitted erasure order whose target the store
+ * held records an obligation; `eraseImpl` pays its own, and this pays every other one (an order
+ * that came through the append or federation door). The journal is rebased first, so the frames
+ * that admitted a target go too. A step that fails leaves its obligation owed, and the erasure
+ * screens read it as still held; the next door that admits an order retries it, and
+ * `loam erase <id>` pays it (it anchors on the standing order).
+ */
+export async function settleOwedPurges(gw: Gateway): Promise<void> {
+  const peer = gw.peer;
+  if (peer === undefined) return;
+  const owed = peer.journal
+    .snapshot()
+    .obligations.filter((o) => o.status !== "removed")
+    .map((o) => o.targetId);
+  if (owed.length === 0) return;
+  try {
+    await rebaseHostPeer(peer);
+  } catch {
+    return;
+  }
+  let fault: string | undefined;
+  try {
+    await gw.backend.purge(owed);
+  } catch (err) {
+    fault = err instanceof Error ? err.message : String(err);
+  }
+  for (const id of owed) {
+    const gone = fault === undefined && !(await gw.backend.holds(id).catch(() => true));
+    await reportPurged(
+      peer,
+      id,
+      gone
+        ? { status: "removed" }
+        : { status: "failed", fault: fault ?? "the store still holds the bytes" },
+    ).catch(() => {});
+  }
+}
 
 /** The id an erasure erases, for readers that join on it (SPEC §29.6's arithmetic). */
 export function erasureTarget(claims: Claims): string | undefined {
@@ -920,6 +960,21 @@ export function erasuresIn(
   return readErasures(probe, now, operator);
 }
 
+/**
+ * What a boot sweep must never bring back, read off raw rows before any gateway exists: the
+ * target of every standing erasure, and every id the door refuses forever (`refusedIds`: the
+ * target of an erasure that ever bound, even one later negated).
+ */
+export function neverReturns(
+  deltas: Iterable<Delta>,
+  now: number,
+  operator: string | undefined,
+): Set<string> {
+  const probe = new Reactor();
+  for (const d of deltas) probe.ingest(d);
+  return new Set([...readErasures(probe, now, operator), ...refusedIds(probe, operator)]);
+}
+
 // Sealed authorship (degree 3): a commitment carried on an anonymous reassertion. Anonymous
 // today; reveal (salt, author) and anyone can recompute the hash — provably yours whenever
 // you choose, no new cryptography.
@@ -1085,15 +1140,22 @@ async function storeHoldsAny(backend: StoreBackend): Promise<boolean> {
   }
 }
 /** The received and close events that reference one opening and still stand. */
-function incarnationMembers(gw: Gateway, openingId: string): string[] {
-  const out: string[] = [];
-  for (const d of gw.reactor.snapshot()) {
-    if (!inLocalContext(d, LOCAL_EVENT) || isErasure(d.claims)) continue;
+async function incarnationMembers(gw: Gateway, openingId: string): Promise<string[]> {
+  const out = new Set<string>();
+  const take = (d: Delta): void => {
+    if (!inLocalContext(d, LOCAL_EVENT) || isErasure(d.claims)) return;
     const parsed = parseLocalEvent(d, gw.operatorAuthor);
     if (parsed !== undefined && parsed.action !== "open" && parsed.opening === openingId)
-      out.push(d.id);
+      out.add(d.id);
+  };
+  const snapshot = gw.reactor.snapshot();
+  for (const d of snapshot) take(d);
+  // On the journal path the reading drops a target when its order is admitted, before its bytes
+  // go. A member whose purge faulted is then held but not served, and must still be found here.
+  if (gw.peer !== undefined) {
+    for (const d of await gw.backend.deltasSince(new Set(snapshot.ids()))) take(d);
   }
-  return out.sort();
+  return [...out].sort();
 }
 export async function eraseImpl(
   gw: Gateway,
@@ -1197,7 +1259,7 @@ export async function eraseImpl(
     // faulted has an erasure and must be erased again; that erase anchors on it.
     if (opts.cascade !== false)
       await withChannelCommit(gw, o.channel, async () => {
-        for (const member of incarnationMembers(gw, id)) {
+        for (const member of await incarnationMembers(gw, id)) {
           const erased = standingErasures(gw.reactor, gw.validityNow(), gw.operatorAuthor).some(
             (d) => erasureParts(d.claims).targetId === member,
           );
@@ -1254,7 +1316,7 @@ export async function eraseImpl(
   const { citations, citationTiers } = danglingCitations(gw, id, (dId) => dId === erasure.id);
   if (already === undefined) {
     if (inLocalContext(erasure, LOCAL_CONTROL)) await appendLocalErasure(gw, erasure);
-    else await gw.append([erasure]);
+    else await appendImpl(gw, [erasure], { settle: false }); // this erase pays its own purge, below
     await gw.flush(); // the erasure must be ground before the target stops being ground
   }
   // The purge count is evidence of work, never the verdict: 0 means "never held" as often as
@@ -1263,10 +1325,41 @@ export async function eraseImpl(
   // A local refusal is a fault to COLLECT, never an abort: thrown here it would deny the
   // erasure and the sweep to every attached pool — one tier's fault becoming every replica's leak.
   let localPurge: unknown;
+  // On the journal path the frame that admitted the target still carries it: rebase first, so the
+  // purge and its WAL truncation reach the old frames too.
+  if (gw.peer !== undefined) {
+    try {
+      await rebaseHostPeer(gw.peer);
+    } catch (err) {
+      localPurge = err;
+    }
+  }
   try {
     await gw.backend.purge([id]);
   } catch (err) {
-    localPurge = err;
+    localPurge = localPurge ?? err;
+  }
+  // On the journal path the purge obligation is the journal's: "removed" settles only where the
+  // store proves the bytes gone; anything else is reported failed and stays owed.
+  if (gw.peer !== undefined) {
+    try {
+      const gone = localPurge === undefined && !(await gw.backend.holds(id));
+      await reportPurged(
+        gw.peer,
+        id,
+        gone
+          ? { status: "removed" }
+          : {
+              status: "failed",
+              fault:
+                localPurge instanceof Error
+                  ? localPurge.message
+                  : "the store still holds the bytes",
+            },
+      );
+    } catch (err) {
+      localPurge = localPurge ?? err;
+    }
   }
   try {
     await gw.reseat();

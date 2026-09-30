@@ -46,8 +46,9 @@ import {
   type RevivalReport,
   receiptLedger,
   standingErasures,
-  erasuresIn,
+  neverReturns,
   erasureTarget,
+  isErasure,
   UNSWEPT_AUTH_SURFACES,
   type ErasureReceipt,
 } from "../gateway/erase.js";
@@ -124,6 +125,8 @@ import { promptLine, promptSecret } from "./prompt.js";
 import type { StoreBackend } from "../store/backend.js";
 import { ArchiveBackend } from "../store/archive.js";
 import { MirrorBackend } from "../store/mirror.js";
+import { holdsJournals } from "../store/peer-image.js";
+import { admitErasureOrders, admitLocal, openHostPeer } from "../gateway/peer-admission.js";
 import { SqliteBackend } from "../store/sqlite.js";
 import { legibilityWarnings, reAdmit } from "../gateway/repair.js";
 import { isRepairable, strandedStrikeWarnings } from "../store/quarantine.js";
@@ -1146,6 +1149,63 @@ async function cmdInitGuided(parsed: Parsed, io: IO, options: RunOptions): Promi
   return 0;
 }
 
+// Restore an empty host store from its archive, through a new peer journal. Returns the count
+// admitted; 0 when the store is not empty or the archive holds nothing living.
+/**
+ * Restore an empty host store from its archive, through a new peer journal. Returns the count
+ * admitted; 0 when there is nothing to restore. A marker file stands while the restore runs, so a
+ * restore a fault interrupted is resumed by the next serve rather than served half done.
+ * @internal — exported for its rail
+ */
+export async function restoreIntoJournal(
+  primary: StoreBackend,
+  archive: StoreBackend,
+  dead: ReadonlySet<string>,
+  seed: string,
+  marker?: string,
+): Promise<number> {
+  if (!holdsJournals(primary)) return 0;
+  const resuming = marker !== undefined && existsSync(marker);
+  if (!resuming) {
+    if ((await primary.journalPeers()).length > 0 || (await primary.holdsAny?.()) !== false) {
+      return 0;
+    }
+  }
+  const rows = (await archive.deltasSince(new Set())).filter((d) => !dead.has(d.id));
+  if (rows.length === 0) {
+    if (marker !== undefined) rmSync(marker, { force: true });
+    return 0;
+  }
+  if (marker !== undefined && !resuming) writeFileSync(marker, "");
+  const { peer } = await openHostPeer(primary.journalStore(), authorForSeed(seed));
+  const state = peer.journal.snapshot().base;
+  // One transfer per delta: readers order events by arrival, and one transfer's arrivals are
+  // simultaneous. The archive keeps no arrival order, so signed time order stands in for it.
+  const ordered = [...rows]
+    .filter((d) => !state.admitted.has(d.id) && !state.refusedIds.has(d.id))
+    .sort(
+      (a, b) => a.claims.timestamp - b.claims.timestamp || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    );
+  const at = Date.now();
+  for (const d of ordered) {
+    // Only an order this store's law binds refuses its target; any other erasure-shaped delta is
+    // testimony, and arrives as an ordinary one.
+    const targetId = isErasure(d.claims) ? erasureTarget(d.claims) : undefined;
+    if (targetId === undefined || !dead.has(targetId)) {
+      await admitLocal(peer, [d], at, () => false);
+    } else {
+      await admitErasureOrders(
+        peer,
+        [{ delta: d, targetId, surfaceHoldsBytes: false }],
+        "local",
+        at,
+      );
+    }
+  }
+  if (marker !== undefined) rmSync(marker, { force: true });
+  return ordered.length;
+}
+
 async function cmdServe(
   args: readonly string[],
   io: IO,
@@ -1202,6 +1262,15 @@ async function cmdServe(
   // replanted from the archive's memory before the gateway ever looks. Lag is safe (union) but
   // never silent: it reaches the operator's log.
   const vault = archivePath(home, parsed.flags.get("archive"));
+  // A restore a fault interrupted left a partial journal; serving it would serve half a store.
+  if (vault === undefined && existsSync(`${path}.restoring`)) {
+    io.err(
+      `serve: a restore of ${path} from its archive did not finish. This store holds only part of ` +
+        "it, so it is not served. Serve again with `--archive <dir>` naming that archive; the " +
+        "restore resumes.",
+    );
+    return 1;
+  }
   let backend: StoreBackend = openStore(path, io);
   if (vault !== undefined) {
     const archive = new ArchiveBackend(vault);
@@ -1216,11 +1285,18 @@ async function cmdServe(
       // The law reaches the vault (SPEC §11): erased ids — read straight off BOTH tiers,
       // before any reactor exists — are excluded from the union, so a cold copy can never
       // replant what the operator erased.
-      const dead = erasuresIn(
+      // A negated erasure's target stays refused forever, so it is swept and never restored.
+      const dead = neverReturns(
         [...(await backend.deltasSince(new Set())), ...(await archive.deltasSince(new Set()))],
         Date.now(), // no gateway yet, so no validity floor: the wall clock is the read time
         authorForSeed(seed),
       );
+      // A host store lives in its peer journal, and the archive keeps rows only. So a lost primary
+      // is restored through a new journal, one local arrival per living row, in signed time order.
+      const restored = await restoreIntoJournal(backend, archive, dead, seed, `${path}.restoring`);
+      if (restored > 0) {
+        io.out(`loam: healed — ${restored} deltas restored from the archive into a new journal`);
+      }
       healed = await mirror.heal(dead);
     } catch (err) {
       await mirror.close().catch(() => {}); // never let a close failure mask the real refusal
@@ -1305,6 +1381,14 @@ async function cmdServe(
       return held.kind === "present" ? held.seed : undefined;
     },
   });
+  // On the journal path a row the journal never admitted is held and never served. Say so.
+  if (gateway.rowsOutsideJournal > 0) {
+    const n = gateway.rowsOutsideJournal;
+    io.err(
+      `loam: ${n} stored row${n === 1 ? " is" : "s are"} outside the peer journal and not ` +
+        "served — a damaged row, or one written around the door.",
+    );
+  }
   const setAside = isRepairable(backend) ? (await backend.quarantine()).length : 0;
   if (setAside > 0) io.err(`loam: ${setAsideLine(setAside)}`);
   let server;
@@ -5200,12 +5284,16 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
       // later run can say it: the re-run boots on the post-purge ground, where nothing came back.
       // A failed RE-SEAT leaves the old reactor in place, so this reading can be taken over ground
       // the purge already changed underneath it. Silence would then read as "nothing came back"
-      // when the honest answer is "this could not be measured" (H9). The cheap tell is the erased
-      // delta itself: if it is still in the reactor, the removal did not land here.
+      // when the honest answer is "this could not be measured" (H9). The tell is the erased delta's
+      // bytes: if a ground still holds them, the removal did not land there. (A reactor is not the
+      // tell: a journaled store drops an erased id from serving before its bytes go.)
       // EVERY GROUND THE SWEEP TOUCHED, not the host alone. A pool re-seats in its own turn and
       // a failure there is folded into the fault list, leaving no mark on the host — so asking the
       // host only reports "measured" about a reading taken over a pool the purge changed underneath.
-      if ([gateway, ...gateway.quarantinePools].some((g) => g.reactor.get(id) !== undefined)) {
+      const heldBy = await Promise.all(
+        [gateway, ...gateway.quarantinePools].map((g) => g.backend.holds(id).catch(() => true)),
+      );
+      if (heldBy.some(Boolean)) {
         io.err(
           `loam: the removal did not complete in this store's own ground, so the revival reading ` +
             `below was taken over a ground that may not reflect the purge. Treat an empty answer ` +

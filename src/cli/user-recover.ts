@@ -49,7 +49,7 @@ import { CTX_GRANTS, grantsNaming } from "../gateway/accounts.js";
 import { keysEverOf } from "../gateway/principal.js";
 import { withStamp } from "../gateway/stamp.js";
 import { attachedPool, declaredInboxes, readContainerTable } from "../gateway/container.js";
-import { refusedIds } from "../gateway/erase.js";
+import { readErasures, refusedIds } from "../gateway/erase.js";
 import {
   cutClaims,
   cutsHere,
@@ -654,7 +654,14 @@ async function resume(
   }
   try {
     const held = gw.reactor.get(j.record) !== undefined;
-    if (held && userGroundOf(gw.reactor).erased().has(j.record)) {
+    // An admitted erasure drops its target from the reading, so "it landed" is also asked of the
+    // journal's arrival history, which keeps erased ids.
+    const landed =
+      held || (gw.peer?.journal.snapshot().base.arrivals.some((a) => a.id === j.record) ?? false);
+    const recordErased =
+      userGroundOf(gw.reactor).erased().has(j.record) ||
+      readErasures(gw.reactor, gw.validityNow(), operator).has(j.record);
+    if (landed && recordErased) {
       // It landed, and the operator has since erased it: the readers no longer see this recovery.
       // Nothing here is rolled back, and nothing is reported as done.
       io.err(
