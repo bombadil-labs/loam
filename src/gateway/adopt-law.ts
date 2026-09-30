@@ -66,8 +66,6 @@ import type { Gateway } from "./gateway.js";
 import { publishRegistrationImpl } from "./lifecycle.js";
 import {
   CTX_REGISTRATION,
-  lawfulHistory,
-  lawfulSnapshot,
   lensOf,
   parseClaimTemplates,
   parseResolvers,
@@ -77,6 +75,7 @@ import {
   type ResolverSpecs,
   type ResolverSpec,
 } from "./registration.js";
+import { lawfulHistory, lawfulSnapshot } from "./lawful.js";
 import { negatedAt } from "./negation.js";
 import { CTX_RENDERER, publishRendererImpl } from "./renderers.js";
 

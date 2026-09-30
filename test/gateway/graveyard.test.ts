@@ -18,8 +18,10 @@
 // exception cannot hide inside the clean case.
 
 import { describe, expect, it } from "vitest";
-import { standingErasures, erasureSlate, erasureTarget } from "../../src/gateway/erase.js";
-import { graveyardCompleteness, readFrozenTerm } from "../../src/gateway/slate.js";
+import { erasureSlate } from "../../src/gateway/erase.js";
+import { standingErasures, erasureTarget } from "../../src/gateway/erase-law.js";
+import { graveyardCompleteness } from "../../src/gateway/slate.js";
+import { readFrozenTerm } from "../../src/gateway/slate-law.js";
 import { FERN, observed } from "../spike/garden.js";
 import { BEFORE_DEADLINE, OP, OP_SEED, bootSlateStore, standSlate } from "./slating.js";
 

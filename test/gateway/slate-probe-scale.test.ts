@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { authorForSeed } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
-import { readSlates } from "../../src/gateway/slate.js";
+import { readSlates } from "../../src/gateway/slate-law.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";

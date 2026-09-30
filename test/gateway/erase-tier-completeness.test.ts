@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
-import { isErasure, readErasures } from "../../src/gateway/erase.js";
+import { isErasure, readErasures } from "../../src/gateway/erase-law.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import type { StoreBackend } from "../../src/store/backend.js";

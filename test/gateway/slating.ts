@@ -15,7 +15,8 @@ import {
   type ContainerPosture,
   type ContainerTrust,
 } from "../../src/gateway/container-law.js";
-import { frozenMembershipTerm, slateClaims, type SlateClosure } from "../../src/gateway/slate.js";
+import { frozenMembershipTerm, slateClaims } from "../../src/gateway/slate.js";
+import { type SlateClosure } from "../../src/gateway/slate-law.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import type { StoreBackend } from "../../src/store/backend.js";
 import { FERN } from "../spike/garden.js";

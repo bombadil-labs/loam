@@ -24,7 +24,7 @@ import { STORE_ENTITY } from "./genesis.js";
 import { CTX_GRANTS, dataStrikers, lawfulStrikersJson } from "./governed-trust.js";
 export { CTX_GRANTS, lawfulStrikersJson } from "./governed-trust.js";
 import { entityGatherBody } from "./gather.js";
-import { isErasure, orderBinds, eraseDefect, erasedInBatch, refusedIds } from "./erase.js";
+import { isErasure, orderBinds, eraseDefect, erasedInBatch, refusedIds } from "./erase-law.js";
 import { publicDefect } from "./public.js";
 import { artifactDefect } from "./artifact.js";
 import { trustDefect } from "./trust.js";
@@ -32,7 +32,7 @@ import { bindingPolicyDefect } from "./binding-policy.js";
 import { budgetDefect } from "./budget.js";
 import { envelopeDefect } from "./envelope.js";
 import { containerDefect } from "./container-law.js";
-import { slateDefect } from "./slate.js";
+import { slateDefect } from "./slate-law.js";
 import { pausedKeys } from "./recovery-cut.js";
 import { type Ctx, type Verb, grantHeld, struck, survivingAt } from "./grants-law.js";
 

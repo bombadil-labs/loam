@@ -26,7 +26,7 @@ import {
   writtenByUser,
 } from "../../src/gateway/member-of.js";
 import { delegationClaims } from "../../src/gateway/principal.js";
-import { freezeAgreement } from "../../src/gateway/slate.js";
+import { freezeAgreement } from "../../src/gateway/slate-law.js";
 import { lineageClaims, recoveryClaims } from "../../src/gateway/user-root.js";
 import { rootClaims, userClaims } from "../../src/server/users.js";
 import { MemoryBackend } from "../../src/store/memory.js";

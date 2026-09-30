@@ -9,8 +9,9 @@ import {
   type Term,
 } from "@bombadil/rhizomatic";
 import { freezeMembers } from "./container-identity.js";
-import { withNegationClosure } from "./ingest.js";
-import { lawfulSnapshot, lensOf, readRegistrations, type Registration } from "./registration.js";
+import { withNegationClosure } from "./negation-closure.js";
+import { lensOf, readRegistrations, type Registration } from "./registration.js";
+import { lawfulSnapshot } from "./lawful.js";
 import { negatedAt } from "./negation.js";
 interface Selection {
   source: string;

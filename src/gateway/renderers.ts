@@ -36,7 +36,8 @@ import {
   type RenderWorkerOptions,
 } from "./render-worker.js";
 import { workerLimitsOf } from "./envelope.js";
-import { lawfulSnapshot, lensOf, type LensName } from "./registration.js";
+import { lensOf, type LensName } from "./registration.js";
+import { lawfulSnapshot } from "./lawful.js";
 import { negatedAt } from "./negation.js";
 import {
   createRootRendererContext,

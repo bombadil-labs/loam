@@ -15,7 +15,7 @@ import {
   erasedInBatch,
   refusedIds,
   standingErasures,
-} from "../../src/gateway/erase.js";
+} from "../../src/gateway/erase-law.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";

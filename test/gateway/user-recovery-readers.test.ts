@@ -15,7 +15,7 @@ import {
   type Delta,
 } from "@bombadil/rhizomatic";
 import { dataStruck, grantClaims, holdsGrant } from "../../src/gateway/accounts.js";
-import { eraseClaims } from "../../src/gateway/erase.js";
+import { eraseClaims } from "../../src/gateway/erase-law.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { governedStrikers } from "../../src/gateway/governed-trust.js";

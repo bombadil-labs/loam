@@ -27,7 +27,7 @@
 // next request; a fresh declaration for the same author supersedes (latest lawful wins).
 
 import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
-import { lawfulDeltasAt } from "./registration.js";
+import { lawfulDeltasAt } from "./lawful.js";
 import { negatedAt } from "./negation.js";
 
 export const BUDGET_ENTITY = "loam:budget";

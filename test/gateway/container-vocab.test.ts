@@ -13,7 +13,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis, CTX_OPERATOR } from "../../src/gateway/genesis.js";
 import { CTX_GRANTS, CTX_MEMBERS, CTX_TENANT } from "../../src/gateway/accounts.js";
 import { CTX_TRUST } from "../../src/gateway/trust.js";
-import { CTX_ERASE } from "../../src/gateway/erase.js";
+import { CTX_ERASE } from "../../src/gateway/erase-law.js";
 import { CTX_PUBLIC } from "../../src/gateway/public.js";
 import { CTX_BUDGET } from "../../src/gateway/budget.js";
 import { CTX_ADOPTION } from "../../src/gateway/adopt.js";

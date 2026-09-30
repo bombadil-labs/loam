@@ -13,7 +13,7 @@ import { authorForSeed, evalTerm, parseTerm, type Policy, type Schema } from "@b
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { readErasures } from "../../src/gateway/erase.js";
+import { readErasures } from "../../src/gateway/erase-law.js";
 import { PLANT } from "./fixtures.js";
 import { FERN, GARDENER_SEED, observed } from "../spike/garden.js";
 

@@ -38,7 +38,8 @@ import { isRepairable } from "../store/quarantine.js";
 import { effectiveGrantsAt, grantClaims, holdsGrant, revocationClaims } from "./accounts.js";
 import { grantSubjects } from "./grants-law.js";
 import { STORE_ENTITY } from "./genesis.js";
-import { isErasure, orderBinds, orderForPool, readErasures } from "./erase.js";
+import { orderForPool } from "./erase.js";
+import { isErasure, orderBinds, readErasures } from "./erase-law.js";
 import {
   clampedTo,
   newPoolEnvelope,
@@ -47,8 +48,8 @@ import {
   type QuarantineEnvelope,
   SIZE_ENVELOPES,
 } from "./envelope.js";
-import { withNegationClosure, withNegationClosureAcross } from "./ingest.js";
-import { lawfulHistory } from "./registration.js";
+import { withNegationClosure, withNegationClosureAcross } from "./negation-closure.js";
+import { lawfulHistory } from "./lawful.js";
 import { negatedAt } from "./negation.js";
 import type { ConnectionBinding, FederationReport, Gateway } from "./gateway.js";
 import { withStamp } from "./stamp.js";

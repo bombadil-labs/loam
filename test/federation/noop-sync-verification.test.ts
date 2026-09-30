@@ -30,7 +30,7 @@ vi.mock("@bombadil/rhizomatic", async (importOriginal) => {
 const { assembleGenesis } = await import("../../src/gateway/genesis.js");
 const { Gateway } = await import("../../src/gateway/gateway.js");
 const { MemoryBackend } = await import("../../src/store/memory.js");
-const { sameVerifiedDelta } = await import("../../src/federation/local-channel-events.js");
+const { sameVerifiedDelta } = await import("../../src/gateway/erase-law.js");
 const { FERN, observed } = await import("../spike/garden.js");
 
 const ME_SEED = "cc".repeat(32);

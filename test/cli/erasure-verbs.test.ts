@@ -165,19 +165,19 @@ import { grantClaims } from "../../src/gateway/accounts.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { withStamp } from "../../src/gateway/stamp.js";
+import { receiptLedger, sealCommitment } from "../../src/gateway/erase.js";
 import {
   CTX_ERASE,
   eraseClaims,
   ERASE_ENTITY,
   ERASURE_NON_CLAIMS,
   ESM_RESIDENCY_DISCLOSURE,
-  receiptLedger,
-  sealCommitment,
   standingErasures,
   erasureTarget,
   UNSWEPT_AUTH_SURFACES,
-} from "../../src/gateway/erase.js";
-import { frozenMembershipTerm, isSlateRecord, readSlates } from "../../src/gateway/slate.js";
+} from "../../src/gateway/erase-law.js";
+import { frozenMembershipTerm } from "../../src/gateway/slate.js";
+import { isSlateRecord, readSlates } from "../../src/gateway/slate-law.js";
 import { exportOffer } from "../../src/federation/offer.js";
 import { ArchiveBackend } from "../../src/store/archive.js";
 import { MirrorBackend } from "../../src/store/mirror.js";

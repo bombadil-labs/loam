@@ -44,17 +44,17 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { withStamp } from "../../src/gateway/stamp.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { containerClaims, readContainerTable } from "../../src/gateway/container-law.js";
-import { eraseClaims, erasedInDeltas, readErasures } from "../../src/gateway/erase.js";
+import { erasedInDeltas } from "../../src/gateway/erase.js";
+import { eraseClaims, readErasures } from "../../src/gateway/erase-law.js";
 import { lawfulNegated } from "../../src/gateway/registration.js";
 import { SEALED_LEEWAY } from "../../src/gateway/leeway.js";
 import { channelRecordClaims, resumeChannelImpl } from "../../src/federation/channel.js";
 import {
-  inLocalContext,
-  LOCAL_CONTROL,
   localControlChannel,
   localChannelEvidence,
   withChannelCommit,
 } from "../../src/federation/local-channel-events.js";
+import { inLocalContext, LOCAL_CONTROL } from "../../src/gateway/erase-law.js";
 import { toWire } from "../../src/federation/wire.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import { MemoryBackend } from "../../src/store/memory.js";

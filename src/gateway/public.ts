@@ -13,7 +13,8 @@
 import { seedSigner } from "./signer.js";
 import type { Claims, Reactor } from "@bombadil/rhizomatic";
 import type { Gateway, RequestContext } from "./gateway.js";
-import { lawfulDeltasAt, lensOf, type LensName } from "./registration.js";
+import { lensOf, type LensName } from "./registration.js";
+import { lawfulDeltasAt } from "./lawful.js";
 import { negatedAt } from "./negation.js";
 import { withStamp } from "./stamp.js";
 

@@ -22,7 +22,8 @@ import {
   grantClaims,
   lawfulStrikersJson,
 } from "../../src/gateway/accounts.js";
-import { eraseClaims, readGrounds } from "../../src/gateway/erase.js";
+import { readGrounds } from "../../src/gateway/erase.js";
+import { eraseClaims } from "../../src/gateway/erase-law.js";
 import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { listingContainerName } from "../../src/gateway/listing.js";

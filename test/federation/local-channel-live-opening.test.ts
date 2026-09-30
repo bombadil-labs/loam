@@ -73,15 +73,14 @@ import {
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { containerClaims, survivingDeclarationIds } from "../../src/gateway/container-law.js";
-import { readErasures } from "../../src/gateway/erase.js";
+import { readErasures } from "../../src/gateway/erase-law.js";
 import { admitLocal, openHostPeer } from "../../src/gateway/peer-admission.js";
 import {
-  inLocalContext,
-  LOCAL_CONTROL,
   LOCAL_EVENT,
   localChannelEvidence,
   localControlChannel,
 } from "../../src/federation/local-channel-events.js";
+import { inLocalContext, LOCAL_CONTROL } from "../../src/gateway/erase-law.js";
 import type { StoreBackend } from "../../src/store/backend.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { MirrorBackend } from "../../src/store/mirror.js";

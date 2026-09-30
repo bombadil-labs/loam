@@ -28,7 +28,7 @@ import {
   type View,
 } from "@bombadil/rhizomatic";
 import { DeltaSet, evalTerm, parseTerm } from "@bombadil/rhizomatic";
-import { erasedFromReading } from "../gateway/erase.js";
+import { erasedFromReading } from "../gateway/erase-law.js";
 import { entityGatherBody } from "../gateway/gather.js";
 
 import {

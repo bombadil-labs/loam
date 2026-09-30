@@ -19,7 +19,7 @@
 // source of truth for the door and the lenses.
 
 import type { Claims, Reactor } from "@bombadil/rhizomatic";
-import { lawfulDeltasAt } from "./registration.js";
+import { lawfulDeltasAt } from "./lawful.js";
 import { negatedAt } from "./negation.js";
 
 export const TRUST_ENTITY = "loam:trust";

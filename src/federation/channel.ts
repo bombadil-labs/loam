@@ -45,12 +45,8 @@ import {
   manifestExportClaims,
   readManifest,
 } from "../gateway/adopt-law.js";
-import {
-  CTX_REGISTRATION,
-  lawfulHistory,
-  lawfulSnapshot,
-  lensOf,
-} from "../gateway/registration.js";
+import { CTX_REGISTRATION, lensOf } from "../gateway/registration.js";
+import { lawfulHistory, lawfulSnapshot } from "../gateway/lawful.js";
 import { negatedAt } from "../gateway/negation.js";
 import { freezeMembers } from "../gateway/container-identity.js";
 import type { RendererBinding } from "../gateway/renderers.js";

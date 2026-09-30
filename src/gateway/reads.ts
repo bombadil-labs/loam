@@ -31,7 +31,8 @@ import { Channel } from "./channel.js";
 // need when a record's own `prefix` primitive is condemned.
 import { prefixOfChannelName } from "../federation/channel.js";
 import { erasedInScope, forgottenSince, poolGovernors } from "./erase.js";
-import { readClosedIds, readGround, requireMoment } from "./slate.js";
+import { readClosedIds, readGround } from "./slate.js";
+import { requireMoment } from "./slate-law.js";
 import type { ConnectionBinding, Gateway } from "./gateway.js";
 import type { PatchNode, ResolvedNode } from "./gql.js";
 import type { Registered } from "./gql.js";
