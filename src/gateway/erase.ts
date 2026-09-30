@@ -7,7 +7,13 @@ import {
   orphanedDeclaration,
   receiptsNaming,
 } from "../federation/local-channel-events.js";
-import { LOCAL_CONTROL, inLocalContext, localEraseTarget, sameVerifiedDelta } from "./erase-law.js";
+import {
+  LOCAL_CONTROL,
+  inLocalContext,
+  localEraseTarget,
+  orderForPool,
+  sameVerifiedDelta,
+} from "./erase-law.js";
 // Erasure — degrees of forgetting (SPEC §11). The store remembers THAT it forgot — who asked,
 // when, which id — never what. A ERASURE is an append-only claim at `loam:erasure` naming
 // the erased delta; the bytes themselves are purged from every tier (the seam's purge, PR
@@ -1257,27 +1263,6 @@ async function incompleteErasureFaults(
     }
   }
   return faults;
-}
-
-// The order a pool receives from this ground, in the fan-out and when the pool opens. A pool
-// governed by this ground's own key takes this ground's erasure as is. A pool under its own key
-// takes an order this ground signs as a pinned governor, naming that pool as its receiver: this
-// ground's own erasure is testimony there. The order keeps the erasure's own time, so the same
-// erasure always yields the same order for one pool: a reseed or a retried fan-out adds nothing.
-export function orderForPool(gw: Gateway, erasure: Delta, pool: Gateway): Delta {
-  if (pool.operatorAuthor === gw.operatorAuthor) return erasure;
-  // The same order in this ground's voice, every pointer kept (a local-control marker included),
-  // plus the one receiver it takes effect at.
-  const operator = gw.operatorAuthor!;
-  return gw.signer!.sign({
-    timestamp: erasure.claims.timestamp,
-    validFrom: erasure.claims.validFrom,
-    author: operator,
-    pointers: [
-      ...erasure.claims.pointers.filter((p) => p.role !== "receiver"),
-      { role: "receiver", target: { kind: "primitive" as const, value: pool.operatorAuthor! } },
-    ],
-  });
 }
 
 // Honor an erasure DECIDED by the primary operator (the body of `Gateway.eraseReplica`, SPEC §24.8),

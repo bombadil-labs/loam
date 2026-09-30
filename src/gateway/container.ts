@@ -38,8 +38,7 @@ import { isRepairable } from "../store/quarantine.js";
 import { effectiveGrantsAt, grantClaims, holdsGrant, revocationClaims } from "./accounts.js";
 import { grantSubjects } from "./grants-law.js";
 import { STORE_ENTITY } from "./genesis.js";
-import { orderForPool } from "./erase.js";
-import { isErasure, orderBinds, readErasures } from "./erase-law.js";
+import { orderForPool, isErasure, orderBinds, readErasures } from "./erase-law.js";
 import {
   clampedTo,
   newPoolEnvelope,
