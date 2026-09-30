@@ -55,7 +55,7 @@ import {
   UNSWEPT_AUTH_SURFACES,
 } from "../gateway/erase-law.js";
 import type { SlateReport } from "../gateway/slate.js";
-import { programMaskJson } from "../gateway/listing.js";
+import { programMaskJson } from "../gateway/program-mask.js";
 import { unreachableStoreReport } from "../gateway/container.js";
 import { assembleGenesis } from "../gateway/genesis.js";
 import { withStamp } from "../gateway/stamp.js";

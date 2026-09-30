@@ -42,7 +42,7 @@ import type { Claims, Delta } from "@bombadil/rhizomatic";
 import { evalTerm, parseTerm } from "@bombadil/rhizomatic";
 import { readLawfulRegistrations } from "./registration.js";
 import { negatedAt } from "./negation.js";
-import { programMaskJson } from "./listing.js";
+import { programMaskJson } from "./program-mask.js";
 import { unreachableStoreReport } from "./container.js";
 import { currentContainerDeclarationId } from "./container-law.js";
 import {

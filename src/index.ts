@@ -161,9 +161,9 @@ export {
   listingContainerName,
   listingContexts,
   listingMembershipJson,
-  programMaskJson,
   type ListOptions,
 } from "./gateway/listing.js";
+export { programMaskJson } from "./gateway/program-mask.js";
 export {
   readLawAdoptions,
   type AdoptLawOptions,
