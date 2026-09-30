@@ -9,7 +9,7 @@
 // back into. Nothing is reachable except through what a registered (HyperSchema, Schema) pair
 // exposes.
 
-import type { Peer } from "./peer.js";
+import type { Peer, UserGround } from "./peer.js";
 import {
   signClaims,
   Reactor,
@@ -446,9 +446,9 @@ export class Gateway {
   // The scope this ground honors delegations for (principal.ts): an inbox pool's own name, and
   // nothing on any other ground. Declared on the reactor, and again whenever the reactor is replaced.
   private delegationScope: string | undefined = undefined;
-  // The gateway whose user records this ground's grants resolve `user:<name>` against: a pool's
-  // host. Declared on the reactor, and again whenever the reactor is replaced.
-  private userHost: Gateway | undefined = undefined;
+  // The user ground this ground's grants resolve `user:<name>` against: a pool's host's, as a port.
+  // Declared on the reactor, and again whenever the reactor is replaced.
+  private userHost: UserGround | undefined = undefined;
   // The resolver memo (SPEC §22.5): (resolver-content-address, bucket-delta-set) → value. Keyed on the
   // surviving bucket, so it invalidates by construction when the ground moves — an erased fact drops
   // from the bucket and its old value can never be served again. A pure cache; safe to clear anytime.
@@ -1893,27 +1893,37 @@ export class Gateway {
    * Resolve this ground's `user:<name>` grant subjects against `host`'s user records. A pool holds
    * no user records of its own. @internal — container.ts
    */
-  readUsersFrom(host: Gateway): void {
+  readUsersFrom(host: UserGround): void {
     if (this.userHost === host) return;
-    this.userHost?.userDependents.delete(this);
+    this.releaseUsers?.();
+    this.releaseUsers = undefined;
     this.userHost = host;
-    if (host !== this) host.userDependents.add(this);
+    if (host !== this) this.releaseUsers = host.watchUsers(() => this.onUsersMoved());
     // Views built before this call read this ground's own (empty) users; read the host's now.
     this.onUsersMoved();
   }
 
+  /** Call `onMoved` whenever this ground's users may have moved. Returns the release. */
+  watchUsers(onMoved: () => void): () => void {
+    this.userWatchers.add(onMoved);
+    return () => {
+      this.userWatchers.delete(onMoved);
+    };
+  }
+
   // A pool's governed reads resolve user-named grants against its HOST's users, which its own
-  // reactor never sees change. So the host tells every dependent after each accepted batch and each
+  // reactor never sees change. So the host tells every watcher after each accepted batch and each
   // validity boundary — widely, since a user's root depends on claims, strikes,
-  // counter-strikes, erasures and windows alike — and each dependent re-lowers its views.
-  private readonly userDependents = new Set<Gateway>();
+  // counter-strikes, erasures and windows alike — and each watching pool re-lowers its views.
+  private readonly userWatchers = new Set<() => void>();
+  private releaseUsers: (() => void) | undefined = undefined;
 
   /** Bumped whenever the users this ground reads may have moved; the listing index keys on it. */
   usersEpoch = 0;
 
   /** @internal — ingest.ts, after each batch it lands */
   notifyUserDependents(): void {
-    for (const dependent of this.userDependents) dependent.onUsersMoved();
+    for (const onMoved of this.userWatchers) onMoved();
   }
 
   /** @internal — ingest.ts: live `watch` evaluations over a governed Term */
@@ -1948,8 +1958,8 @@ export class Gateway {
     });
   }
 
-  /** The gateway whose user records this ground reads: its host's, or its own at the root. */
-  userGroundHost(): Gateway {
+  /** The user ground this ground reads: its host's, or its own at the root. */
+  userGroundHost(): UserGround {
     return this.userHost ?? this;
   }
 
@@ -2403,8 +2413,9 @@ export class Gateway {
   // Close ends every live subscription (a parked reader wakes with done, never hangs), then
   // always releases the backend, even when a latched write failure has to be surfaced.
   async close(): Promise<void> {
-    this.userHost?.userDependents.delete(this);
-    this.userDependents.clear();
+    this.releaseUsers?.();
+    this.releaseUsers = undefined;
+    this.userWatchers.clear();
     if (this.validityTimer !== undefined) clearTimeout(this.validityTimer);
     this.validityTimer = undefined;
     for (const channel of [...this.channels]) await channel.return();

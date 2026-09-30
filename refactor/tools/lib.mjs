@@ -389,6 +389,7 @@ const TREE_MEMBERS = new Set([
   "verifiedRootOf",
   "poolForBinding",
   "poolForBindingImpl",
+  "openChild",
 ]);
 const CONTAINER_CODE = /src\/(gateway|federation)\//;
 const TREE_OWNERS = /src\/gateway\/(container|store)\.ts$/;

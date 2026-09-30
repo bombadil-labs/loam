@@ -131,12 +131,14 @@ describe("R5: a pool follows its host's users", () => {
   it("a closed pool leaves its host's dependents", async () => {
     const t0 = Date.now() - 10_000;
     const { host, pool } = await world(t0);
-    const dependents = (host as unknown as { userDependents: Set<Gateway> }).userDependents;
+    // The host keeps one watcher per watching pool; closing the pool releases its watcher.
+    const watchers = (host as unknown as { userWatchers: Set<() => void> }).userWatchers;
+    const before = watchers.size;
     pool.readUsersFrom(host);
-    expect(dependents.has(pool)).toBe(true);
+    expect(watchers.size).toBe(before + 1);
     await pool.close();
     open.splice(open.indexOf(pool), 1);
-    expect(dependents.has(pool)).toBe(false);
+    expect(watchers.size).toBe(before);
   });
 
   it("the pool's listing follows a re-point in the host", async () => {

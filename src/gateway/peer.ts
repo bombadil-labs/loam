@@ -3,6 +3,7 @@
 // host is only the root container, so it is a `Peer` too, and a walk over the tree takes one type.
 // The census counts the members; a change that adds one widens the boundary and must say why.
 
+import type { Reactor } from "@bombadil/rhizomatic";
 import type { Container } from "./container.js";
 import type { Gateway } from "./gateway.js";
 
@@ -46,6 +47,18 @@ export type Peer = Pick<
   | "eraseReplica"
   | "probe"
 >;
+
+/**
+ * The user records a pool resolves its `user:<name>` grants against: its host's rows and governing
+ * key, and a way to hear when they move. A port the opener hands the pool; the pool holds this, not
+ * its host, and adds nothing to the host but a watcher it can release.
+ */
+export interface UserGround {
+  readonly reactor: Reactor;
+  readonly operatorAuthor: string | undefined;
+  /** Call `onMoved` whenever the users here may have moved. Returns the release. */
+  watchUsers(onMoved: () => void): () => void;
+}
 
 /** A child's handle as container code sees it: the opener's handle, with the child as a `Peer`. */
 export type PeerEntry = Omit<Container, "gateway"> & { readonly gateway?: Peer };

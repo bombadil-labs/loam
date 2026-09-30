@@ -69,11 +69,12 @@ describe("census ratchet counts", () => {
       "gw.attachedContainers;",
       "gw.store.tableOf(gw).pools;",
       "poolForBindingImpl(gw, binding);",
+      "await gw.openChild(backend, options);",
       "gw.store.pools(gw);",
       "// gw.quarantinePools",
     ].join("\n");
-    expect(count(text).treeReach).toBe(7); // two members on the first line count once
-    expect(count(text, "src/federation/channel.ts").treeReach).toBe(7);
+    expect(count(text).treeReach).toBe(8); // two members on the first line count once
+    expect(count(text, "src/federation/channel.ts").treeReach).toBe(8);
     expect(count(text, "src/gateway/container.ts").treeReach).toBe(0);
     expect(count(text, "src/gateway/store.ts").treeReach).toBe(0);
     // A door or a command is a facade over one container, not a container.
