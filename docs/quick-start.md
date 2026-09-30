@@ -133,5 +133,6 @@ Ask Claude to look around. Useful first moves:
 
 Loam's refusals are written to be read — the sentence usually names the fix. The three most
 common on day one: the serve token missing (the wall line above), a schema question answered by
-`loam_docs`, and a CLI write against a running server, which prints a warning that the server
-answers from the memory it booted with — restart the server and the write is seen.
+`loam_docs`, and a CLI write against a running server. The server reads the write on its next
+request; the warning names what it loaded at boot (pen seeds, open containers, channels), which
+waits for a restart.

@@ -144,7 +144,7 @@ const bespoke = (program: string, lens: string): string =>
   });
 
 // T243's fixture pair: a serving record naming a live pid warns; a provably dead pid stays silent.
-const STALENESS = /will not see what just landed until it restarts/;
+const STALENESS = /waits for a restart/;
 const servingRecord = (pid: number): void => {
   writeFileSync(
     join(home, "serving.json"),

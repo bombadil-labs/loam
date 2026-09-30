@@ -5,11 +5,10 @@
 // (every delta carries the client's own author) and the readers' trust masks, never a door
 // prefix. Register alone is prefix-fenced.
 //
-// FRESHNESS IS SPLIT, HONESTLY (T103's architecture, criterion a2): the TOKEN is read from
-// clients.json per request, so it authenticates and retires with no restart; the GRANTS live
-// in the served reactor from boot, so minting beside a live server prints the pointed
-// staleness warning (the fixture records a live serving pid so the probe actually fires) and
-// standing moves at restart. Both directions asserted.
+// NO RESTART (criterion a2): the TOKEN is read from clients.json per request, and the server
+// reads the GRANTS from a refreshed view of its journal per request, so a mint beside a live
+// server authenticates AND stands on the very next request. The warning still fires (the fixture
+// records a live serving pid so the probe actually fires); it names what waits for a restart.
 //
 // REVOKE IS ASSERTED TWO-SIDED at both levels (the erasure rail rule): the named client's
 // grants are struck and its standing resolves gone, AND the sibling's grants carry no strike
@@ -188,8 +187,8 @@ describe("T256 (a)+(d) — the minted client acts as its own author, inside its 
   });
 });
 
-describe("T256 (a2) — freshness is split, honestly", () => {
-  it("a mint beside a live server: the token authenticates NOW, the standing waits for restart, and the warning says so", async () => {
+describe("T256 (a2) — a mint beside a live server needs no restart", () => {
+  it("a mint beside a live server: the token authenticates NOW and its standing holds NOW", async () => {
     const { home } = await mintedHome();
     const { base } = await served(home);
     // The staleness probe reads serving.json, which only `loam serve` writes; the programmatic
@@ -206,9 +205,9 @@ describe("T256 (a2) — freshness is split, honestly", () => {
       c.io,
     );
     expect(code).toBe(0);
-    // The unconditional split note rides stdout; the live-server probe's warning rides err and
+    // The epilogue rides stdout; the live-server probe's warning rides err and
     // only exists because the serving record above matched — delete servingWarning and this fails.
-    expect(c.out.join("\n"), "the split epilogue is missing").toMatch(/restart/i);
+    expect(c.out.join("\n"), "the epilogue is missing").toMatch(/with no restart/);
     expect(c.err.join("\n"), "no staleness warning beside a live server").toMatch(
       /serving this store right now/,
     );
@@ -217,9 +216,9 @@ describe("T256 (a2) — freshness is split, honestly", () => {
     const who = await whoami(base, fresh);
     // The token half: authenticated immediately, no restart.
     expect(who.kind).toBe("actor");
-    // The grants half: the served reactor booted before the mint, so no standing shows yet.
-    expect(who.write).toBe(false);
-    expect(who.registerPrefixes).toEqual([]);
+    // The grants half: the server booted before the mint and reads them on this request.
+    expect(who.write).toBe(true);
+    expect(who.registerPrefixes).toEqual(["other:"]);
   });
 });
 

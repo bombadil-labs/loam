@@ -320,6 +320,24 @@ async function retrying<T>(gw: Gateway, fn: (clock: ArrivalClock) => Promise<T>)
   }
 }
 
+/**
+ * Take in what another gateway committed to this container's journal since this one last read it.
+ * The journal is the source of truth; a gateway's reactor is its view. Run under the admission
+ * lock, so a read never ingests the rows of an append that is between its commit and its ingest.
+ */
+export function refreshImpl(gw: Gateway): Promise<void> {
+  const peer = gw.peer;
+  if (peer === undefined) return Promise.resolve();
+  return admitting(gw, async () => {
+    const read = await peer.store.readHead(peer.journal.peerId);
+    if (read.status !== "head" || read.head === peer.journal.currentHead()) return;
+    const before = gw.reactor.size;
+    await catchUp(gw);
+    // Rows another gateway wrote may bind, rebind or retire a lens: refold, as a boot does.
+    if (gw.reactor.size !== before) gw.replayRegistrations();
+  });
+}
+
 /** @internal — take in what another writer admitted to this host's journal. */
 export async function catchUp(gw: Gateway): Promise<void> {
   const rows = await reopenHostPeer(gw.peer!, (id) => gw.reactor.get(id) !== undefined);

@@ -2059,9 +2059,9 @@ export const CHAPTERS = [
           },
           {
             says:
-              "Freshness is split and stated: the bearer binds per request - a mint " +
-              "authenticates and a revoke refuses with no restart - while the grants live in " +
-              "a serving reactor from boot and move at restart.",
+              "No restart: the bearer binds per request, and a running server reads the " +
+              "grants on its next request - a mint authenticates and stands, and a revoke " +
+              "refuses, with no restart.",
             spec: "spec/57-client-mint.md",
             proof: "test/cli/client-mint.test.ts",
             door: null,
