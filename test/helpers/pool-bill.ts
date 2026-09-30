@@ -10,7 +10,6 @@
 // declaration is a delta on the PARENT's ground, wildcard subject, exactly the shape
 // quarantine-envelope's own fixtures use.
 
-import { signClaims } from "@bombadil/rhizomatic";
 import { ENVELOPE_ANY, envelopeClaims } from "../../src/gateway/envelope.js";
 import type { Gateway } from "../../src/gateway/gateway.js";
 
@@ -19,14 +18,13 @@ export const HOST_SIZED_BILL_MS = 10_000;
 /** Declare a wildcard pool envelope whose clock a loaded host can actually meet. */
 export async function declareHostSizedBill(gw: Gateway, timestamp: number): Promise<void> {
   await gw.append([
-    signClaims(
+    gw.signer!.sign(
       envelopeClaims(
         ENVELOPE_ANY,
         { renderTimeoutMs: HOST_SIZED_BILL_MS },
         gw.operatorAuthor!,
         timestamp,
       ),
-      gw.options.seed!,
     ),
   ]);
 }

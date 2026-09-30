@@ -55,7 +55,7 @@ The census ratchet counts coupling in Loam's source. A count may only fall.
 | --- | --- | --- |
 | Direct `reactor.snapshot()` references | 48 | 42 |
 | Wall-clock reads in core code | 20 | 15 |
-| Operator-seed reads | 63 | 5 |
+| Operator-seed reads | 63 | 4 |
 | Files in import cycles | 22 | 0 |
 | Largest import cycle | 20 | 0 |
 | Container-code lines that reach the tree as gateways | — | 0 |
@@ -69,4 +69,6 @@ Other results so far:
 
 The import cycles fell to 0 at step 6, when the container split moved the pure readers out of the
 effect files. The seed reads fell at step 5,
-when each ground got its own signer (#644, #645).
+when each ground got its own signer (#644, #645). At step 6 a gateway stopped keeping its seed: the
+signer is its only holder. The 4 reads left are where a key is used, not handed out: the gateway
+makes its signer, `Gateway.open` names its peer, and the client and the runner use their own keys.
