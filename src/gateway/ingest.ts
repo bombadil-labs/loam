@@ -288,7 +288,7 @@ async function appendValidated(
 // state (a pause, a budget, a recovery barrier) and both land. Only check, write and ingest run under
 // the lock: closing streams after it may await a reader, and a reader may append.
 const admissions = new WeakMap<Gateway, Promise<unknown>>();
-function admitting<T>(gw: Gateway, fn: () => Promise<T>): Promise<T> {
+export function admitting<T>(gw: Gateway, fn: () => Promise<T>): Promise<T> {
   const run = (admissions.get(gw) ?? Promise.resolve()).then(fn);
   admissions.set(
     gw,
@@ -375,15 +375,11 @@ export async function catchUp(gw: Gateway): Promise<void> {
   gw.needsJournalRefresh = false;
 }
 
-async function appendAdmitted(
-  gw: Gateway,
-  deltas: Iterable<Delta>,
-  clock: ArrivalClock,
-): Promise<{ receipt: AppendReceipt; fresh: Delta[] }> {
+/** @internal Shared governed admission checks; caller must hold the admission queue. */
+export function preflightAppend(gw: Gateway, batch: readonly Delta[], at: number): void {
   if (gw.writeFailure !== undefined) {
     throw new Error(`this gateway can no longer persist: ${gw.writeFailure.message}`);
   }
-  const batch = [...deltas];
   // An erased id is refused re-entry forever (SPEC §11), through append as through federation, even
   // after its erasure is negated. An erasure in this same batch is checked once the batch is valid.
   const dead = refusedIds(gw.reactor, gw.operatorAuthor);
@@ -393,7 +389,6 @@ async function appendAdmitted(
   // only parties who can trigger it are parties who could already read the target, so telling them
   // IS the notice; the mechanism and the warning turn out to be the same thing. The federation door
   // shares this ONE predicate and differs only in disclosure (see federateImpl).
-  const at = (clock.at ??= Date.now()); // the slate check, and the journal's receive time
   const slates = readSlates(gw.reactor, gw.validityNow(), gw.operatorAuthor, at);
   for (const d of batch) {
     if (computeId(d.claims) !== d.id || verifyDelta(d) !== "verified") {
@@ -486,6 +481,16 @@ async function appendAdmitted(
         `and an erasure is permanent`,
     );
   }
+}
+
+async function appendAdmitted(
+  gw: Gateway,
+  deltas: Iterable<Delta>,
+  clock: ArrivalClock,
+): Promise<{ receipt: AppendReceipt; fresh: Delta[] }> {
+  const batch = [...deltas];
+  const at = (clock.at ??= Date.now());
+  preflightAppend(gw, batch, at);
   // A throw here means NOTHING was ingested or served.
   if (gw.peer === undefined) await gw.backend.append(batch);
   else await admitToJournal(gw, batch, at);
