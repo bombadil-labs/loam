@@ -58,7 +58,7 @@ import {
   admitLocal,
   admitReceived,
   JournalConflict,
-  reopenHostPeer,
+  rereadHostPeer,
 } from "./peer-admission.js";
 import { Channel } from "./channel.js";
 import type { AppendReceipt, FederationReport, Gateway } from "./gateway.js";
@@ -335,18 +335,28 @@ export function refreshImpl(gw: Gateway): Promise<void> {
   if (peer === undefined) return Promise.resolve();
   return admitting(gw, async () => {
     const read = await peer.store.readHead(peer.journal.peerId);
-    if (read.status !== "head" || read.head === peer.journal.currentHead()) return;
-    const before = gw.reactor.size;
+    if (read.status !== "head") throw new Error(`refresh: journal head is ${read.status}`);
+    if (!gw.needsJournalRefresh && read.head === peer.journal.currentHead()) return;
     await catchUp(gw);
-    // Rows another gateway wrote may bind, rebind or retire a lens: refold, as a boot does.
-    if (gw.reactor.size !== before) gw.replayRegistrations();
   });
 }
 
 /** @internal — take in what another writer admitted to this host's journal. */
 export async function catchUp(gw: Gateway): Promise<void> {
-  const rows = await reopenHostPeer(gw.peer!, (id) => gw.reactor.get(id) !== undefined);
-  if (rows.length === 0) return;
+  gw.needsJournalRefresh = true;
+  const admitted = await rereadHostPeer(gw.peer!);
+  const ids = new Set(admitted.map((d) => d.id));
+  if ([...gw.reactor.snapshot().ids()].some((id) => !ids.has(id))) {
+    // A removed row can survive in cached views and parked streams. Rebuild those together.
+    await gw.reseat();
+    gw.needsJournalRefresh = false;
+    return;
+  }
+  const rows = admitted.filter((d) => gw.reactor.get(d.id) === undefined);
+  if (rows.length === 0) {
+    gw.needsJournalRefresh = false;
+    return;
+  }
   gw.advanceToNow();
   for (const d of rows) gw.justPersisted.add(d.id);
   try {
@@ -357,9 +367,11 @@ export async function catchUp(gw: Gateway): Promise<void> {
     }
   } finally {
     for (const d of rows) gw.justPersisted.delete(d.id);
+    gw.replayRegistrations();
     gw.armValidityTimer();
     gw.notifyUserDependents();
   }
+  gw.needsJournalRefresh = false;
 }
 
 async function appendAdmitted(
