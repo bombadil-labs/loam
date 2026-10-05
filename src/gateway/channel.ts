@@ -111,6 +111,7 @@ export class Channel<T> implements AsyncGenerator<T, void, unknown> {
 export function streamAfter<T>(
   ready: Promise<void>,
   open: () => AsyncGenerator<T, void, unknown>,
+  live?: Set<LiveStream>,
 ): AsyncGenerator<T, void, unknown> {
   let stream: AsyncGenerator<T, void, unknown> | undefined;
   let closed = false;
@@ -118,21 +119,34 @@ export function streamAfter<T>(
   const left = new Promise<void>((resolve) => {
     release = resolve;
   });
-  return {
+  const leave = () => {
+    closed = true;
+    release();
+    live?.delete(deferred);
+  };
+  const deferred: AsyncGenerator<T, void, unknown> = {
     async next() {
-      await Promise.race([ready, left]);
       if (closed) return { value: undefined, done: true };
-      stream ??= open();
-      return stream.next();
+      try {
+        await Promise.race([ready, left]);
+        if (closed) return { value: undefined, done: true };
+        if (stream === undefined) {
+          stream = open();
+          live?.delete(deferred); // the opened native stream now owns its lifecycle
+        }
+        return stream.next();
+      } catch (error) {
+        if (closed) return { value: undefined, done: true };
+        leave();
+        throw error;
+      }
     },
     async return() {
-      closed = true;
-      release();
+      leave();
       return stream === undefined ? { value: undefined, done: true } : stream.return();
     },
     async throw(error?: unknown) {
-      closed = true;
-      release();
+      leave();
       if (stream !== undefined) return stream.throw(error);
       throw error instanceof Error ? error : new Error(String(error));
     },
@@ -140,4 +154,6 @@ export function streamAfter<T>(
       return this;
     },
   };
+  live?.add(deferred);
+  return deferred;
 }

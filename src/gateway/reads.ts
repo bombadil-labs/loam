@@ -667,7 +667,11 @@ export function watchEntityImpl(
   nowAt: () => number = () => Date.now(),
 ): AsyncGenerator<PatchNode, void, unknown> {
   if (gw.reseating !== undefined)
-    return streamAfter(gw.reseating, () => watchEntityImpl(gw, name, entity, door, nowAt));
+    return streamAfter(
+      gw.reseating,
+      () => watchEntityImpl(gw, name, entity, door, nowAt),
+      gw.channels,
+    );
   const bound = gw.def(name);
   if (channelLens(gw, name)) {
     throw new Error(

@@ -290,4 +290,75 @@ describe("streams opened during reactor replacement", () => {
     expect(await stream.next()).toMatchObject({ done: true });
     expect(opened).toBe(0);
   });
+  it("leaving before a readiness failure keeps subsequent next done", async () => {
+    let fail!: (e: Error) => void;
+    const ready = new Promise<void>((_, reject) => {
+      fail = reject;
+    });
+    void ready.catch(() => {});
+    let opens = 0;
+    const stream = streamAfter(ready, () => {
+      opens++;
+      return new Channel<string>();
+    });
+    const pending = stream.next();
+    await stream.return();
+    expect(await pending).toMatchObject({ done: true });
+    fail(new Error("reseat failed after cancellation"));
+    await ready.catch(() => {});
+    expect(await stream.next()).toMatchObject({ done: true });
+    expect(opens).toBe(0);
+  });
+  it("concurrent reads use one opened stream and retain FIFO", async () => {
+    let release!: () => void;
+    const ready = new Promise<void>((r) => {
+      release = r;
+    });
+    let opens = 0;
+    const channel = new Channel<string>();
+    const stream = streamAfter(ready, () => {
+      opens++;
+      return channel;
+    });
+    const first = stream.next(),
+      second = stream.next();
+    release();
+    channel.push("first");
+    channel.push("second");
+    expect(await first).toEqual({ value: "first", done: false });
+    expect(await second).toEqual({ value: "second", done: false });
+    expect(opens).toBe(1);
+    await stream.return();
+  });
+  it("propagates failed readiness without opening", async () => {
+    let opens = 0;
+    const stream = streamAfter(Promise.reject(new Error("no ground")), () => {
+      opens++;
+      return new Channel<string>();
+    });
+    await expect(stream.next()).rejects.toThrow("no ground");
+    expect(opens).toBe(0);
+    await stream.return();
+  });
+  it("close reaches a native stream acquired during reseat before its first pull", async () => {
+    const p = await pair();
+    try {
+      const old = p.reader.watch(HEIGHTS);
+      await old.next();
+      let deferred: ReturnType<Gateway["watch"]> | undefined;
+      const wake = old.next().then((r) => {
+        if (r.done) deferred = p.reader.watch(HEIGHTS);
+      });
+      await p.writer.erase(p.target.id, { reason: "deferred reader then close" });
+      await p.reader.refresh();
+      await wake;
+      expect(p.reader.reactor.get(p.target.id)).toBeUndefined();
+      expect(p.reader.reactor.get(p.bystander.id)).toBeDefined();
+      await p.reader.close();
+      expect(await deferred!.next()).toMatchObject({ done: true });
+      expect(p.reader.channels.size).toBe(0);
+    } finally {
+      await p.close();
+    }
+  });
 });

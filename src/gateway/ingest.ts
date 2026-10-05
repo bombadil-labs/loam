@@ -705,7 +705,8 @@ export function selectImpl(gw: Gateway, term: unknown): Delta[] {
 // entity streams ride — leaving the stream detaches immediately, a slow reader coalesces to the
 // newest membership. §27.6's "nearly free": every pulse re-evaluates the one Term.
 export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], void, unknown> {
-  if (gw.reseating !== undefined) return streamAfter(gw.reseating, () => watchImpl(gw, term));
+  if (gw.reseating !== undefined)
+    return streamAfter(gw.reseating, () => watchImpl(gw, term), gw.channels);
   // Lowered again on every pulse: a membership naming a user moves when the user's keys do.
   const program = () => parseTerm(lowerMembership(gw, term));
   const parsed = program();
