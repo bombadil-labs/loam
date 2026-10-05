@@ -6,6 +6,7 @@
 // live ServerHandle so a caller (a test, or a supervisor) can drive and close it. The default
 // `serve` blocks until the process is signalled.
 
+import { runOperatorCommand } from "./command.js";
 import { randomBytes } from "node:crypto";
 import {
   existsSync,
@@ -171,6 +172,7 @@ export interface RunOptions {
 const VERSION = "0.7.0";
 
 type CommandName =
+  | "command"
   | "init"
   | "serve"
   | "register"
@@ -206,6 +208,16 @@ function stockShelfLines(): string[] {
 // Each command's vocabulary, ONCE: the sets `--help` prints are the very sets the parser and the
 // allowlist are handed (via parseFor), so a command's manual cannot drift from what it accepts.
 const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
+  command: {
+    summary: "run an operator-local signed retain or pinned evaluation",
+    usage: "loam command --installation file --request file [--home directory] [--store file]",
+    flags: new Set(["home", "store", "installation", "request"]),
+    notes: [
+      "Local operator only. No remote or bound-user mode.",
+      "Retain imports ordinary facts after Loam preflight; law and control acts use existing services.",
+      "Evaluation requires an explicit head, original signed definitions, pins and bindings.",
+    ],
+  },
   init: {
     summary: "create a home — and at a terminal, a first user and a stocked shelf with it",
     usage: "loam init [options]",
@@ -5852,6 +5864,25 @@ export async function run(
   }
   try {
     switch (command) {
+      case "command": {
+        const parsed = parseFor("command", rest);
+        if (
+          parsed.positionals.length > 0 ||
+          !parsed.flags.has("installation") ||
+          !parsed.flags.has("request")
+        )
+          throw new UsageError("command requires --installation and --request files");
+        const home = parsed.flags.get("home") ?? defaultHome();
+        return await runOperatorCommand(
+          {
+            home,
+            store: storePath(home, parsed.flags.get("store")),
+            installation: parsed.flags.get("installation")!,
+            request: parsed.flags.get("request")!,
+          },
+          io,
+        );
+      }
       case "init":
         return await cmdInit(rest, io, options);
       case "serve":

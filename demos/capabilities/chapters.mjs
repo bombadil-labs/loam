@@ -2257,4 +2257,35 @@ export const CHAPTERS = [
       },
     ],
   },
+  {
+    n: 28,
+    slug: "operator-local-commands",
+    title: "An operator can try signed commands",
+    thesis:
+      "Import ordinary facts into the existing journal, then evaluate an explicitly pinned reading and verify the signed answer.",
+    covers: ["spec/65-operator-local-commands.md"],
+    body: [
+      {
+        kind: "prose",
+        text: "The local command service uses the store's existing operator key without retrieving its seed. Choose a journal head, import facts through the same admission guards as append, then supply original signed reading definitions and their pins. Another writer moving the head earns a signed refusal instead of an automatic retry. This trial refuses control acts and evaluation over read-closed ground; it is not a remote or bound-user serving door.",
+      },
+      {
+        kind: "claims",
+        claims: [
+          {
+            says: "Retain facts, evaluate them with original foreign definitions and exact pins, and repeat the reading after reopening SQLite; the request and receiver-signed outcome remain verifiable.",
+            spec: "spec/65-operator-local-commands.md",
+            proof: "test/gateway/operator-command.test.ts",
+            door: "openOperatorCommands",
+          },
+          {
+            says: "Competing writers, permanent refusal, quota and standing slate guards remain effective; control imports and remote or bound CLI modes are refused.",
+            spec: "spec/65-operator-local-commands.md",
+            proof: "test/gateway/operator-command.test.ts",
+            door: null,
+          },
+        ],
+      },
+    ],
+  },
 ];

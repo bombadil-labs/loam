@@ -288,7 +288,7 @@ async function appendValidated(
 // state (a pause, a budget, a recovery barrier) and both land. Only check, write and ingest run under
 // the lock: closing streams after it may await a reader, and a reader may append.
 const admissions = new WeakMap<Gateway, Promise<unknown>>();
-function admitting<T>(gw: Gateway, fn: () => Promise<T>): Promise<T> {
+export function admitting<T>(gw: Gateway, fn: () => Promise<T>): Promise<T> {
   const run = (admissions.get(gw) ?? Promise.resolve()).then(fn);
   admissions.set(
     gw,
@@ -375,15 +375,11 @@ export async function catchUp(gw: Gateway): Promise<void> {
   gw.needsJournalRefresh = false;
 }
 
-async function appendAdmitted(
-  gw: Gateway,
-  deltas: Iterable<Delta>,
-  clock: ArrivalClock,
-): Promise<{ receipt: AppendReceipt; fresh: Delta[] }> {
+/** @internal Shared governed admission checks; caller must hold the admission queue. */
+export function preflightAppend(gw: Gateway, batch: readonly Delta[], at: number): void {
   if (gw.writeFailure !== undefined) {
     throw new Error(`this gateway can no longer persist: ${gw.writeFailure.message}`);
   }
-  const batch = [...deltas];
   // An erased id is refused re-entry forever (SPEC §11), through append as through federation, even
   // after its erasure is negated. An erasure in this same batch is checked once the batch is valid.
   const dead = refusedIds(gw.reactor, gw.operatorAuthor);
@@ -393,8 +389,7 @@ async function appendAdmitted(
   // only parties who can trigger it are parties who could already read the target, so telling them
   // IS the notice; the mechanism and the warning turn out to be the same thing. The federation door
   // shares this ONE predicate and differs only in disclosure (see federateImpl).
-  const at = (clock.at ??= Date.now()); // the slate check, and the journal's receive time
-  const slates = readSlates(gw.reactor, gw.validityNow(), gw.operatorAuthor, at);
+  const slates = readSlates(gw.reactor, gw.validityNow(at), gw.operatorAuthor, at);
   for (const d of batch) {
     if (computeId(d.claims) !== d.id || verifyDelta(d) !== "verified") {
       throw new Error(
@@ -425,7 +420,7 @@ async function appendAdmitted(
     if (gw.operatorAuthor !== undefined) {
       const verdict = authorize(
         gw.reactor,
-        gw.validityNow(),
+        gw.validityNow(at),
         d,
         gw.operatorAuthor,
         batch,
@@ -447,13 +442,13 @@ async function appendAdmitted(
     const defect =
       lateCutDefect(gw.reactor, op, batch, refused) ??
       manifestDefect(gw.reactor, op, batch, (id) =>
-        declaredInboxes(readContainerTable(gw.reactor, gw.validityNow(), op)).some(
+        declaredInboxes(readContainerTable(gw.reactor, gw.validityNow(at), op)).some(
           (pool) => attachedPool(gw, pool)?.reactor.get(id) !== undefined,
         ),
       );
     if (defect !== undefined) throw new Error(`append rejected: ${defect}`);
     for (const d of batch) {
-      const defect = recordBarrierDefect(gw, op, d, batch, refused);
+      const defect = recordBarrierDefect(gw, op, d, batch, refused, at);
       if (defect !== undefined) throw new Error(`append rejected: ${defect}`);
     }
   }
@@ -463,7 +458,7 @@ async function appendAdmitted(
   // operator sets budgets and is never metered. Checked once for the whole batch, on the state
   // as it stands before it — the same discipline authorize() reads under.
   if (gw.operatorAuthor !== undefined) {
-    const overBudget = budgetRefusal(gw.reactor, gw.validityNow(), gw.operatorAuthor, batch);
+    const overBudget = budgetRefusal(gw.reactor, gw.validityNow(at), gw.operatorAuthor, batch);
     if (overBudget !== undefined) {
       throw new Error(`append rejected: ${overBudget}`);
     }
@@ -486,6 +481,16 @@ async function appendAdmitted(
         `and an erasure is permanent`,
     );
   }
+}
+
+async function appendAdmitted(
+  gw: Gateway,
+  deltas: Iterable<Delta>,
+  clock: ArrivalClock,
+): Promise<{ receipt: AppendReceipt; fresh: Delta[] }> {
+  const batch = [...deltas];
+  const at = (clock.at ??= gw.now());
+  preflightAppend(gw, batch, at);
   // A throw here means NOTHING was ingested or served.
   if (gw.peer === undefined) await gw.backend.append(batch);
   else await admitToJournal(gw, batch, at);
@@ -800,6 +805,7 @@ function recordBarrierDefect(
   d: Delta,
   batch: readonly Delta[],
   refused: ReadonlySet<string>,
+  at = gw.now(),
 ): string | undefined {
   const previous = d.claims.author === op ? recordPrevious(d) : undefined;
   if (previous === undefined) return undefined;
@@ -812,7 +818,7 @@ function recordBarrierDefect(
   }
   const stores = [
     { name: "this store", ground: gw as Gateway | undefined, batch },
-    ...declaredInboxes(readContainerTable(gw.reactor, gw.validityNow(), op)).map((pool) => ({
+    ...declaredInboxes(readContainerTable(gw.reactor, gw.validityNow(at), op)).map((pool) => ({
       name: pool,
       ground: attachedPool(gw, pool),
       batch: [] as readonly Delta[],
