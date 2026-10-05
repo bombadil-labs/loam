@@ -23,6 +23,7 @@ import { edgeRoles, lensOf, referenceProps, type ReferenceProp } from "./registr
 import { delegatesEverOf, keysEverOf } from "./principal.js";
 import { gatherPoolForRetraction } from "./reads.js";
 import { attachedPool, bindingPeer, poolOwner } from "./container.js";
+import { assertChannelSourceLegible } from "./reads.js";
 import { declaredInboxes, readContainerTable } from "./container-law.js";
 import { withStamp } from "./stamp.js";
 
@@ -57,6 +58,7 @@ export async function mutateEntityImpl(
   actorSeed?: string,
   binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
+  assertChannelSourceLegible(gw, name);
   const sink = sinkFor(gw, actorSeed, binding);
   const signer = actorSeed !== undefined ? seedSigner(actorSeed) : gw.signer;
   if (signer === undefined) {
@@ -240,6 +242,7 @@ export function clearEntityImpl(
   actorSeed?: string,
   binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
+  assertChannelSourceLegible(gw, name);
   if (fields.length === 0) throw new Error(`clear of ${entity} names no fields to retract`);
   assertWritable(gw, name, fields, binding);
   const set = new Set(fields);
@@ -258,6 +261,7 @@ export function removeEntityImpl(
   actorSeed?: string,
   binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
+  assertChannelSourceLegible(gw, name);
   if (values.length === 0) {
     throw new Error(`remove from ${field} of ${entity} names no values to retract`);
   }
@@ -329,6 +333,7 @@ export async function linkEntityImpl(
   actorSeed?: string,
   binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
+  assertChannelSourceLegible(gw, name);
   const sink = sinkFor(gw, actorSeed, binding);
   const signer = actorSeed !== undefined ? seedSigner(actorSeed) : gw.signer;
   if (signer === undefined) {
@@ -387,6 +392,7 @@ export function severEntityImpl(
   actorSeed?: string,
   binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
+  assertChannelSourceLegible(gw, name);
   if (!gw.def(name, binding).schema.props.has(field)) {
     throw new Error(`schema ${name} has no field "${field}" to sever`);
   }
@@ -477,6 +483,7 @@ export async function linkRefEntityImpl(
   actorSeed?: string,
   binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
+  assertChannelSourceLegible(gw, name);
   const sink = sinkFor(gw, actorSeed, binding);
   const signer = actorSeed !== undefined ? seedSigner(actorSeed) : gw.signer;
   if (signer === undefined) {
@@ -528,6 +535,7 @@ export async function unlinkRefEntityImpl(
   actorSeed?: string,
   binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
+  assertChannelSourceLegible(gw, name);
   const ref = referencePropFor(gw, name, prop, binding);
   return retract(
     gw,

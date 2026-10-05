@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { authorForSeed, signClaims, type Delta, type Claims } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
@@ -13,6 +13,8 @@ import { SqliteBackend } from "../../src/store/sqlite.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "./fixtures.js";
 import { DEADLINE } from "./slating.js";
+import { channelRecordClaims } from "../../src/federation/channel.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 
 const SEED = "51".repeat(32);
 const AUTHOR = authorForSeed(SEED);
@@ -426,6 +428,102 @@ describe("child law refresh invalidates the parent's dependent surface", () => {
       await writer.close();
     }
   }
+  it("an unreadable channel prefix keeps its specific refusal after a real SQLite child refold, without signing mutations or disturbing the native bystander", async () =>
+    channelFixture(async (_sender, receiver, child, file) => {
+      await child.publishRegistration(
+        PLANT,
+        { ...PLANT_POLICY, name: "remote:Plant" },
+        [FERN],
+        undefined,
+        undefined,
+        {
+          setRemoteHeight: {
+            pointers: [
+              { role: "target", at: { arg: "entity" }, context: "height" },
+              { role: "value", value: { arg: "height" } },
+            ],
+          },
+        },
+        ["height"],
+      );
+      expect((await receiver.query(remoteQuery)).errors).toBeUndefined();
+      expect(child.def("remote:Plant").writable).toContain("height");
+      // Healthy channel controls exercise BOTH signing routes before their source becomes unreadable.
+      const healthyHead = receiver.peer!.journal.currentHead();
+      const healthyMutation = await receiver.query(
+        `mutation { remote_Plant(entity: "${FERN}", height: 999) { height } }`,
+      );
+      expect(healthyMutation.errors).toBeUndefined();
+      expect(receiver.peer!.journal.currentHead()).not.toBe(healthyHead);
+      const healthyTemplate = await receiver.query(
+        `mutation { setRemoteHeight(entity: "${FERN}", height: 999) { delta } }`,
+      );
+      expect(healthyTemplate.errors).toBeUndefined();
+      expect(healthyTemplate.data?.setRemoteHeight).toHaveProperty("delta");
+      const status = receiver.channelStatus()[0]!;
+      const claims = withStamp(receiver.stamp(receiver.operatorAuthor), (stamp) =>
+        channelRecordClaims(status, receiver.operatorAuthor!, stamp),
+      );
+      await receiver.append([
+        receiver.signer!.sign({
+          ...claims,
+          pointers: claims.pointers.filter((p) => p.role !== "prefix"),
+        }),
+      ]);
+      expect(receiver.channelStatus()[0]!.unreadable).toContain("prefix");
+      const oldHead = child.peer!.journal.currentHead();
+      const writer = await Gateway.open(new SqliteBackend(file), { seed: CHILD_SEED });
+      try {
+        await writer.append([observed(FERN, "tag", "child changed", 1003, CHILD_SEED)]);
+      } finally {
+        await writer.close();
+      }
+      const result = await receiver.query(remoteQuery);
+      expect(child.peer!.journal.currentHead()).not.toBe(oldHead);
+      expect(child.def("remote:Plant")).toBeDefined();
+      expect(JSON.stringify(result.errors)).toMatch(/does not carry its prefix/);
+      expect(JSON.stringify(result.errors)).toContain(status.name);
+      expect(JSON.stringify(result.data ?? {})).not.toContain("999");
+      const head = receiver.peer!.journal.currentHead();
+      const signing = vi.spyOn(receiver.signer!, "sign");
+      const mutation = await receiver.query(
+        `mutation { remote_Plant(entity: "${FERN}", height: 123) { height } }`,
+      );
+      expect(JSON.stringify(mutation.errors)).toMatch(/does not carry its prefix/);
+      expect(receiver.peer!.journal.currentHead()).toBe(head);
+      const template = await receiver.query(
+        `mutation { setRemoteHeight(entity: "${FERN}", height: 456) { delta } }`,
+      );
+      expect(JSON.stringify(template.errors)).toMatch(/does not carry its prefix/);
+      expect(receiver.peer!.journal.currentHead()).toBe(head);
+      await expect(receiver.mutateEntity("remote:Plant", FERN, { height: 789 })).rejects.toThrow(
+        /does not carry its prefix/,
+      );
+      await expect(receiver.list("remote:Plant")).rejects.toThrow(/does not carry its prefix/);
+      expect(signing).not.toHaveBeenCalled();
+      expect(receiver.peer!.journal.currentHead()).toBe(head);
+      signing.mockRestore();
+      await expect(
+        receiver.subscribe(`subscription { remote_Plant(entity: "${FERN}") { height } }`),
+      ).rejects.toThrow(/federation channel/);
+      const own = await receiver.query(nativeQuery);
+      expect(own.errors).toBeUndefined();
+      expect((own.data?.plant as { height: number }).height).toBe(999);
+      await receiver.publishRegistration(
+        PLANT,
+        PLANT_POLICY,
+        [FERN],
+        undefined,
+        undefined,
+        undefined,
+        ["height"],
+      );
+      const nativeMutation = await receiver.query(
+        `mutation { plant(entity: "${FERN}", height: 321) { height } }`,
+      );
+      expect(nativeMutation.errors).toBeUndefined();
+      expect((nativeMutation.data?.plant as { height: number }).height).toBe(321);
+    }));
   it("an independent SQLite child binding withdrawal retires the parent's warmed channel lens and preserves its native bystander", async () =>
     channelFixture(async (_sender, receiver, child, file) => {
       const warm = await receiver.query(remoteQuery);

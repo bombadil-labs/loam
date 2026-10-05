@@ -353,6 +353,7 @@ export function buildGqlSchema(
       seen.add(name);
     }
 
+    const priorMutations = new Set(Object.keys(mutationFields));
     const typeName = legal(lensOf(def));
     const viewType = new GraphQLObjectType<ResolvedNode>({
       name: `${typeName}View`,
@@ -776,6 +777,17 @@ export function buildGqlSchema(
           }
           return hooks.claim(pointers, actor, binding);
         },
+      };
+    }
+    // Every named mutation, including a raw-pointer template, belongs to THIS lens. Check its
+    // source before the resolver signs; an error from post-write resolution is too late.
+    for (const [name, field] of Object.entries(mutationFields)) {
+      if (priorMutations.has(name)) continue;
+      const resolve = field.resolve;
+      if (resolve === undefined) continue;
+      field.resolve = (...args) => {
+        hooks.assertSource?.(lensOf(def));
+        return resolve(...args);
       };
     }
   }

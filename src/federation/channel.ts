@@ -1372,7 +1372,7 @@ function declaredPrefix(name: string, inboxOf: string | undefined): string | und
  * The prefix a channel's own NAME carries — `channel:<into>:<prefix>`.
  *
  * A STRUCTURAL GUESS that splits at the first colon after `channel:`, so it cannot separate the two
- * halves when either carries a colon (T215) — it is only the last resort `reads.ts` reaches when a
+ * halves when either carries a colon (T215) — it is only the last resort serving readers and binding folds reach when a
  * record's `prefix` primitive is among the roles the reader condemned, where a legible reading is
  * gone and the name is the only identity left. The collision guard reads the record and the
  * declaration instead (`standingPrefixes`); it never calls this.

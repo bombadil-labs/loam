@@ -211,6 +211,7 @@ import {
   unlinkRefEntityImpl,
 } from "./mutate.js";
 import {
+  assertChannelSourceLegible,
   gatherForRetractionImpl,
   gatherImpl,
   resolvedNodeImpl,
@@ -833,6 +834,7 @@ export class Gateway {
   /** @internal — T19 seam (lifecycle.ts: every surface (re)build threads the hooks through) */
   gqlHooks(door: "full" | "public" = "full"): GqlHooks {
     return {
+      assertSource: (name) => assertChannelSourceLegible(this, name),
       resolve: (name, entity, asOf, binding) =>
         this.resolvedNode(name, entity, asOf, undefined, binding),
       mutate: (name, entity, props, actorSeed, binding) =>

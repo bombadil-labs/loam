@@ -280,12 +280,7 @@ export function gatherImpl(
  * Read closure still applies: a read-closed delta must not reappear through a channel's pool, so the
  * narrowed set is subtracted here exactly as the primary path narrows its own.
  */
-function channelGroundFor(
-  gw: Gateway,
-  lens: string,
-  now: number,
-  asOf?: number,
-): DeltaSet | undefined {
+function channelSource(gw: Gateway, lens: string) {
   const cut = lens.indexOf(":");
   if (cut <= 0) return undefined;
   const prefix = lens.slice(0, cut);
@@ -321,6 +316,23 @@ function channelGroundFor(
     }
     return undefined;
   }
+  return channel;
+}
+
+// Source legibility is checked before a named operation can sign or declare listing law.
+// This is the same refusal as gathering, not a new admission or channel authority policy.
+export function assertChannelSourceLegible(gw: Gateway, lens: string): void {
+  channelSource(gw, lens);
+}
+
+function channelGroundFor(
+  gw: Gateway,
+  lens: string,
+  now: number,
+  asOf?: number,
+): DeltaSet | undefined {
+  const channel = channelSource(gw, lens);
+  if (channel === undefined) return undefined;
   const closed = readClosedIds(gw, now);
   // A time pin rides the READ (§26), so it must reach the pool as well — a scoped lens that
   // silently ignored `asOf` would answer the present while the caller believes it answered the past.

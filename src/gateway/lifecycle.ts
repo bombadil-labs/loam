@@ -70,6 +70,7 @@ import { loadResolvers } from "./resolvers.js";
 import { stamped, withStamp, type Stamp } from "./stamp.js";
 import { governedHook, governedProgram } from "./governed-trust.js";
 import { userGroundOf } from "./user-root.js";
+import { prefixOfChannelName, type ChannelStatus } from "../federation/channel.js";
 
 const RAW = { raw: true } as const;
 
@@ -445,6 +446,12 @@ const lastBindFailure = (gw: Gateway, key: string): string | undefined =>
 const lawfulRegistrations = (g: Peer, boundary?: Boundary): Registration[] =>
   readLawfulRegistrations(g.reactor, g.validityNow(), g.lawAuthors("registrations"), boundary);
 
+// An unreadable prefix must still route CURRENT child law to the source-aware refusal in
+// reads.ts. This structural fallback fences candidates; it never supplies a serving ground or
+// preserves withdrawn registrations. Keep contests and bound surfaces under the same fence.
+const bindingPrefix = (standing: ChannelStatus): string | undefined =>
+  standing.unreadable.includes("prefix") ? prefixOfChannelName(standing.name) : standing.prefix;
+
 function storeBindings(gw: Gateway, boundary?: Boundary): Bound[] {
   const rows: Bound[] = lawfulRegistrations(gw, boundary).map((r) => ({
     ...r,
@@ -458,7 +465,8 @@ function storeBindings(gw: Gateway, boundary?: Boundary): Bound[] {
     if (pool === undefined) continue;
     const read = lawfulRegistrations(pool, boundary);
     for (const r of read) {
-      if (!lensOf(r).startsWith(`${standing.prefix}:`)) continue;
+      const prefix = bindingPrefix(standing);
+      if (prefix === undefined || !lensOf(r).startsWith(`${prefix}:`)) continue;
       rows.push({ ...r, origin: "store" as const, channel: standing.name });
     }
   }
@@ -549,7 +557,8 @@ export function boundBindingsImpl(
     const pool = gw.store.channels(gw).get(standing.name)?.gateway;
     if (pool === undefined) continue;
     for (const r of lawfulRegistrations(pool)) {
-      if (!lensOf(r).startsWith(`${standing.prefix}:`)) continue;
+      const prefix = bindingPrefix(standing);
+      if (prefix === undefined || !lensOf(r).startsWith(`${prefix}:`)) continue;
       if (lensOf(r).includes(NUL)) continue;
       candidates.push({ ...r, origin: "store" as const, channel: standing.name });
     }
@@ -801,7 +810,8 @@ export function contestedNamesImpl(gw: Gateway): Map<string, ContestedNameReport
       pool.validityNow(),
       pool.lawAuthors("registrations"),
     )) {
-      if (!lens.startsWith(`${standing.prefix}:`)) continue;
+      const prefix = bindingPrefix(standing);
+      if (prefix === undefined || !lens.startsWith(`${prefix}:`)) continue;
       for (const c of list) add(lens, { ...c, origin: originOf(c.deltaId, standing.name) });
     }
   }

@@ -53,6 +53,18 @@ Bound queries and listings, and channel-prefixed queries, use this serving scope
 subscriptions remain refused by their existing contracts; this slice does not invent a maintained
 view over composed peer sources.
 
+A standing channel whose prefix is explicitly unreadable keeps only its current child law in
+candidate folds, fenced by the same structural channel-name fallback used by the read refusal.
+This preserves the requested channel's diagnostic after a child journal refresh; it does not
+preserve withdrawn bindings or supply a replacement serving ground. Candidate and contest folds
+use the same fence. Unrelated malformed channels do not prevent a native read.
+
+Named mutation hooks and GraphQL templates check source legibility before signing, and listing
+checks before declaring its backing law. A refusal therefore leaves the admitted journal unchanged.
+The optional surface `assertSource` hook supplies this guard to generators; native named mutation
+methods also enforce it. Generic raw `_claim` has no channel lens and keeps its existing admission
+contract. Healthy channel and native mutations retain their existing behavior.
+
 ## Membership is a separate question
 
 `select`, `containerScope`, `connectionScope`, container members and freeze retain their raw

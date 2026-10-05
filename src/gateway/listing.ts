@@ -42,6 +42,7 @@ import { withStamp } from "./stamp.js";
 import { USER_PREFIX } from "./user-root.js";
 import { hasMemberOf, membershipForValidation } from "./member-of.js";
 import { programMaskJson } from "./program-mask.js";
+import { assertChannelSourceLegible } from "./reads.js";
 
 // WHAT A PAGE COSTS. Every page pays three separate costs, and two of them are now independent
 // of the store's size (H8, ticket T163):
@@ -492,6 +493,7 @@ export async function listingPageImpl(
   await gw.prepareRead();
   const now = gw.now();
   const def = gw.def(name, binding); // refuses an unregistered lens in the door's own voice
+  assertChannelSourceLegible(gw, name);
   const program = programOf(def);
   const limit = opts.limit ?? LISTING_DEFAULT_LIMIT;
   if (!Number.isInteger(limit) || limit < 1 || limit > LISTING_MAX_LIMIT) {

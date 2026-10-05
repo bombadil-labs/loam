@@ -86,6 +86,9 @@ export interface ClaimPointerSpec {
 // in its inbox pool and its reads resolve over the container its consent named. Absent, the request
 // is the operator's or a store-wide actor's, on this store's own ground.
 export interface SurfaceHooks {
+  // A named operation must check that its source is legible BEFORE signing or making listing
+  // declarations. Optional for non-federated generators; gateway surfaces supply this guard.
+  assertSource?(schemaName: string): void;
   // Resolve a view at an entity. An optional `asOf` (SPEC §26) reads a MOMENT: the ground as it
   // stood at timestamp T, resolved by the same program — omit it and the read is present-tense.
   resolve(
