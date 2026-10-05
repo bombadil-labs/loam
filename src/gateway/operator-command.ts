@@ -152,7 +152,9 @@ export async function openOperatorCommands(gw: Gateway, installation: CommandIns
         if (
           head.status === "head" &&
           head.head === command.expectedHead &&
-          head.head === peer.journal.currentHead()
+          head.head === peer.journal.currentHead() &&
+          !gw.needsJournalRefresh &&
+          gw.reseating === undefined
         ) {
           if (command.kind === "retain") {
             requireFacts(command.payload);

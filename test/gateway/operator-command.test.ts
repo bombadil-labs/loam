@@ -217,6 +217,40 @@ describe("operator-local portable commands use Loam's real peer", () => {
         await other.close();
       }
     }));
+  it("refuses stale authority after a failed reseat has already adopted the current head", async () =>
+    fixture(async (gw, path) => {
+      const grant = signClaims(
+        grantClaims(STORE_ENTITY, authorForSeed(FOREIGN), "write", OP, 0),
+        OP_SEED,
+      );
+      const bystander = observed(ROOT, "tag", "keep", 1, OP_SEED);
+      await gw.append([grant, bystander]);
+      const commands = await openOperatorCommands(gw, installation);
+      const other = await Gateway.open(new SqliteBackend(path), { seed: OP_SEED });
+      const store = gw.peer!.store;
+      const read = store.readJournal.bind(store);
+      try {
+        await other.erase(grant.id);
+        let reads = 0;
+        store.readJournal = (id) =>
+          ++reads === 2 ? Promise.reject(new Error("temporary journal failure")) : read(id);
+        await expect(gw.reseat()).rejects.toThrow("temporary journal failure");
+        store.readJournal = read;
+        expect(gw.peer!.journal.currentHead()).toBe(await commands.head());
+        expect(gw.reactor.get(grant.id)).toBeDefined();
+        const fact = observed(ROOT, "height", 42, 0, FOREIGN);
+        await expect(
+          commands.run({ kind: "retain", expectedHead: await commands.head(), payload: [fact] }),
+        ).rejects.toThrow(/stale|refresh/);
+        expect(await gw.backend.holds(fact.id)).toBe(false);
+        expect(await gw.backend.holds(bystander.id)).toBe(true);
+        await gw.refresh();
+        expect(gw.reactor.get(grant.id)).toBeUndefined();
+      } finally {
+        store.readJournal = read;
+        await other.close();
+      }
+    }));
   it("keeps erased IDs refused without affecting a named bystander", async () =>
     fixture(async (gw) => {
       const fact = observed(ROOT, "height", 42, 0, OP_SEED),

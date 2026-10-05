@@ -17,7 +17,7 @@ The service's `head()` observes the current journal head. Each `run()` job suppl
 `expectedHead`; observation does not silently choose that expectation for a later invocation.
 A competing durable write produces a signed precondition or write-conflict refusal. There
 is no retry against a newer head. If the caller selects a current durable head while the
-gateway's reactor is stale, the service asks the caller to refresh first.
+gateway's reactor is stale, rebuilding, or recovering from a failed refresh, the service refuses until refresh completes.
 
 The job, guard checks and command use the same admission queue as append and one captured
 receive time. Retain runs append's standing, quota, permanent refusal, erasure and slate
@@ -57,6 +57,6 @@ prints the signed request, signed outcome, status and decoded view when availabl
 flags, including remote and bound-connection options, are refused before invocation.
 
 **Provenance.** [#684](https://github.com/bombadil-labs/loam/pull/684), the supervised command-consumer landing. Implementation: `src/gateway/operator-command.ts`, the shared preflight in
-`src/gateway/ingest.ts`, and `src/cli/command.ts`. Proof: the nine actual SQLite and CLI cases
+`src/gateway/ingest.ts`, and `src/cli/command.ts`. Proof: the actual SQLite and CLI cases
 in `test/gateway/operator-command.test.ts`, covering reopen, foreign definitions, pins and
 closure, competing writers, slate/refusal/quota/law guards, and refusal of remote modes.
