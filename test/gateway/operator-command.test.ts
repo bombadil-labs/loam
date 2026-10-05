@@ -251,6 +251,39 @@ describe("operator-local portable commands use Loam's real peer", () => {
         await other.close();
       }
     }));
+  it("a native write after head observation produces a signed conflict instead of a false stale-gateway fault", async () =>
+    fixture(async (gw) => {
+      const commands = await openOperatorCommands(gw, installation),
+        before = await commands.head();
+      const store = gw.peer!.store,
+        read = store.readHead.bind(store);
+      let race = true;
+      const competitor = observed(ROOT, "tag", "native bystander", 0, OP_SEED),
+        fact = observed(ROOT, "height", 92, 0, OP_SEED);
+      store.readHead = async (peer) => {
+        const observed = await read(peer);
+        if (race) {
+          race = false;
+          gw.reactor.ingest(competitor);
+          await gw.flush();
+        }
+        return observed;
+      };
+      let result: Awaited<ReturnType<typeof commands.run>> | undefined, error: unknown;
+      try {
+        result = await commands.run({ kind: "retain", expectedHead: before, payload: [fact] });
+      } catch (e) {
+        error = e;
+      }
+      expect(await gw.backend.holds(competitor.id)).toBe(true);
+      expect(await gw.backend.holds(fact.id)).toBe(false);
+      expect(gw.needsJournalRefresh).toBe(false);
+      expect(gw.peer!.journal.currentHead()).toBe(await commands.head());
+      expect(error).toBeUndefined();
+      expect(result!.result.status).toBe("refused");
+      expect(verifyDelta(result!.outcome)).toBe("verified");
+      expect(result!.result.body.get("code")).toMatchObject({ v: "precondition-failed" });
+    }));
   it("keeps erased IDs refused without affecting a named bystander", async () =>
     fixture(async (gw) => {
       const fact = observed(ROOT, "height", 42, 0, OP_SEED),

@@ -165,7 +165,13 @@ export async function openOperatorCommands(gw: Gateway, installation: CommandIns
             );
           }
         } else if (head.status === "head" && head.head === command.expectedHead) {
-          throw new Error("operator command gateway is stale; refresh before choosing a new head");
+          // This gateway may have committed a native emission while readHead was in flight.
+          // Keep the chosen expectation and let the endpoint sign the conflict in that case.
+          const current = await peer.store.readHead(signer.author);
+          if (current.status === "head" && current.head === command.expectedHead)
+            throw new Error(
+              "operator command gateway is stale; refresh before choosing a new head",
+            );
         }
         const outcome = await endpoint.invoke(
           request.id,
