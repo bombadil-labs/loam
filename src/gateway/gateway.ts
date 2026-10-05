@@ -1386,11 +1386,15 @@ export class Gateway {
   /** Refresh owned admitted sources before a serving door composes them. */
   async prepareRead(options: { reconcileLaw?: boolean } = {}): Promise<void> {
     await this.refresh();
-    if (options.reconcileLaw) {
-      this.replayRegistrations();
-      await this.preloadResolvers();
+    let children = false;
+    for (const child of this.store.pools(this)) {
+      await child.prepareRead();
+      children = true;
     }
-    for (const child of this.store.pools(this)) await child.prepareRead();
+    // Child law also shapes this surface. Retry this owned refold even at unchanged heads:
+    // a previous failure must not leave a retired channel lens served from the parent cache.
+    if (children || options.reconcileLaw) this.replayRegistrations();
+    if (options.reconcileLaw) await this.preloadResolvers();
   }
 
   /** A parent may narrow this testimony; it cannot substitute the peer's raw snapshot. */

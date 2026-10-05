@@ -6,8 +6,10 @@ import { condemnedClosure, readClosedIds } from "./slate-law.js";
 
 export interface ReadContribution {
   readonly rows: readonly Delta[];
-  /** Approved strikes, including those outside the requested membership/owner filter. */
+  /** Historically eligible approved strikes, including those outside the membership filter. */
   readonly negations: readonly Delta[];
+  /** Current suppression links, independent of asOf; metadata cannot reinsert future bytes. */
+  readonly negationTargets: ReadonlyMap<string, readonly string[]>;
   /** Only targets of withheld strikes cross into another peer's suppression scope. */
   readonly withheldTargets: ReadonlySet<string>;
   /** Raw membership ids support exclusion without disclosing withheld row contents. */
@@ -46,10 +48,21 @@ export function readContributionImpl(
       throw new Error(`serving contribution refused: inbox "${options.inbox}" ${owner.refusal}`);
     selected = gw.select(ownerTerm(gw, owner, options.inbox, gw.validityNow(now)), now);
   }
+  const currentNegations = raw.filter(
+    (d) => !closed.has(d.id) && d.claims.pointers.some((p) => p.role === "negates"),
+  );
   return {
     rows: selected.filter(approved),
-    negations: raw.filter(
-      (d) => approved(d) && d.claims.pointers.some((p) => p.role === "negates"),
+    negations: currentNegations.filter(approved),
+    negationTargets: new Map(
+      currentNegations.map((delta) => [
+        delta.id,
+        delta.claims.pointers.flatMap((pointer) =>
+          pointer.role === "negates" && pointer.target.kind === "delta"
+            ? [pointer.target.deltaRef.delta]
+            : [],
+        ),
+      ]),
     ),
     withheldTargets: targets,
     membership: new Set(raw.map((d) => d.id)),
@@ -62,12 +75,12 @@ export function closeContributions(
   admitted: readonly Delta[],
 ): Delta[] {
   const negations = new Map<string, Delta[]>();
-  const strikes = new Map<string, Delta>();
+  const strikes = new Map<string, readonly string[]>();
   const withheld = new Set<string>();
   for (const contribution of contributions) {
     for (const id of contribution.withheldTargets) withheld.add(id);
+    for (const [id, targets] of contribution.negationTargets) strikes.set(id, targets);
     for (const delta of contribution.negations) {
-      strikes.set(delta.id, delta);
       for (const pointer of delta.claims.pointers) {
         if (pointer.role !== "negates" || pointer.target.kind !== "delta") continue;
         const target = pointer.target.deltaRef.delta;
@@ -81,9 +94,7 @@ export function closeContributions(
   // must also withhold what it held down; otherwise composition revives the next target.
   const hidden = [...withheld];
   while (hidden.length > 0) {
-    for (const pointer of strikes.get(hidden.pop()!)?.claims.pointers ?? []) {
-      if (pointer.role !== "negates" || pointer.target.kind !== "delta") continue;
-      const target = pointer.target.deltaRef.delta;
+    for (const target of strikes.get(hidden.pop()!) ?? []) {
       if (withheld.has(target)) continue;
       withheld.add(target);
       hidden.push(target);

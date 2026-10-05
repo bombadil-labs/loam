@@ -15,6 +15,10 @@ from a cached child reactor instead. This preparation currently reaches every at
 can therefore fail an ordinary read because an attached child is unavailable. It does not promise
 one atomic snapshot across several independently writable journals.
 
+After its children prepare successfully, the parent refolds its own dependent surface. A withdrawn
+child channel binding leaves the parent's cached surface too. A failed parent refold aborts the
+read; the next preparation retries it even when all journal heads are unchanged.
+
 An explicit `reconcileLaw` preparation also replays the peer's registrations and loads its approved
 resolvers. Federation blessing and curse/lift use that owned reconciliation before the parent
 replays its surface. Failures remain visible. The peer interface replaces the separate preload and
@@ -35,6 +39,10 @@ link lives in another contributing peer. It does not reinsert closed strike byte
 reactor. A peer visited only to compute exclusion contributes no strikes or suppression to the
 union. Raw membership IDs still drive subtraction, so closing a row's read door cannot weaken an
 existing exclusion.
+
+Current suppression links are carried as ID metadata separately from historically eligible rows
+and strikes. An `asOf` before a chain was spoken does not reopen a current read closure, and following
+that conservative closure does not insert later strike bytes into the historical answer.
 
 A child's own erasure applies to its own contributed copy. It does not acquire authority over an
 independent copy admitted by another peer, even when the content ID and author agree. Only the

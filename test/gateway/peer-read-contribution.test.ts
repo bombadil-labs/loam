@@ -122,8 +122,10 @@ async function fixture(body: (root: Gateway, child: Gateway, file: string) => Pr
     rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
-const reading = async (root: Gateway) => {
-  const result = await root.query(QUERY, undefined, {
+const reading = async (root: Gateway, asOf?: number) => {
+  const source =
+    asOf === undefined ? QUERY : `{ plant(entity: "${FERN}", asOf: ${asOf}) { height tag } }`;
+  const result = await root.query(source, undefined, {
     binding: { container: HOME, inbox: "unused" },
   });
   expect(result.errors).toBeUndefined();
@@ -149,6 +151,32 @@ describe("a peer owns its serving contribution before composition", () => {
       const composed = root.servingScope(Date.now(), { bound: HOME }).map((d) => d.id);
       expect(composed).not.toContain(target.id);
       expect(composed).toContain(bystander.id);
+    }));
+
+  it("a historical bound query keeps current withheld-strike closure without admitting future strike bytes", async () =>
+    fixture(async (root, child) => {
+      const target = observed(FERN, "height", 87, 1001, SEED);
+      const bystander = observed(FERN, "height", 12, 1000, SEED);
+      await root.append([target, bystander]);
+      const first = strike(root, target.id, 2000);
+      await root.append([first]);
+      const second = strike(child, first.id, 3000);
+      await child.append([second]);
+      expect((await reading(root, 1500)).height).toBe(87);
+      await slate(child, [second]);
+      expect(child.reactor.get(first.id)).toBeUndefined();
+      expect(root.reactor.get(first.id)).toBeDefined();
+      const historical = root
+        .servingScope(Date.now(), { bound: HOME, asOf: 1500 })
+        .map((d) => d.id);
+      expect(historical).not.toContain(first.id);
+      expect(historical).not.toContain(second.id);
+      expect(historical).not.toContain(target.id);
+      expect(historical).toContain(bystander.id);
+      expect((await reading(root, 1500)).height).toBe(12);
+      expect(root.containerScope({ containers: [HOME, ROOM] }).map((d) => d.id)).toEqual(
+        expect.arrayContaining([target.id, first.id, second.id]),
+      );
     }));
 
   it("a child's held read-slate hides its row at the real bound query while raw membership and freeze retain it", async () =>
@@ -342,4 +370,105 @@ describe("channel query serving uses the peer-owned source too", () => {
       await receiver.close();
     }
   });
+});
+
+describe("child law refresh invalidates the parent's dependent surface", () => {
+  async function channelFixture(
+    body: (sender: Gateway, receiver: Gateway, child: Gateway, file: string) => Promise<void>,
+  ) {
+    const dir = mkdtempSync(join(tmpdir(), "loam-peer-channel-law-"));
+    const file = join(dir, "channel.sqlite");
+    const peerSeed = "56".repeat(32);
+    const sender = await Gateway.boot(
+      new MemoryBackend(),
+      assembleGenesis({
+        operatorSeed: peerSeed,
+        registrations: [{ hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN] }],
+      }),
+    );
+    const receiver = await Gateway.boot(
+      new MemoryBackend(),
+      assembleGenesis({
+        operatorSeed: SEED,
+        registrations: [{ hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN] }],
+      }),
+      {
+        channelBackend: () => new SqliteBackend(file),
+        poolKeys: { load: () => CHILD_SEED, create: () => CHILD_SEED },
+      },
+    );
+    try {
+      await sender.append([observed(FERN, "height", 87, 1001, peerSeed)]);
+      const channel = await receiver.openChannel({
+        into: "friends",
+        prefix: "remote",
+        source: { pull: () => Promise.resolve(sender.reactor.arrivalLog()) },
+      });
+      await channel.sync();
+      await receiver.append([observed(FERN, "height", 999, 1002, SEED)]);
+      const child = receiver.store.tableOf(receiver).channels.get(channel.name)!.gateway!;
+      await body(sender, receiver, child, file);
+    } finally {
+      await receiver.close();
+      await sender.close();
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  }
+  const remoteQuery = `{ remote_Plant(entity: "${FERN}") { height } }`;
+  const nativeQuery = `{ plant(entity: "${FERN}") { height } }`;
+  async function withdraw(child: Gateway, file: string) {
+    const id = child.def("remote:Plant").boundId!;
+    expect(id).toBeDefined();
+    const writer = await Gateway.open(new SqliteBackend(file), { seed: CHILD_SEED });
+    try {
+      await writer.strike([id]);
+    } finally {
+      await writer.close();
+    }
+  }
+  it("an independent SQLite child binding withdrawal retires the parent's warmed channel lens and preserves its native bystander", async () =>
+    channelFixture(async (_sender, receiver, child, file) => {
+      const warm = await receiver.query(remoteQuery);
+      expect(warm.errors).toBeUndefined();
+      expect((warm.data?.remote_Plant as { height: number }).height).toBe(87);
+      await withdraw(child, file);
+      expect(child.def("remote:Plant")).toBeDefined(); // the reader has not reconciled yet
+      const result = await receiver.query(remoteQuery);
+      expect(child.registered.map((r) => r.lensName)).not.toContain("remote:Plant");
+      expect(receiver.registered.map((r) => r.lensName)).not.toContain("remote:Plant");
+      expect(result.errors).toBeDefined();
+      const own = await receiver.query(nativeQuery);
+      expect(own.errors).toBeUndefined();
+      expect((own.data?.plant as { height: number }).height).toBe(999);
+    }));
+  it("a failed parent refold refuses the read and retries the withdrawn child law at unchanged heads", async () =>
+    channelFixture(async (_sender, receiver, child, file) => {
+      expect((await receiver.query(remoteQuery)).errors).toBeUndefined();
+      await withdraw(child, file);
+      const replay = receiver.replayRegistrations.bind(receiver);
+      let failed = false;
+      receiver.replayRegistrations = () => {
+        if (!failed) {
+          failed = true;
+          throw new Error("injected parent refold failure");
+        }
+        replay();
+      };
+      try {
+        await expect(receiver.query(remoteQuery)).rejects.toThrow("injected parent refold failure");
+        expect(child.registered.map((r) => r.lensName)).not.toContain("remote:Plant");
+        const childHead = child.peer!.journal.currentHead();
+        const parentHead = receiver.peer!.journal.currentHead();
+        const recovered = await receiver.query(remoteQuery);
+        expect(recovered.errors).toBeDefined();
+        expect(receiver.registered.map((r) => r.lensName)).not.toContain("remote:Plant");
+        expect(child.peer!.journal.currentHead()).toBe(childHead);
+        expect(receiver.peer!.journal.currentHead()).toBe(parentHead);
+        const own = await receiver.query(nativeQuery);
+        expect(own.errors).toBeUndefined();
+        expect((own.data?.plant as { height: number }).height).toBe(999);
+      } finally {
+        receiver.replayRegistrations = replay;
+      }
+    }));
 });
