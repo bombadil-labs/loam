@@ -56,8 +56,7 @@ the jobs above; `definitions` is an array and `bindings` an object even when emp
 prints the signed request, signed outcome, status and decoded view when available. Unknown
 flags, including remote and bound-connection options, are refused before invocation.
 
-**Provenance.** Supervised command-consumer landing (PR link to be filled when the PR is
-opened). Implementation: `src/gateway/operator-command.ts`, the shared preflight in
+**Provenance.** [#684](https://github.com/bombadil-labs/loam/pull/684), the supervised command-consumer landing. Implementation: `src/gateway/operator-command.ts`, the shared preflight in
 `src/gateway/ingest.ts`, and `src/cli/command.ts`. Proof: the nine actual SQLite and CLI cases
 in `test/gateway/operator-command.test.ts`, covering reopen, foreign definitions, pins and
 closure, competing writers, slate/refusal/quota/law guards, and refusal of remote modes.
