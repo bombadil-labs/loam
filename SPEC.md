@@ -83,6 +83,7 @@ name begins with that number.
 | §58 | [A connection is a peer — the container is the grant](spec/58-a-connection-is-a-peer.md) |
 | §59 | [A channel remembers its incarnations — lifecycle events, and a live opening stays until its pool is dropped](spec/59-local-channel-incarnations.md) |
 | §65 | [Operator-local commands over the existing journal](spec/65-operator-local-commands.md) |
+| §66 | [Each peer owns the rows it contributes to a read](spec/66-peer-owned-serving-contributions.md) |
 
 _**§21**, **§22**, **§25**, and **§26** are **landed** — design accepted and implemented (see each
 Provenance footer; §21.7's coexistence design is accepted with its implementation queued as ticket T2).

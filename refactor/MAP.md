@@ -77,3 +77,10 @@ makes its signer, `Gateway.open` names its peer, and the client and the runner u
 The operator-local command consumer shares append preflight and its admission queue.
 Admission captures the gateway wall clock once and passes it to validity checks and the command endpoint.
 This removes one direct core clock observation. Existing local writes and erasure services remain separate.
+
+Serving now composes each peer's approved read contribution before parent narrowing (§66).
+The peer prepares its own admitted source; raw membership remains the freeze/cut input.
+Preparation and contribution replace the former resolver-preload and registration-replay peer ports,
+including their two federation callers, so the Peer boundary remains 28 capabilities.
+Composed serving still walks rows and approved strikes on demand; portable maintained HyperViews
+need a separate source, closure, time and invalidation contract.

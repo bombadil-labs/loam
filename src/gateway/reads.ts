@@ -28,10 +28,10 @@ import {
 } from "@bombadil/rhizomatic";
 import { Channel, streamAfter } from "./channel.js";
 // NOT `./channel.js` above it — that is the gateway's own Channel. The federation module is where a
-// channel POOL's naming lives, and `prefixOfChannelName` is the structural identity both readers
-// need when a record's own `prefix` primitive is condemned.
-import { prefixOfChannelName } from "../federation/channel.js";
-import { erasedInScope, forgottenSince, poolGovernors } from "./erase.js";
+// channel POOL's naming lives. Binding folds and readers share the exact parent-based prefix
+// recovery; no first-colon split can identify a source.
+import { channelBindingPrefix } from "../federation/channel.js";
+import { erasedInScope, forgottenSince } from "./erase.js";
 import { readGround } from "./slate.js";
 import { requireMoment, readClosedIds } from "./slate-law.js";
 import type { ConnectionBinding, Gateway } from "./gateway.js";
@@ -170,16 +170,18 @@ export function gatherImpl(
   // inbox pools composed into it — never the primary's materialization, which is maintained over
   // the whole ground and would answer with everything the store holds. It runs before every other
   // branch for the reason the channel branch does: a materialization keyed by program name is not
-  // the connection's to read. A channel's lens is refused outright — its pool is not in the scope,
-  // and resolving the peer's reading over the connection's ground would answer a question nobody
-  // asked.
+  // the connection's to read. A root channel row inherited into this surface is outside its scope
+  // and refuses. A channel candidate admitted by this container's own bound fold keeps the
+  // authorized bound ground; its source is checked before any fallback.
   if (binding !== undefined) {
-    if (channelLens(gw, name)) {
+    const source = channelAssociation(gw, name, binding);
+    if (source !== undefined && !source.scoped) {
       throw new Error(
         `${name} arrived through a federation channel, and a bound connection reads only the ` +
           `container its consent named — that channel's pool is outside its scope`,
       );
     }
+    assertChannelSourceLegible(gw, name, binding);
     // The lens and the registry are the CONTAINER'S (§58 position 2): a lens that lives only in
     // one of its pools resolves here and nowhere else, and an `expand` inside it finds its
     // sibling readings in the same fold rather than in the root's.
@@ -208,8 +210,8 @@ export function gatherImpl(
   // one — the warm lookup returned a view computed over the primary ground and the scoped path was
   // never reached. A channel lens must never read a materialization it does not own.
   //
-  // The scope is derived from data already in the ground: the living name carries the prefix the
-  // receiver assigned, and the channel record maps that prefix to its pool. No new vocabulary.
+  // The current binding names its exact channel origin. Local law stays on this store's ground;
+  // namespace resemblance alone never supplies a source. No new vocabulary.
   // Deliberately the POOL and not the receiving container — two channels into one container resolve
   // over their OWN pools, or one peer's claims would answer another peer's lens. Every other lens is
   // untouched, which is the decision Myk settled: a container shows its own contents, and descent is
@@ -280,47 +282,102 @@ export function gatherImpl(
  * Read closure still applies: a read-closed delta must not reappear through a channel's pool, so the
  * narrowed set is subtracted here exactly as the primary path narrows its own.
  */
+// The binding owns its source. A known local binding never becomes a channel merely because
+// its name resembles a prefix; an aggregate binding names the exact child, including colon names.
+function channelAssociation(gw: Gateway, lens: string, binding?: ConnectionBinding) {
+  const rows = binding === undefined ? gw.registered : gw.boundSurface(binding).registered;
+  const bound = rows.find((r) => lensOf(r) === lens);
+  if (bound !== undefined) {
+    if (bound.channel === undefined) return undefined;
+    // Bound.channel also records inbox origin in the bound fold. The attached source table,
+    // not its string name, distinguishes the peer roles.
+    if (gw.store.inboxes(gw).has(bound.channel)) {
+      if (gw.store.channels(gw).has(bound.channel)) {
+        throw new Error(`${lens} has an ambiguous attached peer source`);
+      }
+      return undefined;
+    }
+    return {
+      name: bound.channel,
+      scoped:
+        binding !== undefined &&
+        !gw.registered.some((r) => lensOf(r) === lens && r.channel === bound.channel),
+    };
+  }
+  const channels = gw.channelsEver();
+  const matches = channels
+    .flatMap((status) => {
+      const prefix = channelBindingPrefix(gw, status);
+      return prefix !== undefined && lens.startsWith(`${prefix}:`) ? [{ prefix, status }] : [];
+    })
+    .sort((a, b) => b.prefix.length - a.prefix.length);
+  const first = matches[0];
+  if (first === undefined) return undefined;
+  if (
+    matches.some(
+      (m) => m.prefix.length === first.prefix.length && m.status.name !== first.status.name,
+    )
+  ) {
+    throw new Error(
+      `${lens} has an ambiguous federation channel source; it must not fall back to this store's own deltas`,
+    );
+  }
+  return { name: first.status.name, scoped: false };
+}
+
+// Only an unbound/root channel operand is incompatible with borrowing an owner's inbox.
+// A channel candidate accepted by the bound fold executes its authorized container composition.
+export function channelUsesUnboundGround(
+  gw: Gateway,
+  lens: string,
+  binding?: ConnectionBinding,
+): boolean {
+  const source = channelAssociation(gw, lens, binding);
+  return source !== undefined && !source.scoped;
+}
+
+function channelSource(gw: Gateway, lens: string, binding?: ConnectionBinding) {
+  const source = channelAssociation(gw, lens, binding);
+  if (source === undefined) return undefined;
+  const channel = gw.channelStatus().find((c) => c.name === source.name);
+  if (channel === undefined) {
+    throw new Error(
+      `${lens} was served by the federation channel "${source.name}", which has been severed or is unavailable. ` +
+        `Its pool cannot supply this reading — it must not fall back to this store's own deltas. Re-open the channel, or retire the lens.`,
+    );
+  }
+  if (channel.unreadable.includes("prefix") || channelBindingPrefix(gw, channel) === undefined) {
+    throw new Error(
+      `${lens} is served by the federation channel "${channel.name}", whose record does not ` +
+        `carry its prefix in the shape a channel record is written in. This reading cannot be ` +
+        `scoped to that peer's pool, and it must not fall back to this store's own deltas. ` +
+        `\`loam federate list\` names what the record cannot say.`,
+    );
+  }
+  return channel;
+}
+
+// Source legibility is checked before a named operation can sign or declare listing law.
+// This is the same refusal as gathering, not a new admission or channel authority policy.
+export function assertChannelSourceLegible(
+  gw: Gateway,
+  lens: string,
+  binding?: ConnectionBinding,
+): void {
+  if (binding !== undefined && channelUsesUnboundGround(gw, lens, binding)) {
+    throw new Error(`${lens} is a federation channel source outside this bound connection's scope`);
+  }
+  channelSource(gw, lens, binding);
+}
+
 function channelGroundFor(
   gw: Gateway,
   lens: string,
   now: number,
   asOf?: number,
 ): DeltaSet | undefined {
-  const cut = lens.indexOf(":");
-  if (cut <= 0) return undefined;
-  const prefix = lens.slice(0, cut);
-  const channel = gw.channelStatus().find((c) => c.prefix === prefix);
-  if (channel === undefined) {
-    // A SEVERED channel's lens must not fall back to this store's own ground. Measured before this
-    // guard: after `dropChannel`, `alice_Plant` answered 999 — the receiver's own private claim —
-    // where it had answered the peer's 11. On the ordinary query door, after an act the operator
-    // chose, looking like it worked (T199).
-    const severed = gw.channelsEver().find((c) => c.prefix === prefix);
-    if (severed !== undefined) {
-      throw new Error(
-        `${lens} was served by the federation channel "${severed.name}", which has been severed. ` +
-          `Its pool is purged, so this reading has no ground — it must not fall back to this ` +
-          `store's own deltas. Re-open the channel, or retire the lens.`,
-      );
-    }
-    // THE SAME FALL-THROUGH, REACHED BY ILLEGIBILITY INSTEAD OF BY A SEVER. A channel whose record
-    // does not carry a legible `prefix` matches no prefix at all, so the lookup above misses it and
-    // the return below would resolve the peer's lens over the RECEIVER's own ground. The channel's
-    // NAME still carries the prefix structurally, which is what makes the match possible when the
-    // record's own primitive is condemned.
-    const illegible = gw
-      .channelsEver()
-      .find((c) => c.unreadable.includes("prefix") && prefixOfChannelName(c.name) === prefix);
-    if (illegible !== undefined) {
-      throw new Error(
-        `${lens} is served by the federation channel "${illegible.name}", whose record does not ` +
-          `carry its prefix in the shape a channel record is written in. This reading cannot be ` +
-          `scoped to that peer's pool, and it must not fall back to this store's own deltas. ` +
-          `\`loam federate list\` names what the record cannot say.`,
-      );
-    }
-    return undefined;
-  }
+  const channel = channelSource(gw, lens);
+  if (channel === undefined) return undefined;
   const closed = readClosedIds(gw, now);
   // A time pin rides the READ (§26), so it must reach the pool as well — a scoped lens that
   // silently ignored `asOf` would answer the present while the caller believes it answered the past.
@@ -335,8 +392,11 @@ function channelGroundFor(
   // target revives. Presence is not survival.
   // A pool can hold an erasure this store has not seen, and this store can refuse an id only a pool
   // holds, so the erasures are read over the whole composed scope.
-  const scope = gw.containerScope({ containers: [channel.name] });
-  const erased = erasedInScope(gw.reactor, gw.operatorAuthor, scope, poolGovernors(gw));
+  const scope = gw.servingScope(now, {
+    containers: [channel.name],
+    ...(asOf === undefined ? {} : { asOf }),
+  });
+  const erased = erasedInScope(gw.reactor, gw.operatorAuthor, scope);
   const deltas = scope.filter(
     (d) =>
       (asOf === undefined || d.claims.timestamp <= asOf) &&
@@ -362,8 +422,11 @@ export function boundGroundFor(
   asOf?: number,
 ): DeltaSet {
   const closed = readClosedIds(gw, now);
-  const scope = gw.connectionScope({ bound: binding.container });
-  const erased = erasedInScope(gw.reactor, gw.operatorAuthor, scope, poolGovernors(gw));
+  const scope = gw.servingScope(now, {
+    bound: binding.container,
+    ...(asOf === undefined ? {} : { asOf }),
+  });
+  const erased = erasedInScope(gw.reactor, gw.operatorAuthor, scope);
   return DeltaSet.from(
     scope.filter(
       (d) =>
@@ -433,6 +496,31 @@ export function gatherForRetractionImpl(
   now: number = gw.validityNow(),
 ): HView {
   const def = gw.def(name, binding);
+  const source = channelSource(gw, name, binding);
+  if (
+    source !== undefined &&
+    binding !== undefined &&
+    !channelAssociation(gw, name, binding)?.scoped
+  ) {
+    throw new Error(
+      `${name} is a federation channel source outside this bound connection's retraction scope`,
+    );
+  }
+  if (source !== undefined && binding === undefined) {
+    const pool = gw.store.channels(gw).get(source.name)?.gateway;
+    if (pool === undefined)
+      throw new Error(`${name}: channel source ${source.name} cannot be read for retraction`);
+    const result = evalGoverned(
+      gw,
+      def.hyperschema.body,
+      DeltaSet.from(pool.reactor.arrivalLog()),
+      gw.validityNow(now),
+      entity,
+      gw.registry,
+    );
+    if (result.sort !== "hview") throw new Error(`schema ${name} does not evaluate to a hyperview`);
+    return result.hview;
+  }
   // A bound connection's own claims live in its pool, so its retraction gathers ITS scope — the
   // whole of it, unnarrowed by read closure, for the same reason as the primary path — through
   // its container's registry, where a lens that lives only in a pool is known.
@@ -465,6 +553,11 @@ export function gatherPoolForRetraction(
   now: number = gw.validityNow(),
 ): HView {
   const def = gw.def(name, binding);
+  if (channelUsesUnboundGround(gw, name, binding)) {
+    throw new Error(
+      `${name} is an unbound federation channel source, not this owner's inbox retraction ground`,
+    );
+  }
   const result = evalGoverned(
     gw,
     def.hyperschema.body,
@@ -543,21 +636,8 @@ export function resolvedNodeImpl(
  * available, and a disclosure is not recoverable. T193 carries the real fix, which is a per-pool
  * materialization rather than one keyed by the program name.
  */
-export function channelLens(gw: Gateway, lens: string): boolean {
-  const cut = lens.indexOf(":");
-  if (cut <= 0) return false;
-  const prefix = lens.slice(0, cut);
-  // A standing channel whose record cannot say its prefix is STILL a channel lens. Answering
-  // `false` would stop these doors refusing, and the refusal is the whole point of the function.
-  // Scoped to STANDING channels, exactly as before — a severed channel's lens is `channelGroundFor`'s
-  // refusal to make, and widening this reading is not this question's to decide.
-  return gw
-    .channelStatus()
-    .some(
-      (c) =>
-        c.prefix === prefix ||
-        (c.unreadable.includes("prefix") && prefixOfChannelName(c.name) === prefix),
-    );
+export function channelLens(gw: Gateway, lens: string, binding?: ConnectionBinding): boolean {
+  return channelAssociation(gw, lens, binding) !== undefined;
 }
 
 export function resolvePinnedImpl(

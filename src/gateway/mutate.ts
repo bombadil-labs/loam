@@ -21,8 +21,9 @@ import type { ConnectionBinding, Gateway } from "./gateway.js";
 import { legalNameFor, queryFieldFor, type ClaimPointerSpec, type ResolvedNode } from "./gql.js";
 import { edgeRoles, lensOf, referenceProps, type ReferenceProp } from "./registration.js";
 import { delegatesEverOf, keysEverOf } from "./principal.js";
-import { gatherPoolForRetraction } from "./reads.js";
+import { gatherPoolForRetraction, channelUsesUnboundGround } from "./reads.js";
 import { attachedPool, bindingPeer, poolOwner } from "./container.js";
+import { assertChannelSourceLegible } from "./reads.js";
 import { declaredInboxes, readContainerTable } from "./container-law.js";
 import { withStamp } from "./stamp.js";
 
@@ -57,6 +58,7 @@ export async function mutateEntityImpl(
   actorSeed?: string,
   binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
+  assertChannelSourceLegible(gw, name, binding);
   const sink = sinkFor(gw, actorSeed, binding);
   const signer = actorSeed !== undefined ? seedSigner(actorSeed) : gw.signer;
   if (signer === undefined) {
@@ -123,7 +125,17 @@ async function retract(
   // for an unbound call, or a bound one signed by that pool's owner. Checked before anything is
   // signed, so a refusal here leaves nothing behind.
   const ownerCall = binding === undefined || ownerOf(bindingPeer(gw, binding)) === author;
-  const pools = ownerCall ? ownedPools(gw, author) : [];
+  const pools =
+    ownerCall && !channelUsesUnboundGround(gw, name, binding) ? ownedPools(gw, author) : [];
+  // Validate every fanout source before signing in any ground. A scoped candidate keeps the
+  // existing owner/delegate reach; incompatible foreign operands never report a silent no-op.
+  for (const pool of pools) {
+    if (channelUsesUnboundGround(gw, name, { container: pool.parent, inbox: pool.name })) {
+      throw new Error(
+        `${name}: this channel reading is outside owned inbox ${pool.name}'s retraction scope; refused before anything was signed`,
+      );
+    }
+  }
   // UNNARROWED (SPEC §29.3): a read-closing slate must not turn this strike into a silent no-op —
   // the member would be absent from a narrowed hview, so nothing would be targeted and nothing signed.
   // A bound connection gathers ITS scope: its own claims live in its pool, and a strike it signs
@@ -240,6 +252,7 @@ export function clearEntityImpl(
   actorSeed?: string,
   binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
+  assertChannelSourceLegible(gw, name, binding);
   if (fields.length === 0) throw new Error(`clear of ${entity} names no fields to retract`);
   assertWritable(gw, name, fields, binding);
   const set = new Set(fields);
@@ -258,6 +271,7 @@ export function removeEntityImpl(
   actorSeed?: string,
   binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
+  assertChannelSourceLegible(gw, name, binding);
   if (values.length === 0) {
     throw new Error(`remove from ${field} of ${entity} names no values to retract`);
   }
@@ -329,6 +343,7 @@ export async function linkEntityImpl(
   actorSeed?: string,
   binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
+  assertChannelSourceLegible(gw, name, binding);
   const sink = sinkFor(gw, actorSeed, binding);
   const signer = actorSeed !== undefined ? seedSigner(actorSeed) : gw.signer;
   if (signer === undefined) {
@@ -387,6 +402,7 @@ export function severEntityImpl(
   actorSeed?: string,
   binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
+  assertChannelSourceLegible(gw, name, binding);
   if (!gw.def(name, binding).schema.props.has(field)) {
     throw new Error(`schema ${name} has no field "${field}" to sever`);
   }
@@ -477,6 +493,7 @@ export async function linkRefEntityImpl(
   actorSeed?: string,
   binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
+  assertChannelSourceLegible(gw, name, binding);
   const sink = sinkFor(gw, actorSeed, binding);
   const signer = actorSeed !== undefined ? seedSigner(actorSeed) : gw.signer;
   if (signer === undefined) {
@@ -528,6 +545,7 @@ export async function unlinkRefEntityImpl(
   actorSeed?: string,
   binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
+  assertChannelSourceLegible(gw, name, binding);
   const ref = referencePropFor(gw, name, prop, binding);
   return retract(
     gw,

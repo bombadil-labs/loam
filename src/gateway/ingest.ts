@@ -673,11 +673,11 @@ function evalRawGoverned(gw: Gateway, term: Term, input: DeltaSet): EvalResult {
 }
 
 // A membership naming a user (`loam.memberOf`) lowered to the authors acting for that user now.
-function lowerMembership(gw: Gateway, term: unknown): unknown {
+function lowerMembership(gw: Gateway, term: unknown, now: number = gw.validityNow()): unknown {
   return lowerMembershipJson(
     term,
     gw.reactor,
-    gw.validityNow(),
+    now,
     gw.operatorAuthor,
     refusedIds(gw.reactor, gw.operatorAuthor),
   );
@@ -693,8 +693,8 @@ function lowerMembership(gw: Gateway, term: unknown): unknown {
 // surviving erasure has condemned (§11), as does the offer (`withoutErased`). A `select` caller
 // gets neither, by design: `select` is membership machinery, and the erasure cut reads through it,
 // so it hands back exactly what the Term selected, no more.
-export function selectImpl(gw: Gateway, term: unknown): Delta[] {
-  const parsed = parseTerm(lowerMembership(gw, term));
+export function selectImpl(gw: Gateway, term: unknown, now?: number): Delta[] {
+  const parsed = parseTerm(lowerMembership(gw, term, now));
   const result = evalRawGoverned(gw, parsed, gw.reactor.snapshot());
   if (result.sort !== "dset") {
     throw new Error(

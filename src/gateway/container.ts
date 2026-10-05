@@ -22,6 +22,9 @@
 // gates on the knob and never from the roster.
 
 import type { Peer } from "./peer.js";
+import { poolOwner, ownerTerm } from "./inbox-owner.js";
+export { poolOwner } from "./inbox-owner.js";
+import { closeContributions, type ReadContribution } from "./read-contribution.js";
 import { seedSigner } from "./signer.js";
 import { hostChain, inboxLaw, seededLaw } from "./child-law.js";
 import { memoryPoolKeys, PoolKeyMissing, poolKeyClaims, recordedPoolKey } from "./pool-keys.js";
@@ -36,7 +39,7 @@ import {
 import type { StoreBackend } from "../store/backend.js";
 import { MemoryBackend } from "../store/memory.js";
 import { isRepairable } from "../store/quarantine.js";
-import { effectiveGrantsAt, holdsGrant, revocationClaims } from "./accounts.js";
+import { holdsGrant, revocationClaims } from "./accounts.js";
 import { grantSubjects } from "./grants-law.js";
 import { STORE_ENTITY } from "./genesis.js";
 import { orderForPool, isErasure, orderBinds, readErasures } from "./erase-law.js";
@@ -58,12 +61,10 @@ import {
   delegationRecordsFor,
   delegationRootsTo,
   keyActsFor,
-  keysActingFor,
   principalScopeOf,
   standingDelegationIdsFor,
 } from "./principal.js";
 import { keysSubjectCouldName, subjectCouldName, subjectKeyAt, USER_PREFIX } from "./user-root.js";
-import { memberOf } from "./member-of.js";
 import {
   CTX_CONTAINER,
   type ContainerPosture,
@@ -106,8 +107,9 @@ const retractionOf = (targetId: string, author: string, timestamp: number): Clai
 export function containerScopeImpl(
   gw: Gateway,
   opts: { containers?: readonly string[] } = {},
+  serving?: { readonly now: number; readonly asOf?: number },
 ): Delta[] {
-  const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
+  const table = readContainerTable(gw.reactor, gw.validityNow(serving?.now), gw.operatorAuthor);
   const requested = opts.containers ?? [...table.containers.keys()].sort();
   for (const name of requested) {
     if (!table.containers.has(name)) {
@@ -115,10 +117,26 @@ export function containerScopeImpl(
     }
   }
   const isActive = (name: string): boolean => !table.detached.has(name);
+  const sources = new Map<Gateway, ReadContribution>();
+  const memberRows = (ground: Gateway, name: string, selected?: Delta[]) => {
+    if (serving === undefined)
+      return { deltas: selected ?? [...ground.reactor.snapshot()], ground, membership: undefined };
+    let contribution = sources.get(ground);
+    if (contribution === undefined) {
+      contribution = ground.readContribution(serving.now, {
+        ...(serving.asOf === undefined ? {} : { asOf: serving.asOf }),
+        ...(ground !== gw && name.startsWith("inbox:") ? { inbox: name } : {}),
+      });
+      sources.set(ground, contribution);
+    }
+    const ids =
+      selected === undefined ? contribution.membership : new Set(selected.map((d) => d.id));
+    return { deltas: contribution.rows.filter((d) => ids.has(d.id)), ground, membership: ids };
+  };
 
   // Each active container's members, from its own ground — the primary for a shared scope,
   // its own store for an attached separate container.
-  const membersOf = (name: string): { deltas: Delta[]; ground: Gateway } => {
+  const membersOf = (name: string) => {
     const rec = table.containers.get(name)!;
     if (rec.posture === "separate") {
       // THIS STORE IS THAT CONTAINER. A separate container's ground is a one-way seeded copy of its
@@ -130,7 +148,7 @@ export function containerScopeImpl(
       // Without it a pool cannot resolve any lens whose gather scopes the parent — which is every
       // lens a channel blesses. It survives a restart only because of this: a re-attach re-pulses
       // the seeding edge, and a full replay then builds the scope that asks the question.
-      if (name === gw.poolHandle) return { deltas: [...gw.reactor.snapshot()], ground: gw };
+      if (name === gw.poolHandle) return memberRows(gw, name);
       const pool = gw.attachedContainers.get(name);
       if (pool === undefined || !gw.quarantinePools.has(pool)) {
         throw new Error(
@@ -139,7 +157,7 @@ export function containerScopeImpl(
             `(openContainer), or detach() it on the record to take it out of scope deliberately.`,
         );
       }
-      return { deltas: [...pool.reactor.snapshot()], ground: pool };
+      return memberRows(pool, name);
     }
     let term = rec.membership;
     if (term === undefined && rec.membershipAt !== undefined) {
@@ -160,7 +178,7 @@ export function containerScopeImpl(
           `container IS its membership, and an empty fallback would be the H9 shape`,
       );
     }
-    return { deltas: gw.select(term), ground: gw };
+    return memberRows(gw, name, gw.select(term, serving?.now));
   };
 
   // A connection inbox composes into its parent by AUTHORITY (README ruling 8, M3): the CLAIMS its
@@ -171,6 +189,7 @@ export function containerScopeImpl(
   // read, as an unattached one does (H9).
   const contributionOf = (name: string): { deltas: Delta[]; ground: Gateway } => {
     const all = membersOf(name);
+    if (serving !== undefined) return all; // the child already applied its owner filter
     if (!name.startsWith("inbox:") || name === gw.poolHandle) return all;
     const owner = poolOwner(all.ground);
     if ("refusal" in owner) {
@@ -217,7 +236,10 @@ export function containerScopeImpl(
   const minus = new Set<string>();
   for (const name of table.excluded) {
     if (!table.containers.has(name) || !isActive(name)) continue;
-    for (const d of membersOf(name).deltas) minus.add(d.id);
+    const members = membersOf(name);
+    if (members.membership !== undefined) {
+      for (const id of members.membership) minus.add(id);
+    } else for (const d of members.deltas) minus.add(d.id);
   }
 
   // Subtract, THEN close — over the UNION of every contributing ground, not per-ground (SPEC §39,
@@ -236,7 +258,12 @@ export function containerScopeImpl(
       admitted.push(d);
     }
   }
-  return withNegationClosureAcross(grounds, admitted);
+  return serving === undefined
+    ? withNegationClosureAcross(grounds, admitted)
+    : closeContributions(
+        grounds.map((ground) => sources.get(ground)!),
+        admitted,
+      );
 }
 
 /**
@@ -286,8 +313,9 @@ export function openerStands(
 export function connectionScopeImpl(
   gw: Gateway,
   opts: { bound: string; containers?: readonly string[] },
+  serving?: { readonly now: number; readonly asOf?: number },
 ): Delta[] {
-  const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
+  const table = readContainerTable(gw.reactor, gw.validityNow(serving?.now), gw.operatorAuthor);
   if (!table.containers.has(opts.bound)) {
     throw new Error(
       `connectionScope refused: no surviving declaration names the bound container "${opts.bound}"`,
@@ -321,7 +349,7 @@ export function connectionScopeImpl(
       );
     }
   }
-  return containerScopeImpl(gw, { containers: targets });
+  return containerScopeImpl(gw, { containers: targets }, serving);
 }
 
 // --- the runtime handle ---------------------------------------------------------------------------
@@ -1071,79 +1099,6 @@ async function openSeparate(
 }
 
 // --- the connection binding (SPEC §39: a connection binds to a container) ------------------------
-
-/** The one owner an inbox pool's effective admin grants name: a user, or a key. */
-export interface PoolOwner {
-  readonly key: string;
-  readonly user?: string;
-}
-
-/**
- * The owner of the inbox pool `pool`: the one principal its effective admin grants name. Grants are
- * counted by the owner they RESOLVE to, so two grants for one owner name one owner. None, several,
- * or a user subject that resolves to no key is a refusal: a pool must never compose as if its owner
- * were someone.
- */
-export function poolOwner(pool: Peer): PoolOwner | { readonly refusal: string } {
-  const operator = pool.operatorAuthor;
-  const now = pool.validityNow();
-  const owners = new Map<string, PoolOwner>();
-  for (const g of effectiveGrantsAt(pool.reactor, now, operator)) {
-    if (g.verb !== "admin") continue;
-    const key = subjectKeyAt(pool.reactor, now, operator, g.subject);
-    if (key === undefined) {
-      return { refusal: `names its owner ${g.subject}, who resolves to no current key` };
-    }
-    const user = g.subject.startsWith(USER_PREFIX)
-      ? g.subject.slice(USER_PREFIX.length)
-      : undefined;
-    const known = owners.get(key);
-    if (known?.user !== undefined && user !== undefined && known.user !== user) {
-      return { refusal: `names two users, ${known.user} and ${user}, for one key` };
-    }
-    const named = known?.user ?? user;
-    owners.set(key, named === undefined ? { key } : { key, user: named });
-  }
-  if (owners.size !== 1) {
-    return {
-      refusal:
-        owners.size === 0
-          ? "has no owner: no effective admin grant stands in it"
-          : `names ${owners.size} owners in its admin grants`,
-    };
-  }
-  return [...owners.values()][0]!;
-}
-
-// What an inbox pool contributes for `owner`: a user's present authority and history in this pool
-// (`loam.memberOf`, lowered by the pool's select), or a key and the keys acting for it here. The
-// pool operator's own claims compose too: they are its law (erasures, strikes, grants), never data
-// written for the owner, and a parent read must keep binding them (H1).
-function ownerTerm(pool: Gateway, owner: PoolOwner, name: string): unknown {
-  const byOwner =
-    owner.user !== undefined
-      ? memberOf(owner.user, name)
-      : {
-          match: {
-            field: "author",
-            cmp: "inSet",
-            const: [
-              ...keysActingFor(
-                pool.reactor,
-                pool.validityNow(),
-                { root: owner.key },
-                name,
-                pool.operatorAuthor,
-              ),
-            ].sort(),
-          },
-        };
-  const pred =
-    pool.operatorAuthor === undefined
-      ? byOwner
-      : { or: [byOwner, { match: { field: "author", cmp: "eq", const: pool.operatorAuthor } }] };
-  return { op: "select", pred, in: "input" };
-}
 
 export interface BindConnectionOptions {
   /** The parent container this connection is bound to. Its gather composes the inbox pool. */

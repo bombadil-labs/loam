@@ -275,3 +275,61 @@ describe("preflight and partial work", () => {
     );
   });
 });
+
+describe("scoped channel owner retraction", () => {
+  it("an owner can retract her delegated inbox contribution through a legitimately scoped channel reading without changing a private root bystander", async () => {
+    const { gw, bind } = await world(),
+      ada = await bind("ada", "conn");
+    const stamp = gw.stamp(OP);
+    const declaration = containerClaims(
+      {
+        container: "home:ada",
+        posture: "shared",
+        trust: "curated",
+        membership: writtenByUser("ada", "home:ada"),
+        leeway: { receive: true, offer: false, publish: false, envelope: "small", delegate: "off" },
+      },
+      OP,
+      stamp.timestamp,
+    );
+    await gw.append([op({ ...declaration, validFrom: stamp.validFrom })]);
+    const sender = await Gateway.boot(
+      new MemoryBackend(),
+      assembleGenesis({
+        operatorSeed: "6a".repeat(32),
+        registrations: [
+          { hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN], writable: ["height"] },
+        ],
+      }),
+    );
+    open.push(sender);
+    const ch = await gw.openChannel({
+      into: "home:ada",
+      prefix: "home:ada:peer",
+      openedBy: "home:ada",
+      openedFrom: ada.name,
+      source: { pull: () => Promise.resolve(sender.reactor.arrivalLog()) },
+    });
+    await ch.sync();
+    await gw.prepareRead();
+    const lens = "home:ada:peer:Plant",
+      def = gw.def(lens, ada.binding);
+    expect(def.channel).toBe(ch.name);
+    expect(gw.registered.some((r) => r.lensName === lens)).toBe(false);
+    const bea = await bind("bea", "beaConn");
+    const byBea = await write(bea.pool, "beaConn", 23);
+    const target = await write(ada.pool, "conn", 7);
+    const privateRoot = observed(FERN, "height", 999, 100000, OP_SEED);
+    await gw.append([privateRoot]);
+    const before = gw.resolvedNode(lens, FERN, undefined, undefined, ada.binding);
+    expect((before.view as Record<string, unknown>).height).toBe(7);
+    const cleared = await gw.gqlHooks().clear(lens, FERN, ["height"], seed("ada"), ada.binding);
+
+    expect(strikesOf(ada.pool, target.id)).toEqual([key("ada")]);
+    expect((cleared.view as Record<string, unknown>).height).toBeUndefined();
+    expect(gw.reactor.get(privateRoot.id)).toBeDefined();
+    expect(gw.reactor.negationsOf(privateRoot.id)).toHaveLength(0);
+    expect(strikesOf(bea.pool, byBea.id)).toEqual([]);
+    expect(bea.pool.reactor.get(byBea.id)).toBeDefined();
+  });
+});

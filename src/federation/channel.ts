@@ -1191,7 +1191,7 @@ export async function blessChannelResolversImpl(
     // The incumbent is this store's own withheld binding, and replacing it IS the request.
     supersede: true,
   });
-  await ground.preloadResolvers();
+  await ground.prepareRead({ reconcileLaw: true });
   gw.replayRegistrations();
   // THE NAME THIS ACTED ON, because the caller may have typed the bare one. A caller that compared
   // its own argument against a reader that answers prefixed names would be asking a question that
@@ -1368,14 +1368,22 @@ function declaredPrefix(name: string, inboxOf: string | undefined): string | und
   return name.startsWith(lead) ? name.slice(lead.length) : undefined;
 }
 
+/** Exact binding fence, using independently stated parent identity when the prefix is unreadable. */
+export function channelBindingPrefix(gw: Gateway, status: ChannelStatus): string | undefined {
+  if (!status.unreadable.includes("prefix")) return status.prefix;
+  const parent = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor).containers.get(
+    status.name,
+  )?.inboxOf;
+  const recordedParent = status.unreadable.includes("into") ? undefined : status.into;
+  if (parent !== undefined && recordedParent !== undefined && parent !== recordedParent) {
+    return undefined; // contradictory identity never chooses a source
+  }
+  return declaredPrefix(status.name, parent ?? recordedParent);
+}
+
 /**
- * The prefix a channel's own NAME carries — `channel:<into>:<prefix>`.
- *
- * A STRUCTURAL GUESS that splits at the first colon after `channel:`, so it cannot separate the two
- * halves when either carries a colon (T215) — it is only the last resort `reads.ts` reaches when a
- * record's `prefix` primitive is among the roles the reader condemned, where a legible reading is
- * gone and the name is the only identity left. The collision guard reads the record and the
- * declaration instead (`standingPrefixes`); it never calls this.
+ * Historical structural guess. It cannot distinguish colon-bearing parent and prefix names.
+ * @deprecated Never use this to associate a binding with a serving or write source.
  */
 export function prefixOfChannelName(name: string): string | undefined {
   if (!name.startsWith("channel:")) return undefined;
@@ -2574,7 +2582,7 @@ export async function curseChannelLawImpl(
         }
       }
     }
-    replayEverywhere(gw);
+    await replayEverywhere(gw);
     // Lifting strikes the curse record itself. The next poll re-blesses through the ordinary path,
     // so nothing here needs to know how binding works.
     for (const d of cursesOf(gw, channel)) {
@@ -2681,7 +2689,7 @@ export async function curseChannelLawImpl(
   for (const binding of bindings) {
     await binding.sign(binding.id);
   }
-  replayEverywhere(gw);
+  await replayEverywhere(gw);
 
   // THE VERDICT IS THE SURFACE, NOT THE COUNT. A purge's count is evidence, never the verdict (T70),
   // and the same holds for a retirement: this refuses rather than reporting a lens left the surface
@@ -2708,8 +2716,9 @@ export async function curseChannelLawImpl(
  * other way: it revives the binding on the ground and the pool would go on serving nothing. Both
  * halves of a reversible act have to arrive in the same breath, or the reversal is not one.
  */
-function replayEverywhere(gw: Gateway): void {
-  for (const pool of gw.store.channels(gw).values()) pool.gateway?.replayRegistrations();
+async function replayEverywhere(gw: Gateway): Promise<void> {
+  for (const pool of gw.store.channels(gw).values())
+    await pool.gateway?.prepareRead({ reconcileLaw: true });
   gw.replayRegistrations();
 }
 
