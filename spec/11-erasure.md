@@ -32,6 +32,11 @@ its content.
   gone. The same verdict runs in every attached quarantine pool (§24.8), transitively; a retry is
   anchored on the surviving tombstone and bounded by outstanding work, so a partial erasure can
   always be finished and a completed one is never re-reported.
+- **Running gateways reconcile removals.** When another writer moves the journal head, refresh
+  reconciles the admitted set, including removals with no change in its size. A removal closes
+  old streams, clears cached views, and refolds registrations. Reseating also checks removals
+  that happen during subscription teardown. Reconnecting streams wait for the replacement reactor.
+  Failed refresh, refolding, or reseating stays pending for the next read.
 - **The door remembers the hole.** Admission (federate AND append) composes the tombstone set:
   a tombstoned id is refused re-entry forever — a hash-set check, cheap. Union normally lets
   anything return; the tombstone is how forgetting sticks against the store's own gossip.

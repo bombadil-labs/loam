@@ -509,6 +509,10 @@ export class Gateway {
   readonly justPersisted = new Set<string>();
   /** @internal — the host's substrate peer; undefined off that path. */
   peer: HostPeer | undefined = undefined;
+  /** @internal — a failed reconciliation must retry even after the journal handle moved. */
+  needsJournalRefresh = false;
+  /** @internal — new streams wait for this reactor replacement. */
+  reseating: Promise<void> | undefined;
   /** @internal — where this ground's new pools keep their own keys (container.ts). */
   poolKeys: PoolKeySource = memoryPoolKeysFor(this);
   /** Stored rows the host's journal never admitted: held, never served. */
@@ -611,7 +615,17 @@ export class Gateway {
           const at = this.now();
           for (let attempt = 0; ; attempt += 1) {
             try {
-              return await admitLocal(peer, [d], at, () => false);
+              await admitLocal(peer, [d], at, () => false);
+              // A conflict catch-up may replace the reactor before this emission commits.
+              if (this.reactor.get(d.id) === undefined) {
+                this.justPersisted.add(d.id);
+                try {
+                  this.ingestVia(d);
+                } finally {
+                  this.justPersisted.delete(d.id);
+                }
+              }
+              return;
             } catch (err) {
               if (!(err instanceof JournalConflict) || attempt >= WRITE_THROUGH_RETRIES) throw err;
               await catchUp(this);
@@ -1577,17 +1591,35 @@ export class Gateway {
   // re-attaches, and any animating host is detached (it watched the old reactor — the caller
   // re-attaches its runner, as the village does after the crash).
   /** @internal — T19 seam (erase.ts) */
-  async reseat(): Promise<void> {
+  reseat(): Promise<void> {
+    if (this.reseating !== undefined) return this.reseating;
+    this.needsJournalRefresh = true;
+    const run = this.reseatGround();
+    this.reseating = run;
+    void run.then(
+      () => {
+        this.reseating = undefined;
+        this.needsJournalRefresh = false;
+      },
+      () => {
+        this.reseating = undefined;
+      },
+    );
+    return run;
+  }
+
+  private async reseatGround(): Promise<void> {
     // READ FIRST, TEAR DOWN AFTER, CATCH UP LAST: the read is the one step here that can fail,
     // and everything after it is destructive. Ordered the other way, a failed read leaves the
     // gateway half-torn-down — subscriptions killed, reactor still on pre-purge ground.
-    const reactor = new Reactor();
+    let reactor = new Reactor();
     // On the journal path the admitted set is the journal's, never the raw rows.
     const readAll = async (): Promise<Delta[]> => {
       if (this.peer === undefined) return this.backend.deltasSince(new Set());
       return rereadHostPeer(this.peer);
     };
-    for (const d of await readAll()) {
+    let rows = await readAll();
+    for (const d of rows) {
       if (reactor.ingest(d).status === "rejected") {
         throw new Error(`reseat: the store handed back an unacceptable delta ${d.id}`);
       }
@@ -1604,20 +1636,17 @@ export class Gateway {
     // Drop the resolver memo (SPEC §22.5/§11): keying already forbids serving a value over erased
     // bytes, but a re-seat is exactly the moment the ground forgot — clear it so nothing lingers.
     this.resolverMemo.clear();
-    // CATCH UP on the teardown window, until quiescent: every await above is a seam another
-    // task can append through — the delta lands in the backend and the OLD reactor, and swapping
-    // to the snapshot alone would drop it from the live ground until a restart. Looping until a
-    // read returns nothing closes the window, because the ingest loop and the swap below are
-    // synchronous. The cap is a livelock bound, not a correctness bound: ten raced appends in a
-    // row is a hot loop that deserves the loud refusal.
+    // Teardown yields to other writers. Reconcile the whole admitted set, including removals.
+    // The final membership check and reactor swap are synchronous after the last read.
     for (let round = 0; ; round += 1) {
-      const known = new Set(reactor.snapshot().ids());
-      const stragglers = (await readAll()).filter((d) => !known.has(d.id));
-      if (stragglers.length === 0) break;
+      const known = new Set(rows.map((d) => d.id));
+      rows = await readAll();
+      if (rows.length === known.size && rows.every((d) => known.has(d.id))) break;
       if (round >= 10) {
-        throw new Error("reseat: the store will not quiesce — something is appending in a loop");
+        throw new Error("reseat: the store will not quiesce — its admitted set keeps changing");
       }
-      for (const d of stragglers) {
+      reactor = new Reactor();
+      for (const d of rows) {
         if (reactor.ingest(d).status === "rejected") {
           throw new Error(`reseat: the store handed back an unacceptable delta ${d.id}`);
         }
@@ -1641,6 +1670,7 @@ export class Gateway {
     // registrations are this process's own, not the ground's: the replay keeps them by origin.
     this.replayRegistrations();
     this.armValidityTimer(); // the replay re-read the registration boundary
+    this.notifyUserDependents();
   }
 
   // --- federation ------------------------------------------------------------------------------
