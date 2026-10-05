@@ -55,7 +55,7 @@ The census ratchet counts coupling in Loam's source. A count may only fall.
 | Measure | At the start (#572) | Now |
 | --- | --- | --- |
 | Direct `reactor.snapshot()` references | 48 | 42 |
-| Wall-clock reads in core code | 20 | 15 |
+| Wall-clock reads in core code | 20 | 14 |
 | Operator-seed reads | 63 | 4 |
 | Files in import cycles | 22 | 0 |
 | Largest import cycle | 20 | 0 |
@@ -73,3 +73,7 @@ effect files. The seed reads fell at step 5,
 when each ground got its own signer (#644, #645). At step 6 a gateway stopped keeping its seed: the
 signer is its only holder. The 4 reads left are where a key is used, not handed out: the gateway
 makes its signer, `Gateway.open` names its peer, and the client and the runner use their own keys.
+
+The operator-local command consumer shares append preflight and its admission queue.
+Admission captures the gateway wall clock once and passes it to validity checks and the command endpoint.
+This removes one direct core clock observation. Existing local writes and erasure services remain separate.

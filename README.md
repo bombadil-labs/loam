@@ -770,6 +770,43 @@ village.
   An index over [`journal/`](journal/), one file per entry.
 - **[CLAUDE.md](CLAUDE.md)** — the process this repo runs by (the ADLC lifecycle).
 
+## Operator-local command trial
+
+`openOperatorCommands(gateway, installation)` uses the gateway's existing signer and own-key journal.
+The installation contains one signed endpoint configuration and its two signed operation declarations.
+Its caller must be this operator. Seeds remain inside the existing signer.
+
+The service accepts `retain` and `evaluate` jobs with an explicit `expectedHead`.
+Read `service.head()` to observe a head, then put that chosen value in the job.
+A changed head produces a signed refusal. The service never retries against a newer head.
+
+Retain imports ordinary facts after the same standing, quota, erasure and citation checks as append.
+The check and command run under one admission queue, using one captured receive time and journal CAS.
+Retained arrivals are unattributed. Existing local writes and erasure services keep their current behavior.
+This import refuses Loam reserved references, definitions, negations and transaction manifests.
+Use the existing services for those controls.
+
+Evaluation uses `admitted` source and `core/1` interpretation.
+Supply `at`, `root`, original signed `hyperschema` and `schema` acts, their program pins,
+`definitions` for the exact dependency closure, and `bindings` explicitly.
+Foreign authorship and pins stay intact. Support acts are never admitted or re-authored.
+The result includes the signed request, verified receiver-signed outcome and decoded View.
+This trial refuses evaluation while any own-ground read closure is active.
+It does not provide general scoped serving, live materialization, or a bound-user command door.
+
+The CLI invokes that same service against the actual home's SQLite peer:
+
+```sh
+loam command --home ./home --installation ./commands.json --request ./request.json
+```
+
+`commands.json` contains `configuration` and `declarations` in Rhizomatic's signed Delta JSON profile.
+`request.json` contains a job. Retain jobs supply `kind`, `expectedHead` and signed `payload`.
+Evaluate jobs supply the fields listed above, plus `kind: "evaluate"` and `expectedHead`.
+Use arrays for `definitions` and an object for `bindings`, including when empty.
+The CLI prints the signed request, signed outcome, status and decoded view when available.
+It has no remote or bound-connection mode. A host fault remains visible after a durable commit.
+
 ## Development
 
 ```sh

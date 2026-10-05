@@ -292,3 +292,10 @@ export { LocalStorageBackend, type StorageLike } from "./store/local-storage.js"
 export { MemoryBackend } from "./store/memory.js";
 export { MirrorBackend, type HealReport, type MirrorOptions } from "./store/mirror.js";
 export { SqliteBackend } from "./store/sqlite.js";
+
+export {
+  openOperatorCommands,
+  type CommandInstallation,
+  type OperatorCommand,
+  type OperatorCommandResult,
+} from "./gateway/operator-command.js";
