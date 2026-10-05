@@ -147,6 +147,7 @@ export async function openOperatorCommands(gw: Gateway, installation: CommandIns
           commandDescriptionClaims(signer.author, receivedAt, "request/1", fields),
         );
         const head = await peer.store.readHead(signer.author);
+        if (head.status !== "head") throw new Error("operator command head unavailable");
         // Never evaluate guards against a stale reactor. A moved head reaches the command
         // endpoint with the caller's original expectation and produces its signed refusal.
         if (
@@ -168,6 +169,7 @@ export async function openOperatorCommands(gw: Gateway, installation: CommandIns
           // This gateway may have committed a native emission while readHead was in flight.
           // Keep the chosen expectation and let the endpoint sign the conflict in that case.
           const current = await peer.store.readHead(signer.author);
+          if (current.status !== "head") throw new Error("operator command head unavailable");
           if (current.status === "head" && current.head === command.expectedHead)
             throw new Error(
               "operator command gateway is stale; refresh before choosing a new head",

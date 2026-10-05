@@ -284,6 +284,81 @@ describe("operator-local portable commands use Loam's real peer", () => {
       expect(verifyDelta(result!.outcome)).toBe("verified");
       expect(result!.result.body.get("code")).toMatchObject({ v: "precondition-failed" });
     }));
+  it("refuses an unavailable initial head without bypassing reserved-law guards", async () =>
+    fixture(async (gw) => {
+      const bystander = observed(ROOT, "tag", "keep", 1, OP_SEED);
+      await gw.append([bystander]);
+      const commands = await openOperatorCommands(gw, installation),
+        chosen = await commands.head(),
+        store = gw.peer!.store,
+        readHead = store.readHead.bind(store);
+      let observations = 0;
+      store.readHead = async (id) => (++observations === 1 ? { status: "missing" } : readHead(id));
+      const grant = signClaims(
+        grantClaims(STORE_ENTITY, authorForSeed(OTHER), "write", OP, 0),
+        OP_SEED,
+      );
+      try {
+        await expect(
+          commands.run({ kind: "retain", expectedHead: chosen, payload: [grant] }),
+        ).rejects.toThrow(/head unavailable/);
+        expect(await gw.backend.holds(grant.id)).toBe(false);
+        expect(await gw.backend.holds(bystander.id)).toBe(true);
+        expect(await readHead(OP)).toEqual({ status: "head", head: chosen });
+      } finally {
+        store.readHead = readHead;
+      }
+    }));
+  it("refuses an unavailable head reread while reconciliation remains pending", async () =>
+    fixture(async (gw, path) => {
+      const grant = signClaims(
+          grantClaims(STORE_ENTITY, authorForSeed(OTHER), "write", OP, 0),
+          OP_SEED,
+        ),
+        bystander = observed(ROOT, "tag", "keep", 1, OP_SEED);
+      await gw.append([grant, bystander]);
+      const commands = await openOperatorCommands(gw, installation);
+      const other = await Gateway.open(new SqliteBackend(path), { seed: OP_SEED });
+      other.now = () => 100_000;
+      try {
+        await other.erase(grant.id);
+      } finally {
+        await other.close();
+      }
+      const store = gw.peer!.store,
+        readJournal = store.readJournal.bind(store);
+      let reads = 0;
+      store.readJournal = async (id) => {
+        if (++reads === 2) throw new Error("temporary journal failure");
+        return readJournal(id);
+      };
+      try {
+        await expect(gw.reseat()).rejects.toThrow("temporary journal failure");
+      } finally {
+        store.readJournal = readJournal;
+      }
+      expect(gw.needsJournalRefresh).toBe(true);
+      expect(gw.reactor.get(grant.id)).toBeDefined();
+      const chosen = await commands.head(),
+        readHead = store.readHead.bind(store);
+      let observations = 0;
+      store.readHead = async (id) => (++observations === 2 ? { status: "missing" } : readHead(id));
+      const fact = observed(ROOT, "height", 97, 0, OTHER);
+      try {
+        await expect(
+          commands.run({ kind: "retain", expectedHead: chosen, payload: [fact] }),
+        ).rejects.toThrow(/head unavailable/);
+        expect(await gw.backend.holds(fact.id)).toBe(false);
+        expect(await gw.backend.holds(grant.id)).toBe(false);
+        expect(await gw.backend.holds(bystander.id)).toBe(true);
+        expect(await readHead(OP)).toEqual({ status: "head", head: chosen });
+      } finally {
+        store.readHead = readHead;
+      }
+      await gw.refresh();
+      expect(gw.reactor.get(grant.id)).toBeUndefined();
+      expect(gw.reactor.get(bystander.id)).toEqual(bystander);
+    }));
   it("keeps erased IDs refused without affecting a named bystander", async () =>
     fixture(async (gw) => {
       const fact = observed(ROOT, "height", 42, 0, OP_SEED),
