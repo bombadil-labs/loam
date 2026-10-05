@@ -60,7 +60,7 @@ import {
   JournalConflict,
   rereadHostPeer,
 } from "./peer-admission.js";
-import { Channel } from "./channel.js";
+import { Channel, streamAfter } from "./channel.js";
 import type { AppendReceipt, FederationReport, Gateway } from "./gateway.js";
 import { publicDefect } from "./public.js";
 import { artifactDefect } from "./artifact.js";
@@ -343,10 +343,11 @@ export function refreshImpl(gw: Gateway): Promise<void> {
 
 /** @internal — take in what another writer admitted to this host's journal. */
 export async function catchUp(gw: Gateway): Promise<void> {
+  const recovering = gw.needsJournalRefresh;
   gw.needsJournalRefresh = true;
   const admitted = await rereadHostPeer(gw.peer!);
   const ids = new Set(admitted.map((d) => d.id));
-  if ([...gw.reactor.snapshot().ids()].some((id) => !ids.has(id))) {
+  if (recovering || [...gw.reactor.snapshot().ids()].some((id) => !ids.has(id))) {
     // A removed row can survive in cached views and parked streams. Rebuild those together.
     await gw.reseat();
     gw.needsJournalRefresh = false;
@@ -704,6 +705,7 @@ export function selectImpl(gw: Gateway, term: unknown): Delta[] {
 // entity streams ride — leaving the stream detaches immediately, a slow reader coalesces to the
 // newest membership. §27.6's "nearly free": every pulse re-evaluates the one Term.
 export function watchImpl(gw: Gateway, term: unknown): AsyncGenerator<Delta[], void, unknown> {
+  if (gw.reseating !== undefined) return streamAfter(gw.reseating, () => watchImpl(gw, term));
   // Lowered again on every pulse: a membership naming a user moves when the user's keys do.
   const program = () => parseTerm(lowerMembership(gw, term));
   const parsed = program();

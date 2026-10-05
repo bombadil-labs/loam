@@ -35,7 +35,8 @@ its content.
 - **Running gateways reconcile removals.** When another writer moves the journal head, refresh
   reconciles the admitted set, including removals with no change in its size. A removal closes
   old streams, clears cached views, and refolds registrations. Reseating also checks removals
-  that happen during subscription teardown. A failed refresh stays pending for the next read.
+  that happen during subscription teardown. Reconnecting streams wait for the replacement reactor.
+  Failed refresh, refolding, or reseating stays pending for the next read.
 - **The door remembers the hole.** Admission (federate AND append) composes the tombstone set:
   a tombstoned id is refused re-entry forever — a hash-set check, cheap. Union normally lets
   anything return; the tombstone is how forgetting sticks against the store's own gossip.

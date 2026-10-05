@@ -7,7 +7,7 @@ through the CLI. The container split closed step 6 (ruling 13): a gateway is a v
 container's journal (#676), the census shows 0 import cycles (#677), and container code uses a
 child only through `Peer`, in four PRs (#678 to #681). The handoff of existing pools is dropped
 (ruling 10). The audit found that refresh only added rows. It now reconciles the admitted set in both directions.
-A removal closes old streams, clears cached views, and refolds registrations. Reseat also reconciles removals during teardown.
+A removal closes old streams, clears cached views, and refolds registrations. Reseat also reconciles removals during teardown. Reconnecting streams wait for its completion.
 
 The refactor moves in three directions at once:
 

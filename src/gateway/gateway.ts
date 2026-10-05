@@ -511,6 +511,8 @@ export class Gateway {
   peer: HostPeer | undefined = undefined;
   /** @internal — a failed reconciliation must retry even after the journal handle moved. */
   needsJournalRefresh = false;
+  /** @internal — new streams wait for this reactor replacement. */
+  reseating: Promise<void> | undefined;
   /** @internal — where this ground's new pools keep their own keys (container.ts). */
   poolKeys: PoolKeySource = memoryPoolKeysFor(this);
   /** Stored rows the host's journal never admitted: held, never served. */
@@ -1589,7 +1591,24 @@ export class Gateway {
   // re-attaches, and any animating host is detached (it watched the old reactor — the caller
   // re-attaches its runner, as the village does after the crash).
   /** @internal — T19 seam (erase.ts) */
-  async reseat(): Promise<void> {
+  reseat(): Promise<void> {
+    if (this.reseating !== undefined) return this.reseating;
+    this.needsJournalRefresh = true;
+    const run = this.reseatGround();
+    this.reseating = run;
+    void run.then(
+      () => {
+        this.reseating = undefined;
+        this.needsJournalRefresh = false;
+      },
+      () => {
+        this.reseating = undefined;
+      },
+    );
+    return run;
+  }
+
+  private async reseatGround(): Promise<void> {
     // READ FIRST, TEAR DOWN AFTER, CATCH UP LAST: the read is the one step here that can fail,
     // and everything after it is destructive. Ordered the other way, a failed read leaves the
     // gateway half-torn-down — subscriptions killed, reactor still on pre-purge ground.

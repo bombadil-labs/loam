@@ -105,3 +105,39 @@ export class Channel<T> implements AsyncGenerator<T, void, unknown> {
     return this;
   }
 }
+
+// A reconnect during reactor replacement opens only after the new ground is ready.
+// Leaving before readiness cancels the open without waiting for storage or teardown.
+export function streamAfter<T>(
+  ready: Promise<void>,
+  open: () => AsyncGenerator<T, void, unknown>,
+): AsyncGenerator<T, void, unknown> {
+  let stream: AsyncGenerator<T, void, unknown> | undefined;
+  let closed = false;
+  let release!: () => void;
+  const left = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return {
+    async next() {
+      await Promise.race([ready, left]);
+      if (closed) return { value: undefined, done: true };
+      stream ??= open();
+      return stream.next();
+    },
+    async return() {
+      closed = true;
+      release();
+      return stream === undefined ? { value: undefined, done: true } : stream.return();
+    },
+    async throw(error?: unknown) {
+      closed = true;
+      release();
+      if (stream !== undefined) return stream.throw(error);
+      throw error instanceof Error ? error : new Error(String(error));
+    },
+    [Symbol.asyncIterator]() {
+      return this;
+    },
+  };
+}

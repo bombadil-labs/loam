@@ -26,7 +26,7 @@ import {
   type MaterializationChange,
   type View,
 } from "@bombadil/rhizomatic";
-import { Channel } from "./channel.js";
+import { Channel, streamAfter } from "./channel.js";
 // NOT `./channel.js` above it — that is the gateway's own Channel. The federation module is where a
 // channel POOL's naming lives, and `prefixOfChannelName` is the structural identity both readers
 // need when a record's own `prefix` primitive is condemned.
@@ -666,6 +666,8 @@ export function watchEntityImpl(
   door: "full" | "public" = "full",
   nowAt: () => number = () => Date.now(),
 ): AsyncGenerator<PatchNode, void, unknown> {
+  if (gw.reseating !== undefined)
+    return streamAfter(gw.reseating, () => watchEntityImpl(gw, name, entity, door, nowAt));
   const bound = gw.def(name);
   if (channelLens(gw, name)) {
     throw new Error(

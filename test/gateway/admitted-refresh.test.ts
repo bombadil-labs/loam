@@ -2,6 +2,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
+import { watchEntityImpl } from "../../src/gateway/reads.js";
+import { Channel, streamAfter } from "../../src/gateway/channel.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
@@ -120,9 +123,7 @@ describe("refresh reconciles the admitted set", () => {
     try {
       await p.writer.erase(p.target.id, { reason: "retry a failed refresh" });
       const reseat = p.reader.reseat.bind(p.reader);
-      p.reader.reseat = async () => {
-        throw new Error("temporary store read failure");
-      };
+      p.reader.reseat = () => Promise.reject(new Error("temporary store read failure"));
       await expect(p.reader.refresh()).rejects.toThrow("temporary store read failure");
       expect(p.reader.peer!.journal.currentHead()).toBe(p.writer.peer!.journal.currentHead());
       p.reader.reseat = reseat;
@@ -150,5 +151,143 @@ describe("refresh reconciles the admitted set", () => {
     } finally {
       await p.close();
     }
+  });
+  it("a throwing dependent notification must retry its unfinished fanout", async () => {
+    const p = await pair();
+    try {
+      const d = observed(FERN, "height", 44, 1002, SEED);
+      await p.writer.append([d]);
+      let fail = true,
+        callbacks = 0;
+      p.reader.watchUsers(() => {
+        if (fail) throw new Error("temporary observer fault");
+      });
+      p.reader.watchUsers(() => {
+        callbacks++;
+      });
+      await expect(p.reader.refresh()).rejects.toThrow("temporary observer fault");
+      expect(p.reader.reactor.get(d.id)).toBeDefined();
+      expect(p.reader.needsJournalRefresh).toBe(true);
+      fail = false;
+      await p.reader.refresh();
+      expect(callbacks).toBe(1);
+    } finally {
+      await p.close();
+    }
+  });
+  it("retries refolding when the last ingested row survives a failed refold", async () => {
+    const p = await pair();
+    try {
+      const binding = [...p.writer.reactor.snapshot()].find((d) =>
+        d.claims.pointers.some(
+          (q) => q.target.kind === "entity" && q.target.entity.context === "loam.registration",
+        ),
+      )!;
+      expect(p.reader.surface()?.registered).toHaveLength(1);
+      const strike = signClaims(
+        makeNegationClaims(p.writer.operatorAuthor!, Date.now(), binding.id),
+        SEED,
+      );
+      await p.writer.append([strike]);
+      const replay = p.reader.replayRegistrations.bind(p.reader);
+      p.reader.replayRegistrations = () => {
+        throw new Error("temporary refold fault");
+      };
+      await expect(p.reader.refresh()).rejects.toThrow("temporary refold fault");
+      expect(p.reader.reactor.get(strike.id)).toBeDefined();
+      expect(p.reader.needsJournalRefresh).toBe(true);
+      p.reader.replayRegistrations = replay;
+      await p.reader.refresh();
+      expect(p.reader.surface()?.registered ?? []).toHaveLength(0);
+    } finally {
+      await p.close();
+    }
+  });
+  it("a failed direct reseat retries rather than skipping the adopted journal head", async () => {
+    const p = await pair();
+    try {
+      await p.writer.erase(p.target.id, { reason: "direct reseat failure" });
+      const store = p.reader.peer!.store;
+      const original = store.readJournal.bind(store);
+      let reads = 0;
+      store.readJournal = async (id) => {
+        if (++reads === 2) throw new Error("temporary journal failure");
+        return original(id);
+      };
+      await expect(p.reader.reseat()).rejects.toThrow("temporary journal failure");
+      expect(p.reader.peer!.journal.currentHead()).toBe(p.writer.peer!.journal.currentHead());
+      expect(p.reader.reactor.get(p.target.id)).toBeDefined();
+      store.readJournal = original;
+      await p.reader.refresh();
+      expect(p.reader.reactor.get(p.target.id)).toBeUndefined();
+      expect(p.reader.reactor.get(p.bystander.id)).toBeDefined();
+      expect(await height(p.reader)).toBe(12);
+    } finally {
+      await p.close();
+    }
+  });
+  it("new native watch created by a woken reader does not retain removed bytes", async () => {
+    const p = await pair();
+    try {
+      const old = p.reader.watch(HEIGHTS);
+      await old.next();
+      let resumed: ReturnType<Gateway["watch"]> | undefined;
+      const wake = old.next().then((r) => {
+        if (r.done) resumed = p.reader.watch(HEIGHTS);
+      });
+      await p.writer.erase(p.target.id, { reason: "remove then reconnect" });
+      await p.reader.refresh();
+      await wake;
+      expect(p.reader.reactor.get(p.target.id)).toBeUndefined();
+      expect(p.reader.reactor.get(p.bystander.id)).toBeDefined();
+      expect(await height(p.reader)).toBe(12);
+      const frame = await resumed!.next();
+      expect(JSON.stringify(frame)).not.toContain(p.target.id);
+    } finally {
+      await p.close();
+    }
+  });
+});
+
+describe("streams opened during reactor replacement", () => {
+  it("defers materialized streams until the new ground is ready", async () => {
+    const p = await pair();
+    try {
+      const old = p.reader.watch(HEIGHTS);
+      await old.next();
+      let resumed: ReturnType<typeof watchEntityImpl> | undefined;
+      const wake = old.next().then((result) => {
+        if (result.done) resumed = watchEntityImpl(p.reader, "Plant", FERN);
+      });
+      await p.writer.erase(p.target.id, { reason: "reconnect materialized stream" });
+      await p.reader.refresh();
+      await wake;
+      const frame = await resumed!.next();
+      expect(frame.done).toBe(false);
+      expect(frame.value).toMatchObject({ view: { height: 12 } });
+      expect(p.reader.reactor.get(p.target.id)).toBeUndefined();
+      expect(p.reader.reactor.get(p.bystander.id)).toBeDefined();
+      await resumed!.return();
+    } finally {
+      await p.close();
+    }
+  });
+
+  it("leaving a deferred stream wakes pending reads without opening it", async () => {
+    let release!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let opened = 0;
+    const stream = streamAfter(ready, () => {
+      opened += 1;
+      return new Channel<string>();
+    });
+    const pending = stream.next();
+    await stream.return();
+    expect(await pending).toMatchObject({ done: true });
+    release();
+    expect(await stream.next()).toMatchObject({ done: true });
+    expect(opened).toBe(0);
   });
 });
