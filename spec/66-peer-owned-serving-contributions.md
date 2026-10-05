@@ -58,8 +58,7 @@ incremental composed materialization or a portable HyperView artifact; those req
 contract for source identity, closure, time, invalidation and lifecycle.
 
 **Provenance.** Admitted refresh and teardown reconciliation:
-[#683](https://github.com/bombadil-labs/loam/pull/683). Peer-contribution landing PR link to be filled
-when opened. Implementation: `src/gateway/ingest.ts`, `src/gateway/gateway.ts`,
+[#683](https://github.com/bombadil-labs/loam/pull/683). Peer-owned serving contributions: [#685](https://github.com/bombadil-labs/loam/pull/685). Implementation: `src/gateway/ingest.ts`, `src/gateway/gateway.ts`,
 `src/gateway/read-contribution.ts`, `src/gateway/container.ts` and the serving readers. Proof:
 `test/gateway/admitted-refresh.test.ts`, `test/gateway/peer-read-contribution.test.ts`, and the
 existing federation blessing/curse suites.
