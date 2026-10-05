@@ -7,6 +7,11 @@
 // pool serves the lens `alice:Plant`. In the root, the operator writes the tag "root tag" on the
 // fern. `tag` resolves with `all`, so a query shows every ground the answering lens reads.
 //
+// Explicit root-origin law reads the root, even when its name resembles a channel namespace.
+// The four b1/b2 before/after answers therefore contain root tag only; their earlier recording
+// mixed in alice's tag by prefix inference. Pool-only and differently named controls stay unchanged.
+// This correction does not move any binding, strike, or curse outcome.
+//
 // Recorded (`curse-scope.cases`), per case, before and after the curse:
 // - delta level: every registration binding in the pool and in the root, as location + lens name +
 //   live or struck, and the negations that the curse added in each ground. Ids are not recorded:

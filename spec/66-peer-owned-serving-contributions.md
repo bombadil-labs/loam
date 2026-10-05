@@ -54,7 +54,9 @@ subscriptions remain refused by their existing contracts; this slice does not in
 view over composed peer sources.
 
 A standing channel whose prefix is explicitly unreadable keeps only its current child law in
-candidate folds, fenced by the same structural channel-name fallback used by the read refusal.
+candidate folds, fenced by an exact parent-based recovery of the channel's full prefix. The
+lawful pool declaration and independently legible record parent must agree; missing or conflicting
+identity never selects a serving source.
 This preserves the requested channel's diagnostic after a child journal refresh; it does not
 preserve withdrawn bindings or supply a replacement serving ground. Candidate and contest folds
 use the same fence. Unrelated malformed channels do not prevent a native read.
@@ -64,6 +66,21 @@ checks before declaring its backing law. A refusal therefore leaves the admitted
 The optional surface `assertSource` hook supplies this guard to generators; native named mutation
 methods also enforce it. Generic raw `_claim` has no channel lens and keeps its existing admission
 contract. Healthy channel and native mutations retain their existing behavior.
+
+A current binding's explicit channel origin identifies its source in both root and bound folds.
+A known local or inbox binding stays on its own authorized ground even when its name resembles a
+channel prefix. A channel candidate accepted by the container's bound fold retains its authorized
+bound ground; a root channel row merely inherited into that surface remains outside its scope. For an unbound
+name without a current binding, full-prefix matching selects a unique longest channel match;
+ambiguity refuses. A namespace or first-colon split is not source identity. Channel subscriptions
+and source-legibility guards use the same association.
+
+An unbound named channel retraction gathers that channel's raw source, without serving closure.
+It can strike the caller's own peer-held contribution and leaves the private primary bystander
+unchanged. Owner-inbox fanout is not a substitute source for a channel lens; incompatible explicit
+pool gathering refuses before signing. A legitimately scoped channel candidate retains existing
+owner-inbox fanout, including the owner's delegated claims; another owner's independent pool is
+unchanged. Each fanout operand is checked against its own bound fold before any strike is signed.
 
 ## Membership is a separate question
 

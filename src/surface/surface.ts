@@ -88,7 +88,7 @@ export interface ClaimPointerSpec {
 export interface SurfaceHooks {
   // A named operation must check that its source is legible BEFORE signing or making listing
   // declarations. Optional for non-federated generators; gateway surfaces supply this guard.
-  assertSource?(schemaName: string): void;
+  assertSource?(schemaName: string, binding?: ConnectionBinding): void;
   // Resolve a view at an entity. An optional `asOf` (SPEC §26) reads a MOMENT: the ground as it
   // stood at timestamp T, resolved by the same program — omit it and the read is present-tense.
   resolve(

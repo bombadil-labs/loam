@@ -65,6 +65,7 @@ import {
 } from "../helpers/connection-fixture.js";
 import { FERN, observed } from "../spike/garden.js";
 import { withStamp } from "../../src/gateway/stamp.js";
+import { channelRecordClaims } from "../../src/federation/channel.js";
 
 const PEER_SEED = "7a".repeat(32);
 const PEER_TOKEN = "peer-door-token";
@@ -312,10 +313,43 @@ describe("§58 — receive within the subtree", () => {
         ? "unserved"
         : (body.data?.ada_journal_inbox_peer_Plant?.height ?? null);
     };
-    expect(await height(ada)).toBe(11);
+    await gateway.append([observed(FERN, "height", 999, gateway.stamp(), OPERATOR_SEED)]);
+    expect(await height(ada)).toBe(11); // the valid bound source never switches to private primary
     expect(await height("op-token")).toBe("unserved");
     const bea = await connect(base, "bea", "notes");
     expect(await height(bea)).toBe("unserved");
+    // The binding's authorized channel has a colon-bearing parent AND prefix. Its current law
+    // still routes a specific refusal after malformed prefix, before a bound actor signs.
+    const status = gateway.channelStatus().find((c) => c.openedBy === "ada:journal")!;
+    const claims = withStamp(gateway.stamp(), (stamp) =>
+      channelRecordClaims(status, OPERATOR, stamp),
+    );
+    await gateway.append([
+      gateway.signer!.sign({
+        ...claims,
+        pointers: claims.pointers.filter((p) => p.role !== "prefix"),
+      }),
+    ]);
+    const heads = [
+      gateway,
+      ...[...gateway.store.tableOf(gateway).inboxes.values()].flatMap((p) =>
+        p.gateway === undefined ? [] : [p.gateway],
+      ),
+    ].map((g) => ({ g, head: g.peer!.journal.currentHead() }));
+    for (const query of [
+      `{ ada_journal_inbox_peer_Plant(entity: "${FERN}") { height } }`,
+      `mutation { ada_journal_inbox_peer_Plant(entity: "${FERN}", height: 123) { height } }`,
+    ]) {
+      const response = await fetch(`${base}/default/graphql`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${ada}` },
+        body: JSON.stringify({ query }),
+      });
+      const result = (await response.json()) as { errors?: unknown; data?: unknown };
+      expect(JSON.stringify(result.errors)).toMatch(/does not carry its prefix/);
+      expect(JSON.stringify(result.data ?? {})).not.toContain("999");
+      for (const { g, head } of heads) expect(g.peer!.journal.currentHead()).toBe(head);
+    }
     await closePeers();
     await closeAll();
   });

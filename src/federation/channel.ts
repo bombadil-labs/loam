@@ -1368,14 +1368,22 @@ function declaredPrefix(name: string, inboxOf: string | undefined): string | und
   return name.startsWith(lead) ? name.slice(lead.length) : undefined;
 }
 
+/** Exact binding fence, using independently stated parent identity when the prefix is unreadable. */
+export function channelBindingPrefix(gw: Gateway, status: ChannelStatus): string | undefined {
+  if (!status.unreadable.includes("prefix")) return status.prefix;
+  const parent = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor).containers.get(
+    status.name,
+  )?.inboxOf;
+  const recordedParent = status.unreadable.includes("into") ? undefined : status.into;
+  if (parent !== undefined && recordedParent !== undefined && parent !== recordedParent) {
+    return undefined; // contradictory identity never chooses a source
+  }
+  return declaredPrefix(status.name, parent ?? recordedParent);
+}
+
 /**
- * The prefix a channel's own NAME carries — `channel:<into>:<prefix>`.
- *
- * A STRUCTURAL GUESS that splits at the first colon after `channel:`, so it cannot separate the two
- * halves when either carries a colon (T215) — it is only the last resort serving readers and binding folds reach when a
- * record's `prefix` primitive is among the roles the reader condemned, where a legible reading is
- * gone and the name is the only identity left. The collision guard reads the record and the
- * declaration instead (`standingPrefixes`); it never calls this.
+ * Historical structural guess. It cannot distinguish colon-bearing parent and prefix names.
+ * @deprecated Never use this to associate a binding with a serving or write source.
  */
 export function prefixOfChannelName(name: string): string | undefined {
   if (!name.startsWith("channel:")) return undefined;

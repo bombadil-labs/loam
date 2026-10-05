@@ -786,7 +786,7 @@ export function buildGqlSchema(
       const resolve = field.resolve;
       if (resolve === undefined) continue;
       field.resolve = (...args) => {
-        hooks.assertSource?.(lensOf(def));
+        hooks.assertSource?.(lensOf(def), contextOf(args[2]).binding);
         return resolve(...args);
       };
     }

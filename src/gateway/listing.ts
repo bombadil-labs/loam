@@ -493,7 +493,7 @@ export async function listingPageImpl(
   await gw.prepareRead();
   const now = gw.now();
   const def = gw.def(name, binding); // refuses an unregistered lens in the door's own voice
-  assertChannelSourceLegible(gw, name);
+  assertChannelSourceLegible(gw, name, binding);
   const program = programOf(def);
   const limit = opts.limit ?? LISTING_DEFAULT_LIMIT;
   if (!Number.isInteger(limit) || limit < 1 || limit > LISTING_MAX_LIMIT) {

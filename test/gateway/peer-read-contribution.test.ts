@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { authorForSeed, signClaims, type Delta, type Claims } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
-import { assembleGenesis } from "../../src/gateway/genesis.js";
+import { assembleGenesis, STORE_ENTITY } from "../../src/gateway/genesis.js";
 import { containerClaims, exclusionClaims, termClaims } from "../../src/gateway/container-law.js";
 import { frozenMembershipTerm, slateClaims } from "../../src/gateway/slate.js";
 import { eraseClaims } from "../../src/gateway/erase-law.js";
@@ -13,6 +13,7 @@ import { SqliteBackend } from "../../src/store/sqlite.js";
 import { FERN, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY } from "./fixtures.js";
 import { DEADLINE } from "./slating.js";
+import { grantClaims } from "../../src/gateway/accounts.js";
 import { channelRecordClaims } from "../../src/federation/channel.js";
 import { withStamp } from "../../src/gateway/stamp.js";
 
@@ -377,6 +378,7 @@ describe("channel query serving uses the peer-owned source too", () => {
 describe("child law refresh invalidates the parent's dependent surface", () => {
   async function channelFixture(
     body: (sender: Gateway, receiver: Gateway, child: Gateway, file: string) => Promise<void>,
+    sourceName = { into: "friends", prefix: "remote" },
   ) {
     const dir = mkdtempSync(join(tmpdir(), "loam-peer-channel-law-"));
     const file = join(dir, "channel.sqlite");
@@ -402,8 +404,7 @@ describe("child law refresh invalidates the parent's dependent surface", () => {
     try {
       await sender.append([observed(FERN, "height", 87, 1001, peerSeed)]);
       const channel = await receiver.openChannel({
-        into: "friends",
-        prefix: "remote",
+        ...sourceName,
         source: { pull: () => Promise.resolve(sender.reactor.arrivalLog()) },
       });
       await channel.sync();
@@ -428,6 +429,139 @@ describe("child law refresh invalidates the parent's dependent surface", () => {
       await writer.close();
     }
   }
+  it.each([
+    { into: "friends", prefix: "al:ice" },
+    { into: "friends:al", prefix: "ice" },
+  ])(
+    "the exact channel source survives unreadable prefix for $into / $prefix, and a namespaced local binding remains local",
+    async (sourceName) =>
+      channelFixture(async (_sender, receiver, child, file) => {
+        const lens = `${sourceName.prefix}:Plant`;
+        const field = lens.replaceAll(":", "_");
+        const query = `{ ${field}(entity: "${FERN}") { height } }`;
+        expect((await receiver.query(query)).errors).toBeUndefined();
+        await child.publishRegistration(
+          PLANT,
+          { ...PLANT_POLICY, name: lens },
+          [FERN],
+          undefined,
+          undefined,
+          undefined,
+          ["height"],
+        );
+        const privateFact = receiver.reactor
+          .arrivalLog()
+          .find((d) =>
+            d.claims.pointers.some((p) => p.target.kind === "primitive" && p.target.value === 999),
+          )!;
+        const ownAtPeer = observed(FERN, "height", 77, 1004, SEED);
+        await child.append([
+          child.signer!.sign(
+            withStamp(child.stamp(child.operatorAuthor), (stamp) =>
+              grantClaims(STORE_ENTITY, AUTHOR, "write", child.operatorAuthor!, stamp),
+            ),
+          ),
+        ]);
+        await child.append([ownAtPeer]);
+        const raw = receiver.gatherForRetraction(lens, FERN);
+        const cleared = await receiver.query(
+          `mutation { clear${field}(entity: "${FERN}", fields: ["height"]) { height } }`,
+        );
+        expect(cleared.errors).toBeUndefined();
+        expect(receiver.reactor.negationsOf(privateFact.id)).toHaveLength(0);
+        expect(receiver.reactor.negationsOf(ownAtPeer.id)).not.toHaveLength(0);
+        expect((cleared.data?.[`clear${field}`] as { height: number }).height).toBe(87);
+        expect([...raw.props.values()].flat().map((e) => e.delta.id)).toContain(ownAtPeer.id);
+        expect([...raw.props.values()].flat().map((e) => e.delta.id)).not.toContain(privateFact.id);
+        // Same namespace, explicit LOCAL binding: prefix resemblance must not choose child rows.
+        const local = `${sourceName.prefix}:Local`;
+        const localField = local.replaceAll(":", "_");
+        await receiver.publishRegistration(
+          PLANT,
+          { ...PLANT_POLICY, name: local },
+          [FERN],
+          undefined,
+          undefined,
+          undefined,
+          ["height"],
+        );
+        const localQuery = `{ ${localField}(entity: "${FERN}") { height } }`;
+        expect((await receiver.query(localQuery)).errors).toBeUndefined();
+        expect(
+          ((await receiver.query(localQuery)).data?.[localField] as { height: number }).height,
+        ).toBe(999);
+        const status = receiver.channelStatus()[0]!;
+        const claims = withStamp(receiver.stamp(receiver.operatorAuthor), (stamp) =>
+          channelRecordClaims(status, receiver.operatorAuthor!, stamp),
+        );
+        await receiver.append([
+          receiver.signer!.sign({
+            ...claims,
+            pointers: claims.pointers.filter((p) => p.role !== "prefix"),
+          }),
+        ]);
+        const writer = await Gateway.open(new SqliteBackend(file), { seed: CHILD_SEED });
+        try {
+          await writer.append([observed(FERN, "tag", "changed colon source", 1003, CHILD_SEED)]);
+        } finally {
+          await writer.close();
+        }
+        const read = await receiver.query(query);
+        expect(JSON.stringify(read.data ?? {})).not.toContain("999");
+        expect(JSON.stringify(read.errors)).toMatch(/does not carry its prefix/);
+        expect(JSON.stringify(read.errors)).toContain(status.name);
+        const head = receiver.peer!.journal.currentHead();
+        const signing = vi.spyOn(receiver.signer!, "sign");
+        try {
+          const mutation = await receiver.query(
+            `mutation { ${field}(entity: "${FERN}", height: 123) { height } }`,
+          );
+          expect(JSON.stringify(mutation.errors)).toMatch(/does not carry its prefix/);
+          await expect(receiver.mutateEntity(lens, FERN, { height: 234 })).rejects.toThrow(
+            /does not carry its prefix/,
+          );
+          expect(signing).not.toHaveBeenCalled();
+          expect(receiver.peer!.journal.currentHead()).toBe(head);
+        } finally {
+          signing.mockRestore();
+        }
+        await expect(
+          receiver.subscribe(`subscription { ${field}(entity: "${FERN}") { height } }`),
+        ).rejects.toThrow(/federation channel/);
+        const own = await receiver.query(localQuery);
+        expect(own.errors).toBeUndefined();
+        expect((own.data?.[localField] as { height: number }).height).toBe(999);
+        const native = await receiver.query(
+          `mutation { ${localField}(entity: "${FERN}", height: 321) { height } }`,
+        );
+        expect(native.errors).toBeUndefined();
+        expect((native.data?.[localField] as { height: number }).height).toBe(321);
+        // Withdrawing the actual child binding still removes the parent's route.
+        const withdrawer = await Gateway.open(new SqliteBackend(file), { seed: CHILD_SEED });
+        try {
+          await withdrawer.strike(
+            child.reactor
+              .arrivalLog()
+              .filter(
+                (d) =>
+                  d.claims.author === child.operatorAuthor &&
+                  d.claims.pointers.some(
+                    (p) =>
+                      p.role === "schema" &&
+                      p.target.kind === "entity" &&
+                      p.target.entity.id === `schema:${lens}`,
+                  ),
+              )
+              .map((d) => d.id),
+          );
+        } finally {
+          await withdrawer.close();
+        }
+        const withdrawn = await receiver.query(query);
+        expect(withdrawn.errors).toBeDefined();
+        expect(receiver.registered.map((r) => r.lensName)).not.toContain(lens);
+      }, sourceName),
+  );
   it("an unreadable channel prefix keeps its specific refusal after a real SQLite child refold, without signing mutations or disturbing the native bystander", async () =>
     channelFixture(async (_sender, receiver, child, file) => {
       await child.publishRegistration(
