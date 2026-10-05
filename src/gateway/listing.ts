@@ -32,7 +32,7 @@ import {
   readContainerTable,
   type ContainerTable,
 } from "./container-law.js";
-import { erasedInScope, poolGovernors } from "./erase.js";
+import { erasedInScope } from "./erase.js";
 import { erasedFromReading } from "./erase-law.js";
 import type { ConnectionBinding, Gateway } from "./gateway.js";
 import { groupPrograms } from "./lifecycle.js";
@@ -489,6 +489,8 @@ export async function listingPageImpl(
   opts: ListOptions = {},
   binding?: ConnectionBinding,
 ): Promise<string[]> {
+  await gw.prepareRead();
+  const now = gw.now();
   const def = gw.def(name, binding); // refuses an unregistered lens in the door's own voice
   const program = programOf(def);
   const limit = opts.limit ?? LISTING_DEFAULT_LIMIT;
@@ -512,7 +514,7 @@ export async function listingPageImpl(
     const inContexts = new Set(listingContexts(gw, program, binding));
     const after = opts.after;
     return projectListingEntities(
-      withoutErasedScope(gw, gw.connectionScope({ bound: binding.container })),
+      withoutErasedScope(gw, gw.servingScope(now, { bound: binding.container })),
       inContexts,
     )
       .filter((id) => after === undefined || id > after)
@@ -547,7 +549,7 @@ export async function listingPageImpl(
   ) {
     // The scope read owns exclusion and inbox composition; it is O(ground), and correct.
     return projectListingEntities(
-      withoutErasedScope(gw, gw.containerScope({ containers: [container] })),
+      withoutErasedScope(gw, gw.servingScope(now, { containers: [container] })),
       inContexts,
     )
       .filter((id) => after === undefined || id > after)
@@ -561,7 +563,7 @@ export async function listingPageImpl(
 
 // A composed scope with its erased deltas removed (see `erasedInScope`).
 function withoutErasedScope(gw: Gateway, scope: readonly Delta[]): Delta[] {
-  const hidden = erasedInScope(gw.reactor, gw.operatorAuthor, scope, poolGovernors(gw));
+  const hidden = erasedInScope(gw.reactor, gw.operatorAuthor, scope);
   return hidden.size === 0 ? [...scope] : scope.filter((d) => !hidden.has(d.id));
 }
 

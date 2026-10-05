@@ -31,7 +31,7 @@ import { Channel, streamAfter } from "./channel.js";
 // channel POOL's naming lives, and `prefixOfChannelName` is the structural identity both readers
 // need when a record's own `prefix` primitive is condemned.
 import { prefixOfChannelName } from "../federation/channel.js";
-import { erasedInScope, forgottenSince, poolGovernors } from "./erase.js";
+import { erasedInScope, forgottenSince } from "./erase.js";
 import { readGround } from "./slate.js";
 import { requireMoment, readClosedIds } from "./slate-law.js";
 import type { ConnectionBinding, Gateway } from "./gateway.js";
@@ -335,8 +335,11 @@ function channelGroundFor(
   // target revives. Presence is not survival.
   // A pool can hold an erasure this store has not seen, and this store can refuse an id only a pool
   // holds, so the erasures are read over the whole composed scope.
-  const scope = gw.containerScope({ containers: [channel.name] });
-  const erased = erasedInScope(gw.reactor, gw.operatorAuthor, scope, poolGovernors(gw));
+  const scope = gw.servingScope(now, {
+    containers: [channel.name],
+    ...(asOf === undefined ? {} : { asOf }),
+  });
+  const erased = erasedInScope(gw.reactor, gw.operatorAuthor, scope);
   const deltas = scope.filter(
     (d) =>
       (asOf === undefined || d.claims.timestamp <= asOf) &&
@@ -362,8 +365,11 @@ export function boundGroundFor(
   asOf?: number,
 ): DeltaSet {
   const closed = readClosedIds(gw, now);
-  const scope = gw.connectionScope({ bound: binding.container });
-  const erased = erasedInScope(gw.reactor, gw.operatorAuthor, scope, poolGovernors(gw));
+  const scope = gw.servingScope(now, {
+    bound: binding.container,
+    ...(asOf === undefined ? {} : { asOf }),
+  });
+  const erased = erasedInScope(gw.reactor, gw.operatorAuthor, scope);
   return DeltaSet.from(
     scope.filter(
       (d) =>

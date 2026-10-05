@@ -2288,4 +2288,41 @@ export const CHAPTERS = [
       },
     ],
   },
+  {
+    n: 29,
+    slug: "peer-owned-serving-contributions",
+    title: "Each peer decides what it contributes",
+    thesis:
+      "A parent composes rows its children approve for serving, while raw membership remains available to freeze and removal machinery.",
+    covers: ["spec/66-peer-owned-serving-contributions.md"],
+    body: [
+      {
+        kind: "prose",
+        text: "An attached peer refreshes its own admitted journal before a read, including removals that leave its row count unchanged. Its read-closed rows stay out of the parent's composition. Withholding a strike also withholds what would otherwise revive, even across contributors; it does not hand the child erasure authority over another peer's independent copy. Raw members and frozen versions remain a different question.",
+      },
+      {
+        kind: "claims",
+        claims: [
+          {
+            says: "Bound queries and listings, and channel queries, respect child read closures before composition, preserve suppression across peers, and leave raw membership and freeze intact.",
+            spec: "spec/66-peer-owned-serving-contributions.md",
+            proof: "test/gateway/peer-read-contribution.test.ts",
+            door: null,
+          },
+          {
+            says: "An independent SQLite removal reaches the next parent query and closes the child's old watch; an unavailable child source fails the read instead of serving stale testimony.",
+            spec: "spec/66-peer-owned-serving-contributions.md",
+            proof: "test/gateway/peer-read-contribution.test.ts",
+            door: null,
+          },
+          {
+            says: "Refresh reconciles complete admitted membership, including equal-count replacements and removals during stream teardown, and a failed rebuild can recover completely.",
+            spec: "spec/66-peer-owned-serving-contributions.md",
+            proof: "test/gateway/admitted-refresh.test.ts",
+            door: null,
+          },
+        ],
+      },
+    ],
+  },
 ];

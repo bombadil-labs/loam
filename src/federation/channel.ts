@@ -1191,7 +1191,7 @@ export async function blessChannelResolversImpl(
     // The incumbent is this store's own withheld binding, and replacing it IS the request.
     supersede: true,
   });
-  await ground.preloadResolvers();
+  await ground.prepareRead({ reconcileLaw: true });
   gw.replayRegistrations();
   // THE NAME THIS ACTED ON, because the caller may have typed the bare one. A caller that compared
   // its own argument against a reader that answers prefixed names would be asking a question that
@@ -2574,7 +2574,7 @@ export async function curseChannelLawImpl(
         }
       }
     }
-    replayEverywhere(gw);
+    await replayEverywhere(gw);
     // Lifting strikes the curse record itself. The next poll re-blesses through the ordinary path,
     // so nothing here needs to know how binding works.
     for (const d of cursesOf(gw, channel)) {
@@ -2681,7 +2681,7 @@ export async function curseChannelLawImpl(
   for (const binding of bindings) {
     await binding.sign(binding.id);
   }
-  replayEverywhere(gw);
+  await replayEverywhere(gw);
 
   // THE VERDICT IS THE SURFACE, NOT THE COUNT. A purge's count is evidence, never the verdict (T70),
   // and the same holds for a retirement: this refuses rather than reporting a lens left the surface
@@ -2708,8 +2708,9 @@ export async function curseChannelLawImpl(
  * other way: it revives the binding on the ground and the pool would go on serving nothing. Both
  * halves of a reversible act have to arrive in the same breath, or the reversal is not one.
  */
-function replayEverywhere(gw: Gateway): void {
-  for (const pool of gw.store.channels(gw).values()) pool.gateway?.replayRegistrations();
+async function replayEverywhere(gw: Gateway): Promise<void> {
+  for (const pool of gw.store.channels(gw).values())
+    await pool.gateway?.prepareRead({ reconcileLaw: true });
   gw.replayRegistrations();
 }
 

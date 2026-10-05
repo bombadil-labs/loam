@@ -39,9 +39,9 @@ export type Peer = Pick<
   | "exportManifestRows"
   | "arrivalStamps"
   | "adoptLaw"
-  // It refreshes what it derives from its own law.
-  | "preloadResolvers"
-  | "replayRegistrations"
+  // A peer refreshes its own admitted source and decides what it contributes to serving.
+  | "prepareRead"
+  | "readContribution"
   // Erasure: an order delivered to it, and read-only questions about the bytes it holds. The
   // container purges and settles itself; no other container reaches its store.
   | "eraseReplica"

@@ -181,6 +181,7 @@ import {
   type ContainerOptions,
 } from "./container.js";
 import { readContainerTable, type ContainerTable } from "./container-law.js";
+import { readContributionImpl } from "./read-contribution.js";
 import type { Probation } from "./probation.js";
 import {
   declareArtifactImpl,
@@ -1042,6 +1043,7 @@ export class Gateway {
 
   // Ensure a route's bundle is loaded (SPEC §23): the body lives in renderers.ts.
   async prepareRoute(route: string, door: "full" | "public" = "full"): Promise<void> {
+    await this.prepareRead();
     return prepareRouteImpl(this, route, door);
   }
 
@@ -1368,6 +1370,32 @@ export class Gateway {
   // QUERY time — this never rewrites the default door reads.
   containerScope(opts: { containers?: readonly string[] } = {}): Delta[] {
     return containerScopeImpl(this, opts);
+  }
+
+  /** Serving composition uses only the contributions each peer approves under its own law. */
+  servingScope(
+    now: number,
+    opts: { containers?: readonly string[]; bound?: string; asOf?: number } = {},
+  ): Delta[] {
+    const moment = { now, ...(opts.asOf === undefined ? {} : { asOf: opts.asOf }) };
+    return opts.bound === undefined
+      ? containerScopeImpl(this, opts, moment)
+      : connectionScopeImpl(this, { bound: opts.bound, ...opts }, moment);
+  }
+
+  /** Refresh owned admitted sources before a serving door composes them. */
+  async prepareRead(options: { reconcileLaw?: boolean } = {}): Promise<void> {
+    await this.refresh();
+    if (options.reconcileLaw) {
+      this.replayRegistrations();
+      await this.preloadResolvers();
+    }
+    for (const child of this.store.pools(this)) await child.prepareRead();
+  }
+
+  /** A parent may narrow this testimony; it cannot substitute the peer's raw snapshot. */
+  readContribution(now: number, options: { inbox?: string; asOf?: number } = {}) {
+    return readContributionImpl(this, now, options);
   }
 
   // The listing door (ticket T110): one page of the distinct entities holding evidence a lens's
@@ -1705,8 +1733,8 @@ export class Gateway {
 
   // Membership is a query, first-class (SPEC §27.6): evaluate a membership Term over this
   // store's ground, once. The body lives in ingest.ts — select is offeredDeltas, parameterized.
-  select(term: unknown): Delta[] {
-    return selectImpl(this, term);
+  select(term: unknown, now?: number): Delta[] {
+    return selectImpl(this, term, now);
   }
 
   // The same Term, live: the current members, then a fresh evaluation whenever the membership
@@ -2350,7 +2378,7 @@ export class Gateway {
   // A tokenless query: the restricted surface, and NEVER an acting identity — there is no one
   // to sign as, and nothing to sign with.
   async queryPublic(source: string, variables?: Record<string, unknown>): Promise<QueryResult> {
-    await this.refresh();
+    await this.prepareRead();
     const result = await graphql({
       schema: this.publicSurfaceOrThrow(),
       source,
@@ -2367,7 +2395,7 @@ export class Gateway {
     source: string,
     variables?: Record<string, unknown>,
   ): Promise<AsyncGenerator<Record<string, unknown>>> {
-    await this.refresh();
+    await this.prepareRead();
     return this.subscribeVia(this.publicSurfaceOrThrow(), source, variables);
   }
 
@@ -2385,7 +2413,7 @@ export class Gateway {
     variables?: Record<string, unknown>,
     context?: RequestContext,
   ): Promise<QueryResult> {
-    await this.refresh();
+    await this.prepareRead();
     const result = await graphql({
       // A bound connection queries its CONTAINER'S surface, never the store's (§58 position 2).
       schema:
@@ -2419,7 +2447,7 @@ export class Gateway {
           `poll the query door instead`,
       );
     }
-    await this.refresh();
+    await this.prepareRead();
     return this.subscribeVia(this.schemaOrThrow(), source, variables);
   }
 
