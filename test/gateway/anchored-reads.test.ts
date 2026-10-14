@@ -82,7 +82,14 @@ async function plainStore(count: number): Promise<Gateway> {
   return gw;
 }
 
-async function governedStore(count: number): Promise<Gateway> {
+async function governedStore(count: number, lenses = 1): Promise<Gateway> {
+  // Further governed lenses sit in the registry beside Guarded; a read of Guarded lowers them too.
+  const extra = Array.from({ length: lenses - 1 }, (_, n) => ({
+    hyperschema: { ...GUARDED, name: `Guarded${n}` },
+    schema: PLANT_POLICY,
+    roots: [],
+    writable: [...PLANT_WRITABLE],
+  }));
   const gw = await Gateway.boot(
     new MemoryBackend(),
     assembleGenesis({
@@ -94,6 +101,7 @@ async function governedStore(count: number): Promise<Gateway> {
           roots: [FERN],
           writable: [...PLANT_WRITABLE],
         },
+        ...extra,
       ],
     }),
   );
@@ -190,4 +198,18 @@ describe("a read's selection keeps negation and as-of rules", () => {
     );
     await gw.close();
   });
+});
+
+describe("a governed read pays the grant walk once", () => {
+  it("the same reactor accesses with 1 governed lens registered as with 4", async () => {
+    const one = await governedStore(0, 1),
+      four = await governedStore(0, 4);
+    const read = (gw: Gateway) => () => gw.resolvedNode("Guarded", MOSS);
+    const a = accesses(one, read(one)),
+      b = accesses(four, read(four));
+    expect(b.byTarget).toBe(a.byTarget);
+    expect(b.get).toBe(a.get);
+    await one.close();
+    await four.close();
+  }, 120_000);
 });
