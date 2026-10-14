@@ -2,7 +2,7 @@
 // and capacity at the input boundary. Each case reads both routes and names which route ran.
 
 import { describe, expect, it } from "vitest";
-import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
+import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { classifyPortableRead } from "../../src/gateway/portable-door.js";
 import { runPortableRead } from "../../src/gateway/portable-read.js";
@@ -185,5 +185,51 @@ describe("M5 schedules 2 and 7: a durable store reopens and reads from its publi
     expect(after.view).toMatchObject({ plants: { height: 34, readings: 2 } });
     await second.gw.close();
     await second.backend.close();
+  });
+});
+
+describe("M5 schedule 1: bytes and negation answer the same on both routes", () => {
+  it("a struck fact and a bytes value give the native View and HView, through the package", async () => {
+    const routes: Route[] = [];
+    const native = await store(false),
+      portable = await store(true, routes);
+    const base = Math.max(native.now(), portable.now());
+    const tall = mossHeight(90, base - 3, base - 3);
+    const blob = signClaims(
+      {
+        author: authorForSeed(GARDENER_SEED),
+        timestamp: base - 2,
+        validFrom: base - 2,
+        pointers: [
+          { role: "subject", target: { kind: "entity", entity: { id: MOSS, context: "payload" } } },
+          {
+            role: "value",
+            target: {
+              kind: "bytes",
+              mime: "application/octet-stream",
+              value: new Uint8Array([0, 255, 1]),
+            },
+          },
+        ],
+      },
+      GARDENER_SEED,
+    );
+    const strike = signClaims(
+      makeNegationClaims(authorForSeed(GARDENER_SEED), base - 1, tall.id),
+      GARDENER_SEED,
+    );
+    const facts = [mossHeight(10, base - 4, base - 4), tall, blob, strike];
+    await native.append(facts);
+    await portable.append(facts);
+    const t = base + 1;
+    const a = await portable.readNode("Plant", MOSS, undefined, t),
+      b = native.resolvedNode("Plant", MOSS, undefined, t);
+    expect(routes.map((r) => r.route)).toEqual(["portable"]);
+    expect(a.view).toMatchObject({ height: 10 });
+    expect(a.view).toEqual(b.view);
+    expect(a.hex).toBe(b.hex);
+    expect(a.hviewHex).toBe(b.hviewHex);
+    await native.close();
+    await portable.close();
   });
 });
