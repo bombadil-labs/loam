@@ -4,8 +4,6 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  parseTerm,
-  signClaims,
   schemaCanonicalHex,
   schemaHash,
   termCanonicalHex,
@@ -17,7 +15,8 @@ import { readGround } from "../../src/gateway/slate.js";
 import { seedSigner } from "../../src/gateway/signer.js";
 import { portableBoot, portableRead } from "../../src/gateway/portable-read.js";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { FERN, GARDENER, GARDENER_SEED } from "../spike/garden.js";
+import { FERN } from "../spike/garden.js";
+import { BED, BED_READING, BED_WITH_PLANTS, planting } from "./m5-fixtures.js";
 import { classifyPortableRead } from "../../src/gateway/portable-door.js";
 import {
   PLANT,
@@ -127,49 +126,6 @@ describe("M5 slice 1: the portable batch read", () => {
     await gw.close();
   });
 });
-
-const BED = "bed:shade";
-const PICK = {
-  kind: "pick" as const,
-  order: { kind: "byTimestamp" as const, dir: "desc" as const },
-};
-const BED_WITH_PLANTS = {
-  name: "BedWithPlants",
-  alg: 1,
-  body: parseTerm({
-    op: "expand",
-    role: { exact: "plant" },
-    schema: "Plant",
-    reading: "Plant",
-    in: {
-      op: "group",
-      key: "byTargetContext",
-      in: {
-        op: "select",
-        pred: { hasPointer: { targetEntity: { var: "root" } } },
-        in: { op: "mask", policy: "drop", in: "input" },
-      },
-    },
-  }),
-};
-const BED_READING = {
-  name: "BedWithPlants",
-  alg: 1,
-  props: new Map([["plants", PICK]]),
-  default: PICK,
-};
-const planting = signClaims(
-  {
-    timestamp: 1100,
-    validFrom: 1100,
-    author: GARDENER,
-    pointers: [
-      { role: "bed", target: { kind: "entity", entity: { id: BED, context: "plants" } } },
-      { role: "plant", target: { kind: "entity", entity: { id: FERN, context: "planted" } } },
-    ],
-  },
-  GARDENER_SEED,
-);
 
 async function bedGarden(portableReads: boolean, routes?: Route[]): Promise<Gateway> {
   const gw = await publishedGarden(portableReads, routes);
