@@ -86,6 +86,14 @@ function actFor(
     .sort((a, b) => (a.id < b.id ? -1 : 1))[0];
 }
 
+/** Whether a lens was published: its registration binding stands in law. */
+const bound = (law: readonly Delta[], hyperschemaName: string): boolean => {
+  const entity = `registration:hyperschema:${hyperschemaName}`;
+  return law.some((d) =>
+    d.claims.pointers.some((p) => p.target.kind === "entity" && p.target.entity.id === entity),
+  );
+};
+
 const namedReading = (schema: Schema, name: string): Schema => ({
   ...schema,
   name,
@@ -146,34 +154,39 @@ function selectProgram(gw: Gateway, name: string, now: number, law: readonly Del
   if (hyperAct === undefined || schemaAct === undefined) return { status: "unpublished" };
   if (usesPredicateOrder(topReading)) return { status: "reading-predicate" };
   const extra = new Map<string, Delta>();
-  const missing: string[] = [];
+  // A missing act is a broken promise when its lens was published (its binding stands in law), and
+  // native-only law otherwise: a `register()` lens never had acts, so the read stays native.
+  const broken: string[] = [];
+  let nativeOnly = false,
+    predicate = false;
+  const missing = (lens: string, what: string) => {
+    if (bound(law, lens)) broken.push(what);
+    else nativeOnly = true;
+  };
   const seenBodies = new Set<string>();
   const visit = (body: Term): void => {
     for (const ref of collectRefs(body)) {
       const hs: HyperSchema | undefined = gw.registry.resolve(ref);
       if (hs === undefined) {
-        missing.push(`hyperschema ${ref.kind === "name" ? ref.name : ref.hash}`);
+        broken.push(`hyperschema ${ref.kind === "name" ? ref.name : ref.hash}`);
         continue;
       }
       const key = `${hs.name}:${termCanonicalHex(hs.body)}`;
       if (seenBodies.has(key)) continue;
       seenBodies.add(key);
       const act = actFor(law, gw, now, HYPER_TERM, HYPER_NAME, hs.name, termCanonicalHex(hs.body));
-      if (act === undefined) missing.push(`hyperschema ${hs.name}`);
+      if (act === undefined) missing(hs.name, `hyperschema ${hs.name}`);
       else if (act.id !== hyperAct.id) extra.set(act.id, act);
       visit(hs.body);
     }
     for (const readingName of expandReadings(body)) {
       const reading = gw.registered.find((r) => lensOf(r) === readingName);
       if (reading === undefined) {
-        missing.push(`reading ${readingName}`);
+        broken.push(`reading ${readingName}`);
         continue;
       }
       const named = namedReading(reading.schema, readingName);
-      if (usesPredicateOrder(named)) {
-        missing.push(`reading ${readingName} (predicate order)`);
-        continue;
-      }
+      if (usesPredicateOrder(named)) predicate = true;
       const act = actFor(
         law,
         gw,
@@ -183,16 +196,18 @@ function selectProgram(gw: Gateway, name: string, now: number, law: readonly Del
         readingName,
         schemaCanonicalHex(named),
       );
-      if (act === undefined) missing.push(`reading ${readingName}`);
+      if (act === undefined) missing(reading.hyperschema.name, `reading ${readingName}`);
       else if (act.id !== schemaAct.id) extra.set(act.id, act);
     }
   };
   visit(top.body);
-  if (missing.length > 0)
+  if (broken.length > 0)
     throw new Error(
-      `portable read of ${name}: its published law is missing ${missing.join(", ")}; ` +
+      `portable read of ${name}: its published law is missing ${broken.join(", ")}; ` +
         `the receiver never re-signs a missing act`,
     );
+  if (nativeOnly) return { status: "unpublished" };
+  if (predicate) return { status: "reading-predicate" };
   return {
     status: "selected",
     program: {
@@ -262,7 +277,18 @@ export async function readNodeImpl(
   asOf?: number,
   binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
+  const report = gw.options.onReadRoute;
+  if (gw.options.portableReads !== true) {
+    report?.({ lens: name, entity, route: "native", reason: "portable-reads-off" });
+    return resolvedNodeImpl(gw, name, entity, now, asOf, binding);
+  }
   const route = classifyPortableRead(gw, name, entity, now, asOf, binding);
+  report?.({
+    lens: name,
+    entity,
+    route: route.route,
+    ...(route.route === "native" ? { reason: route.reason } : {}),
+  });
   if (route.route === "native") return resolvedNodeImpl(gw, name, entity, now, asOf, binding);
   const answer = await runPortableRead(route.signer, route.prepared);
   if (answer.status !== "completed")

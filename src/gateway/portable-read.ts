@@ -52,6 +52,10 @@ function describe(
   return signer.sign(materializationDescriptionClaims(signer.author, at, kind, fields));
 }
 
+// Runs in the browser bundle too, so no Node Buffer.
+const hexBytes = (hex: string): Uint8Array =>
+  Uint8Array.from(hex.match(/../g) ?? [], (x) => parseInt(x, 16));
+
 /** The full signed appearance the source snapshot and the envelope both carry. */
 function appearance(d: Delta): Uint8Array {
   if (d.sig === undefined) throw new Error(`portable read: ${d.id} is unsigned`);
@@ -59,7 +63,7 @@ function appearance(d: Delta): Uint8Array {
     map([
       ["id", tstr(d.id)],
       ["claims", bstr(canonicalBytes(d.claims))],
-      ["sig", bstr(Uint8Array.from(Buffer.from(d.sig, "hex")))],
+      ["sig", bstr(hexBytes(d.sig))],
     ]),
   );
 }

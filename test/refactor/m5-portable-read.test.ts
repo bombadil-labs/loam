@@ -4,6 +4,8 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  parseTerm,
+  signClaims,
   schemaCanonicalHex,
   schemaHash,
   termCanonicalHex,
@@ -15,8 +17,15 @@ import { readGround } from "../../src/gateway/slate.js";
 import { seedSigner } from "../../src/gateway/signer.js";
 import { portableBoot, portableRead } from "../../src/gateway/portable-read.js";
 import { MemoryBackend } from "../../src/store/memory.js";
-import { FERN } from "../spike/garden.js";
-import { PLANT, PLANT_READING, PLANT_WRITABLE, garden, governedBootstrap } from "../gateway/fixtures.js";
+import { FERN, GARDENER, GARDENER_SEED } from "../spike/garden.js";
+import { classifyPortableRead } from "../../src/gateway/portable-door.js";
+import {
+  PLANT,
+  PLANT_READING,
+  PLANT_WRITABLE,
+  garden,
+  governedBootstrap,
+} from "../gateway/fixtures.js";
 
 const KEEPER_SEED = "d7".repeat(32);
 
@@ -25,8 +34,13 @@ const textOf = (d: Delta, role: string): string | undefined => {
   return t?.kind === "primitive" && typeof t.value === "string" ? t.value : undefined;
 };
 
-async function publishedGarden(): Promise<Gateway> {
-  const gw = await Gateway.open(new MemoryBackend(), { seed: KEEPER_SEED });
+type Route = { lens: string; route: string; reason?: string };
+async function publishedGarden(portableReads = false, routes?: Route[]): Promise<Gateway> {
+  const gw = await Gateway.open(new MemoryBackend(), {
+    seed: KEEPER_SEED,
+    portableReads,
+    ...(routes === undefined ? {} : { onReadRoute: (r: Route) => void routes.push(r) }),
+  });
   await gw.append(governedBootstrap(KEEPER_SEED));
   await gw.append(garden);
   await gw.publishRegistration(
@@ -111,5 +125,106 @@ describe("M5 slice 1: the portable batch read", () => {
     expect(answer).toMatchObject({ status: "completed", view: { height: 30 } });
     if (answer.status === "completed") expect(answer.viewDigest).not.toBe(native.hex);
     await gw.close();
+  });
+});
+
+const BED = "bed:shade";
+const PICK = {
+  kind: "pick" as const,
+  order: { kind: "byTimestamp" as const, dir: "desc" as const },
+};
+const BED_WITH_PLANTS = {
+  name: "BedWithPlants",
+  alg: 1,
+  body: parseTerm({
+    op: "expand",
+    role: { exact: "plant" },
+    schema: "Plant",
+    reading: "Plant",
+    in: {
+      op: "group",
+      key: "byTargetContext",
+      in: {
+        op: "select",
+        pred: { hasPointer: { targetEntity: { var: "root" } } },
+        in: { op: "mask", policy: "drop", in: "input" },
+      },
+    },
+  }),
+};
+const BED_READING = {
+  name: "BedWithPlants",
+  alg: 1,
+  props: new Map([["plants", PICK]]),
+  default: PICK,
+};
+const planting = signClaims(
+  {
+    timestamp: 1100,
+    validFrom: 1100,
+    author: GARDENER,
+    pointers: [
+      { role: "bed", target: { kind: "entity", entity: { id: BED, context: "plants" } } },
+      { role: "plant", target: { kind: "entity", entity: { id: FERN, context: "planted" } } },
+    ],
+  },
+  GARDENER_SEED,
+);
+
+async function bedGarden(portableReads: boolean, routes?: Route[]): Promise<Gateway> {
+  const gw = await publishedGarden(portableReads, routes);
+  await gw.append([planting]);
+  await gw.publishRegistration(BED_WITH_PLANTS, BED_READING, [BED], { actor: KEEPER_SEED });
+  return gw;
+}
+
+const query = async (gw: Gateway, source: string) => {
+  const res = await gw.query(source);
+  expect(res.errors, source).toBeUndefined();
+  return res.data;
+};
+
+describe("M5 slice 1: the routed door", () => {
+  it("classifies each read before dispatch, with its reason named", async () => {
+    const gw = await bedGarden(true);
+    const now = gw.now();
+    expect(classifyPortableRead(gw, "Plant", FERN, now).route).toBe("portable");
+    expect(classifyPortableRead(gw, "BedWithPlants", BED, now).route).toBe("portable");
+    expect(
+      classifyPortableRead(gw, "Plant", FERN, now, undefined, { container: "x" } as never),
+    ).toEqual({ route: "native", reason: "bound-connection" });
+    await gw.close();
+  });
+
+  it("keeps a native-only registration native: it never published law", async () => {
+    const gw = await Gateway.open(new MemoryBackend(), { seed: KEEPER_SEED, portableReads: true });
+    await gw.append(governedBootstrap(KEEPER_SEED));
+    await gw.append(garden);
+    gw.register(PLANT, PLANT_READING, [FERN]);
+    expect(classifyPortableRead(gw, "Plant", FERN, gw.now())).toEqual({
+      route: "native",
+      reason: "unpublished-law",
+    });
+    await gw.close();
+  });
+
+  it("answers the same GraphQL data and digests on both routes, present and as of", async () => {
+    const routes: Route[] = [];
+    const native = await bedGarden(false),
+      portable = await bedGarden(true, routes);
+    for (const source of [
+      `{ plant(entity: "${FERN}") { height tag readings _hex _hviewHex } }`,
+      `{ plant(entity: "${FERN}", asOf: 1600) { height tag _hex _hviewHex _asOf } }`,
+      `{ bedWithPlants(entity: "${BED}") { plants _hex _hviewHex } }`,
+    ])
+      expect(await query(portable, source)).toEqual(await query(native, source));
+    // Every one of those reads really took the portable route.
+    expect(routes.map((r) => [r.lens, r.route])).toEqual([
+      ["Plant", "portable"],
+      ["Plant", "portable"],
+      ["BedWithPlants", "portable"],
+    ]);
+    await native.close();
+    await portable.close();
   });
 });

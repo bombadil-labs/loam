@@ -241,6 +241,19 @@ const WRITE_THROUGH_RETRIES = 8;
 
 export interface GatewayOptions {
   /**
+   * Serve eligible ordinary PRIMARY reads through the portable batch path (SPEC-16 M5 trial).
+   * Off by default: each portable read captures and verifies the whole source, which is slow on a
+   * large store. Ineligible reads stay native either way.
+   */
+  readonly portableReads?: boolean;
+  /** Told the route each ordinary read took, and why a native read stayed native. */
+  readonly onReadRoute?: (read: {
+    readonly lens: string;
+    readonly entity: string;
+    readonly route: "portable" | "native";
+    readonly reason?: string;
+  }) => void;
+  /**
    * The ordinary journal store. Given, this gateway is a substrate peer under
    * its operator key: it opens from the journal, and every write is admitted through it. Only a
    * host passes this; pools, quarantine and scratch gateways never do.

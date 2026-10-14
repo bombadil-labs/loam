@@ -47,9 +47,23 @@ native.
 | 3 | The remaining schedules on journal-backed stores. | 2, 3, 5, 7, 8, 9 |
 | 4 | Remove the eligible duplication; record counts and bytes for Plant and Bed. | 10 |
 
+## Slice 1 findings
+
+- Exact closure extraction works. A Plant read built from Loam's own published acts and source
+  answers the native HView and View digests, through the package endpoint. So does the nested
+  Bed read, and an as-of read.
+- A published lens can depend on a `register()` lens that never published acts. That read stays
+  native with reason `unpublished-law`. A missing act whose lens has a binding in law is an error.
+- The portable route is opt-in (`portableReads`). Each portable read captures and verifies the
+  whole PRIMARY source. In the browser tutorial that took seconds per read, and lessons timed out
+  when the route was on by default. Default-on waits for a source that is not recaptured per read.
+- `onReadRoute` reports each read's route and native reason, so tests observe the classifier.
+
 ## Open questions
 
 - The snapshot and capture documents are assembled in Loam with the package's exported encoders.
   A producer in rhizomatic would remove that duplication. That needs a rhizomatic request.
 - The receiver, caller and capturer keys are all this peer's key in the trial. A separate caller
   key is possible later.
+- When does the portable route become the default? It needs either a cheaper source capture or a
+  ruling that the cost is acceptable. That is Myk's call.
