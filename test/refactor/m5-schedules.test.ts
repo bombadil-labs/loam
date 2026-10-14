@@ -273,3 +273,58 @@ describe("M5 schedule 4: read closure narrows present and historical portable re
     await portable.close();
   });
 });
+
+describe("M5 schedule 3: a bucket resolver sees the full evidence on the portable route", () => {
+  it("a readings resolver counts values 7 and 9 as 2, on Plant and on the Bed's child", async () => {
+    const COUNT = {
+      readings: {
+        code: "export default (b) => b.length",
+        rung: "a" as const,
+        type: "number" as const,
+      },
+    };
+    const open = async (portableReads: boolean, routes?: Route[]) => {
+      const gw = await Gateway.open(new MemoryBackend(), {
+        seed: KEEPER_SEED,
+        portableReads,
+        ...(routes === undefined ? {} : { onReadRoute: (r: Route) => void routes.push(r) }),
+      });
+      await gw.append(governedBootstrap(KEEPER_SEED));
+      await gw.append([...garden, planting]);
+      await gw.publishRegistration(
+        PLANT,
+        PLANT_READING,
+        [FERN],
+        { actor: KEEPER_SEED },
+        undefined,
+        undefined,
+        PLANT_WRITABLE,
+        COUNT,
+      );
+      await gw.publishRegistration(BED_WITH_PLANTS, BED_READING, [BED], { actor: KEEPER_SEED });
+      return gw;
+    };
+    const routes: Route[] = [];
+    const native = await open(false),
+      portable = await open(true, routes);
+    const now = portable.now();
+    for (const [lens, entity] of [
+      ["Plant", FERN],
+      ["BedWithPlants", BED],
+    ] as const) {
+      const a = await portable.readNode(lens, entity, undefined, now),
+        b = native.resolvedNode(lens, entity, undefined, now);
+      expect(a.view).toEqual(b.view);
+      expect(a.hex).toBe(b.hex);
+    }
+    expect((await portable.readNode("Plant", FERN, undefined, now)).view).toMatchObject({
+      readings: 2,
+    });
+    expect((await portable.readNode("BedWithPlants", BED, undefined, now)).view).toMatchObject({
+      plants: { readings: 2 },
+    });
+    expect(routes.every((r) => r.route === "portable")).toBe(true);
+    await native.close();
+    await portable.close();
+  });
+});
