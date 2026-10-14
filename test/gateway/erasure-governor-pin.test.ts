@@ -5,7 +5,11 @@
 
 import { describe, expect, it } from "vitest";
 import { Reactor, authorForSeed, signClaims } from "@bombadil/rhizomatic";
-import { eraseClaims, erasedFromReading, pinErasureGovernors } from "../../src/gateway/erase-law.js";
+import {
+  eraseClaims,
+  erasedFromReading,
+  pinErasureGovernors,
+} from "../../src/gateway/erase-law.js";
 import { GARDENER_SEED, observed } from "../spike/garden.js";
 
 const HOST_SEED = "e1".repeat(32),
