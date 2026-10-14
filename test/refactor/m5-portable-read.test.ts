@@ -12,6 +12,7 @@ import {
 } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { readGround } from "../../src/gateway/slate.js";
+import { readClosedIds } from "../../src/gateway/slate-law.js";
 import { seedSigner } from "../../src/gateway/signer.js";
 import { portableBoot, portableRead } from "../../src/gateway/portable-read.js";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -32,6 +33,20 @@ const textOf = (d: Delta, role: string): string | undefined => {
   const t = d.claims.pointers.find((x) => x.role === role)?.target;
   return t?.kind === "primitive" && typeof t.value === "string" ? t.value : undefined;
 };
+
+/** The Plant read's scope and S(scope) under the read closure, from the reactor's anchored read. */
+function scoped(gw: Gateway, now: number): { scope: string[]; source: Delta[] } {
+  const closed = readClosedIds(gw, now);
+  const read = gw.reactor.evalAnchored(
+    PLANT.body,
+    gw.validityNow(now),
+    FERN,
+    gw.registry,
+    undefined,
+    (d) => !closed.has(d.id),
+  );
+  return { scope: [...read.scope], source: read.members.map((id) => gw.reactor.get(id)!) };
+}
 
 type Route = { lens: string; route: string; reason?: string };
 async function publishedGarden(portableReads = false, routes?: Route[]): Promise<Gateway> {
@@ -81,8 +96,8 @@ describe("M5 slice 1: the portable batch read", () => {
         definitions: [],
         definitionAt: now,
       },
-      source: ground,
-      currentSource: () => [...readGround(gw, now)],
+      ...scoped(gw, now),
+      currentSource: () => scoped(gw, now).source,
     });
     expect(answer).toMatchObject({ status: "completed" });
     if (answer.status !== "completed") return;
@@ -98,7 +113,9 @@ describe("M5 slice 1: the portable batch read", () => {
     const now = gw.now();
     const native = gw.resolvedNode("Plant", FERN, undefined, now);
     const latest = garden.find((d) => d.claims.timestamp === 2000)!;
-    const ground = [...readGround(gw, now)].filter((d) => d.id !== latest.id);
+    const ground = [...readGround(gw, now)];
+    const { scope, source: full } = scoped(gw, now);
+    const source = full.filter((d) => d.id !== latest.id);
     const hyper = ground.find(
       (d) => textOf(d, "rhizomatic.hyperschema.term") === termCanonicalHex(PLANT.body),
     )!;
@@ -118,8 +135,9 @@ describe("M5 slice 1: the portable batch read", () => {
         definitions: [],
         definitionAt: now,
       },
-      source: ground,
-      currentSource: () => ground,
+      scope,
+      source,
+      currentSource: () => source,
     });
     expect(answer).toMatchObject({ status: "completed", view: { height: 30 } });
     if (answer.status === "completed") expect(answer.viewDigest).not.toBe(native.hex);

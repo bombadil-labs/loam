@@ -114,25 +114,47 @@ describe("M5 schedule 6: explicit time crosses validity without ingest", () => {
 });
 
 describe("M5 schedule 8: input capacity is decided before dispatch", () => {
-  it("4096 source appearances run portable; 4097 stay native; both answer as native", async () => {
-    // The limit counts the snapshot's appearances: every delta of the authorized source, law
-    // included, since definition acts are members of the ground.
+  // The limit counts the snapshot's appearances. A scoped capture holds only S(scope), so the
+  // limit follows the read's footprint and never the size of the store (SPEC-17 P7).
+  const appearances = (gw: Gateway, now: number): number => {
+    const c = classifyPortableRead(gw, "Plant", FERN, now);
+    if (c.route !== "portable") throw Error(`expected a portable route, got ${c.reason}`);
+    return c.prepared.invocation.source.length;
+  };
+
+  it("unrelated growth leaves the capture and the route unchanged", async () => {
     const routes: Route[] = [];
     const gw = await store(true, routes);
     const now = gw.now();
-    const size = () => [...primaryGroundImpl(gw, now)].length;
+    const before = appearances(gw, now);
+    await gw.append(
+      Array.from({ length: 5000 }, (_, n) =>
+        observed(`plant:filler-${n}`, "height", n, 1000 + n, GARDENER_SEED),
+      ),
+    );
+    expect([...primaryGroundImpl(gw, now)].length).toBeGreaterThan(5000);
+    expect(appearances(gw, now)).toBe(before);
+    const read = await gw.readNode("Plant", FERN, undefined, now);
+    expect(routes.at(-1)).toEqual({ lens: "Plant", entity: FERN, route: "portable" });
+    expect(read.hex).toBe(gw.resolvedNode("Plant", FERN, undefined, now).hex);
+    await gw.close();
+  }, 300_000);
+
+  it("4096 scoped appearances run portable; 4097 stay native; both answer as native", async () => {
+    const routes: Route[] = [];
+    const gw = await store(true, routes);
+    const now = gw.now();
     const fill = (from: number, count: number) =>
       Array.from({ length: count }, (_, n) =>
-        observed(`plant:filler-${from + n}`, "height", n, 1000 + from + n, GARDENER_SEED),
+        observed(FERN, "height", from + n, 1000 + from + n, GARDENER_SEED),
       );
-    await gw.append(fill(0, 4096 - size()));
-    expect(size()).toBe(4096);
+    await gw.append(fill(0, 4096 - appearances(gw, now)));
+    expect(appearances(gw, now)).toBe(4096);
     const exact = await gw.readNode("Plant", FERN, undefined, now);
     expect(routes.at(-1)).toEqual({ lens: "Plant", entity: FERN, route: "portable" });
     expect(exact.hex).toBe(gw.resolvedNode("Plant", FERN, undefined, now).hex);
 
     await gw.append(fill(4096, 1));
-    expect(size()).toBe(4097);
     expect(classifyPortableRead(gw, "Plant", FERN, now)).toEqual({
       route: "native",
       reason: "input-capacity",
@@ -145,7 +167,6 @@ describe("M5 schedule 8: input capacity is decided before dispatch", () => {
       reason: "input-capacity",
     });
     expect(over.hex).toBe(gw.resolvedNode("Plant", FERN, undefined, now).hex);
-    expect(over.view).toEqual(exact.view);
     await gw.close();
   }, 300_000);
 });

@@ -103,6 +103,7 @@ import {
   offeredDeltasImpl,
   selectImpl,
   watchImpl,
+  ingestTogether,
 } from "./ingest.js";
 import { withNegationClosure } from "./negation-closure.js";
 import { freezeMembers, type ModuleVersion } from "./container-identity.js";
@@ -562,6 +563,12 @@ export class Gateway {
   // derivations); otherwise straight to the reactor. Passive vs animate is exactly this hook.
   /** @internal — T19 seam (ingest.ts: both doors write through it; animate/reseat re-point it) */
   ingestVia: (d: Delta) => IngestResult = (d) => this.reactor.ingest(d);
+  /**
+   * @internal — an admitted batch, with each member's verdict in order. Unanimated, the batch is
+   * ONE reactor update, so each warm view refreshes once per batch, not once per delta. Animated,
+   * a runner's host fires bindings per delta, so the members go one by one.
+   */
+  ingestAllVia: (ds: readonly Delta[]) => IngestResult[] = (ds) => ingestTogether(this.reactor, ds);
 
   // Mutable behind a getter: erase() re-seats the gateway on a fresh reactor replayed from the
   // post-purge backend (the substrate is grow-only; forgetting in-process is a rebuild).
@@ -1099,6 +1106,7 @@ export class Gateway {
   // Animate the gateway: route ingest through a runner's DerivationHost so bindings fire.
   animate(host: { ingest: (d: Delta) => IngestResult }): void {
     this.ingestVia = (d) => host.ingest(d);
+    this.ingestAllVia = (ds) => ds.map((d) => host.ingest(d));
   }
 
   // --- erasure (SPEC §11) ------------------------------------------------------------------------
@@ -1707,6 +1715,7 @@ export class Gateway {
     if (this.delegationScope !== undefined) declarePrincipalScope(reactor, this.delegationScope);
     this.declareUsers(reactor);
     this.ingestVia = (d) => this.reactor.ingest(d);
+    this.ingestAllVia = (ds) => ingestTogether(this.reactor, ds);
     this.attachPersistence(reactor);
     if (this.registered.length > 0) rebindImpl(this, this.registered);
     this.advanceToNow();

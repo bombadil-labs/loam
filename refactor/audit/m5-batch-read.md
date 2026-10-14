@@ -84,11 +84,43 @@ native.
   endpoint and the result reader share would cut it by about four times. That needs a rhizomatic
   request.
 
+## Slice 4 findings: scoped capture (SPEC-17)
+
+Myk ruled on 2026-10-14 that no cost may scale with the size of the system. This slice moves the
+door onto scoped capture from rhizomatic's PR #73.
+
+- The capture holds S(scope), not the store. The scope is the read's root, its constant anchors
+  and every expanded child. `Reactor.evalAnchored` finds it from the index.
+- Program selection reads the definition entities by index. It no longer scans all law.
+- The freshness check recomputes S(scope) from the index. It does not read the whole ground.
+- The library builds the snapshot (`produceMaterializationSnapshot`). Loam no longer assembles it.
+- A program that is not anchored stays native with the new reason `unanchored`.
+- The capacity limit now counts the scoped appearances. 5000 unrelated facts leave the capture and
+  the route unchanged. 4096 facts in the scope run portable; 4097 stay native.
+- The producer applies the source limits first. Its `resource-limit` maps to `input-capacity`.
+
+Measured on Linux, one Plant read with N facts on the root, after this slice:
+
+| N in scope | append of N | classify | portable read | native read |
+| --- | --- | --- | --- | --- |
+| 400 | 2.1 s | 0.8 s | 3.2 s | 25 ms |
+| 1000 | 3.8 s | 1.6 s | 8.3 s | 70 ms |
+
+Two more costs came out of the profile and are fixed:
+
+- Append was quadratic in a batch on one entity: 77 s for 1000 facts. Each delta refreshed the warm
+  view over the whole entity. An admitted batch now enters the reactor as one update
+  (`ingestBatch`), so each view refreshes once per batch. An animated gateway still ingests one
+  delta at a time, because its host fires bindings per delta.
+- The same signature was checked at ingest, in the producer and in each envelope decode.
+  Rhizomatic #73 remembers successful checks. A 400-fact read went from 11.8 s to 4.0 s.
+
+What stays: a portable read still decodes the snapshot several times. Its cost is linear in the
+scope, about 8 ms per delta. That is footprint cost, not store cost.
+
 ## Open questions
 
-- The snapshot and capture documents are assembled in Loam with the package's exported encoders.
-  A producer in rhizomatic would remove that duplication. That needs a rhizomatic request.
 - The receiver, caller and capturer keys are all this peer's key in the trial. A separate caller
   key is possible later.
-- When does the portable route become the default? It needs either a cheaper source capture or a
-  ruling that the cost is acceptable. That is Myk's call.
+- When does the portable route become the default? Its cost no longer grows with the store. It
+  is still about 100 times the native read per scoped delta. That is Myk's call.

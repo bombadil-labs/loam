@@ -8,7 +8,6 @@
 import {
   array,
   bstr,
-  canonicalBytes,
   contentAddress,
   decodeHViewEnvelope,
   encode,
@@ -18,6 +17,8 @@ import {
   MATERIALIZATION_MAX_LIMITS,
   MaterializationEndpoint,
   preflightMaterializationInput,
+  produceMaterializationSnapshot,
+  SCOPED_SNAPSHOT_PROFILE,
   materializationDescriptionClaims,
   readMaterializationDescription,
   readMaterializationResult,
@@ -41,7 +42,6 @@ const ref = (id: string): Target => ({ kind: "delta", deltaRef: { delta: id } })
 const blob = (value: Uint8Array): Target => ({ kind: "bytes", mime: "application/cbor", value });
 const digest = (ids: readonly string[]): string =>
   contentAddress(encode(array([...ids].sort().map(tstr))));
-const byId = (a: Delta, b: Delta): number => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 function describe(
   signer: Signer,
@@ -52,22 +52,6 @@ function describe(
   return signer.sign(materializationDescriptionClaims(signer.author, at, kind, fields));
 }
 
-// Runs in the browser bundle too, so no Node Buffer.
-const hexBytes = (hex: string): Uint8Array =>
-  Uint8Array.from(hex.match(/../g) ?? [], (x) => parseInt(x, 16));
-
-/** The full signed appearance the source snapshot and the envelope both carry. */
-function appearance(d: Delta): Uint8Array {
-  if (d.sig === undefined) throw new Error(`portable read: ${d.id} is unsigned`);
-  return encode(
-    map([
-      ["id", tstr(d.id)],
-      ["claims", bstr(canonicalBytes(d.claims))],
-      ["sig", bstr(hexBytes(d.sig))],
-    ]),
-  );
-}
-
 /** The boot descriptions of one peer's batch endpoint: gather and resolve, one PRIMARY binding. */
 export interface PortableBoot {
   readonly configuration: Delta;
@@ -76,8 +60,9 @@ export interface PortableBoot {
   readonly authority: Delta;
 }
 
+// Each capture covers one read's scope, never the whole store (SPEC-16 §4a).
 const SELECTION = map([
-  ["profile", tstr("host-authorized-snapshot/1")],
+  ["profile", tstr(SCOPED_SNAPSHOT_PROFILE)],
   ["parameters", bstr(encode(map([])))],
 ]);
 
@@ -146,99 +131,33 @@ export function portableSource(
   boot: PortableBoot,
   deltas: readonly Delta[],
   observation: number,
+  scope: readonly string[],
   historicalCutoff?: number,
 ): PortableSource {
-  const sorted = [...deltas].sort(byId);
-  const originals = sorted.map((d) => {
-    const bytes = appearance(d);
-    return { d, bytes, key: contentAddress(bytes) };
-  });
-  const ids = sorted.map((d) => d.id);
-  const component = map([
-    ["peer", tstr(signer.author)],
-    ["revision", tstr(digest(ids))],
-    ["capturedAt", float(observation)],
-    ["rawIds", array(ids.map(tstr))],
-    ["operandIds", array(ids.map(tstr))],
-  ]);
-  const membership = digest(ids),
-    appearanceDigest = digest(originals.map((o) => o.key)),
-    selection = contentAddress(encode(SELECTION));
-  const withoutCapturedAt = (c: CborValue): CborValue =>
-    c.t === "map" ? map(c.v.filter(([k]) => k !== "capturedAt")) : c;
-  const revision = contentAddress(
-    encode(
-      map([
-        ["binding", tstr(boot.binding.id)],
-        ["authority", tstr(boot.authority.id)],
-        ["selection", tstr(selection)],
-        ["components", array([withoutCapturedAt(component)])],
-        ["membership", tstr(membership)],
-        ["appearanceDigest", tstr(appearanceDigest)],
-        ["exclusions", array([])],
-      ]),
-    ),
-  );
-  const common: (readonly [string, CborValue])[] = [
-    ["binding", tstr(boot.binding.id)],
-    ["authority", tstr(boot.authority.id)],
-    ["selection", tstr(selection)],
-    ["revision", tstr(revision)],
-    ["servingAt", float(observation)],
-    ...(historicalCutoff === undefined
-      ? []
-      : [["historicalCutoff", float(historicalCutoff)] as const]),
-    ["components", array([component])],
-    [
-      "operands",
-      array(
-        originals.map((o) =>
-          map([
-            ["id", tstr(o.d.id)],
-            ["appearance", tstr(o.key)],
-            ["peers", array([tstr(signer.author)])],
-          ]),
-        ),
-      ),
+  // The library owns the snapshot format, its digests and its revision (SPEC-16 MR-10c). Loam
+  // supplies what it selected: the read's scope S(E) under its own read closure and cut.
+  const ids = deltas.map((d) => d.id).sort();
+  const produced = produceMaterializationSnapshot({
+    binding: boot.binding.id,
+    authority: boot.authority.id,
+    selection: SELECTION,
+    servingAt: observation,
+    ...(historicalCutoff === undefined ? {} : { historicalCutoff }),
+    scope,
+    components: [
+      { peer: signer.author, revision: digest(ids), capturedAt: observation, operands: deltas },
     ],
-    ["exclusions", array([])],
-    ["membership", tstr(membership)],
-    ["appearanceDigest", tstr(appearanceDigest)],
-  ];
-  const payload = encode(
-    map([
-      ["format", tstr("rhizomatic.source-snapshot/1")],
-      ...common,
-      [
-        "appearances",
-        array(
-          [...originals]
-            .sort((a, b) => (a.key < b.key ? -1 : 1))
-            .map((o) =>
-              map([
-                ["key", tstr(o.key)],
-                ["value", bstr(o.bytes)],
-              ]),
-            ),
-        ),
-      ],
-    ]),
-  );
-  const basis = encode(
-    map([
-      ["format", tstr("rhizomatic.source-basis/1")],
-      ...common,
-      ["snapshot", tstr(contentAddress(payload))],
-    ]),
-  );
+  });
   return {
-    snapshot: describe(signer, observation, "snapshot/1", { data: [blob(payload)] }),
+    snapshot: describe(signer, observation, "snapshot/1", {
+      data: [blob(produced.snapshotBytes)],
+    }),
     capture: describe(signer, observation, "capture/1", {
       "source-binding": [ref(boot.binding.id)],
       authority: [ref(boot.authority.id)],
-      basis: [blob(basis)],
+      basis: [blob(produced.basisBytes)],
     }),
-    revision,
+    revision: produced.revision,
   };
 }
 
@@ -262,8 +181,11 @@ export interface PortableInvocation {
   readonly receivedAt: number;
   readonly historicalCutoff?: number;
   readonly program: PortableProgram;
+  /** The read's scope E: its root, its constant anchors and every expanded child (SPEC-17 §6). */
+  readonly scope: readonly string[];
+  /** S(scope) under this read's selection: the only deltas the read can depend on. */
   readonly source: readonly Delta[];
-  /** The source's present state, for the endpoint's final current-source check. */
+  /** S(scope) as it stands now, read from the index, for the final current-source check. */
   readonly currentSource: () => readonly Delta[];
 }
 
@@ -305,7 +227,14 @@ export function preparePortableRead(
   boot: PortableBoot,
   inv: PortableInvocation,
 ): PreparedPortableRead {
-  const src = portableSource(signer, boot, inv.source, inv.receivedAt, inv.historicalCutoff);
+  const src = portableSource(
+    signer,
+    boot,
+    inv.source,
+    inv.receivedAt,
+    inv.scope,
+    inv.historicalCutoff,
+  );
   const program = inv.program;
   const request = describe(signer, inv.receivedAt, "request/1", {
     receiver: [ent(signer.author)],
@@ -376,7 +305,14 @@ export async function runPortableRead(
       } catch {
         return Promise.resolve({ status: "source-unavailable" });
       }
-      const now = portableSource(signer, boot, current, inv.receivedAt, inv.historicalCutoff);
+      const now = portableSource(
+        signer,
+        boot,
+        current,
+        inv.receivedAt,
+        inv.scope,
+        inv.historicalCutoff,
+      );
       return Promise.resolve(
         now.revision === revision ? { status: "current" } : { status: "source-changed" },
       );
