@@ -118,9 +118,38 @@ Two more costs came out of the profile and are fixed:
 What stays: a portable read still decodes the snapshot several times. Its cost is linear in the
 scope, about 8 ms per delta. That is footprint cost, not store cost.
 
+### Review of slice 4
+
+Three fresh-context lenses read the diff: suppression closure, scan scale and hollow rails. No
+resurrection was found. Fixed in this slice:
+
+- Program selection used its own strike rule. It counted any author's strike and one link only.
+  A stranger's strike, or a struck withdrawal, made a parent lens's portable read throw where
+  native answered. Selection and `bound()` now use native law's rule: a law author's act, in its
+  window, not retired by a surviving lawful strike.
+- New rails: law selection (2 cases), a slate that lands in flight, the as-of operand cut, the
+  scoped capacity boundary with unrelated facts present, the capture revision under growth, a
+  refused batch, and a claim with its strike in one batch. Each one fails with its fix reverted.
+
+Found and not fixed here. Each one costs the store's history on every read or catch-up, on the
+native route as well:
+
+- `readClosedIds` walks every erasure ever filed and every slated member. A read calls it three
+  or four times. The fix is a closed-set index, or a closed set scoped to S(scope).
+- Catch-up rereads the whole journal and copies the whole snapshot when the head moves.
+- `notifyUserDependents` refreshes every materialization in a watching pool on every batch.
+- A lowered (governed) warm view refreshes over the whole store.
+- A lens registered at an override entity is not found by index. It routes native as
+  `unpublished-law`. That loses coverage. It does not give a wrong answer.
+
 ## Open questions
 
 - The receiver, caller and capturer keys are all this peer's key in the trial. A separate caller
   key is possible later.
 - When does the portable route become the default? Its cost no longer grows with the store. It
   is still about 100 times the native read per scoped delta. That is Myk's call.
+- The capture lists only operands as held. SPEC-16 MR-10a says `rawIds` are what each peer holds
+  within the scope. Should a read-closed or past-the-cut id appear in signed testimony? That is a
+  design call for SPEC-16.
+- A portable read checks its source once, before gather. A write that lands between that check
+  and the answer is not seen. MR-10 states this window. Native reads have no such window.

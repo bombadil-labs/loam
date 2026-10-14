@@ -61,34 +61,45 @@ const textAt = (d: Delta, role: string): string | undefined => {
   return t?.kind === "primitive" && typeof t.value === "string" ? t.value : undefined;
 };
 
-/** A definition act stands at `now` when it is in its own window and no standing strike binds it. */
-function standing(gw: Gateway, d: Delta, now: number): boolean {
-  const inWindow = (x: Delta) =>
-    x.claims.validFrom <= now && (x.claims.validUntil === undefined || now < x.claims.validUntil);
-  return (
-    inWindow(d) &&
-    !gw.reactor.negationsOf(d.id).some((n) => {
+/**
+ * Readable law at `now`, judged as native law judges it: the act is signed by a law author, stands
+ * in its own window, and no lawful strike retires it. A strike counts only from a law author and
+ * only while it survives itself, so a struck strike revives its target. A stranger's strike
+ * retires nothing.
+ */
+function readableLaw(gw: Gateway, now: number, closed: ReadonlySet<string>): Admits {
+  const authors = new Set(gw.lawAuthors("registrations"));
+  const lawful = (d: Delta): boolean => authors.size === 0 || authors.has(d.claims.author);
+  const memo = new Map<string, boolean>();
+  const retired = (id: string): boolean => {
+    const known = memo.get(id);
+    if (known !== undefined) return known;
+    memo.set(id, false); // content addressing keeps the chain acyclic
+    const verdict = gw.reactor.negationsOf(id).some((n) => {
       const strike = gw.reactor.get(n);
-      return strike !== undefined && inWindow(strike);
-    })
-  );
+      return strike !== undefined && !closed.has(n) && lawful(strike) && !retired(n);
+    });
+    memo.set(id, verdict);
+    return verdict;
+  };
+  return (d) =>
+    !closed.has(d.id) &&
+    lawful(d) &&
+    d.claims.validFrom <= now &&
+    (d.claims.validUntil === undefined || now < d.claims.validUntil) &&
+    !retired(d.id);
 }
 
 /** The exact original act for one definition body, chosen by act identity among standing copies. */
 function actFor(
   candidates: readonly Delta[],
-  gw: Gateway,
-  now: number,
   termRole: string,
   nameRole: string,
   name: string,
   bodyHex: string,
 ): Delta | undefined {
   return candidates
-    .filter(
-      (d) =>
-        textAt(d, termRole) === bodyHex && textAt(d, nameRole) === name && standing(gw, d, now),
-    )
+    .filter((d) => textAt(d, termRole) === bodyHex && textAt(d, nameRole) === name)
     .sort((a, b) => (a.id < b.id ? -1 : 1))[0];
 }
 
@@ -104,7 +115,7 @@ const lawAt = (gw: Gateway, admits: Admits, entity: string): Delta[] =>
     .map((id) => gw.reactor.get(id))
     .filter((d): d is Delta => d !== undefined && admits(d));
 
-/** Whether a lens was published: its registration binding stands in law. */
+/** Whether a lens was published: a lawful registration binding stands at its entity. */
 const bound = (gw: Gateway, admits: Admits, hyperschemaName: string): boolean =>
   lawAt(gw, admits, `registration:hyperschema:${hyperschemaName}`).length > 0;
 
@@ -149,8 +160,6 @@ function selectProgram(gw: Gateway, name: string, now: number, admits: Admits): 
   const topReading = namedReading(def.schema, lensOf(def));
   const hyperAct = actFor(
     lawAt(gw, admits, `hyperschema:${top.name}`),
-    gw,
-    now,
     HYPER_TERM,
     HYPER_NAME,
     top.name,
@@ -158,8 +167,6 @@ function selectProgram(gw: Gateway, name: string, now: number, admits: Admits): 
   );
   const schemaAct = actFor(
     lawAt(gw, admits, `schema:${lensOf(def)}`),
-    gw,
-    now,
     SCHEMA_TERM,
     SCHEMA_NAME,
     lensOf(def),
@@ -190,8 +197,6 @@ function selectProgram(gw: Gateway, name: string, now: number, admits: Admits): 
       seenBodies.add(key);
       const act = actFor(
         lawAt(gw, admits, `hyperschema:${hs.name}`),
-        gw,
-        now,
         HYPER_TERM,
         HYPER_NAME,
         hs.name,
@@ -211,8 +216,6 @@ function selectProgram(gw: Gateway, name: string, now: number, admits: Admits): 
       if (usesPredicateOrder(named)) predicate = true;
       const act = actFor(
         lawAt(gw, admits, `schema:${readingName}`),
-        gw,
-        now,
         SCHEMA_TERM,
         SCHEMA_NAME,
         readingName,
@@ -270,7 +273,7 @@ export function classifyPortableRead(
     return { route: "native", reason: "governed-lowering" };
   // Law is selected from the present readable law, whatever moment the operands are read at.
   const closed = readClosedIds(gw, now);
-  const selection = selectProgram(gw, name, now, (d) => !closed.has(d.id));
+  const selection = selectProgram(gw, name, now, readableLaw(gw, now, closed));
   if (selection.status === "unpublished") return { route: "native", reason: "unpublished-law" };
   if (selection.status === "reading-predicate")
     return { route: "native", reason: "reading-predicate" };

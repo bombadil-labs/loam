@@ -116,24 +116,27 @@ describe("M5 schedule 6: explicit time crosses validity without ingest", () => {
 describe("M5 schedule 8: input capacity is decided before dispatch", () => {
   // The limit counts the snapshot's appearances. A scoped capture holds only S(scope), so the
   // limit follows the read's footprint and never the size of the store (SPEC-17 P7).
-  const appearances = (gw: Gateway, now: number): number => {
+  const prepared = (gw: Gateway, now: number) => {
     const c = classifyPortableRead(gw, "Plant", FERN, now);
     if (c.route !== "portable") throw Error(`expected a portable route, got ${c.reason}`);
-    return c.prepared.invocation.source.length;
+    return c.prepared;
   };
+  const appearances = (gw: Gateway, now: number): number =>
+    prepared(gw, now).invocation.source.length;
+  const unrelated = (count: number) =>
+    Array.from({ length: count }, (_, n) =>
+      observed(`plant:filler-${n}`, "height", n, 1000 + n, GARDENER_SEED),
+    );
 
   it("unrelated growth leaves the capture and the route unchanged", async () => {
     const routes: Route[] = [];
     const gw = await store(true, routes);
     const now = gw.now();
-    const before = appearances(gw, now);
-    await gw.append(
-      Array.from({ length: 5000 }, (_, n) =>
-        observed(`plant:filler-${n}`, "height", n, 1000 + n, GARDENER_SEED),
-      ),
-    );
+    const before = prepared(gw, now).source.revision;
+    await gw.append(unrelated(5000));
     expect([...primaryGroundImpl(gw, now)].length).toBeGreaterThan(5000);
-    expect(appearances(gw, now)).toBe(before);
+    // The same scope, the same members, the same revision.
+    expect(prepared(gw, now).source.revision).toBe(before);
     const read = await gw.readNode("Plant", FERN, undefined, now);
     expect(routes.at(-1)).toEqual({ lens: "Plant", entity: FERN, route: "portable" });
     expect(read.hex).toBe(gw.resolvedNode("Plant", FERN, undefined, now).hex);
@@ -144,6 +147,8 @@ describe("M5 schedule 8: input capacity is decided before dispatch", () => {
     const routes: Route[] = [];
     const gw = await store(true, routes);
     const now = gw.now();
+    // Facts outside the scope: a whole-store capture would cross the limit before the scope does.
+    await gw.append(unrelated(16));
     const fill = (from: number, count: number) =>
       Array.from({ length: count }, (_, n) =>
         observed(FERN, "height", from + n, 1000 + from + n, GARDENER_SEED),
