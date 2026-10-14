@@ -111,6 +111,8 @@ const erasureGovernors = new WeakMap<Reactor, readonly string[]>();
 
 export function pinErasureGovernors(reactor: Reactor, keys: readonly string[]): void {
   erasureGovernors.set(reactor, keys);
+  // The pins decide which orders bind, so they move the erased set with no ingest.
+  readingCache.delete(reactor);
 }
 
 /**
@@ -240,7 +242,8 @@ export function refusedIds(reactor: Reactor, operator: string | undefined): Set<
 // purge completes, this set is empty again, and reads use warm materializations again.
 //
 // It walks every erasure order and checks each one, so it is cached per reactor: the answer moves
-// only with an ingest (the size changes) or a reseat (a new reactor). One write still costs one walk
+// only with an ingest (the size changes), a reseat (a new reactor), or new governor pins (which
+// clear the entry). One write still costs one walk
 // of the erasure index; an index maintained on ingest would remove that.
 export function erasedFromReading(
   reactor: Reactor,
