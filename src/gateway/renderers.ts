@@ -37,7 +37,7 @@ import {
   type RenderWorkerOptions,
 } from "./render-worker.js";
 import { workerLimitsOf } from "./envelope.js";
-import { lensOf, type LensName } from "./registration.js";
+import { byLens, lensOf, type LensName } from "./registration.js";
 import { lawfulSnapshot } from "./lawful.js";
 import { negatedAt } from "./negation.js";
 import {
@@ -661,7 +661,7 @@ export async function publishRendererImpl(
   }
   const spec = parseRendererInput(input); // one shape for every door (HTTP / CLI / MCP / direct)
   // The schema must be registered — a renderer over a lens the store does not serve mounts nothing.
-  const bound = gw.registered.find((r) => lensOf(r) === spec.schemaName);
+  const bound = byLens(gw.registered, spec.schemaName);
   if (bound === undefined) {
     throw new Error(
       `renderer: no registered schema "${spec.schemaName}" — a renderer reads a lens the store serves`,

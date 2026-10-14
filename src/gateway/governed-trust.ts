@@ -30,6 +30,8 @@ import {
   type Reactor,
   type SchemaRegistry,
   type Term,
+  scopeIds,
+  type Admits,
 } from "@bombadil/rhizomatic";
 import { STORE_ENTITY } from "./genesis.js";
 import {
@@ -157,18 +159,18 @@ export function governedStrikers(
  * The deltas that decide which grants survive in `reactor`: every grant (all are filed at the store
  * entity) with its whole negation closure (H1), less `hidden`. Evaluating the grants term over this
  * set answers as it would over the whole store less `hidden`, from the index rather than a scan.
+ * `admits` narrows it the same way for a read whose ground is a selection (read closure, as-of).
  */
-export function grantGround(reactor: Reactor, hidden: ReadonlySet<string> = NO_IDS): DeltaSet {
-  const scope = new Map<string, Delta>();
-  const take = (id: string): void => {
-    if (hidden.has(id) || scope.has(id)) return;
-    const d = reactor.get(id);
-    if (d === undefined) return;
-    scope.set(id, d);
-    for (const n of reactor.negationsOf(id)) take(n);
-  };
-  for (const id of reactor.byTarget(STORE_ENTITY)) take(id);
-  return DeltaSet.from(scope.values());
+export function grantGround(
+  reactor: Reactor,
+  hidden: ReadonlySet<string> = NO_IDS,
+  admits?: Admits,
+): DeltaSet {
+  const keep =
+    hidden.size === 0 && admits === undefined
+      ? undefined
+      : (d: Delta) => !hidden.has(d.id) && (admits === undefined || admits(d));
+  return reactor.subset(scopeIds(reactor, [STORE_ENTITY], keep));
 }
 
 const NO_IDS: ReadonlySet<string> = new Set();
@@ -412,6 +414,7 @@ export function governedHook(
   term: Term,
   registry: SchemaRegistry | undefined,
   users: () => UserGround,
+  reactor: Reactor,
 ):
   | ((
       body: Term,
@@ -421,8 +424,10 @@ export function governedHook(
     ) => { term: Term; registry?: SchemaRegistry })
   | undefined {
   if (!needsLowering(term, registry)) return undefined;
-  return (body, input, now, available) => {
-    const program = governedProgram(body, available, input, { now }, users());
+  // The lowering reads only the grants, so it takes their scope from `reactor`'s index (the reactor
+  // this hook is registered on) instead of the whole set the refresh hands it.
+  return (body, _input, now, available) => {
+    const program = governedProgram(body, available, grantGround(reactor), { now }, users());
     return {
       term: program.term,
       ...(program.registry === undefined ? {} : { registry: program.registry }),
