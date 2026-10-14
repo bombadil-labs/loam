@@ -363,15 +363,12 @@ export async function runPortableRead(
   const { boot, invocation: inv, request, delivery } = prepared;
   const src = prepared.source;
   const grant: MaterializationSourceCapability = {
-    async capture() {
-      return { status: "source-unavailable" };
-    },
-    async reacquireSnapshot() {
-      return { status: "source-unavailable" };
-    },
-    async checkCurrent(binding, revision, authority) {
+    // Batch reads never recapture or restore: the captured source is the whole invocation.
+    capture: () => Promise.resolve({ status: "source-unavailable" }),
+    reacquireSnapshot: () => Promise.resolve({ status: "source-unavailable" }),
+    checkCurrent(binding, revision, authority) {
       if (binding !== boot.binding.id || authority !== boot.authority.id)
-        return { status: "unauthorized" };
+        return Promise.resolve({ status: "unauthorized" });
       const now = portableSource(
         signer,
         boot,
@@ -379,7 +376,9 @@ export async function runPortableRead(
         inv.receivedAt,
         inv.historicalCutoff,
       );
-      return now.revision === revision ? { status: "current" } : { status: "source-changed" };
+      return Promise.resolve(
+        now.revision === revision ? { status: "current" } : { status: "source-changed" },
+      );
     },
   };
   const endpoint = MaterializationEndpoint.boot({
