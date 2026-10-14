@@ -337,6 +337,23 @@ export type ProgramName = string & { readonly __program: unique symbol };
 export const lensOf = (r: { lensName?: string; hyperschema: { name: string } }): LensName =>
   (r.lensName ?? r.hyperschema.name) as LensName;
 
+type Lensed = { lensName?: string; hyperschema: { name: string } };
+
+// One index per registration list. A list is replaced, never edited, when law changes, so the index
+// needs no invalidation, and a lookup costs one map read instead of a scan of every registration.
+const lensIndexes = new WeakMap<readonly Lensed[], ReadonlyMap<string, Lensed>>();
+
+/** The registration whose lens is `name`, or undefined: the first one in list order, as `find` gives. */
+export function byLens<T extends Lensed>(rows: readonly T[], name: string): T | undefined {
+  let index = lensIndexes.get(rows);
+  if (index === undefined) {
+    const built = new Map<string, Lensed>();
+    for (const r of rows) if (!built.has(lensOf(r))) built.set(lensOf(r), r);
+    lensIndexes.set(rows, (index = built));
+  }
+  return index.get(name) as T | undefined;
+}
+
 // The reading a REGISTRATION INPUT is, before anything is bound: the Schema's own name when it
 // carries one, else the program's. This is what decides the living Schema entity `schema:<lens>`
 // and the GraphQL field the surface answers at, so any door deciding what an input may PUBLISH must

@@ -238,10 +238,26 @@ export function refusedIds(reactor: Reactor, operator: string | undefined): Set<
 //
 // Only ids whose bytes are still HELD are returned: a purged id cannot be read anyway. So once every
 // purge completes, this set is empty again, and reads use warm materializations again.
-export function erasedFromReading(reactor: Reactor, operator: string | undefined): Set<string> {
+//
+// It walks every erasure order and checks each one, so it is cached per reactor: the answer moves
+// only with an ingest (the size changes) or a reseat (a new reactor). One write still costs one walk
+// of the erasure index; an index maintained on ingest would remove that.
+export function erasedFromReading(
+  reactor: Reactor,
+  operator: string | undefined,
+): ReadonlySet<string> {
+  const hit = readingCache.get(reactor);
+  if (hit !== undefined && hit.size === reactor.size && hit.operator === operator) return hit.ids;
   const held = [...refusedIds(reactor, operator)].filter((id) => reactor.get(id) !== undefined);
-  return withHeldDownTargets(new Set(held), (id) => reactor.get(id));
+  const ids = withHeldDownTargets(new Set(held), (id) => reactor.get(id));
+  readingCache.set(reactor, { size: reactor.size, operator, ids });
+  return ids;
 }
+
+const readingCache = new WeakMap<
+  Reactor,
+  { size: number; operator: string | undefined; ids: ReadonlySet<string> }
+>();
 
 // Adds, transitively, the target of every hidden negation that `get` can still find.
 export function withHeldDownTargets(
