@@ -219,6 +219,7 @@ import {
   subscribeViaImpl,
   watchEntityImpl,
 } from "./reads.js";
+import { readNodeImpl } from "./portable-door.js";
 import { listImpl, type ListOptions } from "./listing.js";
 import { declareReadHidden, governedProgram, needsLowering } from "./governed-trust.js";
 import { activeIncarnation, incarnationClaims, mintIncarnation } from "./recovery-cut.js";
@@ -837,6 +838,8 @@ export class Gateway {
       assertSource: (name, binding) => assertChannelSourceLegible(this, name, binding),
       resolve: (name, entity, asOf, binding) =>
         this.resolvedNode(name, entity, asOf, undefined, binding),
+      resolveRead: (name, entity, asOf, binding) =>
+        this.readNode(name, entity, asOf, undefined, binding),
       mutate: (name, entity, props, actorSeed, binding) =>
         this.mutateEntity(name, entity, props, actorSeed, binding),
       clear: (name, entity, fields, actorSeed, binding) =>
@@ -2153,6 +2156,20 @@ export class Gateway {
     binding?: ConnectionBinding,
   ): ResolvedNode {
     return resolvedNodeImpl(this, name, entity, now ?? this.now(), asOf, binding);
+  }
+
+  /**
+   * An ordinary read through its route (SPEC-16 M5): portable batch gather and resolve when the
+   * read is eligible, the native branch otherwise. The host time is sampled once, here.
+   */
+  readNode(
+    name: string,
+    entity: string,
+    asOf?: number,
+    now?: number,
+    binding?: ConnectionBinding,
+  ): Promise<ResolvedNode> {
+    return readNodeImpl(this, name, entity, now ?? this.now(), asOf, binding);
   }
 
   // --- the write seam --------------------------------------------------------------------------

@@ -475,6 +475,16 @@ const asOfGroundImpl = (gw: Gateway, asOf: number, closed: ReadonlySet<string>):
     : DeltaSet.from([...groundAsOfImpl(gw, asOf)].filter((d) => !closed.has(d.id)));
 
 /**
+ * The ground an ordinary PRIMARY read resolves over: the read-closed narrowing of the present, or
+ * of the moment `asOf`. The native branch and the portable source both read exactly this.
+ */
+export function primaryGroundImpl(gw: Gateway, now: number, asOf?: number): DeltaSet {
+  return asOf === undefined
+    ? readGround(gw, now)
+    : asOfGroundImpl(gw, asOf, readClosedIds(gw, now));
+}
+
+/**
  * The gather a §14 RETRACTION reads, over the UNNARROWED ground (SPEC §29.3's invariant list).
  *
  * Read closure is a property of doors serving READINGS. A retraction is a WRITE that must see what it
@@ -584,15 +594,35 @@ export function resolvedNodeImpl(
 ): ResolvedNode {
   const def = gw.def(name, binding); // a bound connection's lens may live only in its container's fold
   const hview = gatherImpl(gw, name, entity, now, asOf, binding);
+  return finishNodeImpl(
+    gw,
+    name,
+    entity,
+    now,
+    hview,
+    resolveView(def.schema, hview) as Record<string, View>,
+    asOf,
+    binding,
+  );
+}
+
+// The application-owned tail of every read, whichever route gathered and resolved it: decorate
+// expanded children through their own readings, apply this lens's resolvers, then annotate an as-of
+// read. `hex` is the digest of the FINAL view, after resolvers, on both routes.
+export function finishNodeImpl(
+  gw: Gateway,
+  name: string,
+  entity: string,
+  now: number,
+  hview: HView,
+  resolved: Record<string, View>,
+  asOf?: number,
+  binding?: ConnectionBinding,
+): ResolvedNode {
+  const def = gw.def(name, binding);
   const view = applyResolvers(
     def.resolvers,
-    decorateChildren(
-      resolveView(def.schema, hview) as Record<string, View>,
-      hview,
-      def.schema,
-      readingResolversOf(gw, binding),
-      gw.resolverMemo,
-    ),
+    decorateChildren(resolved, hview, def.schema, readingResolversOf(gw, binding), gw.resolverMemo),
     hview,
     entity,
     gw.resolverMemo,
