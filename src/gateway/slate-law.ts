@@ -26,8 +26,11 @@ import { CTX_SLATE } from "./slate-vocab.js";
  * every erasure a cut mints carries `{role: "slate", …}` as §29.6's JOIN, so a reader keyed on
  * that role would read each of its own erasures as a malformed slate record and jam the cut at its
  * second member. The same shape `isErasure` uses, for the same reason.
+ *
+ * It is its own entity, not the erasure entity: every read probes it through the target index, and
+ * a probe of `loam:erasure` would walk every erasure order the store has ever held.
  */
-export const SLATE_ENTITY = "loam:erasure";
+export const SLATE_ENTITY = "loam:slate";
 
 const SLATE_AT = { entity: SLATE_ENTITY, context: CTX_SLATE } as const;
 
