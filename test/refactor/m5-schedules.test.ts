@@ -13,9 +13,11 @@ import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { SqliteBackend } from "../../src/store/sqlite.js";
 import { BED, BED_READING, BED_WITH_PLANTS, planting } from "./m5-fixtures.js";
+import { OP_SEED, standSlate } from "../gateway/slating.js";
 import { FERN, GARDENER_SEED, observed } from "../spike/garden.js";
 import {
   PLANT,
+  PLANT_POLICY,
   PLANT_READING,
   PLANT_WRITABLE,
   garden,
@@ -229,6 +231,44 @@ describe("M5 schedule 1: bytes and negation answer the same on both routes", () 
     expect(a.view).toEqual(b.view);
     expect(a.hex).toBe(b.hex);
     expect(a.hviewHex).toBe(b.hviewHex);
+    await native.close();
+    await portable.close();
+  });
+});
+
+describe("M5 schedule 4: read closure narrows present and historical portable reads", () => {
+  it("a read-closed fact is gone from both reads; an unrelated fact survives", async () => {
+    const genesis = assembleGenesis({
+      operatorSeed: OP_SEED,
+      registrations: [
+        { hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN], writable: [...PLANT_WRITABLE] },
+      ],
+    });
+    const routes: Route[] = [];
+    const native = await Gateway.boot(new MemoryBackend(), genesis),
+      portable = await Gateway.boot(new MemoryBackend(), genesis, {
+        portableReads: true,
+        onReadRoute: (r: Route) => void routes.push(r),
+      });
+    const member = observed(FERN, "height", 30, 1000, OP_SEED),
+      bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
+    for (const gw of [native, portable]) {
+      await gw.append([member, bystander]);
+      await standSlate(gw, { members: [member], closes: ["read"] });
+    }
+    for (const asOf of [undefined, 1500]) {
+      const now = portable.now();
+      const a = await portable.readNode("Plant", FERN, asOf, now),
+        b = native.resolvedNode("Plant", FERN, asOf, now);
+      expect(a.view["height"]).toBeUndefined();
+      expect(a.view["tag"]).toEqual(["shade"]);
+      expect(a.view).toEqual(b.view);
+      expect(a.hex).toBe(b.hex);
+    }
+    expect(routes.map((r) => [r.route, r.reason])).toEqual([
+      ["portable", undefined],
+      ["portable", undefined],
+    ]);
     await native.close();
     await portable.close();
   });
