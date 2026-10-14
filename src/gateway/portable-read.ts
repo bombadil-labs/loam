@@ -369,13 +369,14 @@ export async function runPortableRead(
     checkCurrent(binding, revision, authority) {
       if (binding !== boot.binding.id || authority !== boot.authority.id)
         return Promise.resolve({ status: "unauthorized" });
-      const now = portableSource(
-        signer,
-        boot,
-        inv.currentSource(),
-        inv.receivedAt,
-        inv.historicalCutoff,
-      );
+      // A present source that cannot be read is unavailable: a typed refusal, never a stale pass.
+      let current: readonly Delta[];
+      try {
+        current = inv.currentSource();
+      } catch {
+        return Promise.resolve({ status: "source-unavailable" });
+      }
+      const now = portableSource(signer, boot, current, inv.receivedAt, inv.historicalCutoff);
       return Promise.resolve(
         now.revision === revision ? { status: "current" } : { status: "source-changed" },
       );

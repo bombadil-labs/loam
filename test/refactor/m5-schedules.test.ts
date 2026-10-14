@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { classifyPortableRead } from "../../src/gateway/portable-door.js";
+import { primaryGroundImpl } from "../../src/gateway/reads.js";
 import { runPortableRead } from "../../src/gateway/portable-read.js";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -113,24 +114,40 @@ describe("M5 schedule 6: explicit time crosses validity without ingest", () => {
 });
 
 describe("M5 schedule 8: input capacity is decided before dispatch", () => {
-  it("a source over the appearance limit stays native with its answer unchanged", async () => {
-    // 4097 selected appearances, counting every admitted delta of the source.
-    const gw = await store(true);
+  it("4096 source appearances run portable; 4097 stay native; both answer as native", async () => {
+    // The limit counts the snapshot's appearances: every delta of the authorized source, law
+    // included, since definition acts are members of the ground.
+    const routes: Route[] = [];
+    const gw = await store(true, routes);
     const now = gw.now();
-    const have = [...gw.reactor.snapshot()].length;
-    const filler = Array.from({ length: 4097 - have }, (_, n) =>
-      observed(`plant:filler-${n}`, "height", n, 1000 + n, GARDENER_SEED),
-    );
-    await gw.append(filler);
-    expect([...gw.reactor.snapshot()].length).toBe(4097);
+    const size = () => [...primaryGroundImpl(gw, now)].length;
+    const fill = (from: number, count: number) =>
+      Array.from({ length: count }, (_, n) =>
+        observed(`plant:filler-${from + n}`, "height", n, 1000 + from + n, GARDENER_SEED),
+      );
+    await gw.append(fill(0, 4096 - size()));
+    expect(size()).toBe(4096);
+    const exact = await gw.readNode("Plant", FERN, undefined, now);
+    expect(routes.at(-1)).toEqual({ lens: "Plant", entity: FERN, route: "portable" });
+    expect(exact.hex).toBe(gw.resolvedNode("Plant", FERN, undefined, now).hex);
+
+    await gw.append(fill(4096, 1));
+    expect(size()).toBe(4097);
     expect(classifyPortableRead(gw, "Plant", FERN, now)).toEqual({
       route: "native",
       reason: "input-capacity",
     });
-    const node = await gw.readNode("Plant", FERN, undefined, now);
-    expect(node.hex).toBe(gw.resolvedNode("Plant", FERN, undefined, now).hex);
+    const over = await gw.readNode("Plant", FERN, undefined, now);
+    expect(routes.at(-1)).toEqual({
+      lens: "Plant",
+      entity: FERN,
+      route: "native",
+      reason: "input-capacity",
+    });
+    expect(over.hex).toBe(gw.resolvedNode("Plant", FERN, undefined, now).hex);
+    expect(over.view).toEqual(exact.view);
     await gw.close();
-  }, 120_000);
+  }, 300_000);
 });
 
 describe("M5 schedule 9: concurrent preparations keep their own basis", () => {
@@ -326,5 +343,34 @@ describe("M5 schedule 3: a bucket resolver sees the full evidence on the portabl
     expect(routes.every((r) => r.route === "portable")).toBe(true);
     await native.close();
     await portable.close();
+  });
+});
+
+describe("M5 schedule 7: an unavailable source refuses", () => {
+  it("a read whose present source cannot be read refuses source-unavailable, with no fallback", async () => {
+    const gw = await store(true);
+    const route = classifyPortableRead(gw, "Plant", FERN, gw.now());
+    expect(route.route).toBe("portable");
+    if (route.route !== "portable") return;
+    const unavailable = {
+      ...route.prepared,
+      invocation: {
+        ...route.prepared.invocation,
+        currentSource: (): readonly Delta[] => {
+          throw new Error("the journal is gone");
+        },
+      },
+    };
+    const answer = await runPortableRead(route.signer, unavailable);
+    expect(answer).toMatchObject({
+      status: "refused",
+      stage: "gather",
+      code: "source-unavailable",
+    });
+    // The same prepared read with its source readable completes: the refusal is the source's.
+    expect(await runPortableRead(route.signer, route.prepared)).toMatchObject({
+      status: "completed",
+    });
+    await gw.close();
   });
 });
