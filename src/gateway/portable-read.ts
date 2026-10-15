@@ -185,8 +185,8 @@ export interface PortableInvocation {
   readonly scope: readonly string[];
   /** S(scope) under this read's selection: the only deltas the read can depend on. */
   readonly source: readonly Delta[];
-  /** S(scope) as it stands now, read from the index, for the final current-source check. */
-  readonly currentSource: () => readonly Delta[];
+  /** S(scope) as it stands now, read from the index, for the final check. Rejects when unavailable. */
+  readonly currentSource: () => Promise<readonly Delta[]>;
 }
 
 export type PortableAnswer =
@@ -295,15 +295,15 @@ export async function runPortableRead(
     // Batch reads never recapture or restore: the captured source is the whole invocation.
     capture: () => Promise.resolve({ status: "source-unavailable" }),
     reacquireSnapshot: () => Promise.resolve({ status: "source-unavailable" }),
-    checkCurrent(binding, revision, authority) {
+    async checkCurrent(binding, revision, authority) {
       if (binding !== boot.binding.id || authority !== boot.authority.id)
-        return Promise.resolve({ status: "unauthorized" });
+        return { status: "unauthorized" };
       // A present source that cannot be read is unavailable: a typed refusal, never a stale pass.
       let current: readonly Delta[];
       try {
-        current = inv.currentSource();
+        current = await inv.currentSource();
       } catch {
-        return Promise.resolve({ status: "source-unavailable" });
+        return { status: "source-unavailable" };
       }
       const now = portableSource(
         signer,
@@ -313,9 +313,7 @@ export async function runPortableRead(
         inv.scope,
         inv.historicalCutoff,
       );
-      return Promise.resolve(
-        now.revision === revision ? { status: "current" } : { status: "source-changed" },
-      );
+      return now.revision === revision ? { status: "current" } : { status: "source-changed" };
     },
   };
   const endpoint = MaterializationEndpoint.boot({
