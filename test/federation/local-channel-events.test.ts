@@ -309,9 +309,11 @@ describe("T288 actual ingest attestation", () => {
     const { gw } = await home();
     const a = fact();
     await gw.federate([a]);
-    const real = gw.ingestVia;
-    gw.ingestVia = (d) =>
-      d.id === a.id ? { status: "rejected", reason: "fixture explicit refusal" } : real(d);
+    const real = gw.ingestAllVia;
+    gw.ingestAllVia = (ds) =>
+      ds.map((d) =>
+        d.id === a.id ? { status: "rejected", reason: "fixture explicit refusal" } : real([d])[0]!,
+      );
     const report = await gw.federate([a], { ids: true, admittedIds: true });
     expect(gw.reactor.get(a.id)).toEqual(a);
     expect(report.admittedIds).toEqual([]);
@@ -319,11 +321,11 @@ describe("T288 actual ingest attestation", () => {
   it("cannot attest fake duplicate outcomes, mismatched held bytes, bad signatures, or admission refusal", async () => {
     const { gw } = await home();
     const a = fact();
-    const real = gw.ingestVia;
-    gw.ingestVia = () => ({ status: "duplicate" });
+    const real = gw.ingestAllVia;
+    gw.ingestAllVia = (ds) => ds.map(() => ({ status: "duplicate" }));
     expect((await gw.federate([a], { ids: true, admittedIds: true })).admittedIds).toEqual([]);
     expect(gw.reactor.get(a.id)).toBeUndefined();
-    gw.ingestVia = real;
+    gw.ingestAllVia = real;
     await gw.federate([a]);
     const originalGet = gw.reactor.get.bind(gw.reactor);
     vi.spyOn(gw.reactor, "get").mockImplementation((id) =>
@@ -351,17 +353,18 @@ describe("T288 actual ingest attestation", () => {
     const { gw } = await home();
     const a = fact(),
       b = fact(2);
-    const real = gw.ingestVia;
-    gw.ingestVia = (d) => {
-      const result = real(d);
-      if (d.id === b.id) throw new Error("fixture ingest crash");
-      return result;
-    };
+    const real = gw.ingestAllVia;
+    gw.ingestAllVia = (ds) =>
+      ds.map((d) => {
+        const result = real([d])[0]!;
+        if (d.id === b.id) throw new Error("fixture ingest crash");
+        return result;
+      });
     await expect(gw.federate([a, b], { ids: true, admittedIds: true })).rejects.toThrow(
       /ingest crash/,
     );
     expect(gw.reactor.get(a.id)).toBeDefined();
-    gw.ingestVia = real;
+    gw.ingestAllVia = real;
     expect((await gw.federate([a, b], { ids: true, admittedIds: true })).admittedIds).toEqual(
       [a.id, b.id].sort(),
     );
@@ -791,20 +794,23 @@ describe("T288 honest local received operand", () => {
     const { ch, pool, offering } = await channel(gw);
     const a = fact();
     offering.push(a);
-    const real = pool.ingestVia;
-    pool.ingestVia = (d) =>
-      d.id === a.id ? { status: "rejected", reason: "fixture refused" } : real(d);
+    const real = pool.ingestAllVia;
+    pool.ingestAllVia = (ds) =>
+      ds.map((d) =>
+        d.id === a.id ? { status: "rejected", reason: "fixture refused" } : real([d])[0]!,
+      );
     await ch.sync();
     expect(opened(gw, ch.name).received).toEqual([]);
-    pool.ingestVia = (d) => {
-      const result = real(d);
-      if (d.id === a.id) throw new Error("fixture ingest failure");
-      return result;
-    };
+    pool.ingestAllVia = (ds) =>
+      ds.map((d) => {
+        const result = real([d])[0]!;
+        if (d.id === a.id) throw new Error("fixture ingest failure");
+        return result;
+      });
     await expect(ch.sync()).rejects.toThrow(/ingest failure/);
     expect(pool.reactor.get(a.id)).toBeDefined();
     expect(opened(gw, ch.name).received).toEqual([]);
-    pool.ingestVia = real;
+    pool.ingestAllVia = real;
     await ch.sync();
     expect(ids(opened(gw, ch.name).received)).toEqual([a.id]);
   });

@@ -4,8 +4,12 @@
 // dispatched, its errors surface: there is no retry and no fallback to native.
 
 import {
+  anchorAnalysis,
   collectReadingRefs,
   collectRefs,
+  MaterializationSourceError,
+  scopeIds,
+  type Admits,
   schemaCanonicalHex,
   schemaHash,
   termCanonicalHex,
@@ -28,7 +32,8 @@ import {
   type PreparedPortableRead,
   type PortableProgram,
 } from "./portable-read.js";
-import { channelLens, finishNodeImpl, primaryGroundImpl, resolvedNodeImpl } from "./reads.js";
+import { channelLens, finishNodeImpl, resolvedNodeImpl } from "./reads.js";
+import { readClosedIds } from "./slate-law.js";
 import { lensOf } from "./registration.js";
 import type { Signer } from "./signer.js";
 
@@ -40,6 +45,7 @@ export type NativeReason =
   | "governed-lowering"
   | "reading-predicate"
   | "unpublished-law"
+  | "unanchored"
   | "unattested-source"
   | "input-capacity";
 
@@ -57,44 +63,63 @@ const textAt = (d: Delta, role: string): string | undefined => {
   return t?.kind === "primitive" && typeof t.value === "string" ? t.value : undefined;
 };
 
-/** A definition act stands at `now` when it is in its own window and no standing strike binds it. */
-function standing(gw: Gateway, d: Delta, now: number): boolean {
-  const inWindow = (x: Delta) =>
-    x.claims.validFrom <= now && (x.claims.validUntil === undefined || now < x.claims.validUntil);
-  return (
-    inWindow(d) &&
-    !gw.reactor.negationsOf(d.id).some((n) => {
+/**
+ * Readable law at `now`, judged as native law judges it: the act is signed by a law author, stands
+ * in its own window, and no lawful strike that holds at `now` retires it. A strike counts only from a law author and
+ * only while it survives itself, so a struck strike revives its target. A stranger's strike
+ * retires nothing.
+ */
+function readableLaw(gw: Gateway, now: number, closed: ReadonlySet<string>): Admits {
+  const authors = new Set(gw.lawAuthors("registrations"));
+  const lawful = (d: Delta): boolean => authors.size === 0 || authors.has(d.claims.author);
+  // Every act in the chain is judged at `now`: a strike outside its own window binds nothing.
+  const holds = (d: Delta): boolean =>
+    d.claims.validFrom <= now && (d.claims.validUntil === undefined || now < d.claims.validUntil);
+  const memo = new Map<string, boolean>();
+  const retired = (id: string): boolean => {
+    const known = memo.get(id);
+    if (known !== undefined) return known;
+    memo.set(id, false); // content addressing keeps the chain acyclic
+    const verdict = gw.reactor.negationsOf(id).some((n) => {
       const strike = gw.reactor.get(n);
-      return strike !== undefined && inWindow(strike);
-    })
-  );
+      return (
+        strike !== undefined && !closed.has(n) && lawful(strike) && holds(strike) && !retired(n)
+      );
+    });
+    memo.set(id, verdict);
+    return verdict;
+  };
+  return (d) => !closed.has(d.id) && lawful(d) && holds(d) && !retired(d.id);
 }
 
 /** The exact original act for one definition body, chosen by act identity among standing copies. */
 function actFor(
-  law: readonly Delta[],
-  gw: Gateway,
-  now: number,
+  candidates: readonly Delta[],
   termRole: string,
   nameRole: string,
   name: string,
   bodyHex: string,
 ): Delta | undefined {
-  return law
-    .filter(
-      (d) =>
-        textAt(d, termRole) === bodyHex && textAt(d, nameRole) === name && standing(gw, d, now),
-    )
+  return candidates
+    .filter((d) => textAt(d, termRole) === bodyHex && textAt(d, nameRole) === name)
     .sort((a, b) => (a.id < b.id ? -1 : 1))[0];
 }
 
-/** Whether a lens was published: its registration binding stands in law. */
-const bound = (law: readonly Delta[], hyperschemaName: string): boolean => {
-  const entity = `registration:hyperschema:${hyperschemaName}`;
-  return law.some((d) =>
-    d.claims.pointers.some((p) => p.target.kind === "entity" && p.target.entity.id === entity),
-  );
-};
+/**
+ * The readable law at one entity, from the index. A definition act points at its own entity
+ * (`hyperschema:<name>`, `schema:<lens>`), so program selection reads only those entities and
+ * never the whole store. Law published under any other entity is not found, and its read stays
+ * native as `unpublished-law`.
+ */
+const lawAt = (gw: Gateway, admits: Admits, entity: string): Delta[] =>
+  gw.reactor
+    .byTarget(entity)
+    .map((id) => gw.reactor.get(id))
+    .filter((d): d is Delta => d !== undefined && admits(d));
+
+/** Whether a lens was published: a lawful registration binding stands at its entity. */
+const bound = (gw: Gateway, admits: Admits, hyperschemaName: string): boolean =>
+  lawAt(gw, admits, `registration:hyperschema:${hyperschemaName}`).length > 0;
 
 const namedReading = (schema: Schema, name: string): Schema => ({
   ...schema,
@@ -114,23 +139,19 @@ type Selection =
  * top acts is a native-only bystander. A published one whose closure has a missing act is an error:
  * its promised law is gone, and the receiver never re-signs it.
  */
-function selectProgram(gw: Gateway, name: string, now: number, law: readonly Delta[]): Selection {
+function selectProgram(gw: Gateway, name: string, now: number, admits: Admits): Selection {
   const def = gw.def(name);
   const top = def.hyperschema;
   const topReading = namedReading(def.schema, lensOf(def));
   const hyperAct = actFor(
-    law,
-    gw,
-    now,
+    lawAt(gw, admits, `hyperschema:${top.name}`),
     HYPER_TERM,
     HYPER_NAME,
     top.name,
     termCanonicalHex(top.body),
   );
   const schemaAct = actFor(
-    law,
-    gw,
-    now,
+    lawAt(gw, admits, `schema:${lensOf(def)}`),
     SCHEMA_TERM,
     SCHEMA_NAME,
     lensOf(def),
@@ -145,7 +166,7 @@ function selectProgram(gw: Gateway, name: string, now: number, law: readonly Del
   let nativeOnly = false,
     predicate = false;
   const missing = (lens: string, what: string) => {
-    if (bound(law, lens)) broken.push(what);
+    if (bound(gw, admits, lens)) broken.push(what);
     else nativeOnly = true;
   };
   const seenBodies = new Set<string>();
@@ -159,7 +180,13 @@ function selectProgram(gw: Gateway, name: string, now: number, law: readonly Del
       const key = `${hs.name}:${termCanonicalHex(hs.body)}`;
       if (seenBodies.has(key)) continue;
       seenBodies.add(key);
-      const act = actFor(law, gw, now, HYPER_TERM, HYPER_NAME, hs.name, termCanonicalHex(hs.body));
+      const act = actFor(
+        lawAt(gw, admits, `hyperschema:${hs.name}`),
+        HYPER_TERM,
+        HYPER_NAME,
+        hs.name,
+        termCanonicalHex(hs.body),
+      );
       if (act === undefined) missing(hs.name, `hyperschema ${hs.name}`);
       else if (act.id !== hyperAct.id) extra.set(act.id, act);
       visit(hs.body);
@@ -175,9 +202,7 @@ function selectProgram(gw: Gateway, name: string, now: number, law: readonly Del
       const named = namedReading(reading.schema, readingName);
       if (usesPredicateOrder(named)) predicate = true;
       const act = actFor(
-        law,
-        gw,
-        now,
+        lawAt(gw, admits, `schema:${readingName}`),
         SCHEMA_TERM,
         SCHEMA_NAME,
         readingName,
@@ -238,24 +263,51 @@ export function classifyPortableRead(
     return { route: "native", reason: "governed-lowering" };
   // A store that cannot report other handles' commits cannot attest the source a capture names.
   if (gw.backend.revision === undefined) return { route: "native", reason: "unattested-source" };
-  // Law is selected from the present readable ground, whatever moment the operands are read at.
-  const selection = selectProgram(gw, name, now, [...primaryGroundImpl(gw, now)]);
+  // Law is selected from the present readable law, whatever moment the operands are read at.
+  const closed = readClosedIds(gw, now);
+  const selection = selectProgram(gw, name, now, readableLaw(gw, now, closed));
   if (selection.status === "unpublished") return { route: "native", reason: "unpublished-law" };
   if (selection.status === "reading-predicate")
     return { route: "native", reason: "reading-predicate" };
-  const source = [...primaryGroundImpl(gw, now, asOf)];
-  const prepared = preparePortableRead(signer, bootFor(signer), {
-    root: entity,
-    at: asOf ?? now,
-    receivedAt: now,
-    ...(asOf === undefined ? {} : { historicalCutoff: asOf }),
-    program: selection.program,
-    source,
-    currentSource: async () => {
-      if (!(await gw.durableCurrent())) throw new Error(STORE_MOVED);
-      return [...primaryGroundImpl(gw, now, asOf)];
-    },
-  });
+  // The read's scope comes from an anchored read over the reactor's index (SPEC-17 §6): its root,
+  // its constant anchors and every expanded child. The capture carries exactly S(scope) under the
+  // read closure and, for an as-of read, the cut; never the whole store.
+  const term = gw.def(name).hyperschema.body;
+  if (!anchorAnalysis(term, gw.registry).anchored) return { route: "native", reason: "unanchored" };
+  const selected =
+    (closedIds: ReadonlySet<string>): Admits =>
+    (d) =>
+      !closedIds.has(d.id) && (asOf === undefined || d.claims.timestamp <= asOf);
+  const read = gw.reactor.evalAnchored(
+    term,
+    asOf ?? gw.validityNow(now),
+    entity,
+    gw.registry,
+    undefined,
+    selected(closed),
+  );
+  const members = (ids: readonly string[]) => ids.map((id) => gw.reactor.get(id)!);
+  let prepared: PreparedPortableRead;
+  try {
+    prepared = preparePortableRead(signer, bootFor(signer), {
+      root: entity,
+      at: asOf ?? now,
+      receivedAt: now,
+      ...(asOf === undefined ? {} : { historicalCutoff: asOf }),
+      program: selection.program,
+      scope: read.scope,
+      source: members(read.members),
+      currentSource: async () => {
+        if (!(await gw.durableCurrent())) throw new Error(STORE_MOVED);
+        return members(scopeIds(gw.reactor, read.scope, selected(readClosedIds(gw, now))));
+      },
+    });
+  } catch (err) {
+    // The producer applies the source limits before the input preflight runs.
+    if (err instanceof MaterializationSourceError && err.code === "resource-limit")
+      return { route: "native", reason: "input-capacity" };
+    throw err;
+  }
   const preflight = preflightPortableRead(prepared);
   if (preflight.status === "over-input-limit") return { route: "native", reason: "input-capacity" };
   if (preflight.status === "invalid-input")
