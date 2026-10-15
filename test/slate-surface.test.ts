@@ -160,7 +160,7 @@ describe("T109 — the slate surface is reachable from the package barrel", () =
     expect(SLATE_CONTEXTS).toEqual([CTX_SLATE, CTX_GRAVEYARD]);
     expect(CTX_SLATE).toBe("loam.erasure.slate");
     expect(CTX_GRAVEYARD).toBe("loam.erasure.graveyard");
-    expect(SLATE_ENTITY).toBe("loam:erasure");
+    expect(SLATE_ENTITY).toBe("loam:slate");
     expect(RECOMMENDED_CLOSES).toBe("egress,cite");
 
     // The builders, by their behavior rather than by `typeof` — a name bound to the wrong function
