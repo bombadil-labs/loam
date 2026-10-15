@@ -219,6 +219,7 @@ import {
   subscribeViaImpl,
   watchEntityImpl,
 } from "./reads.js";
+import { readNodeImpl } from "./portable-door.js";
 import { listImpl, type ListOptions } from "./listing.js";
 import { declareReadHidden, governedProgram, needsLowering } from "./governed-trust.js";
 import { activeIncarnation, incarnationClaims, mintIncarnation } from "./recovery-cut.js";
@@ -239,6 +240,19 @@ export interface QueryResult {
 const WRITE_THROUGH_RETRIES = 8;
 
 export interface GatewayOptions {
+  /**
+   * Serve eligible ordinary PRIMARY reads through the portable batch path (SPEC-16 M5 trial).
+   * Off by default: each portable read captures and verifies the whole source, which is slow on a
+   * large store. Ineligible reads stay native either way.
+   */
+  readonly portableReads?: boolean;
+  /** Told the route each ordinary read took, and why a native read stayed native. */
+  readonly onReadRoute?: (read: {
+    readonly lens: string;
+    readonly entity: string;
+    readonly route: "portable" | "native";
+    readonly reason?: string;
+  }) => void;
   /**
    * The ordinary journal store. Given, this gateway is a substrate peer under
    * its operator key: it opens from the journal, and every write is admitted through it. Only a
@@ -519,6 +533,11 @@ export class Gateway {
   poolKeys: PoolKeySource = memoryPoolKeysFor(this);
   /** Stored rows the host's journal never admitted: held, never served. */
   rowsOutsideJournal = 0;
+  /**
+   * @internal — the store's revision (`StoreBackend.revision`), sampled before this gateway last
+   * read it whole. A portable read attests its source only while the store still answers it.
+   */
+  durableRevision: string | undefined;
   private unreadableRows = 0; // set by open: rows held, none readable
   /** @internal — T19 seam (erase.ts, adopt.ts) */
   readonly operatorAuthor: string | undefined;
@@ -696,6 +715,9 @@ export class Gateway {
         peerStore = backend.journalStore();
       }
     }
+    // Sampled BEFORE the read: a commit that races the read moves it, and the first attesting read
+    // refuses rather than vouch for rows it never loaded.
+    const revision = await backend.revision?.();
     if (peerStore === undefined) {
       replayed = await backend.deltasSince(new Set());
     } else {
@@ -756,6 +778,7 @@ export class Gateway {
     const gateway = new Gateway(backend, reactor, options);
     gateway.peer = peer;
     gateway.rowsOutsideJournal = outsideJournal;
+    gateway.durableRevision = revision;
     // Each new pool takes its own key; this ground records it first (container.ts
     // `poolGovernor`). The store keeps the keys beside itself, or this process holds them.
     gateway.poolKeys =
@@ -784,6 +807,15 @@ export class Gateway {
   /** @internal — T19 seam (quarantine-pool.ts) */
   async preloadResolvers(): Promise<void> {
     return preloadResolversImpl(this);
+  }
+
+  /**
+   * @internal — whether the durable store still holds what this gateway read: no other handle has
+   * committed since. False when the store cannot say. One revision read, never a scan.
+   */
+  async durableCurrent(): Promise<boolean> {
+    const revision = await this.backend.revision?.();
+    return revision !== undefined && revision === this.durableRevision;
   }
 
   // Boot a fresh (or existing) store from a genesis delta-set: open governed by the genesis
@@ -837,6 +869,8 @@ export class Gateway {
       assertSource: (name, binding) => assertChannelSourceLegible(this, name, binding),
       resolve: (name, entity, asOf, binding) =>
         this.resolvedNode(name, entity, asOf, undefined, binding),
+      resolveRead: (name, entity, asOf, binding) =>
+        this.readNode(name, entity, asOf, undefined, binding),
       mutate: (name, entity, props, actorSeed, binding) =>
         this.mutateEntity(name, entity, props, actorSeed, binding),
       clear: (name, entity, fields, actorSeed, binding) =>
@@ -1652,6 +1686,7 @@ export class Gateway {
       if (this.peer === undefined) return this.backend.deltasSince(new Set());
       return rereadHostPeer(this.peer);
     };
+    let revision = await this.backend.revision?.();
     let rows = await readAll();
     for (const d of rows) {
       if (reactor.ingest(d).status === "rejected") {
@@ -1674,6 +1709,7 @@ export class Gateway {
     // The final membership check and reactor swap are synchronous after the last read.
     for (let round = 0; ; round += 1) {
       const known = new Set(rows.map((d) => d.id));
+      revision = await this.backend.revision?.();
       rows = await readAll();
       if (rows.length === known.size && rows.every((d) => known.has(d.id))) break;
       if (round >= 10) {
@@ -1687,6 +1723,7 @@ export class Gateway {
       }
     }
     this._reactor = reactor;
+    this.durableRevision = revision;
     pinErasureGovernors(reactor, this.erasureGovernors); // the pins follow the ground
     if (this.delegationScope !== undefined) declarePrincipalScope(reactor, this.delegationScope);
     this.declareUsers(reactor);
@@ -2153,6 +2190,20 @@ export class Gateway {
     binding?: ConnectionBinding,
   ): ResolvedNode {
     return resolvedNodeImpl(this, name, entity, now ?? this.now(), asOf, binding);
+  }
+
+  /**
+   * An ordinary read through its route (SPEC-16 M5): portable batch gather and resolve when the
+   * read is eligible, the native branch otherwise. The host time is sampled once, here.
+   */
+  readNode(
+    name: string,
+    entity: string,
+    asOf?: number,
+    now?: number,
+    binding?: ConnectionBinding,
+  ): Promise<ResolvedNode> {
+    return readNodeImpl(this, name, entity, now ?? this.now(), asOf, binding);
   }
 
   // --- the write seam --------------------------------------------------------------------------
