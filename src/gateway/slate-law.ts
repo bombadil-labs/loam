@@ -81,6 +81,19 @@ export const isSlateRecord = (claims: Claims): boolean => declaresSlateVocab(cla
 
 export const isGraveyard = (claims: Claims): boolean => declaresSlateVocab(claims, CTX_GRAVEYARD);
 
+/** The entity slate and graveyard records declared before they took their own. */
+const RETIRED_SLATE_ENTITY = "loam:erasure";
+
+/**
+ * A slate or graveyard record in the retired format, declared at the erasure entity. No reader
+ * honors it, so a store that holds one would silently reopen every door it closed. Loam does not
+ * migrate it: the store is refused at boot, and a new one is refused at every door.
+ */
+export const isRetiredSlateFormat = (claims: Claims): boolean =>
+  [CTX_SLATE, CTX_GRAVEYARD].some(
+    (context) => at(claims, "declares", context) === RETIRED_SLATE_ENTITY,
+  );
+
 // --- the door validator (wired into authorize beside eraseDefect and containerDefect) -----------
 
 // Is this delta slate vocabulary, and if so, is it WELL-FORMED, AUTHORIZED law? A slate closes
@@ -95,6 +108,8 @@ export function slateDefect(
   operator: string | undefined,
 ): string | undefined {
   const claims = delta.claims;
+  if (isRetiredSlateFormat(claims))
+    return `a slate or graveyard record declares ${RETIRED_SLATE_ENTITY}, its retired format; it declares ${SLATE_ENTITY} now`;
   if (isGraveyard(claims)) return graveyardDefect(claims, operator);
   if (!isSlateRecord(claims)) return undefined;
   const shape = slateShapeDefect(claims, operator);
