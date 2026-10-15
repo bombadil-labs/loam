@@ -52,6 +52,12 @@ export class MemoryBackend implements StoreBackend {
     return this.set.has(id);
   }
 
+  async revision(): Promise<string> {
+    this.assertOpen();
+    // A memory store has one handle, so no other handle's commit can move it.
+    return "memory";
+  }
+
   async holdsAny(): Promise<boolean> {
     this.assertOpen();
     // A journal's frames and checkpoint carry whole deltas, so a journal is bytes too.

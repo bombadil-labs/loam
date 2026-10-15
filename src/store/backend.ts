@@ -80,6 +80,13 @@ export interface StoreBackend {
   // unparseable row) is `holdsAny`'s to count and the §25 pen's to settle, never listed here.
   ids?(): Promise<Set<string>>;
 
+  // OPTIONAL: a token that moves whenever ANOTHER handle commits to this store. A gateway reads
+  // its store whole at open (see Concurrency above), so a moved token means its in-memory state
+  // no longer describes the durable inventory, and a read that attests its source refuses. It is
+  // one cheap read, never a scan: an attesting read asks it on every call. A driver whose other
+  // handles cannot be observed leaves it absent, and no read attests a source against it.
+  revision?(): Promise<string>;
+
   // Release held resources.
   close(): Promise<void>;
 }

@@ -4,6 +4,7 @@
 // dispatched, its errors surface: there is no retry and no fallback to native.
 
 import {
+  collectReadingRefs,
   collectRefs,
   schemaCanonicalHex,
   schemaHash,
@@ -39,6 +40,7 @@ export type NativeReason =
   | "governed-lowering"
   | "reading-predicate"
   | "unpublished-law"
+  | "unattested-source"
   | "input-capacity";
 
 export type PortableRoute =
@@ -99,23 +101,6 @@ const namedReading = (schema: Schema, name: string): Schema => ({
   name,
   alg: schema.alg ?? 1,
 });
-
-/** Every reading named by an `expand`, anywhere in a body. */
-function expandReadings(term: Term): string[] {
-  const names: string[] = [];
-  const walk = (x: unknown): void => {
-    if (Array.isArray(x)) x.forEach(walk);
-    else if (x !== null && typeof x === "object") {
-      const o = x as Record<string, unknown>;
-      const reading = o["reading"] as { kind?: string; name?: string } | undefined;
-      if (o["kind"] === "expand" && reading?.kind === "name" && typeof reading.name === "string")
-        names.push(reading.name);
-      Object.values(o).forEach(walk);
-    }
-  };
-  walk(term);
-  return names;
-}
 
 const usesPredicateOrder = (schema: Schema): boolean => JSON.stringify(schema).includes("byPred");
 
@@ -179,10 +164,12 @@ function selectProgram(gw: Gateway, name: string, now: number, law: readonly Del
       else if (act.id !== hyperAct.id) extra.set(act.id, act);
       visit(hs.body);
     }
-    for (const readingName of expandReadings(body)) {
+    // A reading is named or pinned by hash; the registry resolves both as native evaluation does.
+    for (const ref of collectReadingRefs(body)) {
+      const readingName = gw.registry.resolveReading(ref)?.name;
       const reading = gw.registered.find((r) => lensOf(r) === readingName);
-      if (reading === undefined) {
-        broken.push(`reading ${readingName}`);
+      if (readingName === undefined || reading === undefined) {
+        broken.push(`reading ${ref.kind === "name" ? ref.name : ref.hash}`);
         continue;
       }
       const named = namedReading(reading.schema, readingName);
@@ -221,6 +208,9 @@ function selectProgram(gw: Gateway, name: string, now: number, law: readonly Del
   };
 }
 
+const STORE_MOVED =
+  "another handle changed the store after this gateway read it; reopen it to read its inventory";
+
 const boots = new WeakMap<Signer, PortableBoot>();
 const bootFor = (signer: Signer): PortableBoot => {
   let boot = boots.get(signer);
@@ -246,6 +236,8 @@ export function classifyPortableRead(
   if (signer === undefined) return { route: "native", reason: "no-signer" };
   if (needsLowering(gw.def(name).hyperschema.body, gw.registry))
     return { route: "native", reason: "governed-lowering" };
+  // A store that cannot report other handles' commits cannot attest the source a capture names.
+  if (gw.backend.revision === undefined) return { route: "native", reason: "unattested-source" };
   // Law is selected from the present readable ground, whatever moment the operands are read at.
   const selection = selectProgram(gw, name, now, [...primaryGroundImpl(gw, now)]);
   if (selection.status === "unpublished") return { route: "native", reason: "unpublished-law" };
@@ -259,7 +251,10 @@ export function classifyPortableRead(
     ...(asOf === undefined ? {} : { historicalCutoff: asOf }),
     program: selection.program,
     source,
-    currentSource: () => [...primaryGroundImpl(gw, now, asOf)],
+    currentSource: async () => {
+      if (!(await gw.durableCurrent())) throw new Error(STORE_MOVED);
+      return [...primaryGroundImpl(gw, now, asOf)];
+    },
   });
   const preflight = preflightPortableRead(prepared);
   if (preflight.status === "over-input-limit") return { route: "native", reason: "input-capacity" };
@@ -290,6 +285,12 @@ export async function readNodeImpl(
     ...(route.route === "native" ? { reason: route.reason } : {}),
   });
   if (route.route === "native") return resolvedNodeImpl(gw, name, entity, now, asOf, binding);
+  // The capture was built from memory. It names the durable source only while no other handle has
+  // committed since this gateway read the store.
+  if (!(await gw.durableCurrent()))
+    throw new Error(
+      `portable read of ${name} at ${entity}: gather source-unavailable: ${STORE_MOVED}`,
+    );
   const answer = await runPortableRead(route.signer, route.prepared);
   if (answer.status !== "completed")
     throw new Error(
