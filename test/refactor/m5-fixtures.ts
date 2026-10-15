@@ -8,24 +8,25 @@ const PICK = {
   kind: "pick" as const,
   order: { kind: "byTimestamp" as const, dir: "desc" as const },
 };
+export const BED_WITH_PLANTS_JSON = {
+  op: "expand",
+  role: { exact: "plant" },
+  schema: "Plant",
+  reading: "Plant",
+  in: {
+    op: "group",
+    key: "byTargetContext",
+    in: {
+      op: "select",
+      pred: { hasPointer: { targetEntity: { var: "root" } } },
+      in: { op: "mask", policy: "drop", in: "input" },
+    },
+  },
+};
 export const BED_WITH_PLANTS = {
   name: "BedWithPlants",
   alg: 1,
-  body: parseTerm({
-    op: "expand",
-    role: { exact: "plant" },
-    schema: "Plant",
-    reading: "Plant",
-    in: {
-      op: "group",
-      key: "byTargetContext",
-      in: {
-        op: "select",
-        pred: { hasPointer: { targetEntity: { var: "root" } } },
-        in: { op: "mask", policy: "drop", in: "input" },
-      },
-    },
-  }),
+  body: parseTerm(BED_WITH_PLANTS_JSON),
 };
 export const BED_READING = {
   name: "BedWithPlants",

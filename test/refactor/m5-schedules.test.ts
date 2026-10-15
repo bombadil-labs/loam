@@ -66,6 +66,8 @@ const mossHeight = (value: number, timestamp: number, from: number, until?: numb
     GARDENER_SEED,
   );
 
+// The external SQLite half of schedule 5 (another handle deletes or replaces a row) is in
+// m5-portable-read.test.ts. This half moves the source through the gateway itself.
 describe("M5 schedule 5: a source change in flight refuses, the next read sees it", () => {
   it("a prepared read whose source moved before dispatch refuses visibly, once", async () => {
     const gw = await store(true);
@@ -356,9 +358,8 @@ describe("M5 schedule 7: an unavailable source refuses", () => {
       ...route.prepared,
       invocation: {
         ...route.prepared.invocation,
-        currentSource: (): readonly Delta[] => {
-          throw new Error("the journal is gone");
-        },
+        currentSource: (): Promise<readonly Delta[]> =>
+          Promise.reject(new Error("the journal is gone")),
       },
     };
     const answer = await runPortableRead(route.signer, unavailable);
