@@ -63,13 +63,16 @@ const textAt = (d: Delta, role: string): string | undefined => {
 
 /**
  * Readable law at `now`, judged as native law judges it: the act is signed by a law author, stands
- * in its own window, and no lawful strike retires it. A strike counts only from a law author and
+ * in its own window, and no lawful strike that holds at `now` retires it. A strike counts only from a law author and
  * only while it survives itself, so a struck strike revives its target. A stranger's strike
  * retires nothing.
  */
 function readableLaw(gw: Gateway, now: number, closed: ReadonlySet<string>): Admits {
   const authors = new Set(gw.lawAuthors("registrations"));
   const lawful = (d: Delta): boolean => authors.size === 0 || authors.has(d.claims.author);
+  // Every act in the chain is judged at `now`: a strike outside its own window binds nothing.
+  const holds = (d: Delta): boolean =>
+    d.claims.validFrom <= now && (d.claims.validUntil === undefined || now < d.claims.validUntil);
   const memo = new Map<string, boolean>();
   const retired = (id: string): boolean => {
     const known = memo.get(id);
@@ -77,17 +80,14 @@ function readableLaw(gw: Gateway, now: number, closed: ReadonlySet<string>): Adm
     memo.set(id, false); // content addressing keeps the chain acyclic
     const verdict = gw.reactor.negationsOf(id).some((n) => {
       const strike = gw.reactor.get(n);
-      return strike !== undefined && !closed.has(n) && lawful(strike) && !retired(n);
+      return (
+        strike !== undefined && !closed.has(n) && lawful(strike) && holds(strike) && !retired(n)
+      );
     });
     memo.set(id, verdict);
     return verdict;
   };
-  return (d) =>
-    !closed.has(d.id) &&
-    lawful(d) &&
-    d.claims.validFrom <= now &&
-    (d.claims.validUntil === undefined || now < d.claims.validUntil) &&
-    !retired(d.id);
+  return (d) => !closed.has(d.id) && lawful(d) && holds(d) && !retired(d.id);
 }
 
 /** The exact original act for one definition body, chosen by act identity among standing copies. */

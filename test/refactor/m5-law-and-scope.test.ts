@@ -55,8 +55,13 @@ function plantReadingAct(gw: Gateway): Delta {
   return act;
 }
 
-const strike = (seed: string, timestamp: number, target: string): Delta =>
-  signClaims(makeNegationClaims(authorForSeed(seed), timestamp, target), seed);
+const strike = (
+  seed: string,
+  timestamp: number,
+  target: string,
+  window: { validFrom?: number; validUntil?: number } = {},
+): Delta =>
+  signClaims({ ...makeNegationClaims(authorForSeed(seed), timestamp, target), ...window }, seed);
 
 async function bothRoutesAgree(gw: Gateway, routes: Route[]): Promise<void> {
   const now = gw.now();
@@ -88,6 +93,48 @@ describe("M5 law selection matches native law", () => {
     await gw.append([withdrawal]);
     await gw.append([strike(KEEPER_SEED, gw.now(), withdrawal.id)]);
     await bothRoutesAgree(gw, routes);
+    await gw.close();
+  });
+
+  // Native law evaluates every strike in the chain at `now`, so a strike outside its own window
+  // binds nothing yet, or nothing any longer.
+  it("an operator strike that holds only in the future retires nothing now", async () => {
+    const routes: Route[] = [];
+    const gw = await bedStore(routes);
+    const now = gw.now();
+    await gw.append([
+      strike(KEEPER_SEED, now, plantReadingAct(gw).id, { validFrom: now + 60_000 }),
+    ]);
+    await bothRoutesAgree(gw, routes);
+    await gw.close();
+  });
+
+  it("an operator strike whose window has closed retires nothing now", async () => {
+    const routes: Route[] = [];
+    const gw = await bedStore(routes);
+    const now = gw.now();
+    await gw.append([
+      strike(KEEPER_SEED, now - 2_000, plantReadingAct(gw).id, {
+        validFrom: now - 2_000,
+        validUntil: now - 1_000,
+      }),
+    ]);
+    await bothRoutesAgree(gw, routes);
+    await gw.close();
+  });
+
+  it("a strike of the withdrawal that holds only in the future does not revive the act yet", async () => {
+    const routes: Route[] = [];
+    const gw = await bedStore(routes);
+    const now = gw.now();
+    const withdrawal = strike(KEEPER_SEED, now, plantReadingAct(gw).id);
+    await gw.append([withdrawal]);
+    await gw.append([strike(KEEPER_SEED, now, withdrawal.id, { validFrom: now + 60_000 })]);
+    // The withdrawal stands, so the Plant law is retired on both routes and neither read is portable.
+    expect(classifyPortableRead(gw, "Plant", FERN, gw.now())).toEqual({
+      route: "native",
+      reason: "unpublished-law",
+    });
     await gw.close();
   });
 });
