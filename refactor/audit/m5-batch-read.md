@@ -59,6 +59,31 @@ native.
   when the route was on by default. Default-on waits for a source that is not recaptured per read.
 - `onReadRoute` reports each read's route and native reason, so tests observe the classifier.
 
+## Slice 3 findings
+
+- The capacity boundary is exact. A source of 4096 appearances runs portable. A source of 4097
+  stays native with reason `input-capacity`. Both answer the native digests. The count is the
+  snapshot's appearances: every delta of the authorized source, law included.
+- A present source that cannot be read refuses `source-unavailable` at gather. It does not throw
+  and does not fall back.
+- The cost of one portable read is linear in the source. Measured on Linux, one Plant read:
+
+  | appearances | preflight | gather and resolve |
+  | --- | --- | --- |
+  | 512 | 2.2 s | 7.2 s |
+  | 1024 | 4.3 s | 14.5 s |
+  | 2048 | 10.0 s | 28.9 s |
+  | 4096 | about 79 s in total | |
+
+- About 70% of that time is ed25519 signature checks in the package. One read decodes the full
+  source snapshot four times: in the preflight (about 23% of the time), in the gather endpoint
+  (about 26%), and in `readMaterializationResult` for the gather result and for the resolve result
+  (about 47% together). Each decode checks each appearance's signature once, when
+  `decodeMaterializationAppearance` re-encodes it.
+- So the default-on cost is mostly package-side. A verified-snapshot handle that the preflight, the
+  endpoint and the result reader share would cut it by about four times. That needs a rhizomatic
+  request.
+
 ## Open questions
 
 - The snapshot and capture documents are assembled in Loam with the package's exported encoders.
