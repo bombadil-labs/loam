@@ -90,6 +90,7 @@ import {
 } from "./adopt-law.js";
 import { eraseImpl, eraseReplicaImpl, healthImpl, type StoreHealth } from "./erase.js";
 import { pinErasureGovernors, erasedFromReading } from "./erase-law.js";
+import { continueGroundRevision, groundRevision } from "./ground-revision.js";
 import type { LiveStream } from "./channel.js";
 import { STORE_ENTITY, operatorMarkerClaims, type Genesis } from "./genesis.js";
 import { grantClaims, revocationClaims } from "./accounts.js";
@@ -577,6 +578,15 @@ export class Gateway {
   }
 
   /**
+   * This ground's revision: it rises by one for each admitted batch that adds to the held set,
+   * for each reseat, and for each declaration of erasure pins. It never falls, and it is not
+   * persisted. This is the one place a holder of the gateway reads it.
+   */
+  get revision(): number {
+    return groundRevision(this._reactor);
+  }
+
+  /**
    * The options this gateway was opened with, less its seed: the seed becomes the signer and is
    * kept nowhere else, so no code that holds a gateway can read its key.
    * @internal — T19 seam (erase.ts, quarantine-pool.ts, adopt.ts)
@@ -624,9 +634,8 @@ export class Gateway {
   // reactor: at construction, and again by reseat() after an erase.)
   private attachPersistence(reactor: Reactor): void {
     reactor.subscribeRaw((d) => {
-      // Any accepted delta may move the open set (a declaration, a negation) — drop the
-      // cached read; the next tokenless request recomputes. Once per WRITE, not per read.
-      this.publicOpen = undefined;
+      // Count this batch now, not at the next read: two batches are then two revisions.
+      groundRevision(reactor);
       if (this.justPersisted.delete(d.id)) return;
       const peer = this.peer;
       this.writes = this.writes
@@ -1709,7 +1718,6 @@ export class Gateway {
     this.sinks.clear();
     this.lazyMats.clear();
     this.publicLazyMats.clear();
-    this.publicOpen = undefined; // the ground changed out from under the cached read
     // Drop the resolver memo (SPEC §22.5/§11): keying already forbids serving a value over erased
     // bytes, but a re-seat is exactly the moment the ground forgot — clear it so nothing lingers.
     this.resolverMemo.clear();
@@ -1730,9 +1738,10 @@ export class Gateway {
         }
       }
     }
+    pinErasureGovernors(reactor, this.erasureGovernors); // the pins follow the ground
+    continueGroundRevision(this._reactor, reactor); // after the pins: one reseat is one revision
     this._reactor = reactor;
     this.durableRevision = revision;
-    pinErasureGovernors(reactor, this.erasureGovernors); // the pins follow the ground
     if (this.delegationScope !== undefined) declarePrincipalScope(reactor, this.delegationScope);
     this.declareUsers(reactor);
     this.ingestVia = (d) => this.reactor.ingest(d);
@@ -2362,7 +2371,7 @@ export class Gateway {
   // T19 NOTE (a boundary judged, not forced): the public-door READERS — surface, isPublicLatest,
   // isPublicPin, publicSurface, hasPublicSurface — stay on the class deliberately. They are thin
   // veneers over two caches (publicOpen, publicCache) whose INVALIDATION is wired into the write
-  // path (attachPersistence drops publicOpen on any accepted delta) and the reseat cycle; moving
+  // path and the reseat cycle (publicOpen is keyed on this ground's revision); moving
   // the veneers across the seam while the cache lifecycle stays here would be indirection, not
   // separation. The DECLARATION side (declarePublic) moved to public.ts, where the vocabulary is.
   //
@@ -2373,15 +2382,21 @@ export class Gateway {
   // trust) and cached by what actually shapes it, so one negation closes the door on the next
   // request without rebuilding on every read.
   private publicCache: { key: string; schema: GraphQLSchema } | undefined;
-  // The open set, read once per WRITE rather than once per read: any accepted delta drops it
-  // (attachPersistence), so a tokenless request costs O(registered), not O(store) — which
+  // The open set, read once per WRITE rather than once per read: it answers for one revision of
+  // this ground, so any accepted delta (a declaration, a negation) and any reseat retire it. A
+  // tokenless request therefore costs O(registered), not O(store) — which
   // also keeps a nothing-public mount's refusal as cheap as an absent mount's (no timing
   // oracle where the status codes are uniform).
   // It also holds only between validity boundaries: a declaration or strike valid until T changes
   // the open set at T with nothing written. So a cached set answers for a read time in
   // [from, until), where `until` is the next boundary any held delta names.
   private publicOpen:
-    | { readonly open: ReadonlySet<string>; readonly from: number; readonly until: number }
+    | {
+        readonly open: ReadonlySet<string>;
+        readonly revision: number;
+        readonly from: number;
+        readonly until: number;
+      }
     | undefined;
 
   /**
@@ -2400,13 +2415,16 @@ export class Gateway {
   private openNames(): ReadonlySet<string> {
     if (this.channelPool === true) return EMPTY_PUBLIC;
     const now = this.validityNow();
+    const revision = this.revision;
     if (
       this.publicOpen === undefined ||
+      this.publicOpen.revision !== revision ||
       now < this.publicOpen.from ||
       now >= this.publicOpen.until
     ) {
       this.publicOpen = {
         open: readPublicSchemas(this.reactor, now, this.lawAuthors("public")),
+        revision,
         from: now,
         until: this.reactor.nextValidityBoundary(now) ?? Infinity,
       };

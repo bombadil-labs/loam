@@ -7,6 +7,7 @@ import { toWire } from "../federation/wire.js";
 import { negatedAt } from "./negation.js";
 import { CTX_SLATE, slatePointer } from "./slate-vocab.js";
 import { cutErasureDefect, isStoreLocal } from "./recovery-cut.js";
+import { groundRevision, raiseGroundRevision } from "./ground-revision.js";
 import type { Signer } from "./signer.js";
 
 export const ERASE_ENTITY = "loam:erasure";
@@ -112,7 +113,7 @@ const erasureGovernors = new WeakMap<Reactor, readonly string[]>();
 export function pinErasureGovernors(reactor: Reactor, keys: readonly string[]): void {
   erasureGovernors.set(reactor, keys);
   // The pins decide which orders bind, so they move the erased set with no ingest.
-  readingCache.delete(reactor);
+  raiseGroundRevision(reactor);
 }
 
 /**
@@ -241,25 +242,27 @@ export function refusedIds(reactor: Reactor, operator: string | undefined): Set<
 // Only ids whose bytes are still HELD are returned: a purged id cannot be read anyway. So once every
 // purge completes, this set is empty again, and reads use warm materializations again.
 //
-// It walks every erasure order and checks each one, so it is cached per reactor: the answer moves
-// only with an ingest (the size changes), a reseat (a new reactor), or new governor pins (which
-// clear the entry). One write still costs one walk
-// of the erasure index; an index maintained on ingest would remove that.
+// It walks every erasure order and checks each one, so it is cached per ground, for one revision
+// and one operator. The answer moves only with an ingest, a reseat or new governor pins, and each
+// of those raises the revision (ground-revision.ts). A stale hit would serve an erased target as
+// live, so a new input to this function owes a revision rise where it changes. One write still
+// costs one walk of the erasure index; an index maintained on ingest would remove that.
 export function erasedFromReading(
   reactor: Reactor,
   operator: string | undefined,
 ): ReadonlySet<string> {
+  const revision = groundRevision(reactor);
   const hit = readingCache.get(reactor);
-  if (hit !== undefined && hit.size === reactor.size && hit.operator === operator) return hit.ids;
+  if (hit !== undefined && hit.revision === revision && hit.operator === operator) return hit.ids;
   const held = [...refusedIds(reactor, operator)].filter((id) => reactor.get(id) !== undefined);
   const ids = withHeldDownTargets(new Set(held), (id) => reactor.get(id));
-  readingCache.set(reactor, { size: reactor.size, operator, ids });
+  readingCache.set(reactor, { revision, operator, ids });
   return ids;
 }
 
 const readingCache = new WeakMap<
   Reactor,
-  { size: number; operator: string | undefined; ids: ReadonlySet<string> }
+  { revision: number; operator: string | undefined; ids: ReadonlySet<string> }
 >();
 
 // Adds, transitively, the target of every hidden negation that `get` can still find.
