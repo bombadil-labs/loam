@@ -8,6 +8,14 @@ itself gets a new version of its algorithm. Rhizomatic becomes a monorepo of tie
 
 ## Who owns what
 
+**Superseded on 2026-11-09 (Myk): Claude is the steward of both repos and builds in both.** The
+split below and the four threads are set aside until Myk restores them. A fresh-context reviewer
+that did not write the diff reviews each head. Where this file says "ask Sol", Claude does the
+rhizomatic work in a rhizomatic PR, under that repo's `AGENTS.md`. The active work is the store
+arc: `spec/18-store.PROPOSAL.md` in rhizomatic, six slices, all before step 7.
+
+The earlier arrangement, kept for the record:
+
 - **Sol (GPT-6-Sol) owns the `rhizomatic` repo**: spec, vectors, and the TypeScript, Rust, Elixir
   and Haskell witnesses. Sol publishes rhizomatic releases and prereleases.
 - **Claude owns the `loam` repo.** Claude never edits rhizomatic. Sol never edits Loam.

@@ -3,12 +3,15 @@
 ## The refactor runs outside ADLC (Myk, 2026-09-25)
 
 **Read `refactor/README.md` first when you work on the refactor.** The refactor builds a new
-version of rhizomatic as a monorepo of tier libraries, with Loam as its testbed. Sol (GPT-6-Sol)
-owns the rhizomatic repo; Claude owns this one and never edits rhizomatic. For Loam's refactor
+version of rhizomatic as a monorepo of tier libraries, with Loam as its testbed. **Claude is the
+steward of both repos (Myk, 2026-11-09)** and builds in both; the earlier split, with Sol as
+rhizomatic's owner, is set aside until Myk restores it. For Loam's refactor
 work, Myk suspended ADLC: ignore its gates, the rail freeze, the gate ledger and the ticket
 ceremony. Frozen tests may change. The work is greenfield: wire changes ship no migration.
-`npm run check` stays the green bar. **Reviews go to the dedicated Loam review thread** (GPT-6-Sol,
-see "Threads" in the README); Sol's work thread gets only requests and "ready" notices. Everything
+`npm run check` stays the green bar. **The builder never reviews its own diff:** each reviewable
+head goes to a reviewer in a fresh context, from another model family when one is available.
+**The active work is the store arc** (`spec/18-store.PROPOSAL.md` in rhizomatic); Loam moves onto
+the store in its slice 5. Everything
 below still describes how Loam worked before the refactor; where it conflicts with
 `refactor/README.md`, the README wins for refactor work.
 
@@ -47,7 +50,8 @@ next.
 
 ## Hard limits
 
-- **rhizomatic is frozen/normative** — never edit it from here. Most of Loam's core lives there
+- **rhizomatic is normative** — a change to it is a PR in that repo, under its own `AGENTS.md`,
+  never a local patch or a Loam workaround. (Before 2026-11-09 Claude did not edit it at all.) Most of Loam's core lives there
   already (SPEC §2); a genuine substrate need is a PR in that repo + a conversation with Myk.
 
 ## ADLC is the lifecycle
