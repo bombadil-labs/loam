@@ -9,6 +9,7 @@ import {
   type Reactor,
   type Suppression,
 } from "@bombadil/rhizomatic";
+import { declarationsOf } from "./ground-declarations.js";
 import { recoveredFrom, userGroundOf, usersGovernor } from "./user-root.js";
 
 /**
@@ -194,18 +195,17 @@ export function bindingHeld(
 
 // The scope a ground's write door asks delegations about. Only a ground that declares one honors a
 // delegate at all: an inbox pool declares its own name, and the root store declares none, so a
-// delegation record copied anywhere else grants nothing. Keyed by reactor because every road into a
-// ground reaches it through its reactor; a gateway that replaces its reactor declares again.
-const declaredScopes = new WeakMap<Reactor, string>();
+// delegation record copied anywhere else grants nothing. Found through the reactor, because every
+// road into a ground reaches it through its reactor.
 
 /** Declare `scope` as the one scope `reactor`'s ground honors delegations for. */
 export function declarePrincipalScope(reactor: Reactor, scope: string): void {
-  declaredScopes.set(reactor, scope);
+  declarationsOf(reactor).principalScope = scope;
 }
 
 /** The scope `reactor`'s ground honors delegations for, or undefined: it honors none. */
 export function principalScopeOf(reactor: Reactor): string | undefined {
-  return declaredScopes.get(reactor);
+  return declarationsOf(reactor).principalScope;
 }
 
 const prim = (role: string, value: string | boolean) =>

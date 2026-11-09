@@ -90,6 +90,7 @@ import {
 } from "./adopt-law.js";
 import { eraseImpl, eraseReplicaImpl, healthImpl, type StoreHealth } from "./erase.js";
 import { pinErasureGovernors, erasedFromReading } from "./erase-law.js";
+import { seatDeclarations, type GroundDeclarations } from "./ground-declarations.js";
 import { continueGroundRevision, groundRevision } from "./ground-revision.js";
 import type { LiveStream } from "./channel.js";
 import { STORE_ENTITY, operatorMarkerClaims, type Genesis } from "./genesis.js";
@@ -455,11 +456,11 @@ export class Gateway {
   // every separate container so a nested pool's row is attributable even under a non-enveloped one.
   /** @internal — T34 seam (container.ts, envelope.ts) */
   poolHandle: string | undefined = undefined;
-  // The scope this ground honors delegations for (principal.ts): an inbox pool's own name, and
-  // nothing on any other ground. Declared on the reactor, and again whenever the reactor is replaced.
-  private delegationScope: string | undefined = undefined;
+  // What this ground declares beside its deltas (ground-declarations.ts): its user ground, what
+  // a door read withholds, its delegation scope and its erasure pins. One record for the gateway's
+  // life, seated on every reactor it sets, so a declaration made once holds across a reseat.
+  private readonly declarations: GroundDeclarations = {};
   // The user ground this ground's grants resolve `user:<name>` against: a pool's host's, as a port.
-  // Declared on the reactor, and again whenever the reactor is replaced.
   private userHost: UserGround | undefined = undefined;
   // The resolver memo (SPEC §22.5): (resolver-content-address, bucket-delta-set) → value. Keyed on the
   // surviving bucket, so it invalidates by construction when the ground moves — an erased fact drops
@@ -545,10 +546,8 @@ export class Gateway {
 
   /** @internal — set by the child's opener (container.ts `openSeparate`); undefined at a root. */
   childLaw: ChildLaw | undefined = undefined;
-  private erasureGovernors: readonly string[] = [];
   /** @internal — the keys this ground pins as erasure governors; kept across a reseat. */
   pinErasureGovernors(keys: readonly string[]): void {
-    this.erasureGovernors = keys;
     pinErasureGovernors(this._reactor, keys);
   }
   /** The authors of `context` law here: this ground's own key, then a host it selects. */
@@ -605,6 +604,7 @@ export class Gateway {
     this.options = kept;
     this.signer = seed === undefined ? undefined : seedSigner(seed);
     this.operatorAuthor = this.signer?.author;
+    seatDeclarations(reactor, this.declarations);
     this.declareUsers(reactor);
     // Fail fast on a mis-shaped offered lens: a term that does not select a delta set would only
     // blow up when a peer first pulls, in production. Trial-eval it now (empty store → empty
@@ -1738,12 +1738,10 @@ export class Gateway {
         }
       }
     }
-    pinErasureGovernors(reactor, this.erasureGovernors); // the pins follow the ground
-    continueGroundRevision(this._reactor, reactor); // after the pins: one reseat is one revision
+    seatDeclarations(reactor, this.declarations); // the pins, scope and user ground follow
+    continueGroundRevision(this._reactor, reactor);
     this._reactor = reactor;
     this.durableRevision = revision;
-    if (this.delegationScope !== undefined) declarePrincipalScope(reactor, this.delegationScope);
-    this.declareUsers(reactor);
     this.ingestVia = (d) => this.reactor.ingest(d);
     this.ingestAllVia = (ds) => ingestTogether(this.reactor, ds);
     this.attachPersistence(reactor);
@@ -2062,8 +2060,9 @@ export class Gateway {
   private governedRegistered: Bound[] | undefined;
   private governsUsers = false;
 
-  // Every reactor this gateway sets reads its users from its user host (a pool's host, or itself),
-  // hiding what that host has erased but not yet purged, exactly as the user View does.
+  // This ground reads its users from its user host (a pool's host, or itself), hiding what that
+  // host has erased but not yet purged, exactly as the user View does. Both closures read the
+  // gateway, never a reactor, so they are declared once and hold for every reactor it sets.
   private declareUsers(reactor: Reactor): void {
     declareReadHidden(reactor, (now) => readClosedIds(this, now));
     declareUserGround(reactor, () => {
@@ -2087,7 +2086,6 @@ export class Gateway {
    * @internal — container.ts
    */
   honorDelegationsAt(scope: string): void {
-    this.delegationScope = scope;
     declarePrincipalScope(this._reactor, scope);
   }
 

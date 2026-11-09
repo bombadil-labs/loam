@@ -7,6 +7,7 @@ import { toWire } from "../federation/wire.js";
 import { negatedAt } from "./negation.js";
 import { CTX_SLATE, slatePointer } from "./slate-vocab.js";
 import { cutErasureDefect, isStoreLocal } from "./recovery-cut.js";
+import { declarationsOf } from "./ground-declarations.js";
 import { groundRevision, raiseGroundRevision } from "./ground-revision.js";
 import type { Signer } from "./signer.js";
 
@@ -106,12 +107,10 @@ export const erasureParts = (
   return { targetId, spokenBy, slate, reasons, receiver, count };
 };
 
-// The keys a ground pins as additional erasure governors (its host chain, for a pool). Held beside
-// the reactor, like the user ground, so every reader that takes a reactor sees the same pins.
-const erasureGovernors = new WeakMap<Reactor, readonly string[]>();
-
+// The keys a ground pins as additional erasure governors (its host chain, for a pool). Held in the
+// ground's declarations, so every reader that takes a reactor sees the same pins.
 export function pinErasureGovernors(reactor: Reactor, keys: readonly string[]): void {
-  erasureGovernors.set(reactor, keys);
+  declarationsOf(reactor).erasureGovernors = keys;
   // The pins decide which orders bind, so they move the erased set with no ingest.
   raiseGroundRevision(reactor);
 }
@@ -124,7 +123,10 @@ export function pinErasureGovernors(reactor: Reactor, keys: readonly string[]): 
 export function orderBinds(d: Delta, reactor: Reactor, operator: string): boolean {
   const receiver = erasureParts(d.claims).receiver;
   if (d.claims.author === operator) return receiver === undefined || receiver === operator;
-  return receiver === operator && (erasureGovernors.get(reactor) ?? []).includes(d.claims.author);
+  return (
+    receiver === operator &&
+    (declarationsOf(reactor).erasureGovernors ?? []).includes(d.claims.author)
+  );
 }
 
 /** The id an erasure erases, for readers that join on it (SPEC §29.6's arithmetic). */
