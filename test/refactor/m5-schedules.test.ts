@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { classifyPortableRead } from "../../src/gateway/portable-door.js";
-import { primaryGroundImpl } from "../../src/gateway/reads.js";
 import { runPortableRead } from "../../src/gateway/portable-read.js";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -136,7 +135,7 @@ describe("M5 schedule 8: input capacity is decided before dispatch", () => {
     const now = gw.now();
     const before = prepared(gw, now).source.revision;
     await gw.append(unrelated(5000));
-    expect([...primaryGroundImpl(gw, now)].length).toBeGreaterThan(5000);
+    expect(gw.reactor.size).toBeGreaterThan(5000);
     // The same scope, the same members, the same revision.
     expect(prepared(gw, now).source.revision).toBe(before);
     const read = await gw.readNode("Plant", FERN, undefined, now);

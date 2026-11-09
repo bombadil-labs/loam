@@ -148,7 +148,12 @@ import {
   type SlateReport,
 } from "./slate.js";
 import type { CitationTier } from "./tiers.js";
-import { readClosedIds, readGraveyards, type GraveyardRecord } from "./slate-law.js";
+import {
+  isRetiredSlateFormat,
+  readClosedIds,
+  readGraveyards,
+  type GraveyardRecord,
+} from "./slate-law.js";
 import {
   lensOf,
   programOf,
@@ -162,7 +167,7 @@ import {
   type WithdrawnRegistration,
   type LensName,
 } from "./registration.js";
-import { CTX_REGISTRATION, readRegistrations } from "./registration.js";
+import { byLens, CTX_REGISTRATION, readRegistrations } from "./registration.js";
 import { newResolverMemo, type ResolverMemo } from "./resolvers.js";
 import {
   openQuarantineImpl,
@@ -418,17 +423,6 @@ export const unreadableStoreMessage = (rows: number): string =>
   `A store written before rhizomatic 0.11 reads this way: its deltas carry no \`validFrom\`, ` +
   `and there is no migration. Open it with the Loam release that wrote it, or start a new ` +
   `store. \`loam repair\` lists the rows.`;
-
-// The erased-but-held ids a door reads users through, cached per reactor until it next changes:
-// the door asks on every user-named grant it weighs, and the answer moves only with an ingest.
-const erasedCache = new WeakMap<Reactor, { size: number; ids: ReadonlySet<string> }>();
-function erasedIdsOf(reactor: Reactor, operator: string | undefined): ReadonlySet<string> {
-  const hit = erasedCache.get(reactor);
-  if (hit !== undefined && hit.size === reactor.size) return hit.ids;
-  const ids = erasedFromReading(reactor, operator);
-  erasedCache.set(reactor, { size: reactor.size, ids });
-  return ids;
-}
 
 // This module alone can mark a real gateway (gateway-brand.ts).
 const markGateway = claimGatewayMarker();
@@ -741,6 +735,12 @@ export class Gateway {
       }
     }
     for (const d of replayed) {
+      if (isRetiredSlateFormat(d.claims)) {
+        throw new Error(
+          `slate format: this store holds ${d.id}, a slate or graveyard record in the retired ` +
+            `format, and no reader honors it. Loam does not migrate it: start a new store.`,
+        );
+      }
       const result = reactor.ingest(d);
       if (result.status === "rejected") {
         throw new Error(`replay: the store handed back an unacceptable delta ${d.id}`);
@@ -2061,7 +2061,7 @@ export class Gateway {
       const host = this.userHost ?? this;
       return {
         reactor: host.reactor,
-        erased: () => erasedIdsOf(host.reactor, host.operatorAuthor),
+        erased: () => erasedFromReading(host.reactor, host.operatorAuthor),
         ...(host.operatorAuthor === undefined ? {} : { governor: host.operatorAuthor }),
       };
     });
@@ -2122,7 +2122,7 @@ export class Gateway {
     // law its container's pools published — so a lens that lives only in a pool resolves here for
     // the connection and nowhere else (§58 position 2).
     const rows = binding === undefined ? this.registered : this.boundSurface(binding).registered;
-    const def = rows.find((r) => lensOf(r) === name);
+    const def = byLens(rows, name);
     if (def === undefined) throw new Error(`no registered schema named ${name}`);
     return def;
   }

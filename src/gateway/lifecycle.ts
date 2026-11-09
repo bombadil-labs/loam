@@ -282,7 +282,7 @@ export function matForImpl(
       [entity],
       gw.validityNow(),
       gw.registry,
-      governedHook(def.hyperschema.body, gw.registry, () => userGroundOf(gw.reactor)),
+      governedHook(def.hyperschema.body, gw.registry, () => userGroundOf(gw.reactor), gw.reactor),
     );
     gw.lazyMats.add(matName);
   }
@@ -391,7 +391,7 @@ export function rebindImpl(gw: Gateway, next: Bound[]): void {
       program.roots,
       gw.validityNow(),
       registry,
-      governedHook(program.hyperschema.body, registry, () => userGroundOf(gw.reactor)),
+      governedHook(program.hyperschema.body, registry, () => userGroundOf(gw.reactor), gw.reactor),
     );
   }
   gw.lazyMats.clear(); // generation-stale by construction — new watches re-create their own
@@ -984,7 +984,12 @@ export function replayRegistrationsImpl(gw: Gateway): void {
         program.roots,
         gw.validityNow(),
         registry,
-        governedHook(program.hyperschema.body, registry, () => userGroundOf(gw.reactor)),
+        governedHook(
+          program.hyperschema.body,
+          registry,
+          () => userGroundOf(gw.reactor),
+          gw.reactor,
+        ),
       );
     }
     gw.registered = accepted;
@@ -1043,7 +1048,7 @@ export function registerImpl(
     program.roots,
     gw.validityNow(),
     registry,
-    governedHook(hyperschema.body, registry, () => userGroundOf(gw.reactor)),
+    governedHook(hyperschema.body, registry, () => userGroundOf(gw.reactor), gw.reactor),
   );
   gw.registered = next;
   gw.registry = registry;
