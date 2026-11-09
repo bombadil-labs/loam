@@ -1,6 +1,6 @@
 # The refactor map
 
-Updated 2026-10-05. Loam pins `@bombadil/rhizomatic@0.11.0-next.7`, the command-profile prerelease.
+Updated 2026-10-14. Loam pins `@bombadil/rhizomatic@0.11.0-next.10`, release C: anchored reads and scoped batch sources.
 Steps 5 and 6 are done in both repos. In Loam, every host opens and writes through its peer journal
 (#667), and every pool is its own peer under its own key (#671); the end-to-end story confirms it
 through the CLI. The container split closed step 6 (ruling 13): a gateway is a view of its

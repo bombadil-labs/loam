@@ -13,12 +13,14 @@
 import type { Peer } from "./peer.js";
 import { parse, subscribe, type ExecutionResult, type GraphQLSchema } from "graphql";
 import {
+  anchorAnalysis,
   contentAddress,
   DeltaSet,
   evalTerm,
   hviewCanonicalHex,
   resolveView,
   viewCanonicalHex,
+  type Admits,
   type EvalResult,
   type HView,
   type SchemaRegistry,
@@ -37,9 +39,9 @@ import { requireMoment, readClosedIds } from "./slate-law.js";
 import type { ConnectionBinding, Gateway } from "./gateway.js";
 import type { PatchNode, ResolvedNode } from "./gql.js";
 import type { Registered } from "./gql.js";
-import { lensOf, type ResolverSpecs } from "./registration.js";
+import { byLens, lensOf, type ResolverSpecs } from "./registration.js";
 import { applyResolvers, decorateChildren } from "./resolvers.js";
-import { governedProgram, grantGround } from "./governed-trust.js";
+import { governedProgram, grantGround, needsLowering } from "./governed-trust.js";
 import { userGroundOf } from "./user-root.js";
 
 const toError = (err: unknown): Error => (err instanceof Error ? err : new Error(String(err)));
@@ -65,19 +67,8 @@ const hviewDigest = (h: HView): string => contentAddress(bytesOf(hviewCanonicalH
 // a version pins the lens the door asked for, not the whole world's readings.
 const readingResolversOf = (gw: Gateway, binding?: ConnectionBinding) => {
   const registered = binding === undefined ? gw.registered : gw.boundSurface(binding).registered;
-  return (name: string): ResolverSpecs | undefined =>
-    registered.find((r) => lensOf(r) === name)?.resolvers;
+  return (name: string): ResolverSpecs | undefined => byLens(registered, name)?.resolvers;
 };
-
-// The moment as a delta set (SPEC §26): the surviving snapshot filtered to the deltas IN FORCE
-// at T — author-timestamp `≤ T`, and a negation counts only if ITS OWN timestamp is `≤ T` (a
-// fact un-negated at T reads present; a retraction not yet spoken at T leaves the fact
-// standing). Because negations are themselves timestamped deltas, one filter — `timestamp ≤ T`
-// — is exactly both rules. It reads the SURVIVING ground, so purged content can never reappear,
-// no matter how far back T points: erasure is the stronger promise (§11).
-export function groundAsOfImpl(gw: Gateway, asOf: number): DeltaSet {
-  return DeltaSet.from([...gw.reactor.snapshot()].filter((d) => d.claims.timestamp <= asOf));
-}
 
 // Ride the erasure annotation on an as-of node, beside the view (like `_hex`), never inside the
 // resolved data. A present read (no `asOf`) carries neither pin nor mark.
@@ -134,23 +125,53 @@ function evalGoverned(
   return evalTerm(program.term, input, now, entity, program.registry);
 }
 
-// The same over the reactor's own set, whose grants the index finds without a scan.
-function evalGovernedLive(
+// THE PRIMARY GROUND IS A SELECTION, NOT A COPY (SPEC-17 P7). Read closure and an as-of cut each
+// decide one delta at a time, so a read evaluates over the reactor's indexes and touches only its own
+// scope: the root, every expanded child, and their negation chains. Materializing the narrowed ground
+// first would cost the whole store on every read. An as-of read keeps both §26 rules: a delta counts
+// when its own timestamp is `≤ asOf`, so a retraction not yet spoken leaves its fact standing.
+function primaryAdmits(closed: ReadonlySet<string>, asOf?: number): Admits | undefined {
+  if (asOf === undefined) return closed.size === 0 ? undefined : (d) => !closed.has(d.id);
+  return (d) => d.claims.timestamp <= asOf && !closed.has(d.id);
+}
+
+// A governed gather over this store's primary ground at `at`. The lowering reads only the grants, so
+// it takes the grant scope under the same selection; the gather then reads its own scope. A program
+// the anchor check cannot scope (an aliased role, an unpinned reflection) still reads the whole
+// selected ground: that is a named P7 gap, not a mode.
+function evalPrimary(
   gw: Gateway,
   body: Term,
-  now: number,
+  at: number,
   entity: string,
   registry: SchemaRegistry | undefined,
+  closed: ReadonlySet<string>,
+  asOf?: number,
 ): EvalResult {
+  const admits = primaryAdmits(closed, asOf);
+  const users = userGroundOf(gw.reactor);
   const program = governedProgram(
     body,
     registry,
-    grantGround(gw.reactor),
-    { now },
-    userGroundOf(gw.reactor),
+    needsLowering(body, registry) ? grantGround(gw.reactor, undefined, admits) : NO_GROUND,
+    { now: at },
+    asOf === undefined ? users : { ...users, cut: asOf },
   );
-  return gw.reactor.eval(program.term, now, entity, program.registry);
+  if (anchorAnalysis(program.term, program.registry).anchored)
+    return gw.reactor.evalAnchored(program.term, at, entity, program.registry, undefined, admits)
+      .result;
+  const ground = gw.reactor.snapshot();
+  return evalTerm(
+    program.term,
+    admits === undefined ? ground : ground.filtered(admits),
+    at,
+    entity,
+    program.registry,
+  );
 }
+
+const NO_GROUND = new DeltaSet();
+const NO_IDS: ReadonlySet<string> = new Set();
 
 // READ CLOSURE IS A GATHER-LEVEL NARROWING, and this is one of its five named sites (SPEC §29.3).
 // The `now` is REQUIRED here, not optional: a lapse computed at the door means every door that
@@ -233,10 +254,9 @@ export function gatherImpl(
 
   if (asOf !== undefined) {
     const def = gw.def(name);
-    const ground = asOfGroundImpl(gw, asOf, closed);
     // An as-of read reconstructs the past on both axes: what had been said by `asOf`, and what
     // held at `asOf`.
-    const result = evalGoverned(gw, def.hyperschema.body, ground, asOf, entity, gw.registry, asOf);
+    const result = evalPrimary(gw, def.hyperschema.body, asOf, entity, gw.registry, closed, asOf);
     if (result.sort !== "hview") {
       throw new Error(`schema ${name} does not evaluate to a hyperview`);
     }
@@ -261,17 +281,14 @@ export function gatherImpl(
     if (live !== undefined) return live;
   }
   const def = gw.def(name);
-  const result =
-    closed.size === 0
-      ? evalGovernedLive(gw, def.hyperschema.body, gw.validityNow(now), entity, gw.registry)
-      : evalGoverned(
-          gw,
-          def.hyperschema.body,
-          readGround(gw, now),
-          gw.validityNow(now),
-          entity,
-          gw.registry,
-        );
+  const result = evalPrimary(
+    gw,
+    def.hyperschema.body,
+    gw.validityNow(now),
+    entity,
+    gw.registry,
+    closed,
+  );
   if (result.sort !== "hview") throw new Error(`schema ${name} does not evaluate to a hyperview`);
   return result.hview;
 }
@@ -286,7 +303,7 @@ export function gatherImpl(
 // its name resembles a prefix; an aggregate binding names the exact child, including colon names.
 function channelAssociation(gw: Gateway, lens: string, binding?: ConnectionBinding) {
   const rows = binding === undefined ? gw.registered : gw.boundSurface(binding).registered;
-  const bound = rows.find((r) => lensOf(r) === lens);
+  const bound = byLens(rows, lens);
   if (bound !== undefined) {
     if (bound.channel === undefined) return undefined;
     // Bound.channel also records inbox origin in the bound fold. The attached source table,
@@ -469,11 +486,6 @@ const negatedInGround = (
   });
 };
 
-const asOfGroundImpl = (gw: Gateway, asOf: number, closed: ReadonlySet<string>): DeltaSet =>
-  closed.size === 0
-    ? groundAsOfImpl(gw, asOf)
-    : DeltaSet.from([...groundAsOfImpl(gw, asOf)].filter((d) => !closed.has(d.id)));
-
 /**
  * The gather a §14 RETRACTION reads, over the UNNARROWED ground (SPEC §29.3's invariant list).
  *
@@ -526,7 +538,7 @@ export function gatherForRetractionImpl(
   // its container's registry, where a lens that lives only in a pool is known.
   const result =
     binding === undefined
-      ? evalGovernedLive(gw, def.hyperschema.body, gw.validityNow(now), entity, gw.registry)
+      ? evalPrimary(gw, def.hyperschema.body, gw.validityNow(now), entity, gw.registry, NO_IDS)
       : evalGoverned(
           gw,
           def.hyperschema.body,
@@ -673,26 +685,15 @@ export function resolvePinnedImpl(
           gw.registry,
           asOf,
         )
-      : asOf === undefined
-        ? closed.size === 0
-          ? evalGovernedLive(gw, reg.hyperschema.body, gw.validityNow(now), entity, gw.registry)
-          : evalGoverned(
-              gw,
-              reg.hyperschema.body,
-              readGround(gw, now),
-              gw.validityNow(now),
-              entity,
-              gw.registry,
-            )
-        : evalGoverned(
-            gw,
-            reg.hyperschema.body,
-            asOfGroundImpl(gw, asOf, closed),
-            asOf,
-            entity,
-            gw.registry,
-            asOf,
-          );
+      : evalPrimary(
+          gw,
+          reg.hyperschema.body,
+          asOf ?? gw.validityNow(now),
+          entity,
+          gw.registry,
+          closed,
+          asOf,
+        );
   if (result.sort !== "hview") {
     throw new Error(`schema ${reg.hyperschema.name} does not evaluate to a hyperview`);
   }
