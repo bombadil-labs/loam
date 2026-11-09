@@ -33,7 +33,7 @@ import { ARTIFACT_SPAWN_TIMEOUT_MS, artifactPage } from "./artifact-page.js";
 import { HOST_GLOBALS, scanHostReferences } from "./artifact-scan.js";
 import type { Gateway, RequestContext } from "./gateway.js";
 import { RENDER_TIMEOUT_MS } from "./render-worker.js";
-import { lensOf } from "./registration.js";
+import { byLens, lensOf } from "./registration.js";
 import { lawfulDeltasAt } from "./lawful.js";
 import { negatedAt } from "./negation.js";
 import type { Registered } from "../surface/surface.js";
@@ -328,7 +328,7 @@ export function packArtifactImpl(
         `The gap: a version argument on loam_query (or a REST-shaped loam_read tool).`,
     );
   }
-  const registered = gw.registered.find((r) => lensOf(r) === binding.schemaName);
+  const registered = byLens(gw.registered, binding.schemaName);
   if (registered === undefined) {
     refuse(
       `artifact: route "${route}" reads the lens "${binding.schemaName}", which this store no longer serves`,
