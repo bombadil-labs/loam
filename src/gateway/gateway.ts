@@ -147,7 +147,12 @@ import {
   type SlateReport,
 } from "./slate.js";
 import type { CitationTier } from "./tiers.js";
-import { readClosedIds, readGraveyards, type GraveyardRecord } from "./slate-law.js";
+import {
+  isRetiredSlateFormat,
+  readClosedIds,
+  readGraveyards,
+  type GraveyardRecord,
+} from "./slate-law.js";
 import {
   lensOf,
   programOf,
@@ -701,6 +706,12 @@ export class Gateway {
       }
     }
     for (const d of replayed) {
+      if (isRetiredSlateFormat(d.claims)) {
+        throw new Error(
+          `slate format: this store holds ${d.id}, a slate or graveyard record in the retired ` +
+            `format, and no reader honors it. Loam does not migrate it: start a new store.`,
+        );
+      }
       const result = reactor.ingest(d);
       if (result.status === "rejected") {
         throw new Error(`replay: the store handed back an unacceptable delta ${d.id}`);
