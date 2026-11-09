@@ -53,15 +53,21 @@ describe("§46 — the friend scenario, end to end", () => {
     if (typeof handle === "number") throw new Error("serve should return a running handle");
     const mount = `${handle.url}/default`;
     try {
+      // `connection: close`: no pooled socket for the pull below to reuse once this server, which
+      // shares the test's event loop, has reaped it (see test/federation/drop-cli.test.ts).
       const wrote = await fetch(`${mount}/graphql`, {
         method: "POST",
-        headers: { authorization: "Bearer tok-alice", "content-type": "application/json" },
+        headers: {
+          authorization: "Bearer tok-alice",
+          "content-type": "application/json",
+          connection: "close",
+        },
         body: JSON.stringify({
           query:
             'mutation { note(entity: "note:hi", title: "from alice", body: "federation works") { title } }',
         }),
       });
-      expect(wrote.ok).toBe(true);
+      expect(wrote.ok, await wrote.text()).toBe(true);
 
       out.length = 0;
       const opened = await run(

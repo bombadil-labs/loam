@@ -53,14 +53,20 @@ async function writeNotes(home: string, token: string, notes: readonly [string, 
   );
   if (typeof handle === "number") throw new Error(`serve refused: ${said()}`);
   for (const [entity, title] of notes) {
+    // `connection: close`: no pooled socket for a later pull to reuse once this server, which
+    // shares the test's event loop, has reaped it (see test/federation/drop-cli.test.ts).
     const res = await fetch(`${handle.url}/default/graphql`, {
       method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        connection: "close",
+      },
       body: JSON.stringify({
         query: `mutation { note(entity: "${entity}", title: "${title}") { title } }`,
       }),
     });
-    expect(res.ok).toBe(true);
+    expect(res.ok, await res.text()).toBe(true);
   }
   return handle;
 }

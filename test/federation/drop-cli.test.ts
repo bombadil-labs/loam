@@ -45,14 +45,23 @@ async function peer(name: string, title: string) {
     { detach: true },
   );
   if (typeof handle === "number") throw new Error("serve should return a running handle");
+  // `connection: close`: this request must not leave a pooled socket behind. The CLI's next pull
+  // from the same peer would reuse it, and this server runs on the test's own event loop, so a
+  // stall of more than five seconds (Node's keep-alive window) lets the server reap the socket
+  // before the client's pool notices: the pull is written to a closed socket and fails as
+  // `fetch failed` (ECONNRESET). That was this rail's Windows flake.
   const res = await fetch(`${handle.url}/default/graphql`, {
     method: "POST",
-    headers: { authorization: `Bearer tok-${name}`, "content-type": "application/json" },
+    headers: {
+      authorization: `Bearer tok-${name}`,
+      "content-type": "application/json",
+      connection: "close",
+    },
     body: JSON.stringify({
       query: `mutation { note(entity: "note:${name}", title: "${title}") { title } }`,
     }),
   });
-  expect(res.ok).toBe(true);
+  expect(res.ok, await res.text()).toBe(true);
   return { mount: `${handle.url}/default`, token: `tok-${name}`, stop: () => handle.close() };
 }
 
