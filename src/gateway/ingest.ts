@@ -605,10 +605,16 @@ const NO_DEAD: ReadonlySet<string> = new Set();
 // than heuristic, and it deliberately decides nothing else — which erasures SURVIVE, and whose
 // author confirms them, stays the one place that owns those rules (H8: the cheap answer must not
 // become a second implementation of the expensive one).
+//
+// The probe reads the target index: every erasure points at ERASE_ENTITY, so the deltas filed
+// there are the only candidates. The index keys on the entity id alone, so `isErasure` still
+// checks the context. An id the index names and the set cannot resolve is not "no erasure"; it
+// takes the full answer (H9).
 function deadSet(gw: Gateway): ReadonlySet<string> {
   if (gw.operatorAuthor === undefined) return NO_DEAD;
-  for (const d of gw.reactor.snapshot()) {
-    if (isErasure(d.claims)) return refusedIds(gw.reactor, gw.operatorAuthor);
+  for (const id of gw.reactor.byTarget(ERASE_ENTITY)) {
+    const d = gw.reactor.get(id);
+    if (d === undefined || isErasure(d.claims)) return refusedIds(gw.reactor, gw.operatorAuthor);
   }
   return NO_DEAD;
 }
