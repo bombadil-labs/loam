@@ -20,11 +20,16 @@ import { ERASE_ENTITY, isErasure } from "../../src/gateway/erase-law.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { withoutErased } from "../../src/gateway/ingest.js";
+import { SEALED_LEEWAY } from "../../src/gateway/leeway.js";
+import { admitLocal, openHostPeer } from "../../src/gateway/peer-admission.js";
 import { withStamp } from "../../src/gateway/stamp.js";
 import {
+  LOCAL_EVENT,
   localChannelEvidence,
   localChannelsInContainer,
   orphanedDeclaration,
+  PARENT_CONTAINER,
+  parseLocalEvent,
 } from "../../src/federation/local-channel-events.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, observed } from "../spike/garden.js";
@@ -230,6 +235,77 @@ describe("ANSWER (controls: these pass over a whole-store walk too)", () => {
     expect(gw.reactor.get(struck)).toBeDefined();
     expect(gw.reactor.negationsOf(struck).length).toBeGreaterThan(0);
     expect(localChannelsInContainer(gw, "friends")).toEqual([kept.name]);
+  });
+
+  it("localChannelsInContainer separates two declared containers, and an id that only a channel's events are filed at lists nothing", async () => {
+    const gw = await home();
+    await gw.append([
+      signClaims(
+        withStamp(gw.stamp(OP), (t) =>
+          containerClaims(
+            {
+              container: "bea:notes",
+              trust: "curated",
+              posture: "shared",
+              membership: {
+                op: "select",
+                pred: { match: { field: "author", cmp: "eq", const: "none" } },
+                in: "input",
+              },
+              leeway: { ...SEALED_LEEWAY, receive: true },
+            },
+            OP,
+            t,
+          ),
+        ),
+        SEED,
+      ),
+    ]);
+    const friends = await open(gw, "friends", "friends:peer"),
+      notes = await open(gw, "bea:notes", "bea:notes:peer");
+    expect(localChannelsInContainer(gw, "friends")).toEqual([friends.name]);
+    expect(localChannelsInContainer(gw, "bea:notes")).toEqual([notes.name]);
+    // The channel's own events are filed at `channel:<name>` by their event pointer. They are in
+    // the index bucket for that id, and none of them was opened INTO it.
+    expect(gw.reactor.byTarget(`channel:${friends.name}`).length).toBeGreaterThan(0);
+    expect(localChannelsInContainer(gw, `channel:${friends.name}`)).toEqual([]);
+  });
+
+  it("orphanedDeclaration: another channel's unreadable event, filed at this channel's id by its parent pointer, does not answer for this channel", async () => {
+    const gw = await home();
+    const a = await open(gw, "friends", "friends:a"),
+      b = await open(gw, "friends", "friends:b");
+    const byHand = await declareByHand(gw, a.name);
+    expect(orphanedDeclaration(gw, byHand)).toBe(true);
+    // Around the door: b's opening, re-signed with its parent pointer moved to a's channel id.
+    // The parser refuses it (`into` disagrees), and the index files it at `channel:<a>`.
+    const evidence = localChannelEvidence(gw, b.name);
+    if (evidence.state !== "open") throw new Error("expected b open");
+    const opening = gw.reactor.get(evidence.opening.id)!;
+    const stray = signClaims(
+      {
+        ...opening.claims,
+        ...gw.stamp(OP),
+        pointers: opening.claims.pointers.map((p) =>
+          p.role === PARENT_CONTAINER
+            ? {
+                role: p.role,
+                target: {
+                  kind: "entity" as const,
+                  entity: { id: `channel:${a.name}`, context: LOCAL_EVENT },
+                },
+              }
+            : p,
+        ),
+      },
+      SEED,
+    );
+    const { peer } = await openHostPeer((gw.backend as MemoryBackend).journalStore(), OP);
+    await admitLocal(peer, [stray], Date.now(), () => false);
+    await gw.append([observed(FERN, "height", 8, 1008, SEED)]); // the append catches up the journal
+    expect(gw.reactor.byTarget(`channel:${a.name}`)).toContain(stray.id);
+    expect(parseLocalEvent(stray, OP)).toBeUndefined();
+    expect(orphanedDeclaration(gw, byHand)).toBe(true);
   });
 
   it("orphanedDeclaration: an opening's declaration is not an orphan, struck or standing; a hand declaration is; another channel's opening does not answer for it", async () => {

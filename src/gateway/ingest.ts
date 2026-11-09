@@ -635,9 +635,8 @@ function deadSet(gw: Gateway): ReadonlySet<string> {
 // For SERVING doors only. `select` and `freeze` stay raw: the erasure and container machinery
 // must see every byte it has to account for (see `readGround` in slate.ts for the same split).
 //
-// "Erased" means a STANDING erasure names the id. A negated erasure stops refusing its id here,
-// so a delta whose bytes survived could be served again. Closing that needs a store-level list of
-// refused ids that outlives negation.
+// "Erased" means an erasure that ever bound here names the id (`refusedIds`). A negated erasure
+// still refuses its id: negation retracts the record, and the id never returns.
 export function withoutErased(gw: Gateway, deltas: readonly Delta[]): Delta[] {
   const dead = deadSet(gw);
   if (dead.size === 0) return [...deltas];
