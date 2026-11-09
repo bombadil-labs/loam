@@ -554,6 +554,12 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     return this.db.prepare("SELECT 1 FROM deltas WHERE id = ?").get(id) !== undefined;
   }
 
+  async revision(): Promise<string> {
+    this.assertOpen();
+    // SQLite moves `data_version` on every commit by another connection, and never on this one's.
+    return String(this.db.pragma("data_version", { simple: true }));
+  }
+
   async holdsAny(): Promise<boolean> {
     this.assertOpen();
     // An owed truncation may leave page images in the sidecar: unprovable answers TRUE (H9).

@@ -39,6 +39,8 @@ import {
   type Delta,
   type DeltaSet,
   type EvalResult,
+  type IngestResult,
+  type Reactor,
   type Term,
 } from "@bombadil/rhizomatic";
 import { authorize } from "./accounts.js";
@@ -361,8 +363,8 @@ export async function catchUp(gw: Gateway): Promise<void> {
   gw.advanceToNow();
   for (const d of rows) gw.justPersisted.add(d.id);
   try {
+    gw.ingestAllVia(rows);
     for (const d of rows) {
-      gw.ingestVia(d);
       gw.noteAuthorTime(d);
       gw.noteRegistrationTime(d);
     }
@@ -483,6 +485,23 @@ export function preflightAppend(gw: Gateway, batch: readonly Delta[], at: number
   }
 }
 
+/**
+ * Ingest an admitted batch as one reactor update and return each member's verdict, in order. A
+ * batch the reactor refuses leaves no trace, so the members are then taken one by one for their
+ * exact verdicts.
+ */
+export function ingestTogether(reactor: Reactor, batch: readonly Delta[]): IngestResult[] {
+  const seen = new Set<string>();
+  const verdicts = batch.map((d): IngestResult => {
+    if (reactor.get(d.id) !== undefined || seen.has(d.id)) return { status: "duplicate" };
+    seen.add(d.id);
+    return { status: "accepted" };
+  });
+  const fresh = batch.filter((_, i) => verdicts[i]!.status === "accepted");
+  if (fresh.length === 0 || reactor.ingestBatch(fresh).status === "accepted") return verdicts;
+  return batch.map((d) => reactor.ingest(d));
+}
+
 async function appendAdmitted(
   gw: Gateway,
   deltas: Iterable<Delta>,
@@ -500,8 +519,9 @@ async function appendAdmitted(
   gw.advanceToNow(); // views must stand at the present, or this batch is not yet valid there
   for (const d of batch) gw.justPersisted.add(d.id);
   try {
-    for (const d of batch) {
-      const result = gw.ingestVia(d);
+    const verdicts = gw.ingestAllVia(batch);
+    for (const [i, d] of batch.entries()) {
+      const result = verdicts[i]!;
       gw.noteAuthorTime(d);
       gw.noteRegistrationTime(d);
       if (result.status === "accepted") {
@@ -1063,8 +1083,9 @@ async function federateAdmitted(
     gw.advanceToNow(); // as at append
     for (const d of landed) gw.justPersisted.add(d.id);
     try {
-      for (const d of landed) {
-        const result = gw.ingestVia(d);
+      const verdicts = gw.ingestAllVia(landed);
+      for (const [i, d] of landed.entries()) {
+        const result = verdicts[i]!;
         if (result.status !== "rejected") {
           gw.noteAuthorTime(d);
           gw.noteRegistrationTime(d);

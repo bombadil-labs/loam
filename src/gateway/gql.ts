@@ -405,7 +405,12 @@ export function buildGqlSchema(
         },
       },
       resolve: (_src, args: { entity: string; asOf?: number }, ctx: unknown) =>
-        hooks.resolve(lensOf(def), args.entity, args.asOf ?? undefined, contextOf(ctx).binding),
+        (hooks.resolveRead ?? hooks.resolve)(
+          lensOf(def),
+          args.entity,
+          args.asOf ?? undefined,
+          contextOf(ctx).binding,
+        ),
     };
 
     subscriptionFields[fieldName] = {

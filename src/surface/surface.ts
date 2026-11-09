@@ -97,6 +97,14 @@ export interface SurfaceHooks {
     asOf?: number,
     binding?: ConnectionBinding,
   ): ResolvedNode;
+  // The same read through its route, where the host offers one (SPEC-16 M5): an eligible ordinary
+  // read may run the portable batch path, which is asynchronous. Absent means `resolve` serves.
+  resolveRead?(
+    schemaName: string,
+    entity: string,
+    asOf?: number,
+    binding?: ConnectionBinding,
+  ): Promise<ResolvedNode>;
   mutate(
     schemaName: string,
     entity: string,
