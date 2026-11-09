@@ -2779,8 +2779,19 @@ export function sourceFor(
   }
   return {
     pull: async () => {
+      // ONE REQUEST, ONE CONNECTION. A pull is a single GET per poll, and a poll is far apart (a
+      // minute by default) next to any server's keep-alive window (Node's is five seconds), so a
+      // pooled socket never carries a second pull — it only waits to be reused when it is already
+      // stale. Reuse is a race between this client's idle timer and the server's: when the server
+      // reaps first, the request is written onto a socket the peer has closed and fails as
+      // `fetch failed` (ECONNRESET). A busy event loop decides the race — synchronous sqlite work
+      // here, or, in-process, the server's own clock running on the same loop as ours. Closing after
+      // the response takes the reuse, and the race, off this door entirely.
       const res = await fetch(`${from}/federate`, {
-        headers: token === undefined ? {} : { authorization: `Bearer ${token}` },
+        headers: {
+          ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
+          connection: "close",
+        },
       });
       if (!res.ok) {
         throw new Error(
