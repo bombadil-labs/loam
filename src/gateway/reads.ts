@@ -491,9 +491,11 @@ const negatedInGround = (
  * of the moment `asOf`. The native branch and the portable source both read exactly this.
  */
 export function primaryGroundImpl(gw: Gateway, now: number, asOf?: number): DeltaSet {
+  // The whole primary set, narrowed per delta. The scoped portable route reads only its scope.
+  const present = readGround(gw, now);
   return asOf === undefined
-    ? readGround(gw, now)
-    : asOfGroundImpl(gw, asOf, readClosedIds(gw, now));
+    ? present
+    : DeltaSet.from([...present].filter((d) => d.claims.timestamp <= asOf));
 }
 
 /**
