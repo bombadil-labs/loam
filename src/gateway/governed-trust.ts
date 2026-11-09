@@ -325,15 +325,16 @@ export function governs(term: Term): boolean {
 /**
  * `term` with every governed predicate lowered to the explicit striker set, for an evaluation
  * over `input` that reads validity as `read`. Throws on a near miss in a trust policy. The
- * striker set is computed once per operator and flag, for this evaluation only.
+ * striker set is computed once per operator and flag, for this evaluation only: `memo` is shared
+ * by every body one program lowers, so a read pays the grant walk once, not once per body.
  */
 export function lowerGovernedTerm(
   term: Term,
   input: DeltaSet,
   read: TrustRead,
   users: UserGround | undefined,
+  memo: Map<string, readonly string[]> = new Map(),
 ): Term {
-  const memo = new Map<string, readonly string[]>();
   const lowered = mapTerm(term, (p) => {
     const shape = governedShape(p);
     if (shape === undefined) return p;
@@ -387,17 +388,18 @@ export function governedProgram(
   users: UserGround | undefined,
 ): { readonly term: Term; readonly registry: SchemaRegistry | undefined } {
   if (!needsLowering(term, registry)) return { term, registry };
+  const memo = new Map<string, readonly string[]>();
   return {
-    term: lowerGovernedTerm(term, input, read, users),
+    term: lowerGovernedTerm(term, input, read, users, memo),
     registry:
       registry === undefined
         ? undefined
         : registry.mapEvaluationBodies(
-            (body) => (governs(body) ? lowerGovernedTerm(body, input, read, users) : body),
+            (body) => (governs(body) ? lowerGovernedTerm(body, input, read, users, memo) : body),
             (reading) => {
               const wrapper: Term = { kind: "resolve", schema: reading, of: { kind: "input" } };
               if (!governs(wrapper)) return reading;
-              const lowered = lowerGovernedTerm(wrapper, input, read, users);
+              const lowered = lowerGovernedTerm(wrapper, input, read, users, memo);
               if (lowered.kind !== "resolve") throw new Error("governed reading lowering failed");
               return lowered.schema;
             },
