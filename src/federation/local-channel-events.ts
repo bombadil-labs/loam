@@ -104,6 +104,22 @@ export function protectedIngressIds(reactor: Reactor, batch: readonly Delta[]): 
   }
   return protectedIds;
 }
+// Every held delta with an entity pointer at this id, in any context and by any author: the
+// candidates for a read that filters on such a pointer, from the target index instead of a walk
+// of the store (H8). It carries no negation closure (H1): callers ask about strikes by id.
+// An id the index names and the set cannot resolve refuses. Skipping it would shrink the list,
+// and the erase door reads a shorter list as leave to purge (H9).
+function heldAt(reactor: Reactor, entity: string): Delta[] {
+  return reactor.byTarget(entity).map((id) => {
+    const d = reactor.get(id);
+    if (d === undefined)
+      throw new Error(
+        `the target index names delta ${id} at ${entity}, and the store cannot resolve it — ` +
+          `refusing to read local channel history from a ground that disagrees with its own index`,
+      );
+    return d;
+  });
+}
 export interface LocalChannelOpening {
   readonly id: string;
   readonly channel: string;
@@ -240,13 +256,12 @@ export function localChannelsInContainer(gw: Gateway, container: string): string
   // pool, and an erase that faulted after the close's erasure leaves none beside a dropped one.
   // An erased opening is gone from the reactor; one whose purge faulted stays, but its declaration
   // is struck already, so the declaration test covers it and no marker scan is needed.
-  // H8: this walks the snapshot. The parent-container pointer is an entity pointer, so a door
-  // that serves this read per request must switch to `reactor.byTarget(container)` filtered to
-  // the event context, the affordance `lawfulDeltasAt` uses; then one `get` and one negation
-  // read per opening.
+  // An opening's `into` IS its parent-container pointer's entity id (the parser refuses any
+  // other), so every opening into this container is filed at the container's id in the target
+  // index. The index keys on the id alone: the context and parser filters still apply.
   const negated = negatedAt(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   const names = new Set<string>();
-  for (const d of gw.reactor.snapshot()) {
+  for (const d of heldAt(gw.reactor, container)) {
     if (!inLocalContext(d, LOCAL_EVENT)) continue;
     const parsed = parseLocalEvent(d, gw.operatorAuthor);
     if (parsed?.action !== "open" || parsed.opening.into !== container) continue;
@@ -273,7 +288,9 @@ export function orphanedDeclaration(gw: Gateway, declaration: string): boolean {
         p.target.kind === "entity" &&
         p.target.entity.id === `channel:${channel}`,
     );
-  for (const d of gw.reactor.snapshot()) {
+  // `named` asks for an entity pointer at the channel's id, so the target index holds every
+  // candidate.
+  for (const d of heldAt(gw.reactor, `channel:${channel}`)) {
     if (!inLocalContext(d, LOCAL_EVENT) || !named(d)) continue;
     const parsed = parseLocalEvent(d, gw.operatorAuthor);
     // An event of THIS channel the reader cannot parse is not "no opening names it"; it fails

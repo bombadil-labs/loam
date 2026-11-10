@@ -3,7 +3,7 @@
   "importCycles": 0,
   "cyclicFiles": 0,
   "seedReads": 4,
-  "snapshotRefs": 42,
+  "snapshotRefs": 39,
   "coreClockReads": 14,
   "treeReach": 0,
   "peerSurface": 28
