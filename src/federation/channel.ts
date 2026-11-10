@@ -46,7 +46,12 @@ import {
   readManifest,
 } from "../gateway/adopt-vocab.js";
 import { CTX_REGISTRATION, lensOf } from "../gateway/registration.js";
-import { lawfulHistory, lawfulSnapshot } from "../gateway/lawful.js";
+import {
+  lawfulDeltasAt,
+  lawfulHistory,
+  lawfulHistoryAt,
+  lawfulSnapshot,
+} from "../gateway/lawful.js";
 import { negatedAt } from "../gateway/negation.js";
 import { freezeMembers } from "../gateway/container-identity.js";
 import type { RendererBinding } from "../gateway/renderers.js";
@@ -2317,12 +2322,13 @@ async function dropChannelCommit(gw: Gateway, name: string): Promise<void> {
         );
       });
     // HISTORY: a record valid only later must be struck too, or it comes back at its start.
-    for (const d of [...lawfulHistory(gw.reactor, operator)]) {
-      const marker = d.claims.pointers.find(
-        (pt) => pt.target.kind === "entity" && pt.target.entity.context === CTX_CHANNEL,
-      );
-      if (marker === undefined || marker.target.kind !== "entity") continue;
-      if (marker.target.entity.id !== `channel:${name}`) continue;
+    const records = lawfulHistoryAt(
+      gw.reactor,
+      { entity: `channel:${name}`, context: CTX_CHANNEL },
+      operator,
+    );
+    for (const d of records.sort(bySignedTime)) {
+      if (!filedFirstAt(d, CTX_CHANNEL, `channel:${name}`)) continue;
       if (severedForGood(d.id)) continue;
       await gw.append([
         gw.signer.sign(withStamp(gw.stamp(operator), (t) => makeNegationClaims(operator, t, d.id))),
@@ -2707,6 +2713,21 @@ export async function curseChannelLawImpl(
   }
 }
 
+// A record is keyed by the FIRST pointer it carries in its context. The target index finds a record
+// by any of its pointers, so a reader that reads the index asks this as well.
+const filedFirstAt = (d: Delta, context: string, entity: string): boolean => {
+  const marker = d.claims.pointers.find(
+    (p) => p.target.kind === "entity" && p.target.entity.context === context,
+  );
+  return marker?.target.kind === "entity" && marker.target.entity.id === entity;
+};
+
+// Oldest first by signed time, then id. The target index answers in id order. The operator's door
+// signs each record above every earlier one, so for records that door wrote this is the order they
+// arrived in. Records signed elsewhere with out-of-order times sort by their times instead.
+const bySignedTime = (a: Delta, b: Delta): number =>
+  a.claims.timestamp - b.claims.timestamp || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
 /**
  * Re-derive the root's surface AND every attached pool's.
  *
@@ -2741,12 +2762,14 @@ export function cursesOf(gw: Gateway, channel: string): { living: string; deltaI
   const operator = gw.operatorAuthor;
   const negated = negatedAt(gw.reactor, gw.validityNow(), operator);
   const out: { living: string; deltaId: string }[] = [];
-  for (const d of lawfulSnapshot(gw.reactor, gw.validityNow(), operator)) {
-    const marker = d.claims.pointers.find(
-      (p) => p.target.kind === "entity" && p.target.entity.context === CTX_CURSE,
-    );
-    if (marker === undefined || marker.target.kind !== "entity") continue;
-    if (marker.target.entity.id !== `channel:${channel}`) continue;
+  const records = lawfulDeltasAt(
+    gw.reactor,
+    gw.validityNow(),
+    { entity: `channel:${channel}`, context: CTX_CURSE },
+    operator,
+  );
+  for (const d of records.sort(bySignedTime)) {
+    if (!filedFirstAt(d, CTX_CURSE, `channel:${channel}`)) continue;
     if (negated(d.id)) continue;
     const living = d.claims.pointers.find((p) => p.role === "living");
     if (living?.target.kind === "primitive") {
