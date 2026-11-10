@@ -54,7 +54,7 @@ import {
   type ResolverSpecs,
   lensNameFor,
 } from "./registration.js";
-import { lawfulSnapshot } from "./lawful.js";
+import { lawfulScopeAt } from "./lawful.js";
 import {
   admitRenderers,
   readRenderers,
@@ -1067,7 +1067,15 @@ export async function loadHyperSchemaImpl(
   entity: string,
 ): Promise<HyperSchema> {
   const batch = [...deltas];
-  const trial = lawfulSnapshot(gw.reactor, gw.validityNow(), gw.operatorAuthor);
+  // The loader reads `entity` and the negation chains of what is filed there. The batch is not in
+  // the ground yet, so its ids are named: a strike of a batch delta may already be held.
+  const trial = lawfulScopeAt(
+    gw.reactor,
+    gw.validityNow(),
+    entity,
+    gw.operatorAuthor,
+    batch.map((d) => d.id),
+  );
   for (const d of batch) trial.add(d);
   const schema = loadHyperSchema(trial, entity, gw.validityNow()); // throws here → nothing was persisted
   await gw.append(batch);
