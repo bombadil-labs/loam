@@ -13,6 +13,7 @@ import { withNegationClosure } from "./negation-closure.js";
 import { lensOf, readRegistrations, type Registration } from "./registration.js";
 import { lawfulSnapshot } from "./lawful.js";
 import { negatedAt } from "./negation.js";
+import type { Ground } from "./ground.js";
 interface Selection {
   source: string;
   registrationId: string;
@@ -60,7 +61,7 @@ function definitionId(r: Reactor, author: string, entity: string, body: Term, no
   return selected.delta.id;
 }
 export function selectReceivingSnapshot(
-  source: Reactor,
+  source: Ground,
   binding: Binding,
   value: unknown,
   paused: boolean,

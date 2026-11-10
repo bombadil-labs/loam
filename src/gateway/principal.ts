@@ -11,6 +11,7 @@ import {
 } from "@bombadil/rhizomatic";
 import { declarationsOf } from "./ground-declarations.js";
 import { recoveredFrom, userGroundOf, usersGovernor } from "./user-root.js";
+import type { Ground } from "./ground.js";
 
 /**
  * A Loam principal: the root key it is pinned to. A user's root is their own key (README ruling
@@ -80,7 +81,7 @@ const readOptions = (now: number, scope: string, operator: string | undefined) =
   }) as const;
 
 // Is `id` a delegation that says it cannot be passed on? Its bytes are held: the path came from them.
-const sealed = (reactor: Reactor, id: string): boolean =>
+const sealed = (reactor: Ground, id: string): boolean =>
   reactor
     .get(id)
     ?.claims.pointers.some(
@@ -261,7 +262,7 @@ export function standingDelegationIds(
  * "standing" otherwise. A label reads the record only; it does not say its signer could delegate.
  */
 export function delegationStatesFor(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   roots: Iterable<string>,
   key: string,
@@ -304,7 +305,7 @@ export function standingDelegationIdsFor(
  * `delegable: false`, nothing else. A loose or universal-scope row makes no key the root's.
  */
 export function delegatesEverOf(
-  reactor: Reactor,
+  reactor: Ground,
   roots: Iterable<string>,
   scope: string,
 ): ReadonlySet<string> {
@@ -363,7 +364,7 @@ export function delegationRootsTo(reactor: Reactor, key: string): string[] {
  * that holds a grant here, so the grant subjects are the roots worth asking about.
  */
 export function delegationRecordsFor(
-  reactor: Reactor,
+  reactor: Ground,
   roots: Iterable<string>,
   key: string,
 ): Delta[] {

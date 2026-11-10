@@ -41,6 +41,7 @@ import { negatedAt } from "../gateway/negation.js";
 import { governedProgram } from "../gateway/governed-trust.js";
 import { userGroundOf } from "../gateway/user-root.js";
 import { lowerMembershipJson } from "../gateway/member-of.js";
+import type { Ground } from "../gateway/ground.js";
 
 // A pasted offer carries real deltas — a store's worth, potentially. Bounded, but generously.
 const FEDERATE_MAX_BODY = 1024 * 1024;
@@ -129,7 +130,7 @@ export interface AdminFederationCtx {
  * ended, leaves the grant to be struck.
  */
 export function unnegatedOperatorGrantIds(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   operator: string,
   subject: string,

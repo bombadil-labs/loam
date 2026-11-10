@@ -21,6 +21,7 @@ import { negatedAt } from "./negation.js";
 import { readTrustPolicyAt, type TrustPolicy } from "./trust.js";
 import { subjectKeyAt, USER_PREFIX } from "./user-root.js";
 import { membershipForValidation } from "./member-of.js";
+import type { Ground } from "./ground.js";
 
 export const CTX_CONTAINER = "loam.container";
 
@@ -710,7 +711,7 @@ function computeContainerTable(
 // The ADMISSION axis (§28.6): the `loam:trust` shape, filed at the container's entity. Resolved
 // per subject; the root's policy is untouched by it, and it never reads the container's knob.
 export function containerAdmission(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   operator: string | undefined,
   container: string,
@@ -761,7 +762,7 @@ export function containerDeclarationName(claims: Claims): string | undefined {
 
 /** Latest surviving declaration for one container, under the reader's own binding rules. */
 export function currentContainerDeclarationId(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   operator: string | undefined,
   entity: string,
@@ -777,7 +778,7 @@ export function currentContainerDeclarationId(
 
 // The surviving lawful declaration ids for one entity — what a strike-the-declaration act negates.
 export function survivingDeclarationIds(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   operator: string,
   entity: string,
@@ -802,7 +803,7 @@ export function survivingDeclarationIds(
  * it was aimed at.
  */
 export function everDeclared(
-  reactor: Reactor,
+  reactor: Ground,
   operator: string | undefined,
   entity: string,
 ): boolean {

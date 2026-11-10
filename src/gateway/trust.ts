@@ -18,9 +18,10 @@
 // builds an `inView` predicate over the very declaration deltas admission reads — one live
 // source of truth for the door and the lenses.
 
-import type { Claims, Reactor } from "@bombadil/rhizomatic";
+import type { Claims } from "@bombadil/rhizomatic";
 import { lawfulDeltasAt } from "./lawful.js";
 import { negatedAt } from "./negation.js";
+import type { Ground } from "./ground.js";
 
 export const TRUST_ENTITY = "loam:trust";
 export const CTX_TRUST = "loam.trust";
@@ -102,7 +103,7 @@ export function trustDefect(claims: Claims): string | undefined {
 // UNGOVERNED stores ignore trust declarations entirely and stay OPEN: with no operator there
 // is no lawful voice to declare with, and honoring anyone's would let one federated stranger's
 // "closed" delta brick a pull-only aggregator. Govern the store to govern the door.
-export function readTrustPolicy(reactor: Reactor, now: number, operator?: string): TrustPolicy {
+export function readTrustPolicy(reactor: Ground, now: number, operator?: string): TrustPolicy {
   return readTrustPolicyAt(reactor, now, TRUST_ENTITY, operator);
 }
 
@@ -111,7 +112,7 @@ export function readTrustPolicy(reactor: Reactor, now: number, operator?: string
 // entity as subject. One resolver, so the negation algebra and the roster-union rule can never
 // drift between the store's door and a container's.
 export function readTrustPolicyAt(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   subject: string,
   operator?: string,
@@ -150,7 +151,7 @@ export function readTrustPolicyAt(
 }
 
 /** Does `operator` declare a trust mode for this store (as opposed to the undeclared default)? */
-export function declaresTrust(reactor: Reactor, now: number, operator: string): boolean {
+export function declaresTrust(reactor: Ground, now: number, operator: string): boolean {
   const negated = negatedAt(reactor, now, operator);
   return lawfulDeltasAt(reactor, now, { entity: TRUST_ENTITY, context: CTX_TRUST }, operator).some(
     (d) =>

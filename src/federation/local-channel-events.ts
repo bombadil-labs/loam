@@ -18,6 +18,7 @@ import {
   verified,
   inLocalContext,
 } from "../gateway/erase-law.js";
+import type { Ground } from "../gateway/ground.js";
 
 export const LOCAL_EVENT = "loam.local.channel.event";
 export const reservedLocal = (d: Delta): boolean =>
@@ -28,7 +29,7 @@ export const reservedLocal = (d: Delta): boolean =>
  * already holds costs a content hash, not a signature check. Anything else takes the full check,
  * and the offered object is memoized: the reactor keeps that object, so its later reads hit.
  */
-export function verifiesAgainstHeld(reactor: Reactor, d: Delta): boolean {
+export function verifiesAgainstHeld(reactor: Ground, d: Delta): boolean {
   const held = reactor.get(d.id);
   if (
     held !== undefined &&
@@ -109,7 +110,7 @@ export function protectedIngressIds(reactor: Reactor, batch: readonly Delta[]): 
 // of the store (H8). It carries no negation closure (H1): callers ask about strikes by id.
 // An id the index names and the set cannot resolve refuses. Skipping it would shrink the list,
 // and the erase door reads a shorter list as leave to purge (H9).
-function heldAt(reactor: Reactor, entity: string): Delta[] {
+function heldAt(reactor: Ground, entity: string): Delta[] {
   return reactor.byTarget(entity).map((id) => {
     const d = reactor.get(id);
     if (d === undefined)

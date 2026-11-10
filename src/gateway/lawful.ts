@@ -2,6 +2,7 @@
 // the ground, at a read time or across history. A leaf, so every reader of law can import it.
 
 import { DeltaSet, governedDeltas, type Delta, type Reactor } from "@bombadil/rhizomatic";
+import type { Ground } from "./ground.js";
 
 // The slice of the store whose law binds: everything when ungoverned, the operator's deltas
 // when governed. Definitions, registrations, and negations are all read from this set — a
@@ -63,7 +64,7 @@ export interface LawAt {
 
 /** The operator's law filed at `at` that holds at `now`. */
 export function lawfulDeltasAt(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   at: LawAt,
   operator?: string,
@@ -78,7 +79,7 @@ export function lawfulDeltasAt(
  * Every lawful delta ever filed at `at`, whatever its validity. For a historical question such as
  * "was this name ever declared", where an expired declaration must still count.
  */
-export function lawfulHistoryAt(reactor: Reactor, at: LawAt, operator?: string): Delta[] {
+export function lawfulHistoryAt(reactor: Ground, at: LawAt, operator?: string): Delta[] {
   const out: Delta[] = [];
   for (const id of reactor.byTarget(at.entity)) {
     // Unreachable against today's substrate: nothing removes from the reactor's set, and an erase

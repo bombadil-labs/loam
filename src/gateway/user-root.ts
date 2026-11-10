@@ -16,6 +16,7 @@ import {
   type Reactor,
 } from "@bombadil/rhizomatic";
 import { declarationsOf } from "./ground-declarations.js";
+import type { Ground } from "./ground.js";
 
 export const CTX_USER = "loam.user";
 export const CTX_ROLE = "loam.role";
@@ -174,7 +175,7 @@ function filedFor(d: Delta, context: string): string | undefined {
 // Every held operator claim that is recovery evidence for `name` in `context`, signed by the cut and
 // not erased. Validity and negations are not asked: recovery is durable history.
 function heldAt(
-  reactor: Reactor,
+  reactor: Ground,
   operator: string,
   name: string,
   context: string,
@@ -262,7 +263,7 @@ export type RecoveryChain =
 
 /** Read `name`'s recovery history as it stood at `cut`, with `erased` counted as gone. */
 export function recoveryChain(
-  reactor: Reactor,
+  reactor: Ground,
   operator: string | undefined,
   name: string,
   erased: ReadonlySet<string> = NONE,
@@ -311,7 +312,7 @@ export function recoveryChain(
  */
 export function recoveryDefect(
   delta: Delta,
-  reactor: Reactor,
+  reactor: Ground,
   operator: string | undefined,
   batch: readonly Delta[] = [],
   gone: () => ReadonlySet<string> = () => NONE,
@@ -367,7 +368,7 @@ export function recoveryDefect(
  * of each user's chain, and every key a broken history implicates.
  */
 export function retiredKeysOf(
-  reactor: Reactor,
+  reactor: Ground,
   operator: string | undefined,
   erased: ReadonlySet<string> = NONE,
   cut = Infinity,
@@ -397,7 +398,7 @@ export function retiredKeysOf(
  * `root`: the keys `root` recovered from. The history `keysEverOf` follows.
  */
 export function recoveredFrom(
-  reactor: Reactor,
+  reactor: Ground,
   operator: string | undefined,
   root: string,
   erased: ReadonlySet<string> = NONE,
@@ -424,7 +425,7 @@ export function recoveredFrom(
  * may share a root, and one's recoveries are not the other's history.
  */
 export function recoveriesOf(
-  reactor: Reactor,
+  reactor: Ground,
   operator: string | undefined,
   user: string,
   root: string,
@@ -452,7 +453,7 @@ export function recoveriesOf(
 // the operator (as of `cut`), not erased, signed by the cut? The chain decides WHICH key may be the
 // root; this decides whether the operator's own root claim for it stands.
 function standingRootClaim(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   operator: string,
   name: string,
@@ -499,7 +500,7 @@ function standingRootClaim(
  * the indexed reader here and the View reader (`rootOf`), so the two cannot differ.
  */
 export function chainRoot(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   operator: string | undefined,
   name: string,
@@ -523,7 +524,7 @@ export function chainRoot(
  * rather than letting an older one through.
  */
 function latestValues(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   operator: string,
   name: string,
@@ -587,7 +588,7 @@ function latestValues(
  * it stood at an as-of instant: only deltas signed by then, claims and strikes alike.
  */
 export function userRootAt(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   operator: string | undefined,
   name: string,
