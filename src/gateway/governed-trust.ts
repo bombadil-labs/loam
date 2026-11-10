@@ -34,6 +34,7 @@ import {
   type Admits,
 } from "@bombadil/rhizomatic";
 import { STORE_ENTITY } from "./genesis.js";
+import { declarationsOf } from "./ground-declarations.js";
 import {
   retiredKeysOf,
   USER_PREFIX,
@@ -179,19 +180,18 @@ const NO_IDS: ReadonlySet<string> = new Set();
 // slate's read closure: `readClosedIds`). The Gateway declares it, because the readers live above
 // this module. A governed read evaluates over the ground less these, so the strikers that answer
 // "is this struck as data" must be computed over the same ground.
-const readHidden = new WeakMap<Reactor, (now: number) => ReadonlySet<string>>();
 
 /** Declare what a door read of `reactor` withholds at a given instant. */
 export function declareReadHidden(
   reactor: Reactor,
   hidden: (now: number) => ReadonlySet<string>,
 ): void {
-  readHidden.set(reactor, hidden);
+  declarationsOf(reactor).readHidden = hidden;
 }
 
 /** The strikers a reactor's own data answers to at `now`, over the ground a door reads. */
 export function dataStrikers(reactor: Reactor, now: number, operator: string): Set<string> {
-  const hidden = readHidden.get(reactor)?.(now) ?? NO_IDS;
+  const hidden = declarationsOf(reactor).readHidden?.(now) ?? NO_IDS;
   return new Set(
     governedStrikers(grantGround(reactor, hidden), { now }, operator, false, userGroundOf(reactor)),
   );

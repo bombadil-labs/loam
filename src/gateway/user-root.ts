@@ -15,6 +15,7 @@ import {
   type Delta,
   type Reactor,
 } from "@bombadil/rhizomatic";
+import { declarationsOf } from "./ground-declarations.js";
 
 export const CTX_USER = "loam.user";
 export const CTX_ROLE = "loam.role";
@@ -604,8 +605,8 @@ export function userRootAt(
 }
 
 // Where a ground reads its users, and which of their claims are erased but still held. A pool
-// holds no user records; it reads its host's. The Gateway declares this for every reactor it sets,
-// because the erasure reader lives above this module.
+// holds no user records; it reads its host's. The Gateway declares this for its ground, because
+// the erasure reader lives above this module.
 export interface UserGround {
   readonly reactor: Reactor;
   /**
@@ -618,11 +619,9 @@ export interface UserGround {
   /** An as-of read's instant: the ground holds only what was signed by then. */
   readonly cut?: number;
 }
-const userGrounds = new WeakMap<Reactor, () => UserGround>();
-
 /** Declare where `reactor`'s grants naming users read those users. */
 export function declareUserGround(reactor: Reactor, ground: () => UserGround): void {
-  userGrounds.set(reactor, ground);
+  declarationsOf(reactor).users = ground;
 }
 
 /** Whose user records bind in `ground`: its governor, else the caller's own key. */
@@ -631,7 +630,7 @@ export const usersGovernor = (ground: UserGround, operator: string | undefined) 
 
 /** Where `reactor` reads its users: the declared ground, else itself. */
 export function userGroundOf(reactor: Reactor): UserGround {
-  return userGrounds.get(reactor)?.() ?? { reactor, erased: () => NONE };
+  return declarationsOf(reactor).users?.() ?? { reactor, erased: () => NONE };
 }
 
 /**

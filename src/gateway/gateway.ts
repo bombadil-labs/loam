@@ -90,6 +90,8 @@ import {
 } from "./adopt-law.js";
 import { eraseImpl, eraseReplicaImpl, healthImpl, type StoreHealth } from "./erase.js";
 import { pinErasureGovernors, erasedFromReading } from "./erase-law.js";
+import { seatDeclarations, type GroundDeclarations } from "./ground-declarations.js";
+import { continueGroundRevision, groundRevision } from "./ground-revision.js";
 import type { LiveStream } from "./channel.js";
 import { STORE_ENTITY, operatorMarkerClaims, type Genesis } from "./genesis.js";
 import { grantClaims, revocationClaims } from "./accounts.js";
@@ -454,11 +456,11 @@ export class Gateway {
   // every separate container so a nested pool's row is attributable even under a non-enveloped one.
   /** @internal — T34 seam (container.ts, envelope.ts) */
   poolHandle: string | undefined = undefined;
-  // The scope this ground honors delegations for (principal.ts): an inbox pool's own name, and
-  // nothing on any other ground. Declared on the reactor, and again whenever the reactor is replaced.
-  private delegationScope: string | undefined = undefined;
+  // What this ground declares beside its deltas (ground-declarations.ts): its user ground, what
+  // a door read withholds, its delegation scope and its erasure pins. One record for the gateway's
+  // life, seated on every reactor it sets, so a declaration made once holds across a reseat.
+  private readonly declarations: GroundDeclarations = {};
   // The user ground this ground's grants resolve `user:<name>` against: a pool's host's, as a port.
-  // Declared on the reactor, and again whenever the reactor is replaced.
   private userHost: UserGround | undefined = undefined;
   // The resolver memo (SPEC §22.5): (resolver-content-address, bucket-delta-set) → value. Keyed on the
   // surviving bucket, so it invalidates by construction when the ground moves — an erased fact drops
@@ -544,10 +546,8 @@ export class Gateway {
 
   /** @internal — set by the child's opener (container.ts `openSeparate`); undefined at a root. */
   childLaw: ChildLaw | undefined = undefined;
-  private erasureGovernors: readonly string[] = [];
   /** @internal — the keys this ground pins as erasure governors; kept across a reseat. */
   pinErasureGovernors(keys: readonly string[]): void {
-    this.erasureGovernors = keys;
     pinErasureGovernors(this._reactor, keys);
   }
   /** The authors of `context` law here: this ground's own key, then a host it selects. */
@@ -577,6 +577,15 @@ export class Gateway {
   }
 
   /**
+   * This ground's revision: it rises by one for each admitted batch that adds to the held set,
+   * for each reseat, and for each declaration of erasure pins. It never falls, and it is not
+   * persisted. This is the one place a holder of the gateway reads it.
+   */
+  get revision(): number {
+    return groundRevision(this._reactor);
+  }
+
+  /**
    * The options this gateway was opened with, less its seed: the seed becomes the signer and is
    * kept nowhere else, so no code that holds a gateway can read its key.
    * @internal — T19 seam (erase.ts, quarantine-pool.ts, adopt.ts)
@@ -595,6 +604,7 @@ export class Gateway {
     this.options = kept;
     this.signer = seed === undefined ? undefined : seedSigner(seed);
     this.operatorAuthor = this.signer?.author;
+    seatDeclarations(reactor, this.declarations);
     this.declareUsers(reactor);
     // Fail fast on a mis-shaped offered lens: a term that does not select a delta set would only
     // blow up when a peer first pulls, in production. Trial-eval it now (empty store → empty
@@ -624,9 +634,8 @@ export class Gateway {
   // reactor: at construction, and again by reseat() after an erase.)
   private attachPersistence(reactor: Reactor): void {
     reactor.subscribeRaw((d) => {
-      // Any accepted delta may move the open set (a declaration, a negation) — drop the
-      // cached read; the next tokenless request recomputes. Once per WRITE, not per read.
-      this.publicOpen = undefined;
+      // Count this batch now, not at the next read: two batches are then two revisions.
+      groundRevision(reactor);
       if (this.justPersisted.delete(d.id)) return;
       const peer = this.peer;
       this.writes = this.writes
@@ -1709,7 +1718,6 @@ export class Gateway {
     this.sinks.clear();
     this.lazyMats.clear();
     this.publicLazyMats.clear();
-    this.publicOpen = undefined; // the ground changed out from under the cached read
     // Drop the resolver memo (SPEC §22.5/§11): keying already forbids serving a value over erased
     // bytes, but a re-seat is exactly the moment the ground forgot — clear it so nothing lingers.
     this.resolverMemo.clear();
@@ -1730,11 +1738,10 @@ export class Gateway {
         }
       }
     }
+    seatDeclarations(reactor, this.declarations); // the pins, scope and user ground follow
+    continueGroundRevision(this._reactor, reactor);
     this._reactor = reactor;
     this.durableRevision = revision;
-    pinErasureGovernors(reactor, this.erasureGovernors); // the pins follow the ground
-    if (this.delegationScope !== undefined) declarePrincipalScope(reactor, this.delegationScope);
-    this.declareUsers(reactor);
     this.ingestVia = (d) => this.reactor.ingest(d);
     this.ingestAllVia = (ds) => ingestTogether(this.reactor, ds);
     this.attachPersistence(reactor);
@@ -2053,8 +2060,9 @@ export class Gateway {
   private governedRegistered: Bound[] | undefined;
   private governsUsers = false;
 
-  // Every reactor this gateway sets reads its users from its user host (a pool's host, or itself),
-  // hiding what that host has erased but not yet purged, exactly as the user View does.
+  // This ground reads its users from its user host (a pool's host, or itself), hiding what that
+  // host has erased but not yet purged, exactly as the user View does. Both closures read the
+  // gateway, never a reactor, so they are declared once and hold for every reactor it sets.
   private declareUsers(reactor: Reactor): void {
     declareReadHidden(reactor, (now) => readClosedIds(this, now));
     declareUserGround(reactor, () => {
@@ -2078,7 +2086,6 @@ export class Gateway {
    * @internal — container.ts
    */
   honorDelegationsAt(scope: string): void {
-    this.delegationScope = scope;
     declarePrincipalScope(this._reactor, scope);
   }
 
@@ -2362,7 +2369,7 @@ export class Gateway {
   // T19 NOTE (a boundary judged, not forced): the public-door READERS — surface, isPublicLatest,
   // isPublicPin, publicSurface, hasPublicSurface — stay on the class deliberately. They are thin
   // veneers over two caches (publicOpen, publicCache) whose INVALIDATION is wired into the write
-  // path (attachPersistence drops publicOpen on any accepted delta) and the reseat cycle; moving
+  // path and the reseat cycle (publicOpen is keyed on this ground's revision); moving
   // the veneers across the seam while the cache lifecycle stays here would be indirection, not
   // separation. The DECLARATION side (declarePublic) moved to public.ts, where the vocabulary is.
   //
@@ -2373,15 +2380,21 @@ export class Gateway {
   // trust) and cached by what actually shapes it, so one negation closes the door on the next
   // request without rebuilding on every read.
   private publicCache: { key: string; schema: GraphQLSchema } | undefined;
-  // The open set, read once per WRITE rather than once per read: any accepted delta drops it
-  // (attachPersistence), so a tokenless request costs O(registered), not O(store) — which
+  // The open set, read once per WRITE rather than once per read: it answers for one revision of
+  // this ground, so any accepted delta (a declaration, a negation) and any reseat retire it. A
+  // tokenless request therefore costs O(registered), not O(store) — which
   // also keeps a nothing-public mount's refusal as cheap as an absent mount's (no timing
   // oracle where the status codes are uniform).
   // It also holds only between validity boundaries: a declaration or strike valid until T changes
   // the open set at T with nothing written. So a cached set answers for a read time in
   // [from, until), where `until` is the next boundary any held delta names.
   private publicOpen:
-    | { readonly open: ReadonlySet<string>; readonly from: number; readonly until: number }
+    | {
+        readonly open: ReadonlySet<string>;
+        readonly revision: number;
+        readonly from: number;
+        readonly until: number;
+      }
     | undefined;
 
   /**
@@ -2400,13 +2413,16 @@ export class Gateway {
   private openNames(): ReadonlySet<string> {
     if (this.channelPool === true) return EMPTY_PUBLIC;
     const now = this.validityNow();
+    const revision = this.revision;
     if (
       this.publicOpen === undefined ||
+      this.publicOpen.revision !== revision ||
       now < this.publicOpen.from ||
       now >= this.publicOpen.until
     ) {
       this.publicOpen = {
         open: readPublicSchemas(this.reactor, now, this.lawAuthors("public")),
+        revision,
         from: now,
         until: this.reactor.nextValidityBoundary(now) ?? Infinity,
       };
