@@ -7,6 +7,7 @@ import { keyActsFor, principalScopeOf } from "./principal.js";
 import { retiredKeysOf, subjectKeyAt, userGroundOf, usersGovernor } from "./user-root.js";
 import { STORE_ENTITY } from "./genesis.js";
 import { CTX_GRANTS } from "./governed-trust.js";
+import type { Ground } from "./ground.js";
 
 // `write` publishes, `admin` additionally mints grants and retires constitution, `register` (T174)
 // shapes the store — but only inside the entity-namespace PREFIX its own grant names — and
@@ -110,7 +111,7 @@ function standsFor(ctx: Ctx, delta: Delta, visited: ReadonlySet<string>): boolea
 
 /** Every subject any grant at the store entity names, struck or not: the roots a delegate here
  *  could act for. */
-export function grantSubjects(reactor: Reactor): string[] {
+export function grantSubjects(reactor: Ground): string[] {
   const out = new Set<string>();
   for (const id of reactor.byTarget(STORE_ENTITY)) {
     const d = reactor.get(id);

@@ -29,6 +29,7 @@
 import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
 import { lawfulDeltasAt } from "./lawful.js";
 import { negatedAt } from "./negation.js";
+import type { Ground } from "./ground.js";
 
 export const BUDGET_ENTITY = "loam:budget";
 export const CTX_BUDGET = "loam.budget";
@@ -121,7 +122,7 @@ export function budgetDefect(claims: Claims): string | undefined {
 // Mirrors readTrustPolicy; malformed declarations are refused at APPEND (`budgetDefect`), so door
 // and reader cannot disagree on any store whose law arrived through the door.
 export function readBudgetPolicy(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   operator?: string,
 ): ReadonlyMap<string, BudgetPolicy> {
