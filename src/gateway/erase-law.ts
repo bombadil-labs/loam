@@ -247,8 +247,10 @@ export function refusedIds(reactor: Reactor, operator: string | undefined): Set<
 // It walks every erasure order and checks each one, so it is cached per ground, for one revision
 // and one operator. The answer moves only with an ingest, a reseat or new governor pins, and each
 // of those raises the revision (ground-revision.ts). A stale hit would serve an erased target as
-// live, so a new input to this function owes a revision rise where it changes. One write still
-// costs one walk of the erasure index; an index maintained on ingest would remove that.
+// live. The key covers this ground's held set, its pins and the operator. It does not cover the
+// user ground or, on a pool, the host's ground, which `cutState` reads for an order on a recovery
+// cut. One write still costs one walk of the erasure index; an index maintained on ingest would
+// remove that.
 export function erasedFromReading(
   reactor: Reactor,
   operator: string | undefined,

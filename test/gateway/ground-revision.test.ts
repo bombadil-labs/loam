@@ -17,6 +17,7 @@ import { Reactor, authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { eraseClaims, erasedFromReading } from "../../src/gateway/erase-law.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
+import { seatDeclarations } from "../../src/gateway/ground-declarations.js";
 import {
   continueGroundRevision,
   groundRevision,
@@ -112,7 +113,7 @@ describe("the ground's revision", () => {
 
     const b = new Reactor();
     b.ingest(claim);
-    raiseGroundRevision(b); // whatever `b` counted before, the successor's count is set outright
+    raiseGroundRevision(b); // `b` stands at 1, below `a`: the successor is one above `a`
     continueGroundRevision(a, b);
     expect(groundRevision(b)).toBe(3);
   });
@@ -197,6 +198,32 @@ describe("the erased set a reading hides follows every event that moves it", () 
     expect(gw.reactor.get(claim.id)).toBeDefined();
     expect(await fern(gw)).toEqual({ height: null, tag: ["shade"] });
     await gw.close();
+  });
+
+  // A successor that was read before it was seated already has a cached answer and a revision.
+  // Here that revision is 1, and the predecessor stands at 0: a count set to "predecessor + 1"
+  // would land on 1 again and keep serving the answer from before the pins were seated.
+  it("a successor read before it is seated recomputes after: the pinned order's target is hidden", () => {
+    const from = new Reactor();
+    expect(groundRevision(from)).toBe(0);
+    const to = new Reactor();
+    const { claim, bystander } = claimAndBystander();
+    const order = signClaims(
+      eraseClaims(claim.id, OP, HOST, 2000, undefined, undefined, OP),
+      HOST_SEED,
+    );
+    for (const d of [claim, bystander, order]) expect(to.ingest(d).status).toBe("accepted");
+    raiseGroundRevision(to);
+    expect(groundRevision(to)).toBe(1);
+    expect(erasedFromReading(to, OP).size).toBe(0); // cached at 1: unpinned, the order is testimony
+
+    seatDeclarations(to, { erasureGovernors: [HOST] });
+    continueGroundRevision(from, to);
+    expect(groundRevision(to)).toBe(2);
+    expect(to.get(claim.id)).toBeDefined();
+    const erased = erasedFromReading(to, OP);
+    expect(erased.has(claim.id)).toBe(true);
+    expect(erased.has(bystander.id)).toBe(false);
   });
 
   it("the answer is per operator: one ground read as two operators gives two answers", () => {

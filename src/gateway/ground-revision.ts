@@ -41,9 +41,11 @@ export function raiseGroundRevision(reactor: Reactor): void {
 }
 
 /**
- * `to` replaces `from` as one ground's reactor: its revision is one above the last `from` had.
- * It sets the count outright, so it runs after everything else that prepares `to`.
+ * `to` replaces `from` as one ground's reactor. Its revision becomes one above the larger of the
+ * last `from` had and any `to` already had, so an answer cached for `to` before this call can
+ * never match afterwards.
  */
 export function continueGroundRevision(from: Reactor, to: Reactor): void {
-  clocks.set(to, { revision: settled(from).revision + 1, size: to.size });
+  const next = Math.max(settled(from).revision, settled(to).revision) + 1;
+  clocks.set(to, { revision: next, size: to.size });
 }
