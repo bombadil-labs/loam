@@ -15,18 +15,20 @@
 // CONTROL: it passes over a whole-store walk too, because the scope must select exactly what the
 // walk selected. The EQUIVALENCE case compares the two operands directly.
 //
-// Not covered here: the blessing door that asks the incumbent probe is driven in
-// adopt-law.test.ts (the entity-capture refusals); this file bounds the probe's read through
-// `lawfulScopeAt` and the definition publish that shares it. The receiving snapshot's answers are
-// held in receive-snapshot.test.ts.
+// A blessing (`adoptLaw`) walks the store for other reasons, so its case bounds the walks and holds
+// the other accesses fixed, as the registration cases do. The REFUSAL cases hold the scope to its
+// index: an id an index names and the ground does not hold refuses the read.
+//
+// Not covered here: the receiving snapshot's answers are held in receive-snapshot.test.ts.
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   HYPER_SCHEMA_SCHEMA,
   Reactor,
   authorForSeed,
   evalTerm,
   makeNegationClaims,
+  parseTerm,
   publishHyperSchemaClaims,
   publishSchemaClaims,
   signClaims,
@@ -34,7 +36,10 @@ import {
   type HyperSchema,
   type Schema,
 } from "@bombadil/rhizomatic";
-import { freezeMembers } from "../../src/gateway/container-identity.js";
+import { manifestExportClaims } from "../../src/gateway/adopt-vocab.js";
+import { freezeMembers, type ModuleVersion } from "../../src/gateway/container-identity.js";
+import { containerClaims } from "../../src/gateway/container-law.js";
+import type { Ground } from "../../src/gateway/ground.js";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { lawfulScopeAt, lawfulSnapshot } from "../../src/gateway/lawful.js";
@@ -47,9 +52,17 @@ import {
   registrationDeltaClaims,
   versionedSchemaEntityFor,
 } from "../../src/gateway/registration.js";
+import { withStamp } from "../../src/gateway/stamp.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
-import { PLANT, PLANT_POLICY, PLANT_WRITABLE, garden, governedBootstrap } from "./fixtures.js";
+import {
+  PLANT,
+  PLANT_POLICY,
+  PLANT_WRITABLE,
+  garden,
+  governedBootstrap,
+  pickLatest,
+} from "./fixtures.js";
 
 const SEED = "c4".repeat(32);
 const OP = authorForSeed(SEED);
@@ -67,9 +80,28 @@ const OLDEST: Schema = {
   ]),
 };
 const WEED: HyperSchema = { ...PLANT, name: "Weed" };
+const SHIPPER_SEED = "5d".repeat(32);
+const SHIPPER = authorForSeed(SHIPPER_SEED);
+const POST: HyperSchema = { ...PLANT, name: "Post" };
+// A second gather body: the same members, bucketed by role.
+const OTHER_BODY = parseTerm({
+  op: "group",
+  key: "byRole",
+  in: {
+    op: "select",
+    pred: { hasPointer: { targetEntity: { var: "root" } } },
+    in: { op: "mask", policy: "drop", in: "input" },
+  },
+});
 
+// The wall clock is held still. A gateway stamps `validFrom` from it and reads validity at it, so a
+// host clock that steps back between a write and a read would make the write not yet valid.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+});
 const homes: Gateway[] = [];
 afterEach(async () => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   for (const gw of homes.splice(0)) await gw.close();
 });
@@ -102,6 +134,14 @@ const bystanders = (gw: Gateway, count: number) =>
           observed(`plant:other-${n}`, "height", n, 1000 + n, GARDENER_SEED),
         ),
       );
+// A definition of `schema` at `entity`, stamped by the store's clock and valid from now.
+const defined = (gw: Gateway, schema: HyperSchema, entity: string, seed = SEED): Delta =>
+  signClaims(
+    withStamp(gw.stamp(authorForSeed(seed)), (t) =>
+      publishHyperSchemaClaims(schema, entity, authorForSeed(seed), t),
+    ),
+    seed,
+  );
 // The operator's or the gardener's negation of `id`, appended through the door.
 async function strike(gw: Gateway, id: string, seed = SEED, timestamp = FAR): Promise<Delta> {
   const now = gw.validityNow();
@@ -129,6 +169,58 @@ const filedAt = (gw: Gateway, entity: string): Delta[] =>
         ),
     )
     .sort((a, b) => a.claims.timestamp - b.claims.timestamp);
+
+// A module a shipper offers: one program named `name` at `entity`, read as the lens `name`, frozen
+// from a container of the store. `gw.adoptLaw(version, name)` blesses it into the root.
+let modules = 0;
+async function moduleAt(gw: Gateway, entity: string, name: string): Promise<ModuleVersion> {
+  const container = `container:module-${modules++}`;
+  await gw.append([
+    signClaims(
+      withStamp(gw.stamp(OP), (t) =>
+        containerClaims({ container, trust: "untrusted", posture: "separate" }, OP, t),
+      ),
+      SEED,
+    ),
+  ]);
+  const wall = await gw.openContainer({ name: container, backend: new MemoryBackend() });
+  let t = 41_000;
+  const reg = registrationDeltaClaims(
+    entity,
+    name,
+    { props: new Map([["height", pickLatest]]), default: pickLatest, name },
+    [FERN],
+    SHIPPER,
+    () => t++,
+    undefined,
+    ["height"],
+  );
+  await wall.gateway!.federate(
+    [
+      signClaims(
+        publishHyperSchemaClaims({ ...POST, name }, entity, SHIPPER, 40_999),
+        SHIPPER_SEED,
+      ),
+      ...[reg.living, reg.snapshot, reg.binding].map((c) => signClaims(c, SHIPPER_SEED)),
+      signClaims(
+        manifestExportClaims(
+          { alias: name, targetEntity: entity, kind: "schema" },
+          SHIPPER,
+          41_100,
+        ),
+        SHIPPER_SEED,
+      ),
+    ],
+    { admit: () => true },
+  );
+  return wall.gateway!.freeze({
+    op: "select",
+    pred: { match: { field: "author", cmp: "eq", const: SHIPPER } },
+    in: "input",
+  });
+}
+const serves = (gw: Gateway, lens: string): boolean =>
+  gw.registered.some((r) => lensOf(r) === lens);
 
 const registered = (gw: Gateway) =>
   readRegistrations(gw.reactor, gw.validityNow(), OP).filter((r) => lensOf(r) === "Plant");
@@ -188,10 +280,7 @@ describe("COST: a definition read by name opens no whole-store door", () => {
 
   it("Gateway.loadHyperSchema proves a definition with no walk of the store", async () => {
     const cost = await costOf((gw) => {
-      const definition = signClaims(
-        publishHyperSchemaClaims(WEED, "hyperschema:Weed", OP, gw.nextTimestamp(OP)),
-        SEED,
-      );
+      const definition = defined(gw, WEED, "hyperschema:Weed");
       return Promise.resolve(async () =>
         expect((await gw.loadHyperSchema([definition], "hyperschema:Weed")).name).toBe("Weed"),
       );
@@ -201,6 +290,27 @@ describe("COST: a definition read by name opens no whole-store door", () => {
     expect(cost.small.snapshot).toBe(0);
     expect(cost.small.byTarget).toBeGreaterThan(0);
     expect(cost.large).toEqual(cost.small);
+  }, 120_000);
+
+  // A blessing walks the store eleven times for other reasons: the publish it rides, the surface
+  // refold and the adoption records. The incumbent probe adds none. The bound may fall as those
+  // move to an index; it must not rise.
+  it("adoptLaw asks for the incumbent with no walk of its own, and no more with 1000 unrelated facts", async () => {
+    const out: Accesses[] = [];
+    for (const count of [0, UNRELATED]) {
+      const gw = await home();
+      const version = await moduleAt(gw, "hyperschema:Post", "Post");
+      await bystanders(gw, count);
+      out.push(
+        await accesses(gw, async () => {
+          await gw.adoptLaw(version, "Post");
+        }),
+      );
+      expect(serves(gw, "Post")).toBe(true);
+    }
+    expect(out[0]!.snapshot).toBeLessThanOrEqual(11);
+    expect(out[0]!.byTarget).toBeGreaterThan(0);
+    expect(out[1]).toEqual(out[0]);
   }, 120_000);
 
   // Each registration reader walks the store once for its candidates. The loads beside that walk
@@ -279,59 +389,226 @@ describe("COST: a definition read by name opens no whole-store door", () => {
 });
 
 describe("EQUIVALENCE: the scope and the whole lawful set give one answer", () => {
-  it("the same surviving definitions at every law entity, across strikes, strangers and validity", async () => {
+  // Every bucket of the gathered hview, as delta ids.
+  const gathered = (operand: ReturnType<typeof lawfulSnapshot>, at: number, entity: string) => {
+    const rows = evalTerm(HYPER_SCHEMA_SCHEMA.body, operand, at, entity);
+    if (rows.sort !== "hview") throw new Error("expected an hview");
+    return [...rows.hview.props]
+      .map(([prop, entries]) => [prop, entries.map((e) => e.delta.id)] as const)
+      .sort(([a], [b]) => (a < b ? -1 : 1));
+  };
+  const definitionsOf = (operand: ReturnType<typeof lawfulSnapshot>, at: number, entity: string) =>
+    gathered(operand, at, entity).find(([prop]) => prop === "definition")?.[1] ?? [];
+  const negatesAll = (author: string, seed: string, timestamp: number, ...ids: string[]) => ({
+    ...makeNegationClaims(author, timestamp, ids[0]!),
+    validFrom: 1,
+    pointers: ids.map((id) => ({
+      role: "negates",
+      target: { kind: "delta" as const, deltaRef: { delta: id } },
+    })),
+    seed,
+  });
+  const sign = ({ seed, ...claims }: ReturnType<typeof negatesAll>): Delta =>
+    signClaims(claims, seed);
+
+  it("the same hview at every law entity, across strikes, strangers and validity", async () => {
     const gw = await home();
     await evolve(gw);
-    const now = gw.validityNow();
+    await evolve(gw);
     const snapshotEntity = versionedSchemaEntityFor("Plant", OLDEST);
-    const [first, second] = filedAt(gw, PLANT_ENTITY);
+    const [first, second, third] = filedAt(gw, PLANT_ENTITY);
     // first: struck, and the strike stands. second: struck, the strike struck, so it lives.
     await strike(gw, first!.id);
     const revived = await strike(gw, second!.id);
     await strike(gw, revived.id);
     // A stranger's strike of a standing strike, and of a live definition: neither is law.
-    await strike(gw, (await strike(gw, filedAt(gw, snapshotEntity)[0]!.id)).id, GARDENER_SEED);
+    for (const d of filedAt(gw, snapshotEntity)) {
+      await strike(gw, (await strike(gw, d.id)).id, GARDENER_SEED);
+    }
     await strike(gw, second!.id, GARDENER_SEED);
+    // The read time is fixed ahead, so a validity interval can end or start exactly on it.
+    const at = gw.validityNow() + 1e6;
+    const weedAt = (timestamp: number, validFrom: number, validUntil?: number) =>
+      signClaims(
+        {
+          ...publishHyperSchemaClaims(WEED, PLANT_ENTITY, OP, timestamp),
+          validFrom,
+          ...(validUntil === undefined ? {} : { validUntil }),
+        },
+        SEED,
+      );
+    const startsNow = weedAt(FAR + 2, at);
+    const endsNow = weedAt(FAR + 3, 1, at);
+    // One delta that strikes the third definition and the strike of the first. The first lives
+    // again; the third does not.
+    const double = sign(
+      negatesAll(OP, SEED, FAR + 4, third!.id, gw.reactor.negationsOf(first!.id)[0]!),
+    );
+    // The operator's strikes of `startsNow`: one not yet valid, one lapsed, one that ends exactly
+    // at the read time. None holds, so `startsNow` lives.
+    const idle = [
+      { ...negatesAll(OP, SEED, FAR + 5, startsNow.id), validFrom: at + 1 },
+      { ...negatesAll(OP, SEED, FAR + 6, startsNow.id), validUntil: 2 },
+      { ...negatesAll(OP, SEED, FAR + 7, startsNow.id), validUntil: at },
+    ].map(sign);
+    // A strike that also points at the entity: it strikes the second definition and is itself a
+    // member of the gather.
+    const pointed = negatesAll(OP, SEED, FAR + 8, second!.id);
+    const pointing = sign({
+      ...pointed,
+      pointers: [
+        ...pointed.pointers,
+        {
+          role: "about",
+          target: { kind: "entity", entity: { id: PLANT_ENTITY, context: "note" } },
+        },
+      ] as never,
+    });
     await gw.append([
       // A stranger's newer definition at the operator's entity.
       signClaims(publishHyperSchemaClaims(WEED, PLANT_ENTITY, GARDENER, FAR), GARDENER_SEED),
-      // The operator's own, not yet valid and already lapsed.
-      signClaims(
-        { ...publishHyperSchemaClaims(WEED, PLANT_ENTITY, OP, FAR), validFrom: now + 1e9 },
-        SEED,
-      ),
-      signClaims(
-        {
-          ...publishHyperSchemaClaims(WEED, PLANT_ENTITY, OP, FAR + 1),
-          validFrom: 1,
-          validUntil: 2,
-        },
-        SEED,
-      ),
+      // The operator's own: not yet valid, lapsed, starting at the read time, ending at it.
+      weedAt(FAR, at + 1e9),
+      weedAt(FAR + 1, 1, 2),
+      startsNow,
+      endsNow,
+      double,
+      ...idle,
+      pointing,
     ]);
-    const at = gw.validityNow();
-    const definitions = (operand: ReturnType<typeof lawfulSnapshot>, entity: string) => {
-      const rows = evalTerm(HYPER_SCHEMA_SCHEMA.body, operand, at, entity);
-      if (rows.sort !== "hview") throw new Error("expected an hview");
-      return (rows.hview.props.get("definition") ?? []).map((e) => e.delta.id);
-    };
     const whole = lawfulSnapshot(gw.reactor, at, OP);
     const entities = [PLANT_ENTITY, "schema:Plant", snapshotEntity, "hyperschema:Absent"];
     for (const entity of entities) {
       const scope = lawfulScopeAt(gw.reactor, at, entity, OP);
-      expect(definitions(scope, entity), entity).toEqual(definitions(whole, entity));
+      expect(gathered(scope, at, entity), entity).toEqual(gathered(whole, at, entity));
       for (const d of scope) expect(whole.has(d.id), d.id).toBe(true);
     }
-    // The fixture is forceful: one definition struck, one revived, the stranger's absent.
-    expect(definitions(whole, PLANT_ENTITY)).toEqual([second!.id]);
-    expect(definitions(whole, snapshotEntity)).toEqual([]);
-    expect(gw.reactor.byTarget(PLANT_ENTITY).length).toBeGreaterThan(4);
+    // The fixture is forceful. The first definition lives again, the second and third are struck,
+    // the one that starts at the read time lives, the one that ends at it does not.
+    expect(definitionsOf(whole, at, PLANT_ENTITY).sort()).toEqual([first!.id, startsNow.id].sort());
+    expect(whole.has(endsNow.id)).toBe(false);
+    expect(gathered(whole, at, PLANT_ENTITY).map(([prop]) => prop)).toContain("note");
+    expect(definitionsOf(whole, at, snapshotEntity)).toEqual([]);
     // Ungoverned, every author's deltas are law, and the scope follows.
     const open = lawfulSnapshot(gw.reactor, at);
     for (const entity of entities) {
-      expect(definitions(lawfulScopeAt(gw.reactor, at, entity), entity), entity).toEqual(
-        definitions(open, entity),
+      expect(gathered(lawfulScopeAt(gw.reactor, at, entity), at, entity), entity).toEqual(
+        gathered(open, at, entity),
       );
+    }
+  });
+
+  it("a trial set built from the scope and a batch gathers what the whole set and the batch gather", async () => {
+    const gw = await home();
+    const entity = "hyperschema:Weed";
+    const at = gw.validityNow() + 1e6;
+    const weed = (timestamp: number, seed = SEED) =>
+      signClaims(
+        { ...publishHyperSchemaClaims(WEED, entity, authorForSeed(seed), timestamp), validFrom: 1 },
+        seed,
+      );
+    const held = weed(FAR);
+    const [struck, strangerStruck, revived, lapsedStruck, clean, theirs] = [1, 2, 3, 4, 5, 6].map(
+      (n) => weed(FAR + n, n === 6 ? GARDENER_SEED : SEED),
+    ) as [Delta, Delta, Delta, Delta, Delta, Delta];
+    const strikeOfRevived = sign(negatesAll(OP, SEED, FAR + 10, revived.id));
+    const ofHeld = sign(negatesAll(OP, SEED, FAR + 20, held.id));
+    // Held before any batch arrives: strikes of deltas the ground does not hold yet.
+    await gw.append([
+      held,
+      sign(negatesAll(OP, SEED, FAR + 11, struck.id)),
+      sign(negatesAll(GARDENER, GARDENER_SEED, FAR + 12, strangerStruck.id)),
+      strikeOfRevived,
+      sign(negatesAll(OP, SEED, FAR + 13, strikeOfRevived.id)),
+      sign({ ...negatesAll(OP, SEED, FAR + 14, lapsedStruck.id), validUntil: at }),
+      sign(negatesAll(OP, SEED, FAR + 15, theirs.id)),
+    ]);
+    const batches: [string, Delta[], string[]][] = [
+      ["a held strike", [struck], [held.id]],
+      ["a stranger's held strike", [strangerStruck], [held.id, strangerStruck.id]],
+      ["a held strike that is struck", [revived], [held.id, revived.id]],
+      ["a held strike that ends at the read time", [lapsedStruck], [held.id, lapsedStruck.id]],
+      ["no strike", [clean], [clean.id, held.id]],
+      ["a stranger's definition under the operator's strike", [theirs], [held.id]],
+      ["a strike of a held definition", [ofHeld, clean], [clean.id]],
+      ["a delta the ground holds", [held], [held.id]],
+      ["all at once", [struck, strangerStruck, revived, lapsedStruck, clean, theirs, ofHeld], []],
+    ];
+    for (const [name, batch, live] of batches) {
+      const whole = lawfulSnapshot(gw.reactor, at, OP);
+      const scope = lawfulScopeAt(
+        gw.reactor,
+        at,
+        entity,
+        OP,
+        batch.map((d) => d.id),
+      );
+      for (const d of scope) expect(whole.has(d.id), `${name}: ${d.id}`).toBe(true);
+      for (const d of batch) {
+        whole.add(d);
+        scope.add(d);
+      }
+      expect(gathered(scope, at, entity), name).toEqual(gathered(whole, at, entity));
+      if (name !== "all at once") {
+        expect(definitionsOf(whole, at, entity).sort(), name).toEqual([...live].sort());
+      }
+    }
+  });
+});
+
+describe("REFUSAL: a ground that disagrees with its own index is not read", () => {
+  const definition = signClaims(publishHyperSchemaClaims(WEED, "hyperschema:Weed", OP, 10), SEED);
+  const ground = (over: Partial<Ground>): Ground => ({
+    get: (id) => (id === definition.id ? definition : undefined),
+    byTarget: () => [definition.id],
+    negationsOf: () => [],
+    negationWitnesses: () => () => [],
+    negationPredicate: () => () => false,
+    ...over,
+  });
+
+  it("lawfulScopeAt refuses an id the target index names and the ground does not hold", () => {
+    expect(lawfulScopeAt(ground({}), 100, "hyperschema:Weed", OP).size).toBe(1);
+    expect(() =>
+      lawfulScopeAt(
+        ground({ byTarget: () => [definition.id, "gone"] }),
+        100,
+        "hyperschema:Weed",
+        OP,
+      ),
+    ).toThrow(/names delta gone at hyperschema:Weed.*refusing to read law/);
+  });
+
+  it("lawfulScopeAt refuses a strike the negation index names and the ground does not hold", () => {
+    const struck = ground({ negationsOf: (id) => (id === definition.id ? ["gone"] : []) });
+    expect(() => lawfulScopeAt(struck, 100, "hyperschema:Weed", OP)).toThrow(
+      /refusing to read law/,
+    );
+    // The same for a strike of a delta the caller names.
+    expect(() =>
+      lawfulScopeAt(
+        ground({ negationsOf: (id) => (id === "batch" ? ["gone"] : []) }),
+        100,
+        "x",
+        OP,
+        ["batch"],
+      ),
+    ).toThrow(/refusing to read law/);
+  });
+
+  it("the three registration readers refuse; they do not read the registration as unbound", async () => {
+    const gw = await home();
+    await strike(gw, versions(gw)[0]!.deltaId);
+    const lost = filedAt(gw, PLANT_ENTITY)[0]!.id;
+    const now = gw.validityNow();
+    const get = gw.reactor.get.bind(gw.reactor);
+    const readers = [readRegistrations, readRegistrationVersions, readWithdrawnRegistrations];
+    // A bystander store with nothing lost reads without a refusal.
+    await evolve(gw);
+    for (const read of readers) expect(() => read(gw.reactor, now + 1e6, OP)).not.toThrow();
+    vi.spyOn(gw.reactor, "get").mockImplementation((id) => (id === lost ? undefined : get(id)));
+    for (const read of readers) {
+      expect(() => read(gw.reactor, now + 1e6, OP), read.name).toThrow(/refusing to read law/);
     }
   });
 });
@@ -442,14 +719,8 @@ describe("ANSWER (controls: these pass over a whole-store walk too)", () => {
 
   it("a definition whose strike is already held is refused, and nothing lands", async () => {
     const gw = await home();
-    const definition = signClaims(
-      publishHyperSchemaClaims(WEED, "hyperschema:Weed", OP, gw.nextTimestamp(OP)),
-      SEED,
-    );
-    const bystander = signClaims(
-      publishHyperSchemaClaims(WEED, "hyperschema:Moss", OP, gw.nextTimestamp(OP)),
-      SEED,
-    );
+    const definition = defined(gw, WEED, "hyperschema:Weed");
+    const bystander = defined(gw, WEED, "hyperschema:Moss");
     const negation = await strike(gw, definition.id);
     expect(gw.reactor.negationsOf(definition.id)).toEqual([negation.id]);
     await expect(gw.loadHyperSchema([definition], "hyperschema:Weed")).rejects.toThrow(
@@ -459,5 +730,41 @@ describe("ANSWER (controls: these pass over a whole-store walk too)", () => {
     // The bystander, with no strike held, proves and lands.
     expect((await gw.loadHyperSchema([bystander], "hyperschema:Moss")).name).toBe("Weed");
     expect(gw.reactor.get(bystander.id)).toBeDefined();
+  });
+
+  it("a stranger's held strike of a definition does not refuse its publish; the operator's does", async () => {
+    const gw = await home();
+    const [theirs, ours] = ["hyperschema:Weed", "hyperschema:Moss"].map((entity) =>
+      defined(gw, WEED, entity),
+    ) as [Delta, Delta];
+    const forged = await strike(gw, theirs.id, GARDENER_SEED);
+    await strike(gw, ours.id);
+    // Delta level: the stranger's strike is held against the definition before it arrives.
+    expect(gw.reactor.negationsOf(theirs.id)).toEqual([forged.id]);
+    expect((await gw.loadHyperSchema([theirs], "hyperschema:Weed")).name).toBe("Weed");
+    expect(gw.reactor.get(theirs.id)).toBeDefined();
+    await expect(gw.loadHyperSchema([ours], "hyperschema:Moss")).rejects.toThrow(
+      /no surviving schema definition/,
+    );
+    expect(gw.reactor.get(ours.id)).toBeUndefined();
+  });
+
+  it("a stranger's definition at an entity is no incumbent for a blessing; the operator's own is", async () => {
+    const gw = await home();
+    const theirs = defined(gw, { ...POST, body: OTHER_BODY }, "hyperschema:Post", GARDENER_SEED);
+    const ours = defined(gw, { ...POST, name: "Moss", body: OTHER_BODY }, "hyperschema:Moss");
+    await gw.append([theirs, ours]);
+    // Delta level: both rival bodies are held at the entities the two modules name.
+    expect(gw.reactor.byTarget("hyperschema:Post")).toEqual([theirs.id]);
+    expect(gw.reactor.byTarget("hyperschema:Moss")).toEqual([ours.id]);
+
+    await gw.adoptLaw(await moduleAt(gw, "hyperschema:Post", "Post"), "Post");
+    expect(serves(gw, "Post")).toBe(true);
+    expect(gw.resolvedNode("Post", FERN).view["height"]).toBe(34);
+
+    await expect(
+      gw.adoptLaw(await moduleAt(gw, "hyperschema:Moss", "Moss"), "Moss"),
+    ).rejects.toThrow(/A module may not name one of your entities/);
+    expect(serves(gw, "Moss")).toBe(false);
   });
 });
