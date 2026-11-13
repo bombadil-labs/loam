@@ -174,8 +174,9 @@ Design:
   erase data outside a test's own temp dir.
 - Text for Myk uses STE style: commit messages, PR bodies and journal entries. One idea per
   sentence, and 20 words or fewer.
-- Comments explain the code, and they stay short. History goes in the commit message or the
-  journal. No ticket ids in comments.
+- The code carries no comments (Myk, 2026-11-12). `npm run check` refuses one. Only tool
+  directives stay. Hazards live in `src/gateway/SUBSTRATE-HAZARDS.md`. History goes in the commit
+  message or the journal.
 - Keep each change readable. A change that Myk must review carries a few hundred lines of
   decisions at most; mechanical bulk goes in its own commit.
 

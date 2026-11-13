@@ -321,8 +321,9 @@ reader resolve through a Schema, or a door serve?* The middle is not the top —
 `reactor.negationsOf(...)` is still delta-level structure; the object-level question is what a
 **View** contains and what a **door** answers. When the two disagree, that disagreement is usually
 the bug, and neither assertion alone can see it. Where one level is genuinely out of scope, **name
-the gap in the test file** and say which rail would close it; an honest-looking comment over a
-weaker test is how this class keeps surviving review.
+the gap in the test's title** (`it("... [gap: no door-level assertion]")`) or in
+`src/gateway/SUBSTRATE-HAZARDS.md`, and say which rail would close it. The code carries no
+comments, so a gap left unnamed is invisible.
 
 Where a working spec exists, **its acceptance criteria ARE the rail list** — each criterion already
 names its verification path, so P3 is transcription, not invention. If a criterion has no test yet,
@@ -380,7 +381,7 @@ descending order of independence:
    |---|---|---|
    | `npm run lint` | free, already in `npm run check` | H6's common case — the `.hyperschema.name` comparison is an ESLint error |
    | `adlc hollow-test --target <file>` | no tokens | *could this pass with the fix reverted?* — mechanically, on every changed line |
-   | 1–3 routed lenses | a spin-up each | what mutation cannot reach: a vacuous fixture, a header that overclaims, a feature that could be deleted whole |
+   | 1–3 routed lenses | a spin-up each | what mutation cannot reach: a vacuous fixture, a title that overclaims, a feature that could be deleted whole |
    | `loam-verifier` | one per FINDING | refuting what a lens claimed — not one per lens |
 
    A survivor from `hollow-test` is a finding with no model involved, and a clean run *narrows* the
@@ -612,16 +613,13 @@ busy.
   one reason per sentence; then the rails, and what to read. Every sentence obeys the style. Prefer
   a list to a paragraph. Delete a sentence that only sets a mood. Name a risk in its own sentence.
   The register is a maintenance manual, not an essay — and the same holds for the board brief.
-- **Comments explain the code; HISTORY goes in the journal** (Myk, 2026-07-21). A comment answers
-  *what will bite whoever changes this next* — a non-obvious substrate behavior, an invariant, why
-  not the obvious thing. It does **not** narrate how the code got here: what an audit found, what an
-  earlier draft got wrong, why a test was skipped, which PR changed it. That is `JOURNAL.md`, the
-  commit message, and `.adlc/findings.jsonl` — all of which a reader can reach, and none of which
-  costs context on every read of the file.
-  **The tell: if a comment names a PR, an audit, a draft, or a person, it is history in the wrong
-  file.** Don't restate a hazard `SUBSTRATE-HAZARDS.md` already owns — cite it (`H6`) in one line.
-  A test header says what the rail asserts and what it deliberately does not; not its rewrite
-  history. Legacy cruft is not free: it churns tokens forever and crowds the real signal.
+- **The code carries no comments** (Myk, 2026-11-12). `npm run check` refuses one
+  (`npm run comments:check`). Only tool directives stay: `eslint-disable`, `@ts-expect-error`,
+  `prettier-ignore`, coverage hints, `@vitest-environment`, and their kin. A hazard lives in
+  `src/gateway/SUBSTRATE-HAZARDS.md`. History lives in the journal and in commit messages. A test
+  title says what the rail asserts. A known gap goes in the title or in SUBSTRATE-HAZARDS.md. If a
+  missing comment causes a real defect, record the defect in the journal first. Then propose a
+  change to this rule. `node scripts/strip-comments.mjs <path>` removes comments from a file.
 - ~~**Every breaking on-wire change ships a migration** (Myk, 2026-07-12)~~ — **SUPERSEDED
   2026-09-25 by the greenfield ruling** (Myk; `refactor/README.md`): no migrations and no backward
   compatibility. A breaking change changes the bytes and nothing carries old stores forward; a

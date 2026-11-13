@@ -30,7 +30,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const BANNER = "// --- the erasure surface (SPEC §11, §29; T206)";
+const BANNER = "function operatorSeed(";
 const END = "function defaultHome()";
 const SENTENCE = "loam: this store has forgotten nothing that a reader can point at today.";
 

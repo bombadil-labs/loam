@@ -50,11 +50,10 @@ const SRC = readFileSync(new URL("../../src/server/users.ts", import.meta.url), 
 describe("§36 phase 2 — a user is a fact", () => {
   // Criterion 1
   it("names a user as an entity resolved through a Schema, never half of a delta", () => {
-    expect(SRC).not.toMatch(/half of a user that IS a delta/i);
-    expect(SRC).toMatch(/is an ENTITY/);
-    expect(SRC).toMatch(
-      /resolves? through a Schema|resolved into a View|Schema over a HyperSchema/i,
-    );
+    const reactor = new Reactor();
+    ingested(reactor, mkUser("ada", OPERATOR_SEED, 100));
+    expect(userEntity("ada")).toBe("user:ada");
+    expect(resolveUserView(reactor, OPERATOR, Date.now(), "ada")).toEqual({ "loam.user": "ada" });
   });
 
   // Criterion 2 — delta level (admitted) and object level (excluded) in one rail

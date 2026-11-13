@@ -23,10 +23,7 @@ if (home === undefined || clientId === undefined || holdMs === undefined) {
 
 try {
   withOAuthFile<undefined>(home, (file: OAuthFile) => {
-    const until = Date.now() + Number(holdMs);
-    while (Date.now() < until) {
-      // hold the lock, on purpose
-    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(holdMs));
     return {
       next: {
         ...file,

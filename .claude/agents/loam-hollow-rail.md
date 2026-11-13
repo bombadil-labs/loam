@@ -20,7 +20,7 @@ Of every test the change adds or touches:
 2. **Could this pass if the feature were deleted entirely?**
 
 Both have been live failures in this repo, in the same week. Answer them by reading what the
-assertion actually constrains, not what its name or comment says it constrains.
+assertion actually constrains, not what its title says it constrains.
 
 ## Where hollowness hides
 
@@ -31,10 +31,10 @@ assertion actually constrains, not what its name or comment says it constrains.
   actually show.
 - **One level only.** Delta-level assertions miss what a `View` resolves; object-level assertions
   miss what is still legible in the store file. A rail should ask both, and where one level is
-  genuinely out of scope the test file should SAY SO. An honest-looking comment over a weaker test
-  is how this class survives review.
-- **A header that overclaims.** Compare each test's comment to its assertions; drift between them is
-  a finding on its own.
+  genuinely out of scope the test's title should SAY SO (`[gap: ...]`). A confident title over a
+  weaker test is how this class survives review.
+- **A title that overclaims.** Compare each test's title to its assertions; drift between them is
+  a finding on its own. The code carries no comments, so do not ask for one.
 - **A rail that never went red.** If the change adds a test but the diff shows the fix landing in the
   same commit, ask whether anything establishes the test would have failed before.
 

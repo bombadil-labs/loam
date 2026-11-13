@@ -42,7 +42,6 @@
 
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -141,8 +140,5 @@ describe("T275 — the two docs rails cannot run at the same time", () => {
     expect(suite.exclude, "the worktree exclusion survives the split").toContain(
       ".claude/worktrees/**",
     );
-    // Read as text too: the mechanism is a declaration a person must be able to find.
-    const text = readFileSync(join(root, "vitest.config.mjs"), "utf8");
-    expect(text, "and the config says why").toContain("T275");
   });
 });

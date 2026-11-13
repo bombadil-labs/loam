@@ -102,5 +102,11 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    rules: {
+      "no-empty": ["error", { allowEmptyCatch: true }],
+      "@typescript-eslint/ban-ts-comment": ["error", { "ts-expect-error": false }],
+    },
+  },
   eslintConfigPrettier,
 );

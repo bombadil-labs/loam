@@ -36,7 +36,7 @@ import { readFileSync } from "node:fs";
 const cli = readFileSync(process.env["CENSUS_SOURCE"] ?? "src/cli/cli.ts", "utf8");
 const rail = readFileSync(process.env["CENSUS_RAIL"] ?? "test/cli/erasure-verbs.test.ts", "utf8");
 
-const from = cli.indexOf("// --- the erasure surface (SPEC §11, §29; T206)");
+const from = cli.indexOf("function operatorSeed(");
 const to = cli.indexOf("function defaultHome()");
 // A moved banner would otherwise slice an empty region and report a serene 0 of 0.
 if (from < 0 || to < 0 || to <= from) {

@@ -90,9 +90,6 @@ export async function generate() {
     )
     .join("\n");
   const source =
-    `// GENERATED from docs/*.md by scripts/build-docs.mjs — do not edit by hand.\n` +
-    `// Regenerate: \`node scripts/build-docs.mjs\`; \`--check\` diffs without writing (run by the build).\n` +
-    `\n` +
     `export interface DocTopic {\n` +
     `  readonly topic: string;\n` +
     `  readonly summary: string;\n` +
