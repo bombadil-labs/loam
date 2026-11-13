@@ -28,10 +28,8 @@ designed work does **not** live in the spec; it lives as a **ticket** in the sto
 lands, and the landing PR **adds its section as a new `spec/NN-slug.md` file** (with its Provenance
 footer) plus a row in the `SPEC.md` index, in the same change — and **ARCHIVES the ticket it
 realized** (`adlc ticket archive <id> --write --authorize`, moving the shard to
-`.adlc/ticket-archive/`), never deletes it. The distinction is load-bearing (T69): the CI rail
-backstop computes its frozen set from the base tree's shards in BOTH directories, so a deleted
-ticket un-freezes its rails at the exact moment they start protecting landed behavior — the freeze
-would live only while the work was unfinished.
+`.adlc/ticket-archive/`), never deletes it. The archive keeps the record of what the ticket's rails
+were; no CI job reads it during the refactor.
 Each landing writing its *own* file is deliberate: disjoint sections stop colliding, so concurrent
 landings almost never touch the same file (editing an existing section file is the rare exception —
 a bugfix or one-off correction).
@@ -146,10 +144,6 @@ pre-cutover entries were never signed, and the ceremony deliberately did NOT bac
 onto them. It appended one signed `manifest-cutover` record that ATTESTS them and discloses the count
 in its own body. That is the honest shape — you cannot sign what you did not witness — so a bare
 `verify` failing on that history is correct behaviour, not a broken chain.
-
-**CI pins a FLOOR of `@adlc/cli@^1.10.0`** at all three install sites. A pre-forest toolkit does not
-know the segmented store exists; it would write the frozen single-file root instead, silently, and
-report success.
 
 **`adlc run <phase>` asserts the phase's evidence exists, and the names are EXACT.** You record with
 `adlc gate-manifest record <gate-name> --ticket <id>` and assert with `adlc run <phase> --ticket
@@ -424,9 +418,8 @@ only step that reads the code without the ticket's assumptions.
 **P6 — the landing PR writes the ticket's design as a new `spec/NN-slug.md` file, the LAST step and
 the only step that touches `spec/`**: the whole section closed by its `**Provenance.**` footer (the
 PR link(s) + a short implementation note), plus its row in the `SPEC.md` index, and it ARCHIVES the
-realized ticket (`adlc ticket archive <id> --write --authorize` — never a deletion: an archived
-ticket's `rails` stay in the frozen set the CI backstop reads, and a deleted ticket's rails
-un-freeze at the exact moment they start protecting landed behavior; T69).
+realized ticket (`adlc ticket archive <id> --write --authorize` — never a deletion. The archive
+keeps the record of what the ticket's rails were; no CI job reads it during the refactor.)
 It is written FROM the settled working spec, re-cast as narrative —
 `spec/` records what IS, in prose, for a reader; the working spec was a gateable instrument for a
 builder. Different genres, different lifetimes; do not paste one into the other. The spec grows only

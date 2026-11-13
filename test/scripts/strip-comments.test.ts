@@ -123,12 +123,19 @@ describe("strip-comments removes comments and nothing else", () => {
   });
 
   it.each([
-    ["// prettier-ignore because the table reads better aligned", "// prettier-ignore"],
-    ["// prettier-ignore -- a reason", "// prettier-ignore"],
     ["/* c8 ignore next 3 -- a reason */", "/* c8 ignore next 3 */"],
     ["/* c8 ignore start: the platform branch */", "/* c8 ignore start */"],
     ["/* c8 ignore stop because we are done */", "/* c8 ignore stop */"],
     ["/* v8 ignore next: a reason */", "/* v8 ignore next */"],
+    ["/* v8 ignore next -- because */", "/* v8 ignore next */"],
+    ["// @ts-ignore: reason", "// @ts-ignore"],
+    ["// @ts-expect-error: reason", "// @ts-expect-error"],
+    ["// @ts-nocheck because the file is generated", "// @ts-nocheck"],
+    [
+      "// eslint-disable-next-line no-console -- a reason",
+      "// eslint-disable-next-line no-console",
+    ],
+    ["/* eslint-enable no-console -- a reason */", "/* eslint-enable no-console */"],
     ["/* istanbul ignore else because it cannot happen */", "/* istanbul ignore else */"],
     ['/// <reference types="node" /> the node types', '/// <reference types="node" />'],
   ])("drops the prose after a directive: %s", (directive, kept) => {
@@ -136,6 +143,33 @@ describe("strip-comments removes comments and nothing else", () => {
     const result = strip(source, "fixture.ts");
     expect(result.text).toBe(`${kept}\nconst x = 1;\n`);
     expect(result.removed, "--check flags the prose").toHaveLength(1);
+  });
+
+  it.each([
+    "// prettier-ignore is not used here",
+    "// prettier-ignore because the table reads better aligned",
+    "// prettier-ignore -- a reason",
+    "// the eslint-disable-next-line above is gone",
+    "// see @ts-ignore in the old file",
+    "/* note: v8 ignore next was removed */",
+  ])("removes prose whole, never leaving a live directive: %s", (comment) => {
+    expect(stripped(`${comment}\nconst x = 1;\n`)).toBe("const x = 1;\n");
+  });
+
+  it.each(["/* v8 ignore next -- @preserve */", "/* c8 ignore start -- @preserve */"])(
+    "keeps a coverage hint's @preserve marker: %s",
+    (directive) => {
+      const source = `${directive}\nconst x = 1;\n`;
+      const result = strip(source, "fixture.ts");
+      expect(result.text).toBe(source);
+      expect(result.removed).toHaveLength(0);
+    },
+  );
+
+  it("keeps the final newline when the last line was a comment", () => {
+    expect(stripped("const a = 1;\n/* end */")).toBe("const a = 1;\n");
+    expect(stripped("const a = 1;\n// end\n")).toBe("const a = 1;\n");
+    expect(stripped("const a = 1; // end")).toBe("const a = 1;");
   });
 
   it("sees a line break that decides automatic semicolon insertion", () => {

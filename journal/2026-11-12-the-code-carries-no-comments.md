@@ -19,7 +19,9 @@
 - A hazard lives in `src/gateway/SUBSTRATE-HAZARDS.md`. History lives here and in commit messages.
 - A known gap in a rail goes in the test title, for example `[gap: no door-level assertion]`.
 - `comments:check` reads every tracked `.ts`, `.mts`, `.cts`, `.tsx`, `.mjs`, `.cjs` and `.js` file.
-  It excludes vendored bundles, `node_modules` and `demos/village/homes/`.
+  It also reads untracked files that git does not ignore.
+- It excludes vendored bundles, `node_modules`, `demos/village/homes/`, and `dist/` and `site-dist/`
+  at the repo root.
 - Inline `<script>` in `.html` files is out of scope. Comments in YAML are out of scope.
 
 ## The proof

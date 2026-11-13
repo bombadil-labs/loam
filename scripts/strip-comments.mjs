@@ -18,8 +18,7 @@ const EXCLUDED = [
 const DIRECTIVES = [
   /^eslint-disable(-next-line|-line)?(\s|$)/,
   /^eslint-enable(\s|$)/,
-  /^@ts-(expect-error|ignore|nocheck|check)(\s|$)/,
-  /^prettier-ignore(\s|$)/,
+  /^@ts-(expect-error|ignore|nocheck|check)(\s|:|$)/,
   /^(c8|v8|istanbul) ignore(\s|$)/,
   /^@vitest-environment\s/,
   /^[#@]__(PURE|NO_SIDE_EFFECTS)__$/,
@@ -117,15 +116,14 @@ export function directiveOf(text, c) {
   }
   const body = bodyOf(text, c);
   const first = body.split("\n")[0].trim();
+  if (body === "prettier-ignore") return c.block ? "/* prettier-ignore */" : "// prettier-ignore";
   if (!DIRECTIVES.some((re) => re.test(first))) return null;
   let kept = first;
   if (/^eslint-(disable|enable)/.test(first)) {
     const full = body.replace(/\s+/g, " ");
     kept = full.split(" -- ")[0].replace(/\s--$/, "").trim();
   } else if (/^@ts-/.test(first)) {
-    kept = first.split(/\s/)[0];
-  } else if (/^prettier-ignore/.test(first)) {
-    kept = "prettier-ignore";
+    kept = /^@ts-[a-z-]+/.exec(first)[0];
   } else if (/^(c8|v8|istanbul) ignore/.test(first)) {
     const words = first.split(/\s+/);
     const args = [];
@@ -136,6 +134,7 @@ export function directiveOf(text, c) {
       if (arg[2] === ":") break;
     }
     kept = [...words.slice(0, 2), ...args].join(" ");
+    if (/\s--\s*@preserve$/.test(body)) kept += " -- @preserve";
   } else if (/^@vitest-environment/.test(first)) {
     kept = first.split(/\s+/).slice(0, 2).join(" ");
   }
@@ -189,6 +188,7 @@ function tidy(text) {
     }
     out.push(line);
   }
+  if (dropped && out.length > 0 && out.at(-1) !== "") out.push("");
   while (out.length > 1 && out.at(-1) === "" && out.at(-2) === "") out.pop();
   return out.join("\n");
 }
