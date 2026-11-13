@@ -1,7 +1,3 @@
-// SPEC §2, "Self-hosting schema-schema": schemas are data. publishHyperSchemaClaims turns a
-// HyperSchema into claims; loadHyperSchema grows it back from deltas; evolution is append and
-// deprecation is negation. The metacircular seed (HYPER_SCHEMA_SCHEMA) round-trips through itself.
-
 import { describe, expect, it } from "vitest";
 import {
   DeltaSet,
@@ -48,7 +44,6 @@ describe("spike: loadHyperSchema(deltas) → HyperSchema", () => {
   });
 
   it("evolution is append: the newer definition supersedes, body and all", () => {
-    // v2's body genuinely differs from v1's — otherwise supersession of the term is unprovable.
     const v2Body = parseTerm({ op: "group", key: "byRole", in: "input" });
     const v1 = publishHyperSchemaClaims(PLANT, "schema:Evolving", GARDENER, 1000);
     const v2 = publishHyperSchemaClaims(
@@ -84,14 +79,12 @@ describe("spike: loadHyperSchema(deltas) → HyperSchema", () => {
 });
 
 describe("spike: schema refs — the recursion step 3's nested GraphQL types stand on", () => {
-  // A bed holds plants: the BedWithPlants schema expands each "plant" edge through the Plant
-  // schema, nesting a child HView inside the parent's bucket.
   const BED = "bed:shade";
   const BED_BODY = parseTerm({
     op: "expand",
     role: { exact: "plant" },
     schema: "Plant",
-    reading: "Plant", // issue #23: the child resolves through its OWN reading, named here
+    reading: "Plant",
     in: {
       op: "group",
       key: "byTargetContext",
@@ -102,9 +95,6 @@ describe("spike: schema refs — the recursion step 3's nested GraphQL types sta
       },
     },
   });
-  // The child's reading (issue #23): a resolution Schema named "Plant", passed as a reading so the
-  // registry can resolve the expand's `reading: "Plant"`. Empty props + pick-desc default reproduce
-  // exactly the child view the pre-0.8 parent-Schema recursion produced — the change is who NAMES it.
   const PLANT_READING: Schema = {
     props: new Map(),
     default: { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } },
@@ -144,9 +134,6 @@ describe("spike: schema refs — the recursion step 3's nested GraphQL types sta
       { props: new Map(), default: { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } } },
       result.hview,
     ) as Record<string, View>;
-    // The child carries its own properties AND the back-edge that led there: the planting delta
-    // files under the fern too, so the expanded view shows `planted: bed` — the graph is honest
-    // about both directions of the edge.
     expect(view["plants"]).toEqual({ height: 30, planted: BED });
   });
 });

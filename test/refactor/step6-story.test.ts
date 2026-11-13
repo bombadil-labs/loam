@@ -1,14 +1,3 @@
-// Step 6, confirmed end to end through the CLI on real sqlite homes. The story an operator lives:
-//
-//   I keep two notes. Alice serves a note. I open a channel from Alice into my container "friends".
-//   The channel's pool is its own peer: it has its own key, kept beside my store, and my notes are
-//   copied into it. I erase one of my notes; my erasure reaches the pool as an order naming it, and
-//   the note's bytes leave every file under my home, the pool's file included, while my other note
-//   and Alice's note stay. I restart; the pool reopens under its own key. If the pool's key is
-//   lost, my store refuses to reopen that pool rather than fall back to my key.
-//
-// Every check reads files or runs a command; nothing here reaches into a gateway object.
-
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,7 +20,6 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-/** Every file under `dir`, recursively: the store, its -wal sidecar, pool files, key files. */
 function filesUnder(dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -44,7 +32,6 @@ function filesUnder(dir: string): string[] {
 const homeHolds = (home: string, needle: string): boolean =>
   filesUnder(home).some((f) => readFileSync(f).includes(needle));
 
-/** Serve `home`, write notes through its own door, and return the running handle. */
 async function writeNotes(home: string, token: string, notes: readonly [string, string][]) {
   const handle = await run(
     ["serve", "--http", "--home", home, "--port", "0", "--token", token],
@@ -53,8 +40,6 @@ async function writeNotes(home: string, token: string, notes: readonly [string, 
   );
   if (typeof handle === "number") throw new Error(`serve refused: ${said()}`);
   for (const [entity, title] of notes) {
-    // `connection: close`: no pooled socket for a later pull to reuse once this server, which
-    // shares the test's event loop, has reaped it (see test/federation/drop-cli.test.ts).
     const res = await fetch(`${handle.url}/default/graphql`, {
       method: "POST",
       headers: {
@@ -71,7 +56,6 @@ async function writeNotes(home: string, token: string, notes: readonly [string, 
   return handle;
 }
 
-/** The peers whose journals a sqlite store file holds. */
 function journalPeers(file: string): string[] {
   const db = new Database(file, { readonly: true });
   try {
@@ -83,7 +67,6 @@ function journalPeers(file: string): string[] {
   }
 }
 
-/** The id of the one row in a sqlite file whose claims carry `needle`. */
 function rowId(file: string, needle: string): string {
   const db = new Database(file, { readonly: true });
   try {
@@ -135,7 +118,6 @@ describe("step 6: a channel pool is its own peer, end to end", () => {
       await peer.close();
     }
 
-    // The pool has its own key, kept beside my store, and it is not my operator key.
     const keyFile = `${storePath(me)}.poolkeys.json`;
     expect(existsSync(keyFile)).toBe(true);
     const keys = JSON.parse(readFileSync(keyFile, "utf8")) as Record<string, string>;
@@ -144,10 +126,8 @@ describe("step 6: a channel pool is its own peer, end to end", () => {
       readFileSync(join(me, "operator.seed"), "utf8").trim(),
     );
 
-    // The premise: my note is in my store's file and in the pool's file.
     const [poolName] = readdirSync(join(me, "channels")).filter((n) => n.endsWith(".sqlite"));
     const pool = join(me, "channels", poolName!);
-    // The pool's journal belongs to the saved key's peer; my store's journal to my operator key.
     const poolKey = authorForSeed(keys["channel:friends:alice"]!);
     const operator = authorForSeed(readFileSync(join(me, "operator.seed"), "utf8").trim());
     expect(journalPeers(pool)).toEqual([poolKey]);
@@ -156,8 +136,6 @@ describe("step 6: a channel pool is its own peer, end to end", () => {
     expect(readFileSync(pool).includes("ERASED-STORY-MARKER")).toBe(true);
     expect(homeHolds(me, "ALICE-STORY-MARKER")).toBe(true);
 
-    // I erase my first note. Its bytes leave every file under my home, the pool's too; my other
-    // note and Alice's note stay.
     const gone = rowId(storePath(me), "ERASED-STORY-MARKER");
     lines.length = 0;
     expect(await run(["erase", gone, "--reason", "the story", "--home", me], io()), said()).toBe(0);
@@ -165,7 +143,6 @@ describe("step 6: a channel pool is its own peer, end to end", () => {
     expect(readFileSync(pool).includes("KEPT-STORY-MARKER")).toBe(true);
     expect(homeHolds(me, "ALICE-STORY-MARKER")).toBe(true);
 
-    // I restart. The pool reopens under its own key, and the channel is still listed.
     lines.length = 0;
     const again = await run(
       ["serve", "--http", "--home", me, "--port", "0", "--token", "t"],
@@ -181,7 +158,6 @@ describe("step 6: a channel pool is its own peer, end to end", () => {
     expect(said()).toContain("channel:friends:alice");
     expect(homeHolds(me, "ERASED-STORY-MARKER")).toBe(false);
 
-    // The pool's key is lost. My store does not reopen that pool under my key: it says so.
     writeFileSync(keyFile, "{}");
     lines.length = 0;
     const lost = await run(["serve", "--http", "--home", me, "--port", "0", "--token", "t"], io(), {

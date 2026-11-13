@@ -1,10 +1,3 @@
-// The release: `npm run release -- patch|minor|major` (default patch). Runs the whole gate
-// locally, bumps the version (the `version` lifecycle syncs the in-source constants), commits,
-// tags vX.Y.Z, and pushes — the GitHub Actions release workflow takes it from the tag.
-//
-// Refuses to release from anywhere but a clean, up-to-date main: a release is a statement
-// about what main IS, not about a working tree.
-
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 
@@ -20,7 +13,6 @@ if (!["patch", "minor", "major"].includes(bump)) {
   die(`the bump is patch, minor, or major — not "${bump}"`);
 }
 
-// --- the preconditions ---------------------------------------------------------------------
 if (read("git rev-parse --abbrev-ref HEAD") !== "main") {
   die("releases cut from main only");
 }
@@ -40,10 +32,8 @@ for (const license of ["LICENSE-MIT", "LICENSE-APACHE"]) {
   }
 }
 
-// --- the gate, locally (the workflow runs it again — a tag should never be a gamble) --------
 run("npm run check");
 
-// --- bump, sync, commit, tag, push -----------------------------------------------------------
 run(`npm version ${bump} -m "release v%s"`);
 const version = JSON.parse(readFileSync("package.json", "utf8")).version;
 run("git push origin main --follow-tags");

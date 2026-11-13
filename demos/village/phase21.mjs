@@ -1,10 +1,3 @@
-// Phase 21 — THE SCHEMA IS A CITIZEN (SPEC §21 slice 2). Until now a lens rode INLINE in its
-// registration — canonical JSON with no identity of its own. Slice 2 lifts it: register a lens and the
-// almanac's ground gains a living `schema:<name>` entity (a domain node like any Person or Film) and a
-// frozen, content-addressed VersionedSchema snapshot beside it. Evolve the lens and a NEW snapshot is
-// minted while the OLD one goes on answering — coexist, never superseded — so each §17 version resolves
-// against its OWN frozen reading. This act reads those entities straight out of the running store.
-
 import {
   DeltaSet,
   loadSchema,
@@ -27,12 +20,9 @@ const GATHER = {
 };
 const PICK = { pick: { order: { byTimestamp: "desc" } } };
 
-// The lens this act owns end to end (a name of its own, so a re-run is idempotent by law).
 const LEDGER = { name: "Ledger21", alg: 1, body: parseTerm(GATHER) };
 const ALL = { all: { order: { byTimestamp: "asc" } } };
 const V1 = parseSchema({ props: { amount: PICK }, default: PICK });
-// v2 declares `memo` as ALL (a list). v1 never named it, so v1's DEFAULT (pick) answers the same fact
-// as a SCALAR — one ground, two frozen readings, the shape of §17 freezing made visible.
 const V2 = parseSchema({ props: { amount: PICK, memo: ALL }, default: PICK });
 
 let almanac;
@@ -45,7 +35,6 @@ try {
       headers: token === undefined ? {} : { authorization: `Bearer ${token}` },
     });
 
-  // Clear the stage: strike every surviving Ledger21 version (the almanac's home persists between runs).
   for (const stale of almanac.gateway
     .registrationVersions()
     .filter((v) => v.hyperschema.name === "Ledger21")) {
@@ -57,7 +46,6 @@ try {
     ]);
   }
 
-  // Register the lens, and give it one fact to resolve.
   await almanac.gateway.publishRegistration(LEDGER, V1, ["ledger:almanac"]);
   await almanac.gateway.append([
     signClaims(
@@ -73,7 +61,6 @@ try {
     ),
   ]);
 
-  // 21.1 — the lens is a living entity now: `schema:Ledger21` reads back as a genuine domain node.
   const living = loadSchema(ground(), schemaLivingEntityFor("Ledger21"));
   check(
     "21.1",
@@ -82,7 +69,6 @@ try {
     `schema:Ledger21 → {${[...living.props.keys()].join(", ")}}`,
   );
 
-  // 21.2 — a frozen, content-addressed VersionedSchema snapshot stands beside the living lens.
   const v1Snap = versionedSchemaEntityFor("Ledger21", V1);
   const frozenV1 = loadSchema(ground(), v1Snap);
   check(
@@ -92,9 +78,7 @@ try {
     `${v1Snap.slice(0, 26)}…`,
   );
 
-  // 21.3 — evolve: a NEW snapshot is minted; the OLD one still answers (coexist, never superseded).
   await almanac.gateway.publishRegistration(LEDGER, V2, ["ledger:almanac"]);
-  // a memo fact, so v2 (which declares memo) shows it where v1 (which never named it) omits it entirely
   await almanac.gateway.append([
     signClaims(
       {
@@ -109,7 +93,7 @@ try {
     ),
   ]);
   const v2Snap = versionedSchemaEntityFor("Ledger21", V2);
-  const stillFrozenV1 = loadSchema(ground(), v1Snap); // the old snapshot, untouched by the new mint
+  const stillFrozenV1 = loadSchema(ground(), v1Snap);
   const frozenV2 = loadSchema(ground(), v2Snap);
   check(
     "21.3",
@@ -121,7 +105,6 @@ try {
     `v1 ${v1Snap.slice(15, 23)}… ≠ v2 ${v2Snap.slice(15, 23)}…`,
   );
 
-  // 21.4 — end to end: each §17 version freezes against its OWN snapshot, straight through the REST door.
   const versions = almanac.gateway
     .registrationVersions()
     .filter((v) => v.hyperschema.name === "Ledger21");

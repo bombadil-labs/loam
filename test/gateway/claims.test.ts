@@ -1,9 +1,3 @@
-// Step 12's contract: writes become claims. A schema is a PROTOCOL — the read program (the
-// body) and the write discipline (claim templates), both data, both traveling in the
-// registration. A template mutation emits ONE signed multi-pointer delta shaped exactly as
-// declared; the generic `_claim` covers shapes no template anticipated; `_hviewHex` sits
-// beside `_hex` so two lenses can prove they read the same gathered ground.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
@@ -22,7 +16,6 @@ const MALLORY_SEED = "ee".repeat(32);
 
 const ALL = { kind: "all", order: { kind: "byTimestamp", dir: "asc" } } as const;
 
-// The Evening schema: a person's social calendar, written through ONE template.
 const EVENING_TEMPLATES: ClaimTemplates = {
   hostScreening: {
     pointers: [
@@ -30,7 +23,7 @@ const EVENING_TEMPLATES: ClaimTemplates = {
       { role: "film", at: { arg: "film" }, context: "screenings" },
       { role: "guest", at: { arg: "guests" }, context: "events_attended", each: true },
       { role: "date", value: { arg: "date" } },
-      { role: "kind", value: "screening" }, // a literal: no arg, always stamped
+      { role: "kind", value: "screening" },
     ],
   },
 };
@@ -70,14 +63,14 @@ describe("claim templates: the write discipline travels with the schema", () => 
     expect(result.errors).toBeUndefined();
     const deltaId = (result.data as { hostScreening: { delta: string } }).hostScreening.delta;
     const landed = [...gateway.reactor.snapshot()].filter((d) => !before.has(d.id));
-    expect(landed).toHaveLength(1); // ONE delta — the whole point
+    expect(landed).toHaveLength(1);
     expect(landed[0]!.id).toBe(deltaId);
     expect(landed[0]!.claims.author).toBe(MILES);
 
     const ptrs = landed[0]!.claims.pointers;
     const ofRole = (role: string) => ptrs.filter((p) => p.role === role);
     expect(ofRole("host")).toHaveLength(1);
-    expect(ofRole("guest")).toHaveLength(2); // `each` expanded the array
+    expect(ofRole("guest")).toHaveLength(2);
     const host = ofRole("host")[0]!;
     expect(host.target.kind === "entity" && host.target.entity).toEqual({
       id: "person:miles",
@@ -88,9 +81,6 @@ describe("claim templates: the write discipline travels with the schema", () => 
     const kind = ofRole("kind")[0]!;
     expect(kind.target.kind === "primitive" && kind.target.value).toBe("screening");
 
-    // and the fact resolves from the OTHER end too — one delta, many views: at Wren's root the
-    // entry reads as the event FROM HER PERSPECTIVE (host, film, the other guest, the date; her
-    // own anchoring pointer elided)
     const wren = await gateway.query(`{ evening(entity: "person:wren") { events_attended } }`);
     const attended = JSON.stringify(wren.data);
     expect(attended).toContain("person:miles");
@@ -112,13 +102,12 @@ describe("claim templates: the write discipline travels with the schema", () => 
   it("a template whose output its own schema cannot see is refused at publish", async () => {
     const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
     const blind: ClaimTemplates = {
-      orphanNote: { pointers: [{ role: "note", value: { arg: "note" } }] }, // no entity pointer
+      orphanNote: { pointers: [{ role: "note", value: { arg: "note" } }] },
     };
     await expect(
       gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN], undefined, undefined, blind),
     ).rejects.toThrow(/template/);
 
-    // and the SUBTLER case: an entity pointer whose context the schema's own gather excludes
     const { parseTerm } = await import("@bombadil/rhizomatic");
     const heightsOnly = {
       name: "HeightsOnly",
@@ -165,7 +154,6 @@ describe("claim templates: the write discipline travels with the schema", () => 
     await expect(
       gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN], undefined, undefined, hyphenated),
     ).rejects.toThrow(/argument name/);
-    // and __proto__ can never become an arg (it would vanish into a plain object's prototype)
     const proto: ClaimTemplates = {
       sneak: { pointers: [{ role: "subject", at: { arg: "__proto__" }, context: "height" }] },
     };
@@ -210,9 +198,6 @@ describe("claim templates: the write discipline travels with the schema", () => 
   it("a malformed template in a stored registration is dropped; the schema still binds", async () => {
     const backend = new MemoryBackend();
     const gateway = await Gateway.open(backend, { seed: OPERATOR_SEED });
-    // hand-plant a registration whose mutations payload is garbage (past publish's guards). §21: the
-    // binding names its schema entities, so we plant the living Schema + snapshot too, then bolt the
-    // poison mutations pointer onto the binding.
     const { publishHyperSchemaClaims } = await import("@bombadil/rhizomatic");
     const { living, snapshot, binding } = registrationDeltaClaims(
       "hyperschema:Plant",
@@ -231,7 +216,6 @@ describe("claim templates: the write discipline travels with the schema", () => 
           ...binding,
           pointers: [
             ...binding.pointers,
-            // JSON-valid but SHAPE-invalid: parseClaimTemplates throws, the drop is quiet
             { role: "mutations", target: { kind: "primitive", value: '{"x":{"pointers":[]}}' } },
           ],
         },
@@ -241,7 +225,7 @@ describe("claim templates: the write discipline travels with the schema", () => 
     await gateway.flush();
     const reopened = await Gateway.open(backend, { seed: OPERATOR_SEED });
     const read = await reopened.query(`{ plant(entity: "${FERN}") { height } }`);
-    expect(read.errors).toBeUndefined(); // the schema bound; the poison template just fell away
+    expect(read.errors).toBeUndefined();
     await gateway.close();
     await reopened.close();
   });
@@ -333,10 +317,9 @@ describe("_hviewHex: same evidence, many answers", () => {
     };
     const b = (await gateway.query(`{ plantCount(entity: "${FERN}") { _hex _hviewHex } }`))
       .data as { plantCount: { _hex: string; _hviewHex: string } };
-    expect(a.plant._hviewHex).toBe(b.plantCount._hviewHex); // one gathered ground
-    expect(a.plant._hex).not.toBe(b.plantCount._hex); // two adjudications (latest=34 vs count=2)
+    expect(a.plant._hviewHex).toBe(b.plantCount._hviewHex);
+    expect(a.plant._hex).not.toBe(b.plantCount._hex);
 
-    // and a live stream's frames carry both addresses too
     const stream = await gateway.subscribe(
       `subscription { plant(entity: "${FERN}") { _hex _hviewHex } }`,
     );

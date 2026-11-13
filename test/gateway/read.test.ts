@@ -1,10 +1,3 @@
-// Step 3's contract: the read gateway. A Gateway fronts one StoreBackend — it boots by
-// replaying the store into a Reactor, writes every accepted delta through, and serves GraphQL
-// whose shape is DERIVED from (HyperSchema, Schema): field names from the policy's props,
-// field shapes from each Policy's kind. A query resolves via resolveView over the live
-// materialization, and its `_hex` is the content-addressed snapshot — stable across arrival
-// order, stable across processes, changed only by relevant new deltas.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -67,7 +60,6 @@ async function queryPlant(gateway: Gateway): Promise<PlantRow> {
 }
 
 const tmp = mkdtempSync(join(tmpdir(), "loam-gateway-"));
-// maxRetries rides out a Windows EBUSY if the OS hasn't released a just-closed sqlite handle.
 afterAll(() => rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
 
 describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
@@ -75,10 +67,10 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
     const gateway = await openGateway();
     const plant = await queryPlant(gateway);
     expect(plant._entity).toBe(FERN);
-    expect(plant.height).toBe(34); // pick byTimestamp desc
-    expect(plant.tag).toEqual(["shade", "fronds"]); // all → list
-    expect(plant.watered).toBe(false); // absentAs speaks for silence
-    expect(plant.readings).toBe(2); // merge count → the COUNT (the values are 7 and 9)
+    expect(plant.height).toBe(34);
+    expect(plant.tag).toEqual(["shade", "fronds"]);
+    expect(plant.watered).toBe(false);
+    expect(plant.readings).toBe(2);
     expect(plant._hex).toMatch(/^[0-9a-f]+$/);
     await gateway.close();
   });
@@ -111,7 +103,7 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
     const a = await queryPlant(forward);
     const b = await queryPlant(backward);
     expect(a._hex).toBe(b._hex);
-    expect((await queryPlant(forward))._hex).toBe(a._hex); // re-query: same pin
+    expect((await queryPlant(forward))._hex).toBe(a._hex);
     await forward.close();
     await backward.close();
   });
@@ -125,7 +117,6 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
     const loaded = await gateway.loadHyperSchema([published], "schema:Plant");
     expect(loaded.name).toBe("Plant");
     expect(termHash(loaded.body)).toBe(termHash(PLANT.body));
-    // the loaded schema serves queries like the hand-built one
     await gateway.append(garden);
     gateway.register(loaded, PLANT_POLICY, [FERN]);
     expect((await queryPlant(gateway)).height).toBe(34);
@@ -177,9 +168,9 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
         plant: { watered: boolean; height: number | null; readings: number | null };
       }
     ).plant;
-    expect(ghost.watered).toBe(false); // absentAs still speaks
-    expect(ghost.height).toBeNull(); // pick over silence is null
-    expect(ghost.readings).toBeNull(); // and so is a count of nothing
+    expect(ghost.watered).toBe(false);
+    expect(ghost.height).toBeNull();
+    expect(ghost.readings).toBeNull();
     await gateway.close();
   });
 
@@ -204,7 +195,7 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
       op: "expand",
       role: { exact: "plant" },
       schema: "Plant",
-      reading: "Plant", // issue #23: the child resolves through its own Plant reading
+      reading: "Plant",
       in: {
         op: "group",
         key: "byTargetContext",
@@ -243,7 +234,7 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
       bedWithPlants: { plants: Record<string, unknown>; _view: Record<string, unknown> };
     };
     expect(data.plant.height).toBe(34);
-    expect(data.bedWithPlants.plants).toMatchObject({ height: 34 }); // the nested child view
+    expect(data.bedWithPlants.plants).toMatchObject({ height: 34 });
     expect(data.bedWithPlants._view).toHaveProperty("plants");
     await gateway.close();
   });
@@ -251,7 +242,7 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
   it("_view carries dynamic properties the policy never named", async () => {
     const gateway = await openGateway([
       ...garden,
-      observed(FERN, "kind", "fern", 1200, GARDENER_SEED), // no policy prop for "kind"
+      observed(FERN, "kind", "fern", 1200, GARDENER_SEED),
     ]);
     const result = await gateway.query(`{ plant(entity: "${FERN}") { _view } }`);
     const view = (result.data as { plant: { _view: Record<string, unknown> } }).plant._view;
@@ -261,11 +252,9 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
 
   it("a refused registration leaves the gateway exactly as it was", async () => {
     const gateway = await openGateway();
-    // duplicate schema name → refused by the registry
     expect(() =>
       gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE),
     ).toThrow();
-    // a colliding property name → refused by the gql builder
     expect(() =>
       gateway.register(
         { name: "Plant2", alg: 1, body: PLANT_BODY },
@@ -273,7 +262,6 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
         [FERN],
       ),
     ).toThrow(/collides/);
-    // and the gateway still answers as before
     expect((await queryPlant(gateway)).height).toBe(34);
     await gateway.close();
   });
@@ -281,11 +269,11 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
   it("loadHyperSchema proves the definition before anything lands: a bad batch persists nothing", async () => {
     const backend = new MemoryBackend();
     const gateway = await Gateway.open(backend);
-    const stray = observed(FERN, "height", 30, 1000, GARDENER_SEED); // defines no schema
+    const stray = observed(FERN, "height", 30, 1000, GARDENER_SEED);
     await expect(gateway.loadHyperSchema([stray], "schema:Nope")).rejects.toThrow(
       /no surviving schema definition/,
     );
-    expect(await backend.deltasSince(new Set())).toEqual([]); // append-only stores negate nothing
+    expect(await backend.deltasSince(new Set())).toEqual([]);
     await gateway.close();
   });
 
@@ -309,11 +297,9 @@ describe("the read gateway: GraphQL derived from (HyperSchema, Schema)", () => {
       `mutation { plant(entity: "${FERN}", height: 99) { height } }`,
     );
     expect(failed.errors?.join(" ")).toMatch(/disk failure/);
-    // the mutation that failed is NOT being served: no phantom state
     expect((await queryPlant(gateway)).height).toBe(before.height);
     expect((await queryPlant(gateway))._hex).toBe(before._hex);
 
-    // the disk heals; the same write simply works — a failed append is retryable, not fatal
     backend.failNow = false;
     const retried = await gateway.query(
       `mutation { plant(entity: "${FERN}", height: 99) { height } }`,

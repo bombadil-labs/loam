@@ -1,5 +1,3 @@
-// Protected local history. Raw restore is a trusted host capability; wire signatures alone
-// never establish that an event was issued by this home's channel service.
 import type { Peer } from "../gateway/peer.js";
 import { computeId, type Claims, type Delta, type Reactor } from "@bombadil/rhizomatic";
 import type { Gateway } from "../gateway/gateway.js";
@@ -23,12 +21,7 @@ import type { Ground } from "../gateway/ground.js";
 export const LOCAL_EVENT = "loam.local.channel.event";
 export const reservedLocal = (d: Delta): boolean =>
   inLocalContext(d, LOCAL_EVENT) || inLocalContext(d, LOCAL_CONTROL);
-/**
- * Does this offered delta verify? One with the id and signature of a verified held delta, whose
- * claims recompute to that id, has the held delta's verdict — so a re-offer of what the ground
- * already holds costs a content hash, not a signature check. Anything else takes the full check,
- * and the offered object is memoized: the reactor keeps that object, so its later reads hit.
- */
+
 export function verifiesAgainstHeld(reactor: Ground, d: Delta): boolean {
   const held = reactor.get(d.id);
   if (
@@ -41,9 +34,6 @@ export function verifiesAgainstHeld(reactor: Ground, d: Delta): boolean {
     return true;
   return verified(d);
 }
-// Fold one delta into a protected set: a local event or control record protects itself, a control
-// marker remembers its target even after the bytes have gone, and every strike is indexed by what
-// it strikes so the closure below can follow it.
 function absorb(d: Delta, roots: Set<string>, dependents: Map<string, Set<string>>): void {
   let local = false,
     control = false;
@@ -71,14 +61,11 @@ function absorb(d: Delta, roots: Set<string>, dependents: Map<string, Set<string
   }
 }
 interface ProtectedMemo {
-  swept: number; // arrival-log high-water mark
-  roots: Set<string>; // local events, controls, and the targets controls remember
-  dependents: Map<string, Set<string>>; // struck id → the ids that strike it
+  swept: number;
+  roots: Set<string>;
+  dependents: Map<string, Set<string>>;
 }
 const protectedMemo = new WeakMap<Reactor, ProtectedMemo>();
-// The door runs this on EVERY append and federate, so it must not walk the store each time (H8).
-// The memo sweeps the reactor's arrival log once per delta; a call then costs the batch plus the
-// closure over protected ids, never the whole ground.
 export function protectedIngressIds(reactor: Reactor, batch: readonly Delta[]): Set<string> {
   let memo = protectedMemo.get(reactor);
   if (memo === undefined) {
@@ -88,7 +75,6 @@ export function protectedIngressIds(reactor: Reactor, batch: readonly Delta[]): 
   const log = reactor.arrivalLog();
   for (; memo.swept < log.length; memo.swept += 1)
     absorb(log[memo.swept]!, memo.roots, memo.dependents);
-  // The batch is overlaid, never written into the memo: it has not arrived yet, and may be refused.
   const protectedIds = new Set(memo.roots);
   const batchDependents = new Map<string, Set<string>>();
   for (const d of batch) absorb(d, protectedIds, batchDependents);
@@ -105,11 +91,6 @@ export function protectedIngressIds(reactor: Reactor, batch: readonly Delta[]): 
   }
   return protectedIds;
 }
-// Every held delta with an entity pointer at this id, in any context and by any author: the
-// candidates for a read that filters on such a pointer, from the target index instead of a walk
-// of the store (H8). It carries no negation closure (H1): callers ask about strikes by id.
-// An id the index names and the set cannot resolve refuses. Skipping it would shrink the list,
-// and the erase door reads a shorter list as leave to purge (H9).
 function heldAt(reactor: Ground, entity: string): Delta[] {
   return reactor.byTarget(entity).map((id) => {
     const d = reactor.get(id);
@@ -244,22 +225,8 @@ export function parseLocalEvent(d: Delta, operator: string | undefined): LocalEv
     ? { action, channel, into: parentContainer, opening, received }
     : undefined;
 }
-/**
- * The channels whose lineage says they were opened INTO this container and still stand, read from
- * the receiver's root ground by the parent-container pointer. This is the container-scoped read a
- * bound door will serve from; no door serves it yet. Standing means the opening's pool declaration
- * survives, the erase door's own liveness test; a dropped incarnation is not listed, and neither
- * is an erased one.
- */
+
 export function localChannelsInContainer(gw: Gateway, container: string): string[] {
-  // An incarnation STANDS while its pool declaration survives, the same test the erase door uses
-  // for liveness. A close event is not the sign: a refused drop leaves a close beside a standing
-  // pool, and an erase that faulted after the close's erasure leaves none beside a dropped one.
-  // An erased opening is gone from the reactor; one whose purge faulted stays, but its declaration
-  // is struck already, so the declaration test covers it and no marker scan is needed.
-  // An opening's `into` IS its parent-container pointer's entity id (the parser refuses any
-  // other), so every opening into this container is filed at the container's id in the target
-  // index. The index keys on the id alone: the context and parser filters still apply.
   const negated = negatedAt(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   const names = new Set<string>();
   for (const d of heldAt(gw.reactor, container)) {
@@ -272,13 +239,7 @@ export function localChannelsInContainer(gw: Gateway, container: string): string
   }
   return [...names].sort();
 }
-/**
- * Is a pool attached under this declaration an ORPHAN? It is when no surviving opening names the
- * declaration: the operator declared it by hand, beside or instead of the one an opening named.
- * Boot attaches only surviving declarations and a handle keeps the declaration it attached under,
- * so a struck declaration never sits beneath a pool here. The erase door and the drop both ask
- * this, so that an orphan reads the same across a restart as inside the process that made it.
- */
+
 export function orphanedDeclaration(gw: Gateway, declaration: string): boolean {
   const held = gw.reactor.get(declaration);
   const channel = held === undefined ? undefined : containerDeclarationName(held.claims);
@@ -289,24 +250,15 @@ export function orphanedDeclaration(gw: Gateway, declaration: string): boolean {
         p.target.kind === "entity" &&
         p.target.entity.id === `channel:${channel}`,
     );
-  // `named` asks for an entity pointer at the channel's id, so the target index holds every
-  // candidate.
   for (const d of heldAt(gw.reactor, `channel:${channel}`)) {
     if (!inLocalContext(d, LOCAL_EVENT) || !named(d)) continue;
     const parsed = parseLocalEvent(d, gw.operatorAuthor);
-    // An event of THIS channel the reader cannot parse is not "no opening names it"; it fails
-    // closed, so a purge never rides a parser change or a malformed restore. Another channel's
-    // unreadable event is that channel's problem, not this pool's.
     if (parsed === undefined) return false;
     if (parsed.action === "open" && parsed.opening.poolDeclaration === declaration) return false;
   }
   return true;
 }
-/**
- * Every delta id a surviving receipt of the incarnation under this declaration names. A pool
- * holding a peer byte outside this set holds something that incarnation never received, and an
- * erase of an EARLIER opening of the same name must count it as that opening's, not skip it.
- */
+
 export function receiptsNaming(gw: Gateway, declaration: string): Set<string> {
   const openings = new Set<string>();
   const events: LocalEvent[] = [];
@@ -324,7 +276,6 @@ export function receiptsNaming(gw: Gateway, declaration: string): Set<string> {
       for (const id of e.received) named.add(id);
   return named;
 }
-/** The channel entity id a validated local-control marker names; call after localEraseTarget. */
 export function localControlChannel(d: Delta): string | undefined {
   const p = d.claims.pointers.find((p) => p.role === "local-control-channel");
   return p?.target.kind === "primitive" && typeof p.target.value === "string"
@@ -380,7 +331,6 @@ type LocalChannelHistory =
       readonly receivedIds: readonly string[];
     };
 
-/** Cleanup requires a valid lifecycle, even when received source bytes have been erased. */
 export function localChannelLifecycle(gw: Gateway, channel: string): LocalChannelLifecycle {
   const history = projectLocalChannelHistory(gw, channel);
   return history.state === "open"
@@ -391,7 +341,7 @@ function projectLocalChannelHistory(gw: Gateway, channel: string): LocalChannelH
   const unavailable = (reason: string): LocalChannelHistory => ({ state: "unavailable", reason });
   const rows = [...gw.reactor.snapshot()];
   const dead = new Set<string>();
-  let erasedHere = 0; // markers naming THIS channel: erased history is never legacy history
+  let erasedHere = 0;
   for (const d of rows)
     if (inLocalContext(d, LOCAL_CONTROL)) {
       const target = localEraseTarget(d, gw.reactor, gw.operatorAuthor);
@@ -490,8 +440,6 @@ export function localChannelEvidence(gw: Gateway, channel: string): LocalChannel
   }
   return Object.freeze({ state: "open", opening, received: Object.freeze(received) });
 }
-// Typed-array views cannot be frozen by JavaScript. Their owning frozen property returns a
-// detached copy, while the rest of the signed claim graph is frozen recursively.
 function immutableCopy(d: Delta): Delta {
   const copy = structuredClone(d);
   const freeze = (value: object): void => {
@@ -525,9 +473,6 @@ export const eventRef = (role: string, delta: string): Claims["pointers"][number
   role,
   target: { kind: "delta", deltaRef: { delta } },
 });
-// The parent container rides every event at a PINNED position, in the event vocabulary (never
-// `container`/`loam.container`, which the container table would read as law). It scopes reads:
-// a bound connection's lineage read filters by it, and so may the operator's.
 export const PARENT_CONTAINER = "parent-container";
 export function eventHeader(channel: string, action: string, into: string): Claims["pointers"] {
   return [

@@ -1,12 +1,3 @@
-// A law reader that takes a Ground gives the same answer over any Ground that holds the same
-// deltas. The second Ground here is a plain object over a fixed list: it shares no object, cache
-// or index with a Reactor.
-//
-// Asserted: `readTrustPolicy`, `declaresTrust`, `lawfulNegated`, `negatedAt` and `grantSubjects`
-// agree across the two, with a struck declaration, a struck strike and a stranger's strike in the
-// set. Not asserted: any reader that takes a Reactor. Those reach state keyed on the Reactor
-// object (`src/gateway/ground.ts`), which a plain Ground cannot carry.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, Reactor, signClaims, type Claims, type Delta } from "@bombadil/rhizomatic";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
@@ -52,17 +43,13 @@ const grant = (subject: string, timestamp: number): Delta =>
     OP_SEED,
   );
 
-// The set: the operator rosters alice, then closes the store and rosters bob. The operator
-// strikes the closing declaration, strikes that strike, and strikes the second strike, so the
-// closing declaration is struck again. A stranger strikes the first declaration, which no lawful
-// reader honors.
 const rosterAlice = signClaims(trustClaims("roster", [ALICE], OP, 100), OP_SEED);
 const closedBob = signClaims(trustClaims("closed", [BOB], OP, 200), OP_SEED);
 const strikeClosed = strike(OP_SEED, closedBob.id, 300);
 const strikeTheStrike = strike(OP_SEED, strikeClosed.id, 400);
 const strikeAgain = strike(OP_SEED, strikeTheStrike.id, 500);
 const strangerStrike = strike(STRANGER_SEED, rosterAlice.id, 600);
-const lateStrike = strike(OP_SEED, rosterAlice.id, NOW + 1); // not yet valid at NOW
+const lateStrike = strike(OP_SEED, rosterAlice.id, NOW + 1);
 const DELTAS: readonly Delta[] = [
   rosterAlice,
   closedBob,
@@ -75,7 +62,6 @@ const DELTAS: readonly Delta[] = [
   grant(BOB, 800),
 ];
 
-/** A Ground over a fixed list of deltas. No part of it is a Reactor. */
 function plainGround(deltas: readonly Delta[]): Ground {
   const held = new Map(deltas.map((d) => [d.id, d]));
   const index = (keyOf: (d: Delta) => string[]): Map<string, string[]> => {
@@ -136,7 +122,6 @@ describe("a Ground that is not a Reactor", () => {
   it("reads the same trust policy, with the struck declaration left out", () => {
     const fromPlain = readTrustPolicy(plain, NOW, OP);
     expect(fromPlain).toEqual(readTrustPolicy(reactor, NOW, OP));
-    // The closing declaration is struck, so the mode is the roster's and bob is not admitted.
     expect(fromPlain.mode).toBe("roster");
     expect([...fromPlain.roster]).toEqual([ALICE]);
     expect(declaresTrust(plain, NOW, OP)).toBe(declaresTrust(reactor, NOW, OP));
@@ -157,11 +142,10 @@ describe("a Ground that is not a Reactor", () => {
       const answers = (r: typeof a) => DELTAS.map((d) => r[key](d.id));
       expect(answers(a), key).toEqual(answers(b));
     }
-    // The answers are not all one value: each reader separates the set.
     expect(a.lawful(closedBob.id)).toBe(true);
     expect(a.lawful(strikeClosed.id)).toBe(false);
     expect(a.lawful(strikeTheStrike.id)).toBe(true);
-    expect(a.lawful(rosterAlice.id)).toBe(true); // `lawfulNegated` does not ask validity
+    expect(a.lawful(rosterAlice.id)).toBe(true);
     expect(a.anyoneNow(rosterAlice.id)).toBe(true);
     expect(a.operatorNow(rosterAlice.id)).toBe(false);
     expect(negatedAt(plain, NOW + 2, OP)(rosterAlice.id)).toBe(true);

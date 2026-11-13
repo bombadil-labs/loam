@@ -1,11 +1,3 @@
-// The listing door's cost, MEASURED (ticket T163). Not a rail: it prints numbers and asserts
-// nothing, and it runs only under `LOAM_BENCH=1` because a 10k-delta ground costs real seconds.
-//
-//   LOAM_BENCH=1 npx vitest run test/gateway/listing-scale.bench.test.ts
-//
-// It reproduces the ticket's table (memory backend, `list(limit 25)`) and adds the cursor walk
-// and the repeat page — the numbers a before/after claim about H8 must be made from.
-
 import { appendFileSync } from "node:fs";
 import { describe, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
@@ -54,7 +46,7 @@ describe.skipIf(process.env.LOAM_BENCH !== "1")("listing cost by ground size", (
     it(`${deltas} deltas / ${entities} entities`, async () => {
       const gw = await ground(deltas, entities);
       let t0 = performance.now();
-      await gw.list("Plant", { limit: 1 }); // declares the container; pays the first read
+      await gw.list("Plant", { limit: 1 });
       const first = ms(t0);
       t0 = performance.now();
       await gw.list("Plant", { limit: 1 });
@@ -65,8 +57,6 @@ describe.skipIf(process.env.LOAM_BENCH !== "1")("listing cost by ground size", (
       t0 = performance.now();
       await gw.list("Plant", { limit: LISTING_MAX_LIMIT });
       const page25Again = ms(t0);
-      // Cost 2 in isolation: walk the whole kind at limit 25 and time the pages, minus resolution
-      // is not separable through the door, so report the walk total.
       t0 = performance.now();
       let after: string | undefined = page[page.length - 1]!.entity;
       let pages = 1;
@@ -76,14 +66,10 @@ describe.skipIf(process.env.LOAM_BENCH !== "1")("listing cost by ground size", (
         after = next.length === LISTING_MAX_LIMIT ? next[next.length - 1]!.entity : undefined;
       }
       const walk = ms(t0);
-      // Then one more append (a fresh entity) and a page: the maintained-set path pays what?
       await gw.append([observed("plant:zzzzz", "height", 1, 999_999, GARDENER_SEED)]);
       t0 = performance.now();
       await gw.list("Plant", { limit: 1 });
       const afterAppend = ms(t0);
-      // Costs 1 and 2 alone — the candidate page with no resolution — warm, and after one more
-      // plain append; then a cursor walk of ids only. These are the numbers "independent of the
-      // store's size" is claimed on.
       t0 = performance.now();
       await listingPageImpl(gw, "Plant", { limit: LISTING_MAX_LIMIT });
       const idsWarm = ms(t0);
@@ -104,7 +90,6 @@ describe.skipIf(process.env.LOAM_BENCH !== "1")("listing cost by ground size", (
         cursor = next[next.length - 1]!;
       }
       const idsWalk = ms(t0);
-      // Costs 1 and 3 in isolation, through the gateway's own seams.
       t0 = performance.now();
       const scope = gw.containerScope({ containers: [listingContainerName("Plant")] });
       const membership = ms(t0);

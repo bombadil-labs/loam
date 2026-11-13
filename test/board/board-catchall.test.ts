@@ -1,13 +1,3 @@
-// T112 — no item vanishes from the page. The renderer buckets items into fixed sections by
-// status; before this rail, an item whose status matched no section emitted no card at all, so
-// the page silently under-reported what the door answers (the repo's H7 class, at the face).
-// Two-sided: (1) every KNOWN status renders in its own section — all seven, including review /
-// parked / blocked, the three no earlier test seeded (the 2026-07-26 hollow-test survivors);
-// (2) an item with an OFF-LIST status appears in the catch-all section, status text visible;
-// (3) the page's data-title set EQUALS the door's own items — page-vs-door agreement, exact;
-// (4) an item whose status delta was STRUCK (status resolves undefined) lands in the catch-all —
-// the composed case the door-level H1 rail in board-render.test.ts leaves unpinned.
-
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
@@ -31,7 +21,6 @@ vi.setConfig({ testTimeout: 20000 });
 
 const BUNDLE = readFileSync(new URL("../../demos/board/renderer.mjs", import.meta.url), "utf8");
 
-// Every status a section claims to hold, keyed by the section that holds it.
 const KNOWN: ReadonlyArray<readonly [section: string, status: string]> = [
   ["waiting", "waiting-myk"],
   ["flight", "open"],
@@ -41,14 +30,13 @@ const KNOWN: ReadonlyArray<readonly [section: string, status: string]> = [
   ["parked", "parked"],
   ["parked", "blocked"],
 ];
-const STRAY_STATUS = "limbo"; // in no section's holds — the status a typo produces
+const STRAY_STATUS = "limbo";
 
 let world: BoardWorld;
 
 const page = (): Promise<Response> =>
   fetch(`${world.base}/${MOUNT}/app/${BOARD_ROUTE}/${BOARD_ENTITY}`, { method: "GET" });
 
-// The HTML between one section marker and the next — same object-level reading the §34 rails use.
 function section(html: string, key: string): string {
   const marker = `data-section="${key}"`;
   const start = html.indexOf(marker);
@@ -103,11 +91,10 @@ describe("T112: every item the door answers is on the page", () => {
 
   it("an off-list status appears in the catch-all, its odd status legible on the card", async () => {
     const html = await (await page()).text();
-    expect(html).toContain("the mis-statused item"); // visible at all — the bug was total absence
+    expect(html).toContain("the mis-statused item");
     const stray = section(html, "unplaced");
     expect(stray).toContain("the mis-statused item");
-    expect(stray).toContain(STRAY_STATUS); // the card shows WHAT is wrong, not just that something is
-    // And it did not leak into a real section.
+    expect(stray).toContain(STRAY_STATUS);
     for (const key of ["waiting", "flight", "shipped", "parked"]) {
       expect(section(html, key)).not.toContain("the mis-statused item");
     }
@@ -125,13 +112,11 @@ describe("T112: every item the door answers is on the page", () => {
     ).board.items
       .map((i) => String(i["title"]))
       .sort();
-    expect(doorTitles.length).toBeGreaterThanOrEqual(KNOWN.length + 1); // floor: never vacuous (H10)
+    expect(doorTitles.length).toBeGreaterThanOrEqual(KNOWN.length + 1);
     const html = await (await page()).text();
     expect(renderedTitles(html).sort()).toEqual(doorTitles);
   });
 
-  // The composed case the door-level H1 rail leaves unpinned: a struck status resolves to
-  // undefined, which no section holds — the item must land in the catch-all, not vanish.
   it("an item whose status delta was struck stays on the page, in the catch-all", async () => {
     await addItem(world.base, "fable", "board:struck", {
       kind: "ticket",
@@ -139,7 +124,7 @@ describe("T112: every item the door answers is on the page", () => {
       status: "building",
     });
     const [status, ...rest] = statusDeltas(world.gw, "board:struck");
-    expect(rest).toHaveLength(0); // exactly the one delta we are about to strike
+    expect(rest).toHaveLength(0);
     await world.gw.append([
       signClaims(makeNegationClaims(FABLE, Date.now(), status!.id), FABLE_SEED),
     ]);

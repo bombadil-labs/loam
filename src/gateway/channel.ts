@@ -1,26 +1,8 @@
-// A push-to-pull adapter that can always be left. An async generator suspended on a pending
-// promise cannot process return() until that promise settles — so a subscription built on one
-// would hang whoever tries to leave it. This channel implements the AsyncGenerator protocol
-// directly: push() feeds it, next() drains it (or parks), and return() resolves immediately —
-// waking every parked reader with done — no matter what is or is not flowing.
-//
-// Backpressure is coalescence, not growth: when a coalesce function is given, a push landing on
-// an undrained value merges into it instead of queueing behind it — a slow reader holds at most
-// one pending value, and the merge preserves whatever continuity the payload carries.
-//
-// Concurrent readers park in FIFO order (native generators queue concurrent next() calls; so
-// does this). fail() rejects every parked reader with the error — a stream that died of
-// something must say so, not just end.
-
 interface Waiter<T> {
   readonly resolve: (r: IteratorResult<T, void>) => void;
   readonly reject: (e: Error) => void;
 }
 
-// What TEARDOWN needs of a live subscription, whatever it carries: a way to end it. The gateway
-// holds every open stream in ONE set so a re-seat or a close reaches all of them — typing that set
-// by this capability rather than by a payload keeps a second kind of channel (a membership watch is
-// not a patch stream) from needing a second set that the next teardown could forget.
 export type LiveStream = Pick<AsyncGenerator<unknown, void, unknown>, "return">;
 
 export class Channel<T> implements AsyncGenerator<T, void, unknown> {
@@ -30,9 +12,7 @@ export class Channel<T> implements AsyncGenerator<T, void, unknown> {
   private failure: Error | undefined;
 
   constructor(
-    // Called exactly once, when the channel is left, fails, or ends. Detach sinks here.
     private readonly onClose?: () => void,
-    // Merge a new value into an undrained one (slow reader): (pending, incoming) → kept.
     private readonly coalesce?: (pending: T, incoming: T) => T,
   ) {}
 
@@ -50,8 +30,6 @@ export class Channel<T> implements AsyncGenerator<T, void, unknown> {
     }
   }
 
-  // End the stream with an error, delivered exactly once: to every reader parked right now, or
-  // — if nobody is parked — to the next read. After that the stream is simply done.
   fail(error: Error): void {
     if (this.closed) return;
     const parked = this.waiters.splice(0);
@@ -66,7 +44,7 @@ export class Channel<T> implements AsyncGenerator<T, void, unknown> {
     }
     if (this.failure !== undefined) {
       const err = this.failure;
-      this.failure = undefined; // reject once; after that the stream is simply done
+      this.failure = undefined;
       return Promise.reject(err);
     }
     if (this.closed) return Promise.resolve({ value: undefined, done: true });
@@ -88,14 +66,6 @@ export class Channel<T> implements AsyncGenerator<T, void, unknown> {
   private close(): void {
     if (this.closed) return;
     this.closed = true;
-    // Leaving a stream FORGETS what it was holding. An undrained value is a reading of ground that
-    // may since have been erased (SPEC §11) — a re-seat closes every channel precisely because the
-    // purge happened — and `next()` consults the queue BEFORE this flag, so keeping it would let a
-    // slow reader drain purged bytes from a closed stream. Dropping it is what makes a close a
-    // teardown rather than a pause. `fail()` funnels through here too, so a dying stream discards
-    // its undrained value as well and the reader gets the error in its place — acceptable because
-    // the error IS the instruction to resubscribe, and a resubscribe re-reads current state; a
-    // stale value delivered first would be the one thing it could not correct for.
     this.queue.length = 0;
     for (const waiter of this.waiters.splice(0)) waiter.resolve({ value: undefined, done: true });
     this.onClose?.();
@@ -106,8 +76,6 @@ export class Channel<T> implements AsyncGenerator<T, void, unknown> {
   }
 }
 
-// A reconnect during reactor replacement opens only after the new ground is ready.
-// Leaving before readiness cancels the open without waiting for storage or teardown.
 export function streamAfter<T>(
   ready: Promise<void>,
   open: () => AsyncGenerator<T, void, unknown>,
@@ -132,7 +100,7 @@ export function streamAfter<T>(
         if (closed) return { value: undefined, done: true };
         if (stream === undefined) {
           stream = open();
-          live?.delete(deferred); // the opened native stream now owns its lifecycle
+          live?.delete(deferred);
         }
         return stream.next();
       } catch (error) {

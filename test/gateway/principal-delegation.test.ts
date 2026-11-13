@@ -1,18 +1,3 @@
-// Step 5 (SPEC-14) through Loam's principal seam, README ruling 6: a delegated key WRITES for its
-// user and does nothing else; its delegation is scoped, cannot be passed on, and can be revoked by
-// the user's root and by the pinned operator. Evidence records are built literally (rhizomatic
-// exports no builder) and appended through a real Gateway. Every case asks two levels: the seam
-// (`keyActsFor` / `keysActingFor` / `keysEverOf` over the reactor) and the door — an append signed
-// by the key is admitted or refused — or, for history, what a Plant view shows after a clear.
-//
-// Named gaps:
-//   - The door is driven through `Gateway.append`, not over HTTP; the HTTP door calls the same
-//     `authorize`, and no later PR changes that.
-//   - Delegations here are written by hand into a ground that declares the store scope. The
-//     connection path (bind, inbox-name scope, revoke) is test/gateway/connection-delegation.test.ts.
-//   - A delegate's writes are not "yours" to clear: `keysEverOf` follows association (bindings),
-//     not authority (delegations). Provisioning will sign a binding beside each delegation.
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   authorForSeed,
@@ -32,11 +17,11 @@ import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 
 const seedOf = (b: string) => b.repeat(32);
 const OP_SEED = seedOf("0a");
-const R_SEED = seedOf("1b"); // the user's root
-const C_SEED = seedOf("2c"); // a connection key
-const D_SEED = seedOf("3d"); // a key C tries to pass its delegation on to
-const K_SEED = seedOf("4e"); // the user's old key (history)
-const X_SEED = seedOf("5f"); // a bystander with no delegation
+const R_SEED = seedOf("1b");
+const C_SEED = seedOf("2c");
+const D_SEED = seedOf("3d");
+const K_SEED = seedOf("4e");
+const X_SEED = seedOf("5f");
 const OP = authorForSeed(OP_SEED);
 const R = authorForSeed(R_SEED);
 const C = authorForSeed(C_SEED);
@@ -57,7 +42,6 @@ const prim = (role: string, value: string | boolean): Pointer => ({
   target: { kind: "primitive", value },
 });
 
-/** A SPEC-14 §2 evidence record: one `principal` pointer at R, one `kind`, the listed roles. */
 function evidence(
   seed: string,
   kind: "binding" | "delegation",
@@ -121,19 +105,14 @@ const note = (seed: string, t: number): Delta =>
     seed,
   );
 
-/** A governed store at T0: the operator grants R (named by root) `verb` standing, admin by
- *  default, since only an admin grant carries delegation. */
 async function store(verb: "write" | "admin" = "admin", others: readonly string[] = []) {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(T0);
   const gw = await ground(verb, others);
-  // These cases are about a delegation's SHAPE, so the ground declares the store scope they ask
-  // at. Only an inbox pool declares one in production; see "a ground that declares no scope".
   gw.honorDelegationsAt(STORE_ENTITY);
   return gw;
 }
 
-/** The same ground with no declared scope, as the root store boots. */
 async function ground(verb: "write" | "admin" = "admin", others: readonly string[] = []) {
   return Gateway.boot(
     new MemoryBackend(),
@@ -174,7 +153,6 @@ describe("a ground that declares no scope honors no delegate", () => {
     at(T0 + 20);
     expect(await door(root, note(C_SEED, T0 + 20))).toBe("refused");
     expect(await door(root, note(R_SEED, T0 + 21))).toBe("admitted");
-    // Control: the same record in a ground that declares the scope admits C.
     root.honorDelegationsAt(STORE_ENTITY);
     expect(await door(root, note(C_SEED, T0 + 22))).toBe("admitted");
   });
@@ -251,7 +229,6 @@ describe("Loam honors one delegation shape: sealed, scoped, direct", () => {
     const gw = await store();
     at(T0 + 10);
     await gw.append([delegation(R_SEED, C, STORE_ENTITY, true, T0 + 10)]);
-    // C is not honored, so its record for D cannot pass the door; it arrives raw, as by federation.
     expect(gw.reactor.ingest(delegation(C_SEED, D, STORE_ENTITY, false, T0 + 11)).status).toBe(
       "accepted",
     );
@@ -260,7 +237,6 @@ describe("Loam honors one delegation shape: sealed, scoped, direct", () => {
     expect(acts(gw, D)).toBe(false);
     expect(await door(gw, note(C_SEED, T0 + 20))).toBe("refused");
     expect(await door(gw, note(D_SEED, T0 + 21))).toBe("refused");
-    // Control: a sealed delegation from R to D does reach D.
     at(T0 + 30);
     await gw.append([delegation(R_SEED, D, STORE_ENTITY, false, T0 + 30)]);
     at(T0 + 40);
@@ -292,16 +268,12 @@ describe("a delegated key writes and does nothing else", () => {
     at(T0 + 10);
     await gw.append([delegation(R_SEED, C, STORE_ENTITY, false, T0 + 10)]);
     at(T0 + 20);
-    // R's admin covers write, so C writes for R.
     expect(await door(gw, note(C_SEED, T0 + 20))).toBe("admitted");
-    // Any writer may ASSERT a grant; it binds only if its issuer is an effective admin, and that
-    // issuer check matches R's own key only. So C's grant lands and gives X nothing.
     expect(
       await door(gw, signClaims(grantClaims(STORE_ENTITY, X, "write", C, T0 + 21), C_SEED)),
     ).toBe("admitted");
     at(T0 + 30);
     expect(await door(gw, note(X_SEED, T0 + 30))).toBe("refused");
-    // Control: the same grant signed by R is admitted, and X then writes.
     expect(
       await door(gw, signClaims(grantClaims(STORE_ENTITY, X, "write", R, T0 + 31), R_SEED)),
     ).toBe("admitted");
@@ -329,7 +301,6 @@ describe("a delegation is revocable by the root and by the operator", () => {
     at(T0 + 40);
     expect(acts(gw, C)).toBe(false);
     expect(await door(gw, note(C_SEED, T0 + 40))).toBe("refused");
-    // C is refused at the door, so its counter-negation arrives raw, as a federated delta would.
     at(T0 + 50);
     const counter = negation(C_SEED, revoke, T0 + 50);
     expect(gw.reactor.ingest(counter).status).toBe("accepted");
@@ -354,8 +325,6 @@ describe("a delegation is revocable by the root and by the operator", () => {
   });
 
   it("the operator's revocation strikes one record: a NEW delegation from R stands", async () => {
-    // Ruling 6 as stated: revocation ends a delegation, not the key. Barring the key for good is
-    // the operator revoking R's own standing, which ends every delegate with it.
     const { gw, toC } = await delegated();
     at(T0 + 30);
     await gw.append([negation(OP_SEED, toC, T0 + 30)]);
@@ -377,7 +346,6 @@ describe("a delegation is revocable by the root and by the operator", () => {
     at(T0 + 50);
     expect(acts(gw, C)).toBe(false);
     expect(await door(gw, note(C_SEED, T0 + 50))).toBe("refused");
-    // Control: the operator's own revocation of a second delegate, struck by the operator, lifts.
     const toD = delegation(R_SEED, D, STORE_ENTITY, false, T0 + 60);
     at(T0 + 60);
     await gw.append([toD]);
@@ -408,7 +376,6 @@ describe("a delegation is revocable by the root and by the operator", () => {
   it("an UNSIGNED negation naming the operator revokes nothing", async () => {
     const { gw, toC } = await delegated();
     at(T0 + 30);
-    // Unsigned deltas are legal at L1, so one can arrive raw; its author claim proves nothing.
     const signed = negation(OP_SEED, toC, T0 + 30);
     const unsigned: Delta = { id: signed.id, claims: signed.claims };
     expect(gw.reactor.ingest(unsigned).status).toBe("accepted");
@@ -425,8 +392,7 @@ describe("a delegation is revocable by the root and by the operator", () => {
     const counter = negation(R_SEED, revoke, T0 + 31);
     await gw.append([revoke, counter]);
     at(T0 + 40);
-    expect(acts(gw, C)).toBe(true); // R's counter is read, its signature checked, and it lifts
-    // The held counter changes in place: new claims, a matching id, the old signature.
+    expect(acts(gw, C)).toBe(true);
     const held = gw.reactor.get(counter.id)! as { id: string; claims: Delta["claims"] };
     held.claims = { ...held.claims, timestamp: held.claims.timestamp + 1 };
     held.id = computeId(held.claims);
@@ -449,7 +415,7 @@ describe("history: keysEverOf", () => {
   const tags = (gw: Gateway) => gw.resolvedNode("Plant", FERN).view["tag"] ?? null;
 
   async function oldKeyWrote(): Promise<Gateway> {
-    const gw = await store("write", [K]); // K was the user's key before R, and held its own grant
+    const gw = await store("write", [K]);
     at(T0 + 10);
     await gw.gqlHooks().mutate("Plant", FERN, { tag: "by-old-key" }, K_SEED);
     return gw;
@@ -463,21 +429,15 @@ describe("history: keysEverOf", () => {
     expect(tags(gw)).toEqual(["by-old-key"]);
   });
 
-  // A SPEC-14 binding is association evidence, and any key with write standing can sign one naming
-  // someone else's key. "Retract your own" must not follow it, or a writer could clear a stranger's
-  // claims by binding the stranger's key. An earlier key becomes "own" only through an
-  // operator-governed recovery record (step 5, PR 3e).
   it("R's own binding for K does NOT make K's value R's to clear (the adversarial case)", async () => {
     const gw = await oldKeyWrote();
     at(T0 + 20);
     const bind = binding(K, T0 + 20);
     expect(await door(gw, bind)).toBe("admitted");
-    // delta: the binding is held
     expect(gw.reactor.get(bind.id)).toBeDefined();
     at(T0 + 30);
     expect([...keysEverOf(gw.reactor, gw.validityNow(), { root: R }, OP)]).toEqual([R]);
     expect(acts(gw, K)).toBe(false);
-    // door: R's clear leaves K's value standing
     await gw.gqlHooks().clear("Plant", FERN, ["tag"], R_SEED);
     expect(tags(gw)).toEqual(["by-old-key"]);
   });

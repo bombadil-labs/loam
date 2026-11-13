@@ -1,11 +1,3 @@
-// T32 — the containment tree, enforced at BOTH levels (criteria 8, 16, 20, 21). A cycle has two
-// arrival paths and only one passes a door: the DOOR refuses a declaration that would close a
-// cycle — on the initial build and on the latest-wins re-point alike — while the READER restores
-// acyclicity deterministically for what federation or a replayed ground delivers (per remaining
-// cycle, the latest edge is not-binding and surfaced as a defect, until the graph is a forest; a
-// boot never refuses, a walk never hangs). Immutability rides the same reader guard: a federated
-// trust flip is not-binding, and the earliest surviving declaration keeps its word.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -35,7 +27,6 @@ const declare = (spec: Parameters<typeof containerClaims>[0], ts: number) =>
 describe("T32 criteria 8 & 20 — the door refuses a closing edge", () => {
   it("an initial build cannot close a cycle, and the tree stays sound after the refusal", async () => {
     const gw = await boot();
-    // A's parent names a container that does not exist yet — no cycle, lawfully dangling.
     await gw.append([
       declare(
         { container: "container:a", trust: "curated", posture: "separate", parent: "container:c" },
@@ -48,7 +39,6 @@ describe("T32 criteria 8 & 20 — the door refuses a closing edge", () => {
         16_001,
       ),
     ]);
-    // C under B would close C → B → A → C: refused at declaration time, naming the cycle.
     await expect(
       gw.append([
         declare(
@@ -62,7 +52,6 @@ describe("T32 criteria 8 & 20 — the door refuses a closing edge", () => {
         ),
       ]),
     ).rejects.toThrow(/cycle/);
-    // The refusal left the tree sound: the table resolves and a read answers, no hang.
     const table = gw.containers();
     expect(table.containers.has("container:a")).toBe(true);
     expect(table.containers.has("container:c")).toBe(false);
@@ -86,7 +75,6 @@ describe("T32 criteria 8 & 20 — the door refuses a closing edge", () => {
         17_002,
       ),
     ]);
-    // The likely arrival in the wild: not an initial build but a RE-POINT of a standing parent.
     await expect(
       gw.append([
         declare(
@@ -108,8 +96,6 @@ describe("T32 criterion 16 — federated cycles, PLURAL, cannot hang a read", ()
   it("two disjoint cycles resolve with each latest edge not-binding, and a reopen agrees", async () => {
     const backend = new MemoryBackend();
     const gw = await boot(backend);
-    // Two devices, each locally acyclic, unioned: X→Y arrives beside Y→X, and U→V beside V→U.
-    // No door sees either closing — they land by federation, as data.
     const edges = [
       declare(
         { container: "container:x", trust: "curated", posture: "separate", parent: "container:y" },
@@ -131,16 +117,12 @@ describe("T32 criterion 16 — federated cycles, PLURAL, cannot hang a read", ()
     await gw.federate(edges, { admit: () => true });
 
     const table = gw.containers();
-    // Acyclicity is RESTORED, not spot-fixed: both cycles broken, both defects named.
     expect(table.defects.filter((d) => /cycle/.test(d)).length).toBe(2);
-    // Within each cycle the LATEST edge (by timestamp) is the one not binding: Y keeps no parent,
-    // X keeps its Y; V keeps no parent, U keeps its V.
     expect(table.containers.get("container:x")?.parent).toBe("container:y");
     expect(table.containers.get("container:y")?.parent).toBeUndefined();
     expect(table.containers.get("container:u")?.parent).toBe("container:v");
     expect(table.containers.get("container:v")?.parent).toBeUndefined();
 
-    // A reopened store holding the same ground boots, answers, and resolves the same forest.
     const reopened = await Gateway.open(backend, { seed: OP_SEED });
     const again = reopened.containers();
     expect(again.containers.get("container:y")?.parent).toBeUndefined();
@@ -159,17 +141,15 @@ describe("T32 criterion 21 — a federated trust flip is not-binding", () => {
     await gw.append([
       declare({ container: "container:fixed", trust: "curated", posture: "separate" }, 19_000),
     ]);
-    // The flip arrives with no door involved — a replayed ground, the operator's own other
-    // device — as a LATER declaration differing in the immutable knob.
     const flip = declare(
       { container: "container:fixed", trust: "untrusted", posture: "separate" },
       19_100,
     );
     await gw.federate([flip], { admit: () => true });
-    expect(gw.reactor.get(flip.id)).toBeDefined(); // it landed — data, not law
+    expect(gw.reactor.get(flip.id)).toBeDefined();
 
     const table = gw.containers();
-    expect(table.containers.get("container:fixed")?.trust).toBe("curated"); // earliest surviving wins
+    expect(table.containers.get("container:fixed")?.trust).toBe("curated");
     expect(table.defects.some((d) => /container:fixed/.test(d) && /trust/.test(d))).toBe(true);
 
     const reopened = await Gateway.open(backend, { seed: OP_SEED });

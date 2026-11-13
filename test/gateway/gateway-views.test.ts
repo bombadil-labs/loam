@@ -1,9 +1,3 @@
-// A gateway is a view of one container; the container's journal is the source of truth
-// (refactor/audit/step6-container-split.md, ruling 13). So several gateways can serve one store:
-// two over the same container serve each other's writes, and two over different containers keep
-// each container's writes to itself (ruling 11). The second case is a control: isolation already
-// held; it pins that catching up never reaches across containers.
-
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,14 +27,12 @@ describe("gateways are views of a container's journal", () => {
   it("two gateways over the same container: a write through one is served through the other", async () => {
     const file = join(mkdtempSync(join(tmpdir(), "loam-views-")), "store.sqlite");
     const a = await Gateway.boot(new SqliteBackend(file), genesis());
-    const b = await Gateway.open(new SqliteBackend(file), { seed: SEED }); // another handle, another view
+    const b = await Gateway.open(new SqliteBackend(file), { seed: SEED });
     const fact = observed(FERN, "height", 42, 1000, SEED);
     await a.append([fact]);
-    // b's reactor is a view: it lacks the write until b reads through a door, which catches up.
     expect(b.reactor.get(fact.id)).toBeUndefined();
     expect(await height(b)).toBe(42);
     expect(b.reactor.get(fact.id)).toBeDefined();
-    // And the other way round.
     await b.append([observed(FERN, "height", 43, 1001, SEED)]);
     expect(await height(a)).toBe(43);
     await b.close();

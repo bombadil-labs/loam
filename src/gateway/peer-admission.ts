@@ -1,11 +1,3 @@
-// The host store as one substrate peer (step 6). Every host opens here; pools do not yet.
-// Loam's own checks run first, under the gateway's admission lock; the substrate's ordinary
-// journal then admits, records arrivals and refusals, and commits a frame and the new rows.
-//
-// Erasure orders enter through `admitErasures`: Loam's erasure law runs first under the same lock,
-// and the journal records the refusal and any purge obligation. An order travels without ordinary
-// deltas beside it; Loam's purge then reports its result through `reportPurged`.
-
 import {
   OrdinaryJournalPeer,
   type ArrivalOrigin,
@@ -15,20 +7,16 @@ import {
   type OrdinaryJournalAdmissionResult,
 } from "@bombadil/rhizomatic";
 
-// One peer, one commit queue. The door and the write-through both commit, and the journal peer
-// asks its caller to serialize writers.
 export interface HostPeer {
   journal: OrdinaryJournalPeer;
   readonly store: DurableOrdinaryJournalStore;
   tail: Promise<unknown>;
 }
 
-// A Loam author is already a canonical PeerId (`ed25519:<hex>`): the peer IS its governing key.
 export const peerIdOf = (author: string): string => author;
 
 const OPEN_RETRIES = 5;
 
-// Open the journal. Returns the peer and the rows it admitted, in arrival order.
 export async function openHostPeer(
   store: DurableOrdinaryJournalStore,
   peerId: string,
@@ -37,10 +25,6 @@ export async function openHostPeer(
   rows: Delta[];
   unavailable: readonly { id: string; reason: string }[];
 }> {
-  // Degraded, not refused (§25): a damaged admitted row is held out of serving and reported, while
-  // admission stays live. The verified journal copy is never served in its place.
-  // An open can commit (a first journal, a recovery step), so another writer can move the head
-  // under it. That is a conflict, not a fault: open again, a bounded number of times.
   let opened = await OrdinaryJournalPeer.open(store, peerId, { allowDegraded: true });
   for (let attempt = 1; opened.status === "conflict" && attempt < OPEN_RETRIES; attempt += 1) {
     opened = await OrdinaryJournalPeer.open(store, peerId, { allowDegraded: true });
@@ -55,7 +39,6 @@ export async function openHostPeer(
   if (opened.status !== "open" && opened.status !== "degraded") {
     throw new Error(`peer journal: the open did not commit (${describe(opened)})`);
   }
-  // Arrival history keeps erased ids; only the available admitted rows are served, in arrival order.
   const available = opened.peer.availableDeltas();
   const rows = opened.peer
     .snapshot()
@@ -68,25 +51,18 @@ export async function openHostPeer(
   };
 }
 
-// Every step that reads or replaces `peer.journal` runs in the peer's one queue: a reopen that
-// swapped the journal under a commit in flight would leave that commit on a stale head.
 function queued<T>(peer: HostPeer, fn: () => Promise<T>): Promise<T> {
   const run = peer.tail.then(fn);
   peer.tail = run.catch(() => {});
   return run;
 }
 
-// Another writer moved the journal's head. Nothing was admitted or refused; the caller reopens,
-// re-runs its checks and retries with the same receive time and origin.
 export class JournalConflict extends Error {}
 
-// Reopen at the latest head. Returns the admitted rows this process does not hold yet, in arrival
-// order.
 export function reopenHostPeer(peer: HostPeer, holds: (id: string) => boolean): Promise<Delta[]> {
   return rereadHostPeer(peer).then((rows) => rows.filter((d) => !holds(d.id)));
 }
 
-// Reopen at the latest head, in the queue. Returns every admitted row, in arrival order.
 export function rereadHostPeer(peer: HostPeer): Promise<Delta[]> {
   return queued(peer, async () => {
     const { peer: fresh, rows } = await openHostPeer(peer.store, peer.journal.peerId);
@@ -98,7 +74,6 @@ export function rereadHostPeer(peer: HostPeer): Promise<Delta[]> {
 const LOCAL: ArrivalOrigin = { kind: "local" };
 const UNATTRIBUTED: ArrivalOrigin = { kind: "unattributed" };
 
-// A local append: all or nothing, one reason.
 export async function admitLocal(
   peer: HostPeer,
   batch: readonly Delta[],
@@ -112,7 +87,6 @@ export async function admitLocal(
   }
 }
 
-// A federation receive: per delta. The ids the journal admitted or already held.
 export async function admitReceived(
   peer: HostPeer,
   batch: readonly Delta[],
@@ -157,9 +131,6 @@ function describe(r: { status: string; reason?: string; fault?: string }): strin
   return r.reason ?? r.fault ?? r.status;
 }
 
-// Erasure orders: Loam's erasure law already cleared each one under the admission lock, so the
-// journal's own authorization accepts them (one order at a time; several interacting orders would
-// need the rule re-expressed over each round's admitted set). Loam erases only targets it holds.
 export async function admitErasureOrders(
   peer: HostPeer,
   orders: readonly EffectiveErasureOrder[],
@@ -170,8 +141,6 @@ export async function admitErasureOrders(
   const result = await queued(peer, () =>
     peer.journal.admitErasures({
       orders,
-      // One transfer: its orders are considered before its ordinary deltas (SPEC-6), so a target
-      // offered beside its erasure is refused and never briefly admitted.
       ...(ordinary.length === 0 ? {} : { ordinary, capacity: Number.MAX_SAFE_INTEGER }),
       origin: origin === "local" ? LOCAL : UNATTRIBUTED,
       arrivedAt,
@@ -179,7 +148,6 @@ export async function admitErasureOrders(
       guards: [],
       mode: origin === "local" ? "atomic" : "individual",
       targetBudget: Number.MAX_SAFE_INTEGER,
-      // Loam's door admits an erasure of a target it does not hold: the target is refused ahead.
       advanceRefusalCap: Number.MAX_SAFE_INTEGER,
       authorize: () => true,
     }),
@@ -195,9 +163,6 @@ export async function admitErasureOrders(
   );
 }
 
-// Report what Loam's purge did to `targetId`'s bytes. "removed" settles the obligation only if the
-// store proves, in the same transaction, that the bytes are gone. No active obligation: nothing
-// was owed (the order asserted the target absent), so nothing is reported.
 export async function reportPurged(
   peer: HostPeer,
   targetId: string,
@@ -221,8 +186,6 @@ export async function reportPurged(
   }
 }
 
-// Replace the journal's payload-bearing frames with a checkpoint of the current state, so an
-// erased target's payload leaves the frames that admitted it. Its purge cannot settle before this.
 export async function rebaseHostPeer(peer: HostPeer): Promise<void> {
   const result = await queued(peer, () => peer.journal.rebase());
   if (result.status === "conflict") throw new JournalConflict("the peer journal moved");

@@ -1,14 +1,3 @@
-// §11 completeness under a MIRROR — the verdict must inspect the same tiers the promise covers.
-// Under `MirrorBackend`, `deltasSince` returns the PRIMARY only and `purge` returns the MAX of
-// the two counts, so neither can carry the verdict: one tier's honest removal hides the other's
-// silent retention. Every rail here plants retention on a specific tier and asks what `erase`
-// reports — never `get(id) === undefined`, which stays true through a byte-at-rest leak.
-//
-// The two silent-retention rails necessarily drive a FAKE tier: no shipped driver returns 0 while
-// keeping the row (sqlite throws, the archive throws, memory cannot). They prove the VERDICT.
-// `holds` against the real drivers is proven in test/store/contract.test.ts, and the archive's
-// straggler-awareness in test/store/archive.test.ts. Both levels, never one.
-
 import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -35,8 +24,6 @@ afterAll(() => {
     rmSync(r, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-// A governed grove whose store is the supplied backend — the same shape as erase.test.ts's
-// `grove`, opened over a mirror so the tiers are addressable from the test.
 async function groveOn(
   backend: StoreBackend,
 ): Promise<{ gateway: Gateway; fact: Delta; erasures: () => number }> {
@@ -54,20 +41,16 @@ async function groveOn(
   };
 }
 
-// A tier that ACCEPTS the removal order and quietly keeps the bytes: `purge` reports 0 and the
-// delta stays in the set — the read-only-mount / silently-refusing-driver shape. `holds` tells
-// the truth, because a double that lied there would defeat the very rail it stands in.
 function retaining(inner: MemoryBackend): StoreBackend {
   return {
     append: (d) => inner.append(d),
     deltasSince: (k) => inner.deltasSince(k),
-    purge: () => Promise.resolve(0), // ordered to forget; keeps everything
+    purge: () => Promise.resolve(0),
     holds: (id) => inner.holds(id),
     close: () => inner.close(),
   };
 }
 
-// A tier that refuses every call — the cold archive on an unmounted disk.
 const unreachable = (): StoreBackend => ({
   append: () => Promise.reject(new Error("cold store unreachable")),
   deltasSince: () => Promise.reject(new Error("cold store unreachable")),
@@ -78,8 +61,6 @@ const unreachable = (): StoreBackend => ({
 
 describe("erase is complete only when every TIER is clean", () => {
   it("the MIRROR keeps the byte while the primary is clean: erase refuses", async () => {
-    // `deltasSince` on a mirror returns the primary's deltas, and the primary really did forget
-    // — a read-based verdict sees a clean store while the plaintext sits on the other tier.
     const primary = new MemoryBackend();
     const mirrorInner = new MemoryBackend();
     const backend = new MirrorBackend(primary, retaining(mirrorInner));
@@ -88,42 +69,29 @@ describe("erase is complete only when every TIER is clean", () => {
     await expect(gateway.erase(fact.id, { reason: "the subject asked" })).rejects.toThrow(
       /STILL HELD|not complete/i,
     );
-    // And the byte really is where the rail says it is — otherwise this passes for the wrong reason.
     expect(await mirrorInner.holds(fact.id)).toBe(true);
     expect(await primary.holds(fact.id)).toBe(false);
     await gateway.close();
   });
 
   it("the PRIMARY keeps the byte while the mirror removes a straggler: the aggregate count says 1, and erase still refuses", async () => {
-    // `MirrorBackend.purge` returns Math.max(primary, mirror), so a mirror that legitimately
-    // removed something reports 1 for the pair — a count-gated verdict would skip the scan and
-    // miss the retaining primary.
     const primaryInner = new MemoryBackend();
     const mirror = new MemoryBackend();
     const backend = new MirrorBackend(retaining(primaryInner), mirror);
     const { gateway, fact } = await groveOn(backend);
 
-    // NOTHING is purged before the erase: a setup purge would consume the mirror's copy — the
-    // very condition this fixture exists to create. Left alone, the mirror still holds the
-    // target when `erase` runs, so its purge removes one, the retaining primary removes none,
-    // and `MirrorBackend.purge` reports max(0, 1) = 1 — the positive aggregate under test.
     expect(await primaryInner.holds(fact.id)).toBe(true);
     expect(await mirror.holds(fact.id)).toBe(true);
 
     await expect(gateway.erase(fact.id, { reason: "the subject asked" })).rejects.toThrow(
       /STILL HELD|not complete/i,
     );
-    // The primary is what kept it — name the tier, so a pass cannot come from the wrong side.
     expect(await primaryInner.holds(fact.id)).toBe(true);
-    expect(await mirror.holds(fact.id)).toBe(false); // the mirror did its job
+    expect(await mirror.holds(fact.id)).toBe(false);
     await gateway.close();
   });
 
   it("a `.tmp` straggler the sweep missed makes erase refuse, though no read on any tier can see it", async () => {
-    // `deltasSince` is DEFINED to skip `<id>.json.<pid>.tmp` — correct for reads, and the reason
-    // a read can never answer §11. The `shallow` double sweeps only the canonical name, so the
-    // straggler survives its purge; the verdict has to catch what the sweep missed, or the
-    // operator is told a crash-left copy is gone.
     const root = scratch();
     roots.push(root);
     const primary = new MemoryBackend();
@@ -133,7 +101,6 @@ describe("erase is complete only when every TIER is clean", () => {
       deltasSince: (k) => vault.deltasSince(k),
       holds: (id) => vault.holds(id),
       close: () => vault.close(),
-      // Sweeps only the canonical `<id>.json`; leaves `<id>.json.*.tmp` behind.
       purge: (ids) => {
         let removed = 0;
         for (const fan of readdirSync(root, { withFileTypes: true }).filter((f) =>
@@ -154,8 +121,6 @@ describe("erase is complete only when every TIER is clean", () => {
     const backend = new MirrorBackend(primary, shallow);
     const { gateway, fact } = await groveOn(backend);
 
-    // Plant the straggler BEHIND the seam — a raw write, never an append. A `holds` built on the
-    // driver's own bookkeeping could not see this, which is what makes the rail able to fail.
     const fan = join(root, fact.id.slice(0, 2));
     writeFileSync(join(fan, `${fact.id}.json.4242.tmp`), "{}\n");
 
@@ -166,10 +131,6 @@ describe("erase is complete only when every TIER is clean", () => {
   });
 
   it("an UNREACHABLE tier makes erase refuse rather than report a completion it cannot prove", async () => {
-    // An intended availability consequence, pinned so it is never "fixed" by swallowing the tier
-    // error: a store whose cold half is offline cannot PROVE the bytes went, so it must not say
-    // so. A characterization pin, not evidence of the verdict (`MirrorBackend.purge` already
-    // rejects here) — it guards against a per-tier probe that treats unprovable as clean (H9).
     const backend = new MirrorBackend(new MemoryBackend(), unreachable());
     const { gateway, fact } = await groveOn(backend);
     await expect(gateway.erase(fact.id, { reason: "the subject asked" })).rejects.toThrow(
@@ -179,8 +140,6 @@ describe("erase is complete only when every TIER is clean", () => {
   });
 
   it("POSITIVE CONTROL: the same fixture with nothing retained completes normally", async () => {
-    // Without this, every rail above would pass just as happily against an `erase` that always
-    // threw. This is what makes the four refusals mean something.
     const primary = new MemoryBackend();
     const mirror = new MemoryBackend();
     const backend = new MirrorBackend(primary, mirror);
@@ -195,8 +154,6 @@ describe("erase is complete only when every TIER is clean", () => {
   });
 
   it("a refused erase still records the erasure, and the re-run after repair mints no second one", async () => {
-    // The erasure log is append-only: a failed sweep leaves exactly one erasure behind, and
-    // the operator's re-run finishes the job without growing the log.
     const primary = new MemoryBackend();
     const mirrorInner = new MemoryBackend();
     let retain = true;
@@ -214,19 +171,15 @@ describe("erase is complete only when every TIER is clean", () => {
     );
     expect(erasures()).toBe(1);
 
-    retain = false; // the operator fixed the mount and re-ran, exactly as the error instructs
+    retain = false;
     await expect(gateway.erase(fact.id, { reason: "the subject asked" })).resolves.toMatchObject({
       erased: fact.id,
     });
-    expect(erasures()).toBe(1); // still ONE — a fresh timestamp would have minted a second
+    expect(erasures()).toBe(1);
     await gateway.close();
   });
 });
 
-// The retry anchor is a SURVIVING erasure. A negated erasure is no longer standing testimony,
-// and the id stays refused forever, so an erased id can never return through a write path.
-// NOT COVERED: an erase that anchors on a negated erasure while the bytes are back. No door can
-// bring them back now; a tier that kept them unasked would reach it, and no test builds that.
 describe("the retry anchor honors negation", () => {
   const strike = async (gateway: Gateway, targetId: string): Promise<void> => {
     const tomb = [...gateway.reactor.snapshot()].find(
@@ -245,8 +198,8 @@ describe("the retry anchor honors negation", () => {
     );
     await gateway.erase(fact.id, { reason: "the subject asked" });
     await strike(gateway, fact.id);
-    expect(readErasures(gateway.reactor, gateway.validityNow(), OPERATOR).has(fact.id)).toBe(false); // not standing
-    await expect(gateway.append([fact])).rejects.toThrow(/erased/); // and still refused
+    expect(readErasures(gateway.reactor, gateway.validityNow(), OPERATOR).has(fact.id)).toBe(false);
+    await expect(gateway.append([fact])).rejects.toThrow(/erased/);
     await gateway.close();
   });
 
@@ -255,17 +208,13 @@ describe("the retry anchor honors negation", () => {
       new MirrorBackend(new MemoryBackend(), new MemoryBackend()),
     );
     await gateway.erase(fact.id, { reason: "the subject asked" });
-    await strike(gateway, fact.id); // negated, and NOT re-admitted — the store holds nothing
+    await strike(gateway, fact.id);
 
-    // Without the surviving-erasure rule this returns `{ erased }` for work never done (H7).
     await expect(gateway.erase(fact.id)).rejects.toThrow(/nothing to erase/);
     await gateway.close();
   });
 });
 
-// The retry bypass is bounded by "is there anything left to sweep": a surviving erasure from a
-// completed erasure months ago must not suppress the existence guard forever — that would return
-// `{ erased }` for work never done (H7). So these two cases must differ.
 describe("the retry bypass is for an OUTSTANDING erasure, not for any erasure", () => {
   it("a second erase of a CLEANLY erased id still refuses", async () => {
     const { gateway, fact } = await groveOn(
@@ -274,14 +223,11 @@ describe("the retry bypass is for an OUTSTANDING erasure, not for any erasure", 
     await expect(gateway.erase(fact.id, { reason: "the subject asked" })).resolves.toMatchObject({
       erased: fact.id,
     });
-    // Nothing is left anywhere: the erasure record stands, but the byte removal is complete.
     await expect(gateway.erase(fact.id)).rejects.toThrow(/nothing to erase/);
     await gateway.close();
   });
 
   it("...while a retry with bytes still on a tier is let through", async () => {
-    // The case the bypass exists for, pinned beside the case it must not cover — a plain
-    // presence guard would look correct against the rail above alone.
     const primary = new MemoryBackend();
     const mirrorInner = new MemoryBackend();
     let retain = true;
@@ -295,8 +241,8 @@ describe("the retry bypass is for an OUTSTANDING erasure, not for any erasure", 
     const { gateway, fact, erasures } = await groveOn(new MirrorBackend(primary, flaky));
 
     await expect(gateway.erase(fact.id)).rejects.toThrow(/STILL HELD/);
-    expect(await primary.holds(fact.id)).toBe(false); // the reactor has lost the target...
-    expect(await mirrorInner.holds(fact.id)).toBe(true); // ...but the bytes are still out there
+    expect(await primary.holds(fact.id)).toBe(false);
+    expect(await mirrorInner.holds(fact.id)).toBe(true);
 
     retain = false;
     await expect(gateway.erase(fact.id)).resolves.toMatchObject({ erased: fact.id });
@@ -309,9 +255,6 @@ describe("the retry bypass is for an OUTSTANDING erasure, not for any erasure", 
       new MirrorBackend(new MemoryBackend(), new MemoryBackend()),
     );
     const first = await gateway.erase(fact.id, { reason: "the subject asked" });
-    // The erasure names the id in an `erases` pointer, so a naive citation filter picks it up on
-    // any call where it is already in the ground — and a caller cascading on citations would then
-    // try to erase the cut itself and be refused by the append-only guard.
     for (const cited of first.citations) {
       expect(
         isErasure(

@@ -1,16 +1,3 @@
-// §27.2 / §27.6 q2 module-version identity rails (ticket T29) — freezing a membership Term to a
-// MODULE VERSION: an immutable, content-addressed delta-set whose id is a pure function of its
-// MEMBERS. §27.2 decided the shape (order-free, because the members are a CRDT set); this fixes the
-// rung — a hash over the SORTED member ids — and rails the five properties that make the id worth
-// having: order-freedom, cross-store determinism, sensitivity, non-drift, and no metadata in the
-// address.
-//
-// Written BEFORE the build (P3): every rail here fails on pre-T29 code, where `freeze` does not
-// exist. The point of the id is that two stores that froze the same members agree without
-// coordinating — dedup, verification, reproducibility. A test that only checked "freeze returns a
-// string" would pass without any of that, so each rail below asserts an AGREEMENT or a
-// DISAGREEMENT between two independently-reached ids, never the shape of one.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Policy, type Schema } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
@@ -41,8 +28,6 @@ const boot = async (): Promise<Gateway> =>
     }),
   );
 
-// A membership Term naming an explicit id set — the shape that lets a rail hand the SAME members
-// to `freeze` by two different routes.
 const byIds = (ids: readonly string[]): unknown => ({
   op: "select",
   pred: { match: { field: "id", cmp: "inSet", const: [...ids] } },
@@ -63,15 +48,12 @@ describe("§27.2 freeze — a membership Term becomes a content-addressed module
     const c = observed(FERN, "height", 32, 1200, OP_SEED);
     await gw.append([a, b, c]);
 
-    // Same three members, three different orderings of the naming Term. The members are a CRDT
-    // set, so nothing about how they were reached may reach the address.
     const one = gw.freeze(byIds([a.id, b.id, c.id]));
     const two = gw.freeze(byIds([c.id, a.id, b.id]));
     const three = gw.freeze(byIds([b.id, c.id, a.id]));
 
     expect(one.id).toBe(two.id);
     expect(two.id).toBe(three.id);
-    // ...and it really is those three, not an empty set agreeing with itself.
     expect(one.members.map((d) => d.id).sort()).toEqual([a.id, b.id, c.id].sort());
     await gw.close();
   });
@@ -98,8 +80,6 @@ describe("§27.2 freeze — a membership Term becomes a content-addressed module
     await here.append([a, b]);
     await there.append([a, b]);
 
-    // Each store also holds ground the other does not — the address is over the MEMBERS the Term
-    // selected, never over the store they were selected from.
     await here.append([observed(FERN, "message", "only here", 1200, OP_SEED)]);
     await there.federate([observed(FERN, "height", 99, 1300, GARDENER_SEED)]);
 
@@ -130,7 +110,6 @@ describe("§27.2 freeze — a membership Term becomes a content-addressed module
     const a = observed(FERN, "height", 30, 1000, OP_SEED);
     await gw.append([a]);
 
-    // Frozen against a LIVE term — one that would select more members the moment more land.
     const version = gw.freeze(HEIGHTS);
     const idAtFreeze = version.id;
     const membersAtFreeze = version.members.map((d) => d.id).sort();
@@ -138,14 +117,10 @@ describe("§27.2 freeze — a membership Term becomes a content-addressed module
     await gw.append([observed(FERN, "height", 31, 1100, OP_SEED)]);
     await gw.append([observed(FERN, "height", 32, 1200, OP_SEED)]);
 
-    // The version is immutable: this is the living→frozen ladder of §27.2. A LIVING container
-    // re-evaluates; a version does not.
     expect(version.id).toBe(idAtFreeze);
     expect(version.members.map((d) => d.id).sort()).toEqual(membersAtFreeze);
     expect(version.members).toHaveLength(1);
 
-    // And freezing the same term NOW is a different version — the drift is real, the frozen one
-    // just does not participate in it.
     expect(gw.freeze(HEIGHTS).id).not.toBe(idAtFreeze);
     await gw.close();
   });
@@ -156,7 +131,7 @@ describe("§27.2 freeze — a membership Term becomes a content-addressed module
     await gw.append([a]);
 
     const first = gw.freeze(byIds([a.id]));
-    await new Promise((r) => setTimeout(r, 12)); // the wall clock moves between the two freezes
+    await new Promise((r) => setTimeout(r, 12));
     const second = gw.freeze(byIds([a.id]));
 
     expect(second.id).toBe(first.id);
@@ -165,16 +140,8 @@ describe("§27.2 freeze — a membership Term becomes a content-addressed module
 
   it("a non-dset Term is refused at the door, exactly as select refuses it", async () => {
     const gw = await boot();
-    // freeze is select + an address; it must not WIDEN what select accepts, and it must not
-    // narrow it either. That equivalence is the real property, so assert it directly rather than
-    // pinning one error string: for the same Term, the two doors agree — both refuse, with the
-    // same voice, or both admit.
-    //
-    // (Asserting the equivalence also keeps this rail honest. Before this ticket `gw.freeze` did
-    // not exist, so a bare `.toThrow()` went green on the TypeError — passing without any of the
-    // behavior. Comparing freeze's answer to select's cannot pass that way.)
-    const refused = { op: "group", key: "byTargetContext", in: "input" }; // cannot evaluate rootless
-    const admitted = { op: "mask", policy: "drop", in: "input" }; // evaluates, and IS a dset
+    const refused = { op: "group", key: "byTargetContext", in: "input" };
+    const admitted = { op: "mask", policy: "drop", in: "input" };
 
     let selectSaid = "";
     let freezeSaid = "";
@@ -191,12 +158,8 @@ describe("§27.2 freeze — a membership Term becomes a content-addressed module
       freezeSaid = (e as Error).message;
     }
     expect(freezeSaid).toBe(selectSaid);
-    expect(freezeSaid).not.toMatch(/is not a function/); // the door's voice, not a missing method
+    expect(freezeSaid).not.toMatch(/is not a function/);
 
-    // And where select admits, freeze admits. NOTE the members may EXCEED select's: freeze carries
-    // the negation closure (hazard H1, T38) because a version is shipped, while select is the
-    // reading surface and answers exactly what the Term picked. With no negations in play the two
-    // coincide, which is what this asserts; the divergence has its own rail below.
     expect(() => gw.freeze(admitted)).not.toThrow();
     expect(
       gw
@@ -227,24 +190,16 @@ describe("§27.2 freeze — a membership Term becomes a content-addressed module
     );
     await gw.append([retraction]);
 
-    // The Term names only the claim. select() answers exactly that — it is the reading surface.
     expect(gw.select(byIds([claim.id])).map((d) => d.id)).toEqual([claim.id]);
 
-    // freeze() carries the closure, because a version is SHIPPED: a consumer loading it must not
-    // read a withdrawn claim as live (hazard H1, T38).
     const version = gw.freeze(byIds([claim.id]));
     expect(version.members.map((d) => d.id).sort()).toEqual([claim.id, retraction.id].sort());
 
-    // Membership alone is the weaker rail (T52): route the same version through the shared H1
-    // narrowing rail, which asks what a consumer LOADING it reads — struck, as at the source.
-    // The freeze-specific leak and transitivity rails live in freeze-narrowing.test.ts.
     const destination = await boot();
     await destination.append([...version.members]);
     assertPreservesSuppression({ what: "freeze", source: gw, destination, struckClaim: claim.id });
     await destination.close();
 
-    // And the address reflects it: freezing the same Term BEFORE the retraction existed is a
-    // different version, because it is a different set. That is the address working, not a wart.
     const other = await boot();
     await other.append([claim]);
     expect(other.freeze(byIds([claim.id])).id).not.toBe(version.id);
@@ -256,11 +211,8 @@ describe("§27.2 freeze — a membership Term becomes a content-addressed module
     const gw = await boot();
     const empty = gw.freeze(byIds([]));
     expect(empty.members).toHaveLength(0);
-    // Stable across stores and across calls — an empty module is a real thing to pin, and two
-    // people who pin it must agree.
     const other = await boot();
     expect(other.freeze(byIds([])).id).toBe(empty.id);
-    // ...and distinguishable from any non-empty one.
     const a = observed(FERN, "height", 30, 1000, OP_SEED);
     await gw.append([a]);
     expect(gw.freeze(byIds([a.id])).id).not.toBe(empty.id);

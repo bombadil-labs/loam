@@ -1,14 +1,3 @@
-// T150 item 4 — the empty-surface refusal says WHICH emptiness: nothing at all, or law that
-// binds nothing. The inert case is the one a pull lands in — a governed store whose only
-// registrations are a peer's — and the refusal must name the operator's own register as the cure.
-// The cause is named as a pair, never attributed: foreign law is inert, and an own definition
-// that does not resolve binds nothing either.
-//
-// NAMED GAP (verifier, P5 round 2): the UNGOVERNED message form ("they conflict or one does not
-// resolve") has no rail — constructing a bind-failure on an ungoverned store needs rival
-// definitions that collide at replay. The governed forms are pinned below; the ungoverned
-// sentence is verified by reading.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, parseTerm, signClaims } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";

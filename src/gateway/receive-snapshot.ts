@@ -1,5 +1,3 @@
-/** Exact experimental law operands. Source identity/completeness are caller assertions;
- * a manifest hash authenticates only its declared members. No capture, signer or cache. */
 import {
   Reactor,
   evalTerm,
@@ -43,13 +41,11 @@ function manifest(value: unknown): Selection | undefined {
 }
 function fromMembers(members: readonly Delta[]): Reactor {
   const r = new Reactor();
-  // The caller verified EVERY input before deduplication; these are only held members.
   for (const d of members)
     if (r.ingest(d).status === "rejected") throw new Error("member rejected");
   return r;
 }
 function definitionId(r: Reactor, author: string, entity: string, body: Term, now: number): string {
-  // Both bootstrap bodies select the deltas at `entity` and mask them, which is what the scope holds.
   const rows = evalTerm(body, lawfulScopeAt(r, now, entity, author), now, entity);
   if (rows.sort !== "hview") throw new Error("bootstrap sort");
   const definitions = rows.hview.props.get("definition") ?? [];
@@ -90,8 +86,6 @@ export function selectReceivingSnapshot(
   const schemaRef = claims.pointers.find((p) => p.role === "schemaVersion")?.target;
   if (claims.author !== binding.sourceAuthor || schemaRef?.kind !== "entity")
     return { status: "invalid-selection" };
-  // Derive authority identities BEFORE adding any forward strikes. Equal-content older
-  // definitions cannot substitute for a withdrawn selected authorial act.
   const pinnedIds = [
     s.registrationId,
     definitionId(original, binding.sourceAuthor, binding.entity!, HYPER_SCHEMA_SCHEMA.body, now),

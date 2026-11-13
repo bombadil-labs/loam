@@ -1,15 +1,3 @@
-// LARDER — the first real Loam app, run end to end (ticket T22). Two sovereign stores — Ann's and
-// Ben's — each install the same delta-bundle, federate directly, and share one grocery list with
-// no server, no account, and no company in the middle. This file is the app's own witness: it does
-// exactly what SKILL.md tells a Claude to do, through the same doors, and checks every promise the
-// README makes. Homes live under demos/larder/homes — disposable, like the village's.
-//
-// The quiet machinery (never explained to the user, always load-bearing): checking off your
-// partner's item is OUTSAYING, not unsaying — `got` is a later claim that beats `need`, and nobody
-// ever negates a delta they didn't author. Two lenses read one item-ground (the list's broad Item
-// reading; the Pantry reading future bundles will ask about beer). The UI is served from the store
-// itself, and the tablet's check-off tap is a pen-signed write.
-
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,7 +19,6 @@ const HOMES = join(ROOT, "homes");
 const BUNDLE = join(ROOT, "bundle");
 const spec = (f) => JSON.parse(readFileSync(join(BUNDLE, f), "utf8"));
 
-// The pen the tick renderer signs as — provisioned in config (custody), granted below (authority).
 const PEN_SEED = "1a".repeat(32);
 const PEN = authorForSeed(PEN_SEED);
 
@@ -41,7 +28,6 @@ const check = (id, label, ok, detail = "") => {
   console.log(`${ok ? "  ok " : "  FAIL"} ${id} ${label}${detail ? ` — ${detail}` : ""}`);
 };
 
-// ---- a household member's store: a home, a gateway, a served surface --------------------------
 async function openMember(name, port) {
   const home = join(HOMES, name);
   initHome(home);
@@ -70,11 +56,8 @@ async function openMember(name, port) {
   };
 }
 
-// ---- install the bundle: the app IS these deltas (what SKILL.md walks a Claude through) --------
 async function installLarder(member) {
   const { gateway } = member;
-  // Order matters only for readability; the fixpoint would sort it out. Recipe expands Item, and
-  // Cookbook expands Recipe — two levels of lens, each naming the reading below it.
   for (const file of [
     "item.json",
     "pantry.json",
@@ -100,13 +83,11 @@ async function installLarder(member) {
   await gateway.publishRenderer(spec("renderer-list.json"));
   await gateway.publishRenderer(spec("renderer-tick.json"));
   await gateway.declarePublic(["Groceries", "Item", "Cookbook"]);
-  // The pen's write standing (SPEC §6's two keys: provisioning is custody, THIS is authority).
   await gateway.append([
     signClaims(grantClaims("loam:store", PEN, "write", member.operator, Date.now()), member.seed),
   ]);
 }
 
-// ---- the daily verbs, exactly as Claude drives them (the claim templates via GraphQL) ----------
 const q = (g, src) => g.query(src);
 const addItem = async (g, item, name) => {
   await q(
@@ -125,7 +106,6 @@ try {
   ann = await openMember("ann", 4501);
   ben = await openMember("ben", 4502);
 
-  // INSTALL — the same bundle, both stores. The app now EXISTS twice, sovereign both times.
   await installLarder(ann);
   await installLarder(ben);
   check(
@@ -134,7 +114,6 @@ try {
     true,
   );
 
-  // ANN ADDS — milk and eggs, through the claim templates (the protocol Claude speaks).
   await addItem(ann.gateway, "item:milk", "milk");
   await addItem(ann.gateway, "item:eggs", "eggs");
   const annList = await q(ann.gateway, `{ groceries(entity: "list:groceries") { item } }`);
@@ -146,7 +125,6 @@ try {
     `items: ${annItems.length}`,
   );
 
-  // BEN FEDERATES — one pull, and the shared list exists with no server between them.
   await pullFrom(ben.gateway, ann.base, "op-ann");
   const benList = await q(ben.gateway, `{ groceries(entity: "list:groceries") { item } }`);
   const benItems = benList.data?.groceries?.item ?? [];
@@ -157,8 +135,6 @@ try {
     `ben sees ${benItems.length} item entries`,
   );
 
-  // BEN CHECKS OFF Ann's milk — OUTSAYING, not unsaying: a later `got` beats her `need`, and her
-  // delta is never touched. Nobody wrote a permissions system; the substrate is the permissions.
   await q(ben.gateway, `mutation { gotIt(item: "item:milk", at: ${Date.now()}) { delta } }`);
   await pullFrom(ann.gateway, ben.base, "op-ben");
   const merged = await q(ann.gateway, `{ groceries(entity: "list:groceries") { item } }`);
@@ -170,8 +146,6 @@ try {
     `milk need=${milk?.need} got=${milk?.got}`,
   );
 
-  // THE UI IS IN THE STORE — the list renderer serves anonymously (declared public), milk in the
-  // basket, eggs still needed.
   const page = await ann.gateway.serveRoute("list", "list:groceries", "public");
   check(
     "larder.5",
@@ -180,8 +154,6 @@ try {
     `render: ${page.status}, ${page.body.length} bytes`,
   );
 
-  // THE TABLET'S TAP IS A SIGNED WRITE — the tick renderer's form posts through the pen (§23.3):
-  // provisioned in config, granted on the ground, and the write lands as the pen's own claim.
   const tapped = await ann.gateway.writeRoute("tick", "item:eggs", { got: Date.now() }, "public");
   const eggsAfter = await q(ann.gateway, `{ item(entity: "item:eggs") { need got } }`);
   check(
@@ -191,7 +163,6 @@ try {
     `writeRoute: ${tapped.status}`,
   );
 
-  // THE SECOND LENS — the pantry reading over the SAME ground, waiting for the BBQ question.
   await q(ann.gateway, `mutation { stocked(item: "item:beer", qty: 6) { delta } }`);
   const pantry = await q(ann.gateway, `{ pantry(entity: "item:beer") { have } }`);
   check(
@@ -201,12 +172,6 @@ try {
     `beer on hand: ${pantry.data?.pantry?.have}`,
   );
 
-  // ---- BOTH DIRECTIONS ---------------------------------------------------------------------
-  // A recipe names what it needs; the pantry says what is there. Point the same edge two ways and
-  // you get the two questions people actually ask: what does this dish need, and what can I cook?
-
-  // Ann writes down two dishes. `needsIngredient` files a line under the recipe AND names the item,
-  // so the gather expands each line into that item's real Item view — stock included.
   const recipe = async (g, id, title, lines) => {
     await q(g, `mutation { recipeCalled(recipe: "${id}", title: "${title}") { delta } }`);
     for (const [item, qty] of lines) {
@@ -221,7 +186,6 @@ try {
     );
   };
 
-  // The pantry as it stands: flour enough for one loaf, no eggs at all.
   await q(ann.gateway, `mutation { called(item: "item:flour", name: "flour") { delta } }`);
   await q(ann.gateway, `mutation { stocked(item: "item:flour", qty: 3) { delta } }`);
   await q(ann.gateway, `mutation { called(item: "item:egg", name: "eggs") { delta } }`);
@@ -233,7 +197,6 @@ try {
     ["item:egg", 3],
   ]);
 
-  // FORWARD — recipe to ingredients. Each line is computed against the pantry, not typed in.
   const pastaView = await q(ann.gateway, `{ recipe(entity: "recipe:pasta") { title ingredient } }`);
   const lines = pastaView.data?.recipe?.ingredient ?? [];
   check(
@@ -246,9 +209,6 @@ try {
     JSON.stringify(lines),
   );
 
-  // REVERSE — the whole question, answered as a READ. The cookbook weighs every recipe against the
-  // pantry two levels down: a cookbook link expands to a Recipe view, whose ingredient lines carry
-  // each item's stock.
   const beforeShopping = await q(ann.gateway, `{ cookbook(entity: "book:recipes") { recipe } }`);
   const verdicts = beforeShopping.data?.cookbook?.recipe ?? [];
   check(
@@ -260,9 +220,6 @@ try {
     JSON.stringify(verdicts),
   );
 
-  // AND IT IS LIVE. Buy the eggs and ask again — nothing re-derived, nothing re-ground. The answer
-  // moves because the pantry moved, which is the whole reason this is an interpretation and not a
-  // remembered fact: a cookbook that says "pasta" over eggs you already ate is the bug.
   await q(ann.gateway, `mutation { stocked(item: "item:egg", qty: 12) { delta } }`);
   const afterShopping = await q(ann.gateway, `{ cookbook(entity: "book:recipes") { recipe } }`);
   const nowMakeable = (afterShopping.data?.cookbook?.recipe ?? []).filter((v) =>
@@ -276,8 +233,6 @@ try {
     JSON.stringify(afterShopping.data?.cookbook?.recipe ?? []),
   );
 
-  // AND IT COMPOSES BACK. What a recipe is short of is exactly what belongs on the grocery list —
-  // the same edge, read the third way. Ben (federated) sees the shortfall land on the shared list.
   await q(ann.gateway, `mutation { stocked(item: "item:egg", qty: 0) { delta } }`);
   await addItem(ann.gateway, "item:egg", "eggs");
   await pullFrom(ben.gateway, ann.base, "op-ann");

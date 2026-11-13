@@ -1,9 +1,3 @@
-// Phase 20 — Clearing is retraction (SPEC §14). Two residents keep a shared board on the commons.
-// Each may withdraw only their OWN words; a clear falls to whatever survives, or to absence — and
-// absence renders per the lens, never a null on a reference. Both doors speak it: GraphQL
-// `clearBoard`, and the REST door's honest verb, DELETE. Retract-your-own is the whole reach: no
-// one's clear ever touches another's claim (to keep others out of a view you narrow the Policy).
-
 import {
   check,
   constitute,
@@ -40,26 +34,20 @@ const notesOf = (res) => res.body?.data?.board?.notes ?? null;
 
 let commons;
 try {
-  // A clean stage: this act writes to a shared board with wall-clock timestamps, so it resets its
-  // own store to stay deterministic and re-runnable (homes are disposable; genesis re-lands).
   dropStore("commons");
   commons = await openStore("commons");
-  // Standing (authors, not owners): the operator seats wren and miles as writers on the commons.
   await constitute(commons, ["wren", "miles"], Date.now());
-  // A tiny shared board: `notes` unions every voice (all), `headline` is latest-wins (pick).
   await registerHttp(commons.base, opToken("commons"), {
     hyperschema: { name: "Board", alg: 1, body: GATHER },
     schema: { props: { notes: ALL, headline: PICK }, default: PICK },
     roots: [BOARD],
-    writable: ["notes", "headline"], // immutable-by-default (§14/§21): open both fields to writes
+    writable: ["notes", "headline"],
   });
 
-  // Both residents write to the shared list; the union holds both, in ground order.
   await gql(commons.base, tok("wren", "commons"), `mutation { board(entity: "${BOARD}", notes: "tend the well") { notes } }`);
   await gql(commons.base, tok("miles", "commons"), `mutation { board(entity: "${BOARD}", notes: "mind the bees") { notes } }`);
   const both = await gql(commons.base, opToken("commons"), `{ board(entity: "${BOARD}") { notes } }`);
 
-  // 20.1 — wren withdraws their OWN note; miles's still stands. Retract-your-own is scoped.
   const afterWren = await gql(
     commons.base,
     tok("wren", "commons"),
@@ -73,8 +61,6 @@ try {
     `[${(notesOf(both) ?? []).length}] → wren clears → [${(afterWren.body?.data?.clearBoard?.notes ?? []).join(", ")}]`,
   );
 
-  // 20.2 — miles clears through the REST door (DELETE): the board empties to ABSENCE, then a fresh
-  // word repopulates it — "withdraw my claim", never "no one may speak here".
   const del = await restDelete(commons.base, tok("miles", "commons"), ["notes"]);
   const emptied = await gql(commons.base, opToken("commons"), `{ board(entity: "${BOARD}") { notes } }`);
   await gql(commons.base, tok("wren", "commons"), `mutation { board(entity: "${BOARD}", notes: "fresh start") { notes } }`);
@@ -88,8 +74,6 @@ try {
     `DELETE ${del.status}; emptied → ${JSON.stringify(notesOf(emptied))}; then → ${JSON.stringify(notesOf(repopulated))}`,
   );
 
-  // 20.3 — a pick field cleared goes to absence, which reads as null (the null-ness is the lens's,
-  // not a value written into the ground).
   await gql(commons.base, tok("wren", "commons"), `mutation { board(entity: "${BOARD}", headline: "harvest saturday") { headline } }`);
   const set = await gql(commons.base, opToken("commons"), `{ board(entity: "${BOARD}") { headline } }`);
   const cleared = await gql(
@@ -105,8 +89,6 @@ try {
     `set "${set.body?.data?.board?.headline}" → cleared → ${JSON.stringify(cleared.body?.data?.clearBoard?.headline)}`,
   );
 
-  // 20.4 — value-scoped REMOVE: withdraw the ONE note you named, the rest of the list stands. On a
-  // fresh board so it reads cleanly. Miles adds two; removing one by value leaves the other.
   const GARDEN = "board:garden";
   await gql(commons.base, tok("miles", "commons"), `mutation { board(entity: "${GARDEN}", notes: "water tuesdays") { notes } }`);
   await gql(commons.base, tok("miles", "commons"), `mutation { board(entity: "${GARDEN}", notes: "prune in march") { notes } }`);
@@ -116,7 +98,6 @@ try {
     tok("miles", "commons"),
     `mutation { removeBoard(entity: "${GARDEN}", field: "notes", values: ["prune in march"]) { notes } }`,
   );
-  // miles cannot remove wren's note — retract-your-own holds for a single value too
   const foreign = await gql(
     commons.base,
     tok("miles", "commons"),
@@ -133,8 +114,6 @@ try {
     `after remove: [${finalNotes.join(", ")}] (wren's note untouched by miles)`,
   );
 
-  // 20.5 — writability: a Ledger whose `amount` is writable and whose `memo` is read-only at the
-  // door. The surface refuses a write to memo (assert, clear, remove) though the ground stays open.
   await registerHttp(commons.base, opToken("commons"), {
     hyperschema: { name: "Ledger", alg: 1, body: GATHER },
     schema: { props: { amount: PICK, memo: PICK }, default: PICK },

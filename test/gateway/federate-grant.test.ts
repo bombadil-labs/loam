@@ -1,14 +1,3 @@
-// T188 — federation authority is a CONTAINER-SCOPED grant, not the operator role.
-//
-// Today `GET /:mount/federate` demands the operator token, and that token also registers root law,
-// mints grants, drops containers and reads everything. So "let me federate with you" costs a peer
-// the entire store. §28 says trust is a property of a CONTAINER and multitenancy is a goal, so
-// re-centralising on the operator would defeat the model this arc exists to build.
-//
-// The shape mirrors T174's register verb exactly: a verb in the grant vocabulary, scoped — there by
-// an entity-namespace prefix, here by a container name. The operator holds it at root BY
-// CONSTRUCTION rather than as a special case.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { federateContainersOf, grantClaims, holdsGrant } from "../../src/gateway/accounts.js";
@@ -28,7 +17,6 @@ async function store(): Promise<Gateway> {
   );
 }
 
-/** The operator grants `subject` the federate verb, scoped to one container. */
 async function grantFederate(gw: Gateway, subject: string, container: string): Promise<void> {
   await gw.append([
     signClaims(
@@ -55,7 +43,6 @@ describe("T188 — a container-scoped federate grant", () => {
   });
 
   it("a holder scoped to one container is not scoped to another", async () => {
-    // The fence, from the side that matters: holding `federate` at `friends` must not admit `work`.
     const gw = await store();
     try {
       const friend = authorForSeed(FRIEND);
@@ -72,7 +59,6 @@ describe("T188 — a container-scoped federate grant", () => {
     const gw = await store();
     try {
       await grantFederate(gw, authorForSeed(FRIEND), "friends");
-      // Two-sided: the reader must distinguish a holder from a bystander, or the fence is decorative.
       expect(
         federateContainersOf(
           gw.reactor,
@@ -146,7 +132,6 @@ describe("T188 — a container-scoped federate grant", () => {
       expect(federateContainersOf(gw.reactor, gw.validityNow(), friend, gw.operatorAuthor)).toEqual(
         [],
       );
-      // Two-sided: the bystander's grant is untouched.
       expect(federateContainersOf(gw.reactor, gw.validityNow(), other, gw.operatorAuthor)).toEqual([
         "work",
       ]);

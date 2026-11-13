@@ -1,8 +1,3 @@
-// Step 7's genesis + registrations-as-deltas. A registration is a delta: schema, policy, and
-// roots, filed as data — so the GraphQL surface is a function of the store and survives reopen
-// with no re-registration code. A genesis is the bootstrap delta-set every store is born from;
-// Gateway.boot opens a fresh store already governed and registered.
-
 import { describe, expect, it } from "vitest";
 import {
   VOCAB_PREFIX,
@@ -30,7 +25,6 @@ describe("registrations as deltas: the surface is a function of the store", () =
     await gateway.append([observed(FERN, "height", 30, 1000, OPERATOR_SEED)]);
     await gateway.flush();
 
-    // reopen: NO register() call — the store remembers its own shape
     const reopened = await Gateway.open(backend, { seed: OPERATOR_SEED });
     const result = await reopened.query(`{ plant(entity: "${FERN}") { height } }`);
     expect(result.errors).toBeUndefined();
@@ -41,7 +35,6 @@ describe("registrations as deltas: the surface is a function of the store", () =
 
   it("only the operator may publish a registration (it is constitutional)", async () => {
     const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
-    // a non-operator actor cannot register through the store
     await expect(
       gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN], { actor: GARDENER_SEED }),
     ).rejects.toThrow(/only the operator/);
@@ -61,11 +54,9 @@ describe("genesis: a fresh store, born governed and registered", () => {
     });
     const gateway = await Gateway.boot(backend, genesis);
 
-    // registered: it answers without a register() call
     const empty = await gateway.query(`{ plant(entity: "${FERN}") { height } }`);
     expect(empty.errors).toBeUndefined();
 
-    // governed: the gardener may write, a stranger may not
     const allowed = await gateway.query(
       `mutation { plant(entity: "${FERN}", height: 40) { height } }`,
       undefined,
@@ -91,14 +82,13 @@ describe("genesis: a fresh store, born governed and registered", () => {
     const definition = genesis.deltas.find((d) =>
       d.claims.pointers.some((p) => p.role === `${VOCAB_PREFIX}.hyperschema.defines`),
     );
-    expect(definition).toBeDefined(); // the schema is DEFINED by a schema-schema delta
+    expect(definition).toBeDefined();
     const registration = genesis.deltas.find((d) =>
       d.claims.pointers.some(
         (p) => p.target.kind === "entity" && p.target.entity.context === "loam.registration",
       ),
     );
     expect(registration).toBeDefined();
-    // the registration references the schema entity; the body travels only in the definition
     expect(
       registration!.claims.pointers.some(
         (p) => p.target.kind === "entity" && p.target.entity.id === "hyperschema:Plant",
@@ -137,7 +127,7 @@ describe("genesis: a fresh store, born governed and registered", () => {
     ]);
     const offered = gateway.offeredDeltas();
     expect(offered.some((d) => JSON.stringify(d.claims).includes("grumbles"))).toBe(false);
-    expect(offered.length).toBeGreaterThan(0); // the marker still crosses
+    expect(offered.length).toBeGreaterThan(0);
     await gateway.close();
   });
 
@@ -153,29 +143,16 @@ describe("genesis: a fresh store, born governed and registered", () => {
     const first = await Gateway.boot(backend, genesis);
     await first.flush();
     const before = (await backend.deltasSince(new Set())).length;
-    const second = await Gateway.boot(backend, genesis); // same genesis, live store
+    const second = await Gateway.boot(backend, genesis);
     await second.flush();
     const after = (await backend.deltasSince(new Set())).length;
-    expect(after).toBe(before); // genesis deltas are content-addressed: the same seed twice is one
+    expect(after).toBe(before);
     await first.close();
     await second.close();
   });
 });
 
 describe("genesis ids are golden: a drive-by constant cannot re-mint the constitution (T74)", () => {
-  // Genesis deltas are content-addressed and their fixed timestamps are load-bearing INPUTS to
-  // those addresses: the marker's `timestamp: 0` and the registration clock's base of 1. Mutating
-  // either keeps boot deterministic (still the same ids every boot) while silently re-minting EVERY
-  // genesis id — an existing store re-booted under the changed constant grows a PARALLEL
-  // constitution (a second marker, duplicate grants) and nothing complains. These golden hexes are
-  // the store's birth certificate: changing a genesis constant is sometimes intended (§20 corollary
-  // — identity lives in the bytes — and then ships a migration) but must never be silent. The
-  // hyperschema and root are local and frozen; the only shared inputs are stable primitives
-  // (`pickLatest`, `GARDENER`), so in practice a genesis-internals change is what moves these hexes.
-  // Scope: this pins the two timestamp constants (marker `timestamp: 0`, clock base `1`) via one
-  // registration + one grant. It does NOT exercise the multi-registration lens-dedup path or
-  // `spec.extra` — a change confined to those re-mints nothing in this fixture; widen the fixture
-  // to pin them.
   const GOLDEN_HS: HyperSchema = {
     name: "GoldenType",
     alg: 1,
@@ -196,9 +173,6 @@ describe("genesis ids are golden: a drive-by constant cannot re-mint the constit
     });
 
   it("the marker id is fixed by the operator alone — pins the marker's timestamp", () => {
-    // Depends only on the operator seed, so the marker-timestamp mutant (0 -> 1) moves it here;
-    // the clock-base mutant does not (the marker predates the clock). That asymmetry is why the
-    // full-list assertion below exists too — neither alone sees both mutants.
     const marker = goldenGenesis().deltas[0]!;
     expect(marker.id).toBe("1e208c8e789157512e9ff8a7f78b5eea9e9e79476aaf34b275d681771715a5a8e8de");
   });
@@ -206,18 +180,16 @@ describe("genesis ids are golden: a drive-by constant cannot re-mint the constit
   it("every genesis delta id, in order — pins the clock base and the whole constitution", () => {
     const ids = goldenGenesis().deltas.map((d) => d.id);
     expect(ids).toEqual([
-      "1e208c8e789157512e9ff8a7f78b5eea9e9e79476aaf34b275d681771715a5a8e8de", // marker
-      "1e20254aac5c179c9c9559a97a0fb6c0ebf5406b565a12030b6f1291465f3726416d", // hyperschema definition
-      "1e2081df71b7eb87e9dc4fe1f684d64a62de02c91c274f808c396bd87070a9421696", // living schema
-      "1e206d4e4a9f072b084c91ec9fb8d6444b886234701d03313492454d6f013a881709", // frozen snapshot
-      "1e205acd66ec82624c3004d8d38190e458a12b62dc411732eddd7d3efe0c90060f41", // binding
-      "1e20db1fe4205979bfc16f2528f30e5122913bac8a17cbb08d02aae4d6d0a59a9c53", // operator grant
+      "1e208c8e789157512e9ff8a7f78b5eea9e9e79476aaf34b275d681771715a5a8e8de",
+      "1e20254aac5c179c9c9559a97a0fb6c0ebf5406b565a12030b6f1291465f3726416d",
+      "1e2081df71b7eb87e9dc4fe1f684d64a62de02c91c274f808c396bd87070a9421696",
+      "1e206d4e4a9f072b084c91ec9fb8d6444b886234701d03313492454d6f013a881709",
+      "1e205acd66ec82624c3004d8d38190e458a12b62dc411732eddd7d3efe0c90060f41",
+      "1e20db1fe4205979bfc16f2528f30e5122913bac8a17cbb08d02aae4d6d0a59a9c53",
     ]);
   });
 });
 
-// The v2 body gathers heights only — tags fall out of the hyperview, so evolution is
-// observable through an unchanged policy: the DEFINITION drove the change.
 const HEIGHTS_ONLY = parseTerm({
   op: "group",
   key: "byTargetContext",
@@ -235,7 +207,6 @@ const PLANT_V2: HyperSchema = { name: "Plant", alg: 1, body: HEIGHTS_ONLY };
 
 describe("evolution is append: the surface follows the surviving definitions", () => {
   const seedGarden = async (gateway: Gateway): Promise<void> => {
-    // Standing first, writes second: a batch cannot bootstrap its own permissions.
     await gateway.append([
       signClaims(grantClaims(STORE_ENTITY, GARDENER, "write", OPERATOR, 2), OPERATOR_SEED),
     ]);
@@ -258,8 +229,8 @@ describe("evolution is append: the surface follows the surviving definitions", (
     const v2 = await gateway.query(`{ plant(entity: "${FERN}") { height tag } }`);
     expect(v2.errors).toBeUndefined();
     const after = v2.data as { plant: { height: number; tag: string[] | null } };
-    expect(after.plant.height).toBe(30); // heights still gather
-    expect(after.plant.tag ?? []).toEqual([]); // tags no longer do: the new body binds, live
+    expect(after.plant.height).toBe(30);
+    expect(after.plant.tag ?? []).toEqual([]);
     await gateway.close();
   });
 
@@ -285,7 +256,6 @@ describe("evolution is append: the surface follows the surviving definitions", (
     const gateway = await Gateway.open(backend, { seed: OPERATOR_SEED });
     await seedGarden(gateway);
     await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
-    // find the definition delta in the store and negate it, operator-signed
     const definition = [...gateway.reactor.snapshot()].find((d) =>
       d.claims.pointers.some((p) => p.role === `${VOCAB_PREFIX}.hyperschema.defines`),
     );
@@ -298,7 +268,7 @@ describe("evolution is append: the surface follows the surviving definitions", (
     ]);
     await gateway.flush();
 
-    const reopened = await Gateway.open(backend, { seed: OPERATOR_SEED }); // no crash
+    const reopened = await Gateway.open(backend, { seed: OPERATOR_SEED });
     await expect(reopened.query(`{ plant(entity: "${FERN}") { height } }`)).rejects.toThrow(
       /nothing is registered/,
     );
@@ -310,10 +280,10 @@ describe("evolution is append: the surface follows the surviving definitions", (
     const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
     await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
     const before = gateway.materializationFor("Plant");
-    await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN]); // same shape, new deltas
-    expect(gateway.materializationFor("Plant")).toBe(before); // no rebind
-    await gateway.publishRegistration(PLANT_V2, PLANT_POLICY, [FERN]); // a REAL evolution
-    expect(gateway.materializationFor("Plant")).not.toBe(before); // rebinds
+    await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
+    expect(gateway.materializationFor("Plant")).toBe(before);
+    await gateway.publishRegistration(PLANT_V2, PLANT_POLICY, [FERN]);
+    expect(gateway.materializationFor("Plant")).not.toBe(before);
     await gateway.close();
   });
 
@@ -323,9 +293,9 @@ describe("evolution is append: the surface follows the surviving definitions", (
     const heightOnly = { props: new Map([["height", pickLatest]]), default: pickLatest };
     await gateway.publishRegistration(PLANT, heightOnly, [FERN]);
     const narrow = await gateway.query(`{ plant(entity: "${FERN}") { tag } }`);
-    expect(narrow.errors?.join(" ")).toMatch(/Cannot query/); // no tag field yet
+    expect(narrow.errors?.join(" ")).toMatch(/Cannot query/);
 
-    await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN]); // same body, wider policy
+    await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
     const wide = await gateway.query(`{ plant(entity: "${FERN}") { tag } }`);
     expect(wide.errors).toBeUndefined();
     expect((wide.data as { plant: { tag: string[] } }).plant.tag).toEqual(["shade"]);
@@ -358,11 +328,10 @@ describe("evolution is append: the surface follows the surviving definitions", (
       undefined,
       undefined,
       [...PLANT_WRITABLE],
-    ); // evolve: heights only
+    );
     const evolved = await gateway.query(`{ plant(entity: "${FERN}") { height tag } }`);
     expect((evolved.data as { plant: { tag: string[] | null } }).plant.tag ?? []).toEqual([]);
 
-    // the OLD stream still fires, and still gathers tags — the shape it promised its reader
     await gateway.query(`mutation { plant(entity: "${FERN}", height: 44) { height } }`);
     const patch = (await stream.next()).value as { plant: { height: number; tag: string[] } };
     expect(patch.plant.height).toBe(44);
@@ -373,10 +342,7 @@ describe("evolution is append: the surface follows the surviving definitions", (
 
   it("a store registration colliding with a manual name persists but does not bind — and says so", async () => {
     const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
-    gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE); // manual, this process's own
-    // The claim is VALID law and is written; whether it shapes THIS store's surface is a downstream
-    // effect, and it is reported rather than thrown. (A peer that pulls these deltas, holding no such
-    // manual binding, binds them fine — which is why one process's memory must not veto the write.)
+    gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     const out = await gateway.publishRegistration(PLANT_V2, PLANT_POLICY, [FERN]);
     expect(out.persisted).toBe(true);
     expect(out.bound).toBe(false);
@@ -404,7 +370,6 @@ describe("evolution is append: the surface follows the surviving definitions", (
     const dsetSort: HyperSchema = {
       name: "Poison",
       alg: 1,
-      // canonical and loadable — but select yields a delta set, not a hyperview
       body: parseTerm({ op: "mask", policy: "drop", in: "input" }),
     };
     await gateway.flush();
@@ -413,14 +378,13 @@ describe("evolution is append: the surface follows the surviving definitions", (
       /hyperview/,
     );
     await gateway.flush();
-    expect((await backend.deltasSince(new Set())).length).toBe(before); // nothing landed
+    expect((await backend.deltasSince(new Set())).length).toBe(before);
     await gateway.close();
   });
 
   it("a hand-planted unmaterializable definition leaves its type unbound, never a crashed boot", async () => {
     const backend = new MemoryBackend();
     const gateway = await Gateway.open(backend, { seed: OPERATOR_SEED });
-    // the operator plants the poison by hand, past publishRegistration's guard
     const { publishHyperSchemaClaims } = await import("@bombadil/rhizomatic");
     const { registrationDeltaClaims } = await import("../../src/gateway/registration.js");
     const dsetBody = parseTerm({ op: "mask", policy: "drop", in: "input" });
@@ -448,7 +412,7 @@ describe("evolution is append: the surface follows the surviving definitions", (
     ]);
     await gateway.flush();
 
-    const reopened = await Gateway.open(backend, { seed: OPERATOR_SEED }); // boots — the poison is unbound
+    const reopened = await Gateway.open(backend, { seed: OPERATOR_SEED });
     await expect(reopened.query(`{ poison(entity: "x") { _hex } }`)).rejects.toThrow(
       /nothing is registered/,
     );
@@ -471,13 +435,10 @@ describe("evolution is append: the surface follows the surviving definitions", (
   it("a granted writer's rival definition LANDS (writes are open) and reshapes nothing", async () => {
     const backend = new MemoryBackend();
     const gateway = await Gateway.open(backend, { seed: OPERATOR_SEED });
-    await seedGarden(gateway); // the gardener holds write standing
+    await seedGarden(gateway);
     await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
 
-    // the gardener publishes a NEWER definition at the operator's own schema entity — under
-    // open writes it lands as data; under operator-filtered reads it binds nothing
     const { publishHyperSchemaClaims } = await import("@bombadil/rhizomatic");
-    // Newer by far, and valid now: only its author keeps it from binding.
     const rival = signClaims(
       {
         ...publishHyperSchemaClaims(PLANT_V2, "schema:Plant", GARDENER, Date.now() + 9_000_000),
@@ -490,7 +451,6 @@ describe("evolution is append: the surface follows the surviving definitions", (
 
     const reopened = await Gateway.open(backend, { seed: OPERATOR_SEED });
     const result = await reopened.query(`{ plant(entity: "${FERN}") { tag } }`);
-    // the operator's v1 body still gathers tags — the gardener's heights-only rival never bound
     expect((result.data as { plant: { tag: string[] } }).plant.tag).toEqual(["shade"]);
     await gateway.close();
     await reopened.close();
@@ -505,7 +465,7 @@ describe("evolution is append: the surface follows the surviving definitions", (
         op: "expand",
         role: { exact: "plant" },
         schema: "Plant",
-        reading: "Plant", // issue #23: the child resolves through its own Plant reading
+        reading: "Plant",
         in: {
           op: "group",
           key: "byTargetContext",
@@ -519,14 +479,12 @@ describe("evolution is append: the surface follows the surviving definitions", (
     };
     const genesis = assembleGenesis({
       operatorSeed: OPERATOR_SEED,
-      // Bed FIRST: its ref must wait for Plant — the fixpoint, not the order, resolves it
       registrations: [
         {
           hyperschema: BED_SCHEMA,
           schema: { props: new Map(), default: pickLatest },
           roots: [BED],
         },
-        // Plant registered under its NAMED reading (issue #23) so the Bed's `reading: "Plant"` resolves.
         { hyperschema: PLANT, schema: PLANT_READING, roots: [FERN], writable: [...PLANT_WRITABLE] },
       ],
     });

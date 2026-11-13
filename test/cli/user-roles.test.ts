@@ -1,13 +1,3 @@
-// §36 phase 3 (T124): `loam user create|assign-role|remove-role`, driven end to end through
-// `run()`. Criteria transcribed from `.adlc/specs/36-03-the-bootstrap-the-role-commands-and-per-
-// operator-keys.md`. Ground/grant trust mechanics (the A-I letters that need `dataStruck`/
-// `governedGatherBody`) live in `test/server/operator-keys.test.ts` instead — this file asserts
-// what the CLI itself does: delta counts, refusals, help text, and the ENOENT/EACCES split.
-//
-// Deliberately NOT here: `loam user unlock` (deferred whole to phase 9 — `login-locks.ts` does not
-// exist on `main` yet, per the working spec's §36.3.1.6). The DOOR half of "a struck role stops a
-// live session" (ticket criterion 15) has no door to test against until phase 5.
-
 import { chmodSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -38,7 +28,6 @@ const out: string[] = [];
 const err: string[] = [];
 const io = () => ({ out: (s: string) => out.push(s), err: (s: string) => err.push(s) });
 
-// A cheap, fixed cost so the suite does not pay the interactive scrypt floor per `create` call.
 const CHEAP_SCRYPT: ScryptParams = { N: 16, r: 1, p: 1, keylen: 16 };
 const password = (value: string) => ({
   readSecret: () => Promise.resolve(value),
@@ -54,8 +43,6 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-// A short-lived read-only Gateway over the same store the CLI just wrote — never held open across
-// a `run()` call (the store is single-writer).
 async function ground(): Promise<{
   reactor: Gateway["reactor"];
   operator: string;
@@ -76,9 +63,6 @@ async function deltaCount(): Promise<number> {
   return n;
 }
 
-// Appends claims directly to the ground, operator-signed, bypassing every CLI refusal — used for
-// fixtures that stand in for a federated pull (the double-grant case; criterion 11 refuses a
-// second `assign-role` call, so the CLI itself cannot produce this state).
 async function appendDirect(claims: Claims, seed: string): Promise<void> {
   const g = await Gateway.boot(
     new SqliteBackend(storePath(home)),
@@ -99,7 +83,7 @@ describe("loam user — subcommand routing", () => {
 describe("loam user create", () => {
   it("actor: one credential at 0600, exactly two deltas, no seed file", async () => {
     await run(["init", "--home", home], io());
-    const before = await deltaCount(); // 1: the genesis operator marker
+    const before = await deltaCount();
     const code = await run(["user", "create", "alice", "--home", home], io(), password("pw"));
     expect(code).toBe(0);
     expect(await deltaCount()).toBe(before + 2);
@@ -147,7 +131,7 @@ describe("loam user create", () => {
     const code = await run(["user", "create", "dana", "--home", home], io(), password("pw"));
     expect(code).toBe(0);
     expect(out.join("\n")).toMatch(/repaired/);
-    expect(await deltaCount()).toBe(before); // nothing new appended
+    expect(await deltaCount()).toBe(before);
     expect(readCredentials(home).users["dana"]).toBeDefined();
   });
 
@@ -208,8 +192,6 @@ describe("loam user create", () => {
     expect(scanFor(before.reactor.arrivalLog(), entry.salt)).toBe(false);
     await before.close();
 
-    // Positive control (H10): plant a fabricated hex string and prove the SAME scan sees it —
-    // otherwise the two assertions above could be passing on a scan that cannot fail at all.
     const seed = readSeed(home);
     const operator = authorForSeed(seed);
     await appendDirect(userClaims("deadbeef00112233", operator, 999), seed);
@@ -269,14 +251,11 @@ describe("loam user create", () => {
       },
     );
 
-    // Pins the `&&` in `homeDefect`, not `||`: a symlink LOOP (ELOOP) is a symlink AND a stat
-    // failure, exactly like a dangling one, but its target may well exist — reporting it as
-    // "does not exist" would be a wrong diagnosis for whoever has to fix it.
     it.skipIf(process.platform === "win32")(
       "a symlink LOOP reports the generic fault, never 'does not exist'",
       async () => {
         const loop = join(home, "loop");
-        symlinkSync(loop, loop); // a symlink pointing at itself: ELOOP, not ENOENT
+        symlinkSync(loop, loop);
         const code = await run(["user", "create", "loki", "--home", loop], io(), password("pw"));
         expect(code).toBe(1);
         expect(err.join("\n")).not.toMatch(/does not exist/);
@@ -299,7 +278,7 @@ describe("loam user create", () => {
           expect(code).toBe(1);
           expect(err.join("\n")).toMatch(/sealed/);
         } finally {
-          chmodSync(sealed, 0o700); // afterEach's rmSync needs to get back in
+          chmodSync(sealed, 0o700);
         }
       },
     );
@@ -355,7 +334,7 @@ describe("loam user assign-role", () => {
   });
 
   it("assigning a role already held appends nothing and says so", async () => {
-    await run(["user", "create", "rose", "--home", home], io(), password("pw")); // actor by default
+    await run(["user", "create", "rose", "--home", home], io(), password("pw"));
     const before = await deltaCount();
     const code = await run(["user", "assign-role", "rose", "--role=actor", "--home", home], io());
     expect(code).toBe(2);
@@ -411,14 +390,14 @@ describe("loam user remove-role", () => {
     );
     expect(code).toBe(0);
     const after = await ground();
-    expect(after.reactor.get(roleDeltaId)).toBeDefined(); // the delta itself still exists
+    expect(after.reactor.get(roleDeltaId)).toBeDefined();
     expect(after.reactor.negationsOf(roleDeltaId).length).toBeGreaterThan(0);
     expect(rolesOf(after.reactor, after.operator, Date.now(), "tara").has("operator")).toBe(false);
     await after.close();
   });
 
   it("a role not held is an idempotent no-op — appends nothing", async () => {
-    await run(["user", "create", "uma", "--home", home], io(), password("pw")); // actor only
+    await run(["user", "create", "uma", "--home", home], io(), password("pw"));
     const before = await deltaCount();
     const code = await run(["user", "remove-role", "uma", "--role=operator", "--home", home], io());
     expect(code).toBe(0);
@@ -430,14 +409,12 @@ describe("loam user remove-role", () => {
   it("double-grant case: two surviving role claims, one remove-role strikes BOTH", async () => {
     await run(["user", "create", "vic", "--home", home], io(), password("pw"));
     await run(["user", "assign-role", "vic", "--role=operator", "--home", home], io());
-    // A second `operator` claim, appended DIRECTLY — `assign-role` would refuse the retry
-    // (criterion 11), which is exactly why a federated pull is the scenario this fixture covers.
     const seed = readSeed(home);
     const operator = authorForSeed(seed);
     await appendDirect(roleClaims("vic", "operator", operator, 99999), seed);
 
     const mid = await ground();
-    expect(rolesOf(mid.reactor, mid.operator, Date.now(), "vic").has("operator")).toBe(true); // held through the 2nd claim
+    expect(rolesOf(mid.reactor, mid.operator, Date.now(), "vic").has("operator")).toBe(true);
     await mid.close();
 
     const code = await run(["user", "remove-role", "vic", "--role=operator", "--home", home], io());
@@ -466,7 +443,7 @@ describe("loam user remove-role", () => {
     await run(["user", "remove-role", "wade", "--role=actor", "--home", home], io());
     g = await ground();
     expect(rolesOf(g.reactor, g.operator, Date.now(), "wade")).toEqual(new Set());
-    expect(resolveUserView(g.reactor, g.operator, Date.now(), "wade")).toBeDefined(); // still a readable user
+    expect(resolveUserView(g.reactor, g.operator, Date.now(), "wade")).toBeDefined();
     await g.close();
   });
 
@@ -510,10 +487,8 @@ describe("loam user remove-role", () => {
       await run(["user", "remove-role", "zara", "--role=operator", "--home", home], io()),
     ).toBe(0);
     g = await ground();
-    // delta: the literal admin grant is struck, the literal write grant is not
     expect(g.reactor.negationsOf(oldAdmin.id).length).toBeGreaterThan(0);
     expect(g.reactor.negationsOf(writeGrant.id)).toEqual([]);
-    // door: admin gone under either subject, write still held
     expect(holdsGrant(g.reactor, Date.now(), STORE_ENTITY, zara, "admin", operator)).toBe(false);
     expect(holdsGrant(g.reactor, Date.now(), STORE_ENTITY, zara, "write", operator)).toBe(true);
     await g.close();
@@ -534,7 +509,6 @@ describe("loam user remove-role", () => {
       io(),
     );
     expect(code).toBe(0);
-    // The grant is found by the user's name, so no seed file is needed to strike it.
     expect(out.join("\n")).not.toMatch(/could not be located/);
     g = await ground();
     expect(rolesOf(g.reactor, g.operator, Date.now(), "yara").has("operator")).toBe(false);
@@ -557,7 +531,7 @@ describe("loam user remove-role", () => {
         expect(err.join("\n")).toMatch(/could not be read/);
         expect(await deltaCount()).toBe(before);
         const g = await ground();
-        expect(rolesOf(g.reactor, g.operator, Date.now(), "zane").has("operator")).toBe(true); // untouched
+        expect(rolesOf(g.reactor, g.operator, Date.now(), "zane").has("operator")).toBe(true);
         await g.close();
       } finally {
         chmodSync(userSeedPath(home, "zane"), 0o600);

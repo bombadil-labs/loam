@@ -1,10 +1,3 @@
-// SPEC §23 renderers, v1 — a UI unit pushed as deltas, bound to a Schema and a route, served by a host
-// that hands it a resolved View and nothing else. These suites prove the vertical: publish → serve
-// (HTML rendered from the live view), push-time verification (existence + field coverage + operator-only),
-// latest-per-route and pinned-version serving, read discipline (the anonymous door serves only a declared
-// lens's latest), the §23.6 "an app never outlives its source" law (withdraw stops serving), and that a
-// faulting bundle refuses cleanly without leaking.
-
 import { type LensName } from "../../src/gateway/registration.js";
 import { describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
@@ -19,14 +12,8 @@ const L = (n: string): LensName => n as LensName;
 const OP_SEED = "0e".repeat(32);
 const OP = authorForSeed(OP_SEED);
 
-// A v1 renderer: a resolved node in, HTML out. Reads `height` and paints it.
 const HEIGHT_CARD = 'export default (n) => `<p class="h">height: ${n.view.height}</p>`;';
 
-// A generous render clock, the #190 pattern: every bundle in this file is a GOOD one, and these
-// rails observe correct rendering — not that a render beats the default 500ms, whose spawn window
-// under full-suite CPU contention can starve a legitimate render into a 500 (T75). The timeout
-// bound itself is proven in render-sandbox.test.ts (the hang rail at the default clock, the 1ms
-// rail); a long clock here removes the competing bound from the frame, it does not weaken it.
 const boot = (): Promise<Gateway> =>
   Gateway.boot(
     new MemoryBackend(),
@@ -124,7 +111,6 @@ describe("§23.5: latest per route, and pinned versions", () => {
   it("a version-pinned renderer resolves against that frozen version", async () => {
     const gw = await boot();
     await gw.append([observed(FERN, "height", 30, 1000, OP_SEED)]);
-    // evolve the schema to v2 (adds `note`), so v1 and v2 are distinct frozen readings
     const evolved = {
       ...PLANT_POLICY,
       props: new Map([
@@ -139,7 +125,6 @@ describe("§23.5: latest per route, and pinned versions", () => {
       ...PLANT_WRITABLE,
       "note",
     ]);
-    // a renderer pinned to v1 reads the v1 reading; note-free
     await gw.publishRenderer(
       spec({
         route: "plantV1",
@@ -147,14 +132,12 @@ describe("§23.5: latest per route, and pinned versions", () => {
         bundle: "export default (n) => `<i>${n.view.note ?? 'none'}</i>`;",
       }),
     );
-    // v1 froze before `note`, so its view has no note — the renderer paints 'none'
     expect((await gw.serveRoute("plantV1", FERN, "full")).body).toBe("<i>none</i>");
     await gw.close();
   });
 });
 
 describe("§23.4 + §17: a pin is the version's CONTENT ADDRESS, durable against withdrawal", () => {
-  // evolve Plant to v2 (adds `note`), returning the gateway with versions [v1, v2].
   const withV2 = async (): Promise<Gateway> => {
     const gw = await boot();
     await gw.append([
@@ -180,7 +163,6 @@ describe("§23.4 + §17: a pin is the version's CONTENT ADDRESS, durable against
 
   it("a pin resolves the SAME frozen version even after an EARLIER version is withdrawn (no vN shift)", async () => {
     const gw = await withV2();
-    // pin to v2 (which declares `note` as a list), render it
     await gw.publishRenderer(
       spec({
         route: "pinned2",
@@ -190,26 +172,21 @@ describe("§23.4 + §17: a pin is the version's CONTENT ADDRESS, durable against
       }),
     );
     const before = (await gw.serveRoute("pinned2", FERN, "full")).body;
-    expect(before).toBe('<i>["hi"]</i>'); // v2 sees `note` as a list
+    expect(before).toBe('<i>["hi"]</i>');
 
-    // withdraw v1 — the numeric alias would now renumber v2 to "v1", but the pin is by content address
     const v1 = gw.registrationVersions().filter((v) => v.hyperschema.name === "Plant")[0]!;
     await gw.append([
       signClaims(makeNegationClaims(OP, 9_000_000, v1.deltaId, "withdraw v1"), OP_SEED),
     ]);
-    // the pinned renderer STILL resolves v2's frozen reading — it never slid to a different version
     expect((await gw.serveRoute("pinned2", FERN, "full")).body).toBe('<i>["hi"]</i>');
     await gw.close();
   });
 
   it("field coverage is checked against the PINNED version, not the latest (§23.4)", async () => {
     const gw = await withV2();
-    // `note` exists only in v2; a renderer pinned to v1 that consumes it must be refused at push,
-    // not accepted-because-latest-has-it (the false-accept the panel caught).
     await expect(
       gw.publishRenderer(spec({ route: "p1", version: 1, consumes: ["note"] })),
     ).rejects.toThrow(/no such field/);
-    // ...and consuming a field v1 DOES have is accepted for a v1 pin
     await expect(
       gw.publishRenderer(spec({ route: "p1", version: 1, consumes: ["height"] })),
     ).resolves.toBeUndefined();
@@ -221,9 +198,6 @@ describe("§23.6: an app never outlives its source", () => {
   it("a route whose schema is not in the door's surface serves a clean 404, never a resolve-error leak", async () => {
     const gw = await boot();
     await gw.append([observed(FERN, "height", 3, 1000, OP_SEED)]);
-    // raw-append a renderer over a schema the store never registered (past publishRenderer's guard) — the
-    // surface check darkens it with a uniform 404, never a 400 leaking the resolver's internals (§23.6 /
-    // the correctness panel's door-asymmetry finding).
     const { rendererBindingClaims } = await import("../../src/gateway/renderers.js");
     await gw.append([
       signClaims(
@@ -254,7 +228,7 @@ describe("§23.6: an app never outlives its source", () => {
         OP_SEED,
       ),
     ]);
-    expect((await gw.serveRoute("plant", FERN, "full")).status).toBe(404); // gone with its source
+    expect((await gw.serveRoute("plant", FERN, "full")).status).toBe(404);
     await gw.close();
   });
 });
@@ -264,14 +238,11 @@ describe("§23: read discipline on the anonymous door (§17)", () => {
     const gw = await boot();
     await gw.append([observed(FERN, "height", 21, 1000, OP_SEED)]);
     await gw.publishRenderer(spec());
-    // not declared public yet → the anonymous door refuses (uniform 404, no oracle)
     expect((await gw.serveRoute("plant", FERN, "public")).status).toBe(404);
-    // declare Plant public → the anonymous door serves it
     await gw.append([signClaims(publicClaims(["Plant"], OP, 2000), OP_SEED)]);
     const out = await gw.serveRoute("plant", FERN, "public");
     expect(out.status).toBe(200);
     expect(out.body).toContain("height: 21");
-    // ...but the operator door serves it regardless
     expect((await gw.serveRoute("plant", FERN, "full")).status).toBe(200);
     await gw.close();
   });
@@ -281,8 +252,8 @@ describe("§23: read discipline on the anonymous door (§17)", () => {
     await gw.append([observed(FERN, "height", 8, 1000, OP_SEED)]);
     await gw.append([signClaims(publicClaims(["Plant"], OP, 2000), OP_SEED)]);
     await gw.publishRenderer(spec({ route: "pinned", version: 1 }));
-    expect((await gw.serveRoute("pinned", FERN, "public")).status).toBe(404); // no pinned-public in v1
-    expect((await gw.serveRoute("pinned", FERN, "full")).status).toBe(200); // full door is fine
+    expect((await gw.serveRoute("pinned", FERN, "public")).status).toBe(404);
+    expect((await gw.serveRoute("pinned", FERN, "full")).status).toBe(200);
     await gw.close();
   });
 });
@@ -296,7 +267,7 @@ describe("§23: a faulting renderer refuses cleanly", () => {
     );
     const out = await gw.serveRoute("plant", FERN, "full");
     expect(out.status).toBe(500);
-    expect(out.body).not.toContain("secret internals"); // the operator's fault, not leaked
+    expect(out.body).not.toContain("secret internals");
     await gw.close();
   });
 
@@ -323,8 +294,6 @@ describe("§23: an unloaded bundle is UNMOUNTED (404), and prepareRoute loads it
   it("a renderer binding appended raw (not preloaded) serves 404 until prepareRoute loads it", async () => {
     const gw = await boot();
     await gw.append([observed(FERN, "height", 7, 1000, OP_SEED)]);
-    // hand-forge a valid renderer binding with a UNIQUE bundle (never loaded by another test — the ESM
-    // cache is process-global) and append it RAW — no publishRenderer, so no preload.
     const uniqueBundle = "export default (n) => `<u>raw ${n.view.height}</u>`;";
     const { rendererBindingClaims } = await import("../../src/gateway/renderers.js");
     await gw.append([
@@ -338,9 +307,7 @@ describe("§23: an unloaded bundle is UNMOUNTED (404), and prepareRoute loads it
         OP_SEED,
       ),
     ]);
-    // the binding is live, but its bundle is not in the ESM cache → unmounted, a clean 404 (never a 500)
     expect((await gw.serveRoute("raw", FERN, "full")).status).toBe(404);
-    // prepareRoute (the async serve-path step) loads it, and then it mounts
     await gw.prepareRoute("raw");
     expect((await gw.serveRoute("raw", FERN, "full")).status).toBe(200);
     await gw.close();

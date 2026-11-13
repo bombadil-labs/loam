@@ -1,14 +1,3 @@
-// §22.6's declared type BINDS (ticket T18, audit-2 MED) — a resolver's signed definition names its
-// output type, and the doors advertise it; before this ticket nothing ENFORCED it, so a resolver
-// declaring `string` and returning an object made GraphQL null-with-error while REST emitted the
-// object verbatim — a concrete two-doors-DISAGREE, precisely the §17 invariant §22.6 claims to
-// keep. The fix validates at the apply seam, ONCE, where every door inherits it, and a mismatch
-// does exactly what a THROWING resolver already does: fall back to the field's Policy value,
-// blast radius of one field.
-//
-// Written BEFORE the build (P3): the mismatch rails failed on pre-fix code (GraphQL erroring where
-// it now answers the Policy value).
-
 import { describe, expect, it } from "vitest";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -46,17 +35,11 @@ const gqlHeight = async (gw: Gateway): Promise<unknown> =>
 
 const restHeight = async (gw: Gateway): Promise<unknown> => {
   const res = await handleRest(gw, "full", "GET", ["v1", "Plant", FERN], undefined);
-  return (res.body as { view?: { height?: unknown } }).view?.height; // props ride under body.view
+  return (res.body as { view?: { height?: unknown } }).view?.height;
 };
 
 describe("§22.6: the resolver's declared type binds at the apply seam — two doors, one answer", () => {
   it("a mismatch behaves EXACTLY like a throw: both doors serve the Policy value, identically to the throwing case", async () => {
-    // The decided shape: a type mismatch does what a throwing resolver already does — per-field
-    // fallback to the Policy value. So the invariant asserted here is EQUIVALENCE with the throw
-    // case, at both doors. (Residual, named: each door serializes the fallback through its own
-    // contract — GraphQL's declared String coerces the numeric Policy value to "42", REST emits
-    // the raw 42. That asymmetry pre-exists for THROWING resolvers and is not widened here; the
-    // VALUE agrees, and mismatch ≡ throw is the promise §22.6 now keeps.)
     const mismatch = await bootWith({
       height: { rung: "a", type: "string", code: "export default () => ({ oops: true });" },
     });
@@ -69,10 +52,10 @@ describe("§22.6: the resolver's declared type binds at the apply seam — two d
     });
     const viaGqlMismatch = await gqlHeight(mismatch);
     const viaRestMismatch = await restHeight(mismatch);
-    expect(viaGqlMismatch).toBe(await gqlHeight(throwing)); // mismatch ≡ throw at the GraphQL door
-    expect(viaRestMismatch).toBe(await restHeight(throwing)); // and at the REST door
-    expect(viaRestMismatch).toBe(42); // the Policy value stands — never the mistyped object
-    expect(viaGqlMismatch).toBe("42"); // GraphQL speaks its declared String of the same value
+    expect(viaGqlMismatch).toBe(await gqlHeight(throwing));
+    expect(viaRestMismatch).toBe(await restHeight(throwing));
+    expect(viaRestMismatch).toBe(42);
+    expect(viaGqlMismatch).toBe("42");
     await mismatch.close();
     await throwing.close();
   });
@@ -97,8 +80,8 @@ describe("§22.6: the resolver's declared type binds at the apply seam — two d
       height: { rung: "a", type: "number", code: 'export default () => "not a number";' },
     });
     const res = await gw.query(`{ plant(entity: "${FERN}") { height tag } }`);
-    expect(res.errors).toBeUndefined(); // the read still answers
-    expect(res.data?.plant).toMatchObject({ height: 42 }); // the field fell back to its Policy value
+    expect(res.errors).toBeUndefined();
+    expect(res.data?.plant).toMatchObject({ height: 42 });
     await gw.close();
   });
 });

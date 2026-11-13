@@ -1,18 +1,3 @@
-// §54 — the guided init (T249), driven end to end through `run()`. One command carries a newcomer
-// from `npm i -g` to a living store: operator, first user (operator role), the stock shelf, and
-// the printed next step — while the flagless piped init every existing rail calls stays
-// byte-for-byte today's bare init.
-//
-// TWO LEVELS, as P3 requires. Object level: what the CLI prints, and what the HTTP door serves
-// (the introspected surface, the virgin-store refusal). Delta level: the store reopened cold —
-// which lenses bind, which roles the ground resolves, what the credential file holds.
-//
-// NAMED GAPS. The TTY-true side of the trigger is pinned at the exported pure predicate, and
-// promptLine's terminal half against a fake stdin (prompt.test.ts's idiom) — no real pty runs
-// here, and test/cli/prompt.test.ts owns promptSecret's own terminal contract. The staleness
-// warning under a concurrently running server is the user-create machinery's own, asserted in
-// its own rails, not re-asserted here.
-
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -34,12 +19,10 @@ import {
 } from "../../src/server/credentials.js";
 import { rolesOf } from "../../src/server/users.js";
 
-// Serve boots real HTTP servers and user create pays a real (cheapened) scrypt — the same
-// hang-guard the sibling CLI rails carry.
 vi.setConfig({ testTimeout: 20_000 });
 
 let home: string;
-let aux: string; // password files live OUTSIDE the home, so (b)'s two-file assertion stays exact
+let aux: string;
 const out: string[] = [];
 const err: string[] = [];
 const io = () => ({ out: (s: string) => out.push(s), err: (s: string) => err.push(s) });
@@ -60,7 +43,6 @@ afterEach(() => {
 const operatorOf = (h: string): string =>
   (JSON.parse(readFileSync(join(h, "config.json"), "utf8")) as { operator: string }).operator;
 
-// A short-lived Gateway over the same store the CLI just wrote — never held open across `run()`.
 async function ground(h: string): Promise<{
   reactor: Gateway["reactor"];
   operator: string;
@@ -115,9 +97,6 @@ const passwordFile = (content: string): string => {
 
 const ALL_LENSES = ["Event", "Note", "Org", "Person", "Post", "ShallowPerson"];
 
-// A bespoke registration over chosen program and lens names — stock-install.test.ts's fixture
-// shape. The body diverges from stock (`annotate` where stock is `drop`); the Schema matches
-// stock shallow-person byte-for-byte, so a divergence warning can only come from the body layer.
 const bespoke = (program: string, lens: string): string =>
   JSON.stringify({
     hyperschema: {
@@ -143,7 +122,6 @@ const bespoke = (program: string, lens: string): string =>
     writable: ["name"],
   });
 
-// T243's fixture pair: a serving record naming a live pid warns; a provably dead pid stays silent.
 const STALENESS = /waits for a restart/;
 const servingRecord = (pid: number): void => {
   writeFileSync(
@@ -155,10 +133,6 @@ const deadPid = (): number => {
   const child = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
   return child.pid ?? 999999;
 };
-
-// ---------------------------------------------------------------------------------------------
-// The trigger — the pure predicate, both sides (criteria b and c pin the behavior; this pins the
-// decision itself, including the TTY-true side no piped test can reach).
 
 describe("§54 the trigger (isGuidedInit)", () => {
   const parsed = (
@@ -195,10 +169,6 @@ describe("§54 the trigger (isGuidedInit)", () => {
   });
 });
 
-// ---------------------------------------------------------------------------------------------
-// The shelf listing in --help: the column is sized to the longest name, so no name concatenates
-// with its summary (help-columns' defect, found live here — `shallow-persona person read …`).
-
 describe("§54 the shelf listing in --help", () => {
   it("no shelf name concatenates with its summary — init and register alike", async () => {
     for (const command of ["init", "register"]) {
@@ -212,9 +182,6 @@ describe("§54 the shelf listing in --help", () => {
     }
   });
 });
-
-// ---------------------------------------------------------------------------------------------
-// (b) BARE COMPAT — the literal pre-§54 strings, the exact two files, no prompts, exit 0.
 
 describe("§54(b) the bare init survives byte-for-byte", () => {
   it("flagless piped init: today's two files, today's output lines, nothing on stderr", async () => {
@@ -252,9 +219,6 @@ describe("§54(b) the bare init survives byte-for-byte", () => {
   });
 });
 
-// ---------------------------------------------------------------------------------------------
-// (a) GUIDED, non-interactive — the whole story in one piped command.
-
 describe("§54(a) --user + --password-file on a fresh home", () => {
   it("mints operator + config, creates the user with the operator role, stocks the full shelf, prints the serve command", async () => {
     const code = await run(
@@ -264,12 +228,10 @@ describe("§54(a) --user + --password-file on a fresh home", () => {
     );
     expect(code).toBe(0);
 
-    // bytes: the identity pair, and a credential for ada alone
     expect(existsSync(join(home, "operator.seed"))).toBe(true);
     expect(existsSync(join(home, "config.json"))).toBe(true);
     expect(entryFor(readCredentials(home), "ada")).toBeDefined();
 
-    // ground: ada holds the operator role, and all six shelf lenses bind
     const g = await ground(home);
     try {
       expect(rolesOf(g.reactor, g.operator, Date.now(), "ada").has("operator")).toBe(true);
@@ -278,20 +240,15 @@ describe("§54(a) --user + --password-file on a fresh home", () => {
     }
     expect(await boundLenses(home)).toEqual(ALL_LENSES);
 
-    // the report: shallow-person arrives via deps, exactly once, nothing skipped on a fresh home
     const printed = out.join("\n");
     expect(printed.match(/stocked shallow-person/g)).toHaveLength(1);
     expect(printed).not.toContain("already bound");
 
-    // the next step: the serve command for THIS home, and the login path
     expect(printed).toContain(`loam serve --http --home ${home}`);
     expect(printed).toContain("/login");
     expect(printed).toContain("ada");
   });
 });
-
-// ---------------------------------------------------------------------------------------------
-// (c) RULE 1 — the name is never invented.
 
 describe("§54(c) a guided flag with no way to a name", () => {
   it("--stock all alone in a pipe refuses, exit 2, naming both exits, writing nothing", async () => {
@@ -320,9 +277,6 @@ describe("§54(c) a guided flag with no way to a name", () => {
   });
 });
 
-// ---------------------------------------------------------------------------------------------
-// (d) EXPLICIT SKIPS — each skip says what it costs; contradictions refuse.
-
 describe("§54(d) explicit skips", () => {
   it("--no-user --no-stock: both notes print, no credential lands, and the virgin door still answers GraphQL", async () => {
     const code = await run(["init", "--home", home, "--no-user", "--no-stock"], io());
@@ -332,7 +286,6 @@ describe("§54(d) explicit skips", () => {
     expect(printed).toMatch(/\/login stays dark until .*loam user create/);
     expect(printed).toMatch(/surface is empty until .*loam register/);
 
-    // door: the empty surface is the honest refusal, served as GraphQL, not a dead socket
     const handle = await detached(home);
     try {
       const body = await gql(handle.url, "{ __typename }");
@@ -357,9 +310,6 @@ describe("§54(d) explicit skips", () => {
     }
   });
 });
-
-// ---------------------------------------------------------------------------------------------
-// (e) TTY PROMPTS — through the injected seam, which is the same seam the terminal path uses.
 
 describe("§54(e) the prompt seams", () => {
   it("asks the name once and the password twice, and creates the user", async () => {
@@ -415,24 +365,18 @@ describe("§54(e) the prompt seams", () => {
     });
     expect(code).toBe(1);
     expect(err.join("\n")).toMatch(/cancelled/);
-    // the honest disclosure: the operator mint DID happen, and the line above said so
     expect(out.join("\n")).toContain(`loam: initialized ${home}`);
     expect(existsSync(join(home, "credentials.json"))).toBe(false);
   });
 });
-
-// ---------------------------------------------------------------------------------------------
-// (f) SELECTION — exactly the named entries plus their deps, and nothing else.
 
 describe("§54(f) --stock person,event", () => {
   it("binds person, event, and shallow-person via deps; the door serves them and refuses note", async () => {
     const code = await run(["init", "--home", home, "--stock", "person,event", "--no-user"], io());
     expect(code).toBe(0);
 
-    // delta level: exactly the selection plus its closure, nothing else
     expect(await boundLenses(home)).toEqual(["Event", "Person", "ShallowPerson"]);
 
-    // door level: the surface serves the three and refuses the absent shape
     const handle = await detached(home);
     try {
       const shape = await gql(handle.url, "{ __schema { queryType { fields { name } } } }");
@@ -451,9 +395,6 @@ describe("§54(f) --stock person,event", () => {
     }
   });
 });
-
-// ---------------------------------------------------------------------------------------------
-// (g) IDEMPOTENCE — a second guided run keeps the identity, refuses the duplicate, skips the shelf.
 
 describe("§54(g) a second guided run on the same home", () => {
   it("keeps the operator, refuses the duplicate user in user-create's own voice, and skips bound stock", async () => {
@@ -476,22 +417,14 @@ describe("§54(g) a second guided run on the same home", () => {
     err.length = 0;
     const again = await run(args, io(), { scrypt: CHEAP_SCRYPT });
     expect(again).toBe(2);
-    // the identity survives
     expect(readFileSync(join(home, "operator.seed"), "utf8")).toBe(seed);
-    // the duplicate is the user-create machinery's own refusal
     expect(err.join("\n")).toMatch(/ada already has a credential/);
-    // and the shelf pass still runs, as the ordinary skip-if-bound install
     const printed = out.join("\n");
     expect(printed).toContain("note already bound — skipped");
     expect(printed).not.toContain("stocked note");
-    // a refused run earns no crown: the next-step block belongs to a clean finish alone
     expect(printed).not.toContain("the next step");
   });
 });
-
-// ---------------------------------------------------------------------------------------------
-// (h) PASSWORD hygiene — the file is the password, minus its trailing newline; absence refuses;
-// the secret never reaches the captured io.
 
 describe("§54(h) --password-file", () => {
   it("uses the content with the trailing newline stripped, and never prints the password", async () => {
@@ -578,10 +511,6 @@ describe("§54(h) --password-file", () => {
   });
 });
 
-// ---------------------------------------------------------------------------------------------
-// The selection is validated WHOLE, before anything lands — a typo'd name must never surface
-// after a partial install, so each refusal leaves the directory empty.
-
 describe("§54(f) the selection's own refusals", () => {
   const cases: ReadonlyArray<readonly [string, RegExp]> = [
     ["note,,person", /empty entry/],
@@ -599,10 +528,6 @@ describe("§54(f) the selection's own refusals", () => {
   }
 });
 
-// ---------------------------------------------------------------------------------------------
-// The §50 machinery through init's own door: the pre-flight contest refusal and the divergence
-// warning — sibling code to register's loop, reachable by no register rail.
-
 describe("§54 the shelf pass meets a bespoke reading", () => {
   it("a stock lens under a foreign program refuses whole — nothing from this run lands", async () => {
     await run(["init", "--home", home], io());
@@ -615,7 +540,6 @@ describe("§54 the shelf pass meets a bespoke reading", () => {
     const code = await run(["init", "--home", home, "--stock", "org", "--no-user"], io());
     expect(code).toBe(2);
     expect(err.join("\n")).toMatch(/would evict your reading, so nothing was installed/);
-    // the "nothing was installed" scope holds truly: only the bespoke lens binds, nothing new
     expect(await boundLenses(home)).toEqual(["ShallowPerson"]);
   });
 
@@ -639,18 +563,11 @@ describe("§54 the shelf pass meets a bespoke reading", () => {
   });
 });
 
-// ---------------------------------------------------------------------------------------------
-// T243's honest sentence, one level up: a guided RE-RUN is first-class (rule 7), and the home it
-// lands into can be served live — the server keeps answering from boot-time memory. Two-sided:
-// the warning fires beside a live pid, and both earned silences stay silent.
-
 describe("§54 the shelf pass under a live server", () => {
   it("warns beside a live-pid serving record; a fresh home and a dead pid stay silent", async () => {
-    // the fresh run: no serving record, no warning — the first earned silence
     expect(await run(["init", "--home", home, "--stock", "note", "--no-user"], io())).toBe(0);
     expect(err.join("\n")).not.toMatch(STALENESS);
 
-    // a live server holds the store: the re-run's skip pass still says so
     servingRecord(process.pid);
     out.length = 0;
     err.length = 0;
@@ -658,7 +575,6 @@ describe("§54 the shelf pass under a live server", () => {
     expect(out.join("\n")).toContain("note already bound — skipped");
     expect(err.join("\n")).toMatch(STALENESS);
 
-    // a provably dead pid is the second earned silence
     servingRecord(deadPid());
     out.length = 0;
     err.length = 0;
@@ -667,17 +583,9 @@ describe("§54 the shelf pass under a live server", () => {
   });
 });
 
-// ---------------------------------------------------------------------------------------------
-// The crown never coexists with an unserved surface. Probed exhaustively: a same-lens contender
-// is SKIPPED (whatever its entity — the divergence rail above), and a rival body under the same
-// program name makes the substrate THROW at publish — so `bound: false` is unreachable from
-// init's publish, and installStock collapses that branch to a loud throw (H7) rather than
-// wearing a disclaimer on a dead branch. This rail pins the throw route's honest exit.
-
 describe("§54 a rival program body under the shelf pass", () => {
   it("the substrate's refusal surfaces as exit 1, and no ready line is crowned", async () => {
     await run(["init", "--home", home], io());
-    // the program name under a foreign lens: stock note would publish a second Note body
     const rival = join(aux, "rival-note.json");
     writeFileSync(rival, bespoke("Note", "MyNote"));
     expect(await run(["register", rival, "--home", home], io())).toBe(0);
@@ -692,11 +600,6 @@ describe("§54 a rival program body under the shelf pass", () => {
     expect(printed).not.toContain("the next step:");
   });
 });
-
-// ---------------------------------------------------------------------------------------------
-// (e)'s terminal half — promptLine, the seam's default. Driven against a fake stdin, the same
-// idiom prompt.test.ts uses for promptSecret: every other test here injects `readInput`, so
-// without these the terminal path would ship with zero coverage of its own two sides.
 
 class FakeInput extends EventEmitter {
   isTTY = true;
@@ -739,7 +642,7 @@ describe("§54(e) promptLine — the terminal name prompt", () => {
     Object.defineProperty(process, "stdin", { value: fake, configurable: true });
     process.stdout.write = (): boolean => true;
     const answer = promptLine("a name: ");
-    fake.emit("end"); // readline folds the input's end into close without ever answering
+    fake.emit("end");
     await expect(answer).rejects.toThrow(/cancelled/);
   });
 });

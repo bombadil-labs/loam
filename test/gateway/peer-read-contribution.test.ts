@@ -149,8 +149,6 @@ describe("a peer owns its serving contribution before composition", () => {
       expect(onlyParent).toContain(target.id);
       expect(onlyParent).toContain(bystander.id);
       expect(onlyParent).not.toContain(negation.id);
-      // The child remains an actual contributor when explicitly selected, so its withheld
-      // strike's target suppression then binds. Exclusion alone was not that selection.
       const composed = root.servingScope(Date.now(), { bound: HOME }).map((d) => d.id);
       expect(composed).not.toContain(target.id);
       expect(composed).toContain(bystander.id);
@@ -473,7 +471,6 @@ describe("child law refresh invalidates the parent's dependent surface", () => {
         expect((cleared.data?.[`clear${field}`] as { height: number }).height).toBe(87);
         expect([...raw.props.values()].flat().map((e) => e.delta.id)).toContain(ownAtPeer.id);
         expect([...raw.props.values()].flat().map((e) => e.delta.id)).not.toContain(privateFact.id);
-        // Same namespace, explicit LOCAL binding: prefix resemblance must not choose child rows.
         const local = `${sourceName.prefix}:Local`;
         const localField = local.replaceAll(":", "_");
         await receiver.publishRegistration(
@@ -536,7 +533,6 @@ describe("child law refresh invalidates the parent's dependent surface", () => {
         );
         expect(native.errors).toBeUndefined();
         expect((native.data?.[localField] as { height: number }).height).toBe(321);
-        // Withdrawing the actual child binding still removes the parent's route.
         const withdrawer = await Gateway.open(new SqliteBackend(file), { seed: CHILD_SEED });
         try {
           await withdrawer.strike(
@@ -582,7 +578,6 @@ describe("child law refresh invalidates the parent's dependent surface", () => {
       );
       expect((await receiver.query(remoteQuery)).errors).toBeUndefined();
       expect(child.def("remote:Plant").writable).toContain("height");
-      // Healthy channel controls exercise BOTH signing routes before their source becomes unreadable.
       const healthyHead = receiver.peer!.journal.currentHead();
       const healthyMutation = await receiver.query(
         `mutation { remote_Plant(entity: "${FERN}", height: 999) { height } }`,
@@ -664,7 +659,7 @@ describe("child law refresh invalidates the parent's dependent surface", () => {
       expect(warm.errors).toBeUndefined();
       expect((warm.data?.remote_Plant as { height: number }).height).toBe(87);
       await withdraw(child, file);
-      expect(child.def("remote:Plant")).toBeDefined(); // the reader has not reconciled yet
+      expect(child.def("remote:Plant")).toBeDefined();
       const result = await receiver.query(remoteQuery);
       expect(child.registered.map((r) => r.lensName)).not.toContain("remote:Plant");
       expect(receiver.registered.map((r) => r.lensName)).not.toContain("remote:Plant");

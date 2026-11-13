@@ -1,9 +1,3 @@
-// Phase 12 (SPEC §11) — THE UNSAYING: a villager erases her own words. The bytes are cleared from
-// every tier (the vault forgets too — heal is erasure-guarded), the signed hole remains,
-// the dossier reverts, and the door refuses the id's return — even when a peer store still
-// holds the original and offers it back on every pulse. Sovereignty both ways: the almanac
-// forgets; the commons remembers; neither can force the other.
-
 import { readErasures, erasuresIn } from "../../dist/index.js";
 import {
   AUTHORS,
@@ -30,9 +24,6 @@ try {
   await constitute(almanac, ["wren", "miles", "odile", "petra", "miller"], 1_000_000);
   await constitute(commons, ["wren", "miles", "odile", "petra"], 1_000_000);
 
-  // 12.1 — the regret: said on the commons, federated to the almanac, visible in the dossier
-  // Future-dated PAST Mallory's forgeries (the lived-in home holds +8_000_000 fakes): the
-  // regret must top the naive pick for 12.1 to say anything.
   const regret = signClaims(
     {
       timestamp: ts + 10_000_000, validFrom: ts + 10_000_000,
@@ -51,8 +42,6 @@ try {
   await pullFrom(almanac.gateway, commons.base, opToken("commons"));
   check("12.1", "the regret federates in and tops the dossier", (await bioOf(almanac.base)) === `regrettable-${ts}`);
 
-  // 12.2 — the unsaying: erasure is the OPERATOR's alone, so the almanac's operator honors
-  // Wren's request and erases; the dossier reverts
   const report = await almanac.gateway.erase(regret.id, {
     reason: "unsaid at the subject's request",
   });
@@ -66,7 +55,6 @@ try {
     `bio now: ${JSON.stringify(after)}`,
   );
 
-  // 12.3 — the door remembers: the commons still offers the original; the pulse refuses it
   const repull = await pullFrom(almanac.gateway, commons.base, opToken("commons"));
   const held = almanac.gateway.reactor.get(regret.id) !== undefined;
   check(
@@ -76,7 +64,6 @@ try {
     `repull accepted ${repull.accepted}, erased id held: ${held}`,
   );
 
-  // 12.4 — the vault forgets too: reopen (heal runs erasure-guarded) and the hole holds
   await almanac.close();
   almanac = await openStore("almanac");
   const ground = [...almanac.gateway.reactor.snapshot()];

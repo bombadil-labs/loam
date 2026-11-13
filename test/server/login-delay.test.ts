@@ -1,18 +1,3 @@
-// §36 phase 9 — the login delay (T130). Criteria 1–16 of .adlc/specs/36-09-the-login-delay.md,
-// transcribed. Two levels, as CLAUDE.md requires: the pure delay functions are driven directly with
-// an injected clock (delta level — what is in the file), and the login door is driven as a real
-// listening server with an injected `waitFor` (object level — what the door answers).
-//
-// NO REAL SLEEP IS EVER ASSERTED. The wait is served by an injected `waitFor` whose gate the test
-// controls, so a "still in flight" witness is a settled-flag read after a microtask flush, never a
-// stopwatch. Every concurrency fixture carries that witness (criterion 7): it asserts the attempt it
-// claims is waiting has NOT settled while the gate is closed, and a positive control proves the
-// witness can tell the difference.
-//
-// What this file deliberately does NOT assert: a timing FLOOR (a duration rail is a flake by
-// construction — the delay table is pinned through `delayFor`'s return value instead); and the squat
-// is stated with its cost, never railed as a defence (criterion 10).
-
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -26,9 +11,6 @@ import { hashPassword, writeCredentials, type ScryptParams } from "../../src/ser
 import { roleClaims, userClaims } from "../../src/server/users.js";
 import { PRESESSION_COOKIE, SESSION_COOKIE } from "../../src/server/session.js";
 
-// A fault switch the mock reads. Hoisted so the `vi.mock` factory can close over it. Both writes
-// delegate to the real module unless the matching flag is set, so the unit tests below still run the
-// real `noteFailure`/`forgetFailures` while criterion 9 can make either write throw on demand.
 const faults = vi.hoisted(() => ({ note: false, forget: false }));
 vi.mock("../../src/server/login-locks.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/server/login-locks.js")>();
@@ -45,8 +27,6 @@ vi.mock("../../src/server/login-locks.js", async (importOriginal) => {
   };
 });
 
-// Imported AFTER the mock so the unit calls route through the (delegating) mock — proving the door
-// and the units share one module surface.
 import {
   DEFAULT_LIMIT,
   delayFor,
@@ -64,17 +44,14 @@ vi.setConfig({ testTimeout: 20000 });
 const OPERATOR_SEED = "0e".repeat(32);
 const CHEAP: ScryptParams = { N: 1024, r: 8, p: 1, keylen: 32 };
 const PASSWORD = "correct horse";
-// A wait-policy for the DOOR: a positive base so an accrued name owes a non-zero wait the injected
-// gate can hold. The millisecond values never elapse — `waitFor` is injected in every door test.
 const DOOR_LIMIT: LimitPolicy = {
   baseDelayMs: 1000,
   maxDelayMs: 8000,
   forgetMs: 900_000,
   maxTracked: 512,
 };
-// A tiny pinnable policy for the unit tests, so the table can be written as literals.
 const P: LimitPolicy = { baseDelayMs: 200, maxDelayMs: 1600, forgetMs: 900_000, maxTracked: 4 };
-const T = 1_000_000; // a fixed wall-clock origin for the injected `limitNow`.
+const T = 1_000_000;
 
 const homes: string[] = [];
 const handles: ServerHandle[] = [];
@@ -130,7 +107,6 @@ const cookiesOf = (res: Response): string[] => res.headers.getSetCookie();
 const valueOf = (header: string): string =>
   header.slice(header.indexOf("=") + 1, header.indexOf(";"));
 
-/** A fresh stateless pre-session: the nonce cookie to present and the token that matches it. */
 async function formPair(base: string): Promise<{ token: string; nonceCookie: string }> {
   const form = await fetch(`${base}/login`, { redirect: "manual" });
   const nonceCookie = cookiesOf(form).find((c) => c.startsWith(`${PRESESSION_COOKIE}=`))!;
@@ -138,7 +114,6 @@ async function formPair(base: string): Promise<{ token: string; nonceCookie: str
   return { token, nonceCookie: `${PRESESSION_COOKIE}=${valueOf(nonceCookie)}` };
 }
 
-/** POST a credential with a valid nonce+token pair, plus any extra headers (e.g. X-Forwarded-For). */
 async function attemptLogin(
   base: string,
   user: string,
@@ -158,8 +133,6 @@ async function attemptLogin(
   });
 }
 
-// A settled-flag witness. `isSettled()` is read after a microtask/macrotask flush; a request parked
-// in the injected wait CANNOT respond, so its flag stays false — that is the in-flight witness.
 function track<T>(p: Promise<T>): { promise: Promise<T>; isSettled: () => boolean } {
   let settled = false;
   const promise = p.then(
@@ -175,8 +148,6 @@ const flush = async (): Promise<void> => {
   for (let i = 0; i < 6; i++) await new Promise((r) => setImmediate(r));
 };
 
-// An injectable, GATED `waitFor`: it records each owed value, counts entries, and blocks until
-// `release()` is called. `untilEntered(n)` resolves once `n` attempts are parked inside it.
 function makeGate(): {
   waitFor: (ms: number) => Promise<void>;
   owed: number[];
@@ -198,7 +169,6 @@ function makeGate(): {
     new Promise((resolve) => (entered >= n ? resolve() : waiters.push({ n, resolve })));
   return { waitFor, owed, untilEntered, release };
 }
-// A pass-through wait for the door tests that only need the delay recorded, never held.
 const immediateWait = async (): Promise<void> => {};
 
 const statusOf = (r: Response): number => r.status;
@@ -210,69 +180,57 @@ describe("§36 phase 9 — the login delay (unit: the delay functions)", () => {
     expect(delayFor(2, P)).toBe(400);
     expect(delayFor(3, P)).toBe(800);
     expect(delayFor(4, P)).toBe(1600);
-    expect(delayFor(5, P)).toBe(1600); // capped, not 3200
-    expect(delayFor(64, P)).toBe(1600); // 2 ** 63 → still a finite number at the cap
+    expect(delayFor(5, P)).toBe(1600);
+    expect(delayFor(64, P)).toBe(1600);
   });
 
   it("a flood against one name leaves a different name at zero wait", () => {
     const home = scratchHome();
     for (let i = 0; i < 10; i++) noteFailure(home, "target", T, P);
-    expect(delayMs(home, "target", T, P)).toBe(P.maxDelayMs); // 10 failures → capped
-    expect(delayMs(home, "bystander", T, P)).toBe(0); // never failed → nothing owed
+    expect(delayMs(home, "target", T, P)).toBe(P.maxDelayMs);
+    expect(delayMs(home, "bystander", T, P)).toBe(0);
   });
 
   it("a wall-clock step backwards leaves the accumulated wait in place", () => {
     const locks = new Map([["target", { failures: 3, lastFailureAt: T }]]);
     expect(delayMsIn(locks, "target", T, P)).toBe(800);
-    // The clock steps a full window BACKWARD: elapsed is negative, never past forgetMs, so the wait
-    // stands. A record's decay must only fire on genuine silence, never on a clock correction.
     expect(delayMsIn(locks, "target", T - P.forgetMs, P)).toBe(800);
     expect(delayMsIn(locks, "target", 0, P)).toBe(800);
   });
 
   it("inside the forget window the wait persists", () => {
     const home = scratchHome();
-    noteFailure(home, "target", T, P); // count 1
-    expect(delayMs(home, "target", T + P.forgetMs, P)).toBe(200); // exactly at the edge: not spent
+    noteFailure(home, "target", T, P);
+    expect(delayMs(home, "target", T + P.forgetMs, P)).toBe(200);
   });
 
   it("past the forget window the name starts clean", () => {
     const home = scratchHome();
     noteFailure(home, "target", T, P);
-    expect(delayMs(home, "target", T + P.forgetMs + 1, P)).toBe(0); // one ms past → spent → clean
-    // And the NEXT failure starts the count over at 1, not where it left off.
+    expect(delayMs(home, "target", T + P.forgetMs + 1, P)).toBe(0);
     noteFailure(home, "target", T + P.forgetMs + 1, P);
     expect(delayMs(home, "target", T + P.forgetMs + 1, P)).toBe(200);
   });
 
   it("the table is bounded at maxTracked", () => {
     const home = scratchHome();
-    // Five distinct names, one failure each. maxTracked is 4, so one is evicted. This pins the BOUND;
-    // the tie-break that CHOOSES which row goes is pinned by the next test (all timestamps equal here,
-    // so this fixture cannot — and does not claim to — distinguish oldest from first-inserted).
     for (const name of ["a", "b", "c", "d", "e"]) noteFailure(home, name, T, P);
-    expect(readLocks(home).size).toBe(4); // bounded — never a fifth row
+    expect(readLocks(home).size).toBe(4);
   });
 
   it("eviction takes the OLDEST among equal-failure rows, not the first inserted", () => {
     const home = scratchHome();
-    // Insertion order DISAGREES with age, so only the `lastFailureAt` tie-break can decide correctly.
-    // "newer" is inserted first but is younger; "older" is inserted second but is older. maxTracked 4.
     noteFailure(home, "newer", T + 100, P);
     noteFailure(home, "older", T, P);
     noteFailure(home, "keepA", T + 100, P);
-    noteFailure(home, "keepB", T + 100, P); // table full, every row at failures 1
-    noteFailure(home, "fresh", T + 200, P); // forces exactly one eviction
+    noteFailure(home, "keepB", T + 100, P);
+    noteFailure(home, "fresh", T + 200, P);
     const locks = readLocks(home);
-    // The oldest by lastFailureAt goes, though it was NOT inserted first. Dropping the secondary sort
-    // term would fall back to insertion order and evict "newer" instead — this is the rail that sees it.
     expect(locks.has("older")).toBe(false);
     expect(locks.has("newer")).toBe(true);
   });
 
   it("DEFAULT_LIMIT pins the shipped policy constants", () => {
-    // The tuning an operator actually runs under, pinned against the literals so a silent edit to the
-    // shipped delay, cap, forget window, or table size is caught rather than absorbed.
     expect(DEFAULT_LIMIT).toEqual({
       baseDelayMs: 250,
       maxDelayMs: 5_000,
@@ -283,15 +241,12 @@ describe("§36 phase 9 — the login delay (unit: the delay functions)", () => {
 
   it("readLocks keeps a well-formed row and drops every malformed entry shape", () => {
     const home = scratchHome();
-    // A hand-edited or corrupted file can hold any shape. `isRecord` is the validator, and each clause
-    // is load-bearing: a non-object, a missing/non-numeric lastFailureAt, or a non-integer/negative
-    // failures count is not a record and must be dropped — not read, and never a throw.
     writeFileSync(
       locksPath(home),
       JSON.stringify({
         users: {
           good: { failures: 3, lastFailureAt: T },
-          zero: { failures: 0, lastFailureAt: T }, // 0 is well-formed (>= 0), delayFor(0) === 0
+          zero: { failures: 0, lastFailureAt: T },
           nullEntry: null,
           notObject: 5,
           noStamp: { failures: 2 },
@@ -303,38 +258,30 @@ describe("§36 phase 9 — the login delay (unit: the delay functions)", () => {
       "utf8",
     );
     const locks = readLocks(home);
-    expect([...locks.keys()].sort()).toEqual(["good", "zero"]); // only the two valid shapes survive
+    expect([...locks.keys()].sort()).toEqual(["good", "zero"]);
     expect(locks.get("good")?.failures).toBe(3);
   });
 
   it("a wide squat holds a chosen name at zero and does not decay", () => {
     const home = scratchHome();
-    // The attacker fills the table with junk, so the target's row is never present at guess time.
     for (const f of ["f1", "f2", "f3", "f4"]) noteFailure(home, f, T, P);
-    expect(delayMs(home, "target", T, P)).toBe(0); // target absent → 0
-    noteFailure(home, "target", T, P); // the guess seats the target (count 1), evicting one junk
-    // The attacker re-floods with maxTracked fresh seatings; the target (count 1, oldest) is evicted.
+    expect(delayMs(home, "target", T, P)).toBe(0);
+    noteFailure(home, "target", T, P);
     for (const g of ["g1", "g2", "g3", "g4"]) noteFailure(home, g, T, P);
     expect(readLocks(home).has("target")).toBe(false);
     expect(delayMs(home, "target", T, P)).toBe(0);
-    // It does NOT decay: a full forget window of silence leaves the target still at zero, because its
-    // row is gone rather than merely old. No waiting on the defender's part erodes a wide squat.
     expect(delayMs(home, "target", T + P.forgetMs + 1, P)).toBe(0);
   });
 
   it("a narrow squat holds zero until one idle window, then the charge returns", () => {
     const home = scratchHome();
-    // Junk held STRONGER than the target (count 2), filling the table.
     for (const f of ["f1", "f2", "f3", "f4"])
       for (let i = 0; i < 2; i++) noteFailure(home, f, T, P);
     expect(delayMs(home, "target", T, P)).toBe(0);
-    noteFailure(home, "target", T, P); // seats target at count 1 (strict weakest), evicting one junk
-    // The attacker refreshes with one fresh seating, evicting the weakest — the target.
+    noteFailure(home, "target", T, P);
     noteFailure(home, "f5", T, P);
     expect(readLocks(home).has("target")).toBe(false);
-    expect(delayMs(home, "target", T, P)).toBe(0); // squatted
-    // DECAY: the attacker stops refreshing. One forget window later the junk is spent, so the
-    // target's next seating survives and the charge returns.
+    expect(delayMs(home, "target", T, P)).toBe(0);
     noteFailure(home, "target", T + P.forgetMs + 1, P);
     expect(delayMs(home, "target", T + P.forgetMs + 1, P)).toBe(200);
   });
@@ -342,7 +289,7 @@ describe("§36 phase 9 — the login delay (unit: the delay functions)", () => {
   it("a damaged record file reads as no records", () => {
     const home = scratchHome();
     writeFileSync(locksPath(home), "this is not json {", "utf8");
-    expect(readLocks(home).size).toBe(0); // fail-open: unparseable → none, never a throw
+    expect(readLocks(home).size).toBe(0);
   });
 });
 
@@ -354,10 +301,10 @@ describe("§36 phase 9 — the login delay (door: what it answers)", () => {
     );
     for (let i = 0; i < 20; i++) {
       const res = await attemptLogin(base, "myk", "wrong");
-      expect(res.status).toBe(401); // a refusal, NEVER a lockout status
+      expect(res.status).toBe(401);
     }
     const ok = await attemptLogin(base, "myk", PASSWORD);
-    expect(ok.status).toBe(200); // admitted after any number of failures — the whole promise
+    expect(ok.status).toBe(200);
     expect(await ok.text()).toContain("Signed in");
   });
 
@@ -367,21 +314,15 @@ describe("§36 phase 9 — the login delay (door: what it answers)", () => {
       { ground: { myk: ["operator"] }, passwords: { myk: PASSWORD } },
       { waitFor: gate.waitFor },
     );
-    noteFailure(home, "myk", T, DOOR_LIMIT); // seat a row so both attempts owe a wait
+    noteFailure(home, "myk", T, DOOR_LIMIT);
     const hit = track(attemptLogin(base, "myk", PASSWORD));
     const miss = track(attemptLogin(base, "myk", "wrong"));
     await gate.untilEntered(2);
     await flush();
-    // The wait is a function of the COUNT read before the compare, never of the compare's OUTCOME:
-    // both the hit and the miss owe the identical wait and both are still parked in it. A hit computed
-    // AFTER its success cleared the count would owe 0 and settle here — that is the timing oracle
-    // criterion 3 forbids, and this witness (hit parked, and both owed values equal) is what sees it.
     expect(gate.owed).toEqual([DOOR_LIMIT.baseDelayMs, DOOR_LIMIT.baseDelayMs]);
     expect(hit.isSettled()).toBe(false);
     expect(miss.isSettled()).toBe(false);
     gate.release();
-    // Positive control: once the wait is released, the two DO diverge — so the block was the wait,
-    // not a hang, and the door is genuinely deciding hit vs miss.
     expect(statusOf(await hit.promise)).toBe(200);
     expect(statusOf(await miss.promise)).toBe(401);
   });
@@ -392,23 +333,18 @@ describe("§36 phase 9 — the login delay (door: what it answers)", () => {
       { ground: { a: ["operator"], b: ["operator"] }, passwords: { a: PASSWORD, b: PASSWORD } },
       { waitFor: gate.waitFor, maxConcurrentHashes: 1 },
     );
-    noteFailure(home, "a", T, DOOR_LIMIT); // a owes a wait; b owes none
+    noteFailure(home, "a", T, DOOR_LIMIT);
     const waiting = track(attemptLogin(base, "a", PASSWORD));
     await gate.untilEntered(1);
-    // b never enters the gate (owes nothing) and completes on the single hash slot — which proves the
-    // parked attempt for a is NOT holding it.
     const other = await attemptLogin(base, "b", PASSWORD);
     expect(other.status).toBe(200);
     await flush();
-    expect(waiting.isSettled()).toBe(false); // WITNESS: a is still parked in its wait
+    expect(waiting.isSettled()).toBe(false);
     gate.release();
     expect(statusOf(await waiting.promise)).toBe(200);
   });
 
   it("the concurrency fixtures prove their held attempt is genuinely in flight", async () => {
-    // The witness itself, under test. A GATED wait leaves the attempt unsettled; an IMMEDIATE wait
-    // lets the same attempt settle. If both read the same way, every concurrency rail above is
-    // vacuous, so this is their positive control.
     const gate = makeGate();
     const gated = await loginServer(
       { ground: { myk: ["operator"] }, passwords: { myk: PASSWORD } },
@@ -418,7 +354,7 @@ describe("§36 phase 9 — the login delay (door: what it answers)", () => {
     const held = track(attemptLogin(gated.base, "myk", PASSWORD));
     await gate.untilEntered(1);
     await flush();
-    expect(held.isSettled()).toBe(false); // the gate holds it
+    expect(held.isSettled()).toBe(false);
 
     const open = await loginServer(
       { ground: { myk: ["operator"] }, passwords: { myk: PASSWORD } },
@@ -428,7 +364,7 @@ describe("§36 phase 9 — the login delay (door: what it answers)", () => {
     const free = track(attemptLogin(open.base, "myk", PASSWORD));
     await free.promise;
     await flush();
-    expect(free.isSettled()).toBe(true); // an un-gated wait DOES settle — the witness can tell
+    expect(free.isSettled()).toBe(true);
 
     gate.release();
     await held.promise;
@@ -439,9 +375,6 @@ describe("§36 phase 9 — the login delay (door: what it answers)", () => {
       { ground: { myk: ["operator"] }, passwords: { myk: PASSWORD } },
       { waitFor: immediateWait },
     );
-    // Fire two wrong-password attempts together. `noteFailure` re-reads the file itself with no await
-    // between read and write, so the second increment sees the first — the count reads two, not one.
-    // A snapshot carried across the hash would make the limit maxFailures × concurrency.
     const [r1, r2] = await Promise.all([
       attemptLogin(base, "myk", "wrong"),
       attemptLogin(base, "myk", "wrong"),
@@ -455,40 +388,38 @@ describe("§36 phase 9 — the login delay (door: what it answers)", () => {
     const gate = makeGate();
     const forward = await loginServer(
       { ground: { myk: ["operator"] }, passwords: { myk: PASSWORD } },
-      { waitFor: gate.waitFor, limitNow: () => T + 5_000 }, // clock ahead of the seeded row
+      { waitFor: gate.waitFor, limitNow: () => T + 5_000 },
     );
-    noteFailure(forward.home, "myk", T, DOOR_LIMIT); // count 1 → delayFor(1) = base
+    noteFailure(forward.home, "myk", T, DOOR_LIMIT);
     const p = track(attemptLogin(forward.base, "myk", PASSWORD));
     await gate.untilEntered(1);
-    expect(gate.owed).toEqual([DOOR_LIMIT.baseDelayMs]); // NOT a deadline against lastFailureAt
+    expect(gate.owed).toEqual([DOOR_LIMIT.baseDelayMs]);
     gate.release();
     await p.promise;
 
     const back = makeGate();
     const backward = await loginServer(
       { ground: { myk: ["operator"] }, passwords: { myk: PASSWORD } },
-      { waitFor: back.waitFor, limitNow: () => T - 5_000 }, // clock behind the seeded row
+      { waitFor: back.waitFor, limitNow: () => T - 5_000 },
     );
     noteFailure(backward.home, "myk", T, DOOR_LIMIT);
     const q = track(attemptLogin(backward.base, "myk", PASSWORD));
     await back.untilEntered(1);
-    expect(back.owed).toEqual([DOOR_LIMIT.baseDelayMs]); // same wait, unmoved by the backward step
+    expect(back.owed).toEqual([DOOR_LIMIT.baseDelayMs]);
     back.release();
     await q.promise;
   });
 
   it("any positive owed wait is served, down to a single millisecond", async () => {
-    // The gate is `owed > 0`, not `owed > 1`: a 1ms owed wait is a wait owed, and it is served. A base
-    // of 1ms makes delayFor(1) === 1, the smallest owed value a policy can produce.
     const gate = makeGate();
     const { base, home } = await loginServer(
       { ground: { myk: ["operator"] }, passwords: { myk: PASSWORD } },
       { waitFor: gate.waitFor, limit: { ...DOOR_LIMIT, baseDelayMs: 1 } },
     );
-    noteFailure(home, "myk", T, { ...DOOR_LIMIT, baseDelayMs: 1 }); // count 1 → owes exactly 1ms
+    noteFailure(home, "myk", T, { ...DOOR_LIMIT, baseDelayMs: 1 });
     const p = track(attemptLogin(base, "myk", PASSWORD));
     await gate.untilEntered(1);
-    expect(gate.owed).toEqual([1]); // the 1ms wait was served, not skipped
+    expect(gate.owed).toEqual([1]);
     await flush();
     expect(p.isSettled()).toBe(false);
     gate.release();
@@ -501,13 +432,13 @@ describe("§36 phase 9 — the login delay (door: what it answers)", () => {
       { ground: { myk: ["operator"] }, passwords: { myk: PASSWORD } },
       { waitFor: immediateWait, onFault: (m: string) => faultsSeen.push(m) },
     );
-    faults.note = true; // every noteFailure throws
+    faults.note = true;
     const miss = await attemptLogin(base, "myk", "wrong");
-    expect(miss.status).toBe(401); // a write fault must NOT become a 503
-    expect(faultsSeen.some((m) => m.includes("login-locks.json"))).toBe(true); // named to the operator
-    expect(readLocks(home).size).toBe(0); // fail-open means NO budget at all — no row was written
+    expect(miss.status).toBe(401);
+    expect(faultsSeen.some((m) => m.includes("login-locks.json"))).toBe(true);
+    expect(readLocks(home).size).toBe(0);
     const ok = await attemptLogin(base, "myk", PASSWORD);
-    expect(ok.status).toBe(200); // and the correct password is still admitted
+    expect(ok.status).toBe(200);
   });
 
   it("a write fault on the success-clear path still admits the correct password", async () => {
@@ -516,11 +447,11 @@ describe("§36 phase 9 — the login delay (door: what it answers)", () => {
       { ground: { myk: ["operator"] }, passwords: { myk: PASSWORD } },
       { waitFor: immediateWait, onFault: (m: string) => faultsSeen.push(m) },
     );
-    noteFailure(home, "myk", T, DOOR_LIMIT); // a row exists, so a successful login tries to clear it
-    faults.forget = true; // the clear write throws
+    noteFailure(home, "myk", T, DOOR_LIMIT);
+    faults.forget = true;
     const ok = await attemptLogin(base, "myk", PASSWORD);
-    expect(ok.status).toBe(200); // the correct password is admitted despite the clear-write fault
-    expect(cookiesOf(ok).some((c) => c.startsWith(`${SESSION_COOKIE}=`))).toBe(true); // seated
+    expect(ok.status).toBe(200);
+    expect(cookiesOf(ok).some((c) => c.startsWith(`${SESSION_COOKIE}=`))).toBe(true);
     expect(faultsSeen.some((m) => m.includes("login-locks.json"))).toBe(true);
   });
 
@@ -530,14 +461,11 @@ describe("§36 phase 9 — the login delay (door: what it answers)", () => {
       { ground: { myk: ["operator"] }, passwords: { myk: PASSWORD } },
       { waitFor: gate.waitFor, maxConcurrentHashes: 8 },
     );
-    noteFailure(home, "myk", T, DOOR_LIMIT); // count 1 → each concurrent attempt owes delayFor(1)
+    noteFailure(home, "myk", T, DOOR_LIMIT);
     const N = 5;
     const attempts = Array.from({ length: N }, () => track(attemptLogin(base, "myk", "wrong")));
     await gate.untilEntered(N);
     await flush();
-    // Each attempt read the ONE count and paid the ONE wait — N entries, all equal — not a queue that
-    // serialises N waits. So a caller buys maxConcurrentHashes guesses per wait; a per-second bound
-    // would be wrong by orders of magnitude.
     expect(gate.owed).toEqual(Array(N).fill(DOOR_LIMIT.baseDelayMs));
     for (const a of attempts) expect(a.isSettled()).toBe(false);
     gate.release();
@@ -549,15 +477,13 @@ describe("§36 phase 9 — the login delay (door: what it answers)", () => {
       { ground: { myk: ["operator"] }, passwords: { myk: PASSWORD } },
       { waitFor: immediateWait },
     );
-    // A rotated X-Forwarded-For is the caller's to write. An IP-keyed limiter would reset every time;
-    // a username-keyed one accumulates one growing wait on the name.
     for (let i = 0; i < 20; i++) {
       const res = await attemptLogin(base, "myk", "wrong", { "x-forwarded-for": `203.0.113.${i}` });
       expect(res.status).toBe(401);
     }
-    expect(readLocks(home).get("myk")?.failures).toBe(20); // one row, twenty failures — keyed on the name
-    expect(delayMs(home, "myk", T, DOOR_LIMIT)).toBe(DOOR_LIMIT.maxDelayMs); // one capped wait
-    expect(readLocks(home).size).toBe(1); // no per-address rows leaked in
+    expect(readLocks(home).get("myk")?.failures).toBe(20);
+    expect(delayMs(home, "myk", T, DOOR_LIMIT)).toBe(DOOR_LIMIT.maxDelayMs);
+    expect(readLocks(home).size).toBe(1);
   });
 
   it("the failure count keys on the same string the credential lookup uses", async () => {
@@ -566,11 +492,9 @@ describe("§36 phase 9 — the login delay (door: what it answers)", () => {
       { waitFor: immediateWait },
     );
     for (let i = 0; i < 3; i++) await attemptLogin(base, "myk", "wrong");
-    // The count sits under the exact username the credential lookup uses — no normalization between
-    // the two, so two surface forms cannot split one credential's count across two rows.
     expect(readLocks(home).get("myk")?.failures).toBe(3);
     expect(delayMs(home, "myk", T, DOOR_LIMIT)).toBe(delayFor(3, DOOR_LIMIT));
-    expect(delayMs(home, "MYK", T, DOOR_LIMIT)).toBe(0); // a different string is a different key
+    expect(delayMs(home, "MYK", T, DOOR_LIMIT)).toBe(0);
   });
 
   it("the cap is re-checked after the wait, so a second released waiter draws the 503", async () => {
@@ -579,7 +503,7 @@ describe("§36 phase 9 — the login delay (door: what it answers)", () => {
       { ground: { myk: ["operator"] }, passwords: { myk: PASSWORD } },
       { waitFor: gate.waitFor, maxConcurrentHashes: 1 },
     );
-    noteFailure(home, "myk", T, DOOR_LIMIT); // both attempts read this count and owe a wait
+    noteFailure(home, "myk", T, DOOR_LIMIT);
     const first = track(attemptLogin(base, "myk", PASSWORD));
     await gate.untilEntered(1);
     const second = track(attemptLogin(base, "myk", "wrong"));
@@ -589,16 +513,11 @@ describe("§36 phase 9 — the login delay (door: what it answers)", () => {
     expect(second.isSettled()).toBe(false);
     gate.release();
     const statuses = [statusOf(await first.promise), statusOf(await second.promise)];
-    // Both cleared the wait, THEN contended for the one hash slot. Exactly one drew the 503 — proof
-    // the cap is read after the wait (never before it) and refuses the surplus rather than queueing it.
     expect(statuses.filter((s) => s === 503)).toHaveLength(1);
     expect(statuses).toContain(200);
   });
 
   it("the hash cap refuses the surplus attempt rather than queueing it", async () => {
-    // A genuinely slow hash holds the one slot; probes meet the cap and are refused, then recover
-    // once the slot frees. The in-flight witness: if the slow hash settled before any probe met the
-    // cap, the fixture proved nothing and SAYS so.
     const SLOW: ScryptParams = { N: 65536, r: 8, p: 2, keylen: 32 };
     const { base } = await loginServer(
       {
@@ -608,8 +527,6 @@ describe("§36 phase 9 — the login delay (door: what it answers)", () => {
       },
       { waitFor: immediateWait, maxConcurrentHashes: 1 },
     );
-    // One stateless pair serves every POST here (reusable by design), so a probe pays no per-probe
-    // page load and can meet the cap before the slow hash drains.
     const pair = await formPair(base);
     const post = (user: string, password: string): Promise<Response> =>
       fetch(`${base}/login`, {
@@ -630,8 +547,8 @@ describe("§36 phase 9 — the login delay (door: what it answers)", () => {
     }
     expect(busy, "the slow hash settled before any probe met the cap").toBeDefined();
     expect((await busy!.text()).toLowerCase()).toContain("busy");
-    expect((await slow).status).toBe(200); // drained, the slow correct password is admitted
-    expect((await attemptLogin(base, "myk", PASSWORD)).status).toBe(200); // and the door recovers
+    expect((await slow).status).toBe(200);
+    expect((await attemptLogin(base, "myk", PASSWORD)).status).toBe(200);
   });
 
   it.skipIf(process.platform === "win32")(
@@ -642,12 +559,9 @@ describe("§36 phase 9 — the login delay (door: what it answers)", () => {
         { ground: { myk: ["operator"] }, passwords: { myk: PASSWORD } },
         { waitFor: immediateWait },
       );
-      // A FIFO here would park readFileSync — and the whole single-threaded login door — forever
-      // (T120). The stat guard must refuse it. If the guard regressed, this login never answers and
-      // the 4s timeout fails the suite VISIBLY rather than hanging silently.
       execFileSync("mkfifo", [locksPath(home)]);
       const res = await attemptLogin(base, "myk", PASSWORD);
-      expect(res.status).toBe(200); // the door answered — the FIFO was refused, never opened
+      expect(res.status).toBe(200);
     },
   );
 
@@ -657,11 +571,9 @@ describe("§36 phase 9 — the login delay (door: what it answers)", () => {
       { ground: { myk: ["operator"] }, passwords: { myk: PASSWORD } },
       { waitFor: immediateWait, onFault: (m: string) => faultsSeen.push(m) },
     );
-    mkdirSync(locksPath(home)); // a directory is not a regular file
+    mkdirSync(locksPath(home));
     const miss = await attemptLogin(base, "myk", "wrong");
-    expect(miss.status).toBe(401); // the read is refused (fail-open), so the login still answers
-    // The WRITE cannot land on a directory, and that fault is named to the operator by its path —
-    // not one generic message for every fault.
+    expect(miss.status).toBe(401);
     expect(faultsSeen.some((m) => m.includes("login-locks.json"))).toBe(true);
   });
 });

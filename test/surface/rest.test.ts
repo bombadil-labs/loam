@@ -1,11 +1,3 @@
-// The REST door (SPEC §17). A registration is interface-agnostic truth; this suite holds the
-// second door to the first one's answers. Three laws under test: AGREEMENT (one ground, one
-// registration — the same view through both doors, _hex for _hex), PARITY (every refusal the
-// GraphQL door makes, the REST door makes — the matrix below, row by row through BOTH),
-// and VERSIONING (§17 amendment: publishing is append-only — an evolved registration mints
-// v2 and v1 stays answerable; a struck version stops being served and its hash answers
-// 410 Gone; the version's true name is the registration delta's content address).
-
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -18,11 +10,9 @@ import { serve, type ServerHandle } from "../../src/server/http.js";
 import { FERN, PLANT_BODY, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 
-// A second, NEVER-DECLARED schema: the smaller-world assertions need a real thing to be
-// missing, and the oracle probes need a live undeclared registration hash to ask about.
 const BOOK = { name: "Book", alg: 1, body: PLANT_BODY };
 
-vi.setConfig({ testTimeout: 20000 }); // one real HTTP server carries the whole suite
+vi.setConfig({ testTimeout: 20000 });
 
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
@@ -31,7 +21,7 @@ const STRANGER_SEED = "e4".repeat(32);
 
 let gateway: Gateway;
 let server: ServerHandle;
-let base: string; // http://host:port/plants
+let base: string;
 
 const rest = (path: string, init: RequestInit = {}, token?: string) =>
   fetch(`${base}${path}`, {
@@ -121,15 +111,12 @@ describe("agreement: one registration, two doors, the same answer", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { view: { height: number } };
     expect(body.view.height).toBe(31);
-    // and the OTHER door sees the write immediately — one ground
     const viaGql = await gql(`{ plant(entity: "${FERN}") { height } }`, "op-token");
     expect((viaGql.body as { data: { plant: { height: number } } }).data.plant.height).toBe(31);
   });
 });
 
 describe("agreement on the time axis: one ground, one asOf, both doors (SPEC §26)", () => {
-  // A fresh entity with two dated heights, so the moment between them is unambiguous — and
-  // untouched by the versioning block that evolves Plant later in this file.
   const CLOCK = "plant:asof";
   const enc = encodeURIComponent(CLOCK);
 
@@ -139,7 +126,6 @@ describe("agreement on the time axis: one ground, one asOf, both doors (SPEC §2
       observed(CLOCK, "height", 20, 200, OPERATOR_SEED),
     ]);
 
-    // The moment T=150 sits between the two heights: the earlier one is in force.
     const viaGql = await gql(
       `{ plant(entity: "${CLOCK}", asOf: 150) { height _hex _asOf _forgotten } }`,
       "op-token",
@@ -155,10 +141,10 @@ describe("agreement on the time axis: one ground, one asOf, both doors (SPEC §2
     };
     expect(gqlPlant["height"]).toBe(10);
     expect(restBody.view.height).toBe(10);
-    expect(restBody._hex).toBe(gqlPlant["_hex"]); // _hex for _hex, across the time axis too
+    expect(restBody._hex).toBe(gqlPlant["_hex"]);
     expect(restBody._asOf).toBe(150);
     expect(gqlPlant["_asOf"]).toBe(150);
-    expect(restBody._forgotten).toEqual(gqlPlant["_forgotten"]); // same enumeration, both doors: [] == []
+    expect(restBody._forgotten).toEqual(gqlPlant["_forgotten"]);
     expect(restBody._forgotten).toEqual([]);
   });
 
@@ -167,10 +153,10 @@ describe("agreement on the time axis: one ground, one asOf, both doors (SPEC §2
     const viaRest = await rest(`/rest/v1/Plant/${enc}`, {}, "op-token");
     const gqlPlant = (viaGql.body as { data: { plant: Record<string, unknown> } }).data.plant;
     const restBody = (await viaRest.json()) as { view: { height: number }; _asOf?: number };
-    expect(gqlPlant["height"]).toBe(20); // the latest, present-tense
+    expect(gqlPlant["height"]).toBe(20);
     expect(restBody.view.height).toBe(20);
-    expect(gqlPlant["_asOf"]).toBeNull(); // no time pin on a present read
-    expect(restBody._asOf).toBeUndefined(); // REST omits the annotation entirely on a present read
+    expect(gqlPlant["_asOf"]).toBeNull();
+    expect(restBody._asOf).toBeUndefined();
   });
 
   it("a malformed asOf refuses plainly (400), never a resolver 500", async () => {
@@ -184,7 +170,7 @@ describe("parity: every refusal, both doors, the same posture", () => {
     const viaGql = await gql(`{ plant(entity: "${FERN}") { height } }`);
     const viaRest = await rest(`/rest/v1/Plant/${encodeURIComponent(FERN)}`);
     const viaSpec = await rest(`/openapi.json`);
-    expect(viaGql.status).toBe(viaRest.status); // the same uniform refusal
+    expect(viaGql.status).toBe(viaRest.status);
     expect(viaRest.status).toBe(viaSpec.status);
     expect(viaRest.status).toBeGreaterThanOrEqual(400);
   });
@@ -214,7 +200,6 @@ describe("parity: every refusal, both doors, the same posture", () => {
   });
 
   it("the public projection is a smaller world through both doors", async () => {
-    // Before any declaration both anonymous doors refuse (asserted above). Open ONE lens:
     await gateway.append([signClaims(publicClaims(["Plant"], OPERATOR, 9_100_000), OPERATOR_SEED)]);
     const viaGql = await gql(`{ plant(entity: "${FERN}") { height } }`);
     const viaRest = await rest(`/rest/v1/Plant/${encodeURIComponent(FERN)}`);
@@ -224,9 +209,8 @@ describe("parity: every refusal, both doors, the same posture", () => {
     const gqlPlant = (await gql(`{ plant(entity: "${FERN}") { _hex } }`)).body as {
       data: { plant: { _hex: string } };
     };
-    expect(restBody._hex).toBe(gqlPlant.data.plant._hex); // agreement holds anonymously too
+    expect(restBody._hex).toBe(gqlPlant.data.plant._hex);
 
-    // ...and writing anonymously is impossible through either door
     const gqlWrite = await gql(`mutation { plant(entity: "${FERN}", height: 1) { height } }`);
     const restWrite = await rest(`/rest/v1/Plant/${encodeURIComponent(FERN)}`, {
       method: "POST",
@@ -235,15 +219,12 @@ describe("parity: every refusal, both doors, the same posture", () => {
     expect(JSON.stringify(gqlWrite.body)).toMatch(/mutation|refused|denied|not/i);
     expect(restWrite.status).toBeGreaterThanOrEqual(400);
 
-    // ...and the anonymous OpenAPI document describes ONLY the declared world — Book is a
-    // real, live, registered lens on this store, and the document must not know it
     const spec = await rest(`/openapi.json`);
     expect(spec.status).toBe(200);
     const doc = (await spec.json()) as { paths: Record<string, unknown> };
     const paths = Object.keys(doc.paths);
     expect(paths.some((p) => p.includes("/Plant/"))).toBe(true);
     expect(paths.some((p) => p.includes("/Book/"))).toBe(false);
-    // ...and reaching Book by name anonymously is a plain 404, no oracle
     const bookRest = await rest(`/rest/v1/Book/${encodeURIComponent("book:dune")}`);
     expect(bookRest.status).toBe(404);
   });
@@ -282,7 +263,6 @@ describe("versioning: publishing is append-only (SPEC §17 amendment)", () => {
     expect(plantV1).toBeDefined();
     v1Hash = plantV1!.deltaId;
 
-    // Evolve: add a `note` prop (all). The registration entity is the identity; same name.
     const evolved = {
       ...PLANT_POLICY,
       props: new Map([
@@ -311,9 +291,6 @@ describe("versioning: publishing is append-only (SPEC §17 amendment)", () => {
     expect(v2.status).toBe(200);
     const v1Body = (await v1.json()) as { view: Record<string, unknown>; _hex: string };
     const v2Body = (await v2.json()) as { view: Record<string, unknown>; _hex: string };
-    // Two lenses, one ground: v2 declares `note` as ALL (a list); v1 never named it, so its
-    // DEFAULT (pick latest) answers a scalar. Same fact, different resolutions, different
-    // content addresses — nothing was mutated, and both answers are true under their law.
     expect(v2Body.view["note"]).toEqual(["evolved and thriving"]);
     expect(v1Body.view["note"]).toBe("evolved and thriving");
     expect(v1Body._hex).not.toBe(v2Body._hex);
@@ -339,16 +316,14 @@ describe("versioning: publishing is append-only (SPEC §17 amendment)", () => {
     const paths = Object.keys(doc.paths);
     expect(paths.some((p) => p.includes("/rest/v1/Plant/"))).toBe(true);
     expect(paths.some((p) => p.includes("/rest/v2/Plant/"))).toBe(true);
-    expect(JSON.stringify(doc)).toContain(v1Hash); // the true name travels in the doc
+    expect(JSON.stringify(doc)).toContain(v1Hash);
   });
 
   it("the public door serves ONE version per name: the latest, aliased v1 — history is not anonymous", async () => {
-    // Plant is declared public and now has two versions. The anonymous world sees exactly
-    // one: the latest policy, at v1 — its version count is its own business.
     const v1 = await rest(`/rest/v1/Plant/${encodeURIComponent(FERN)}`);
     expect(v1.status).toBe(200);
     const body = (await v1.json()) as { view: Record<string, unknown> };
-    expect(body.view["note"]).toEqual(["evolved and thriving"]); // the LATEST lens (all → list)
+    expect(body.view["note"]).toEqual(["evolved and thriving"]);
     const v2 = await rest(`/rest/v2/Plant/${encodeURIComponent(FERN)}`);
     expect(v2.status).toBe(404);
     const spec = await rest(`/openapi.json`);
@@ -357,8 +332,6 @@ describe("versioning: publishing is append-only (SPEC §17 amendment)", () => {
   });
 
   it("an anonymous @hash probe learns nothing: uniform 404 for held, withdrawn, and imaginary hashes alike", async () => {
-    // A LIVE registration of an undeclared schema — the ground holds it; the stranger must
-    // not learn that.
     const bookHash = readRegistrationVersions(
       gateway.reactor,
       gateway.validityNow(),
@@ -366,11 +339,9 @@ describe("versioning: publishing is append-only (SPEC §17 amendment)", () => {
     ).find((v) => v.hyperschema.name === "Book")!.deltaId;
     const probes = [
       `/rest/@${bookHash}/Book/${encodeURIComponent("book:dune")}`,
-      `/rest/@${v1Hash}/Plant/${encodeURIComponent(FERN)}`, // still surviving at this point
-      `/rest/@${"ab".repeat(34)}/Plant/${encodeURIComponent(FERN)}`, // imaginary
+      `/rest/@${v1Hash}/Plant/${encodeURIComponent(FERN)}`,
+      `/rest/@${"ab".repeat(34)}/Plant/${encodeURIComponent(FERN)}`,
     ];
-    // (The Plant v1 hash is still surviving here, so it ANSWERS anonymously? No — the public
-    // door serves only the latest; a non-latest hash is outside its world: 404, same as all.)
     for (const p of probes) {
       const res = await rest(p);
       expect(res.status, p).toBe(404);
@@ -384,27 +355,23 @@ describe("versioning: publishing is append-only (SPEC §17 amendment)", () => {
         OPERATOR_SEED,
       ),
     ]);
-    // The hash answers 410 Gone — withdrawn is not the same silence as never-existed. The
-    // distinction is the FULL door's alone: anonymously the same probe is a uniform 404.
     const byHash = await rest(`/rest/@${v1Hash}/Plant/${encodeURIComponent(FERN)}`, {}, "op-token");
     expect(byHash.status).toBe(410);
     const anonProbe = await rest(`/rest/@${v1Hash}/Plant/${encodeURIComponent(FERN)}`);
     expect(anonProbe.status).toBe(404);
-    // And a surviving hash reached under the WRONG name is a 404, never a false 410.
     const wrongName = await rest(
       `/rest/@${v1Hash}/Book/${encodeURIComponent(FERN)}`,
       {},
       "op-token",
     );
     expect(wrongName.status).toBe(404);
-    // Aliases shift: the surviving registration is now v1 (the Nth SURVIVING, in ground order).
     const versions = readRegistrationVersions(gateway.reactor, gateway.validityNow(), OPERATOR);
     const plants = versions.filter((v) => v.hyperschema.name === "Plant");
     expect(plants).toHaveLength(1);
     expect(plants[0]!.version).toBe(1);
     const v1Now = await rest(`/rest/v1/Plant/${encodeURIComponent(FERN)}`, {}, "op-token");
     const body = (await v1Now.json()) as { view: Record<string, unknown> };
-    expect(body.view["note"]).toEqual(["evolved and thriving"]); // v1 now aliases the evolved lens
+    expect(body.view["note"]).toEqual(["evolved and thriving"]);
   });
 
   it("a version that never existed refuses plainly", async () => {
@@ -417,7 +384,6 @@ describe("versioning: publishing is append-only (SPEC §17 amendment)", () => {
 
 describe("retraction: DELETE clears your own, in agreement with GraphQL clear (§14)", () => {
   it("DELETE /rest retracts the writer's own contribution — the field falls to what survives", async () => {
-    // the writer asserts a distinctive height, both doors see it
     await rest(
       `/rest/v1/Plant/${encodeURIComponent(FERN)}`,
       { method: "POST", body: JSON.stringify({ height: 88 }) },
@@ -426,7 +392,6 @@ describe("retraction: DELETE clears your own, in agreement with GraphQL clear (�
     const seen = await rest(`/rest/v1/Plant/${encodeURIComponent(FERN)}`, {}, "op-token");
     expect(((await seen.json()) as { view: { height: number } }).view.height).toBe(88);
 
-    // DELETE naming the field retracts the writer's OWN height(s) — the operator's 30 still stands.
     const del = await rest(
       `/rest/v1/Plant/${encodeURIComponent(FERN)}`,
       { method: "DELETE", body: JSON.stringify(["height"]) },
@@ -434,15 +399,13 @@ describe("retraction: DELETE clears your own, in agreement with GraphQL clear (�
     );
     expect(del.status).toBe(200);
     const after = (await del.json()) as { view: { height: number } };
-    expect(after.view.height).toBe(30); // reverted to the operator's surviving reading, not null
+    expect(after.view.height).toBe(30);
 
-    // the OTHER door agrees immediately — one ground, one retraction
     const viaGql = await gql(`{ plant(entity: "${FERN}") { height } }`, "op-token");
     expect((viaGql.body as { data: { plant: { height: number } } }).data.plant.height).toBe(30);
   });
 
   it("a field-scoped DELETE honors its body: clearing one field leaves the writer's others", async () => {
-    // the writer contributes TWO distinct fields in one shot, then clears ONLY height
     await rest(
       `/rest/v1/Plant/${encodeURIComponent(FERN)}`,
       { method: "POST", body: JSON.stringify({ height: 66, watered: true }) },
@@ -455,8 +418,8 @@ describe("retraction: DELETE clears your own, in agreement with GraphQL clear (�
     );
     expect(del.status).toBe(200);
     const after = (await del.json()) as { view: { height: number; watered: boolean } };
-    expect(after.view.height).toBe(30); // height retracted → the operator's reading survives
-    expect(after.view.watered).toBe(true); // watered was NOT named, so it stands (not a clear-all)
+    expect(after.view.height).toBe(30);
+    expect(after.view.watered).toBe(true);
   });
 
   it("a DELETE with an empty body clears every prop the writer contributed", async () => {
@@ -472,7 +435,7 @@ describe("retraction: DELETE clears your own, in agreement with GraphQL clear (�
     );
     expect(del.status).toBe(200);
     const after = (await del.json()) as { view: { height: number } };
-    expect(after.view.height).toBe(30); // the writer's 77 withdrawn along with the rest
+    expect(after.view.height).toBe(30);
   });
 
   it("the public door cannot retract any more than it can write", async () => {
@@ -484,7 +447,6 @@ describe("retraction: DELETE clears your own, in agreement with GraphQL clear (�
   });
 
   it("an object DELETE body removes specific values the writer contributed (value-scoped)", async () => {
-    // the writer adds a distinctive tag to the `all` list, both doors see it
     await rest(
       `/rest/v1/Plant/${encodeURIComponent(FERN)}`,
       { method: "POST", body: JSON.stringify({ tag: "ephemeral" }) },
@@ -495,7 +457,6 @@ describe("retraction: DELETE clears your own, in agreement with GraphQL clear (�
       "ephemeral",
     );
 
-    // DELETE { tag: ["ephemeral"] } retracts only that value — the rest of the list stands
     const del = await rest(
       `/rest/v1/Plant/${encodeURIComponent(FERN)}`,
       { method: "DELETE", body: JSON.stringify({ tag: ["ephemeral"] }) },
@@ -504,6 +465,6 @@ describe("retraction: DELETE clears your own, in agreement with GraphQL clear (�
     expect(del.status).toBe(200);
     const after = await gql(`{ plant(entity: "${FERN}") { tag } }`, "op-token");
     const tag = (after.body as { data: { plant: { tag: string[] | null } } }).data.plant.tag;
-    expect(tag ?? []).not.toContain("ephemeral"); // withdrawn; sole value → absent (null)
+    expect(tag ?? []).not.toContain("ephemeral");
   });
 });

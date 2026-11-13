@@ -1,7 +1,3 @@
-// A connection inbox composes into its parent by its owner's authority (step 5 PR 3h; README ruling
-// 8, M3). Delta level: what each pool holds. Object level: what the parent's scope serves. A pool's
-// bytes never move; only the parent's view of them does.
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   authorForSeed,
@@ -42,8 +38,6 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-// A store where ada (root ADA) owns home:ada. `named` binds connections by her name (the user
-// form); otherwise by her key.
 async function home(named = true) {
   const gw = await Gateway.boot(new MemoryBackend(), assembleGenesis({ operatorSeed: OP_SEED }));
   open.push(gw);
@@ -97,7 +91,7 @@ describe("inbox composition by authority", () => {
         connectionKey: CONN,
         ownerSeed: ADA_SEED,
       });
-      expect(one.pool.reactor.get(past.id)).toBeDefined(); // delta level: still held
+      expect(one.pool.reactor.get(past.id)).toBeDefined();
       expect([scope().has(past.id), scope().has(sibling.id)]).toEqual([false, true]);
     });
   }
@@ -127,7 +121,7 @@ describe("inbox composition by authority", () => {
     const one = await bind(CONN_SEED);
     const mine = await writeIn(one.pool, ADA_SEED, 3);
     const stranger = observed(FERN, "height", 4, 50, "5e".repeat(32));
-    expect(one.pool.reactor.ingest(stranger).status).toBe("accepted"); // planted past the door
+    expect(one.pool.reactor.ingest(stranger).status).toBe("accepted");
     expect([scope().has(mine.id), scope().has(stranger.id)]).toEqual([true, false]);
   });
 
@@ -142,9 +136,6 @@ describe("inbox composition by authority", () => {
     );
     await one.pool.append([byOwner]);
     await one.pool.append([byOperator]);
-    // The authority filter keeps both strikes beside their claims, in the scope and in the bound
-    // ground a reading resolves over; the substrate suppresses a claim whose strike is in the
-    // operand set. What a View then serves is the suppression rails' question, not this file's.
     const s = scope();
     expect([s.has(byOwner.id), s.has(byOperator.id)]).toEqual([true, true]);
     const read = boundGroundFor(gw, { container: "home:ada", inbox: one.name }, Date.now());
@@ -162,15 +153,12 @@ describe("inbox composition by authority", () => {
     const one = await bind(CONN_SEED);
     const P = one.pool.operatorAuthor!;
     const law = (c: Claims): Delta => one.pool.signer!.sign(c);
-    // A second grant to the same owner, by key: one owner still.
     await one.pool.append([law(grantClaims(STORE_ENTITY, ADA, "admin", P, 70))]);
     expect(poolOwner(one.pool)).toEqual({ key: ADA, user: "ada" });
     expect(() => scope()).not.toThrow();
-    // A second owner.
     await one.pool.append([law(grantClaims(STORE_ENTITY, CONN2, "admin", P, 71))]);
     expect(poolOwner(one.pool)).toHaveProperty("refusal");
     expect(() => scope()).toThrow(/containerScope refused: the inbox .* names 2 owners/);
-    // No owner at all.
     const grants = one.pool.reactor
       .arrivalLog()
       .filter((d) =>
@@ -206,7 +194,7 @@ describe("inbox composition by authority", () => {
     const watch = one.pool.watch(writtenByUser("ada", one.name));
     const first = (await watch.next()).value as Delta[];
     expect(first.map((d) => d.id)).toContain(w.id);
-    const next = watch.next(); // the frame itself, awaited
+    const next = watch.next();
     await vi.advanceTimersByTimeAsync(T - Date.now() + 1);
     const frame = (await next).value as Delta[];
     expect(frame.map((d) => d.id)).not.toContain(w.id);

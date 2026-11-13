@@ -1,6 +1,3 @@
-// Phase 6 — The living ecosystem: all four stores up, the pulse running, subscribers parked on
-// the almanac while writes land two federation hops away.
-
 import { signClaims } from "@bombadil/rhizomatic";
 import {
   AUTHORS,
@@ -25,7 +22,6 @@ const stores = {};
 let pulsing = true;
 let pulseError;
 
-// The anti-entropy pulse: reel reads the commons; the almanac reads everyone. ~1.2s cadence.
 async function pulse() {
   while (pulsing) {
     try {
@@ -40,7 +36,6 @@ async function pulse() {
   }
 }
 
-// Read frames until the predicate is satisfied (patches may coalesce or arrive split).
 async function framesUntil(stream, pred, timeoutMs = 20000) {
   const deadline = Date.now() + timeoutMs;
   let last;
@@ -56,7 +51,6 @@ try {
   const { commons, reel, hive, almanac } = stores;
   const pulseDone = pulse();
 
-  // 6.1 — the centerpiece subscriber
   const wrenDossier = await sseOpen(
     almanac.base,
     opToken("almanac"),
@@ -70,7 +64,6 @@ try {
     JSON.stringify(snap?.dossier)?.slice(0, 160),
   );
 
-  // 6.2 — THE HEADLINE: a write on the reel patches a subscription on the almanac
   await gql(
     reel.base,
     tok("miles", "reel"),
@@ -90,7 +83,6 @@ try {
     `companioned=${JSON.stringify(patch62.dossier.companioned)} changed=${JSON.stringify(patch62.dossier._changed)}`,
   );
 
-  // 6.3 — a second app moves the same dossier
   await gql(
     commons.base,
     tok("wren", "commons"),
@@ -105,14 +97,13 @@ try {
     patch63.dossier.bio.includes("fern archive"),
   );
 
-  // 6.4 — Petra arrives: live constitutional change, then two stores compose her dossier
   await constitute(commons, ["petra"], 2_000_000);
   const petraDossier = await sseOpen(
     almanac.base,
     opToken("almanac"),
     `subscription { dossier(entity: "person:petra") { name attended _changed } }`,
   );
-  await petraDossier.nextFrame(); // snapshot (likely sparse)
+  await petraDossier.nextFrame();
   await gql(
     commons.base,
     tok("petra", "commons"),
@@ -140,9 +131,8 @@ try {
   );
   await petraDossier.close();
 
-  // 6.5 — the reel's schema evolution crossed as DATA and rebound nothing here
   const genBefore = almanac.gateway.materializationFor("Dossier");
-  await sleep(1500); // at least one full pulse
+  await sleep(1500);
   const genAfter = almanac.gateway.materializationFor("Dossier");
   const noScreening = await gql(
     almanac.base,
@@ -157,10 +147,9 @@ try {
     `generation stable; screening type absent`,
   );
 
-  // 6.6 — the trust lens: Mallory's NEWER forgery wins pick-latest, loses byAuthorRank
   const forgery = signClaims(
     {
-      ...((t) => ({ timestamp: t, validFrom: t }))(Date.now() + 10_000_000), // the newest claim about Wren's bio, by far
+      ...((t) => ({ timestamp: t, validFrom: t }))(Date.now() + 10_000_000),
       author: AUTHORS.mallory,
       pointers: [
         {
@@ -189,7 +178,6 @@ try {
     `plain="${plain}" trusted="${trusted}"`,
   );
 
-  // 6.7 — the four-store audit: subsets + cross-store convergence, post-saga
   const ids = (g) => new Set([...g.reactor.snapshot()].map((d) => d.id));
   const subset = (a, b) => [...a].every((id) => b.has(id));
   const almanacIds = ids(almanac.gateway);
@@ -207,7 +195,6 @@ try {
     `counts: commons ${ids(commons.gateway).size}, reel ${ids(reel.gateway).size}, hive-offered ${hiveOffered.size}, almanac ${almanacIds.size}`,
   );
 
-  // 6.8 — restart the almanac cold: the whole confluence replays from deltas
   await wrenDossier.close();
   pulsing = false;
   await pulseDone;

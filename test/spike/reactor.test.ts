@@ -1,9 +1,3 @@
-// SPEC §2, "The reactor": named, rooted materializations kept current on each ingest, and
-// subscribe as push change-notification. Dynamic view = subscription; ingest is idempotent,
-// forgery is rejected, and order of arrival cannot change the materialized truth. This file
-// also confirms the exact seam step 3 stands on: resolveView over a materializedView equals
-// the batch-eval path, and negation flows through the live read.
-
 import { describe, expect, it } from "vitest";
 import {
   DeltaSet,
@@ -28,7 +22,7 @@ import {
 } from "./garden.js";
 
 const height30 = observed(FERN, "height", 30, 1000, GARDENER_SEED);
-const height34 = observed(FERN, "height", 34, 2000, SURVEYOR_SEED); // same bucket as height30
+const height34 = observed(FERN, "height", 34, 2000, SURVEYOR_SEED);
 const tag = observed(FERN, "tag", "shade", 1500, SURVEYOR_SEED);
 const elsewhere = observed("plant:moss", "height", 2, 1200, SURVEYOR_SEED);
 
@@ -37,7 +31,6 @@ const latest: Schema = {
   default: { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } },
 };
 
-// Ground truth: batch-evaluate the same term over a bare DeltaSet.
 function batchHex(deltas: readonly Delta[]): string {
   return resultCanonicalHex(evalTerm(PLANT_BODY, DeltaSet.from(deltas), Date.now(), FERN));
 }
@@ -68,7 +61,7 @@ describe("spike: reactor materializations + subscribe", () => {
         root: FERN,
         changedProps: ["height"],
         responsibleDeltaIds: [height30.id],
-        newHex: batchHex([height30]), // ground truth, not the reactor's own readback
+        newHex: batchHex([height30]),
       },
     ]);
   });
@@ -87,9 +80,9 @@ describe("spike: reactor materializations + subscribe", () => {
     expect(second).toEqual(first);
     expect(raw.map((d) => d.id)).toEqual([height30.id]);
 
-    reactor.ingest(height30); // duplicate: silent everywhere
+    reactor.ingest(height30);
     const forged: Delta = { ...height34, id: `1e20${"00".repeat(32)}` };
-    expect(reactor.ingest(forged).status).toBe("rejected"); // forgery: silent everywhere
+    expect(reactor.ingest(forged).status).toBe("rejected");
     expect(first).toHaveLength(1);
     expect(raw).toHaveLength(1);
   });
@@ -102,12 +95,12 @@ describe("spike: reactor materializations + subscribe", () => {
     changes.length = 0;
     expect(reactor.ingest(elsewhere).status).toBe("accepted");
     expect(changes).toEqual([]);
-    expect(reactor.evalCountOf("plant")).toBe(evals); // root-anchored term: not even re-evaluated
+    expect(reactor.evalCountOf("plant")).toBe(evals);
     expect(reactor.materializedHex("plant", FERN)).toBe(hex);
   });
 
   it("registration after ingest backfills from the already-settled ground", () => {
-    const reactor = plantReactor(); // "plant" watches; "late" does not exist yet
+    const reactor = plantReactor();
     reactor.ingest(height30);
     reactor.ingest(tag);
     reactor.register("late", PLANT_BODY, [FERN], Date.now());
@@ -126,7 +119,7 @@ describe("spike: reactor materializations + subscribe", () => {
     expect(changes).toHaveLength(1);
     expect(changes[0]!.changedProps).toContain("height");
     const after = resolveView(latest, reactor.materializedView("plant", FERN)!);
-    expect((after as Record<string, unknown>)["height"]).toBe(30); // the negated claim is gone
+    expect((after as Record<string, unknown>)["height"]).toBe(30);
   });
 
   it("the gateway seam: resolveView over a materializedView equals the batch-eval path", () => {

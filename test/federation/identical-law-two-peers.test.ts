@@ -1,15 +1,3 @@
-// §47 criteria 2 and 8 — TWO PEERS WITH BYTE-IDENTICAL LAW BOTH BIND, each under its own
-// receiver-assigned name, and both serve real reads.
-//
-// This is the friend scenario, and it is the DEFAULT case, not an edge: two people who both ran
-// `loam register --stock note` hold byte-identical law, and until this fix the second channel's
-// name was never created — the witness guard keyed on the content address alone, so the second
-// blessing was treated as a repeat of the first. The report has been honest about it since T198's
-// first half (`witnessed`, not `bound`); this is the half that makes the name actually answer.
-//
-// The general assertion rides along, because it is worth more than the specific case: every name a
-// sync reports in `bound` is defined and answers a real read.
-
 import { describe, expect, it } from "vitest";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -27,7 +15,6 @@ describe("§47 — identical law from two peers", () => {
     const bob = await S("b0".repeat(32));
     const me = await S("cc".repeat(32));
     try {
-      // Byte-identical law on both sides — the stock-shelf case.
       await alice.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
       await bob.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
       await alice.append([observed(FERN, "height", 11, 1000, "a1".repeat(32))]);
@@ -39,16 +26,12 @@ describe("§47 — identical law from two peers", () => {
       const rTwo = await two.sync();
 
       expect(rOne.bound).toContain("alice:Plant");
-      // THE FIX: the second channel's name is CREATED, not witnessed away.
       expect(rTwo.bound).toContain("bob:Plant");
       expect(rTwo.witnessed).toEqual([]);
 
-      // THE REPORT CANNOT OUTRUN THE STORE, generally: every bound name is defined...
       for (const name of [...rOne.bound, ...rTwo.bound]) {
         expect(() => me.def(name), `${name} was reported bound`).not.toThrow();
       }
-      // ...and both SERVE, each answering its own peer's value — 11 is alice's, 22 is bob's, and a
-      // fix that bound both names to one pool would answer the same number twice.
       const a = await me.query(`{ alice_Plant(entity: "${FERN}") { height } }`);
       const b = await me.query(`{ bob_Plant(entity: "${FERN}") { height } }`);
       expect(a.errors, JSON.stringify(a)).toBeUndefined();
@@ -63,9 +46,6 @@ describe("§47 — identical law from two peers", () => {
   });
 
   it("a repeat blessing of the SAME name still witnesses — the hourly poll appends no narrative", async () => {
-    // Two-sided against the fix that narrowed too far: the witness exists so a standing sync can
-    // re-bless every interval without republishing. Keying it on (address, name) must keep that —
-    // only a NEW name publishes.
     const alice = await S("a1".repeat(32));
     const me = await S("cc".repeat(32));
     try {
@@ -74,8 +54,6 @@ describe("§47 — identical law from two peers", () => {
       const first = await ch.sync();
       expect(first.bound).toContain("alice:Plant");
 
-      // LAW deltas in the POOL, where blessings land (S47 slice 3); the raw count always moves. What
-      // the witness promises is that no REGISTRATION lands twice.
       const lawCount = (): number =>
         [...ch.pool.gateway!.reactor.snapshot()].filter((d) =>
           d.claims.pointers.some(
@@ -83,7 +61,7 @@ describe("§47 — identical law from two peers", () => {
           ),
         ).length;
       const before = lawCount();
-      expect(before).toBeGreaterThan(0); // the floor: an empty filter would make this rail vacuous
+      expect(before).toBeGreaterThan(0);
       const again = await ch.sync();
       expect(again.witnessed).toContain("alice:Plant");
       expect(again.bound).not.toContain("alice:Plant");
@@ -97,11 +75,6 @@ describe("§47 — identical law from two peers", () => {
 
 describe("§47 — the receiver's own bare name survives a peer's arrival", () => {
   it("after syncing a peer, the bare name still answers with the RECEIVER's entity", async () => {
-    // The hollow-rail lens found the sibling assertion missing in the frozen name-parked file: its
-    // header claimed "a receiver's OWN law keeps its bare name" while nothing asserted the bare
-    // binding after the sync — a sync that struck or re-pointed it would have passed green. This
-    // rail carries the assertion at the level that matters: the ENTITY, not merely the name, since
-    // a re-point keeps the name and swaps what it means.
     const alice = await S("a1".repeat(32));
     const me = await S("cc".repeat(32));
     try {

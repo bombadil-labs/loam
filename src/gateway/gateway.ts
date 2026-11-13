@@ -1,14 +1,3 @@
-// The Gateway: one live front over one StoreBackend. It boots by replaying the store into a
-// Reactor, writes every accepted delta through to the backend by way of the raw stream (so a
-// future DerivationHost's emissions persist by the same path as appends), meta-resolves
-// schema-defining deltas via HYPER_SCHEMA_SCHEMA, and serves GraphQL derived from what is registered:
-// query (resolve once → snapshot), mutate (args → signed deltas → append → the re-resolved
-// view), and subscribe (a snapshot, then a patch per relevant change).
-//
-// The reactor is the living present tense; the backend is the ground it grows from and settles
-// back into. Nothing is reachable except through what a registered (HyperSchema, Schema) pair
-// exposes.
-
 import type { Peer, UserGround } from "./peer.js";
 import {
   signClaims,
@@ -45,7 +34,6 @@ import { stampOn, withStamp, type Stamp } from "./stamp.js";
 import { manifestExportClaims, type ManifestExport } from "./adopt-vocab.js";
 import { probePhysicalRetention, storeHoldsAny, storeInventory } from "./custody.js";
 
-/** A question `Gateway.probe` answers about a container's own stored bytes. */
 type ProbeQuestion =
   { readonly holds: string } | { readonly retention: readonly string[] } | "any" | "inventory";
 import { claimGatewayMarker } from "./gateway-brand.js";
@@ -244,139 +232,55 @@ export interface QueryResult {
   errors?: string[];
 }
 
-// How many times the write-through catches up and retries before it reports a write failure.
 const WRITE_THROUGH_RETRIES = 8;
 
 export interface GatewayOptions {
-  /**
-   * Serve eligible ordinary PRIMARY reads through the portable batch path (SPEC-16 M5 trial).
-   * Off by default: each portable read captures and verifies the whole source, which is slow on a
-   * large store. Ineligible reads stay native either way.
-   */
   readonly portableReads?: boolean;
-  /** Told the route each ordinary read took, and why a native read stayed native. */
   readonly onReadRoute?: (read: {
     readonly lens: string;
     readonly entity: string;
     readonly route: "portable" | "native";
     readonly reason?: string;
   }) => void;
-  /**
-   * The ordinary journal store. Given, this gateway is a substrate peer under
-   * its operator key: it opens from the journal, and every write is admitted through it. Only a
-   * host passes this; pools, quarantine and scratch gateways never do.
-   */
+
   readonly peerStore?: DurableOrdinaryJournalStore;
-  /**
-   * Where each new pool's own key lives. A host defaults to its store's own key file, or to
-   * process memory for a store with none. Absent on a pool, whose child pools stay on its key.
-   */
+
   readonly poolKeys?: PoolKeySource;
-  /**
-   * Where a FEDERATION CHANNEL's pool keeps its bytes, by pool name. A separate container defaults
-   * to a fresh in-memory backend, which is right for a quarantine (transient by design) and WRONG
-   * for a channel: without this, a peer's deltas vanish with the process that pulled them, and the
-   * next boot serves a bound lens over an empty ground. Measured exactly that way (T189).
-   *
-   * Supplied by the CLI as a file inside the home. Absent, channels are in-memory and say so only
-   * by forgetting — so a durable deployment sets it.
-   */
+
   readonly channelBackend?: (pool: string) => StoreBackend;
-  /**
-   * The credential a channel presents to its peer, by channel name (T196). A SECRET, so it never
-   * rides the channel record — the address does, and this supplies the other half at boot. Absent,
-   * or returning undefined for a channel, means that channel cannot sync and must SAY so rather
-   * than sit in the list reporting `receiving`.
-   */
+
   readonly channelToken?: (channel: string) => string | undefined;
-  // The OPERATOR's signing identity — the root of the capability chain (SPEC §7). It needs no
-  // grant, plants the first tenants and grants, and signs mutations that name no actor. Without
-  // a seed the gateway is read-only — unsigned authority does not exist here.
   readonly seed?: string;
-  // What this store OFFERS to federation peers: a term selecting the surviving deltas a puller
-  // may see. Default: everything. Trust is the peer's read lens, not this gateway's to decide;
-  // the offered lens is only what this store is willing to publish.
   readonly offeredLens?: Term;
-  // How many UNREGISTERED entities the public door may hold live (lazy materializations first
-  // created by tokenless subscriptions). A separate, smaller budget than MAX_LAZY_MATS, so a
-  // stranger can exhaust the stranger's allowance and never the authenticated surface's.
   readonly maxPublicWatches?: number;
-  // Provisioned renderer-pen SEEDS (SPEC §23.3), keyed by the pen identity a renderer binding names. This
-  // is CUSTODY: a pen's seed lives in config (the store's home), never on the ground — a write-enabled
-  // renderer signs its form-submits AS this seed's author. Provisioning the seed is NOT authorization; the
-  // pen still needs an operator GRANT of write standing (§6's two keys), and revocation strikes that grant.
-  // A store that compromises this config can sign as the pen — the same trust as the operator seed here.
   readonly pens?: Readonly<Record<string, string>>;
-  // The in-flight cap on ANONYMOUS renders (SPEC §23.9, ticket T18) — the same discipline as
-  // maxPublicStreams, on a strictly more expensive resource: every render spawns a worker thread
-  // with a ~160MB memory ceiling for up to its 500ms timeout. Default 16: bounds the anonymous
-  // door's worst case at a few transient GB while serving heavy legitimate load; raising it is a
-  // deploy decision, not a default. Public-door-scoped, following the SSE precedent — the threat
-  // is the anonymous fan; the token door is the operator's own. Over the cap the door refuses a
-  // clean 503 that leaks nothing, never queues unboundedly.
   readonly maxPublicRenders?: number;
-  // The per-render wall-clock budget in ms (default RENDER_TIMEOUT_MS, 500). A deploy decision,
-  // like maxPublicRenders — and the control a rail needs when it must observe the MEMORY bound
-  // in isolation: wall-clock racing CPU-starved work is nondeterministic under load, so a test
-  // that lengthens this clock is not weakening the timeout, it is removing the competing bound
-  // from the frame to observe the other one.
   readonly renderTimeoutMs?: number;
-  // The worker-SPAWN budget in ms (default RENDER_SPAWN_TIMEOUT_MS, 10_000). A separate knob because
-  // it bounds a separate thing: thread start under host load, which no bundle can influence. It is
-  // still the operator's to set, and on the public door it is what really bounds how long one
-  // anonymous request may hold a `maxPublicRenders` slot — leaving it hard-coded would put that
-  // window out of the operator's reach.
   readonly renderSpawnTimeoutMs?: number;
 }
 
 export interface FederationReport {
-  readonly offered: number; // occurrences in the offered batch, duplicates counted
-  readonly accepted: number; // UNIQUE deltas newly ingested (union is idempotent)
-  readonly rejected: number; // occurrences refused at the door — a duplicated refusal counts twice
-  readonly held: number; // UNIQUE offered ids the store already held — neither new nor refused
-  /**
-   * WHICH deltas were newly ingested, in offer order — present only when the caller asked with
-   * `{ ids: true }`, and then `acceptedIds.length === accepted` always.
-   *
-   * A count says how much crossed; only this says WHAT. A caller that must point at the arrivals —
-   * the channel's arrival attestation does — would otherwise diff reactor snapshots around the
-   * call, which costs a pass over the whole store per sync (H8) to recover something the door
-   * already knew.
-   *
-   * ASKED FOR RATHER THAN ALWAYS PRESENT: the report is a small count-vector that callers compare
-   * and serialize whole, so it stays exactly what it was for everyone who wants the counts.
-   */
+  readonly offered: number;
+  readonly accepted: number;
+  readonly rejected: number;
+  readonly held: number;
+
   readonly acceptedIds?: readonly string[];
   readonly admittedIds?: readonly string[];
 }
 
-/**
- * Where a §58 connection's request lands: the container its consent bound it to and the inbox
- * pool that receives its writes. A request carrying a binding WRITES into `inbox` (the pool's own
- * door authorizes it, on the pool's own grant chain) and READS over `container`'s scope — never
- * this store's primary ground. A door derives it from the grant row on every request, so a
- * revoked pair loses its binding on the very next call.
- */
 export interface ConnectionBinding {
   readonly container: string;
   readonly inbox: string;
 }
 
 export interface RequestContext {
-  // The acting identity for this request: mutations are signed as this seed's author and
-  // authorized as them. Absent, the operator acts.
   readonly actor?: string;
-  // The connection's binding when the actor is a §58 connection: routes its writes into its inbox
-  // pool and scopes its reads. A binding with no actor is refused at the write seam — the
-  // operator's seed never signs into a connection's pool.
   readonly binding?: ConnectionBinding;
 }
 
 const toError = (e: unknown): Error => (e instanceof Error ? e : new Error(String(e)));
 
-// The typed refusal for a tokenless request where no public surface stands — the transport
-// matches on the CLASS (not a message) to keep its anonymous refusals uniform, even when a
-// revocation lands between its check and the execution.
 export class NothingPublic extends Error {
   constructor() {
     super(
@@ -387,38 +291,16 @@ export class NothingPublic extends Error {
 
 export { NUL } from "./alphabet.js";
 
-// What the gateway holds bound: a registration plus where it came from. Manual registrations
-// (register()) live only in this process; store-derived ones are re-generated from deltas on
-// every replay — so a store one can evolve or retire underneath us, and a manual one cannot.
-/** @internal - T19 seam (lifecycle.ts) */
 export interface Bound extends Registration {
   readonly origin: "manual" | "store";
-  /** The channel pool this row aggregated from (§47 slice 3) — absent for the root's own rows.
-   * Rank under byAuthorRank reads THIS, not the signer: a blessing is operator-signed wherever it
-   * lands, and "author rank" means whose ACT placed the binding — a direct registration outranks
-   * law that arrived by federation. */
+
   readonly channel?: string;
 }
 
-// The two names a registration answers to when something binds to it BY NAME: the reading it is,
-// and the program it is over. They coincide until a sibling reading exists (H6), and a binding
-// definition may legitimately name either — data outlives the distinction. Kept as one function
-// because both `materializationFor` and `materializationNames` read it.
 const bindableNames = (r: Bound): string[] => [lensOf(r), programOf(r)];
 
-// ── The internals seam (ticket T19) ─────────────────────────────────────────────────────────────
-// The Gateway's behaviors are decomposed into concern modules (erase.ts, quarantine-pool.ts,
-// adopt.ts, …): each public method stays on the class with its exact signature as a THIN DELEGATE,
-// and its body lives in the module that owns the concern's vocabulary. A module function cannot use
-// `private` fields from outside the class body, so the members those bodies reach are marked
-// `/** @internal — T19 seam */` below: public to the compiler, internal by contract — not API, not
-// for callers, pinned by no rail (test/cli/pack.test.ts pins what the PACKAGE exports; these ride
-// no export). The seam is deliberately explicit: what a concern module touches is greppable as
-// `gw.<member>` in its module, and a module needing a member NOT yet marked is a real finding about
-// coupling — widen the seam loudly, here, or question the boundary.
-/** No name at all — what a channel pool has declared open to a tokenless caller (see `openNames`). */
 const EMPTY_PUBLIC: ReadonlySet<string> = new Set<string>();
-const MAX_TIMER_DELAY = 2 ** 31 - 1; // the largest delay setTimeout accepts
+const MAX_TIMER_DELAY = 2 ** 31 - 1;
 
 export const unreadableStoreMessage = (rows: number): string =>
   `this store holds ${rows} rows and none of them is readable, so it was not booted. ` +
@@ -426,174 +308,71 @@ export const unreadableStoreMessage = (rows: number): string =>
   `and there is no migration. Open it with the Loam release that wrote it, or start a new ` +
   `store. \`loam repair\` lists the rows.`;
 
-// This module alone can mark a real gateway (gateway-brand.ts).
 const markGateway = claimGatewayMarker();
 
 export class Gateway {
-  /** @internal — T19 seam (renderers.ts) */
   registered: Bound[] = [];
-  /** @internal — T19 seam (renderers.ts: the §23.9 anonymous-render cap's in-flight count) */
   publicRendersInFlight = 0;
-  // The §24.5 RESOURCE ENVELOPE, present iff this gateway is an UNTRUSTED separate container's pool
-  // (container.ts sets it at open). It carries the pool's live slot/timeout/memory accounting and a
-  // resolver closed over the PARENT's ground — a child that may admit what its parent distrusts must
-  // never be able to admit a delta that raises its own ceiling. Absent on a primary and on a
-  // trusted/curated container, which keep the ordinary door budgets.
-  /** @internal — T34 seam (renderers.ts, container.ts, envelope.ts) */
   envelope: PoolEnvelope | undefined = undefined;
-  // The §24.5 CEILING every separate container carries, enveloped or not: what the operator's LIVE
-  // ground allows this container, composed with its opener's. Absent on a primary.
-  /** @internal — T34 seam (container.ts) */
   envelopeCeiling: (() => QuarantineEnvelope) | undefined = undefined;
-  // The ROOT ground every descendant resolves its own envelope from — the operator's real store, not
-  // the seeded copy it sits on. A container's ground is a one-way copy where a later STRIKE never
-  // lands, so a pool that resolved from the ground beneath it would read a ceiling the operator has
-  // already retracted, at both levels at once. Passed down unchanged at every depth. Absent on a
-  // primary, which is its own root.
-  /** @internal — T34 seam (container.ts) */
   envelopeGround: ((subject?: string) => QuarantineEnvelope) | undefined = undefined;
-  // This container's display handle in an envelope report (its entity, or `anonymous#N`). Present on
-  // every separate container so a nested pool's row is attributable even under a non-enveloped one.
-  /** @internal — T34 seam (container.ts, envelope.ts) */
   poolHandle: string | undefined = undefined;
-  // What this ground declares beside its deltas (ground-declarations.ts): its user ground, what
-  // a door read withholds, its delegation scope and its erasure pins. One record for the gateway's
-  // life, seated on every reactor it sets, so a declaration made once holds across a reseat.
   private readonly declarations: GroundDeclarations = {};
-  // The user ground this ground's grants resolve `user:<name>` against: a pool's host's, as a port.
   private userHost: UserGround | undefined = undefined;
-  // The resolver memo (SPEC §22.5): (resolver-content-address, bucket-delta-set) → value. Keyed on the
-  // surviving bucket, so it invalidates by construction when the ground moves — an erased fact drops
-  // from the bucket and its old value can never be served again. A pure cache; safe to clear anytime.
-  /** @internal — T19 seam (reads.ts) */
   readonly resolverMemo: ResolverMemo = newResolverMemo();
-  /** @internal — T19 seam (reads.ts) */
   registry = SchemaRegistry.build([]);
-  /** @internal — T19 seam (lifecycle.ts) */
   gql: GraphQLSchema | undefined;
-  /**
-   * The surface each BOUND container is served (SPEC §58 position 2), keyed by container and
-   * rebuilt when anything it folds moves: root law, the pools composed into the container, or a
-   * pool's registrations. A dropped pool leaves the map, so its law leaves the next build. The
-   * entry itself is never evicted — see the note on the cache below `boundSurface`.
-   */
+
   private readonly boundCache = new Map<
     string,
     { key: string; fold: BoundFold; schema: GraphQLSchema }
   >();
-  // Materialization names are generation-qualified (see matName): the reactor has no
-  // deregister, so an evolved schema binds a FRESH materialization under a bumped generation
-  // and the superseded one is simply left behind (it costs memory and per-ingest CPU for the
-  // process lifetime — registration is administrative and rare; a reopen starts clean).
-  /** @internal — T19 seam (lifecycle.ts) */
   generation = 0;
-  // The write-through queue: raw-stream deltas append to the backend in arrival order. The
-  // chain itself always resolves (later writes are still attempted); the FIRST failure latches
-  // in `writeFailure`, and from then on the gateway is degraded: append refuses new work
-  // before ingesting it, and flush/close surface the failure. A gateway that cannot persist
-  // must not quietly widen the gap between the live view and the ground.
   private writes: Promise<void> = Promise.resolve();
-  /** @internal — T19 seam (ingest.ts: both doors refuse when the gateway can no longer persist) */
   writeFailure: Error | undefined;
-  // Live subscriptions: one reactor subscription per materialization name, fanned out to any
-  // number of sinks (the reactor has no unsubscribe; the fan-out set is ours, so leaving a
-  // subscription only empties our set). Lazily-registered materializations — for entities not
-  // in any registered root list — are cached and reused for the gateway's lifetime.
-  /** @internal — T19 seam (reads.ts) */
   readonly sinks = new Map<string, Set<(c: MaterializationChange) => void>>();
-  /** @internal — T19 seam (lifecycle.ts) */
   readonly lazyMats = new Set<string>();
-  // Lazy materializations FIRST created through the public door — a stranger's subscriptions
-  // draw on this smaller budget, so exhausting it degrades only the stranger's own door,
-  // never the authenticated surface. Cleared wherever lazyMats is.
-  /** @internal - T19 seam (lifecycle.ts) */
   readonly publicLazyMats = new Set<string>();
-  // EVERY open stream, of every kind — a patch stream (reads.ts) and a membership watch (ingest.ts)
-  // alike. `reseat()` and `close()` end what is in this set and nothing else, so a stream missing
-  // from it survives an erasure: still serving its pre-purge reading, still bound to the replaced
-  // reactor. Typed by the one thing teardown does with a member (`return()`), so no payload shape
-  // ever justifies a second set for the next teardown to overlook.
-  /** @internal — T19 seam (reads.ts, ingest.ts) */
   readonly channels = new Set<LiveStream>();
-  // Ids append() has already persisted this tick: the raw-stream subscriber skips them, so a
-  // direct append is written exactly once (the raw stream still catches every OTHER emitter —
-  // a future DerivationHost's emissions ride it into the ground).
-  /** @internal — T19 seam (ingest.ts) */
   readonly justPersisted = new Set<string>();
-  /** @internal — the host's substrate peer; undefined off that path. */
   peer: HostPeer | undefined = undefined;
-  /** @internal — a failed reconciliation must retry even after the journal handle moved. */
   needsJournalRefresh = false;
-  /** @internal — new streams wait for this reactor replacement. */
   reseating: Promise<void> | undefined;
-  /** @internal — where this ground's new pools keep their own keys (container.ts). */
   poolKeys: PoolKeySource = memoryPoolKeysFor(this);
-  /** Stored rows the host's journal never admitted: held, never served. */
   rowsOutsideJournal = 0;
-  /**
-   * @internal — the store's revision (`StoreBackend.revision`), sampled before this gateway last
-   * read it whole. A portable read attests its source only while the store still answers it.
-   */
+
   durableRevision: string | undefined;
-  private unreadableRows = 0; // set by open: rows held, none readable
-  /** @internal — T19 seam (erase.ts, adopt.ts) */
+  private unreadableRows = 0;
   readonly operatorAuthor: string | undefined;
-  /**
-   * The signer of THIS ground's governing key: what signs this ground's own law. Absent, the ground
-   * is ungoverned, and nothing is signed in its voice. Its author equals `operatorAuthor`.
-   */
+
   readonly signer: Signer | undefined;
 
-  /** @internal — set by the child's opener (container.ts `openSeparate`); undefined at a root. */
   childLaw: ChildLaw | undefined = undefined;
-  /** @internal — the keys this ground pins as erasure governors; kept across a reseat. */
   pinErasureGovernors(keys: readonly string[]): void {
     pinErasureGovernors(this._reactor, keys);
   }
-  /** The authors of `context` law here: this ground's own key, then a host it selects. */
   lawAuthors(context: LawContext): string[] {
     return lawAuthors(this.operatorAuthor, this.childLaw, context);
   }
-  /** The keys whose acts here are the receiver's own: this ground's key and its host's. */
   localAuthors(): string[] {
     return localAuthors(this.operatorAuthor, this.childLaw);
   }
-  // When a runner animates the gateway, ingest routes through its DerivationHost (ingest + drain
-  // derivations); otherwise straight to the reactor. Passive vs animate is exactly this hook.
-  /** @internal — T19 seam (ingest.ts: both doors write through it; animate/reseat re-point it) */
   ingestVia: (d: Delta) => IngestResult = (d) => this.reactor.ingest(d);
-  /**
-   * @internal — an admitted batch, with each member's verdict in order. Unanimated, the batch is
-   * ONE reactor update, so each warm view refreshes once per batch, not once per delta. Animated,
-   * a runner's host fires bindings per delta, so the members go one by one.
-   */
+
   ingestAllVia: (ds: readonly Delta[]) => IngestResult[] = (ds) => ingestTogether(this.reactor, ds);
 
-  // Mutable behind a getter: erase() re-seats the gateway on a fresh reactor replayed from the
-  // post-purge backend (the substrate is grow-only; forgetting in-process is a rebuild).
   private _reactor: Reactor;
   get reactor(): Reactor {
     return this._reactor;
   }
 
-  /**
-   * This ground's revision: it rises by one for each admitted batch that adds to the held set,
-   * for each reseat, and for each declaration of erasure pins. It never falls, and it is not
-   * persisted. This is the one place a holder of the gateway reads it.
-   */
   get revision(): number {
     return groundRevision(this._reactor);
   }
 
-  /**
-   * The options this gateway was opened with, less its seed: the seed becomes the signer and is
-   * kept nowhere else, so no code that holds a gateway can read its key.
-   * @internal — T19 seam (erase.ts, quarantine-pool.ts, adopt.ts)
-   */
   readonly options: Readonly<Omit<GatewayOptions, "seed">>;
 
   private constructor(
-    /** @internal — T19 seam (erase.ts) */
     readonly backend: StoreBackend,
     reactor: Reactor,
     options: GatewayOptions,
@@ -606,9 +385,6 @@ export class Gateway {
     this.operatorAuthor = this.signer?.author;
     seatDeclarations(reactor, this.declarations);
     this.declareUsers(reactor);
-    // Fail fast on a mis-shaped offered lens: a term that does not select a delta set would only
-    // blow up when a peer first pulls, in production. Trial-eval it now (empty store → empty
-    // dset; the SORT is what we're checking, and that is content-independent).
     if (options.offeredLens !== undefined) {
       const ground = reactor.snapshot();
       const lens = governedProgram(
@@ -626,28 +402,18 @@ export class Gateway {
     this.attachPersistence(reactor);
   }
 
-  // Every accepted delta — appends AND a runner's derived emissions — is written through here.
-  // Derived emissions do not pass authorize(): a governed store runs only the operator's
-  // blessed binding definitions (readBindingDefinitions gates on the operator), so a firing
-  // binding is the operator's own delegated authority. Confining UNTRUSTED (federated)
-  // function bodies is a runner-runtime concern SPEC §6 reserves for later. (Called once per
-  // reactor: at construction, and again by reseat() after an erase.)
   private attachPersistence(reactor: Reactor): void {
     reactor.subscribeRaw((d) => {
-      // Count this batch now, not at the next read: two batches are then two revisions.
       groundRevision(reactor);
       if (this.justPersisted.delete(d.id)) return;
       const peer = this.peer;
       this.writes = this.writes
         .then(async () => {
           if (peer === undefined) return void (await this.backend.append([d]));
-          // The same conflict rule as the doors: catch up, then retry at the first receive time.
-          // A catch-up that brings `d` in means another writer committed it: nothing is owed.
           const at = this.now();
           for (let attempt = 0; ; attempt += 1) {
             try {
               await admitLocal(peer, [d], at, () => false);
-              // A conflict catch-up may replace the reactor before this emission commits.
               if (this.reactor.get(d.id) === undefined) {
                 this.justPersisted.add(d.id);
                 try {
@@ -673,20 +439,9 @@ export class Gateway {
     });
   }
 
-  // Open a gateway over a backend: replay everything the store holds, then start listening.
-  // The raw subscription attaches AFTER replay, so boot never writes the store back to itself.
-  //
-  // Boot DEGRADES, it does not abort (SPEC §25): a row the driver could not admit is quarantined
-  // by the read, so replay only ever sees admissible deltas, and a store missing some rows is a
-  // legal, younger store (union tolerates absence). The ONE loud exception is the constitutional
-  // core — the operator marker at `loam:store`/`loam.operator` that says who governs this store.
-  // If a governed store's own read quarantined that marker, the store cannot know its own
-  // constitution, and that is a failure the operator must see, not one to boot past.
-  /** @internal — a child ground over `backend`: the pool opener reaches the class through its
-   * parent, so it needs only the type. */
   async openChild(backend: StoreBackend, options: GatewayOptions): Promise<Gateway> {
     const child = await Gateway.open(backend, options);
-    child.store = this.store; // one store for the whole tree
+    child.store = this.store;
     return child;
   }
 
@@ -696,8 +451,6 @@ export class Gateway {
     let peer: HostPeer | undefined;
     let replayed: Delta[];
     let outsideJournal = 0;
-    // A journaled store's raw rows are not its admitted set, so it always opens through its
-    // journal. With a seed, that seed names the peer; without one, the store's only journal does.
     let peerStore = options.peerStore;
     let peerId = seed === undefined ? undefined : peerIdOf(authorForSeed(seed));
     if (holdsJournals(backend)) {
@@ -708,8 +461,6 @@ export class Gateway {
             `(${peerId}) names no journal here. Open it with its own operator seed.`,
         );
       }
-      // A seeded open is a peer's, host or pool: a fresh store starts its journal, and a store
-      // with rows and no journal is refused.
       if (peerStore === undefined && journals.length === 0 && peerId !== undefined) {
         peerStore = backend.journalStore();
       } else if (peerStore === undefined && journals.length > 0) {
@@ -725,8 +476,6 @@ export class Gateway {
         peerStore = backend.journalStore();
       }
     }
-    // Sampled BEFORE the read: a commit that races the read moves it, and the first attesting read
-    // refuses rather than vouch for rows it never loaded.
     const revision = await backend.revision?.();
     if (peerStore === undefined) {
       replayed = await backend.deltasSince(new Set());
@@ -755,14 +504,9 @@ export class Gateway {
         throw new Error(`replay: the store handed back an unacceptable delta ${d.id}`);
       }
     }
-    // Degrading past unreadable rows assumes some of the store is readable. A pool may hold only
-    // unreadable rows and still open; boot refuses such a store (see `boot`).
     const unreadableRows =
       replayed.length === 0 && isRepairable(backend) ? (await backend.quarantine()).length : 0;
     if (seed !== undefined && isRepairable(backend)) {
-      // The marker is a deterministic, content-addressed delta (genesis.ts), so its id is known
-      // from the operator alone. Quarantined (present but unreadable) is the loud case; simply
-      // ABSENT is fine — a fresh store has not been booted yet, and boot() will plant it.
       const markerId = computeId(operatorMarkerClaims(authorForSeed(seed)));
       const quarantined = await backend.quarantine();
       if (quarantined.some((row) => row.key === markerId || row.key.endsWith(markerId))) {
@@ -773,9 +517,6 @@ export class Gateway {
         );
       }
     }
-    // A governed store writes its own incarnation marker before it admits anything else, so a
-    // replayed marker from an earlier incarnation can never be the lowest-arrival one
-    // (recovery-history.md). Written straight to the backend and the reactor: no door runs yet.
     let pendingMarker: Delta | undefined;
     if (
       seed !== undefined &&
@@ -783,7 +524,6 @@ export class Gateway {
       activeIncarnation(reactor, authorForSeed(seed), new Set()) === undefined
     ) {
       const operator = authorForSeed(seed);
-      // Its time never matters (the reader orders markers by arrival), so no clock is read.
       const t = Math.max(1, ...replayed.map((d) => d.claims.timestamp + 1));
       const marker = signClaims(incarnationClaims(mintIncarnation(), operator, t), seed);
       if (peer === undefined) {
@@ -795,13 +535,10 @@ export class Gateway {
     gateway.peer = peer;
     gateway.rowsOutsideJournal = outsideJournal;
     gateway.durableRevision = revision;
-    // Each new pool takes its own key; this ground records it first (container.ts
-    // `poolGovernor`). The store keeps the keys beside itself, or this process holds them.
     gateway.poolKeys =
       options.poolKeys ??
       (holdsPoolKeys(backend) ? backend.poolKeys() : undefined) ??
       memoryPoolKeysFor(backend);
-    // On the journal path the marker enters through local admission, at the gateway's clock.
     if (peer !== undefined && pendingMarker !== undefined) {
       await admitLocal(peer, [pendingMarker], gateway.now(), () => false);
       gateway.justPersisted.add(pendingMarker.id);
@@ -816,35 +553,20 @@ export class Gateway {
     return gateway;
   }
 
-  // Load every resolver's ESM (SPEC §22) into the content-addressed cache — the live lenses AND every
-  // answerable version's, so both the warm path and a pinned version-door read find their functions
-  // synchronously. Async (a `data:` import); idempotent (the cache dedups by content address). Called
-  // after every (re)bind and every publish, so a newly-arrived resolver is runnable by the next read.
-  /** @internal — T19 seam (quarantine-pool.ts) */
   async preloadResolvers(): Promise<void> {
     return preloadResolversImpl(this);
   }
 
-  /**
-   * @internal — whether the durable store still holds what this gateway read: no other handle has
-   * committed since. False when the store cannot say. One revision read, never a scan.
-   */
   async durableCurrent(): Promise<boolean> {
     const revision = await this.backend.revision?.();
     return revision !== undefined && revision === this.durableRevision;
   }
 
-  // Boot a fresh (or existing) store from a genesis delta-set: open governed by the genesis
-  // operator, land the bundle (idempotent — content-addressed deltas dedup), and register what
-  // the genesis declares. The store is born answering and enforcing. Options beyond the seed
-  // (an offeredLens, say) pass through to open().
   static async boot(
     backend: StoreBackend,
     genesis: Genesis,
     options: Omit<GatewayOptions, "seed"> = {},
   ): Promise<Gateway> {
-    // Every host is one substrate peer under its operator key: its store opens only through its
-    // peer journal, and a store that holds rows with no journal is refused (greenfield, ruling 10).
     const journal =
       options.peerStore === undefined && holdsJournals(backend)
         ? { peerStore: backend.journalStore() }
@@ -854,8 +576,6 @@ export class Gateway {
       ...journal,
       seed: genesis.operatorSeed,
     });
-    // A store with rows and none readable would boot empty, with a fresh genesis planted beside
-    // the rows it could not read.
     if (gateway.unreadableRows > 0) {
       await gateway.close();
       throw new Error(unreadableStoreMessage(gateway.unreadableRows));
@@ -863,23 +583,11 @@ export class Gateway {
     if (genesis.deltas.length > 0) await gateway.append(genesis.deltas);
     gateway.replayRegistrations();
     await gateway.preloadResolvers();
-    // Standing federation channels are ATTACHED at boot, so a channel opened by one process is
-    // readable by the next. A separate container's bytes are unreadable until it is attached, and
-    // containerScope refuses rather than resolving empty (H9) — correct, and it surfaces as a query
-    // error on a store that merely restarted. Resuming here is what makes a channel outlive the
-    // command that opened it.
     await gateway.resumeChannels();
-    // And every connection's inbox pool (§58), for the same reason: a binding made by one process
-    // must be readable by the next, or the bound container answers with a refusal after a restart.
     await gateway.resumeInboxes();
     return gateway;
   }
 
-  // The seams gql.ts resolves through — one object, shared by every (re)build of the surface.
-  // The door rides the watch hook: lazy materializations first created through the public
-  // surface draw on their own, smaller budget (see matFor). Stays on the class: it is pure
-  // `this`-plumbing, the wiring loom between the class's delegates and the gql generator.
-  /** @internal — T19 seam (lifecycle.ts: every surface (re)build threads the hooks through) */
   gqlHooks(door: "full" | "public" = "full"): GqlHooks {
     return {
       assertSource: (name, binding) => assertChannelSourceLegible(this, name, binding),
@@ -907,11 +615,6 @@ export class Gateway {
     };
   }
 
-  // The door-neutral accessor (SPEC §17): what any surface generator needs — the registered
-  // set and the hooks — through the same discipline GraphQL gets. "public" narrows the set to
-  // the operator's declared-public lenses (and a generator given it must derive a READ door;
-  // narrowing is a generator's right, widening never is). Returns undefined for a public door
-  // with nothing public — the transport keeps its refusals uniform.
   surface(
     door: "full" | "public" = "full",
   ): { registered: readonly Registered[]; hooks: GqlHooks } | undefined {
@@ -924,10 +627,6 @@ export class Gateway {
     return { registered: this.registered, hooks: this.gqlHooks() };
   }
 
-  // The two shapes a `loam.public` declaration can take (SPEC §23.8): a BARE name means "the latest
-  // version, served anonymously" (unchanged); a `Name@<deltaId>` pin means "exactly this version, served
-  // anonymously — because the operator declared it." A declaration is publication, not a probe, so the
-  // anonymous door may reveal exactly what the operator chose to name, and nothing else stays 404.
   isPublicLatest(name: string): boolean {
     return this.openNames().has(name);
   }
@@ -935,28 +634,18 @@ export class Gateway {
     return this.openNames().has(`${name}@${deltaId}`);
   }
 
-  // Every answerable version of every registration (SPEC §17): the append-only publication
-  // history, read live from the ground under this store's law.
   registrationVersions(): RegistrationVersion[] {
     return readRegistrationVersions(this.reactor, this.validityNow(), this.operatorAuthor);
   }
 
-  // The names a declared `conflicts` policy is WITHHOLDING (§47.1), across every ground this store
-  // serves law from — its own, and each attached channel pool's. The refusal a person can act on:
-  // the lens is absent from the surface, and this says which name, between whom, and from where.
   contestedNames(): Map<string, ContestedNameReport> {
     return contestedNamesImpl(this);
   }
 
-  // The versions the operator lawfully struck (SPEC §17): served no longer, remembered
-  // forever — the 410 door's only witness.
   withdrawnRegistrations(): WithdrawnRegistration[] {
     return readWithdrawnRegistrations(this.reactor, this.validityNow(), this.operatorAuthor);
   }
 
-  // Pinned resolution (SPEC §17 versioning × §26 as-of): the body lives in reads.ts.
-  // The optional `now` is the caller's WALL-CLOCK moment for a slate's lapse (SPEC §29.4); absent,
-  // the door reads its own clock. The INTERNAL seam below requires it — see `requireMoment`.
   resolvePinned(
     reg: Registered,
     entity: string,
@@ -967,46 +656,18 @@ export class Gateway {
     return resolvePinnedImpl(this, reg, entity, now ?? this.now(), asOf, binding);
   }
 
-  // Re-derive the store's slice of the surface and follow it. The desired set is the manual
-  // registrations (this process's own) plus every store registration whose schema GENERATES
-  // from surviving definitions — so an evolved definition reshapes the surface, and a negated
-  // one retires its type. Store registrations install in fixpoint rounds: a schema that refs
-  // another must validate after it, and timestamp order is not enough (ties, same
-  // millisecond). One that never resolves — or whose body cannot materialize — is left
-  // unbound rather than crashing the boot. A purely-additive change binds incrementally under
-  // the current generation; only a change or a retirement pays for a rebind.
-  /** @internal — T19 seam (quarantine-pool.ts) */
   replayRegistrations(): void {
     return replayRegistrationsImpl(this);
   }
 
-  // Persist a batch, THEN serve it. The batch is validated whole (one bad delta refuses the
-  // lot); it lands in the backend before the reactor sees it, so nothing a query or a
-  // subscriber can observe is ever less durable than the ground — a failed write means nothing
-  // happened, and the caller may simply retry. Only verified signatures pass: the substrate
-  // accepts unsigned deltas, the gateway does not (authority is always attested here). And each
-  // delta's author must hold STANDING — the operator, or a surviving operator-rooted write
-  // grant on this store; what the delta points at is not authorization's business (entities
-  // are unowned — trust is the reader's). Authorization reads the state as it stands before
-  // the batch — a batch cannot bootstrap its own permissions.
   async append(deltas: Iterable<Delta>): Promise<AppendReceipt> {
     return appendImpl(this, deltas);
   }
 
-  // Meta-resolve schema-defining deltas via HYPER_SCHEMA_SCHEMA into a HyperSchema. The definition is
-  // proven against a TRIAL set first — the store is append-only, so nothing lands until the
-  // deltas are known to define what the caller says they define. The trial reads the LAWFUL
-  // slice (the operator's, in a governed store): a federated foreign definition at the same
-  // entity — newer, or malformed — must not shadow what the operator is proving.
   async loadHyperSchema(deltas: Iterable<Delta>, entity: string): Promise<HyperSchema> {
     return loadHyperSchemaImpl(this, deltas, entity);
   }
 
-  // Register a (HyperSchema, Schema) pair over the given roots: a live materialization per
-  // root, and a GraphQL surface rebuilt to include it. Everything that can refuse — duplicate
-  // names, unresolved refs, GraphQL field collisions — refuses BEFORE any state changes, so a
-  // failed registration leaves the gateway exactly as it was. Register dependencies first:
-  // earlier schemas are visible to later refs.
   register(
     hyperschema: HyperSchema,
     schema: Schema,
@@ -1018,13 +679,6 @@ export class Gateway {
     return registerImpl(this, hyperschema, schema, roots, mutations, writable, refs);
   }
 
-  // Publish a schema and its registration as data, then bind them, so the surface survives
-  // reopen with no code. Two deltas: the DEFINITION (schema-schema claims at the schema
-  // entity — proven by loadHyperSchema before anything lands) and the REFERENCE that registers it.
-  // Republishing at the same entity is evolution: the running surface rebinds to the latest
-  // surviving definition. Any granted author could APPEND such deltas (writes are open), but
-  // only the operator's ever bind — so this method refuses non-operators up front rather than
-  // persist deltas that would look registered while shaping nothing.
   async publishRegistration(
     hyperschema: HyperSchema,
     schema: Schema,
@@ -1036,9 +690,6 @@ export class Gateway {
     resolvers?: ResolverSpecs,
     refs?: RefSpecs,
   ): Promise<PublishOutcome> {
-    // Through the living-name critical section (T33, criterion 14): a direct publish takes the
-    // same latest-wins name a blessing does, so it must not be able to move a winner underneath a
-    // blessing that has already checked it.
     return withLivingNames(this, () =>
       publishRegistrationImpl(
         this,
@@ -1055,51 +706,35 @@ export class Gateway {
     );
   }
 
-  // --- renderers (SPEC §23) ----------------------------------------------------------------------
-
-  // Every surviving renderer binding, latest per route, read live under this store's law.
   renderers(): RendererBinding[] {
     return readRenderers(this.reactor, this.validityNow(), this.lawAuthors("renderers"));
   }
 
-  // Declare lenses public (SPEC §12/§17/§23.8): the body — bare names pass, `Name@vN` freezes to the
-  // version's content address — lives beside the loam.public vocabulary in public.ts.
   async declarePublic(entries: readonly string[], context?: RequestContext): Promise<void> {
     return declarePublicImpl(this, entries, context);
   }
 
-  // Declare routes publishable as artifacts (SPEC §30): `loam.public`'s twin — the body lives beside
-  // the artifact vocabulary in artifact.ts.
   async declareArtifact(routes: readonly string[], context?: RequestContext): Promise<void> {
     return declareArtifactImpl(this, routes, context);
   }
 
-  // Every route the operator has declared artifact-publishable, read live under this store's law.
   artifactRoutes(): ReadonlySet<string> {
     return readArtifactRoutes(this.reactor, this.validityNow(), this.operatorAuthor);
   }
 
-  // Assess a route for artifact publication (SPEC §30): every refusal, the derived capability
-  // statement, and the coordinates a page would carry. Re-derived from surviving law on every call,
-  // exactly as serveRoute is, so withdrawal is live. The body lives in artifact.ts.
   packArtifact(route: string, entity: string, opts: PackArtifactOptions): PackedArtifact {
     return packArtifactImpl(this, route, entity, opts);
   }
 
-  // Publish a renderer as data (SPEC §23): the body lives beside the binding vocabulary in
-  // renderers.ts. A ROUTE is a living name too (§23.5 is latest-per-route), so this door shares the
-  // living-name critical section with `publishRegistration` and `adoptLaw` (T33, criterion 14).
   async publishRenderer(input: unknown, context?: RequestContext): Promise<void> {
     return withLivingNames(this, () => publishRendererImpl(this, input, context));
   }
 
-  // Ensure a route's bundle is loaded (SPEC §23): the body lives in renderers.ts.
   async prepareRoute(route: string, door: "full" | "public" = "full"): Promise<void> {
     await this.prepareRead();
     return prepareRouteImpl(this, route, door);
   }
 
-  // Serve a route (SPEC §23): the body — and the door-discipline doctrine — lives in renderers.ts.
   async serveRoute(
     route: string,
     entity: string,
@@ -1110,7 +745,6 @@ export class Gateway {
     return serveRouteImpl(this, route, entity, door, gesture, asOf);
   }
 
-  // Write through a rendered route (SPEC §23.3): the body lives in renderers.ts.
   async writeRoute(
     route: string,
     entity: string,
@@ -1120,7 +754,6 @@ export class Gateway {
     return writeRouteImpl(this, route, entity, fields, door);
   }
 
-  // The byte-door (SPEC §23.7): the body lives in renderers.ts.
   serveBytes(
     ref: string,
     fromLens: LensName,
@@ -1130,221 +763,112 @@ export class Gateway {
     return serveBytesImpl(this, ref, fromLens, fromEntity, door);
   }
 
-  // Animate the gateway: route ingest through a runner's DerivationHost so bindings fire.
   animate(host: { ingest: (d: Delta) => IngestResult }): void {
     this.ingestVia = (d) => host.ingest(d);
     this.ingestAllVia = (ds) => ds.map((d) => host.ingest(d));
   }
 
-  // --- erasure (SPEC §11) ------------------------------------------------------------------------
-
-  // Erase one delta (SPEC §11): the body lives beside the erasure vocabulary in erase.ts.
-  // `kept` lists the declared container stores a surviving detach record deliberately holds outside
-  // this sweep (SPEC §27.7's completeness guard) — on the record, never silent.
-  // `slate` is the §29.6 JOIN a cut stamps on each erasure it mints; an ordinary erase leaves it
-  // absent, forever, and `erasure`/`spokenBy` ride out so a cut can collect them per member rather
-  // than re-derive them from a ground the purge just moved.
   async erase(
     id: string,
     opts: { reason?: string; slate?: string } = {},
   ): Promise<{
     erased: string;
     citations: string[];
-    /** The citations manifest attributed to the tier each dangler lives on (T216, `CitationTier`). */
     citationTiers: CitationTier[];
     kept: string[];
     erasure: string;
-    /** False when a standing erasure was REUSED — a retry after a fault records no new reason. */
     minted: boolean;
-    /** The reasons on the receipt itself, which on a retry are the FIRST run’s, not this call’s. */
     reasons: string[];
-    /** Absent when the reused erasure carries no `spoken-by` — the door requires one, replay does not. */
     spokenBy?: string;
   }> {
     return eraseImpl(this, id, opts);
   }
 
-  // The settling report (T70): does every erasure this ground has promised hold at the bytes,
-  // NOW? Live — the reactor's surviving erasures against the backend's own byte probe — because
-  // this store is eventually consistent about forgetting, and the gap between an erasure landing
-  // and the bytes leaving every tier is a health state to watch, not a fault to boot past.
   async health(now?: number): Promise<StoreHealth> {
     return healthImpl(this, now ?? this.now());
   }
 
-  // --- slating (SPEC §29, ticket T64) -------------------------------------------------------------
-
-  /**
-   * The operator's REVIEW read over every standing slate (SPEC §29.3): the frozen members, the
-   * closures in force at `now`, the RESURFACING set (claims a cut will bring back to life — the
-   * genuine new value of the two-phase shape), the AFFECTED containers, and the `duplicates` links.
-   *
-   * Read closure never closes this. The operator is the controller and must be able to examine what
-   * they are about to destroy, so this evaluates over the UNNARROWED ground even for a slate that
-   * closes `read` — a read-closed slate that could not be reviewed would defeat itself.
-   */
   slates(now?: number): SlateReport[] {
     return slateReportsImpl(this, now ?? this.now());
   }
 
-  /** Every surviving lawful graveyard — the durable record of each erasure EVENT (SPEC §29.6). */
   graveyards(): GraveyardRecord[] {
     return readGraveyards(this.reactor, this.validityNow(), this.operatorAuthor);
   }
 
-  /**
-   * THE CUT (SPEC §29.5): pre-flight all-or-refuse, then §11's ordinary erase per member, then the
-   * graveyard, then — the LAST act — the slate's container is dropped by striking its declaration.
-   * On ANY fault the slate STANDS: doors closed, declaration resolving, cut RESUMABLE.
-   */
   async cut(slate: string, opts: { now?: number } = {}): Promise<CutReport> {
     return cutImpl(this, slate, opts);
   }
-  /**
-   * Re-derive a compliance receipt from the graveyard + the erasures + the frozen version, plus a
-   * LIVE probe at the moment of issue (SPEC §29.7). Re-issuable at any time — which IS §11's
-   * testable-compliance promise. Every per-tier byte verdict is RE-PROBED here, never reprinted from
-   * a CutReport: a formatter that reprinted last month's snapshot would be the dry-run mistake this
-   * design rejects, wearing a letterhead. (The SIGNED DOCUMENT and its surface are §29.7's deferred
-   * half; this is the structured object it formats.)
-   */
+
   async receipt(graveyard: string, opts: { now?: number } = {}): Promise<Receipt> {
     return deriveReceiptImpl(this, graveyard, opts);
   }
 
-  /**
-   * @internal — T64 seam (slate.ts): the injected hold the cut-order rail drives. Awaited between
-   * the graveyard's landing and the declaration's strike, so a test can interrupt exactly that
-   * window and prove the re-run lands exactly one graveyard. Undefined in production; nothing in the
-   * cut's logic depends on it being set.
-   */
   cutHold: (() => Promise<void>) | undefined = undefined;
 
-  // This container's children live in the Store's table (store.ts). These getters are the
-  // facade's view of it, for doors, commands and rails; container code reads children only as
-  // peers, through the Store.
-  /** The separate-store children attached below this container: the registry of erasure reach. */
   get quarantinePools(): Set<Gateway> {
     return this.store.tableOf(this).pools;
   }
 
-  /** The declared children, by container entity. */
   get attachedContainers(): Map<string, Gateway> {
     return this.store.tableOf(this).named;
   }
 
-  /** The connection inbox handles (SPEC §39), by inbox name. */
   get connectionInboxes(): Map<string, Container> {
     return this.store.tableOf(this).inboxes;
   }
 
-  /** The federation channel pools (§46), by pool name. */
   get channelPools(): Map<string, Container> {
     return this.store.tableOf(this).channels;
   }
 
-  // THIS gateway is a quarantine pool's own gateway (SPEC §24.7) — set by the attach that opened it,
-  // and held for the pool's whole life. The renderer door reads it to wrap a served route in the
-  // SEQUESTERED FRAME, so a probationary app is visibly on probation. Only an UNTRUSTED container
-  // sets it: a curated container holds the operator's own law, and framing that as probation would be
-  // the same lie pointed the other way.
-  /** @internal — T35 seam (container.ts, renderers.ts) */
   probation: Probation | undefined = undefined;
 
-  /** @internal — the store this container belongs to, and the services its tree shares. */
   store = new Store();
 
-  /** Live federation channels by pool name (§46). Mirrors `connectionInboxes`: same shape, with a
-   * peer on the other end instead of an MCP connection. (Named in full because `channels` is
-   * already this class's live-stream set — two different things, one obvious word.) */
   readonly federationChannels = new Map<string, Channel>();
 
-  /**
-   * Set on a POOL's own gateway when it is a federation channel's pool (§46.1). It is what tells a
-   * peer-fed staging store from an operator-opened quarantine, and it closes the anonymous surface.
-   */
   channelPool?: true;
 
-  // The §24.5 envelope rows for every enveloped pool attached here: which pool, its resolved
-  // ceilings, and what it has spent. The refusal a caller meets stays leak-free; this is the
-  // operator-facing half of "exhaustion is loud". Body in envelope.ts.
   envelopeReports(): EnvelopeReport[] {
     return envelopeReportsImpl(this);
   }
 
-  // Open a QUARANTINE POOL over this store (SPEC §24): the body lives in quarantine-pool.ts,
-  // which re-expresses it as the untrusted-and-separate PRESET of the container primitive below.
   async openQuarantine(opts: QuarantineOptions = {}): Promise<QuarantinePool> {
     return openQuarantineImpl(this, opts);
   }
 
-  // --- containers (SPEC §27, ticket T32) ---------------------------------------------------------
-
-  // The resolved container table: declarations, exclusions, detach records, and the reader-level
-  // defects (immutable-knob flips, restored cycles) — live from the ground, like trust.
   containers(): ContainerTable {
     return readContainerTable(this.reactor, this.validityNow(), this.operatorAuthor);
   }
 
-  // Open a container over this store (SPEC §27): a declared one by name, or an anonymous one
-  // with explicit knobs. The body lives in container.ts.
-  /**
-   * Attach every standing channel's pool. Idempotent, and failure-tolerant per channel: a pool whose
-   * bytes are missing must not stop the store from booting, and anything that reads it will meet
-   * containerScope's refusal by name — louder and more honest than a store that will not start.
-   */
-  /** Why a standing channel's pool did not attach at the last resume, by channel name. */
   readonly channelAttachFaults = new Map<string, { message: string; keyMissing: boolean }>();
 
   async resumeChannels(): Promise<void> {
     for (const standing of this.channelStatus()) {
       if (this.federationChannels.has(standing.name)) continue;
-      // REBUILD THE CHANNEL, not only its pool. `keepSyncing` iterates `federationChannels`, so a
-      // booted store with pools and no channels polls nothing — while `federate list` goes on
-      // reporting `receiving`. That is the standing instruction dying with the process that opened
-      // it, and reporting otherwise (T196).
-      //
-      // A channel with no recorded address, or none this store holds a credential for, is left
-      // unrebuilt DELIBERATELY: it cannot sync, and a handle that cannot pull would report health it
-      // does not have. `channelStatus` still lists it, and the CLI reads the missing half from the
-      // same two places this does.
       const token = this.options.channelToken?.(standing.name);
       try {
-        // Through the one attach, which is also the one place a channel pool is MARKED — a resumed
-        // pool is a channel's too, and this is the path a running server actually serves from.
         this.store.setChannel(this, standing.name, await attachChannelPool(this, standing.name));
         this.channelAttachFaults.delete(standing.name);
       } catch (err) {
-        // Kept, so a report can name the cause rather than guess at one.
         this.channelAttachFaults.set(standing.name, {
           message: err instanceof Error ? err.message : String(err),
           keyMissing: err instanceof PoolKeyMissing,
         });
-        // Deliberately left unattached; see above. And CRUCIALLY, left un-REGISTERED below: the
-        // channel goes into `federationChannels` only once its pool is open. Registered first, a
-        // channel with an unreadable pool evaded the CLI's cannot-sync report (which filters on
-        // this very map), and every tick then threw BEFORE the stamp-failure path — so
-        // consecutiveFailures stayed 0 while `federate list` said `receiving` about something that
-        // could never pull. The exact H9 shape this ticket closes, reintroduced one layer down.
         continue;
       }
       if (standing.from !== "" && token !== undefined) {
         this.federationChannels.set(standing.name, resumeChannelImpl(this, standing, token));
       }
     }
-    // Boot's replay ran before any pool attached, so the aggregation saw none of them. Refold once,
-    // after the loop — without this a rebooted store keeps the data and loses the LAW until the
-    // next sync, which is T196's failure shape one layer up.
     if (this.store.channels(this).size > 0) this.replayRegistrations();
   }
 
-  /** Keep accepting on every open channel until stopped. Polling today; the transport is
-   * deliberately the only thing that knows so. */
   keepSyncing(opts: { everyMs?: number } = {}): StandingSync {
     return keepSyncingImpl(this, opts);
   }
 
-  /** Retire ONE law a channel blessed, durably across polls. `{ lift: true }` reverses it. */
   async curseChannelLaw(
     channel: string,
     living: string,
@@ -1353,7 +877,6 @@ export class Gateway {
     return curseChannelLawImpl(this, channel, living, opts);
   }
 
-  /** Set a channel's reversible toggles: `receiving` (freeze) and `blessing`. */
   async setChannel(
     name: string,
     next: { receiving?: boolean; blessing?: boolean },
@@ -1361,8 +884,6 @@ export class Gateway {
     return setChannelImpl(this, name, next);
   }
 
-  /** Every channel's live state, or one by name — read from the ground, not from memory. */
-  /** Every channel ever declared, severed ones included — the read path needs the difference. */
   channelsEver(name?: string): ChannelStatus[] {
     return channelsEverImpl(this, name);
   }
@@ -1371,15 +892,10 @@ export class Gateway {
     return channelStatusImpl(this, name);
   }
 
-  /** The peer apps sitting in this store's channel pools — arrived, and inert until blessed. */
   channelApps(channel?: string): ArrivedApp[] {
     return channelAppsImpl(this, channel);
   }
 
-  /**
-   * Mount ONE arrived app (SPEC §24.6). Neither channel toggle reaches this: blessing a name and
-   * running a stranger's code are different grants, so the wider one takes its own deliberate act.
-   */
   async blessChannelApp(
     channel: string,
     route: string,
@@ -1388,15 +904,10 @@ export class Gateway {
     return blessChannelAppImpl(this, channel, route, opts);
   }
 
-  /**
-   * Run a peer's RESOLVER code for one lens (SPEC §24.6). The channel binds names on its own; this
-   * is the separate act that lets the code behind a computed field run.
-   */
   async blessChannelResolvers(channel: string, lens: string): Promise<string> {
     return blessChannelResolversImpl(this, channel, lens);
   }
 
-  /** The lenses on a channel whose peer-written resolvers are WITHHELD — decisions waiting on you. */
   withheldOn(channel: string): string[] {
     const status = channelStatusImpl(this, channel)[0];
     const ground = this.store.channels(this).get(channel)?.gateway;
@@ -1404,12 +915,10 @@ export class Gateway {
     return withheldLenses(this, ground, status.prefix);
   }
 
-  /** Sever a federation channel and purge its pool. Irreversible; freezing is the reversible act. */
   async dropChannel(name: string): Promise<void> {
     return dropChannelImpl(this, name);
   }
 
-  /** Open (or resume) a federation channel receiving into `into` under the receiver's `prefix`. */
   async openChannel(opts: OpenChannelOptions): Promise<Channel> {
     return openChannelImpl(this, opts);
   }
@@ -1418,14 +927,10 @@ export class Gateway {
     return openContainerImpl(this, opts);
   }
 
-  // The scope-merge read (SPEC §27.4): union(active containers) MINUS excluded, closed under
-  // forward negation (H1), failing closed on any unresolvable dependency. Scope is chosen at
-  // QUERY time — this never rewrites the default door reads.
   containerScope(opts: { containers?: readonly string[] } = {}): Delta[] {
     return containerScopeImpl(this, opts);
   }
 
-  /** Serving composition uses only the contributions each peer approves under its own law. */
   servingScope(
     now: number,
     opts: { containers?: readonly string[]; bound?: string; asOf?: number } = {},
@@ -1436,7 +941,6 @@ export class Gateway {
       : connectionScopeImpl(this, { bound: opts.bound, ...opts }, moment);
   }
 
-  /** Refresh owned admitted sources before a serving door composes them. */
   async prepareRead(options: { reconcileLaw?: boolean } = {}): Promise<void> {
     await this.refresh();
     let children = false;
@@ -1444,22 +948,14 @@ export class Gateway {
       await child.prepareRead();
       children = true;
     }
-    // Child law also shapes this surface. Retry this owned refold even at unchanged heads:
-    // a previous failure must not leave a retired channel lens served from the parent cache.
     if (children || options.reconcileLaw) this.replayRegistrations();
     if (options.reconcileLaw) await this.preloadResolvers();
   }
 
-  /** A parent may narrow this testimony; it cannot substitute the peer's raw snapshot. */
   readContribution(now: number, options: { inbox?: string; asOf?: number } = {}) {
     return readContributionImpl(this, now, options);
   }
 
-  // The listing door (ticket T110): one page of the distinct entities holding evidence a lens's
-  // hyperschema reads, each resolved through that lens. The maintained candidate set is a shared
-  // CONTAINER backing the hyperschema (declared here when absent, refreshed when a sibling lens
-  // widens the context union), read through the container scope — governed, negation-closed,
-  // erasure-reachable. AUTHED surface only; the public projection never builds a listing field.
   async list(
     name: string,
     opts: ListOptions = {},
@@ -1468,33 +964,22 @@ export class Gateway {
     return listImpl(this, name, opts, binding);
   }
 
-  // Bind a connection to a container (SPEC §39): spawn a per-connection inbox pool and provision its
-  // owner-authored grant chain. Reads gather the container; writes land in the returned inbox as the
-  // owner. Idempotent on (container, connectionKey) — a second bind resumes the same inbox.
   async bindConnection(opts: BindConnectionOptions): Promise<Container> {
     return bindConnectionImpl(this, opts);
   }
 
-  // The inbox pool a bound request WRITES into (SPEC §58): the live handle for `binding.inbox`,
-  // or a refusal — never a fallback to this store. The body lives in container.ts.
   poolForBinding(binding: ConnectionBinding): Gateway {
     return poolForBindingImpl(this, binding);
   }
 
-  /** Attach every declared inbox pool whose bytes this store's pool backend holds (§58). */
   async resumeInboxes(): Promise<void> {
     return resumeInboxesImpl(this);
   }
 
-  // A connection's bounded read (SPEC §39.1.2): gather the bound container (or a named descendant of
-  // it), refusing any target outside the binding's subtree. The binding is an upper bound.
   connectionScope(opts: { bound: string; containers?: readonly string[] }): Delta[] {
     return connectionScopeImpl(this, opts);
   }
 
-  // Revoke a connection (SPEC §39.3c): strike its owner-authored write grant in the inbox. New writes
-  // signed by that key refuse; its past deltas keep their author, stay in the inbox, and leave the
-  // parent's view (the parent composes a pool by its owner's authority).
   async revokeConnection(opts: {
     inbox: Container;
     connectionKey: string;
@@ -1504,8 +989,6 @@ export class Gateway {
     return revokeConnectionImpl(opts);
   }
 
-  // Promote a delta a quarantine produced into THIS store (SPEC §24.3 — promote-outputs): the body
-  // lives beside the loam.adoption vocabulary in adopt.ts.
   async promote(
     source: Gateway,
     deltaId: string,
@@ -1514,23 +997,11 @@ export class Gateway {
     return promoteImpl(this, source, deltaId, opts);
   }
 
-  // The adoptions this store's operator has made (SPEC §24.3) — the visible trail from a canonical value
-  // back to the quarantine that produced it. The read side of promotion, for audit and review (§27).
-  // An unoperated store has no operator and therefore no adoptions of its own.
   adoptions(): Adoption[] {
     if (this.operatorAuthor === undefined) return [];
     return readAdoptions(this.reactor, this.validityNow(), this.operatorAuthor);
   }
 
-  // --- operations another container asks of this one ----------------------------------------------
-  // Each signs with THIS container's governing key, inside this container. Another container asks;
-  // it never holds this one's key or signs in its name (ruling 11).
-
-  /**
-   * Strike `ids` here in one batch: a negation apiece on one stamp of this container's clock,
-   * through its own door. Signed with this container's key, or with `by`: a key its caller holds
-   * for itself, such as a person retracting their own writes. Never another container's key.
-   */
   async strike(ids: readonly string[], by: Signer | undefined = this.signer): Promise<void> {
     if (by === undefined) throw new Error("strike: this container has no governing key");
     const stamp = this.stamp(by.author);
@@ -1539,7 +1010,6 @@ export class Gateway {
     );
   }
 
-  /** Grant `subject` the right `verb` over this container's store, signed with its own key. */
   async issueGrant(subject: string, verb: Verb): Promise<void> {
     const signer = this.signer;
     if (signer === undefined) throw new Error("issueGrant: this container has no governing key");
@@ -1552,10 +1022,6 @@ export class Gateway {
     ]);
   }
 
-  /**
-   * Revocations of `ids` here, each on its own stamp, signed with this container's key. Returned
-   * unadmitted, so the caller admits them in its own batch beside what it signs itself.
-   */
   revocations(ids: readonly string[]): Delta[] {
     const signer = this.signer;
     if (signer === undefined) throw new Error("revocations: this container has no governing key");
@@ -1566,13 +1032,6 @@ export class Gateway {
     );
   }
 
-  /**
-   * Answer a read-only question about the bytes this container's own store holds, on every tier:
-   * one id (`holds`, which throws when the store cannot answer), a batch (`retention`, whose
-   * unanswerable ids come back `unasked`), whether it holds any bytes at all (`any`: unprovable
-   * reads as true), or every id it holds (`inventory`: the reason, when it cannot be listed).
-   * Another container asks; none reaches this one's store.
-   */
   probe(q: { readonly holds: string }): Promise<boolean>;
   probe(q: {
     readonly retention: readonly string[];
@@ -1586,7 +1045,6 @@ export class Gateway {
     return probePhysicalRetention(this.backend, q.retention);
   }
 
-  /** Record manifest export rows here (§27.8) in one batch, signed with this container's key. */
   async exportManifestRows(rows: readonly ManifestExport[]): Promise<void> {
     const signer = this.signer;
     if (signer === undefined) {
@@ -1601,11 +1059,6 @@ export class Gateway {
     );
   }
 
-  /**
-   * Arrival stamps for a sync on `channel` from `from` (§46): one per chunk of refs, all on one
-   * stamp of this container's clock, signed with its key. Returned unadmitted: the caller sends
-   * them through this container's federation door and settles what did not land.
-   */
   arrivalStamps(channel: string, from: string, chunks: readonly (readonly string[])[]): Delta[] {
     const signer = this.signer;
     if (signer === undefined) throw new Error("arrivalStamps: this container has no governing key");
@@ -1617,11 +1070,6 @@ export class Gateway {
     );
   }
 
-  // --- promote-law (SPEC §24.4 × §27.8, ticket T33) ------------------------------------------------
-
-  // Bless ONE manifest row of a module version into this root's own law: the body — and the
-  // root-name guard, the pen flag, the bytes-classification, and the timestamp inheritance that
-  // makes it idempotent — lives beside the manifest vocabulary in adopt-law.ts.
   async adoptLaw(
     version: ModuleVersion,
     alias: string,
@@ -1630,52 +1078,27 @@ export class Gateway {
     return adoptLawImpl(this, version, alias, opts);
   }
 
-  // Bless every LAW row of a module version — sugar that expands to N ordinary adoptions (§27.8).
   async blessAll(version: ModuleVersion, opts: BlessAllOptions = {}): Promise<BlessAllReport> {
     return blessAllImpl(this, version, opts);
   }
 
-  // "What law of these module versions does my root currently bind?" — content-address
-  // intersection over the UNION of their manifests. Arithmetic, never the adoption records.
   lawFrom(versions: readonly ModuleVersion[]): LawFromRow[] {
     return lawFromImpl(this, versions);
   }
 
-  // The law-adoption trail (§27.8's ledger): origination (`adopted-from`) told apart from mere
-  // exposure (`witnessed`). Shares `loam.adoption` with promote-outputs and answers a different
-  // question over it — `adoptions()` reads the FACT trail, this one the LAW trail.
   lawAdoptions(): LawAdoption[] {
     if (this.operatorAuthor === undefined) return [];
     return readLawAdoptions(this.reactor, this.validityNow(), this.operatorAuthor);
   }
 
-  /**
-   * @internal — T33 seam (adopt-law.ts): the injected post-check hold the atomicity rail drives.
-   * Awaited between a blessing's name-check and its append, OUTSIDE the critical section, so a
-   * test can hold one adoption open while another door genuinely moves the winner. Undefined in
-   * production; nothing in the door's logic depends on it being set.
-   */
   adoptionHold: (() => Promise<void>) | undefined = undefined;
 
-  /**
-   * @internal — T33 seam (adopt-law.ts): the ONE per-gateway living-name critical section. Every
-   * door that takes a latest-wins NAME chains through it — `adoptLaw`, `publishRegistration`,
-   * `publishRenderer` — because the guard defends a name and not a door. The mechanism is the
-   * single-writer gateway the store doctrine already holds; the substrate needs nothing.
-   */
   livingNames: Promise<void> = Promise.resolve();
 
-  // Honor an erasure DECIDED by the primary operator (SPEC §24.8), called on a pool by the primary's
-  // fan-out: the body — and the fan-out's re-derive-its-own-reach doctrine — lives in erase.ts.
   async eraseReplica(erasure: Delta, id: string, seen: Set<Peer> = new Set()): Promise<void> {
     return eraseReplicaImpl(this, erasure, id, seen);
   }
 
-  // A fresh reactor replayed from the backend as it stands NOW — how open() built the first
-  // one. Every registered schema rebinds under a new generation (rebind), persistence
-  // re-attaches, and any animating host is detached (it watched the old reactor — the caller
-  // re-attaches its runner, as the village does after the crash).
-  /** @internal — T19 seam (erase.ts) */
   reseat(): Promise<void> {
     if (this.reseating !== undefined) return this.reseating;
     this.needsJournalRefresh = true;
@@ -1694,11 +1117,7 @@ export class Gateway {
   }
 
   private async reseatGround(): Promise<void> {
-    // READ FIRST, TEAR DOWN AFTER, CATCH UP LAST: the read is the one step here that can fail,
-    // and everything after it is destructive. Ordered the other way, a failed read leaves the
-    // gateway half-torn-down — subscriptions killed, reactor still on pre-purge ground.
     let reactor = new Reactor();
-    // On the journal path the admitted set is the journal's, never the raw rows.
     const readAll = async (): Promise<Delta[]> => {
       if (this.peer === undefined) return this.backend.deltasSince(new Set());
       return rereadHostPeer(this.peer);
@@ -1710,19 +1129,11 @@ export class Gateway {
         throw new Error(`reseat: the store handed back an unacceptable delta ${d.id}`);
       }
     }
-    // End live subscriptions: a parked reader must not keep serving a view built on the
-    // pre-erase ground (the removed record could still sit in its last snapshot). They wake
-    // with `done` and resubscribe against the fresh reactor — the same reconnect a crash
-    // reopen or a schema evolution asks of them. Their sinks watched the old reactor; drop them.
     for (const channel of [...this.channels]) await channel.return();
     this.sinks.clear();
     this.lazyMats.clear();
     this.publicLazyMats.clear();
-    // Drop the resolver memo (SPEC §22.5/§11): keying already forbids serving a value over erased
-    // bytes, but a re-seat is exactly the moment the ground forgot — clear it so nothing lingers.
     this.resolverMemo.clear();
-    // Teardown yields to other writers. Reconcile the whole admitted set, including removals.
-    // The final membership check and reactor swap are synchronous after the last read.
     for (let round = 0; ; round += 1) {
       const known = new Set(rows.map((d) => d.id));
       revision = await this.backend.revision?.();
@@ -1738,7 +1149,7 @@ export class Gateway {
         }
       }
     }
-    seatDeclarations(reactor, this.declarations); // the pins, scope and user ground follow
+    seatDeclarations(reactor, this.declarations);
     continueGroundRevision(this._reactor, reactor);
     this._reactor = reactor;
     this.durableRevision = revision;
@@ -1747,76 +1158,29 @@ export class Gateway {
     this.attachPersistence(reactor);
     if (this.registered.length > 0) rebindImpl(this, this.registered);
     this.advanceToNow();
-    // The registered set is a PARSED COPY of definition content — hyperschema bodies, schemas,
-    // resolver source — so it is a tier like any other (§11), and rebinding it alone would keep
-    // serving law whose bytes this cut just removed: `surface()`, the GraphQL schema and every
-    // door built from them would outlive the ground until a restart. Re-derive instead. The
-    // rebind above still has to happen first — it is what puts materializations on the FRESH
-    // reactor — and the replay is a no-op when nothing was forgotten (it compares sets and
-    // returns), so the second bind is paid only when the cut actually took law away. Manual
-    // registrations are this process's own, not the ground's: the replay keeps them by origin.
     this.replayRegistrations();
-    this.armValidityTimer(); // the replay re-read the registration boundary
+    this.armValidityTimer();
     this.notifyUserDependents();
   }
 
-  // --- federation ------------------------------------------------------------------------------
-  //
-  // Federation is union at the substrate, NOT a governed mutation. Capabilities gate who may
-  // write via GraphQL; a peer's deltas cross by VERIFICATION alone (content address + a real
-  // signature, then an optional admission predicate). Whether a peer's facts shape a local view
-  // is a read-time TRUST choice (a policy's `byAuthorRank`), never a write denial here — "no
-  // authority deciding whose truth survives" (SPEC §8). So `federate` bypasses `authorize`.
-  //
-  // Foreign law stays inert by the SAME operator-rooting the local store uses: a federated
-  // grant / membership / registration / binding-definition authored by anyone but this store's
-  // operator binds nothing (grantHeld / readRegistrations / readBindingDefinitions all filter on
-  // the operator). This rests on one invariant the federation must keep: **distinct operator
-  // seeds across instances.** Two stores sharing an operator seed trust each other's
-  // constitution completely — a peer could then federate effective grants and code. Give every
-  // instance its own operator identity.
-
-  // The admission function the store's own TRUST POLICY dictates, resolved fresh from the
-  // live deltas at loam:trust each call (trust is data — see trust.ts): open admits every
-  // verified delta, roster admits the operator and the named authors, closed admits nothing.
-  // `federate` and `pullFrom` use this when no explicit admit is given; an explicit predicate
-  // always wins.
   admitFor(): (d: Delta) => boolean {
     return admitForImpl(this);
   }
 
-  // The surviving deltas this store offers a peer — everything, or what the offered lens selects.
   offeredDeltas(): Delta[] {
     return offeredDeltasImpl(this);
   }
 
-  // Membership is a query, first-class (SPEC §27.6): evaluate a membership Term over this
-  // store's ground, once. The body lives in ingest.ts — select is offeredDeltas, parameterized.
   select(term: unknown, now?: number): Delta[] {
     return selectImpl(this, term, now);
   }
 
-  // The same Term, live: the current members, then a fresh evaluation whenever the membership
-  // moves. The body lives in ingest.ts.
   watch(term: unknown): AsyncGenerator<Delta[], void, unknown> {
     return watchImpl(this, term);
   }
 
-  // The same Term, FROZEN (SPEC §27.2): evaluate the membership once and name the result with a
-  // content address over its members. `select` is the living reading, `watch` the live one, and
-  // this is the third rung of the same ladder — the version you ship, pin, verify, and reproduce.
-  // Order-free by construction, so two stores that froze the same members agree without
-  // coordinating (container-identity.ts holds the address; the refusal voice stays in select).
   freeze(term: unknown): ModuleVersion {
-    // ...plus the negation closure of what it selects (hazard H1, T38). A version exists to be
-    // SHIPPED, so a version carrying a claim without the retraction that struck it would hand its
-    // consumer a withdrawn claim reading as live. The address is over whatever the members ARE, so
-    // two stores freezing the same Term where only one holds a retraction get DIFFERENT addresses —
-    // correct, not a wart: they are genuinely different sets, and the address says so.
     const members = withNegationClosure(this, selectImpl(this, term));
-    // A version is a permanent name you ship, so it never commits to erased content, and it never
-    // quietly changes meaning by leaving that content out. It refuses instead. The erasure run
-    // re-freezes through `freezeMembers` directly, so this refusal never blocks it.
     const hidden = erasedFromReading(this.reactor, this.operatorAuthor);
     const erased = members.find((d) => hidden.has(d.id));
     if (erased !== undefined) {
@@ -1828,7 +1192,6 @@ export class Gateway {
     return freezeMembers(members);
   }
 
-  // Admit a batch of peer deltas (SPEC §8): the body lives in ingest.ts.
   async federate(
     deltas: Iterable<Delta>,
     opts: { admit?: (d: Delta) => boolean; ids?: boolean; admittedIds?: boolean } = {},
@@ -1836,71 +1199,34 @@ export class Gateway {
     return federateImpl(this, deltas, opts);
   }
 
-  // The operator's author, so a peer (the runner) can gate on it without holding the seed.
   get operator(): string | undefined {
     return this.operatorAuthor;
   }
 
-  // The reactor materialization currently backing a registered schema — internal names are
-  // generation-qualified, so anything that binds to a materialization by name (the runner's
-  // BindingSpecs) resolves through here. An unregistered name passes through unchanged: it may
-  // name a materialization registered outside the gateway, or an orphan that simply waits. The
-  // pass-through is a RESOLUTION rule, never a licence — it cannot tell those two apart, so a
-  // caller that would ACT on the result asks `materializationNames()` first and decides for
-  // itself (Runner.attach refuses to install on a name it cannot resolve, rather than watching
-  // one nothing here will ever change).
-  // NOTE: the resolution is AS OF NOW — after an evolution, work bound to the superseded
-  // generation keeps watching the old shape until it re-attaches.
   materializationFor(name: string): string {
     const hit = this.registered.find((r) => bindableNames(r).includes(name));
     return hit !== undefined ? this.matName(hit.hyperschema.name) : name;
   }
 
-  // Every name `materializationFor` can RESOLVE, deduplicated and ordered — so a caller can ask
-  // "will this resolve?" before binding to the pass-through, and cite the alternatives when it
-  // does not. Same source as the resolution above, deliberately: a check and its cure that read
-  // the registered set through two expressions drift into disagreeing.
-  //
-  // It MIXES the two kinds (H6): a reading's own name and the program's, because a definition may
-  // name either and this answers what resolves. It is not a list of what any door serves — sibling
-  // readings share one materialization, so two names here can resolve to one gather.
   materializationNames(): string[] {
     return [...new Set(this.registered.flatMap(bindableNames))].sort();
   }
 
-  /** @internal — T19 seam (erase.ts, adopt.ts) */
-  /** The wall clock, read in this one place. Rhizomatic never reads a clock itself. */
   now(): number {
     return Date.now();
   }
 
-  /** The instant a validity read looks at: the wall clock. No signed value and no count of writes
-   * moves it, so no writer can move every reader's time. A claim this gateway stamps is valid from
-   * the wall clock at signing, so the next read sees it. After the host clock steps back, a claim
-   * stamped before the step stays not yet valid until the wall clock passes its `validFrom`. */
   validityNow(now: number = this.now()): number {
     return now;
   }
 
   private validityTimer: ReturnType<typeof setTimeout> | undefined;
 
-  /**
-   * Brings the reactor's maintained views to the present, then arms the validity timer. Views are
-   * evaluated at an instant: a delta written after that instant is not yet valid there, so every
-   * ingest advances first.
-   * @internal — ingest.ts calls it before each batch
-   */
   advanceToNow(): void {
     this.reactor.advanceTime(this.validityNow());
     this.armValidityTimer();
   }
 
-  /**
-   * Arms one timer for the next validity boundary a held delta names: a delta that becomes valid,
-   * or stops being valid, with nothing written at all. Re-arm after every ingest, because the batch
-   * may name an earlier boundary than the one already armed.
-   * @internal — ingest.ts calls it after each batch
-   */
   armValidityTimer(): void {
     if (this.validityTimer !== undefined) clearTimeout(this.validityTimer);
     this.validityTimer = undefined;
@@ -1909,45 +1235,26 @@ export class Gateway {
       .filter((t): t is number => t !== undefined)
       .reduce((a, b) => Math.min(a, b), Infinity);
     if (next === Infinity) return;
-    // A delay past 2^31-1 ms overflows, and Node then fires it at once, every time. Waking early
-    // is harmless: the callback advances and re-arms for what remains.
     const delay = Math.min(Math.max(0, next - now), MAX_TIMER_DELAY);
     this.validityTimer = setTimeout(() => this.onValidityBoundary(), delay);
     this.validityTimer.unref?.();
   }
 
-  /** @internal — the next moment a registration claim starts or stops; replay sets it */
   registrationBoundary: number | undefined;
 
-  // A registration boundary changes which bindings exist, so it replays the registrations, which
-  // re-reads the next registration boundary. A data boundary only moves the views.
   private onValidityBoundary(): void {
     const crossed =
       this.registrationBoundary !== undefined && this.validityNow() >= this.registrationBoundary;
     this.reactor.advanceTime(this.validityNow());
     if (crossed) this.replayRegistrations();
     this.armValidityTimer();
-    // A watch over a Term that reads delegations or roots (`loam.memberOf`) was lowered at its last
-    // evaluation; a window that closes here moves it with nothing written, and `advanceTime` fires no
-    // subscriber. So this ground's own pulses re-evaluate, as its dependents' do.
     for (const pulse of [...this.userPulses]) pulse();
     this.notifyUserDependents();
   }
 
-  // Each author's newest held claim time. A Schema that orders `byTimestamp` needs an author's
-  // writes to sort in the order they were made, and a host clock can step back across a restart.
   private readonly authorClocks = new Map<string, number>();
 
-  /**
-   * A registration claim that starts or stops later moves the registration boundary, so the timer
-   * replays the registrations when that moment arrives. A claim valid now is left to the caller
-   * that wrote it, as before: a raw append does not replay.
-   * @internal — ingest.ts calls it for every delta it lands
-   */
   noteRegistrationTime(d: Delta): void {
-    // Arrival order is free: a negation can land before the registration it negates, or a middle
-    // link can land last. So walk UP from `d` to every held registration it reaches, then DOWN from
-    // each through every held negation, and note every future boundary on the way.
     const now = this.validityNow();
     const note = (x: Delta): void => {
       for (const t of [x.claims.validFrom, x.claims.validUntil]) {
@@ -1982,44 +1289,29 @@ export class Gateway {
     walkUp(d);
   }
 
-  /** @internal — ingest.ts calls it for every delta it lands */
   noteAuthorTime(d: Delta): void {
     this.raiseAuthorClock(d.claims.author, d.claims.timestamp);
   }
 
-  // The map holds each author's greatest USABLE time. Ordering is monotonic only within the
-  // safe-integer range: above it `t + 1` need not be a new number, so a time there is never
-  // stored (storing it would hide a safe time held beside it). At MAX_SAFE_INTEGER itself strict
-  // order ends; see `nextTimestamp`. Nothing refuses such a
-  // write, and under a `byTimestamp` Policy that claim can still win: the store accepts any finite
-  // signed creation time. It never moves validity.
   private raiseAuthorClock(author: string, t: number): void {
     if (t <= Number.MAX_SAFE_INTEGER && t > (this.authorClocks.get(author) ?? -Infinity)) {
       this.authorClocks.set(author, t);
     }
   }
 
-  // The store's own history is the only witness to ordering before this process started. It only
-  // orders: a held timestamp is signed by its author, and no read time follows it.
   private seedAuthorClocks(deltas: Iterable<Delta>): void {
     for (const d of deltas) this.noteAuthorTime(d);
   }
 
-  /**
-   * Resolve this ground's `user:<name>` grant subjects against `host`'s user records. A pool holds
-   * no user records of its own. @internal — container.ts
-   */
   readUsersFrom(host: UserGround): void {
     if (this.userHost === host) return;
     this.releaseUsers?.();
     this.releaseUsers = undefined;
     this.userHost = host;
     if (host !== this) this.releaseUsers = host.watchUsers(() => this.onUsersMoved());
-    // Views built before this call read this ground's own (empty) users; read the host's now.
     this.onUsersMoved();
   }
 
-  /** Call `onMoved` whenever this ground's users may have moved. Returns the release. */
   watchUsers(onMoved: () => void): () => void {
     this.userWatchers.add(onMoved);
     return () => {
@@ -2027,22 +1319,15 @@ export class Gateway {
     };
   }
 
-  // A pool's governed reads resolve user-named grants against its HOST's users, which its own
-  // reactor never sees change. So the host tells every watcher after each accepted batch and each
-  // validity boundary — widely, since a user's root depends on claims, strikes,
-  // counter-strikes, erasures and windows alike — and each watching pool re-lowers its views.
   private readonly userWatchers = new Set<() => void>();
   private releaseUsers: (() => void) | undefined = undefined;
 
-  /** Bumped whenever the users this ground reads may have moved; the listing index keys on it. */
   usersEpoch = 0;
 
-  /** @internal — ingest.ts, after each batch it lands */
   notifyUserDependents(): void {
     for (const onMoved of this.userWatchers) onMoved();
   }
 
-  /** @internal — ingest.ts: live `watch` evaluations over a governed Term */
   readonly userPulses = new Set<() => void>();
 
   private onUsersMoved(): void {
@@ -2060,9 +1345,6 @@ export class Gateway {
   private governedRegistered: Bound[] | undefined;
   private governsUsers = false;
 
-  // This ground reads its users from its user host (a pool's host, or itself), hiding what that
-  // host has erased but not yet purged, exactly as the user View does. Both closures read the
-  // gateway, never a reactor, so they are declared once and hold for every reactor it sets.
   private declareUsers(reactor: Reactor): void {
     declareReadHidden(reactor, (now) => readClosedIds(this, now));
     declareUserGround(reactor, () => {
@@ -2075,70 +1357,36 @@ export class Gateway {
     });
   }
 
-  /** The user ground this ground reads: its host's, or its own at the root. */
   userGroundHost(): UserGround {
     return this.userHost ?? this;
   }
 
-  /**
-   * Honor delegations on this ground, for `scope` only (README ruling 6). Called on an inbox pool
-   * with its own name; no other ground calls it, so no other ground honors a delegate.
-   * @internal — container.ts
-   */
   honorDelegationsAt(scope: string): void {
     declarePrincipalScope(this._reactor, scope);
   }
 
-  /**
-   * The times for a claim `author` is about to sign: `timestamp` from `nextTimestamp(author)`, and
-   * `validFrom` from the wall clock. See `stampOn`.
-   */
   stamp(author: string | undefined = this.operatorAuthor): Stamp {
     return stampOn(this, author, this.now());
   }
 
-  /**
-   * The ordering time for a claim `author` is about to sign. For one author it is strictly
-   * increasing: above every claim the store holds, and every time issued, for `author` (within the
-   * safe-integer range). Across authors it follows this gateway's own clock only, so same-moment
-   * writes through one gateway sort in the order they were made, unless an author's own floor
-   * lifts that author's time above the clock. One author's floor never lifts another's. It can run
-   * ahead of the wall clock, so it is never a validity time. Source code signs with `stamp()`,
-   * which calls this; call it directly only from a fixture.
-   * @internal
-   */
   nextTimestamp(author: string | undefined = this.operatorAuthor): number {
     this.lastIssued = Math.max(this.now(), this.lastIssued + 1);
     if (author === undefined) return this.lastIssued;
-    // Strict order ends at the top of the safe range: once the floor has no safe successor, the
-    // time falls back to this gateway's own counter, which never repeats.
     const floor = this.authorClocks.get(author) ?? -Infinity;
     const timestamp =
       floor < Number.MAX_SAFE_INTEGER ? Math.max(this.lastIssued, floor + 1) : this.lastIssued;
     this.raiseAuthorClock(author, timestamp);
     return timestamp;
   }
-  // Only this gateway's own issues move it, never a held timestamp, so no author moves it far.
   private lastIssued = 0;
 
-  // --- the read seam ---------------------------------------------------------------------------
-
-  /** @internal — T19 seam (mutate.ts) */
   def(name: string, binding?: ConnectionBinding): Bound {
-    // A bound connection is served its CONTAINER'S surface, which carries the root's law and the
-    // law its container's pools published — so a lens that lives only in a pool resolves here for
-    // the connection and nowhere else (§58 position 2).
     const rows = binding === undefined ? this.registered : this.boundSurface(binding).registered;
     const def = byLens(rows, name);
     if (def === undefined) throw new Error(`no registered schema named ${name}`);
     return def;
   }
 
-  /**
-   * The surface a bound connection is served (SPEC §58 position 2): the root's law plus the law
-   * published on the inbox pools composed into its container, fenced and trialled by
-   * `boundBindingsImpl`. Cached per container; the fold's own key says when it moved.
-   */
   boundSurface(binding: ConnectionBinding): {
     readonly registered: readonly Bound[];
     readonly registry: SchemaRegistry;
@@ -2153,36 +1401,18 @@ export class Gateway {
     return { ...fold, schema };
   }
 
-  // The cache holds one fold per container ever asked for, for the gateway's lifetime. Correctness
-  // never depends on eviction: the key names every pool row the fold saw, so a dropped pool's rows
-  // leave the key and the next ask rebuilds. What eviction would buy is memory for a container
-  // nobody asks for again — unobservable from outside, and evicting on fold SHAPE instead
-  // re-trialled the common case on every ask. Named as a limit rather than half-solved: the drop
-  // path is where a context-carrying design (T274) can release it.
-
-  // The materialization watching (schema, entity) — the schema's own when the entity is a
-  // registered root, a lazily-created cached one otherwise. Lazy names live in a NUL-separated
-  // namespace no schema name can enter (register() refuses NUL), so they can never collide.
-  // Generation-qualified (see the class note): an evolved schema binds a fresh materialization
-  // under the bumped generation; a superseded one is left behind, and a stream still attached
-  // to it keeps watching the old shape until it resubscribes.
-  /** @internal — T19 seam (reads.ts) */
   matName(name: string): string {
     return matNameImpl(this, name);
   }
 
-  /** @internal - T19 seam (reads.ts) */
   lazyMatName(name: string, entity: string): string {
     return lazyMatNameImpl(this, name, entity);
   }
 
-  /** @internal - T19 seam (reads.ts: a watch binds to the materialization this names) */
   matFor(name: string, entity: string, door: "full" | "public" = "full"): string {
     return matForImpl(this, name, entity, door);
   }
 
-  // Gather the HView for (schema, entity): the body lives in reads.ts.
-  /** @internal — T19 seam (mutate.ts: retraction reads the hview to find the caller's own claims) */
   gather(
     name: string,
     entity: string,
@@ -2197,7 +1427,6 @@ export class Gateway {
     return gatherForRetractionImpl(this, name, entity, binding);
   }
 
-  /** @internal — T19 seam (mutate.ts: every write verb answers with the re-resolved node) */
   resolvedNode(
     name: string,
     entity: string,
@@ -2208,10 +1437,6 @@ export class Gateway {
     return resolvedNodeImpl(this, name, entity, now ?? this.now(), asOf, binding);
   }
 
-  /**
-   * An ordinary read through its route (SPEC-16 M5): portable batch gather and resolve when the
-   * read is eligible, the native branch otherwise. The host time is sampled once, here.
-   */
   readNode(
     name: string,
     entity: string,
@@ -2222,10 +1447,6 @@ export class Gateway {
     return readNodeImpl(this, name, entity, now ?? this.now(), asOf, binding);
   }
 
-  // --- the write seam --------------------------------------------------------------------------
-
-  // One signed property-claim delta per provided property (SPEC §14): the body lives in mutate.ts.
-  /** @internal — T19 seam (renderers.ts: writeRoute signs as the pen through the normal §14 mutate) */
   async mutateEntity(
     name: string,
     entity: string,
@@ -2236,7 +1457,6 @@ export class Gateway {
     return mutateEntityImpl(this, name, entity, props, actorSeed, binding);
   }
 
-  // Clear whole fields (SPEC §14): the body lives in mutate.ts.
   private clearEntity(
     name: string,
     entity: string,
@@ -2247,7 +1467,6 @@ export class Gateway {
     return clearEntityImpl(this, name, entity, fields, actorSeed, binding);
   }
 
-  // Remove ONE value (SPEC §14 amendment): the body lives in mutate.ts.
   private removeEntity(
     name: string,
     entity: string,
@@ -2259,7 +1478,6 @@ export class Gateway {
     return removeEntityImpl(this, name, entity, field, values, actorSeed, binding);
   }
 
-  // Link an edge (SPEC §14 edge verbs): the body lives in mutate.ts.
   private async linkEntity(
     name: string,
     entity: string,
@@ -2272,7 +1490,6 @@ export class Gateway {
     return linkEntityImpl(this, name, entity, field, target, context, actorSeed, binding);
   }
 
-  // Sever an edge (SPEC §14 edge verbs): the body lives in mutate.ts.
   private severEntity(
     name: string,
     entity: string,
@@ -2284,7 +1501,6 @@ export class Gateway {
     return severEntityImpl(this, name, entity, field, targets, actorSeed, binding);
   }
 
-  // Link a declared reference (SPEC §51): the body lives in mutate.ts.
   private linkRefEntity(
     name: string,
     entity: string,
@@ -2296,7 +1512,6 @@ export class Gateway {
     return linkRefEntityImpl(this, name, entity, prop, target, actorSeed, binding);
   }
 
-  // Unlink a declared reference (SPEC §51): the body lives in mutate.ts.
   private unlinkRefEntity(
     name: string,
     entity: string,
@@ -2308,7 +1523,6 @@ export class Gateway {
     return unlinkRefEntityImpl(this, name, entity, prop, target, actorSeed, binding);
   }
 
-  // One signed MULTI-POINTER delta from an explicit pointer list (SPEC §14): the body lives in mutate.ts.
   private async claimEntity(
     pointers: readonly ClaimPointerSpec[],
     actorSeed?: string,
@@ -2317,23 +1531,14 @@ export class Gateway {
     return claimEntityImpl(this, pointers, actorSeed, binding);
   }
 
-  // --- the live seam ---------------------------------------------------------------------------
-
-  // A dynamic view of (schema, entity) — snapshot, then patches: the body (and the
-  // captured-shape doctrine) lives in reads.ts.
   private watchEntity(
     name: string,
     entity: string,
     door: "full" | "public" = "full",
     now?: number,
   ): AsyncGenerator<PatchNode, void, unknown> {
-    // A stream outlives any single moment, so an unpinned watch re-reads the clock PER FRAME — the
-    // lapse of a deadline that passes mid-stream must take effect without a resubscribe. A pinned
-    // `now` is the rails' deterministic seam (the flaky-test rule).
     return watchEntityImpl(this, name, entity, door, now === undefined ? undefined : () => now);
   }
-
-  // --- the GraphQL surface ---------------------------------------------------------------------
 
   private schemaOrThrow(): GraphQLSchema {
     if (this.gql === undefined) {
@@ -2342,18 +1547,9 @@ export class Gateway {
     return this.gql;
   }
 
-  // An empty surface has two honest shapes, and the refusal says which. The plain one: the store
-  // holds no law at all. The inert one: it HOLDS registrations that bind nothing — and the cause
-  // is named as a pair, never attributed: foreign law is inert on a governed store (SPEC §8), and
-  // an own definition that does not resolve binds nothing either. The operator's register is the
-  // cure, named in both shapes. The scan is a cold path (it only runs on the error), so the
-  // whole-store read is acceptable here where it would not be per request.
   private emptySurfaceMessage(): string {
     let inert = "";
     if (readRegistrations(this.reactor, this.validityNow(), undefined).length > 0) {
-      // The derivable fact is that registrations exist and none binds. The causes are stated as
-      // general rules, attributed only where the store's own posture makes them true: foreign
-      // inertia is a governed-store rule (SPEC §8), never claimed of an ungoverned store.
       inert =
         this.operatorAuthor !== undefined
           ? " the store holds registrations that do not bind (foreign law is inert on a governed " +
@@ -2366,28 +1562,7 @@ export class Gateway {
     );
   }
 
-  // T19 NOTE (a boundary judged, not forced): the public-door READERS — surface, isPublicLatest,
-  // isPublicPin, publicSurface, hasPublicSurface — stay on the class deliberately. They are thin
-  // veneers over two caches (publicOpen, publicCache) whose INVALIDATION is wired into the write
-  // path and the reseat cycle (publicOpen is keyed on this ground's revision); moving
-  // the veneers across the seam while the cache lifecycle stays here would be indirection, not
-  // separation. The DECLARATION side (declarePublic) moved to public.ts, where the vocabulary is.
-  //
-  // The restricted schema the anonymous door serves (SPEC §12): the query + subscription
-  // fields of every REGISTERED schema the operator's surviving `loam:public` declarations
-  // open, and no Mutation type at all — a tokenless write is a validation impossibility, not
-  // a policed string. Read fresh from the live deltas each call (the open set is data, like
-  // trust) and cached by what actually shapes it, so one negation closes the door on the next
-  // request without rebuilding on every read.
   private publicCache: { key: string; schema: GraphQLSchema } | undefined;
-  // The open set, read once per WRITE rather than once per read: it answers for one revision of
-  // this ground, so any accepted delta (a declaration, a negation) and any reseat retire it. A
-  // tokenless request therefore costs O(registered), not O(store) — which
-  // also keeps a nothing-public mount's refusal as cheap as an absent mount's (no timing
-  // oracle where the status codes are uniform).
-  // It also holds only between validity boundaries: a declaration or strike valid until T changes
-  // the open set at T with nothing written. So a cached set answers for a read time in
-  // [from, until), where `until` is the next boundary any held delta names.
   private publicOpen:
     | {
         readonly open: ReadonlySet<string>;
@@ -2397,19 +1572,6 @@ export class Gateway {
       }
     | undefined;
 
-  /**
-   * THE NAMES THIS STORE HAS DECLARED OPEN TO A TOKENLESS CALLER — and the one place that decides
-   * it, because there are five readers and a guard on one of them closes one door.
-   *
-   * A CHANNEL POOL DECLARES NOTHING. It is an attached container and therefore a mount in its own
-   * right, so `/channel:friends:alice/...` is a real URL against a store whose ground is a frozen
-   * COPY of this one's — `loam:public` rides that copy, and a declaration the operator has since
-   * struck still stands in there. Answering an empty set here closes the GraphQL surface, the SSE
-   * subscribe, the pinned-version REST door and the renderer door together, because all four ask
-   * this. A quarantine pool the operator opened themselves keeps its anonymous door: §24.7 builds a
-   * deliberate public probation surface on one, and this is narrower on purpose — it is about a
-   * pool whose contents a PEER chooses.
-   */
   private openNames(): ReadonlySet<string> {
     if (this.channelPool === true) return EMPTY_PUBLIC;
     const now = this.validityNow();
@@ -2433,7 +1595,7 @@ export class Gateway {
     const open = this.openNames();
     if (open.size === 0) return undefined;
     const defs = this.registered.filter((r) => open.has(lensOf(r)));
-    if (defs.length === 0) return undefined; // declared but not (yet) registered: nothing binds
+    if (defs.length === 0) return undefined;
     const key = defs.map((r) => boundKey(r)).join(NUL);
     if (this.publicCache?.key !== key) {
       this.publicCache = { key, schema: buildGqlSchema(defs, this.gqlHooks("public"), "read") };
@@ -2447,18 +1609,12 @@ export class Gateway {
     return surface;
   }
 
-  // Is there anything to serve a tokenless caller? The transport asks this to keep its
-  // refusals uniform — a mount with nothing public must answer exactly like no mount at all.
   hasPublicSurface(): boolean {
     if (this.publicSurface() !== undefined) return true;
-    // §23.8: a pinned-public declaration opens the anonymous door for its route (and its byte-door) even
-    // when no BARE-name lens is public — publicSurface builds only the bare-latest GraphQL/REST surface.
     for (const entry of this.openNames()) if (entry.includes("@")) return true;
     return false;
   }
 
-  // A tokenless query: the restricted surface, and NEVER an acting identity — there is no one
-  // to sign as, and nothing to sign with.
   async queryPublic(source: string, variables?: Record<string, unknown>): Promise<QueryResult> {
     await this.prepareRead();
     const result = await graphql({
@@ -2472,7 +1628,6 @@ export class Gateway {
     };
   }
 
-  // A tokenless subscription over the same restricted surface.
   async subscribePublic(
     source: string,
     variables?: Record<string, unknown>,
@@ -2481,11 +1636,6 @@ export class Gateway {
     return this.subscribeVia(this.publicSurfaceOrThrow(), source, variables);
   }
 
-  /**
-   * Take in what other gateways committed to this container since this one last read it. The
-   * container's journal is the source of truth, and this gateway's reactor is a view of it, so
-   * several gateways can serve one container. Every GraphQL door calls this first.
-   */
   refresh(): Promise<void> {
     return refreshImpl(this);
   }
@@ -2497,7 +1647,6 @@ export class Gateway {
   ): Promise<QueryResult> {
     await this.prepareRead();
     const result = await graphql({
-      // A bound connection queries its CONTAINER'S surface, never the store's (§58 position 2).
       schema:
         context?.binding === undefined
           ? this.schemaOrThrow()
@@ -2512,16 +1661,11 @@ export class Gateway {
     };
   }
 
-  // Run a GraphQL subscription: an async stream of data payloads. Errors inside the stream
-  // surface as thrown errors; returning the iterator ends the underlying watch.
   async subscribe(
     source: string,
     variables?: Record<string, unknown>,
     context?: RequestContext,
   ): Promise<AsyncGenerator<Record<string, unknown>>> {
-    // A live stream resolves off a MATERIALIZATION of this store's primary ground (§29.3), and no
-    // materialization is maintained over a connection's scope — a bound subscriber would be served
-    // the whole store, or nothing, and either is a lie. Refuse until a scoped stream exists.
     if (context?.binding !== undefined) {
       throw new Error(
         `a bound connection cannot subscribe: a live stream resolves over this store's ` +
@@ -2541,7 +1685,6 @@ export class Gateway {
     return subscribeViaImpl(schema, source, variables);
   }
 
-  // Await every write the raw stream has queued; surface the first write-through failure.
   async flush(): Promise<void> {
     await this.writes;
     if (this.writeFailure !== undefined) {
@@ -2549,8 +1692,6 @@ export class Gateway {
     }
   }
 
-  // Close ends every live subscription (a parked reader wakes with done, never hangs), then
-  // always releases the backend, even when a latched write failure has to be surfaced.
   async close(): Promise<void> {
     this.releaseUsers?.();
     this.releaseUsers = undefined;
@@ -2558,13 +1699,6 @@ export class Gateway {
     if (this.validityTimer !== undefined) clearTimeout(this.validityTimer);
     this.validityTimer = undefined;
     for (const channel of [...this.channels]) await channel.return();
-    // ATTACHED POOLS CLOSE WITH THEIR PARENT. A separate container holds its own store open, and
-    // nothing else will ever close it — so before this, every channel pool leaked its sqlite handle
-    // until the process exited. Invisible on Linux, which happily unlinks an open file; Windows CI
-    // found it, as an EPERM deleting a temp directory whose files were still held.
-    //
-    // Tolerant of an already-closed pool: `drop()` closes the store it purged, so a dropped channel
-    // is normally in this table having already gone.
     await this.store.closeChildren(this);
     this.federationChannels.clear();
     try {

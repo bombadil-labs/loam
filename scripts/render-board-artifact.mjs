@@ -1,14 +1,4 @@
 #!/usr/bin/env node
-// The board's generated mirror (§34): query the store's own door, render with the SAME renderer
-// module the store serves, write the artifact HTML to stdout. Content comes exclusively from the
-// store — this script contributes transport and nothing else, so the artifact can never disagree
-// with the board it mirrors.
-//
-//   node scripts/render-board-artifact.mjs --url http://127.0.0.1:5701/default --token "$(cat ~/bombadil-labs/loam-board/door.token)"
-//
-// Flags: --url <mount base> (or LOAM_BOARD_URL) · --token <bearer> (or LOAM_BOARD_TOKEN; omit for
-// a store whose Board lens is public) · --entity <id> (default board:main). The session pipes the
-// output into the claude.ai artifact republish — the phone-reachable snapshot, generated.
 
 import render from "../demos/board/renderer.mjs";
 import { BOARD_ENTITY } from "../demos/board/vocabulary.mjs";

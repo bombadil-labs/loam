@@ -1,16 +1,3 @@
-// T66 at the operator's surface. Two disclosures, both load-bearing, because the whole ticket exists
-// because the operator was TOLD a strike was stranded (T57) and handed no tool to settle it:
-//
-//   - `loam serve --archive` heals before boot, so the restore happens on the path the operator
-//     already runs. A change to the ground must be VISIBLE: the restored id reaches stdout, and a
-//     restore that could not be made reaches stderr beside the erasure sweep's refusals — a store
-//     that serves while a strike is still stranded must say so.
-//   - `repair re-admit` on a row that still fails admission now names the recovery that exists,
-//     rather than leaving "discard it as garbage" as the only end.
-//
-// The re-admit case asserts the message NAMES the archive path, not merely that it is longer: an
-// operator who cannot find the verb has not been told anything.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -58,15 +45,11 @@ describe("T66: the boot heal tells the operator what it restored", () => {
     await gw.append([height, strike]);
     await gw.close();
 
-    // The negation's signature is damaged in the PRIMARY only; the archive keeps the healthy copy.
     const db = new Database(path);
     db.prepare("UPDATE deltas SET sig = ? WHERE id = ?").run("ab".repeat(64), strike.id);
     db.close();
 
     out.length = 0;
-    // An ABSOLUTE --archive on purpose: `archivePath` returns the override verbatim, so a relative
-    // one resolves against the CWD rather than the home its help text promises — a separate defect,
-    // and one that would silently point this rail at an empty vault.
     const handle = await run(
       ["serve", "--http", "--port", "0", "--token", "t", "--home", home, "--archive", vault],
       io(),
@@ -78,16 +61,10 @@ describe("T66: the boot heal tells the operator what it restored", () => {
     const said = out.join("\n");
     expect(said).toContain(strike.id);
     expect(said).toMatch(/restor/i);
-    // A repaired boot has nothing left to warn about — so the stderr branch below is not merely
-    // unexercised here, it is correctly silent.
     expect(err.join("\n")).not.toMatch(/could not|stranded|set aside/i);
   });
 
   it("a squatter the archive CANNOT fix reaches stderr — the store serves, and says so", async () => {
-    // The higher-stakes branch: this boot serves with a strike stranded. Delete the archive's copy of
-    // the negation before corrupting the primary's row, so no healthy copy exists anywhere and the
-    // recovery genuinely cannot run. Without this rail the whole stderr loop could be deleted and the
-    // suite would stay green (H9 — the reader exists and nothing proves it).
     await run(["init", "--home", home], io());
     const seed = readSeed(home);
     const op = authorForSeed(seed);
@@ -101,7 +78,6 @@ describe("T66: the boot heal tells the operator what it restored", () => {
     await gw.append([height, strike]);
     await gw.close();
 
-    // The archive's own file for the negation — inside this test's own mkdtemp home, nowhere else.
     rmSync(join(vault, strike.id.slice(0, 2), `${strike.id}.json`));
     const db = new Database(path);
     db.prepare("UPDATE deltas SET sig = ? WHERE id = ?").run("ab".repeat(64), strike.id);
@@ -117,13 +93,10 @@ describe("T66: the boot heal tells the operator what it restored", () => {
     if (typeof handle === "number") throw new Error(`serve refused: exit ${handle}`);
     await handle.close();
 
-    // It SERVED (a legible store beats an outage)...
     expect(out.join("\n")).toMatch(/serving/);
-    // ...and the operator was told, by id, that a row is set aside and a strike may read live.
     const warned = err.join("\n");
     expect(warned).toContain(strike.id);
     expect(warned).toMatch(/repair list/);
-    // ...and it did NOT claim a restore it never made.
     expect(out.join("\n")).not.toMatch(/restored/);
   });
 });
@@ -146,9 +119,7 @@ describe("T66: re-admit names the recovery that now exists", () => {
 
     expect(code).toBe(0);
     const said = out.join("\n");
-    expect(said).toMatch(/still fails admission/); // the existing promise, unbroken
-    // ...and the new one: the operator is handed a RUNNABLE command, not merely a hint that one
-    // exists. The whole invocation is pinned, so a mangled flag or placeholder is a red bar.
+    expect(said).toMatch(/still fails admission/);
     expect(said).toContain("`loam serve --archive <dir>`");
   });
 });

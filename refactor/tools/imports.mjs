@@ -1,7 +1,3 @@
-// The import graph of a source tree: dependency cycles, directory-level edges, fan-in and fan-out,
-// external modules, and which rhizomatic names are used.
-// Usage: node refactor/tools/imports.mjs [dir=src] [--json out.json]
-
 import fs from "node:fs";
 import path from "node:path";
 import { importGraph, option, sourceFiles, stronglyConnected } from "./lib.mjs";

@@ -99,7 +99,8 @@ these tests exist and are red.
    a process restart produces — starts with no rows regardless of what an earlier instance held.
    Verified by `test/server/session-table.test.ts` (open a session on one table instance, `touch` its
    id against a second, freshly created instance, and get `undefined`) and stated in a comment in
-   `src/server/session.ts`.
+   `src/server/session.ts`. The comment was removed on 2026-11-12. The session-table test was
+   deleted earlier with `createSessionTable` (#298). No check exists now.
 4. The table holds at most its cap. State what a full table does: `open` refuses a new session
    (returns `undefined`) once the table is at its configured `maxSessions`, and it does not evict a
    LIVE session to make room — a session already open stays open (positive control: `touch` a

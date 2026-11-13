@@ -1,13 +1,8 @@
-// A memory backend whose row writes pass one hook first, on both write paths: a direct `append`
-// and a journal commit. A host writes through its peer journal, so a fault fixture that only
-// wrapped `append` would never fire there.
-
 import type { Delta, DurableOrdinaryJournalStore } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "../../src/store/backend.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 
 export class FaultableBackend extends MemoryBackend {
-  /** Throw to fail the write; nothing in `batch` is then stored. */
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async checkWrite(batch: readonly Delta[]): Promise<void> {}
 
@@ -34,10 +29,6 @@ export class FaultableBackend extends MemoryBackend {
   }
 }
 
-// A view of a memory backend that replaces only the probes a fault fixture is about (a purge that
-// lies, a blind read, a mute probe, a pen that never empties). Everything else, the peer journal
-// included, is the backend's own, so a pool, which is always its own journal peer, still opens
-// over it.
 export function overlay<B extends MemoryBackend>(
   backend: B,
   over: Partial<StoreBackend> & Record<string, unknown>,

@@ -1,4 +1,3 @@
-// Operator-local command trial. This is not a bound-user or remote serving door.
 import {
   CommandEndpoint,
   commandDescriptionClaims,
@@ -47,8 +46,6 @@ const entity = (id: string): readonly Target[] => [{ kind: "entity", entity: { i
 function requireFacts(batch: readonly Delta[]): void {
   for (const delta of batch) {
     for (const { role, target } of delta.claims.pointers) {
-      // Even an otherwise ordinary negation could retire law. Program acts and manifests
-      // belong to their existing services, which own their activation and provenance.
       if (
         ["negates", "defines", "manifest", "erases"].includes(role) ||
         role.startsWith(`${VOCAB_PREFIX}.txn.`) ||
@@ -68,7 +65,6 @@ function requireFacts(batch: readonly Delta[]): void {
   }
 }
 
-/** Opens only over an already operated, journal-backed Gateway. No seed retrieval is needed. */
 export async function openOperatorCommands(gw: Gateway, installation: CommandInstallation) {
   const signer =
     gw.signer === undefined
@@ -98,7 +94,6 @@ export async function openOperatorCommands(gw: Gateway, installation: CommandIns
     },
   });
   return {
-    /** A current head is an observation; the caller must put the chosen head in each request. */
     async head(): Promise<string> {
       const read = await peer.store.readHead(signer.author);
       if (read.status !== "head") throw new Error("operator command head unavailable");
@@ -148,8 +143,6 @@ export async function openOperatorCommands(gw: Gateway, installation: CommandIns
         );
         const head = await peer.store.readHead(signer.author);
         if (head.status !== "head") throw new Error("operator command head unavailable");
-        // Never evaluate guards against a stale reactor. A moved head reaches the command
-        // endpoint with the caller's original expectation and produces its signed refusal.
         if (
           head.status === "head" &&
           head.head === command.expectedHead &&
@@ -166,8 +159,6 @@ export async function openOperatorCommands(gw: Gateway, installation: CommandIns
             );
           }
         } else if (head.status === "head" && head.head === command.expectedHead) {
-          // This gateway may have committed a native emission while readHead was in flight.
-          // Keep the chosen expectation and let the endpoint sign the conflict in that case.
           const current = await peer.store.readHead(signer.author);
           if (current.status !== "head") throw new Error("operator command head unavailable");
           if (current.status === "head" && current.head === command.expectedHead)

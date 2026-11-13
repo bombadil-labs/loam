@@ -1,8 +1,3 @@
-// Adoption's vocabulary and its pure readers: the manifest row, the receiver's refusing resolver
-// stub, the registration-binding test, and why a schema definition is missing. A leaf: channel.ts,
-// gql.ts and resolvers.ts read these without importing adopt-law.ts, whose doors publish through
-// lifecycle.ts and renderers.ts.
-
 import {
   DeltaSet,
   HYPER_SCHEMA_SCHEMA,
@@ -19,14 +14,6 @@ export const MANIFEST_ENTITY = "loam:manifest";
 
 export const NUL = "\u0000";
 
-// --- the manifest mint (SPEC §27.8: the row shape; T33 owns it) ---------------------------------
-
-/**
- * One export row of a module's manifest: the consumer-facing ALIAS, and the export named by its
- * kind's most stable identifier — an ENTITY for schema law and for exported plain entities, a
- * CONTENT ADDRESS for a renderer binding or a byte-blob. `kind` is DISPLAY COPY: every guard in
- * this module classifies from the bytes at the target, never from this label.
- */
 export interface ManifestExport {
   readonly alias: string;
   readonly targetEntity?: string;
@@ -47,9 +34,6 @@ export function manifestExportClaims(
         "neither — the kind's most stable identifier is the one the consumer can verify (§27.8)",
     );
   }
-  // Each shape refuses ALONE (a conjunction here is satisfied by neither, and the mutation gate
-  // found exactly that mutant surviving): an empty alias names nothing a consumer could ask for,
-  // and NUL is the gateway's own separator.
   if (row.alias === "" || row.alias.includes(NUL)) {
     throw new Error("a manifest alias must be a non-empty name without NUL");
   }
@@ -89,13 +73,10 @@ export function manifestExportClaims(
   };
 }
 
-/** A manifest row as read back out of a module's members. */
 export interface ManifestRow {
   readonly alias: string;
-  /** The entity id or the content address the row names — its identity for re-point arithmetic. */
   readonly target: string;
   readonly by: "entity" | "address";
-  /** The stranger's own label. Reported, never trusted. */
   readonly declaredKind?: string;
   readonly deltaId: string;
   readonly timestamp: number;
@@ -115,8 +96,6 @@ export const entityOf = (claims: Claims, role: string): string | undefined => {
   return p?.target.kind === "entity" ? p.target.entity.id : undefined;
 };
 
-// A manifest row declares the manifest entity, exactly as an adoption record declares its own
-// (isAdoption's shape). The alias and target roles hang beside that key, role-qualified.
 const isManifestRow = (claims: Claims): boolean =>
   claims.pointers.some(
     (p) =>
@@ -128,18 +107,6 @@ const isManifestRow = (claims: Claims): boolean =>
 export const byAge = (a: { timestamp: number; deltaId: string }, b: typeof a): number =>
   a.timestamp - b.timestamp || (a.deltaId < b.deltaId ? -1 : a.deltaId > b.deltaId ? 1 : 0);
 
-/**
- * The manifest a module version publishes, LATEST PER ALIAS (by (timestamp, id) — the tie-break
- * every latest-wins reader here uses). A bumped module re-states an alias to re-point it, so the
- * newest row is what the alias means now; the older one survives on the ground, which is what
- * makes the re-point a three-way DIFF rather than a guess.
- *
- * Malformed rows are LOUD, not skipped: a stranger's manifest gets no silent drops, because a
- * skip is how a crafted manifest hides a row.
- *
- * A manifest is frozen history: every row is read whatever its own validity interval. Only the
- * strikes on rows are read at `now`. This is not a present-validity view of the rows.
- */
 export function readManifest(members: readonly Delta[], now: number): ManifestRow[] {
   const survives = survivalOver(members, now);
   const latest = new Map<string, ManifestRow>();
@@ -173,29 +140,6 @@ export function readManifest(members: readonly Delta[], now: number): ManifestRo
   return [...latest.values()].sort((a, b) => (a.alias < b.alias ? -1 : a.alias > b.alias ? 1 : 0));
 }
 
-// --- survival inside a version's members --------------------------------------------------------
-
-// The negation algebra over a version's MEMBERS, scoped by AUTHORSHIP — the rule every sibling
-// constitutional reader keeps (`lawfulNegated`), stated here for a
-// member set rather than a store:
-//
-//   **A strike binds a member only when the member's OWN AUTHOR signed it.**
-//
-// A shipper takes back their own word; nobody takes it back for them. The membership is NOT one
-// trust domain and must not be read as one: `Gateway.freeze` is `freezeMembers(withNegationClosure(
-// …))`, and that closure walks `negationsOf` with no author filter precisely so foreign strikes
-// travel with what they strike — so "in the members" means "somebody, anybody, struck this", and
-// multi-author freeze terms are a supported shape. Unscoped, the algebra had two failures at once:
-// a hostile co-tenant's strike on a shipper's law would REFUSE a lawful adoption, and a foreign
-// negation-of-the-negation would REVIVE law the shipper genuinely withdrew (the second defeats the
-// survival refusal outright — H1's shape at the blessing door).
-//
-// Recursion is unchanged: a strike retires its target only while it survives itself, so the
-// shipper negating their own retraction revives their law. The scope applies at every rung — a
-// foreign strike on a strike counts for nothing.
-//
-// A strike counts only inside its own validity window at `now`. The members' own windows are not
-// asked here: this answers "was it taken back", not "does it hold".
 export function survivalOver(members: readonly Delta[], now: number): (id: string) => boolean {
   const byId = new Map(members.map((d) => [d.id, d]));
   const strikes = new Map<string, string[]>();
@@ -213,8 +157,8 @@ export function survivalOver(members: readonly Delta[], now: number): (id: strin
     const seen = memo.get(id);
     if (seen !== undefined) return seen;
     const target = byId.get(id);
-    if (target === undefined) return false; // not a member: nothing in this set speaks about it
-    memo.set(id, false); // in-progress: surviving (content addressing keeps the chain acyclic)
+    if (target === undefined) return false;
+    memo.set(id, false);
     const verdict = (strikes.get(id) ?? []).some((n) => {
       const strike = byId.get(n);
       return (
@@ -235,17 +179,6 @@ export const isRegistrationBinding = (claims: Claims): boolean =>
     (p) => p.target.kind === "entity" && p.target.entity.context === CTX_REGISTRATION,
   );
 
-/**
- * THE RECEIVER'S REFUSING STUB, byte for byte — the whole source of a withheld resolver.
- *
- * It is DERIVED from the lens and the field rather than recognised by a marker, and that is the
- * guard, not a detail. A substring test over source a PEER authors is a test the peer can pass:
- * prefix your module with the marker, and every reader here calls your code withheld while
- * `publishRegistration` imports and evaluates it — the guarantee inverted, with every
- * operator-facing signal agreeing that nothing ran. Equality cannot be gamed that way: source
- * identical to this IS this, and what runs is the refusal. Nothing about a stub is read from what
- * arrived.
- */
 export function withheldResolverCode(lens: string, field: string): string {
   const why =
     `"${field}" on "${lens}" is computed by RESOLVER CODE the peer wrote, and this store has ` +
@@ -255,18 +188,10 @@ export function withheldResolverCode(lens: string, field: string): string {
   return `export default () => { throw new Error(${JSON.stringify(why)}); };`;
 }
 
-/** Is this EXACTLY the stub this store would write for that field — not merely something like it? */
 export const isWithheldResolver = (code: string, lens: string, field: string): boolean =>
   code === withheldResolverCode(lens, field);
 
-/**
- * Why no schema definition holds for `entity` at `now`: none ever survives, or one first survives
- * at a later time. That time can be a definition's own `validFrom` (a peer whose clock runs ahead),
- * or the moment a negation of it expires. It is not always the signed `validFrom`.
- */
 export function explainMissingDefinition(dset: DeltaSet, entity: string, now: number): string {
-  // The error path only. Each future validity boundary in the set is a moment the answer can
-  // change, so evaluate there, in order, and report the first moment a definition survives.
   const boundaries = new Set<number>();
   for (const d of dset) {
     for (const t of [d.claims.validFrom, d.claims.validUntil]) {

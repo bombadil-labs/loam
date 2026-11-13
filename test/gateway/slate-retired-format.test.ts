@@ -1,8 +1,3 @@
-// Slate and graveyard records declare `loam:slate`. A store whose journal holds a record in the
-// retired format (declared at `loam:erasure`) is refused at boot, before any read is served: no
-// reader honors that record, so serving the store would reopen every door it closed. The door
-// refuses a new record in that format too. Loam does not migrate it.
-
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -47,7 +42,6 @@ describe("a slate record in the retired format", () => {
     it(`a journal holding a retired ${kind} record is refused at boot`, async () => {
       const path = join(mkdtempSync(join(tmpdir(), "loam-slate-retired-")), "s.sqlite");
       const first = await durable(path);
-      // The earlier format reached the journal through its own door. Admit it below today's door.
       await admitLocal(first.gw.peer!, [retired(context)], first.gw.now(), () => false);
       await first.gw.close();
       await first.backend.close();

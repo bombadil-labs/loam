@@ -1,13 +1,3 @@
-// An operator-authored NEGATION of a claim at a user entity strikes only when its signature
-// verifies, and so does a counter-negation of such a strike. A reactor can hold raw-ingested rows no
-// door verified (`reactor.ingest` takes them), so each case ingests an UNSIGNED negation that names
-// the operator as author. A negation is filed at the delta it strikes, not at the user entity, so
-// this is a separate path from the unsigned claims in user-root-signatures.test.ts. Asked of every
-// reader that must agree: the indexed root reader (`userRootAt`), the View reader (`rootOf`,
-// `rolesOf`), the raw reader (`userRootsRaw`), the revoke readers (`subjectCouldName`,
-// `keysSubjectCouldName`) and the door (`holdsGrant`). Every case also reads a bystander user, bea,
-// whose signed claims must stand.
-
 import { afterEach, describe, expect, it } from "vitest";
 import { appendWithHostCut } from "../helpers/recovery-cut.js";
 import {
@@ -45,7 +35,6 @@ const [K1, K2, B] = ["e1", "e2", "eb"].map((s) => authorForSeed(s.repeat(32))) a
 ];
 
 const op = (claims: Claims): Delta => signClaims(claims, OP_SEED);
-// The same claims with no signature: accepted by `reactor.ingest`, refused by every signed door.
 const unsigned = (claims: Claims): Delta => makeDelta(claims);
 const strike = (id: string, t: number): Claims => makeNegationClaims(OP, t, id);
 
@@ -54,8 +43,6 @@ afterEach(async () => {
   for (const gw of open.splice(0)) await gw.close();
 });
 
-// ada, root K1, holds a user-named write grant and the actor role. bea, the bystander, root B, holds
-// a user-named write grant and the operator role. Every claim here is signed by the operator.
 async function world() {
   const gw = await Gateway.boot(
     unjournaled(new MemoryBackend()),
@@ -88,7 +75,6 @@ async function world() {
 const ingest = (gw: Gateway, d: Delta) => {
   expect(d.sig).toBeUndefined();
   expect(gw.reactor.ingest(d).status).toBe("accepted");
-  // The negation is held and indexed against the delta it strikes: every reader could see it.
   const target = d.claims.pointers[0]!.target;
   expect(target.kind === "delta" && gw.reactor.negationsOf(target.deltaRef.delta)).toContain(d.id);
 };
@@ -141,7 +127,6 @@ describe("an unsigned operator negation strikes no user claim", () => {
 });
 
 describe("under a recovery chain, an unsigned strike leaves the head's root claim standing", () => {
-  // ada recovers from K1 to K2: the signed record, lineage claim and root claim for K2.
   async function recovered() {
     const { gw, ada } = await world();
     const record = op(

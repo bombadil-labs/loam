@@ -1,39 +1,3 @@
-// T278 selection slice (working spec 63) — a bound connection asks which RECEIVED renderer would
-// read the CURRENT law in its channel, and gets exact ids or a typed refusal.
-//
-// What these rails assert, at both levels. DELTA: the ids the answer names are the ids in the
-// channel's attested received history, in full, and the answer writes nothing to any store — the
-// root, the inbox pool, the channel pool and the peer are snapshotted around every call, answers
-// and refusals alike, by the `select` helper itself. OBJECT:
-// the law the answer names is the law the bound surface currently serves for that lens, compared
-// by structural address, and every road that would let an older, malformed, write-capable,
-// foreign, erased or superseded delta stand in for the current one refuses with the code the
-// spec names.
-//
-// What they deliberately do not assert, and where it lives: that the selected bundle can be
-// ADMITTED or RENDERED (the later activation slice, through T287's contexts); that a selection
-// grants a reader anything (it grants nothing, and no door serves it yet).
-//
-// Fixtures that must be forged are forged by hand: a malformed renderer, a registration claiming
-// another entity, an adoption record naming the wrong source. Each is a signed claim the store
-// would never mint, so a production round-trip could not reach the branch under test.
-//
-// MEASURED. rails-red on origin/main: the suite does not load (the module is absent), an honest
-// red and a weak one. Revert probes, one guard deleted at a time across these 24 cases: the inbox
-// name, subtree reach, candidate survival, latest-candidate order, the write roles, the marker
-// count, consumes distinctness, consumes coverage, law against the row,
-// roots, the alias/target/author join, and in the classifier survival of the named binding, the
-// entity ambiguity, the current-binding check, the author-scoped operand and the loader's id
-// tie-break, and the unreceipted-strike hole — each 1 or 2 red, none 0. Six further guards that deleted to 0 red were redundant
-// with a check one line later and are gone from the code.
-//
-// INHERITED AND CLOSED ON THIS SIDE ONLY: T288's projection skips an ERASED RECEIPT silently while
-// the opening and other receipts survive (its own rail "erasing a received-strike event
-// deliberately exposes earlier received source support" asserts this), so the received operand
-// can lose a strike its pool still holds. This reader does not widen the operand; it refuses
-// when the pool holds a same-author strike of a received id that no receipt names. T288's own
-// reading is unchanged and its rail still holds.
-
 import { afterEach, describe, expect, it } from "vitest";
 import {
   authorForSeed,
@@ -120,7 +84,6 @@ async function declare(gw: Gateway, container: string, leeway?: Leeway, parent?:
   return delta;
 }
 
-/** Alice, a peer with Plant registered, one observation, and a read-only renderer at `hello`. */
 async function peer(): Promise<Gateway> {
   const alice = await Gateway.boot(
     new MemoryBackend(),
@@ -161,7 +124,6 @@ interface World {
 const idsOf = (stores: Gateway[]): string[][] =>
   stores.map((s) => [...s.reactor.snapshot()].map((d) => d.id).sort());
 
-/** The receiver: a bound connection at `owner:room` whose channel `alice` pulls from the peer. */
 async function world(alice?: Gateway, opts: { rootTwin?: boolean } = {}): Promise<World> {
   alice ??= await peer();
   const gw = await Gateway.open(new MemoryBackend(), {
@@ -202,8 +164,6 @@ async function world(alice?: Gateway, opts: { rootTwin?: boolean } = {}): Promis
       over?.channel ?? ch.name,
     ] as const;
   const stores = () => [gw, ...gateways.filter((g) => g !== gw), ...gw.attachedContainers.values()];
-  // EVERY selection is the write-nothing instrument: each call runs twice between snapshots of
-  // every store, and a refusal is held to the same rule as an answer.
   const select: World["select"] = (route, over) => {
     const [who, channel] = args(over);
     const before = idsOf(stores());
@@ -245,7 +205,6 @@ async function world(alice?: Gateway, opts: { rootTwin?: boolean } = {}): Promis
   };
 }
 
-/** Run `act` and prove no store gained or lost a delta — the answer is a reading, not a record. */
 function writesNothing(w: World, act: () => unknown): void {
   const before = idsOf(w.stores());
   act();
@@ -271,7 +230,6 @@ const entityRef = (d: Delta, role: string): string => {
   if (p?.target.kind !== "entity") throw new Error(`no entity at ${role}`);
   return p.target.entity.id;
 };
-/** The definition rows for `entity` among `received`, as the loaders see them. */
 const definitionsOf = (received: readonly Delta[], entity: string): Delta[] =>
   received.filter((d) =>
     d.claims.pointers.some(
@@ -282,7 +240,6 @@ const definitionsOf = (received: readonly Delta[], entity: string): Delta[] =>
     ),
   );
 
-/** A renderer binding signed by `seed`, appended straight into `store` — no publish door. */
 async function rawRenderer(
   store: Gateway,
   seed: string,
@@ -305,14 +262,12 @@ const strike = (author: string, seed: string, target: string, at: Stamp): Delta 
     withStamp(at, (t) => makeNegationClaims(author, t, target)),
     seed,
   );
-/** The peer evolves its Plant law: a new registration over a narrower reading. */
 const evolve = (alice: Gateway, name = "Plant"): Promise<unknown> =>
   alice.publishRegistration(
     PLANT,
     { ...PLANT_POLICY, name, props: new Map([["height", PLANT_POLICY.default]]) },
     [FERN],
   );
-/** The receiver takes the peer's CURRENT law under the channel's name, eyes open (§47). */
 async function supersede(w: World, alias = "Plant"): Promise<void> {
   await w.pool.adoptLaw(freezeMembers([...w.pool.reactor.snapshot()]), alias, {
     as: `alice:${alias}`,
@@ -338,7 +293,6 @@ const currentAdoption = (w: World, lens = "alice:Plant") => {
   if (adoption === undefined) throw new Error(`fixture: no adoption record for ${lens}`);
   return { row, adoption };
 };
-/** An adoption record re-signed in the pool's own voice with one field changed, filed in `pool`. */
 async function forge(pool: Gateway, from: Delta, edit: Record<string, string>): Promise<Delta> {
   const claims: Claims = {
     ...from.claims,
@@ -354,7 +308,6 @@ async function forge(pool: Gateway, from: Delta, edit: Record<string, string>): 
   await pool.append([d]);
   return d;
 }
-/** A strike in the pool's own voice: a pool governs its own law under its own key. */
 const poolStrike = (pool: Gateway, target: string): Delta =>
   pool.signer!.sign(
     withStamp(pool.stamp(), (t) => makeNegationClaims(pool.operatorAuthor!, t, target)),
@@ -386,8 +339,6 @@ describe("T278 — exact received renderer selection", () => {
     expect(answer.destinationLens).toBe("alice:Plant");
     expect(answer.sourceRegistration).toBe(registration!.id);
     expect(answer.destinationRegistration).toBe(row.boundId);
-    // The lineage is the binding plus the ONE definition row each loader reads: here each entity
-    // has exactly one, so the set is fully determined by the received bytes.
     const hyperschema = definitionsOf(received, entityRef(registration!, "hyperschema"));
     const snapshot = definitionsOf(received, entityRef(registration!, "schemaVersion"));
     expect(hyperschema).toHaveLength(1);
@@ -395,7 +346,6 @@ describe("T278 — exact received renderer selection", () => {
     expect(answer.sourceLineage).toEqual(
       [registration!.id, hyperschema[0]!.id, snapshot[0]!.id].sort(),
     );
-    // Full ids, never a prefix or a second hash: every id in the answer is a delta the peer holds.
     for (const id of [answer.sourceDelta, answer.sourceRegistration, ...answer.sourceLineage]) {
       expect(w.alice.reactor.get(id)?.id).toBe(id);
     }
@@ -408,7 +358,6 @@ describe("T278 — exact received renderer selection", () => {
 
   it("criterion 1: a bundle that throws at initialisation still selects — admission is a later act", async () => {
     const w = await world();
-    // The publish door admits a bundle before it will sign one, so this shape can only be forged.
     const boom = await rawRenderer(w.alice, ALICE_SEED, {
       ...HELLO,
       route: "boom",
@@ -459,8 +408,6 @@ describe("T278 — exact received renderer selection", () => {
           binding: { container: "owner:other", inbox: sibling },
         }).code,
       ).toBe("not_authorized");
-      // The parent's subtree reaches the channel's container, and the channel was still not opened
-      // by the parent's binding: exact opener, not reach alone.
       expect(
         w.refusal("hello", { requester: OTHER_KEY, binding: { container: ROOT, inbox: parent } })
           .code,
@@ -471,7 +418,6 @@ describe("T278 — exact received renderer selection", () => {
           binding: { container: "owner:roomx", inbox: lookalike },
         }).code,
       ).toBe("not_authorized");
-      // The right key naming another key's inbox in the same container.
       expect(w.refusal("hello", { binding: { container: LEAF, inbox: borrowed } }).code).toBe(
         "not_authorized",
       );
@@ -479,7 +425,6 @@ describe("T278 — exact received renderer selection", () => {
         "not_authorized",
       );
     });
-    // And the standing connection still selects: the refusals above are not a broken fixture.
     expect(w.select("hello").route).toBe("hello");
   });
 
@@ -522,8 +467,6 @@ describe("T278 — exact received renderer selection", () => {
 
   it("criterion 2: a channel record with no attested history is source_unavailable, not legacy-served", async () => {
     const w = await world();
-    // A standing record forged without the service's open event: T288 calls it legacy, and legacy
-    // never attested what arrived, so there is no operand to select from.
     const status = w.gw.channelStatus(w.channel)[0]!;
     const ghost = { ...status, name: "channel:owner:room:ghost", prefix: "ghost" };
     await w.gw.append([
@@ -540,8 +483,6 @@ describe("T278 — exact received renderer selection", () => {
     const w = await world();
     await declare(w.gw, "owner:other", RECEIVES, ROOT);
     const status = w.gw.channelStatus(w.channel)[0]!;
-    // Opener and inbox are this connection's; the destination is a sibling it cannot reach. The
-    // opener check alone admits this record; reach refuses it before its history is read.
     const stray = {
       ...status,
       name: "channel:owner:other:stray",
@@ -560,7 +501,6 @@ describe("T278 — exact received renderer selection", () => {
 
   it("criterion 2: a renderer the receiver's own operator authored is eligible once RECEIVED; one pooled or root-seeded without a receipt is not", async () => {
     const w = await world();
-    // Relayed by the peer: authored by this store's operator, but it arrived through the channel.
     const mine = signClaims(
       withStamp(w.alice.stamp(OP), (t) =>
         rendererBindingClaims({ ...HELLO, route: "mine" }, undefined, OP, t),
@@ -570,7 +510,6 @@ describe("T278 — exact received renderer selection", () => {
     await w.alice.federate([mine]);
     await w.sync();
     expect(w.select("mine").sourceDelta).toBe(mine.id);
-    // Planted in the pool by hand, and root-published: present in the pool, absent from the receipts.
     const planted = signClaims(
       withStamp(w.pool.stamp(MALLORY), (t) =>
         rendererBindingClaims({ ...HELLO, route: "planted" }, undefined, MALLORY, t),
@@ -632,8 +571,6 @@ describe("T278 — exact received renderer selection", () => {
     };
     const forged: Record<string, Delta> = {};
     for (const [name, edit] of Object.entries(shapes)) {
-      // Each shape lands at its own route, and ALSO as the newest binding at `hello`, where a valid
-      // older one stands: the newest must refuse rather than reveal the older.
       forged[name] = await rawRenderer(
         w.alice,
         ALICE_SEED,
@@ -649,8 +586,6 @@ describe("T278 — exact received renderer selection", () => {
       ).toBe(true);
       const r = w.refusal(name.replace(/\W/g, "-"));
       expect(r.code, name).toBe("renderer_ineligible");
-      // The shape fault, never the absence: a candidate the filter stopped recognising would
-      // refuse too, for the wrong reason.
       expect(r.message, name).toContain("the current renderer at");
     }
     const valid = w.select("hello");
@@ -677,9 +612,6 @@ describe("T278 — exact received renderer selection", () => {
     await w.alice.append([ss]);
     await w.sync();
     expect(w.select("hello").sourceDelta).toBe(v2.id);
-    // Mallory's strikes, relayed through alice, retract nothing of alice's: not the renderer, not
-    // the registration, and not a definition row — the loaders' own masking is author-blind, so
-    // the last of these is the one an unscoped operand would lose.
     const [registration] = registrations(w.received());
     const definition = definitionsOf(w.received(), entityRef(registration!, "hyperschema"))[0]!;
     const foreign = [
@@ -705,9 +637,6 @@ describe("T278 — exact received renderer selection", () => {
     await w.alice.append([s]);
     await w.sync();
     expect(w.select("hello").sourceDelta).toBe(v1.id);
-    // The operator erases the receipt that attested the strike. T288 reads the earlier support as
-    // standing again (its own rail says so); this reader sees the strike still in the pool with
-    // no receipt naming it, and refuses rather than select the code its author took back.
     const receipt = [...w.gw.reactor.snapshot()].find(
       (d) =>
         hasContext(d, "loam.local.channel.event") &&
@@ -722,7 +651,6 @@ describe("T278 — exact received renderer selection", () => {
     const erased = w.refusal("hello");
     expect(erased.code).toBe("source_unavailable");
     expect(erased.message).toContain(s.id);
-    // A fresh world: the same strike planted straight into the pool, never offered.
     const w2 = await world();
     const target = rendererAt(w2.received(), "hello")[0]!;
     const planted = strike(ALICE, ALICE_SEED, target.id, w2.pool.stamp(ALICE));
@@ -731,7 +659,6 @@ describe("T278 — exact received renderer selection", () => {
     const hole = w2.refusal("hello");
     expect(hole.code).toBe("source_unavailable");
     expect(hole.message).toContain(planted.id);
-    // CONTROL: a stranger's strike in the same position counts nowhere, so it is no hole either.
     const w3 = await world();
     const target3 = rendererAt(w3.received(), "hello")[0]!;
     await w3.pool.federate([strike(MALLORY, MALLORY_SEED, target3.id, w3.pool.stamp(MALLORY))]);
@@ -765,8 +692,6 @@ describe("T278 — exact received renderer selection", () => {
     const w = await world();
     const observation = w.received().find((d) => hasContext(d, "height"))!;
     expect(w.select("hello").route).toBe("hello");
-    // The root erase acts on a root-held target; holding the exact received source invents no
-    // custody, the receipt proved it. The sweep reaches the pool and the receipt names the id.
     await w.gw.federate([observation]);
     await w.gw.erase(observation.id, { reason: "rail" });
     expect(w.pool.reactor.get(observation.id)).toBeUndefined();
@@ -817,8 +742,6 @@ describe("T278 — exact received renderer selection", () => {
     expect(two.sourceLens).toBe("Plant2");
     expect(one.sourceRegistration).not.toBe(two.sourceRegistration);
     expect(one.destinationRegistration).not.toBe(two.destinationRegistration);
-    // Both readings share one hyperschema entity and one definition row; the lanes differ in
-    // binding and snapshot only.
     const shared = one.sourceLineage.filter((id) => two.sourceLineage.includes(id));
     expect(shared).toHaveLength(1);
   });
@@ -832,7 +755,6 @@ describe("T278 — exact received renderer selection", () => {
       (a, b) => a.claims.timestamp - b.claims.timestamp,
     );
     expect(v1!.id).toBe(before.sourceRegistration);
-    // The adoption still names v1; v1 is no longer the current binding of schema:Plant.
     const stale = w.refusal("hello");
     expect(stale.code).toBe("law_unavailable");
     expect(stale.message).toContain(v2!.id);
@@ -841,8 +763,6 @@ describe("T278 — exact received renderer selection", () => {
     expect(after.sourceRegistration).toBe(v2!.id);
     expect(after.destinationRegistration).not.toBe(before.destinationRegistration);
     expect(after.sourceDelta).toBe(before.sourceDelta);
-    // A newer MALFORMED registration never supersedes a valid current one (criterion 12): the
-    // valid-winner set excludes it, as the registration readers do.
     const malformed = signClaims(
       {
         ...v2!.claims,
@@ -855,9 +775,6 @@ describe("T278 — exact received renderer selection", () => {
     await w.sync();
     expect(w.received().some((d) => d.id === malformed.id)).toBe(true);
     expect(w.select("hello").sourceRegistration).toBe(v2!.id);
-    // The peer withdraws v2 (and its malformed afterthought). Its living schema entity is still
-    // ahead; the current survivor is v1, whose FROZEN snapshot must be what the lineage names —
-    // and the destination, still on v2's content, does not match it until it is re-adopted.
     await w.alice.append([
       strike(ALICE, ALICE_SEED, malformed.id, w.alice.stamp(ALICE)),
       strike(ALICE, ALICE_SEED, v2!.id, w.alice.stamp(ALICE)),
@@ -906,8 +823,6 @@ describe("T278 — exact received renderer selection", () => {
   it("criterion 6: a destination definition rewritten under an unchanged bound id no longer matches the adoption's law", async () => {
     const w = await world();
     const { row } = currentAdoption(w);
-    // The pool's own copy of the destination hyperschema, re-published in the pool's voice with a
-    // different gather body: the bound row keeps its id and its law moves under it.
     await w.pool.append([
       w.pool.signer!.sign(
         withStamp(w.pool.stamp(), (t) =>
@@ -929,8 +844,6 @@ describe("T278 — exact received renderer selection", () => {
     ]);
     w.pool.replayRegistrations();
     w.gw.replayRegistrations();
-    // The fold either re-trials the row over its new body or refuses the row whole; both leave
-    // the served surface without the law the adoption named, and the selector refuses on that.
     const surface = w.gw.boundSurface(w.binding);
     const moved = surface.registered.find((r) => String(r.lensName) === "alice:Plant");
     expect(moved === undefined || moved.boundId === row.boundId).toBe(true);
@@ -960,8 +873,6 @@ describe("T278 — exact received renderer selection", () => {
     ]) {
       const forged = await forge(w.pool, adoption, edit);
       if ("law-address" in edit) {
-        // A stale law-address alone is not disqualifying — the CONTENT is compared — so this
-        // shape, faithful in every field the join reads, passes; the others do not.
         expect(w.select("hello").sourceRegistration).toBe(good.sourceRegistration);
         await w.pool.append([poolStrike(w.pool, forged.id)]);
       } else {
@@ -969,7 +880,6 @@ describe("T278 — exact received renderer selection", () => {
       }
     }
     expect(w.refusal("hello").code).toBe("law_unavailable");
-    // A perfect copy in another channel's pool is another channel's story.
     const other = await w.gw.openChannel({
       into: LEAF,
       prefix: "bob",
@@ -981,7 +891,6 @@ describe("T278 — exact received renderer selection", () => {
     await other.sync();
     await forge(gatewayOf(other.pool), adoption, {});
     expect(w.refusal("hello").code).toBe("law_unavailable");
-    // And a faithful duplicate in THIS pool restores the join: same exact result, one answer.
     await forge(w.pool, adoption, {});
     expect(w.select("hello").sourceRegistration).toBe(good.sourceRegistration);
   });
@@ -989,7 +898,6 @@ describe("T278 — exact received renderer selection", () => {
   it("criteria 7 and 9: an adoption forged to name the CURRENT source registration still refuses when its law, or only its roots, differ from the served row", async () => {
     const w = await world();
     const { row, adoption } = currentAdoption(w);
-    // The peer evolves its policy: v2 is current, the row still carries v1's content.
     await evolve(w.alice);
     await w.sync();
     const [, v2] = registrations(w.received()).sort(
@@ -997,8 +905,6 @@ describe("T278 — exact received renderer selection", () => {
     );
     await forge(w.pool, adoption, { "source-delta": v2!.id });
     expect(w.refusal("hello").code).toBe("law_unavailable");
-    // The peer re-registers the SAME law over other roots: v3 is current, the law matches the row
-    // and only the roots do not.
     await w.alice.publishRegistration(PLANT, PLANT_POLICY, ["plant:oak"]);
     await w.sync();
     const [v3] = registrations(w.received()).sort(
@@ -1014,9 +920,6 @@ describe("T278 — exact received renderer selection", () => {
   });
 
   it("criterion 7: a root-registered twin of the peer's law leaves the adoption naming the root's registration, and that is refused, not guessed", async () => {
-    // A CONTROL for the join: identical law already served by the root makes the blessing name
-    // the root's own binding as its source. No received registration is joined, so selection
-    // refuses law_unavailable — the conservative answer, recorded here rather than widened.
     const w = await world(undefined, { rootTwin: true });
     expect(
       w.gw
@@ -1067,8 +970,6 @@ describe("T278 — exact received renderer selection", () => {
   it("criterion 8: a current registration whose referenced snapshot never arrived refuses, naming the missing definition", async () => {
     const w = await world();
     const [v1] = registrations(w.received());
-    // Well-formed and newest, so it is the current binding of schema:Plant — and its frozen
-    // snapshot entity has no definition row anywhere in the received history.
     const dangling = signClaims(
       {
         ...v1!.claims,
@@ -1115,9 +1016,6 @@ describe("T278 — exact received renderer selection", () => {
     const entity = entityRef(v1!, "hyperschema");
     const snapshotEntity = entityRef(v1!, "schemaVersion");
     const law = classifyExactReceivedSchema(w.received(), "Plant", v1!.id, Date.now());
-    // Two rows each, byte-identical in content, differing only in the id their timestamp mints —
-    // so the loader's tie-break is the ONLY thing that picks, and the law does not move under
-    // the destination.
     const stamp = w.alice.stamp(ALICE);
     const at = stamp.timestamp + 10;
     const twins = [at, at].map((ts, i) =>
@@ -1146,7 +1044,6 @@ describe("T278 — exact received renderer selection", () => {
         ALICE_SEED,
       ),
     );
-    // A row a defines-role scan would take for a definition: right role, wrong context, latest.
     const decoy = signClaims(
       {
         ...twins[0]!.claims,
@@ -1180,7 +1077,6 @@ describe("T278 — exact received renderer selection", () => {
     expect(exact.schema).toEqual(law.schema);
     expect(exact.lineage).not.toContain(decoy.id);
     expect(w.select("hello").sourceLineage).toEqual([v1!.id, winner.id, snapshotWinner.id].sort());
-    // A malformed row that WINS the bootstrap refuses; the older valid twin is not substituted.
     const broken = signClaims(
       {
         ...twins[0]!.claims,

@@ -1,6 +1,3 @@
-// Probes for the census ratchet: each form it claims to count must move its count. A form the
-// ratchet misses is a coupling that can rise while `npm run check` stays green.
-
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -73,11 +70,10 @@ describe("census ratchet counts", () => {
       "gw.store.pools(gw);",
       "// gw.quarantinePools",
     ].join("\n");
-    expect(count(text).treeReach).toBe(8); // two members on the first line count once
+    expect(count(text).treeReach).toBe(8);
     expect(count(text, "src/federation/channel.ts").treeReach).toBe(8);
     expect(count(text, "src/gateway/container.ts").treeReach).toBe(0);
     expect(count(text, "src/gateway/store.ts").treeReach).toBe(0);
-    // A door or a command is a facade over one container, not a container.
     expect(count(text, "src/server/admin.ts").treeReach).toBe(0);
     expect(count(text, "src/cli/cli.ts").treeReach).toBe(0);
   });
@@ -91,12 +87,10 @@ describe("census ratchet counts", () => {
       "}",
     ].join("\n");
     expect(count(text, "src/gateway/gateway.ts").treeReach).toBe(1);
-    // The same definitions anywhere else, or on another class, are reaches like any other.
     expect(count(text).treeReach).toBe(3);
     const other = "class X { poolForBinding(b) { return this.quarantinePools.has(b); } }";
     expect(count(other).treeReach).toBe(1);
     expect(count(other, "src/gateway/gateway.ts").treeReach).toBe(1);
-    // In class Gateway itself, a facade member with any other body is counted.
     for (const body of [
       "class Gateway { poolForBinding(b) { return this.quarantinePools.has(b); } }",
       "class Gateway { get channelPools() { return this.quarantinePools; } }",

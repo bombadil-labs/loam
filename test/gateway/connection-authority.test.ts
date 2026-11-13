@@ -1,20 +1,3 @@
-// T286: characterize the live HTTP bound-authority checks at their shared gateway seam.
-// Every authority change below is a signed delta in a real store or connection inbox.
-//
-// RAILS-RED on origin/main, this file copied in: the suite does not LOAD there. It imports
-// src/gateway/connection-authority.js, which this slice adds, so vitest reports one failed suite
-// and no cases. The three cases are therefore a characterization of behaviour main already has,
-// pinned at the seam the extraction creates; the door rails in test/server/container-tools.test.ts
-// still drive the same refusals end to end.
-//
-// REVERT PROBES, each guard deleted in turn on this tree (3 cases):
-//   connectionStands skips chainBreaksAt            → case 3 red
-//   connectionStands skips openerStands             → cases 1, 2 red
-//   boundChannelAdmits drops connectionStands       → case 3 red
-//   boundChannelAdmits drops openedFrom === inbox   → case 1 red
-//   boundChannelAdmits drops openerStands(channel)  → case 1 red
-//   boundChannelAdmits drops receivesNow            → case 3 red
-//   openedBy and openedFrom swapped                 → all 3 red
 import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { Gateway, type ConnectionBinding } from "../../src/gateway/gateway.js";
@@ -92,8 +75,6 @@ async function fixture() {
   return { gateway, ancestor, first: connections[0]!, second: connections[1]! };
 }
 
-// Snapshot every attached ground, including both inboxes and channel pools. Run each batch of
-// probes repeatedly: even refusal must not append audit records, repair declarations, or grants.
 function probes(gateway: Gateway, check: () => void): void {
   const stores = [gateway, ...gateway.attachedContainers.values()];
   const snapshot = () => stores.map((store) => [...store.reactor.snapshot()]);
@@ -158,8 +139,6 @@ describe("live bound connection authority", () => {
       expect(boundChannelAdmits(gateway, first.binding, first.status)).toBe(true);
       expect(boundChannelAdmits(gateway, second.binding, second.status)).toBe(true);
     });
-    // Delta level: the revocation is one strike in the inbox pool, and the grant no longer holds
-    // there. Object level: the checks read that strike at once.
     const inbox = gateway.connectionInboxes.get(first.inbox.entity!)!.gateway!;
     const strikes = () =>
       [...inbox.reactor.snapshot()].filter((d) =>

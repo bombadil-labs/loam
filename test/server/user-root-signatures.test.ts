@@ -1,11 +1,3 @@
-// An operator-authored claim at a user entity counts only when its signature verifies. A reactor
-// can hold raw-ingested rows no door verified (`reactor.ingest` takes them), so each case here
-// ingests an UNSIGNED row that names the operator as author and would otherwise win. Asked of every
-// reader that must agree: the indexed root reader (`userRootAt`), the View reader (`rootOf`,
-// `rolesOf`), the raw reader (`userRootsRaw`), the revoke readers (`subjectCouldName`,
-// `keysSubjectCouldName`), the name reader (`nameStillHeld`) and the door (`holdsGrant`). Every
-// case also reads a bystander user, bea, whose signed claims must stand.
-
 import { afterEach, describe, expect, it } from "vitest";
 import { appendWithHostCut } from "../helpers/recovery-cut.js";
 import {
@@ -51,7 +43,6 @@ const [K1, K2, B] = ["d1", "d2", "db"].map((s) => authorForSeed(s.repeat(32))) a
 ];
 
 const op = (claims: Claims): Delta => signClaims(claims, OP_SEED);
-// The same claims with no signature: accepted by `reactor.ingest`, refused by every signed door.
 const unsigned = (claims: Claims): Delta => makeDelta(claims);
 
 const open: Gateway[] = [];
@@ -59,8 +50,6 @@ afterEach(async () => {
   for (const gw of open.splice(0)) await gw.close();
 });
 
-// ada, root K1, holds a user-named write grant and the actor role. bea, the bystander, root B, holds
-// a user-named write grant and the operator role. Every claim here is signed by the operator.
 async function world(): Promise<Gateway> {
   const gw = await Gateway.boot(
     unjournaled(new MemoryBackend()),
@@ -88,7 +77,6 @@ async function world(): Promise<Gateway> {
 const ingest = (gw: Gateway, d: Delta) => {
   expect(d.sig).toBeUndefined();
   expect(gw.reactor.ingest(d).status).toBe("accepted");
-  // The row is held, filed at the user's own index: every reader below could see it.
   const entity = d.claims.pointers.find((p) => p.target.kind === "entity")!.target;
   expect(entity.kind === "entity" && gw.reactor.byTarget(entity.entity.id).includes(d.id)).toBe(
     true,
@@ -117,7 +105,6 @@ describe("an unsigned operator root claim changes no user's root", () => {
     expect(subjectCouldName(gw.reactor, now, OP, "user:ada", K2)).toBe(false);
     expect(subjectCouldName(gw.reactor, now, OP, "user:ada", K1)).toBe(true);
     expect(keysSubjectCouldName(gw.reactor, now, OP, "user:ada")).toEqual([K1]);
-    // The bystander.
     expect(readers(gw, "bea")).toEqual({ index: B, view: B, raw: [B] });
     expect(writes(gw, B)).toBe(true);
   });
@@ -132,7 +119,6 @@ describe("an unsigned operator root claim changes no user's root", () => {
 
   it("under a recovery chain, an unsigned root claim for the head's key gives the head no standing", async () => {
     const gw = await world();
-    // The record and lineage claim are signed; the operator's root claim for K2 is not.
     const record = op(
       recoveryClaims({ name: "ada", attempt: "a", previous: K1, root: K2, retired: [K1] }, OP, 30),
     );

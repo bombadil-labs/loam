@@ -1,20 +1,3 @@
-// §40 phase A3 — schemas and data through the admin page (T141). Criteria (8)–(9) of
-// .adlc/specs/40-admin-page.md, transcribed. `POST /admin/register` takes the SAME JSON body as
-// `loam register`, operator-signed by the server behind the session + form token; `GET /admin/view`
-// resolves a container's gather through a registered lens beside the raw member count.
-//
-// Criterion 9 is asserted at BOTH levels on one fixture: the members list (delta level) shows a
-// struck member's strike — the §39.4 gather includes negations — and the view page (object level)
-// resolves WITHOUT the struck value while a live bystander field resolves. The honest-empty copy is
-// two-sided: asserted present where the lens reads nothing, asserted ABSENT where data resolves.
-//
-// What this file deliberately does NOT assert, and which rail closes each gap:
-//   - The door itself (login, CSP, peek, subtree GETs) — phase A1 (`admin-door.test.ts`).
-//   - The container lifecycle POSTs — phase A2 (`admin-containers.test.ts`).
-//   - publishRegistration's own law (evolution, withdrawal) — the §21 gateway rails.
-//
-// Erasure standing rule: every store here is this file's own memory/mkdtemp fixture.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -50,22 +33,17 @@ const SEEDS = { ada: "aa".repeat(32), bea: "bb".repeat(32) } as const;
 const KEYS = { ada: authorForSeed(SEEDS.ada), bea: authorForSeed(SEEDS.bea) } as const;
 const UNUSED_KEY = authorForSeed("cc".repeat(32));
 
-// Distinctive values: the struck height (must NOT appear in the resolved view) and the live
-// bystander tag (must appear) can never collide with an id or a count by accident.
 const STRUCK_HEIGHT = 3131;
 const BYSTANDER_TAG = "evergreen-bystander";
 
-// The one honest-empty sentence the view page speaks; both sides of criterion 9 pin it.
 const READS_NOTHING = "This lens reads nothing here";
 
-/** The membership shape §40 fixes — the same author-select Term §39's inboxes use. */
 const authoredBy = (key: string): unknown => ({
   op: "select",
   pred: { match: { field: "author", cmp: "eq", const: key } },
   in: "input",
 });
 
-/** The SAME JSON body `loam register` takes, built from the shared Plant fixture. */
 const plantRegistration = (): unknown => ({
   hyperschema: { name: "Plant", alg: 1, body: termToJson(PLANT.body) },
   schema: schemaToJson(PLANT_POLICY),
@@ -91,11 +69,6 @@ afterEach(async () => {
   while (homes.length > 0) rmSync(homes.pop()!, { recursive: true, force: true });
 });
 
-/**
- * A store with two rooted users. Ada's root gathers what she authors: a height claim (struck — the
- * §39.4 fixture), its strike, and a live tag claim (the bystander). `ada:empty` is a shared child
- * whose membership selects a key that authored nothing — the honest-empty fixture.
- */
 async function schemaServer(): Promise<{
   base: string;
   gateway: Gateway;
@@ -110,8 +83,6 @@ async function schemaServer(): Promise<{
     await op(userClaims(name, OPERATOR, ts++));
     await op(roleClaims(name, "actor", OPERATOR, ts++));
   }
-  // Registering a lens is store-wide law, so the door asks for the OPERATOR role. ada holds it
-  // here; bea stays a pure actor, which is what the refusal rail below needs.
   await op(roleClaims("ada", "operator", OPERATOR, ts++));
   await op(
     containerClaims(
@@ -171,7 +142,6 @@ const valueOf = (header: string): string =>
   header.slice(header.indexOf("=") + 1, header.indexOf(";"));
 const SAME_ORIGIN = { "sec-fetch-site": "same-origin" } as const;
 
-/** Sign in over the REAL login doors; returns the session cookie value. */
 async function signIn(base: string, user: string): Promise<string> {
   const form = await fetch(`${base}/login`, { redirect: "manual" });
   const nonceCookie = cookiesOf(form).find((c) => c.startsWith(`${PRESESSION_COOKIE}=`))!;
@@ -232,11 +202,8 @@ const register = (
 
 describe("§40 phase A3 — the schema panel", () => {
   it("(8) registering is CONSTITUTIONAL: an actor session is refused, an operator session is not", async () => {
-    // A lens is not per-user — publishing under a live name evolves it for every reader and every
-    // mount. The sibling doors (`POST /:mount/register`, the loam_register tool) both require an
-    // operator, so this one does too; the role is read from the GROUND, never from the session.
     const { base, gateway } = await schemaServer();
-    const bea = await signIn(base, "bea"); // actor only
+    const bea = await signIn(base, "bea");
     const page = await (await getPage(base, bea)).text();
     const before = readRegistrations(
       gateway.reactor,
@@ -251,7 +218,6 @@ describe("§40 phase A3 — the schema panel", () => {
       readRegistrations(gateway.reactor, gateway.validityNow(), gateway.operatorAuthor).length,
     ).toBe(before);
 
-    // The positive control: the SAME body from an operator session lands.
     const ada = await signIn(base, "ada");
     const adaPage = await (await getPage(base, ada)).text();
     const ok = await register(base, ada, tokenOf(adaPage), JSON.stringify(plantRegistration()));
@@ -273,14 +239,11 @@ describe("§40 phase A3 — the schema panel", () => {
     const regs = readRegistrations(gateway.reactor, gateway.validityNow(), gateway.operatorAuthor);
     expect(regs.map((r) => r.hyperschema.name)).toContain("Plant");
 
-    // The panel lists the lens with its roots, and the honest-empty line is gone.
     const after = await (await getPage(base, ada)).text();
     expect(after).toContain("Plant");
     expect(after).toContain(FERN);
     expect(after).not.toContain("No lens is registered on this store yet");
 
-    // No regression on the sibling door: the SAME body through POST /:mount/register still lands
-    // (a republish at the same entity is evolution, not a conflict).
     const sibling = await fetch(`${base}/default/register`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: "Bearer op-token" },
@@ -295,7 +258,6 @@ describe("§40 phase A3 — the schema panel", () => {
     const ada = await signIn(base, "ada");
     const token = tokenOf(await (await getPage(base, ada)).text());
 
-    // Bad JSON carrying a script: the defect is named, the hostile bytes never ride back.
     const HOSTILE = '{"hyperschema": <script>alert(1)</script>';
     const notJson = await register(base, ada, token, HOSTILE);
     expect(notJson.status).toBe(400);
@@ -304,14 +266,12 @@ describe("§40 phase A3 — the schema panel", () => {
     expect(notJsonBody).not.toContain("<script");
     expect(notJsonBody).not.toContain("alert(1)");
 
-    // Missing schema: the parser names the missing piece in plain English.
     const partial = { ...(plantRegistration() as Record<string, unknown>) };
     delete partial["schema"];
     const noSchema = await register(base, ada, token, JSON.stringify(partial));
     expect(noSchema.status).toBe(400);
     expect(await noSchema.text()).toContain("schema");
 
-    // Forged token: nothing lands. Positive control beside it: the honest token does.
     const forged = await register(base, ada, "not-the-token", JSON.stringify(plantRegistration()));
     expect(forged.status).toBe(403);
     expect(
@@ -345,14 +305,10 @@ describe("§40 phase A3 — the resolved view, both levels on one fixture", () =
     const res = await getView(base, ada, { container: "ada", lens: "Plant", entity: FERN });
     expect(res.status).toBe(200);
     const html = await res.text();
-    // The struck height does not resolve; the live bystander does; the honest-empty copy is
-    // ABSENT here — data resolved, and the page must not speak the empty sentence over it.
     expect(html).not.toContain(String(STRUCK_HEIGHT));
     expect(html).toContain(BYSTANDER_TAG);
     expect(html).not.toContain(READS_NOTHING);
-    // The raw members ride beside the view: the count names the whole gather, strike included.
     expect(html).toContain("raw member");
-    // The scratch resolution leaves the primary ground exactly as it was.
     expect(gateway.containerScope({ containers: ["ada"] }).length).toBeGreaterThan(0);
   });
 
@@ -381,7 +337,6 @@ describe("§40 phase A3 — the resolved view, both levels on one fixture", () =
     expect(foreign.status).toBe(403);
     expect(absent.status).toBe(403);
     expect(await foreign.text()).toBe(await absent.text());
-    // Positive control: her own container answers 200 (the lens picker, since none is named).
     const own = await getView(base, ada, { container: "ada" });
     expect(own.status).toBe(200);
   });

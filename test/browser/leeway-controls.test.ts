@@ -1,16 +1,3 @@
-// T263 — THE FIVE CONTROLS, DRIVEN BY A REAL BROWSER (SPEC §58 position 4, criterion 4). Chrome
-// over CDP, because two of the promises in that position are not strings a server test can read:
-// that Delegate's terms UNFOLD BENEATH IT WHEN ON, and that a person who checks a box and submits
-// gets a container that says what the box said.
-//
-// Chrome ABSENT is a FAILURE, not a skip — resolveChrome() throws, naming LOAM_CHROME. A skipped
-// browser rail is how T143 shipped: every gate green and no person able to use the thing.
-//
-// The story: ada signs in, meets the five, sees Delegate's terms hidden until she turns Delegate
-// on, turns Receive on and picks a bigger envelope, and creates her journal. Then she opens that
-// container's own page, finds the same five reading what she chose, turns Receive back off, and
-// saves. What the store holds after each act is read at the bytes, not at the page.
-
 import { createServer, type Server } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -68,7 +55,6 @@ beforeAll(async () => {
     ...PLANT_WRITABLE,
   ]);
 
-  // ada has a password and NOTHING else: no seed on disk, no container in the store.
   home = mkdtempSync(join(tmpdir(), "loam-consent-story-"));
   initHome(home, OPERATOR_SEED);
   writeCredentials(home, { version: 1, users: { ada: await hashPassword(PASSWORD, CHEAP) } });
@@ -132,14 +118,11 @@ describe("§58 — the five controls, in a real browser", () => {
     });
     await tab.navigate(`${base}/oauth/authorize?${query.toString()}`);
 
-    // The five are here, in the words the spec writes, where a person can read them without
-    // hovering anything.
     const shown = (await bodyText(tab)) as string;
     for (const c of LEEWAY_CONTROLS) {
       expect(shown.replace(/\s+/g, " "), c.label).toContain(c.capability.replace(/\s+/g, " "));
     }
 
-    // Every switch starts off, and the envelope starts small.
     for (const field of ["leeway_receive", "leeway_offer", "leeway_publish", "leeway_delegate"]) {
       expect(
         await tab.eval(`document.getElementById(${JSON.stringify(field)}).checked`),
@@ -148,18 +131,14 @@ describe("§58 — the five controls, in a real browser", () => {
     }
     expect(await tab.eval('document.getElementById("leeway_envelope").value')).toBe("small");
 
-    // DELEGATE'S TERMS UNFOLD BENEATH IT WHEN ON — and are folded away until then. This is the
-    // sentence no server test can read: it is a rule the browser applies, not a string.
     const termsDisplay = (): Promise<unknown> =>
       tab.eval('getComputedStyle(document.getElementById("delegate_terms")).display');
     expect(await termsDisplay(), "folded away while Delegate is off").toBe("none");
     await tab.eval('document.getElementById("leeway_delegate").click()');
     expect(await termsDisplay(), "unfolded when Delegate is on").not.toBe("none");
-    // She thinks better of delegating, and the terms fold away again.
     await tab.eval('document.getElementById("leeway_delegate").click()');
     expect(await termsDisplay(), "folded away again").toBe("none");
 
-    // She lets this container follow other stores, and gives it a little more room to run things.
     await tab.eval('document.getElementById("leeway_receive").click()');
     await tab.eval('document.getElementById("leeway_envelope").value = "medium"');
     await tab.eval('document.getElementById("bind_new").value = "journal"');
@@ -168,7 +147,6 @@ describe("§58 — the five controls, in a real browser", () => {
       true,
     );
 
-    // What she checked is what her container declares, at the bytes.
     const declared = gateway.containers().containers.get("ada:journal");
     expect(declared?.leewayDeclared).toBe(true);
     expect(declared?.leeway).toEqual({
@@ -179,7 +157,6 @@ describe("§58 — the five controls, in a real browser", () => {
       delegate: "off",
     });
 
-    // The container's own page shows the same five, reading what she chose.
     await tab.navigate(`${base}/admin/container?name=${encodeURIComponent("ada:journal")}`);
     const onPage = (await bodyText(tab)) as string;
     for (const c of LEEWAY_CONTROLS) {
@@ -188,8 +165,6 @@ describe("§58 — the five controls, in a real browser", () => {
     expect(await tab.eval('document.getElementById("leeway_receive").checked')).toBe(true);
     expect(await tab.eval('document.getElementById("leeway_envelope").value')).toBe("medium");
 
-    // She changes her mind. A leeway is a declaration, so saving it is a delta the next request
-    // obeys — and the page she lands back on says so.
     await tab.eval('document.getElementById("leeway_receive").click()');
     await submit(tab, "/admin/leeway");
     const after = gateway.containers().containers.get("ada:journal");

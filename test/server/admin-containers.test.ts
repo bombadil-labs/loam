@@ -1,16 +1,3 @@
-// §40 phase A2 — the container lifecycle through the admin page (T141). Criteria (5)–(7) of
-// .adlc/specs/40-admin-page.md, transcribed. `POST /admin/declare` declares a child inside the
-// session user's subtree; `POST /admin/detach` and `POST /admin/reattach` drive the at-rest keep
-// lifecycle; `POST /admin/drop` renders the confirm page and `POST /admin/drop-confirm` does it —
-// two steps, byte-verified where bytes exist, refused honestly where they do not.
-//
-// What this file deliberately does NOT assert, and which rail closes each gap:
-//   - The door itself (login, CSP, peek, subtree GETs) — phase A1 (`admin-door.test.ts`).
-//   - drop()'s own purge-verify internals — the frozen T138 rails (`connection-container.test.ts`).
-//   - Schema registration — A3; promotion/federation — A4; connections list/revoke — A5.
-//
-// Erasure standing rule: every store here is this file's own mkdtemp/memory fixture.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -43,7 +30,6 @@ const CONN2_SEED = "2d".repeat(32);
 const CONN = authorForSeed(CONN_SEED);
 const CONN2 = authorForSeed(CONN2_SEED);
 
-/** The membership shape §40 fixes — the same author-select Term §39's inboxes use. */
 const authoredBy = (key: string): unknown => ({
   op: "select",
   pred: { match: { field: "author", cmp: "eq", const: key } },
@@ -68,12 +54,6 @@ const note = (text: string, seed: string, timestamp: number): ReturnType<typeof 
     seed,
   );
 
-/**
- * A store with two rooted users (ada, bea), a shared child of ada (`ada:letters`, gathering one
- * delta authored by cal's key), a detached separate child (`ada:vault`), and two live connection
- * inboxes bound to ada's root — each with its own backend, the first carrying a purge spy. One
- * primary delta authored by ada sits in the ground (the drop rails' second bystander).
- */
 async function containerServer(): Promise<{
   base: string;
   gateway: Gateway;
@@ -113,10 +93,7 @@ async function containerServer(): Promise<{
     );
   await declare("ada");
   await declare("bea", { membership: authoredBy(KEYS.bea) });
-  // The shared child whose detach/reattach and shared-drop the rails drive. Its membership selects
-  // cal's key, so its gather is disjoint from ada's root gather.
   await declare("ada:letters", { parent: "ada", membership: authoredBy(KEYS.cal) });
-  // Declared separate, detached on the record: the honest-refusal rails' fixture.
   await op(
     containerClaims(
       { container: "ada:vault", trust: "curated", posture: "separate", parent: "ada" },
@@ -133,9 +110,6 @@ async function containerServer(): Promise<{
   const calNote = note("a letter", SEEDS.cal, ts++);
   await gateway.append([calNote]);
 
-  // Two live connections into ada's root, each with its own store — the T138 fixture shape. The
-  // first backend carries a purge SPY: `holds` throws once drop() closes the store, so the byte
-  // witness is the purge call itself, independent of drop()'s own refuse-on-survivors verify.
   const backend1 = new MemoryBackend();
   const backend2 = new MemoryBackend();
   const purged: string[] = [];
@@ -195,7 +169,6 @@ const valueOf = (header: string): string =>
   header.slice(header.indexOf("=") + 1, header.indexOf(";"));
 const SAME_ORIGIN = { "sec-fetch-site": "same-origin" } as const;
 
-/** Sign in over the REAL login doors; returns the session cookie value. */
 async function signIn(base: string, user: string): Promise<string> {
   const form = await fetch(`${base}/login`, { redirect: "manual" });
   const nonceCookie = cookiesOf(form).find((c) => c.startsWith(`${PRESESSION_COOKIE}=`))!;
@@ -240,13 +213,11 @@ const post = (
     body: new URLSearchParams(fields).toString(),
   });
 
-/** The dashboard's session-bound form token (any lifecycle form carries it). */
 const tokenOf = (html: string): string => /name="form_token" value="([^"]+)"/.exec(html)![1]!;
 
 const confirmTokenOf = (html: string): string | undefined =>
   /name="confirm_token" value="([^"]+)"/.exec(html)?.[1];
 
-/** The ids a scoped read of one container resolves — the delta-level probe. */
 const scopedIds = (gateway: Gateway, name: string): string[] =>
   gateway.containerScope({ containers: [name] }).map((d) => d.id);
 
@@ -257,7 +228,6 @@ describe("§40 phase A2 — the container lifecycle", () => {
     const token = tokenOf(await (await getPage(base, ada)).text());
     const before = gateway.containers().containers.size;
 
-    // Parent outside the subtree — foreign (bea's root) and absent alike — is ONE uniform 403.
     const foreign = await post(base, "/admin/declare", ada, {
       form_token: token,
       name: "ada:evil",
@@ -277,8 +247,6 @@ describe("§40 phase A2 — the container lifecycle", () => {
     expect(await foreign.text()).toBe(await absent.text());
     expect(gateway.containers().containers.size).toBe(before);
 
-    // A name not namespaced under the session user refuses: a system-looking name and another
-    // user's namespace alike. Neither declares anything.
     for (const name of ["system", "bea:evil"]) {
       const res = await post(base, "/admin/declare", ada, {
         form_token: token,
@@ -291,8 +259,6 @@ describe("§40 phase A2 — the container lifecycle", () => {
       expect(gateway.containers().containers.size).toBe(before);
     }
 
-    // Positive control: the honest declare lands, operator-signed, parent edge on the table,
-    // and the dashboard renders the new name.
     const ok = await post(base, "/admin/declare", ada, {
       form_token: token,
       name: "ada:notes",
@@ -346,7 +312,6 @@ describe("§40 phase A2 — the container lifecycle", () => {
     expect(notTerm.status).toBe(400);
     expect(await notTerm.text()).toContain("not a valid Term");
 
-    // A shared child with no membership at all refuses too — H9 at the form.
     const noTerm = await post(base, "/admin/declare", ada, {
       form_token: token,
       name: "ada:bad",
@@ -363,7 +328,6 @@ describe("§40 phase A2 — the container lifecycle", () => {
     const ada = await signIn(base, "ada");
     const token = tokenOf(await (await getPage(base, ada)).text());
 
-    // Baseline: the child gathers its member and the dashboard lists it active.
     expect(scopedIds(gateway, "ada:letters")).toContain(calNote.id);
 
     const detached = await post(base, "/admin/detach", ada, {
@@ -371,8 +335,6 @@ describe("§40 phase A2 — the container lifecycle", () => {
       name: "ada:letters",
     });
     expect(detached.status).toBe(303);
-    // Delta level: the detach record survives on the table. Object level: the scoped read
-    // resolves the child empty, and the dashboard says "detached" beside the name.
     expect(gateway.containers().detached.has("ada:letters")).toBe(true);
     expect(scopedIds(gateway, "ada:letters")).toEqual([]);
     const dashboard = await (await getPage(base, ada)).text();
@@ -387,7 +349,6 @@ describe("§40 phase A2 — the container lifecycle", () => {
     expect(gateway.containers().detached.has("ada:letters")).toBe(false);
     expect(scopedIds(gateway, "ada:letters")).toContain(calNote.id);
 
-    // Reattaching what is not detached refuses rather than minting stray negations.
     const again = await post(base, "/admin/reattach", ada, {
       form_token: token,
       name: "ada:letters",
@@ -400,7 +361,6 @@ describe("§40 phase A2 — the container lifecycle", () => {
     const ada = await signIn(base, "ada");
     const token = tokenOf(await (await getPage(base, ada)).text());
 
-    // The detail page states the limitation rather than offering a form that would lie.
     const detail = await (await getDetail(base, ada, "ada:vault")).text();
     expect(detail).toContain("command line");
     expect(detail).not.toContain(`action="/admin/reattach"`);
@@ -411,7 +371,6 @@ describe("§40 phase A2 — the container lifecycle", () => {
     });
     expect(res.status).toBe(409);
     expect(await res.text()).toContain("command line");
-    // The record stands: the container is still deliberately kept.
     expect(gateway.containers().detached.has("ada:vault")).toBe(true);
   });
 
@@ -421,26 +380,21 @@ describe("§40 phase A2 — the container lifecycle", () => {
     const ada = await signIn(base, "ada");
     const token = tokenOf(await (await getPage(base, ada)).text());
 
-    // Baseline: the bytes are there, and the gather composes both connections' writes.
     expect(await backend1.holds(w1.id)).toBe(true);
     const beforeIds = gateway.connectionScope({ bound: "ada" }).map((d) => d.id);
     expect(beforeIds).toContain(w1.id);
     expect(beforeIds).toContain(w2.id);
 
-    // Step 1: the drop form posts to a CONFIRM page that says what will be forgotten.
     const confirm = await post(base, "/admin/drop", ada, { form_token: token, name: inboxes.one });
     expect(confirm.status).toBe(200);
     const confirmBody = await confirm.text();
     expect(confirmBody).toContain(inboxes.one);
     expect(confirmBody).toMatch(/\d+ delta/);
     expect(confirmBody).toContain("cannot be undone");
-    // An inbox drop names the connection it kills — the parent it wrote into.
     expect(confirmBody).toContain("connection");
     const confirmToken = confirmTokenOf(confirmBody)!;
     expect(confirmToken).toBeDefined();
 
-    // The no-confirm path: a direct POST to the confirm endpoint without the minted token
-    // (session form token and all) does NOTHING.
     const forged = await post(base, "/admin/drop-confirm", ada, {
       form_token: token,
       name: inboxes.one,
@@ -450,9 +404,6 @@ describe("§40 phase A2 — the container lifecycle", () => {
     expect(await backend1.holds(w1.id)).toBe(true);
     expect(gateway.containers().containers.has(inboxes.one)).toBe(true);
 
-    // Step 2: the confirmed POST drops. Byte level: the purge spy saw the write's id (drop()'s
-    // own verify refuses survivors — T138's frozen rails prove that half). Delta level: the
-    // declaration is struck. Object level: the gather no longer resolves the write.
     const done = await post(base, "/admin/drop-confirm", ada, {
       form_token: token,
       name: inboxes.one,
@@ -463,13 +414,11 @@ describe("§40 phase A2 — the container lifecycle", () => {
     expect(gateway.containers().containers.has(inboxes.one)).toBe(false);
     const afterIds = gateway.connectionScope({ bound: "ada" }).map((d) => d.id);
     expect(afterIds).not.toContain(w1.id);
-    // The bystanders SURVIVE, named: the sibling inbox's bytes and gather, and the primary member.
     expect(await backend2.holds(w2.id)).toBe(true);
     expect(afterIds).toContain(w2.id);
     expect(afterIds).toContain(adaNote.id);
     expect(gateway.containers().containers.has(inboxes.two)).toBe(true);
 
-    // The consumed confirm token buys nothing twice.
     const replay = await post(base, "/admin/drop-confirm", ada, {
       form_token: token,
       name: inboxes.one,
@@ -489,7 +438,6 @@ describe("§40 phase A2 — the container lifecycle", () => {
     });
     expect(confirm.status).toBe(200);
     const confirmBody = await confirm.text();
-    // The exact promise, in the page's own words: shape forgotten, deltas kept.
     expect(confirmBody).toContain("forgets its shape");
     expect(confirmBody).toContain("remain in the store");
     expect(confirmBody).toContain("cannot be undone");
@@ -500,8 +448,6 @@ describe("§40 phase A2 — the container lifecycle", () => {
       confirm_token: confirmTokenOf(confirmBody)!,
     });
     expect(done.status).toBe(303);
-    // Two-sided: the declaration is struck (the name stops resolving), AND the delta it gathered
-    // remains in the primary ground; the sibling root container still stands.
     expect(gateway.containers().containers.has("ada:letters")).toBe(false);
     expect(gateway.reactor.get(calNote.id)).toBeDefined();
     expect(gateway.containers().containers.has("ada")).toBe(true);
@@ -516,9 +462,7 @@ describe("§40 phase A2 — the container lifecycle", () => {
     expect(res.status).toBe(409);
     const body = await res.text();
     expect(body).toContain("detached");
-    // No confirm token is minted for a drop that cannot happen.
     expect(confirmTokenOf(body)).toBeUndefined();
-    // The declaration and the record both stand: nothing was forgotten, nothing was claimed.
     expect(gateway.containers().containers.has("ada:vault")).toBe(true);
     expect(gateway.containers().detached.has("ada:vault")).toBe(true);
   });
@@ -529,7 +473,6 @@ describe("§40 phase A2 — the container lifecycle", () => {
     const token = tokenOf(await (await getPage(base, ada)).text());
     const before = [...gateway.reactor.snapshot()].length;
 
-    // One forged-token negative per endpoint class. Nothing lands, nothing is purged.
     const attempts: [string, Record<string, string>][] = [
       ["/admin/declare", { name: "ada:x", parent: "ada", posture: "separate" }],
       ["/admin/detach", { name: "ada:letters" }],
@@ -552,8 +495,6 @@ describe("§40 phase A2 — the container lifecycle", () => {
     expect([...gateway.reactor.snapshot()].length).toBe(before);
     expect(await backend1.holds(w1.id)).toBe(true);
 
-    // The subtree gate on a write path: bea's session addressing ada's child gets the SAME
-    // refusal as an absent name — no existence confirmation on any lifecycle POST.
     const bea = await signIn(base, "bea");
     const beaToken = tokenOf(await (await getPage(base, bea)).text());
     const foreignName = await post(base, "/admin/detach", bea, {
@@ -569,7 +510,6 @@ describe("§40 phase A2 — the container lifecycle", () => {
     expect(await foreignName.text()).toBe(await absentName.text());
     expect(gateway.containers().detached.has("ada:letters")).toBe(false);
 
-    // Positive control beside the negatives: the honest POST with the honest token acts.
     const ok = await post(base, "/admin/detach", ada, { form_token: token, name: "ada:letters" });
     expect(ok.status).toBe(303);
     expect(gateway.containers().detached.has("ada:letters")).toBe(true);

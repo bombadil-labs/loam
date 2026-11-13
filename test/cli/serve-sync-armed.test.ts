@@ -1,17 +1,3 @@
-// A channel opened while the store is SERVING must be polled (SPEC §46). `loam serve` used to arm
-// the poller only when a channel already existed at boot, so a store that started with none never
-// created an interval — and a channel opened afterwards through the MCP `loam_federate_connect`
-// tool was polled by nothing, for the life of the process, while `federate list` went on reporting
-// it as `receiving`. That is the exact shape the code's own note warns against: the report
-// outliving the behaviour (H9).
-//
-// The rail drives the reachable path end to end: a receiver served by the CLI with NO channels, a
-// peer served beside it, the channel opened through the receiver's own MCP door, and then a fact
-// written to the peer AFTER the channel exists. Only a live poller can carry that second fact
-// across, which is what makes this a test of the timer rather than of `openChannel`'s first sync.
-//
-// Erasure standing rule: both stores here are this file's own mkdtemp fixtures.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,7 +12,7 @@ import { serve, type ServerHandle } from "../../src/server/http.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 
-vi.setConfig({ testTimeout: 30_000 }); // two real listening servers
+vi.setConfig({ testTimeout: 30_000 });
 
 const PEER_SEED = "0e".repeat(32);
 const PEER_OP = authorForSeed(PEER_SEED);
@@ -41,7 +27,6 @@ afterEach(async () => {
 });
 const io = () => ({ out: () => {}, err: () => {} });
 
-/** A peer store with one Plant lens and one claim, served on a real port. */
 async function peer(): Promise<{ url: string; gateway: Gateway }> {
   const gateway = await Gateway.open(new MemoryBackend(), { seed: PEER_SEED });
   await gateway.append([
@@ -73,7 +58,6 @@ const mcp = (base: string, token: string, name: string, args: Record<string, unk
     }),
   });
 
-/** What the receiver's own door resolves for the peer's fern, or null. */
 async function heightVia(base: string): Promise<unknown> {
   const res = await fetch(`${base}/default/graphql`, {
     method: "POST",
@@ -91,16 +75,14 @@ describe("§46 — a channel opened while serving is polled, with no restart", (
     homes.push(home);
     expect(await run(["init", "--home", home], io())).toBe(0);
 
-    // Served with NO channels — the state that used to arm no poller at all.
     const handle = (await run(
       ["serve", "--http", "--home", home, "--token", MINE_TOKEN, "--port", "0"],
       io(),
       { detach: true, syncEveryMs: 40 },
     )) as ServerHandle;
     handles.push(handle);
-    expect(await heightVia(handle.url)).toBeNull(); // nothing of the peer's yet
+    expect(await heightVia(handle.url)).toBeNull();
 
-    // Opened through the RUNNING store's own door, which is the reachable path.
     const opened = await mcp(handle.url, MINE_TOKEN, "loam_federate_connect", {
       from: away.url,
       into: "peers",
@@ -110,8 +92,6 @@ describe("§46 — a channel opened while serving is polled, with no restart", (
     expect(opened.status).toBe(200);
     await vi.waitFor(async () => expect(await heightVia(handle.url)).toBe(30), { timeout: 8000 });
 
-    // THE ASSERTION THE TIMER OWNS: a fact written to the peer AFTER the channel exists. The open
-    // call's own first sync cannot carry this one, so only a live poller can.
     await away.gateway.append([observed(FERN, "height", 41, 2000, GARDENER_SEED)]);
     await vi.waitFor(async () => expect(await heightVia(handle.url)).toBe(41), { timeout: 8000 });
   });
@@ -127,7 +107,6 @@ describe("§46 — a channel opened while serving is polled, with no restart", (
       { detach: true, syncEveryMs: 40 },
     )) as ServerHandle;
     handles.push(handle);
-    // The boot line says what is true: no channels, and a poll that will follow one opened later.
     const line = said.join("\n");
     expect(line).toContain("no channels yet");
     expect(line).not.toContain("syncing 0 channel");

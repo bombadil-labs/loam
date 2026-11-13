@@ -1,14 +1,8 @@
-// Flat ESLint config (ESLint 9). Correctness linting only — formatting is Prettier's job, and
-// eslint-config-prettier turns off any rules that would fight it. Type-aware rules are on from
-// the start: the plan is promise-heavy (an async store seam, a gateway), and a floating promise
-// should die at lint time, not in production timing.
 import js from "@eslint/js";
 import eslintConfigPrettier from "eslint-config-prettier";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  // demos/village is the living demonstration (see demos/village/README.md): committed, but
-  // never part of the gate. scripts/ is release tooling — plain node, no project service.
   {
     ignores: [
       "dist/**",
@@ -19,12 +13,7 @@ export default tseslint.config(
       "demos/pachyderm/**",
       "scripts/**",
       ".adlc/**",
-      // Per-ticket agent worktrees: whole checkouts of this repo, each with its own copy of every
-      // source file. git ignores them; eslint would otherwise lint N copies of the tree and bury
-      // the real bar under thousands of duplicate findings (measured: 2973 from six worktrees).
       ".claude/worktrees/**",
-      // Vendored bundler output (T97): real esbuild-over-React fixtures, read as text by the
-      // reference-scan rail. Minified generated code is not ours to lint.
       "test/gateway/fixtures/*.bundle.mjs",
     ],
   },
@@ -35,10 +24,7 @@ export default tseslint.config(
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
     },
   },
-  // Plain-JS files (demos/tutorial/lessons.mjs is bundled into the page; the arc test types it via
-  // demos/tutorial/lessons.d.mts) get syntax linting without the project service.
   { files: ["**/*.js", "**/*.mjs"], ...tseslint.configs.disableTypeChecked },
-  // The page itself runs in a browser; say so instead of silencing no-undef.
   {
     files: ["demos/tutorial/**/*.mjs", "demos/capabilities/**/*.mjs"],
     languageOptions: {
@@ -56,9 +42,6 @@ export default tseslint.config(
       },
     },
   },
-  // Top-level demo scripts (e.g. demos/renderers-demo.mjs) and the board app run under Node — a
-  // runnable `node <file>` like the village phases (which are ignored), so give them the Node
-  // globals rather than silencing.
   {
     files: ["demos/*.mjs", "demos/board/*.mjs"],
     languageOptions: {
@@ -72,24 +55,13 @@ export default tseslint.config(
       },
     },
   },
-  // The refactor's census tools run under Node too: `node refactor/tools/<script>.mjs`.
   {
     files: ["refactor/**/*.mjs"],
     languageOptions: { globals: { console: "readonly", process: "readonly" } },
   },
-  // Hazard H6 backstop. `lensOf`/`programOf` brand the two names so `LensName === ProgramName` is a
-  // compile error — but rhizomatic types `hyperschema.name` as bare `string`, so a raw
-  // `r.hyperschema.name === <aLensName>` slips past the checker (string vs a brand is allowed). This
-  // forbids `.hyperschema.name` as a DIRECT operand of a comparison in the door files: route a
-  // program name through `programOf(r)` and the brand is restored, so the comparison is checked.
-  // SCOPE, stated honestly: it catches the direct form only — the shape every H6 bug has actually
-  // taken. A program name first bound to a variable and then compared (`const p = r.hyperschema.name;
-  // p === lens`) still slips both the checker and this rule; the guard against that is that
-  // `programOf`/`lensOf` are the ergonomic path, not a lint. Reading `.hyperschema.name` for any
-  // non-comparison purpose (a materialization key, a message) is untouched by design.
   {
     files: ["src/gateway/**/*.ts", "src/surface/**/*.ts", "src/server/**/*.ts"],
-    ignores: ["src/gateway/registration.ts"], // where lensOf/programOf are defined
+    ignores: ["src/gateway/registration.ts"],
     rules: {
       "no-restricted-syntax": [
         "error",
@@ -100,6 +72,12 @@ export default tseslint.config(
             "Do not compare `.hyperschema.name` directly — it is a bare string and bypasses the LensName/ProgramName brand (hazard H6). Route it through `programOf(r)`, which restores the brand so the comparison is type-checked.",
         },
       ],
+    },
+  },
+  {
+    rules: {
+      "no-empty": ["error", { allowEmptyCatch: true }],
+      "@typescript-eslint/ban-ts-comment": ["error", { "ts-expect-error": false }],
     },
   },
   eslintConfigPrettier,

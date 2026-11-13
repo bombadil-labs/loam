@@ -1,8 +1,3 @@
-// A recovered user's history, cut per store (refactor/audit/recovery-history.md; ruling 8, M1). The
-// records are written by hand here, as `loam user recover` (the barrier PR) will write them. Each case
-// asks the delta level (what the store holds, what the door admits) and the object level (what a
-// membership naming the user selects), with a bystander.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -72,7 +67,6 @@ const incarnationOf = (gw: Gateway): string => {
   return p.kind === "primitive" ? String(p.value) : "";
 };
 
-// ada (root K1, write by name) and bea (key B). K1 and B each write one value.
 async function world(): Promise<{ gw: Gateway; byK1: Delta; byB: Delta }> {
   const gw = await store();
   await gw.append([
@@ -87,8 +81,6 @@ async function world(): Promise<{ gw: Gateway; byK1: Delta; byB: Delta }> {
   return { gw, byK1, byB };
 }
 
-// The recovery K1 → K2 as the barrier lands it on the host: a cut first, then the record, its
-// lineage, the new root and K2's binding, then (unless `outcome` is omitted) the outcome.
 async function recover(
   gw: Gateway,
   opts: { outcome?: "committed" | "aborted"; land?: boolean } = {},
@@ -126,7 +118,6 @@ async function recover(
     K2_SEED,
   );
   if (opts.land !== false) {
-    // The manifest in its own append, then the record's: one append is one transfer.
     await gw.append([op(manifestClaims(record.id, [cut.id], OP, 30))]);
     await gw.append([
       record,
@@ -154,7 +145,7 @@ describe("H1: history before the cut, nothing after it", () => {
   it("K1's earlier value is a member after recovery; a later, backdated K1 value is not; bea's is not", async () => {
     const { gw, byK1, byB } = await world();
     await recover(gw, { outcome: "committed" });
-    const late = observed(FERN, "height", 9, 5, K1_SEED); // backdated
+    const late = observed(FERN, "height", 9, 5, K1_SEED);
     await gw.federate([late]);
     expect(gw.reactor.get(late.id)).toBeDefined();
     const m = members(gw);
@@ -204,9 +195,7 @@ describe("the barrier holds at both doors", () => {
     const lineage = op(
       lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30),
     );
-    // A bare operator root claim moves a root at either door; the record is what retires K1.
     await gw.federate([record, lineage], { admit: () => true });
-    // delta level: the record did not land; object level: the served root is still K1
     expect(gw.reactor.get(record.id)).toBeUndefined();
     expect(root()).toBe(K1);
   });
@@ -214,7 +203,6 @@ describe("the barrier holds at both doors", () => {
   it("an earlier, narrower manifest does not block a later, complete one", async () => {
     const { gw } = await world();
     const { record, cut } = await recover(gw, { land: false });
-    // A manifest naming no cut is lawful to hold, and covers nothing.
     await gw.append([op(manifestClaims(record.id, [], OP, 29))]);
     await gw.append([op(manifestClaims(record.id, [cut.id], OP, 30))]);
     await gw.append([
@@ -338,7 +326,7 @@ describe("the cut readers, against erasure, restart and a shared root", () => {
       .arrivalLog()
       .find((d) => d.claims.pointers.some((p) => p.role === "outcome"))!;
     await gw.append([op(eraseClaims(cut.id, OP, OP, 90)), op(eraseClaims(outcome.id, OP, OP, 90))]);
-    expect(gw.reactor.get(cut.id)).toBeDefined(); // held, waiting for the purge
+    expect(gw.reactor.get(cut.id)).toBeDefined();
     expect(cutsHere(gw.reactor, OP, refusedIds(gw.reactor, OP))).toEqual([]);
     expect(members(gw).has(byK1.id)).toBe(false);
   });
@@ -381,7 +369,7 @@ describe("the cut readers, against erasure, restart and a shared root", () => {
       op(grantClaims(STORE_ENTITY, "user:ada", "write", OP, 11)),
       op(grantClaims(STORE_ENTITY, B, "write", OP, 12)),
     ]);
-    const byB = observed(FERN, "height", 2, 19, B_SEED); // arrives first, then is purged
+    const byB = observed(FERN, "height", 2, 19, B_SEED);
     const byK1 = observed(FERN, "height", 1, 20, K1_SEED);
     await gw.append([byB]);
     await gw.append([byK1]);
@@ -413,17 +401,17 @@ describe("the cut readers, against erasure, restart and a shared root", () => {
       op(rootClaims("ada", K2, OP, 30)),
     ];
     await gw.federate(landed);
-    expect(gw.reactor.get(record.id)).toBeUndefined(); // federation runs the barrier too
-    for (const d of landed) gw.reactor.ingest(d); // planted past both doors
+    expect(gw.reactor.get(record.id)).toBeUndefined();
+    for (const d of landed) gw.reactor.ingest(d);
     expect(gw.reactor.get(record.id)).toBeDefined();
-    const late = observed(FERN, "height", 9, 5, K1_SEED); // after the record, backdated
+    const late = observed(FERN, "height", 9, 5, K1_SEED);
     await gw.federate([late]);
     expect(gw.reactor.get(late.id)).toBeDefined();
     const cut = op(
       cutClaims({ store: incarnationOf(gw), attempt: "f", recovery: record.id, key: K1 }, OP, 40),
     );
     await expect(gw.append([cut])).rejects.toThrow(/must arrive before its record/);
-    expect(gw.reactor.ingest(cut).status).toBe("accepted"); // planted past the door
+    expect(gw.reactor.ingest(cut).status).toBe("accepted");
     await gw.append([op(outcomeClaims(cut.id, "committed", OP, 41))]);
     await gw.federate([
       signClaims(
@@ -491,15 +479,14 @@ describe("the cut readers, against erasure, restart and a shared root", () => {
         31,
       ),
     );
-    await pool.append([cut]); // stale host view does not see R
-    pool.readUsersFrom(host); // host now shows R
+    await pool.append([cut]);
+    pool.readUsersFrom(host);
     expect(cutsHere(pool.reactor, OP, refusedIds(pool.reactor, OP)).map((c) => c.state)).toEqual([
       "prepared",
     ]);
     expect(
       historyBefore(pool.reactor, OP, record.id, K1, refusedIds(pool.reactor, OP)),
     ).not.toContain(late.id);
-    // A committed outcome for the late cut changes nothing: no manifest ahead of R names it.
     await pool.append([op(outcomeClaims(cut.id, "committed", OP, 32))]);
     expect(cutsHere(pool.reactor, OP, refusedIds(pool.reactor, OP)).map((c) => c.state)).toEqual([
       "prepared",
@@ -524,20 +511,20 @@ describe("the cut readers, against erasure, restart and a shared root", () => {
         31,
       ),
     );
-    const manifest = op(manifestClaims(record.id, [cut.id], OP, 30)); // names a cut not yet written
+    const manifest = op(manifestClaims(record.id, [cut.id], OP, 30));
     const rest = [
       record,
       op(lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30)),
       op(rootClaims("ada", K2, OP, 30)),
     ];
     await host.federate([manifest, ...rest]);
-    expect(host.reactor.get(manifest.id)).toBeUndefined(); // the federate door drops a manifest
-    expect(host.reactor.get(record.id)).toBeUndefined(); // and a record with no barrier
-    for (const d of rest) host.reactor.ingest(d); // planted past both doors
+    expect(host.reactor.get(manifest.id)).toBeUndefined();
+    expect(host.reactor.get(record.id)).toBeUndefined();
+    for (const d of rest) host.reactor.ingest(d);
     expect(host.reactor.get(record.id)).toBeDefined();
     const late = observed(FERN, "height", 996, 5, K1_SEED);
     await pool.federate([late]);
-    expect(pool.reactor.ingest(cut).status).toBe("accepted"); // the pool door refuses it: planted
+    expect(pool.reactor.ingest(cut).status).toBe("accepted");
     expect(cutsHere(pool.reactor, OP, refusedIds(pool.reactor, OP)).map((c) => c.state)).toEqual([
       "prepared",
     ]);
@@ -572,7 +559,6 @@ describe("the cut readers, against erasure, restart and a shared root", () => {
       ),
     );
     expect(pool.reactor.ingest(cut).status).toBe("accepted");
-    // As a writer that never saw R would land it: after R, in the host's durable order.
     expect(host.reactor.ingest(op(manifestClaims(record.id, [cut.id], OP, 32))).status).toBe(
       "accepted",
     );
@@ -600,11 +586,9 @@ describe("the cut readers, against erasure, restart and a shared root", () => {
       op(lineageClaims({ name: "ada", recovery: record.id, root: K2, retired: [K1] }, OP, 30)),
       op(rootClaims("ada", K2, OP, 30)),
     ];
-    // A manifest may not name a cut that is not held yet: it would bind a later arrival.
     const early = op(manifestClaims(record.id, [cut.id, future.id], OP, 30));
     await expect(gw.append([early])).rejects.toThrow(/neither held nor in its append/);
     expect(gw.reactor.get(early.id)).toBeUndefined();
-    // One append's arrivals are simultaneous, so a manifest beside its record does not count.
     await expect(
       gw.append(commit(op(manifestClaims(record.id, [cut.id], OP, 30)))),
     ).rejects.toThrow(/separate appends, the manifest first/);
@@ -652,7 +636,7 @@ describe("the cut readers, against erasure, restart and a shared root", () => {
       op(cutClaims({ store: incarnationOf(gw), attempt, recovery: record.id, key: K1 }, OP, t));
     const cutA = cutFor("a", 28);
     await gw.append([cutA]);
-    const between = observed(FERN, "height", 9, 5, K1_SEED); // the pause would refuse it: planted
+    const between = observed(FERN, "height", 9, 5, K1_SEED);
     expect(gw.reactor.ingest(between).status).toBe("accepted");
     const cutB = cutFor("b", 29);
     await gw.append([cutB]);

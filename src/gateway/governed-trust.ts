@@ -1,21 +1,3 @@
-// Governed trust: which authors' strikes a governed read honors, and the lowering that lets a grant
-// name a USER. The trust predicate (`lawfulStrikersJson`) reflects each surviving operator grant's
-// subject STRING into the author set. A grant naming `user:<name>` must count as that user's root
-// key, which no Term can say (it has no join). So every evaluation lowers the WHOLE predicate to an
-// explicit `match author inSet [...]` computed here, over the same input the reflection would see.
-// The signed body is never lowered: hashes, signatures and stored declarations keep the canonical
-// form, and only the program handed to an evaluator changes.
-//
-// Two modes, because rhizomatic has two evaluators. `evalTerm` is `evalTermRaw` over the input
-// filtered to what is valid at `now`; its grants resolve users to the one root at `now`. Raw
-// evaluation ignores validity, so its grants expand a user to every root the operator named and
-// did not strike (`userRootsRaw`), read in the same raw posture as the grants. A key-named grant
-// trusts exactly what it trusted before lowering, in either mode.
-//
-// A predicate that LOOKS governed but is not byte-for-byte canonical fails closed: evaluated
-// unlowered it would reflect `user:` strings as authors. Only mask trust policies are checked; an
-// `inView` anywhere else is ordinary law.
-
 import {
   DeltaSet,
   collectRefs,
@@ -47,12 +29,8 @@ import {
 
 export const CTX_GRANTS = "loam.grants";
 
-/** How the evaluation that runs a lowered program reads validity. */
 export type TrustRead = { readonly now: number } | { readonly raw: true };
 
-// The operator's surviving grants, as a Term: grant-shaped deltas the operator minted (admin grants
-// only, when asked), after masking by the operator's own negations — a stranger cannot shrink the
-// trusted set by negating a grant delta.
 function lawfulGrantsTermJson(operator: string, adminsOnly: boolean): unknown {
   const operatorMinted = { match: { field: "author", cmp: "eq", const: operator } };
   const grantShaped = {
@@ -74,7 +52,6 @@ function lawfulGrantsTermJson(operator: string, adminsOnly: boolean): unknown {
   };
 }
 
-/** @internal — the data-strike trust predicate, exported for its parity rail */
 export function lawfulStrikersJson(operator: string, adminsOnly: boolean): unknown {
   return {
     or: [
@@ -90,8 +67,6 @@ export function lawfulStrikersJson(operator: string, adminsOnly: boolean): unkno
   };
 }
 
-// The strings an `inView` extract reflects from one pointer role, exactly as the substrate's
-// `extractReflected` does: an entity id, a delta id, or a STRING primitive.
 function reflectedSubjects(d: Delta, role: string): string[] {
   const out: string[] = [];
   for (const p of d.claims.pointers) {
@@ -104,13 +79,6 @@ function reflectedSubjects(d: Delta, role: string): string[] {
   return out;
 }
 
-/**
- * The trusted strikers: the operator, plus the key each surviving grant's subject names. A key
- * names itself; `user:<name>` names the user's root (ruling 8: the root only, never a key acting
- * for it by delegation). A user with no readable root adds nobody. `input` is what the evaluation
- * sees: the whole input when lowering, or the grants and their negation closure when a caller
- * indexes them. With no user ground, a user subject adds nobody.
- */
 export function governedStrikers(
   input: DeltaSet,
   read: TrustRead,
@@ -123,7 +91,6 @@ export function governedStrikers(
   if (grants.sort !== "dset")
     throw new Error("the lawful-grants term always evaluates to a delta set");
   const erased = users?.erased();
-  // A key a recovery retired strikes nothing (refactor/audit/user-recovery.md).
   const retired =
     users === undefined
       ? new Set<string>()
@@ -156,12 +123,6 @@ export function governedStrikers(
   return [...out].sort();
 }
 
-/**
- * The deltas that decide which grants survive in `reactor`: every grant (all are filed at the store
- * entity) with its whole negation closure (H1), less `hidden`. Evaluating the grants term over this
- * set answers as it would over the whole store less `hidden`, from the index rather than a scan.
- * `admits` narrows it the same way for a read whose ground is a selection (read closure, as-of).
- */
 export function grantGround(
   reactor: Reactor,
   hidden: ReadonlySet<string> = NO_IDS,
@@ -176,12 +137,6 @@ export function grantGround(
 
 const NO_IDS: ReadonlySet<string> = new Set();
 
-// What a door read withholds from a reactor's ground at `now` (erased-but-held deltas, and a
-// slate's read closure: `readClosedIds`). The Gateway declares it, because the readers live above
-// this module. A governed read evaluates over the ground less these, so the strikers that answer
-// "is this struck as data" must be computed over the same ground.
-
-/** Declare what a door read of `reactor` withholds at a given instant. */
 export function declareReadHidden(
   reactor: Reactor,
   hidden: (now: number) => ReadonlySet<string>,
@@ -189,15 +144,12 @@ export function declareReadHidden(
   declarationsOf(reactor).readHidden = hidden;
 }
 
-/** The strikers a reactor's own data answers to at `now`, over the ground a door reads. */
 export function dataStrikers(reactor: Reactor, now: number, operator: string): Set<string> {
   const hidden = declarationsOf(reactor).readHidden?.(now) ?? NO_IDS;
   return new Set(
     governedStrikers(grantGround(reactor, hidden), { now }, operator, false, userGroundOf(reactor)),
   );
 }
-
-// ── recognition ──────────────────────────────────────────────────────────────────────────────
 
 const canonical = new Map<string, string>();
 const canonicalJson = (operator: string, adminsOnly: boolean): string => {
@@ -210,7 +162,6 @@ const canonicalJson = (operator: string, adminsOnly: boolean): string => {
   return hit;
 };
 
-// The operator and flag a canonical governed predicate names, or undefined for any other pred.
 function governedShape(pred: Pred): { operator: string; adminsOnly: boolean } | undefined {
   if (pred.kind !== "or" || pred.left.kind !== "match") return undefined;
   const { field, cmp, constant } = pred.left;
@@ -222,8 +173,6 @@ function governedShape(pred: Pred): { operator: string; adminsOnly: boolean } | 
   return undefined;
 }
 
-// An `inView` that reads like a grant reflection: it extracts the subject role, or its term names
-// the grants context. Inside a trust policy, one that survived lowering is a near miss.
 function grantish(pred: Pred): boolean {
   if (pred.kind !== "inView") return false;
   if (pred.extract.kind === "role" && pred.extract.role === "subject") return true;
@@ -232,8 +181,6 @@ function grantish(pred: Pred): boolean {
 
 type PredMap = (pred: Pred, inTrust: boolean) => Pred;
 
-// Rebuild a Term, handing every Pred to `f` (outermost first) — the same positions rhizomatic's
-// principal lowering walks: select, mask trust, inView sub-terms, and resolve orders.
 function mapTerm(term: Term, f: PredMap): Term {
   const pred = (p: Pred, inTrust: boolean): Pred => {
     const q = f(p, inTrust);
@@ -312,7 +259,6 @@ function mapTerm(term: Term, f: PredMap): Term {
   return walk(term);
 }
 
-/** Does `term` carry a governed predicate, or a near miss that lowering must refuse? */
 export function governs(term: Term): boolean {
   let found = false;
   mapTerm(term, (p, inTrust) => {
@@ -322,12 +268,6 @@ export function governs(term: Term): boolean {
   return found;
 }
 
-/**
- * `term` with every governed predicate lowered to the explicit striker set, for an evaluation
- * over `input` that reads validity as `read`. Throws on a near miss in a trust policy. The
- * striker set is computed once per operator and flag, for this evaluation only: `memo` is shared
- * by every body one program lowers, so a read pays the grant walk once, not once per body.
- */
 export function lowerGovernedTerm(
   term: Term,
   input: DeltaSet,
@@ -360,7 +300,6 @@ export function lowerGovernedTerm(
   return lowered;
 }
 
-/** Does `term`, or any body it references through `registry`, need lowering? */
 export function needsLowering(term: Term, registry: SchemaRegistry | undefined): boolean {
   if (governs(term)) return true;
   if (registry === undefined) return false;
@@ -379,7 +318,6 @@ export function needsLowering(term: Term, registry: SchemaRegistry | undefined):
   return false;
 }
 
-/** The program an evaluator runs: `term` and `registry`, lowered when either needs it. */
 export function governedProgram(
   term: Term,
   registry: SchemaRegistry | undefined,
@@ -407,11 +345,6 @@ export function governedProgram(
   };
 }
 
-/**
- * The `lowerTerm` hook for `Reactor.register`, or undefined when the program needs none — a hook
- * turns root anchoring off, so an ordinary body must not carry one. The hook re-lowers on every
- * refresh, at the refresh's own instant.
- */
 export function governedHook(
   term: Term,
   registry: SchemaRegistry | undefined,
@@ -426,8 +359,6 @@ export function governedHook(
     ) => { term: Term; registry?: SchemaRegistry })
   | undefined {
   if (!needsLowering(term, registry)) return undefined;
-  // The lowering reads only the grants, so it takes their scope from `reactor`'s index (the reactor
-  // this hook is registered on) instead of the whole set the refresh hands it.
   return (body, _input, now, available) => {
     const program = governedProgram(body, available, grantGround(reactor), { now }, users());
     return {

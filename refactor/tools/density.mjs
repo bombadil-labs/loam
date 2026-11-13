@@ -1,6 +1,3 @@
-// Code, string literals and comments: bytes and lines, per file and in total.
-// Usage: node refactor/tools/density.mjs [dir=src] [--top 25]
-
 import { classify, option, parse, pct, sourceFiles } from "./lib.mjs";
 
 const args = process.argv.slice(2);
@@ -13,7 +10,6 @@ for (const file of sourceFiles(dir)) {
   const cls = classify(parsed);
   const bytes = [0, 0, 0, 0];
   for (const c of cls) bytes[c]++;
-  // A line counts as code if it holds any code, else as string, else as comment.
   const lines = { code: 0, string: 0, comment: 0 };
   let start = 0;
   const { text } = parsed;

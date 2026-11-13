@@ -1,15 +1,3 @@
-// §40 phase A1 — the admin door (T141). Criteria (1)–(4), (13), (14) of
-// .adlc/specs/40-admin-page.md, transcribed. `GET /admin` renders the signed-in user's container
-// subtree and ONLY theirs; `GET /admin/container?name=` renders one container's members,
-// subtree-gated; `POST /admin/create-root` declares the root container for a fresh user. The
-// session half is the REAL login doors' machinery (a `serve` with `users`), reused through the
-// SessionGate — every rail here runs the enforcing code, not a fake.
-//
-// What this file deliberately does NOT assert, and which rail closes each gap:
-//   - Declaring CHILDREN, detach, drop, reattach — phase A2 (`admin-containers.test.ts`).
-//   - Schema registration and resolved views — phase A3; promotion/federation — A4; connections — A5.
-//   - The login doors' own refusals (wrong password, delay) — the frozen §36 rails.
-
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -40,11 +28,9 @@ const KEYS = {
   cal: authorForSeed(SEEDS.cal),
 } as const;
 
-// A container name that is live markup unless the page escapes it (criterion 3).
 const HOSTILE = "<script>alert(1)</script>";
 const INBOX = "inbox:ada:demo-connection";
 
-/** The root membership shape §40 fixes — the same Term shape §39's inboxes use. */
 const authoredBy = (key: string): unknown => ({
   op: "select",
   pred: { match: { field: "author", cmp: "eq", const: key } },
@@ -58,12 +44,6 @@ afterEach(async () => {
   while (homes.length > 0) rmSync(homes.pop()!, { recursive: true, force: true });
 });
 
-/**
- * A store with two rooted users (ada, bea — root + a child each; ada also holds a hostile-named
- * child, an unattached separate container, and an inbox pool) and one fresh user (cal — credentials
- * and a signing seed, no root container). One delta authored by ada sits in the ground so her root's
- * gather is non-empty (the positive control for the members list).
- */
 async function adminServer(
   opts: { monotonicNow?: () => number; calSeed?: "present" | "unreadable" | "none" } = {},
 ): Promise<{ base: string; home: string; gateway: Gateway; adaNoteId: string }> {
@@ -93,10 +73,8 @@ async function adminServer(
       ),
     );
   await declare("ada");
-  // Empty on purpose (cal has authored nothing): the empty-state positive control.
   await declare("ada-notes", { parent: "ada", membership: authoredBy(KEYS.cal) });
   await declare(HOSTILE, { parent: "ada" });
-  // Declared, then detached: the "detached" state on the dashboard.
   await declare("ada-archive", { parent: "ada", membership: authoredBy(KEYS.cal) });
   await op(detachClaims("ada-archive", undefined, OPERATOR, ts++));
   await op(
@@ -121,7 +99,6 @@ async function adminServer(
   );
   await declare("bea", { membership: authoredBy(KEYS.bea) });
   await declare("bea-notes", { parent: "bea", membership: authoredBy(KEYS.bea) });
-  // One delta authored by ada, so her root's author-select gathers something real.
   await op(grantClaims(STORE_ENTITY, KEYS.ada, "write", OPERATOR, ts++));
   const note = signClaims(
     {
@@ -133,12 +110,7 @@ async function adminServer(
     SEEDS.ada,
   );
   await gateway.append([note]);
-  // The inbox pool is ATTACHED (as a real bound connection's would be), so ada's root gather
-  // composes it rather than refusing. `ada-vault` stays deliberately unattached — the H9 rail.
   const inbox = await gateway.openContainer({ name: INBOX });
-  // A real inbox carries its owner's admin grant (bindConnection writes it): the parent composes
-  // the pool by that owner's authority, and a pool with no owner fails the read.
-  // The pool governs itself under its own key, so the grant is signed in the pool's voice.
   const pool = inbox.gateway!;
   await pool.append([
     pool.signer!.sign(grantClaims(STORE_ENTITY, KEYS.ada, "admin", pool.operatorAuthor!, ts++)),
@@ -152,7 +124,7 @@ async function adminServer(
   writeUserSeed(home, "bea", SEEDS.bea);
   const calSeed = opts.calSeed ?? "present";
   if (calSeed === "present") writeUserSeed(home, "cal", SEEDS.cal);
-  if (calSeed === "unreadable") mkdirSync(userSeedPath(home, "cal")); // EISDIR on read
+  if (calSeed === "unreadable") mkdirSync(userSeedPath(home, "cal"));
 
   const handle = await serve({
     mounts: { default: gateway },
@@ -174,7 +146,6 @@ const valueOf = (header: string): string =>
   header.slice(header.indexOf("=") + 1, header.indexOf(";"));
 const SAME_ORIGIN = { "sec-fetch-site": "same-origin" } as const;
 
-/** Sign in over the REAL login doors; returns the session cookie value. */
 async function signIn(base: string, user: string): Promise<string> {
   const form = await fetch(`${base}/login`, { redirect: "manual" });
   const nonceCookie = cookiesOf(form).find((c) => c.startsWith(`${PRESESSION_COOKIE}=`))!;
@@ -218,7 +189,6 @@ const postCreate = (
     body: new URLSearchParams({ form_token: formToken }).toString(),
   });
 
-/** The dashboard's form token — present only on the create offer (a fresh user's page). */
 const tokenOf = (html: string): string | undefined =>
   /name="form_token" value="([^"]+)"/.exec(html)?.[1];
 
@@ -236,20 +206,16 @@ describe("§40 phase A1 — the admin door", () => {
     expect(anonBody).not.toContain("Your containers");
     expect(declCount(gateway)).toBe(before);
 
-    // Ada's dashboard: her names, marked as declared — and none of bea's, in any spelling.
     const ada = await signIn(base, "ada");
     const adaPage = await (await getAdmin(base, ada)).text();
     expect(adaPage).toContain("Your containers");
     for (const name of ["ada", "ada-notes", "ada-vault"]) expect(adaPage).toContain(name);
     expect(adaPage).toContain(INBOX);
     expect(adaPage).toContain("inbox");
-    expect(adaPage).toContain("detached"); // ada-archive's state
-    // Names render as <code>name</code> and as ?name= links — assert on those shapes, since
-    // ordinary prose ("bears") can contain a short name by accident.
+    expect(adaPage).toContain("detached");
     expect(adaPage).not.toContain("<code>bea</code>");
     expect(adaPage).not.toContain("name=bea");
 
-    // Bea's dashboard: the positive control the other way.
     const bea = await signIn(base, "bea");
     const beaPage = await (await getAdmin(base, bea)).text();
     expect(beaPage).toContain("<code>bea</code>");
@@ -263,7 +229,6 @@ describe("§40 phase A1 — the admin door", () => {
     const { base } = await adminServer({ monotonicNow: () => clock });
     const MIN = 60_000;
 
-    // A garbage GET at 29m is refused; at 31m the session is gone — the refusal did not slide it.
     const s1 = await signIn(base, "ada");
     clock = 29 * MIN;
     const refused = await getDetail(base, s1, "no-such-container");
@@ -272,8 +237,7 @@ describe("§40 phase A1 — the admin door", () => {
     const after = await getAdmin(base, s1);
     expect(await after.text()).toContain("Sign in.");
 
-    // Positive control: a door that DOES admit (GET /login) slides the window past 31 + 30.
-    const s2 = await signIn(base, "ada"); // opened at 31m
+    const s2 = await signIn(base, "ada");
     clock = 60 * MIN;
     await fetch(`${base}/login`, { headers: { cookie: `${SESSION_COOKIE}=${s2}` } });
     clock = 62 * MIN;
@@ -296,7 +260,6 @@ describe("§40 phase A1 — the admin door", () => {
     expect(forged.status).toBe(403);
     expect(declCount(gateway)).toBe(before);
 
-    // Positive control: the honest POST declares exactly one container.
     const ok = await postCreate(base, cal, token);
     expect(ok.status).toBe(303);
     expect(declCount(gateway)).toBe(before + 1);
@@ -317,7 +280,6 @@ describe("§40 phase A1 — the admin door", () => {
     expect(body).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
     expect(body).not.toContain("<script");
 
-    // The hostile name's own detail page renders it escaped too.
     const hostileDetail = await getDetail(base, ada, HOSTILE);
     expect(hostileDetail.status).toBe(200);
     const hostileBody = await hostileDetail.text();
@@ -329,8 +291,6 @@ describe("§40 phase A1 — the admin door", () => {
     const { base, gateway } = await adminServer();
     const cal = await signIn(base, "cal");
 
-    // The offer, and nothing else: no tree, no other user's names. The random form token is
-    // stripped first — a base64 value can contain any short substring by chance.
     const offer = await (await getAdmin(base, cal)).text();
     expect(offer).toContain("create your container");
     const prose = offer.replace(/name="form_token" value="[^"]*"/, "");
@@ -342,7 +302,6 @@ describe("§40 phase A1 — the admin door", () => {
     expect(ok.status).toBe(303);
     expect(ok.headers.get("location")).toBe("/admin");
 
-    // The declaration is operator-signed and carries the author-select membership with CAL's key.
     const table = gateway.containers();
     expect(table.containers.get("cal")).toBeDefined();
     expect(table.containers.get("cal")!.membership).toEqual(authoredBy(KEYS.cal));
@@ -356,7 +315,6 @@ describe("§40 phase A1 — the admin door", () => {
     )!;
     expect(decl.claims.author).toBe(OPERATOR);
 
-    // The next dashboard shows the root; a second create refuses and declares nothing more.
     const after = await (await getAdmin(base, cal)).text();
     expect(after).toContain("Your containers");
     expect(after).toContain("cal");
@@ -370,12 +328,10 @@ describe("§40 phase A1 — the admin door", () => {
     const { base, adaNoteId } = await adminServer();
     const ada = await signIn(base, "ada");
 
-    // Ada's root gathers her one authored delta — id and author on the page.
     const detail = await (await getDetail(base, ada, "ada")).text();
     expect(detail).toContain(adaNoteId);
     expect(detail).toContain(KEYS.ada);
 
-    // An empty active container says so honestly rather than rendering nothing.
     const empty = await (await getDetail(base, ada, "ada-notes")).text();
     expect(empty).not.toContain(adaNoteId);
     expect(empty).toContain("Nothing has gathered here yet");
@@ -389,7 +345,6 @@ describe("§40 phase A1 — the admin door", () => {
     const body = await res.text();
     expect(body).toContain("not attached");
     expect(body).toContain("bytes are not readable from here");
-    // The exact H9 lie this page must not tell: an empty-but-fine member list.
     expect(body).not.toContain("Nothing has gathered here yet");
     expect(body).not.toContain("member");
   });
@@ -398,7 +353,6 @@ describe("§40 phase A1 — the admin door", () => {
     const { base } = await adminServer();
     const ada = await signIn(base, "ada");
 
-    // Foreign (bea's root) and absent (nobody's) get byte-identical refusals.
     const foreign = await getDetail(base, ada, "bea");
     const absent = await getDetail(base, ada, "utterly-absent");
     expect(foreign.status).toBe(403);
@@ -407,7 +361,6 @@ describe("§40 phase A1 — the admin door", () => {
     expect(foreignBody).toBe(await absent.text());
     expect(foreignBody).not.toContain("bea");
 
-    // Positive control: her own name answers.
     expect((await getDetail(base, ada, "ada")).status).toBe(200);
   });
 
@@ -419,21 +372,20 @@ describe("§40 phase A1 — the admin door", () => {
     const token = tokenOf(offer)!;
 
     const responses = [
-      await getAdmin(base), // login form
-      await getAdmin(base, ada), // dashboard
-      await getDetail(base, ada, "ada"), // detail
-      await getDetail(base, ada, "bea"), // subtree refusal
-      await getDetail(base, ada, "ada-vault"), // H9 page
-      await postCreate(base, cal, "wrong-token"), // provenance refusal
+      await getAdmin(base),
+      await getAdmin(base, ada),
+      await getDetail(base, ada, "ada"),
+      await getDetail(base, ada, "bea"),
+      await getDetail(base, ada, "ada-vault"),
+      await postCreate(base, cal, "wrong-token"),
       await postCreate(base, cal, token, { origin: "https://evil.example" }),
-      await fetch(`${base}/admin`, { method: "POST", redirect: "manual" }), // method refusal
-      await postCreate(base, cal, token), // the one redirect this door writes
+      await fetch(`${base}/admin`, { method: "POST", redirect: "manual" }),
+      await postCreate(base, cal, token),
     ];
     for (const res of responses) {
       const location = res.headers.get("location");
       expect(location === null || location.startsWith("/")).toBe(true);
     }
-    // And the redirect DOES exist — the rule above is not vacuously true of a door that never redirects.
     expect(responses[responses.length - 1]!.headers.get("location")).toBe("/admin");
   });
 
@@ -455,10 +407,6 @@ describe("§40 phase A1 — the admin door", () => {
   });
 
   it("(provisioning) a keyless actor's create MINTS their signing key: 0600 file, write grant, their Term", async () => {
-    // The CLI mints keys only for operators (T124's pinned design), so a tenant actor arrives
-    // here keyless. The door provisions rather than dead-ending them (Myk, 2026-08-02): the seed
-    // file lands 0600, its key gains WRITE standing operator-signed, and the root's membership
-    // Term carries that key. The seed itself never enters the ground.
     const { base, home, gateway } = await adminServer({ calSeed: "none" });
     const cal = await signIn(base, "cal");
     const offer = await (await getAdmin(base, cal)).text();
@@ -469,16 +417,11 @@ describe("§40 phase A1 — the admin door", () => {
     const seedPath = userSeedPath(home, "cal");
     const raw = readFileSync(seedPath, "utf8").trim();
     expect(raw).toMatch(/^[0-9a-f]{64}$/);
-    // POSIX only. Windows reports 0666 for an ordinary file whatever the open mode asked, so a
-    // Windows run proves NOTHING about who may read a minted seed — the same gap the credentials
-    // rail names. The rest of this test's claims (the grant, the Term, the leak scan) do hold on
-    // Windows and keep running there; only this line is platform-bound.
     if (process.platform !== "win32") {
       expect(statSync(seedPath).mode & 0o777).toBe(0o600);
     }
     const mintedKey = authorForSeed(raw);
 
-    // The write grant, operator-signed, on the minted key.
     expect(
       holdsGrant(
         gateway.reactor,
@@ -489,16 +432,14 @@ describe("§40 phase A1 — the admin door", () => {
         OPERATOR,
       ),
     ).toBe(true);
-    // The root's Term names cal, whose root is now the minted key, and gathers what that key writes.
     const term = gateway.containers().containers.get("cal")!.membership!;
     expect(term).toEqual(writtenByUser("cal", "cal"));
     const byCal = observed(FERN, "height", 1, gateway.stamp(mintedKey).timestamp, raw);
     await gateway.append([byCal]);
     expect(gateway.select(term).map((d) => d.id)).toContain(byCal.id);
-    // The SECRET never entered the ground (the H7 discipline: prove the scan can see, then clean).
     const scan = (needle: string): boolean =>
       [...gateway.reactor.snapshot()].some((d) => JSON.stringify(d.claims).includes(needle));
-    expect(scan(mintedKey)).toBe(true); // the PUBLIC key is visible — the scan works
-    expect(scan(raw)).toBe(false); // the SEED is not
+    expect(scan(mintedKey)).toBe(true);
+    expect(scan(raw)).toBe(false);
   });
 });

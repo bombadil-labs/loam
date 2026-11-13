@@ -1,27 +1,7 @@
-// The drawing kit the capabilities book shares with the concept deck (`demos/tutorial/intro.html`).
-//
-// The deck keeps its own inline copy on purpose: it is copied to `site-dist/` unbundled and must
-// render with no build step, so reaching into this module would trade a page that always works for
-// a page that is tidier. Two copies of a kit is the price of that guarantee. What both copies must
-// agree on is the GRAMMAR below — change it here and change it there, or the book and the deck
-// start meaning different things by the same picture.
-//
-// The grammar, in one paragraph. A figure is nodes and edges. A node is a `delta` (a signed claim),
-// an `entity` (an object — an id somebody used), a `prim` (a value at the tip), a `dead` (a claim
-// struck or an erasure), or a `ghost` (bytes that are gone). An edge always runs from the delta
-// that authored the pointer to the thing pointed at, whatever the layout puts on top. An edge grips
-// each end at a PORT — a small solid dot. A port on a delta is one of its pointers; a port on an
-// object is one of its properties; hovering says which. Two deltas that bind the SAME property
-// converge on ONE dot, so a conflict is drawn rather than described.
-
 const NS = "http://www.w3.org/2000/svg";
 
-/** Radii by node kind. Read before drawing, because edges are laid beneath the circles. */
 const RADIUS = { delta: 32, entity: 20, prim: 17, dead: 32, ghost: 28 };
 
-// Colours are TOKENS, never resolved values: a figure carries `var(--alice)` and the stylesheet
-// decides what that is, in whichever theme the reader is in. It also keeps figure data pure enough
-// to build in Node, which is what lets the rail check every edge without a browser.
 const TOKEN = (name) => `var(${name})`;
 export const ink = () => TOKEN("--ink");
 export const alice = () => TOKEN("--alice");
@@ -38,7 +18,6 @@ export function el(tag, attrs, parent) {
   return n;
 }
 
-/** The floating label. One per page; `draw` finds it by id rather than taking it as an argument. */
 const tip = () => document.getElementById("fig-tip");
 
 function explain(target, text, colour) {
@@ -87,8 +66,6 @@ function drawNode(svg, n) {
     c.setAttribute("stroke-dasharray", "4 4");
     c.setAttribute("stroke-width", 1.8);
   }
-  // The fill stays opaque even when a node is dimmed to memory: a circle must occlude the edge
-  // running beneath it, or the picture reads as a line through a hole.
   if (n.dim) c.setAttribute("stroke-opacity", n.dim);
   if (n.tip) explain(c, n.tip, strokeOf(n));
 
@@ -134,10 +111,6 @@ function drawNode(svg, n) {
   }
 }
 
-/**
- * Render one figure. `fig` is `{w, h, nodes, edges, extra?}` — the same shape the deck uses, so a
- * figure can be moved between the two pages by copy alone.
- */
 export function draw(fig) {
   const svg = el("svg", {
     viewBox: `0 0 ${fig.w} ${fig.h}`,
@@ -148,8 +121,6 @@ export function draw(fig) {
   const N = fig.nodes;
   for (const k in N) N[k]._r = N[k].r || RADIUS[N[k].kind];
 
-  // Resolve ports. A named port is shared by every edge that binds the same property; an unnamed
-  // endpoint gets a private key, so a bare value never pretends to be a contested property.
   const ports = new Map();
   let anon = 0;
   const endpoint = (nodeName, portName, otherName, dim) => {
@@ -166,7 +137,6 @@ export function draw(fig) {
     b: endpoint(e.to, e.toPort, e.from, e.dim),
   }));
 
-  // A port sits on the rim, in the mean direction of the far ends it serves.
   const pos = new Map();
   for (const [key, rec] of ports) {
     const n = N[rec.node];
@@ -213,11 +183,8 @@ export function draw(fig) {
   for (const k in N) drawNode(svg, N[k]);
   if (fig.extra) fig.extra(svg, N, pos);
 
-  // Ports last, at the absolute top of the stack. A port takes the colour of the node at the other
-  // end — a little of A on B and a little of B on A — and goes neutral when several origins share
-  // it, which is the drawn form of "two voices, one property".
   for (const [key, rec] of ports) {
-    if (!rec.name) continue; // an unnamed grip answers nothing on hover, so it stays a bare line
+    if (!rec.name) continue;
     const n = N[rec.node];
     const p = pos.get(key);
     const hues = new Set(rec.others.map((o) => strokeOf(N[o])));

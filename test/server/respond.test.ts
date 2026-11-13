@@ -1,13 +1,3 @@
-// T153 item 1 — respond.ts's own header test. The agreed core is the point: the JSON content-type
-// must not drift again (T143 proved the copies could disagree in ways that matter), and a call site
-// must not be able to override it. Asserted at the OBJECT level — a real server, a real response —
-// so the module's promise is what the bytes say, not what the file spells.
-//
-// DOOR BINDING, NAMED: this file pins the core, and the source scan below pins that the three doors
-// with JSON writers still CALL the core — a door that stops delegating would otherwise go red
-// nowhere. The scan is textual (the T143 pattern): the doors' own policy literals stay per-door by
-// frozen design, so the scan counts `endJson(` call sites, not policy spellings.
-
 import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
@@ -43,7 +33,6 @@ describe("respond.endJson writes the agreed core", () => {
   it("the door's cache policy rides through at the call site", async () => {
     const res = await jsonAnswer({ "cache-control": "no-store" });
     expect(res.headers.get("cache-control")).toBe("no-store");
-    // The core itself forces nothing: an http-door answer keeps its pre-consolidation cacheability.
     const plain = await jsonAnswer({});
     expect(plain.headers.get("cache-control")).toBeNull();
   });

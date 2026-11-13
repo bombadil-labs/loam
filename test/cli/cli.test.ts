@@ -1,16 +1,9 @@
-// Step 8's contract: the `loam` CLI. init mints a home and an operator identity (never echoing
-// the seed); serve boots a store and answers over HTTP; store inspects. The parser is small and
-// hand-rolled, and every subcommand is exercised against real files and, for serve, a real
-// listening server.
-
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { run } from "../../src/cli/cli.js";
 
-// These boot real HTTP servers; a generous hang-guard keeps machine load from blowing the
-// default per-test timeout (it only ever matters when something is genuinely stuck).
 vi.setConfig({ testTimeout: 20_000 });
 
 let home: string;
@@ -24,7 +17,6 @@ beforeEach(() => {
   err.length = 0;
 });
 afterEach(() => {
-  // maxRetries rides out a Windows EBUSY if the OS hasn't released a just-closed sqlite handle.
   rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -37,10 +29,9 @@ describe("loam init", () => {
       seed?: string;
     };
     expect(config.operator).toMatch(/^ed25519:/);
-    expect(config.seed).toBeUndefined(); // the seed lives in its own guarded file, not the config
+    expect(config.seed).toBeUndefined();
     const seedFile = readFileSync(join(home, "operator.seed"), "utf8").trim();
     expect(seedFile).toMatch(/^[0-9a-f]{64}$/);
-    // the printed output announces the operator but never the secret
     const printed = out.join("\n");
     expect(printed).toContain(config.operator);
     expect(printed).not.toContain(seedFile);
@@ -57,7 +48,7 @@ describe("loam init", () => {
     const seed = "11".repeat(32);
     await run(["init", "--home", home, "--seed", seed], io());
     expect(readFileSync(join(home, "operator.seed"), "utf8").trim()).toBe(seed);
-    expect(out.join("\n")).not.toContain(seed); // still never echoed
+    expect(out.join("\n")).not.toContain(seed);
   });
 
   it("refuses a positional seed (the natural --seed typo) without echoing it", async () => {
@@ -67,10 +58,6 @@ describe("loam init", () => {
   });
 });
 
-// T124's fix for T117 lives in the shared parser (args.ts), not in `loam user` alone — this pins
-// it against a DIFFERENT command's boolean flag, so the fix is proven general rather than special-
-// cased to `--operator`. `--http` is `serve`'s only boolean; `=1` must refuse before any server
-// logic runs (parseFor throws before `cmdServe`'s body is reached).
 describe("the arg parser refuses a value on a boolean flag (T117)", () => {
   it("`--http=1` is a usage error, not a silently-absent boolean", async () => {
     const code = await run(["serve", "--http=1", "--home", home, "--token", "t"], io());
@@ -89,7 +76,6 @@ async function serveDetached(
 
 describe("loam serve", () => {
   it("self-initializes, boots a store, and answers a real HTTP query, then shuts down", async () => {
-    // no prior `init` — serve mints the identity itself (turnkey containers rely on this)
     const handle = await serveDetached(["--home", home, "--port", "0", "--token", "s3cret"]);
     const res = await fetch(`${handle.url}/default/graphql`, {
       method: "POST",
@@ -126,7 +112,6 @@ describe("loam serve", () => {
     const seed = "22".repeat(32);
     process.env["LOAM_SEED"] = seed;
     try {
-      // first server boots (genesis lands on disk), answers, and shuts down
       const first = await serveDetached(["--home", home, "--port", "0", "--token", "t"]);
       const res = await fetch(`${first.url}/default/graphql`, {
         method: "POST",
@@ -136,12 +121,10 @@ describe("loam serve", () => {
       expect(res.status).toBe(200);
       await first.close();
 
-      // a fresh process reads the store file: the genesis deltas are durably there
       out.length = 0;
       const code = await run(["store", "--home", home], io());
       expect(code).toBe(0);
-      expect(out.join("\n")).not.toMatch(/\b0 deltas\b/); // the genesis persisted
-      // and the operator identity is stable (same seed → same home)
+      expect(out.join("\n")).not.toMatch(/\b0 deltas\b/);
       expect(readFileSync(join(home, "operator.seed"), "utf8").trim()).toBe(seed);
     } finally {
       delete process.env["LOAM_SEED"];
@@ -164,19 +147,16 @@ describe("loam serve", () => {
     out.length = 0;
     await run(["store", "--home", home], io());
     const before = Number(/(\d+) deltas/.exec(out.join("\n"))?.[1]);
-    expect(before).toBeGreaterThan(0); // genesis landed
-    // the vault holds cold copies: one file per delta, written in the same appends
+    expect(before).toBeGreaterThan(0);
     const cold = (readdirSync(vault, { recursive: true }) as string[]).filter((f) =>
       f.endsWith(".json"),
     );
     expect(cold.length).toBe(before);
 
-    // THE CRASH — the hot store is gone entirely
     for (const f of ["store.sqlite", "store.sqlite-wal", "store.sqlite-shm"]) {
       rmSync(join(home, f), { force: true, maxRetries: 5, retryDelay: 100 });
     }
 
-    // the next serve heals from the archive BEFORE booting; nothing was lost
     out.length = 0;
     const second = await serveDetached([
       "--home",
@@ -268,7 +248,6 @@ describe("loam register", () => {
     expect(code).toBe(0);
     expect(out.join("\n")).toMatch(/registered.*Plant/i);
 
-    // the registration is deltas on disk: a fresh serve reads them and serves the type
     const handle = await serveDetached(["--home", home, "--port", "0", "--token", "t"]);
     const res = await fetch(`${handle.url}/default/graphql`, {
       method: "POST",

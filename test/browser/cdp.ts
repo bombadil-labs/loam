@@ -1,17 +1,9 @@
-// A minimal Chrome-DevTools-Protocol driver for the door-smoke rail — no npm dependency, just
-// Chrome's own debugging endpoint over Node's built-in WebSocket. T143 exists because no rail
-// drove a real browser; this helper is deliberately small enough to keep that rail cheap.
-
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { dropProfile, killTree } from "./teardown.js";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
-/**
- * Find a Chrome to drive, or THROW — never skip. A skipped browser rail is exactly the hole that
- * shipped T143: every hand-built fixture stayed green while no real browser could log in.
- */
 export function resolveChrome(): string {
   const named = process.env["LOAM_CHROME"] ?? process.env["CHROME_BIN"];
   if (named !== undefined && named !== "") return named;
@@ -42,7 +34,7 @@ export function resolveChrome(): string {
   );
 }
 
-const DEADLINE_MS = 30_000; // per CDP operation; Chrome's cold start gets its own budget below
+const DEADLINE_MS = 30_000;
 
 const withDeadline = <T>(promise: Promise<T>, what: string): Promise<T> => {
   let timer: NodeJS.Timeout;
@@ -66,7 +58,6 @@ interface CdpMessage {
   readonly error?: { message: string };
 }
 
-/** One page, one WebSocket. Register a `loaded()` waiter BEFORE the action that navigates. */
 export class Tab {
   private readonly ws: WebSocket;
   private nextId = 1;
@@ -122,7 +113,6 @@ export class Tab {
     return withDeadline(sent, method);
   }
 
-  /** The NEXT Page.loadEventFired. Await the returned promise after triggering the navigation. */
   loaded(what = "a page load"): Promise<void> {
     return withDeadline(
       new Promise<void>((resolve) => {
@@ -140,7 +130,6 @@ export class Tab {
     await done;
   }
 
-  /** Evaluate an expression in the page and return its JSON value. */
   async eval(expression: string): Promise<unknown> {
     const result = (await this.send("Runtime.evaluate", {
       expression,
@@ -158,7 +147,6 @@ export class Tab {
   }
 }
 
-/** A headless Chrome with its own throwaway profile; every tab it opens shares that profile. */
 export class Browser {
   private constructor(
     private readonly child: ChildProcess,
@@ -180,14 +168,13 @@ export class Browser {
         "--disable-gpu",
         "--disable-extensions",
         "--disable-dev-shm-usage",
-        "--no-sandbox", // CI containers have no usable namespace sandbox; this profile only ever visits loopback
+        "--no-sandbox",
         "about:blank",
       ],
       { stdio: "ignore" },
     );
-    // Chrome announces its picked port by writing DevToolsActivePort into the profile dir.
     const portFile = join(userDataDir, "DevToolsActivePort");
-    const deadline = Date.now() + 120_000; // cold start on a loaded CI runner legitimately exceeds the per-op budget
+    const deadline = Date.now() + 120_000;
     let port: number | undefined;
     while (port === undefined) {
       if (child.exitCode !== null)
@@ -196,18 +183,14 @@ export class Browser {
       try {
         const first = readFileSync(portFile, "utf8").split("\n")[0] ?? "";
         if (first !== "") port = Number(first);
-      } catch {
-        // not written yet
-      }
+      } catch {}
       if (port === undefined) await new Promise((resolve) => setTimeout(resolve, 100));
     }
     return new Browser(child, userDataDir, port);
   }
 
-  /** Open a fresh tab (same profile, same cookie jar) and attach to it. */
   async tab(url = "about:blank"): Promise<Tab> {
     const endpoint = `http://127.0.0.1:${this.port}/json/new?${new URLSearchParams({ url })}`;
-    // Modern Chrome wants PUT here; older builds answered GET. Try both rather than pin a version.
     let res = await fetch(endpoint, { method: "PUT" });
     if (!res.ok) res = await fetch(endpoint);
     if (!res.ok) throw new Error(`/json/new answered ${res.status}`);

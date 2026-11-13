@@ -1,7 +1,3 @@
-// Step-4 trial: four properties of rhizomatic #48's governed-read APIs that Loam's swap relies on,
-// checked against the substrate directly and through Loam's seams. Plus one gateway case: a
-// registration struck from T is unbound at T by the validity timer, with no write and no replay.
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DeltaSet,
@@ -61,7 +57,6 @@ describe("step-4 substrate properties (rhizomatic #48)", () => {
     const target = claim(A, 1, "x");
     const foreign = negate(target, B, 2);
     const r1 = reactorOf([target, foreign]);
-    // Predicate form: suppression is the caller's author selection.
     expect(r1.negationPredicate(10, (n) => n.claims.author === A)(target.id)).toBe(false);
     expect(negatedAt(r1, 10, A)(target.id)).toBe(false);
     expect(negatedAt(r1, 10, undefined)(target.id)).toBe(true);
@@ -69,8 +64,6 @@ describe("step-4 substrate properties (rhizomatic #48)", () => {
     const r2 = reactorOf([target, own]);
     expect(negatedAt(r2, 10, A)(target.id)).toBe(true);
 
-    // Governed load form: a foreign negation of the selected author's definition is dropped with
-    // the foreign author, before the bootstrap's mask runs.
     const def = makeDelta(publishHyperSchemaClaims(HYPER_SCHEMA_SCHEMA, "schema:x", A, 1));
     const foreignDefStrike = negate(def, B, 2);
     const ownDefStrike = negate(def, A, 2);
@@ -88,7 +81,6 @@ describe("step-4 substrate properties (rhizomatic #48)", () => {
     expect(() =>
       loadGovernedHyperSchema(DeltaSet.from([def, ownDefStrike]), "schema:x", 10, governed, order),
     ).toThrow(/no surviving schema definition/);
-    // Selecting both authors lets the foreign strike bind.
     expect(() =>
       loadGovernedHyperSchema(
         DeltaSet.from([def, foreignDefStrike]),
@@ -101,8 +93,8 @@ describe("step-4 substrate properties (rhizomatic #48)", () => {
   });
 
   it("(b) target validity is independent of the negation witnesses", () => {
-    const target = claim(A, 0, "x", 12); // expires at 12
-    const neg = negate(target, A, 10, 20); // valid over [10, 20)
+    const target = claim(A, 0, "x", 12);
+    const neg = negate(target, A, 10, 20);
     const r = reactorOf([target, neg]);
     expect(
       r
@@ -115,19 +107,17 @@ describe("step-4 substrate properties (rhizomatic #48)", () => {
     expect(negatedAt(r, 13, A)(target.id)).toBe(true);
     expect(honoredStrikeOn(r, 13, target.id, A)?.id).toBe(neg.id);
     expect(dataStruck(r, 13, A)(target.id)).toBe(true);
-    // The negation's own window still binds: at 20 it has ended.
     expect(negatedAt(r, 20, A)(target.id)).toBe(false);
   });
 
   it("(c) a missing or purged target reports false and no witness", () => {
     const target = claim(A, 0, "x");
     const neg = negate(target, A, 1);
-    const r = reactorOf([neg]); // the target was never held, or was purged and the reactor replayed
+    const r = reactorOf([neg]);
     expect(r.negationWitnesses(5, () => true)(target.id)).toEqual([]);
     expect(negatedAt(r, 5, A)(target.id)).toBe(false);
     expect(dataStruck(r, 5, A)(target.id)).toBe(false);
     expect(honoredStrikeOn(r, 5, target.id, A)).toBeUndefined();
-    // Behaviour change: the step-3 Loam walk answered TRUE for an absent target.
     expect(lawfulNegated(r, A)(target.id)).toBe(true);
   });
 
@@ -138,7 +128,7 @@ describe("step-4 substrate properties (rhizomatic #48)", () => {
     const r = reactorOf([older, newer, neg]);
     const keyOf = (d: Delta) => (d.claims.pointers.some((p) => p.role === "key") ? "k" : undefined);
     const unmasked = latestByKey(r.snapshot(), 10, new Set([A]), keyOf);
-    expect(unmasked.get("k")?.id).toBe(newer.id); // the negated claim wins
+    expect(unmasked.get("k")?.id).toBe(newer.id);
     const negated = r.negationPredicate(10, (n) => n.claims.author === A);
     const masked = latestByKey(
       DeltaSet.from([...r.snapshot()].filter((d) => !negated(d.id))),
@@ -155,8 +145,6 @@ describe("step-4 substrate properties (rhizomatic #48)", () => {
     const [small, large] = x.id < y.id ? [x, y] : [y, x];
     const keyOf = () => "k";
     expect(latestByKey(DeltaSet.from([x, y]), 10, new Set([A]), keyOf).get("k")?.id).toBe(small.id);
-    // Loam's own latest-wins readers (trust, budget, envelope, binding-policy, tenantOf) break
-    // the same tie toward the LARGER id.
     expect(large.id > small.id).toBe(true);
   });
 
@@ -187,9 +175,9 @@ describe("step-4 substrate properties (rhizomatic #48)", () => {
       signClaims({ ...strike(shrub, "operator", T0 - 1).claims, validFrom: T0 }, SEEDS.operator),
     ]);
     const names = () => gw.registered.map((r) => r.hyperschema.name).sort();
-    expect(names()).toEqual(["Plant", "Shrub"]); // T-1: the strike is not valid yet
+    expect(names()).toEqual(["Plant", "Shrub"]);
     await vi.advanceTimersByTimeAsync(1);
-    expect(names()).toEqual(["Plant"]); // T: the timer replayed the registrations
+    expect(names()).toEqual(["Plant"]);
     await gw.close();
   });
 });

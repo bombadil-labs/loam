@@ -1,12 +1,3 @@
-// §34 (h) — the operator path. `demos/board/boot.mjs` stands the whole board up from an EMPTY
-// home in one run: identity, vocabulary, the fable grant, the renderer, the public declaration,
-// and the start script. The rail executes the script exactly as an operator would (a node
-// subprocess against the built package — `npm run check` builds dist first) and then reopens the
-// home it left behind to prove every piece of law actually LANDED — no trust in the script's own
-// report (H7).
-//
-// The home is this test's own mkdtempSync dir, never a real one (the standing erasure rule).
-
 import { execFile } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -36,7 +27,7 @@ let fableSeed: string;
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "loam-board-boot-"));
-  await run(process.execPath, [BOOT, "--home", home]); // ONE run, empty home → whole app
+  await run(process.execPath, [BOOT, "--home", home]);
   fableSeed = readFileSync(join(home, "fable.seed"), "utf8").trim();
   const seed = readFileSync(join(home, "operator.seed"), "utf8").trim();
   gw = await Gateway.boot(
@@ -89,7 +80,7 @@ describe("(h) one run over an empty home stands the whole app up", () => {
   it("the renderer and the public declaration landed: the page serves tokenless", async () => {
     const res = await fetch(`${base}/board/app/${BOARD_ROUTE}/${BOARD_ENTITY}`);
     expect(res.status).toBe(200);
-    expect(await res.text()).toContain("the board"); // the seeded banner renders
+    expect(await res.text()).toContain("the board");
   });
 
   it("the minted fable identity holds write standing: a session reports through the door", async () => {
@@ -113,10 +104,6 @@ describe("(h) one run over an empty home stands the whole app up", () => {
   });
 
   it("a re-run re-expresses only the face: the constitution is content-addressed still", async () => {
-    // Its own home, so no open gateway holds the sqlite file between runs. Two runs, counted at
-    // the delta level: the grant and the declaration dedupe by content address (H4), the
-    // registrations are skipped once bound, and the ONE delta a re-run adds is the renderer
-    // re-push — how a re-boot carries a newer face to a standing store.
     const home2 = mkdtempSync(join(tmpdir(), "loam-board-reboot-"));
     try {
       await run(process.execPath, [BOOT, "--home", home2]);
@@ -141,19 +128,16 @@ describe("(h) one run over an empty home stands the whole app up", () => {
         return { deltas: snapshot.length, grants: grants.length };
       };
       const first = await census();
-      await run(process.execPath, [BOOT, "--home", home2]); // a rejected exec would throw here
+      await run(process.execPath, [BOOT, "--home", home2]);
       const second = await census();
       expect(second.grants).toBe(1);
-      expect(second.deltas).toBe(first.deltas + 1); // the renderer re-push, and nothing else
+      expect(second.deltas).toBe(first.deltas + 1);
     } finally {
       rmSync(home2, { recursive: true, force: true });
     }
   });
 
   it("boot over an IMPROVISED store re-expresses the blessed law — the live-home migration", async () => {
-    // The scenario the live instance created: a home whose `Board` was stood up over the wire
-    // with a different shape (banner only, no items, no templates). The blessed script must
-    // supersede it — republishing at the same entity is evolution — not keep it.
     const home3 = mkdtempSync(join(tmpdir(), "loam-board-improvised-"));
     try {
       initHome(home3);

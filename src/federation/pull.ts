@@ -1,46 +1,19 @@
-// Pull from a peer: fetch its published offer, verify and merge it locally. This IS the
-// "subscribe to instance X's published lens" declaration — a single anti-entropy step,
-// repeatable on whatever cadence a deployment wants (a timer, a webhook, a manual sync). Union
-// is monotone, so re-pulling is safe and idempotent; content addressing makes double-delivery
-// harmless.
-
 import type { Delta } from "@bombadil/rhizomatic";
 import type { FederationReport, Gateway } from "../gateway/gateway.js";
 import { fromWire, type WireDelta } from "./wire.js";
 
-// The pull report: federate's report plus the one dimension only the wire crossing can produce.
-// A delta that fails RECONSTRUCTION (its id does not recompute from its claims) never reaches
-// federate, so `FederationReport` cannot carry the count — the field lives here, on the door
-// where it can be nonzero, and `offered` is restored to what the peer actually SENT. Without it
-// the report was false (H7): a peer offering 100 deltas of which 40 rot on the wire read
-// "offered 60, rejected 0", and every later pull repeated the lie.
-//
-// The invariant this buys is `offered === unreconstructable + (what reached federate)`, and that
-// is the whole of it. `offered`, `rejected` and `unreconstructable` count OCCURRENCES while
-// `accepted` and `held` count unique ids (federateImpl says so, and warns the two dimensions are
-// never subtracted from each other), so `accepted + rejected + held + unreconstructable` is NOT
-// `offered` — a peer that sends one delta twice breaks it. Do not infer a fifth number from these.
 export interface PullReport extends FederationReport {
   readonly unreconstructable: number;
 }
 
-const DEFAULT_MAX_OFFER = 64 * 1024 * 1024; // a peer's offer, capped so it cannot OOM the puller
+const DEFAULT_MAX_OFFER = 64 * 1024 * 1024;
 
 export interface PullOptions {
-  // What this puller admits from the peer beyond signature verification — a trust boundary
-  // (e.g. only deltas from known authors). Default: the puller's OWN trust policy, resolved
-  // live from its deltas at loam:trust (open when none declared) — see gateway.admitFor().
-  //
-  // A PREDICATE HERE OWNS THE NEGATION CLOSURE (H1). The door closes the offer over what the
-  // store's own policy admits, but it will not overrule a boundary you authored: refuse a
-  // retraction and the claim it struck reads LIVE here while the peer holds it withdrawn. Admit
-  // negations of what you admit, or accept that reading.
   readonly admit?: (d: Delta) => boolean;
-  readonly maxBytes?: number; // cap on the offer body (default 64 MiB)
-  readonly fetch?: typeof fetch; // injectable for tests
+  readonly maxBytes?: number;
+  readonly fetch?: typeof fetch;
 }
 
-// Read a response body with a hard byte cap — a peer we pull from is not trusted to be small.
 async function boundedText(res: Response, limit: number): Promise<string> {
   const reader = res.body?.getReader();
   if (reader === undefined) return "";
@@ -60,13 +33,6 @@ async function boundedText(res: Response, limit: number): Promise<string> {
   return text + decoder.decode();
 }
 
-// Pull `peerUrl`/federate (a mount base like http://host:port/default) into `local`, presenting
-// `peerToken` as the bearer. Returns the merge report.
-// What fetch actually saw, and the cure that matches. Node's fetch failure is a TypeError whose
-// CAUSE chain carries the real verdict (getaddrinfo ENOTFOUND, connect ECONNREFUSED, a certificate
-// error, a mid-body reset); the verdict is what tells a puller whether to fix the address, wait,
-// or fix the trust — and the cure must not contradict the verdict (a TLS fault is not an address
-// problem, and EAI_AGAIN is a transient resolver hiccup, not a wrong host).
 function fetchVerdict(err: unknown): { verdict: string; cure: string } {
   const seen = new Set<unknown>();
   const texts: string[] = [];
@@ -138,9 +104,6 @@ export async function pullFrom(
     }
     text = await boundedText(res, opts.maxBytes ?? DEFAULT_MAX_OFFER);
   } catch (err) {
-    // A refusal with its own message keeps it; anything else — a connect failure OR a peer that
-    // dies mid-offer — is wrapped with the peer, the verdict, and the cure. The bare error names
-    // neither; the operator typed the address, so the refusal says it back (T149).
     if (err instanceof Error && err.message.startsWith("federation:")) throw err;
     const { verdict, cure } = fetchVerdict(err);
     throw new Error(`federation: pull from ${peerUrl} failed — ${verdict}; ${cure}`, {
@@ -153,15 +116,6 @@ export async function pullFrom(
   } catch {
     throw new Error("federation: the peer's offer was not the expected JSON");
   }
-  // A delta that will not reconstruct is dropped and the REST still land (a live peer's stream
-  // may be partially good — offer.ts holds the divergence note). The drop is deliberate; hiding
-  // it from the report is not (H7). What the count DOES prove is that the same bytes fail the
-  // same way on every pull, so "the next pull heals" is false for this class. What it does NOT
-  // prove is whose fault it is: `fromWire` refuses both a delta whose id does not recompute (the
-  // peer's bytes rotted) and one whose claims `parseClaims` will not read (H5 fails closed on an
-  // unknown key — a peer on a NEWER rhizomatic looks identical from here, and the cure is to
-  // upgrade this puller, not the peer). The report says the count and stops; naming a cause the
-  // catch discarded would be the same overclaim in a new place.
   const deltas: Delta[] = [];
   let unreconstructable = 0;
   for (const wire of body.deltas ?? []) {
@@ -171,12 +125,10 @@ export async function pullFrom(
       unreconstructable += 1;
     }
   }
-  // No explicit admit → federate resolves the local trust policy itself (fresh per call).
   const report = await local.federate(
     deltas,
     opts.admit === undefined ? {} : { admit: opts.admit },
   );
-  // `offered` restored to what the peer actually SENT — federate can only count what reached it.
   return {
     ...report,
     offered: report.offered + unreconstructable,

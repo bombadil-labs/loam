@@ -1,5 +1,3 @@
-// T288 P5 regressions: a handle retains its exact lifecycle even when currently closed or
-// legacy. Every erased/dropped byte belongs to these owned MemoryBackend fixtures.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { signClaims, type Delta } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -144,7 +142,6 @@ describe("T288 legacy handle exact declaration and attachment", () => {
       let pull: () => Promise<readonly Delta[]> = () => Promise.resolve([fact(1)]);
       const source = { pull: () => pull() };
       vi.stubGlobal("fetch", async () => wire(await pull()));
-      // Empty prefix is deliberately supported legacy history, without forging or deleting events.
       const opts = { into: "friends", prefix: "", from: FROM, source };
       const fresh = await gw.openChannel(opts);
       const handle =
@@ -163,8 +160,6 @@ describe("T288 legacy handle exact declaration and attachment", () => {
       };
       let current = fresh;
       if (replacement === "attachment") {
-        // This invocation deliberately starts AFTER replacement. A lazy name lookup must not
-        // retarget the old resumed handle to the new physical pool before the commit guard runs.
         await gw.dropChannel(fresh.name);
         current = await gw.openChannel(opts);
         expect(current.pool.gateway).not.toBe(originalPool);
@@ -178,8 +173,6 @@ describe("T288 legacy handle exact declaration and attachment", () => {
       );
       await entered.promise;
       if (replacement === "declaration") {
-        // The pull entered on the original pool, then a real operator append supersedes its exact
-        // declaration while keeping every legacy field and the physical attachment unchanged.
         const declaration = gw.reactor.get(originalDeclaration)!;
         const changed = signClaims({ ...declaration.claims, ...gw.stamp() }, SEED);
         await gw.append([changed]);
@@ -203,8 +196,6 @@ describe("T288 legacy handle exact declaration and attachment", () => {
       expect.soft(gatewayOf(current.pool).reactor.get(offered.id)).toBeUndefined();
       expect.soft(await gatewayOf(current.pool).backend.holds(offered.id)).toBe(false);
       expect(events(gw, current.name, "received")).toEqual([]);
-      // The replacement attachment remains a usable legacy channel; stale refusal is not a
-      // blanket ban on receives. Same-declaration mutation intentionally leaves old handles stale.
       if (replacement === "attachment") {
         pull = () => Promise.resolve([fact(3)]);
         expect((await current.sync()).accepted).toBe(1);

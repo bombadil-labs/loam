@@ -1,7 +1,3 @@
-// §46 criterion 12 — freezing a channel stops new deltas arriving and leaves everything already
-// received readable. Freeze is the REVERSIBLE act; drop is the irreversible one, and they are
-// deliberately different verbs on different surfaces (T188 keeps them apart for agents too).
-
 import { describe, expect, it } from "vitest";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -34,12 +30,9 @@ describe("§46 — freezing a channel", () => {
       await alice.append([later]);
       const frozen = await ch.sync();
 
-      // Nothing new crossed...
       expect(frozen.accepted).toBe(0);
       const pool = ch.pool.gateway!.reactor.arrivalLog().map((d) => d.id);
       expect(pool).not.toContain(later.id);
-      // ...and everything already received still reads. Two-sided: a freeze that emptied the pool
-      // would pass the first assertion and be a catastrophe.
       expect(pool).toContain(first.id);
       expect(me.containerScope({ containers: ["friends"] }).map((d) => d.id)).toContain(first.id);
     } finally {

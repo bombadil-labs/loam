@@ -1,18 +1,3 @@
-// Three reads that have an entity anchor answer from the target index, never from a walk of the
-// store (H8): the erasure probe behind `withoutErased`, `localChannelsInContainer`, and
-// `orphanedDeclaration`. The COST cases count every reactor access the read makes: no whole-store
-// door (`snapshot`, `arrivalLog`) opens, and the accesses are the same with 0 and with 1000
-// unrelated facts in the store. The ANSWER cases hold the result fixed, each with a struck or
-// erased member beside a live bystander.
-//
-// The ANSWER cases are CONTROLS: they pass with the whole-store walk too, because the index read
-// must select exactly what the walk selected. Only the COST cases can tell the two apart.
-//
-// Not covered here: the erase door and the drop door that ask `orphanedDeclaration` are driven in
-// local-channel-live-opening.test.ts (the unreadable-event cases, both directions). No door
-// serves `localChannelsInContainer` yet. With an erasure in the ground the probe hands over to
-// `refusedIds`, whose cost grows with the erasure index; no case here bounds that.
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { containerClaims, survivingDeclarationIds } from "../../src/gateway/container-law.js";
@@ -79,7 +64,6 @@ function declarationOf(gw: Gateway, name: string): string {
   if (evidence.state !== "open") throw new Error(`expected open: ${JSON.stringify(evidence)}`);
   return evidence.opening.poolDeclaration;
 }
-// A second declaration under a channel's name, made by hand: no opening names it.
 async function declareByHand(gw: Gateway, name: string): Promise<string> {
   const before = new Set(survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, name));
   await gw.append([
@@ -118,7 +102,6 @@ function accesses(gw: Gateway, read: () => void): Accesses {
   vi.restoreAllMocks();
   return counts as Accesses;
 }
-// The read's cost on a store with no unrelated facts and on one with UNRELATED of them.
 async function costOf(
   prepare: (gw: Gateway) => Promise<() => void>,
 ): Promise<{ small: Accesses; large: Accesses }> {
@@ -176,8 +159,6 @@ describe("COST: an anchored read opens no whole-store door and does not grow wit
 });
 
 describe("ANSWER (controls: these pass over a whole-store walk too)", () => {
-  // The erase purges the target from the reactor, so the caller's own copy stands in for a delta
-  // a door is about to serve. The offer door can then only show the bystander side.
   async function erase(gw: Gateway, target: Delta): Promise<Delta> {
     await gw.erase(target.id);
     const erasure = gw.reactor
@@ -231,7 +212,6 @@ describe("ANSWER (controls: these pass over a whole-store walk too)", () => {
     expect(localChannelsInContainer(gw, "nobody")).toEqual([]);
     const struck = declarationOf(gw, dropped.name);
     await gw.dropChannel(dropped.name);
-    // Delta level: the dropped opening's declaration is held and struck, not gone.
     expect(gw.reactor.get(struck)).toBeDefined();
     expect(gw.reactor.negationsOf(struck).length).toBeGreaterThan(0);
     expect(localChannelsInContainer(gw, "friends")).toEqual([kept.name]);
@@ -265,8 +245,6 @@ describe("ANSWER (controls: these pass over a whole-store walk too)", () => {
       notes = await open(gw, "bea:notes", "bea:notes:peer");
     expect(localChannelsInContainer(gw, "friends")).toEqual([friends.name]);
     expect(localChannelsInContainer(gw, "bea:notes")).toEqual([notes.name]);
-    // The channel's own events are filed at `channel:<name>` by their event pointer. They are in
-    // the index bucket for that id, and none of them was opened INTO it.
     expect(gw.reactor.byTarget(`channel:${friends.name}`).length).toBeGreaterThan(0);
     expect(localChannelsInContainer(gw, `channel:${friends.name}`)).toEqual([]);
   });
@@ -277,8 +255,6 @@ describe("ANSWER (controls: these pass over a whole-store walk too)", () => {
       b = await open(gw, "friends", "friends:b");
     const byHand = await declareByHand(gw, a.name);
     expect(orphanedDeclaration(gw, byHand)).toBe(true);
-    // Around the door: b's opening, re-signed with its parent pointer moved to a's channel id.
-    // The parser refuses it (`into` disagrees), and the index files it at `channel:<a>`.
     const evidence = localChannelEvidence(gw, b.name);
     if (evidence.state !== "open") throw new Error("expected b open");
     const opening = gw.reactor.get(evidence.opening.id)!;
@@ -302,7 +278,7 @@ describe("ANSWER (controls: these pass over a whole-store walk too)", () => {
     );
     const { peer } = await openHostPeer((gw.backend as MemoryBackend).journalStore(), OP);
     await admitLocal(peer, [stray], Date.now(), () => false);
-    await gw.append([observed(FERN, "height", 8, 1008, SEED)]); // the append catches up the journal
+    await gw.append([observed(FERN, "height", 8, 1008, SEED)]);
     expect(gw.reactor.byTarget(`channel:${a.name}`)).toContain(stray.id);
     expect(parseLocalEvent(stray, OP)).toBeUndefined();
     expect(orphanedDeclaration(gw, byHand)).toBe(true);
@@ -317,7 +293,6 @@ describe("ANSWER (controls: these pass over a whole-store walk too)", () => {
     expect(orphanedDeclaration(gw, named)).toBe(false);
     expect(orphanedDeclaration(gw, byHand)).toBe(true);
     expect(orphanedDeclaration(gw, declarationOf(gw, b.name))).toBe(false);
-    // A struck declaration keeps its opening: the question reads events, not the strike.
     const bDeclaration = declarationOf(gw, b.name);
     await gw.dropChannel(b.name);
     expect(gw.reactor.negationsOf(bDeclaration).length).toBeGreaterThan(0);

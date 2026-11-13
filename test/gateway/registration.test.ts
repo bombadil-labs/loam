@@ -1,12 +1,3 @@
-// Step 10's contract, part 1, as §21 leaves it: registrations BIND, definitions DEFINE. A
-// hyperschema is defined by schema-schema deltas (publishHyperSchemaClaims) at a hyperschema entity,
-// and — since §21 — the resolution Schema is likewise a first-class entity (publishSchemaClaims at
-// `schema:<name>`), with a frozen VersionedSchema snapshot beside it. A registration delta is now a
-// pure BINDING: it names those entities and the roots, and quotes neither. readRegistrations
-// GENERATES each HyperSchema via loadHyperSchema and each Schema via loadSchema over the store's
-// surviving deltas — so evolution is append, deprecation is negation, and in a governed store only
-// the operator's law binds.
-
 import { describe, expect, it } from "vitest";
 import {
   Reactor,
@@ -31,12 +22,9 @@ import { FERN } from "../spike/garden.js";
 
 const OPERATOR = authorForSeed("0e".repeat(32));
 const MALLORY = authorForSeed("ee".repeat(32));
-// Post-slice-1 naming: the hyperschema lives at `hyperschema:Plant`, freeing `schema:Plant` for the
-// living resolution Schema entity §21 lifts it into — the two never share an id.
 const ENTITY = "hyperschema:Plant";
 const LIVING = schemaLivingEntityFor("Plant");
 
-// A different body, so supersession is provable by term hash: heights only.
 const V2_BODY = parseTerm({
   op: "group",
   key: "byTargetContext",
@@ -55,9 +43,6 @@ const PLANT_V2: HyperSchema = { name: "Plant", alg: 1, body: V2_BODY };
 const define = (schema: HyperSchema, author: string, ts: number): Delta =>
   makeDelta(publishHyperSchemaClaims(schema, ENTITY, author, ts));
 
-// A registration now plants THREE deltas (SPEC §21): the living Schema entity, its frozen
-// VersionedSchema snapshot, and the BINDING that references both. `register` returns them in that
-// order; the binding (last) is the delta a negation strikes to retire the registration.
 const register = (author: string, ts: number): Delta[] => {
   const { living, snapshot, binding } = registrationDeltaClaims(
     ENTITY,
@@ -91,7 +76,6 @@ describe("registration claims: a binding, never a carrier", () => {
       (p) => p.target.kind === "entity" && p.target.entity.context === CTX_REGISTRATION,
     );
     expect(files).toBeDefined();
-    // the binding NAMES three entities and quotes none of them: hyperschema, living Schema, snapshot
     const named = (role: string): string | undefined => {
       const p = binding.pointers.find((x) => x.role === role);
       return p?.target.kind === "entity" ? p.target.entity.id : undefined;
@@ -100,13 +84,11 @@ describe("registration claims: a binding, never a carrier", () => {
     expect(named("schema")).toBe(livingEntity);
     expect(named("schema")).toBe(LIVING);
     expect(named("schemaVersion")).toBe(snapshotEntity);
-    // the living entity and its snapshot share the `schema:` prefix but the snapshot pins a @hash
     expect(snapshotEntity.startsWith(`${LIVING}@`)).toBe(true);
-    // §21: the Schema is no longer a passenger — no inline policy JSON, no term blob rides the binding
     const flat = JSON.stringify(binding);
     expect(flat).not.toContain(termCanonicalHex(PLANT.body));
     expect(flat).not.toContain('"group"');
-    expect(flat).not.toContain('"pick"'); // the resolution policy lives at its own entity now
+    expect(flat).not.toContain('"pick"');
   });
 
   it("does not file its entity pointers under the definition bucket (loadHyperSchema/loadSchema stay clean)", () => {
@@ -134,8 +116,6 @@ describe("registration claims: a binding, never a carrier", () => {
       OPERATOR,
       () => 5,
     );
-    // both are SCHEMA_SCHEMA publications carrying the same canonical term (props+default); only the
-    // entity they file under differs (the living lens vs. the frozen version).
     const term = (c: typeof living): string | undefined => {
       const p = c.pointers.find((x) => x.role.endsWith(".schema.term"));
       return p?.target.kind === "primitive" && typeof p.target.value === "string"
@@ -154,9 +134,8 @@ describe("readRegistrations: the surface is generated from surviving definitions
     expect(regs).toHaveLength(1);
     expect(regs[0]!.hyperschema.name).toBe("Plant");
     expect(termHash(regs[0]!.hyperschema.body)).toBe(termHash(PLANT.body));
-    // the resolution Schema is now loaded from the living `schema:Plant` entity, not an inline blob
     expect(regs[0]!.schema.props.get("height")?.kind).toBe("pick");
-    expect(regs[0]!.schema.name).toBe("Plant"); // a published Schema carries its own name (0.5.0)
+    expect(regs[0]!.schema.name).toBe("Plant");
     expect(regs[0]!.roots).toEqual([FERN]);
   });
 
@@ -198,10 +177,10 @@ describe("readRegistrations: the surface is generated from surviving definitions
       define(PLANT, OPERATOR, 1),
       ...registration,
       retirement,
-      makeDelta(makeNegationClaims(OPERATOR, 4, retirement.id)), // the retirement, retired
+      makeDelta(makeNegationClaims(OPERATOR, 4, retirement.id)),
     );
     const regs = readRegistrations(reactor, Date.now(), OPERATOR);
-    expect(regs).toHaveLength(1); // the registration lives again
+    expect(regs).toHaveLength(1);
   });
 
   it("a foreign negation of the operator's registration retires nothing", () => {
@@ -209,7 +188,7 @@ describe("readRegistrations: the surface is generated from surviving definitions
     const reactor = world(
       define(PLANT, OPERATOR, 1),
       ...registration,
-      makeDelta(makeNegationClaims(MALLORY, 3, bindingOf(registration).id)), // Mallory's, roots in nobody
+      makeDelta(makeNegationClaims(MALLORY, 3, bindingOf(registration).id)),
     );
     expect(readRegistrations(reactor, Date.now(), OPERATOR)).toHaveLength(1);
   });
@@ -218,11 +197,11 @@ describe("readRegistrations: the surface is generated from surviving definitions
     const reactor = world(
       define(PLANT, OPERATOR, 1),
       ...register(OPERATOR, 2),
-      define(PLANT_V2, MALLORY, 999), // newer, but Mallory roots in nobody the operator blessed
+      define(PLANT_V2, MALLORY, 999),
     );
     const regs = readRegistrations(reactor, Date.now(), OPERATOR);
     expect(regs).toHaveLength(1);
-    expect(termHash(regs[0]!.hyperschema.body)).toBe(termHash(PLANT.body)); // the operator's v1 holds
+    expect(termHash(regs[0]!.hyperschema.body)).toBe(termHash(PLANT.body));
   });
 
   it("a foreign registration is likewise inert in a governed store", () => {
@@ -260,8 +239,6 @@ describe("readRegistrations: the surface is generated from surviving definitions
   });
 
   it("a binding whose schema entity was never planted binds nothing (unbound, not a crash)", () => {
-    // the binding NAMES a living Schema entity; if only the hyperschema arrives, loadSchema throws
-    // and the registration is quietly unbound — never a boot crash.
     const { binding } = registrationDeltaClaims(
       ENTITY,
       "Plant",

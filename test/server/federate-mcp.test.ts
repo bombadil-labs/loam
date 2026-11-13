@@ -1,11 +1,3 @@
-// T188 — federation over MCP. Authority is the CONTAINER-SCOPED federate grant, never the operator
-// role: `GET /:mount/federate` demands the operator token today, and that token also registers root
-// law, mints grants and reads everything, so federating cost a peer the whole store.
-//
-// FIVE tools rather than one `federate` passthrough, because tools are the unit of CONSENT — a
-// client applies policy per tool, so `status` can be auto-approved while `drop` always asks. This
-// file covers the two that are safe by construction; the staged drop has its own.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
@@ -83,10 +75,8 @@ describe("T188 — federation tools over MCP", () => {
       const scoped = await callTool(door.url, "tok-friend", "loam_federate_status");
       expect(scoped.isError).toBe(false);
       expect(scoped.text).toContain("channel:friends:alice");
-      // The fence, from the side that matters: `work` is not theirs to see.
       expect(scoped.text).not.toContain("channel:work:carol");
 
-      // Two-sided: the operator is unrestricted, so the tool is not simply hiding everything.
       const op = await callTool(door.url, "tok-op", "loam_federate_status");
       expect(op.text).toContain("channel:friends:alice");
       expect(op.text).toContain("channel:work:carol");
@@ -108,7 +98,6 @@ describe("T188 — federation tools over MCP", () => {
         channel: "channel:friends:alice",
       });
       expect(asked.isError).toBe(true);
-      // No oracle: naming a real channel and a fictional one must read identically (§12/T78).
       const fiction = await callTool(door.url, "tok-stranger", "loam_federate_status", {
         channel: "channel:nope:nobody",
       });
@@ -140,7 +129,6 @@ describe("T188 — federation tools over MCP", () => {
         blessing: false,
       });
       expect(outside.isError).toBe(true);
-      // And it did NOT take effect — a refusal that still acted would be the worst of both.
       expect(gw.channelStatus("channel:work:carol")[0]!.blessing).toBe(true);
     } finally {
       await door.close();
@@ -150,7 +138,6 @@ describe("T188 — federation tools over MCP", () => {
 });
 
 describe("T217 — a record this store cannot read is reported unreadable, never healthy", () => {
-  /** One channel's record, minus one role — the product's own shape, partially legible. */
   async function truncate(gw: Gateway, pool: string, role: string): Promise<void> {
     const built = withStamp(gw.stamp(), (t) =>
       channelRecordClaims(gw.channelStatus(pool)[0]!, gw.operatorAuthor!, t),
@@ -162,10 +149,6 @@ describe("T217 — a record this store cannot read is reported unreadable, never
 
   it("withholds exactly the roles the verdict names, and no others", async () => {
     const gw = await storeWithChannels();
-    // TWO records, condemned on DIFFERENT roles. One alone cannot tell a handler that blanks the
-    // roles the verdict names from one that blanks a fixed pair — and the fixed-pair version is
-    // wrong in both directions at once: it withholds a good number it could have served, while
-    // serving a condemned field's coerced value as fact.
     await truncate(gw, "channel:friends:alice", "lastSyncedAt");
     await truncate(gw, "channel:work:carol", "receiving");
 
@@ -185,22 +168,16 @@ describe("T217 — a record this store cannot read is reported unreadable, never
         consecutiveFailures: number | string;
       }[];
 
-      // The record with no readable TIME: the time is withheld and named...
       const noTime = rows.find((r) => r.name === "channel:friends:alice")!;
       expect(noTime.unreadable).toEqual(["lastSyncedAt"]);
       expect(noTime.lastSyncedAt).toBe("unreadable");
-      // ...and `never synced` — the coercion's own words — is gone from that row entirely.
       expect(JSON.stringify(noTime)).not.toContain("never synced");
-      // ...while the count it CAN read is still served, rather than blanked along with it.
       expect(noTime.consecutiveFailures).toBe(0);
 
-      // The record with no readable TOGGLE: the toggle is withheld, not served as a coerced
-      // `true`. This is the row a fixed-pair substitution gets exactly backwards.
       const noToggle = rows.find((r) => r.name === "channel:work:carol")!;
       expect(noToggle.unreadable).toEqual(["receiving"]);
       expect(noToggle.receiving).toBe("unreadable");
       expect(noToggle.receiving).not.toBe(true);
-      // Its two good numbers pass through untouched — including the "never synced" convention.
       expect(noToggle.lastSyncedAt).toBe("never synced");
       expect(noToggle.consecutiveFailures).toBe(0);
     } finally {
@@ -210,9 +187,6 @@ describe("T217 — a record this store cannot read is reported unreadable, never
   });
 
   it("a legible channel is untouched by any of it", async () => {
-    // TWO-SIDED at the tool: with one channel condemned, the other must read exactly as it always
-    // did — marker empty, convention intact. A handler that blanked every row would pass the
-    // assertions above on their own.
     const gw = await storeWithChannels();
     await truncate(gw, "channel:friends:alice", "lastSyncedAt");
     const door = await serve({
@@ -261,12 +235,9 @@ describe("T188 — an agent can stage a sever and can never complete one", () =>
         wouldSurvive: string[];
       };
       expect(body.purgedNothing).toBe(true);
-      // It hands back a place for a PERSON to finish, not a token the agent could redeem.
       expect(body.confirmAt).toContain("/admin/container");
       expect(body.confirmAt).toContain(encodeURIComponent("channel:friends:alice"));
 
-      // THE CHANNEL IS STILL THERE. Asserted against the store rather than the report, because the
-      // report is the thing under test.
       expect(gw.channelStatus().map((c) => c.name)).toEqual(before);
       expect(gw.channelStatus("channel:friends:alice")).toHaveLength(1);
     } finally {
@@ -276,8 +247,6 @@ describe("T188 — an agent can stage a sever and can never complete one", () =>
   });
 
   it("the preview is TWO-SIDED — what would go, and what would remain", async () => {
-    // A preview naming only the target cannot show over-purging, which is the failure with no
-    // recovery. The operator must be able to read what SURVIVES before agreeing to anything.
     const gw = await storeWithChannels();
     const door = await serve({
       mounts: { default: gw },
@@ -311,7 +280,6 @@ describe("T188 — an agent can stage a sever and can never complete one", () =>
       });
       expect(outside.isError).toBe(true);
       expect(outside.text).not.toContain("confirmAt");
-      // Two-sided: the channel it could not stage is untouched and still listed for its owner.
       expect(gw.channelStatus("channel:work:carol")).toHaveLength(1);
     } finally {
       await door.close();
@@ -329,7 +297,6 @@ describe("T188 — opening a channel over MCP", () => {
       port: 0,
     });
     try {
-      // Outside the fence: refused, and nothing is created.
       const outside = await callTool(door.url, "tok-friend", "loam_federate_connect", {
         from: "http://127.0.0.1:1/default",
         into: "work",
@@ -338,9 +305,6 @@ describe("T188 — opening a channel over MCP", () => {
       expect(outside.isError).toBe(true);
       expect(gw.channelStatus().some((c) => c.prefix === "mallory")).toBe(false);
 
-      // Inside the fence the FENCE passes — the peer is unreachable here, so the failure that
-      // follows is the peer's, not the fence's. Asserting the refusal TEXT differs is what
-      // distinguishes "you may not" from "it did not work".
       const inside = await callTool(door.url, "tok-friend", "loam_federate_connect", {
         from: "http://127.0.0.1:1/default",
         into: "friends",
@@ -354,7 +318,6 @@ describe("T188 — opening a channel over MCP", () => {
   });
 
   it("the refusal reads identically for a real container and a fictional one", async () => {
-    // No oracle: a caller must not be able to map this store's containers by comparing refusals.
     const gw = await storeWithChannels();
     const door = await serve({
       mounts: { default: gw },

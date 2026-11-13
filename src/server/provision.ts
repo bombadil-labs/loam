@@ -1,12 +1,3 @@
-// Provisioning a person's place in the tree (SPEC §40 create-root, §58 consent): their signing
-// key, their home container, and a child under it. Two doors do this — the admin page when a
-// person presses "create your container", and the consent page when a person binds a connection
-// on a day their home does not exist yet — so the acts live here, once, with one set of words.
-//
-// A seed file that EXISTS but cannot be used fails closed: overwriting a key file because it read
-// wrong would destroy a credential no door can prove dead. Every fault reaches the operator through
-// `onFault` (it names paths); the caller sees only the refusal's status and sentence.
-
 import { randomBytes } from "node:crypto";
 import { rmSync } from "node:fs";
 import { authorForSeed } from "@bombadil/rhizomatic";
@@ -27,16 +18,10 @@ export interface ProvisionRefusal {
   readonly message: string;
 }
 
-/** A leaf a person may name under their home: one path segment, never a colon (the separator). */
 export const LEAF_RE = /^[a-z0-9][a-z0-9_-]{0,62}$/i;
 
 const said = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-/**
- * The user's signing seed — minted, and its public key trusted with a write grant, when absent.
- * Refuses when the store cannot sign, when a present seed cannot be used, or when minting fails —
- * nothing partial.
- */
 export async function ensureUserKey(
   gw: Gateway,
   home: string,
@@ -62,10 +47,6 @@ export async function ensureUserKey(
       const operator = gw.operatorAuthor;
       const signer = gw.signer;
       const key = authorForSeed(minted);
-      // `stampOn`, not `gw.stamp`: this act runs over any gateway-shaped ground. The grant names the
-      // USER, and stands for whatever root the user holds now; it lands with the root pointer, so a
-      // user never holds one without the other. With no user record the name resolves to nobody, so
-      // then the grant names the key.
       const known = resolveUserView(gw.reactor, operator, gw.validityNow(), user) !== undefined;
       await gw.append([
         signer.sign(
@@ -78,9 +59,6 @@ export async function ensureUserKey(
         ),
       ]);
     } catch (err) {
-      // A seed on disk without its grant would answer the next attempt as "present" and never
-      // earn the grant. So the file THIS act wrote is taken back — only that file: a seed that
-      // stood before took the branch above and is never touched.
       let survived = false;
       if (written) {
         try {
@@ -120,15 +98,6 @@ export async function ensureUserKey(
   };
 }
 
-/**
- * The membership of a container `owner` owns, read through the same ground the memberOf lowering
- * reads users from. It names the user (`loam.memberOf`) when the user resolves by name to the very
- * key `owner.seed` signs with: it then follows their current root, the keys that act for them in
- * `scope`, and a recovery. A name with no key evidence held here (`keyEvidenceHeld`: a user keyed
- * before root claims, or none at all) keeps the key form, as its grant does. Any other name that
- * does not resolve to this key is refused, whatever state its evidence is in (struck, expired, not
- * yet valid, a broken history): the key form would pin the container to a key the user may not hold.
- */
 export function ownedMembership(
   gw: Gateway,
   owner: { readonly user: string; readonly seed: string },
@@ -152,17 +121,12 @@ export function ownedMembership(
     : { membership: authoredBy(key) };
 }
 
-/**
- * Declare a container gathering what `owner` writes — the home (no parent) or a child. The caller
- * has proven `owner.user` is the session user's own name, and `owner.seed` is their key file.
- */
 export async function declareOwned(
   gw: Gateway,
   name: string,
   owner: { readonly user: string; readonly seed: string },
   parent: string | undefined,
   onFault: (message: string) => void,
-  /** What the person set on the five controls, when this declaration is theirs to shape. */
   leeway?: Leeway,
 ): Promise<ProvisionRefusal | undefined> {
   if (gw.signer === undefined || gw.operatorAuthor === undefined) {
@@ -187,9 +151,6 @@ export async function declareOwned(
     posture: "shared" as const,
     membership: owned.membership,
     ...(parent === undefined ? {} : { parent }),
-    // WRITTEN ONLY WHEN THE PERSON SET IT. A container declared with no leeway pointer is a pure
-    // namespace that inherits; writing a sealed pointer onto every provisioned home would seal
-    // what should inherit, which is a different promise (SPEC §58 position 4).
     ...(leeway === undefined ? {} : { leeway }),
   };
   const operator = gw.operatorAuthor;

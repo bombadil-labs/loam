@@ -1,13 +1,3 @@
-// §21.7 Coexistence rails (ticket T2) — two lenses (resolution Schemas) over one hyperschema,
-// per-lens at every door, with the degenerate single-lens case BYTE-IDENTICAL to what ships today.
-//
-// The rails were written BEFORE the build (P3), on the pre-coexistence code:
-//   - The PINNING suite passed from the day it was written: its snapshots capture the single-lens
-//     SDL / OpenAPI / REST paths as they stood on main, and the build must never move them —
-//     "nothing at rest moves" is §21.7's on-wire verdict, and this is its serving-side twin.
-//   - The COEXISTENCE suite failed on the pre-build code (registering a second lens EVICTED the
-//     first — the §21 body's honesty note) and turning it green IS the ticket.
-
 import { describe, expect, it } from "vitest";
 import {
   buildClientSchema,
@@ -25,7 +15,6 @@ import { FERN, observed } from "../spike/garden.js";
 
 const OP_SEED = "0e".repeat(32);
 
-// The broad reading: every field. The narrow archival sibling: height only, its own clock.
 const BROAD: Schema = parseSchema({
   name: "Plant",
   alg: 1,
@@ -88,12 +77,11 @@ describe("§21.7 coexistence — two lenses over one hyperschema", () => {
     await gw.publishRegistration(PLANT, ARCHIVAL, [FERN], undefined, undefined, undefined, [
       "height",
     ]);
-    // BOTH lenses answer, each through its own reading (desc vs asc over the same ground).
     await gw.append([observed(FERN, "height", 7, 2000, OP_SEED)]);
     const broad = await gw.query(`{ plant(entity: "${FERN}") { height } }`);
     const classic = await gw.query(`{ plantClassic(entity: "${FERN}") { height } }`);
-    expect(broad.data?.plant).toMatchObject({ height: 7 }); // latest wins in the broad lens
-    expect(classic.data?.plantClassic).toMatchObject({ height: 42 }); // oldest wins in the archival one
+    expect(broad.data?.plant).toMatchObject({ height: 7 });
+    expect(classic.data?.plantClassic).toMatchObject({ height: 42 });
     await gw.close();
   });
 
@@ -112,16 +100,14 @@ describe("§21.7 coexistence — two lenses over one hyperschema", () => {
       "message",
     ]);
     const broad = await gw.query(`{ plant(entity: "${FERN}") { height message } }`);
-    expect(broad.errors).toBeUndefined(); // the sibling's evolution reshaped nothing here
+    expect(broad.errors).toBeUndefined();
     const classicOld = await gw.query(`{ plantClassic(entity: "${FERN}") { height } }`);
-    expect((classicOld.errors ?? []).join(" ")).toMatch(/height/); // the archival lens moved on
+    expect((classicOld.errors ?? []).join(" ")).toMatch(/height/);
     await gw.close();
   });
 
   it("grouping refusal: one hyperschema name with two DIFFERENT bodies is refused loudly", async () => {
     const gw = await bootSingle();
-    // A genuinely different gather under the SAME hyperschema name (different termHash): the
-    // extra top-level select makes the bodies distinct while both still materialize.
     const rival: typeof PLANT = {
       name: PLANT.name,
       alg: PLANT.alg,
@@ -163,7 +149,7 @@ describe("§21.7 coexistence — two lenses over one hyperschema", () => {
     const pub = await gw.queryPublic(`{ plant(entity: "${FERN}") { height } }`);
     expect(pub.errors).toBeUndefined();
     const leak = await gw.queryPublic(`{ plantClassic(entity: "${FERN}") { height } }`);
-    expect((leak.errors ?? []).join(" ")).toMatch(/plantClassic/); // unknown field — uniform silence
+    expect((leak.errors ?? []).join(" ")).toMatch(/plantClassic/);
     await gw.close();
   });
 
@@ -184,8 +170,8 @@ describe("§21.7 coexistence — two lenses over one hyperschema", () => {
     const versions = gw.registrationVersions();
     const ladder = (lens: string): number =>
       versions.filter((v) => (v.lensName ?? v.hyperschema.name) === lens).length;
-    expect(ladder("PlantClassic")).toBe(2); // the archival lens carries its own two rungs
-    expect(ladder("Plant")).toBeGreaterThanOrEqual(1); // the broad lens's ladder is untouched by them
+    expect(ladder("PlantClassic")).toBe(2);
+    expect(ladder("Plant")).toBeGreaterThanOrEqual(1);
     await gw.close();
   });
 
@@ -202,9 +188,6 @@ describe("§21.7 coexistence — two lenses over one hyperschema", () => {
   });
 
   it("a renderer binds to a LENS by its own name — found by Larder, the first real app", async () => {
-    // T2's sweep missed the renderer path: publishRenderer and the serve-surface membership
-    // checks still keyed on the hyperschema's name, so a renderer over a non-degenerate lens
-    // ("PlantClassic" here; "Groceries" in the app that found it) was refused as unregistered.
     const gw = await bootSingle();
     await gw.publishRegistration(PLANT, ARCHIVAL, [FERN], undefined, undefined, undefined, [
       "height",
@@ -217,19 +200,17 @@ describe("§21.7 coexistence — two lenses over one hyperschema", () => {
     });
     const page = await gw.serveRoute("classic", FERN, "full");
     expect(page.status).toBe(200);
-    expect(page.body).toContain("first height: 42"); // the archival lens's oldest-wins reading
+    expect(page.body).toContain("first height: 42");
     await gw.close();
   });
 
   it("writability honesty: a field writable through one sibling lens is writable (§14's posture)", async () => {
     const gw = await bootSingle();
-    // The archival lens opens NO fields; the broad lens opens height. A write through the broad
-    // lens lands, and the archival lens reads the same ground — behavior, not a bypass-guard.
     await gw.publishRegistration(PLANT, ARCHIVAL, [FERN], undefined, undefined, undefined, []);
     const written = await gw.query(`mutation { plant(entity: "${FERN}", height: 9) { height } }`);
     expect(written.errors).toBeUndefined();
     const classic = await gw.query(`{ plantClassic(entity: "${FERN}") { height } }`);
-    expect(classic.data?.plantClassic).toMatchObject({ height: 42 }); // asc still picks the oldest
+    expect(classic.data?.plantClassic).toMatchObject({ height: 42 });
     await gw.close();
   });
 });

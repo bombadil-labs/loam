@@ -1,8 +1,3 @@
-// The Ground pane's classifier (SPEC §19): kind badges are recognized by the constitutional
-// contexts and pointer shapes Loam itself uses. This suite pins the classification over REAL
-// deltas built by the library's own constructors — a badge that misnames a record would
-// teach a falsehood on every row.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
@@ -12,7 +7,6 @@ import { publicClaims } from "../../src/gateway/public.js";
 import { registrationDeltaClaims } from "../../src/gateway/registration.js";
 import { trustClaims } from "../../src/gateway/trust.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
-// The page and this test share the classifier — same import discipline as the arc.
 import { classifyDelta, isReadOnlyDocument } from "../../demos/tutorial/instruments.mjs";
 
 const SEED = "0e".repeat(32);
@@ -47,7 +41,6 @@ describe("classifyDelta: every badge earns its name", () => {
       props: new Map(),
       default: { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } },
     };
-    // the BINDING is the delta a classifier sees as a registration (it files under CTX_REGISTRATION)
     const { binding } = registrationDeltaClaims(
       "hyperschema:Plant",
       "Plant",
@@ -81,7 +74,6 @@ describe("classifyDelta: every badge earns its name", () => {
   });
 
   it("recognizes a derived record (a runner's emission)", () => {
-    // a derived delta carries the runner's provenance pointer `rhizomatic.derived.by`
     expect(
       kindOf(
         sign({
@@ -120,10 +112,7 @@ describe("classifyDelta: every badge earns its name", () => {
   });
 
   it("a grant is recognized by the gateway's own grammar (context, not entity id)", () => {
-    // A non-default tenant's grant is still a grant...
     expect(kindOf(sign(grantClaims("tenant:garden", GARDENER, "write", ME, 6)))).toBe("grant");
-    // ...and a delta that merely MENTIONS loam:store under some other context is a fact —
-    // badging it "standing changing hands" would teach a falsehood.
     expect(
       kindOf(
         sign({

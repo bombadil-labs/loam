@@ -1,13 +1,3 @@
-// T153 slice 3b — the admin door's FEDERATION/CONNECTOR group, moved out of makeAdminDoor
-// verbatim: the connections panel (phase A5), the federate-in POST, and the two-step
-// revoke → revoke-confirm pair. The seam: these read the connector records (`oauth.json`) and
-// drive `revokeConnector` / `gw.federate`; the door helpers they share with the lifecycle POSTs —
-// the POST gate, the signer ground, the subtree target gate, the response writers, the confirm-token
-// mint, and the page renderers — are injected through AdminFederationCtx.
-//
-// Nothing in this module imports admin.ts, so there is no cycle: the door imports this group and
-// wires its `connectionsPanelHtml` into the page factory.
-
 import { refusedIds } from "../gateway/erase-law.js";
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import {
@@ -43,12 +33,8 @@ import { userGroundOf } from "../gateway/user-root.js";
 import { lowerMembershipJson } from "../gateway/member-of.js";
 import type { Ground } from "../gateway/ground.js";
 
-// A pasted offer carries real deltas — a store's worth, potentially. Bounded, but generously.
 const FEDERATE_MAX_BODY = 1024 * 1024;
 
-// The membership Term a SHARED container resolves right now — inline, or from its published
-// address. `undefined` where it resolves none (H9: the caller must refuse, never treat that as
-// "everything" or "nothing").
 function membershipTermOf(
   gw: Gateway,
   rec: ResolvedContainer,
@@ -84,51 +70,33 @@ function membershipTermOf(
 }
 
 export interface AdminFederationCtx {
-  /** The connector flow's home, when the server has one — makeAdminDoor's own option, passed whole. */
   readonly connectors?: { readonly home: string };
-  /** The home the users' signing seeds live in. */
   readonly home: string;
-  /** The users mount's live gateway, re-asked per request. */
   readonly ground: () => Gateway | undefined;
   readonly onFault: (message: string) => void;
-  /** The door's HTML writer — headers are its policy, spelled once in admin.ts. */
   readonly htmlOut: (res: ServerResponse, status: number, body: string, cookie?: string) => void;
   readonly refuse: (res: ServerResponse, status: number, message: string) => void;
-  /** The phase-6 provenance + form-token pair, shared by every POST on this door. */
   readonly postGate: (
     req: IncomingMessage,
     res: ServerResponse,
     maxBody?: number,
   ) => Promise<{ fields: Map<string, string>; user: string; formToken: string } | undefined>;
-  /** The ground, provably able to sign — or the refusal, already written. */
   readonly signerGround: (res: ServerResponse) => Gateway | undefined;
-  /** The subtree gate on a write path. */
   readonly targetOf: (
     gw: Gateway,
     user: string,
     fields: Map<string, string>,
     res: ServerResponse,
   ) => { table: ContainerTable; name: string; rec: ResolvedContainer } | undefined;
-  /** The single-use confirm-token mint; this module keeps its own store, separate from drop's. */
   readonly mintConfirm: (
     store: Map<string, { user: string; name: string }>,
     user: string,
     name: string,
   ) => string;
-  /** The negation-of-one-delta shape the door strikes with. */
   readonly negationOf: (targetId: string, author: string, timestamp: number) => Claims;
-  /** The page renderers (admin-pages.ts) — detailHref, actForm, revokeConfirmPage. */
   readonly pages: ReturnType<typeof adminPages>;
 }
 
-/**
- * The revoke selection: every UNNEGATED operator-authored grant delta at the store entity naming
- * `subject`. It is deliberately wider than the grants the door honours now. A grant that has not
- * started, or whose window has ended, is selected too, so a revoke strikes it before it can start
- * or be re-read. Only the operator's strikes count, down the whole chain, and only while each is
- * valid at `now`: a stranger's strike, or an operator strike whose window has not begun or has
- * ended, leaves the grant to be struck.
- */
 export function unnegatedOperatorGrantIds(
   reactor: Ground,
   now: number,
@@ -157,21 +125,8 @@ export function unnegatedOperatorGrantIds(
   return out;
 }
 
-/** What a connection's write standing reads as on the connections panel. */
 export type ConnectionGrantState = "active" | "revoked" | "not yet valid" | "expired" | "ungranted";
 
-/**
- * What the inbox pool's own write grants and delegations say about `key` at `now`, read from the
- * deltas on every request. Each label names what those records show, and nothing else:
- *   - "active": the door honours a write grant now.
- *   - "revoked": a write grant inside its window is struck by a negation the door honours. It
- *     does not say the grant's issuer ever had standing to grant it.
- *   - "not yet valid": a write grant has a window that starts after `now`.
- *   - "expired": a write grant has a window that ended at or before `now`.
- *   - "ungranted": no write grant names the key, or none of the above holds (for example, a grant
- *     whose author has no standing).
- * Where several grants disagree, the first label in that order wins.
- */
 export function connectionGrantState(
   reactor: Reactor,
   now: number,
@@ -204,7 +159,6 @@ export function connectionGrantState(
     else if (validUntil !== undefined && now >= validUntil) seen.add("expired");
     else if (struckAt(reactor, now, id, operator)) seen.add("revoked");
   }
-  // A connection bound since step 5 writes by DELEGATION rather than by a grant naming its key.
   for (const state of delegationStatesFor(
     reactor,
     now,
@@ -219,7 +173,6 @@ export function connectionGrantState(
   return "ungranted";
 }
 
-/** The federation/connector door group, in one closure (moved verbatim from admin.ts). */
 export const adminFederation = (ctx: AdminFederationCtx) => {
   const {
     onFault,
@@ -233,12 +186,6 @@ export const adminFederation = (ctx: AdminFederationCtx) => {
     pages,
   } = ctx;
 
-  // --- the connections panel (phase A5) ----------------------------------------------------------
-
-  // The connection key from the inbox's deterministic name (`inbox:<container>:<key>`,
-  // container.ts's inboxName). A container name may itself carry colons, so the parse anchors on
-  // the row's own `inboxOf` instead of splitting on ":". A hand-declared inbox whose name does not
-  // follow the shape yields no key, and the panel says so rather than guessing.
   const connectionKeyOf = (name: string, bound: string): string | undefined => {
     const prefix = `inbox:${bound}:`;
     return name.startsWith(prefix) && name.length > prefix.length
@@ -246,9 +193,6 @@ export const adminFederation = (ctx: AdminFederationCtx) => {
       : undefined;
   };
 
-  // The connector records, read fresh per render. Unreadable is its own state: "cannot determine
-  // what is registered" is never "nothing is" (oauth-file.ts's rule), so the panel says the records
-  // cannot be read rather than rendering rows as bare.
   type ConnectorRecords =
     | { readonly kind: "none" }
     | { readonly kind: "unreadable" }
@@ -266,12 +210,6 @@ export const adminFederation = (ctx: AdminFederationCtx) => {
     }
   };
 
-  // The oauth half of a row: the client whose granted actor IS this connection key. Live tokens
-  // are counted the way the door counts them — a token whose generation no longer matches its
-  // client's is dead already, so it is not a "live" anything.
-  // A pair that is ANOTHER person's (§58: a key bound into this reach through the library door)
-  // joins as nothing but the fact — no client, no generation, no count — the same withholding
-  // the revoke pages keep.
   type ConnectorJoin =
     | {
         readonly kind: "own";
@@ -298,7 +236,7 @@ export const adminFederation = (ctx: AdminFederationCtx) => {
             (t) =>
               t.clientId === grant.clientId &&
               t.generation === client.generation &&
-              t.user === grant.user, // the pair's tokens, not the connector's (§58)
+              t.user === grant.user,
           ).length;
     return {
       kind: "own",
@@ -310,8 +248,6 @@ export const adminFederation = (ctx: AdminFederationCtx) => {
     };
   };
 
-  // A key, shortened for the row. The full key rides in the title attribute, so hovering (and any
-  // exact search) still has the whole of it; the inbox's own page carries it in full too.
   const shortKey = (key: string): string => (key.length <= 24 ? key : `${key.slice(0, 24)}…`);
 
   const connectionRowHtml = (
@@ -359,8 +295,6 @@ export const adminFederation = (ctx: AdminFederationCtx) => {
           : ` · via <code>${escapeHtml(join.clientName ?? join.clientId)}</code>` +
             (join.generation === undefined ? "" : `, generation ${join.generation}`) +
             `, ${join.liveTokens} live token${join.liveTokens === 1 ? "" : "s"}`;
-    // The form is an OFFER (revoke re-derives everything): shown where something stands to revoke —
-    // a standing inbox grant, or a connector grant the records still hold.
     const revocable = state === "active" || join !== undefined;
     const form = revocable
       ? `\n${pages.actForm(ADMIN_REVOKE_PATH, formToken, name, "revoke…")}`
@@ -405,11 +339,6 @@ ${listing}
 ${flowNote}`;
   };
 
-  // Land a pasted offer in one subtree container (§40 criterion 11). The page adds no authorship —
-  // each delta crosses by its own signature, verified where every federated delta is verified. A
-  // SEPARATE container takes the offer through its pool's own door (its own admission); a SHARED
-  // one through the primary's door, and its membership then decides what the container gathers.
-  // The result page tells both numbers, because both are true and they differ.
   const postFederate = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const gated = await postGate(req, res, FEDERATE_MAX_BODY);
     if (gated === undefined) return;
@@ -435,8 +364,6 @@ ${flowNote}`;
       refuse(res, 400, "The offer is empty, so nothing landed.");
       return;
     }
-    // parseOffer refuses the WHOLE paste on the first bad delta — a corrupt offer is reported
-    // whole, never quietly landed in part. Its message can quote a forged id, so it is escaped.
     let deltas: Delta[];
     try {
       deltas = parseOffer(raw);
@@ -460,16 +387,9 @@ ${flowNote}`;
           );
           return;
         }
-        report = await pool.federate(deltas); // no override: the pool's own admission decides
+        report = await pool.federate(deltas);
         door = "its own store";
       } else {
-        // A SHARED container has no store of its own: its deltas live in the primary ground, which
-        // every other user's containers also cut. So the write is BOUNDED TO WHAT THIS CONTAINER
-        // GATHERS — the subtree gate authorizes landing bytes in ada's world, not in the store at
-        // large, and an unbounded `federate` here would let any tenant seed the primary with
-        // deltas another user's membership Term happens to select. The bound is the container's
-        // own membership, evaluated over the OFFER, plus the offer-local negation closure (H1: a
-        // subset that drops an admitted delta's strike revives it).
         const term = membershipTermOf(gw, rec);
         if (term === undefined) {
           refuse(
@@ -512,8 +432,6 @@ ${flowNote}`;
       refuse(res, 503, "The store could not land this offer, and it says no rather than why.");
       return;
     }
-    // The second number: of the offered deltas, how many the container's gather now holds. Landing
-    // and gathering are different doors, and the page must not let one count impersonate the other.
     let gathered: number | undefined;
     try {
       const ids = new Set(gw.containerScope({ containers: [name] }).map((d) => d.id));
@@ -521,10 +439,6 @@ ${flowNote}`;
     } catch {
       gathered = undefined;
     }
-    // Held and repeats are different dimensions, and neither is inferred: the door reports held as
-    // a UNIQUE-id fact (a refused delta offered twice counts twice in `rejected` and once in the
-    // complement of `held`), and repeats are the paste's own extra copies. Held-by-the-store is
-    // not the same fact as repeated-in-your-paste, and the page never subtracts one from the other.
     const inPasteDuplicates = deltas.length - new Set(deltas.map((d) => d.id)).size;
     const held = report.held;
     const gatherLine =
@@ -553,14 +467,6 @@ ${flowNote}`;
     );
   };
 
-  // --- revoke a connection (phase A5) ------------------------------------------------------------
-
-  // What a revoke of this connection would truthfully be — resolved fresh at BOTH steps, exactly
-  // as a drop's plan is. It can have two halves, and either may stand alone: the §39.3c strike of
-  // the write grant in the inbox pool (owner-authored, in the session user's voice), and phase 15's
-  // connector revoke (generation bump + records strike + ground strike) when the key is a
-  // connector's granted actor.
-
   const planRevoke = (
     gw: Gateway,
     user: string,
@@ -587,8 +493,6 @@ ${flowNote}`;
           "Nothing changed.",
       };
     }
-    // The connector half. An unreadable records file refuses the WHOLE act: "cannot determine what
-    // is registered" is never a licence to revoke only the half this page can see.
     let client:
       { clientId: string; clientName?: string; generation?: number; user?: string } | undefined;
     let othersPair = false;
@@ -608,17 +512,11 @@ ${flowNote}`;
             "This store's connector records cannot be read right now, so nothing was revoked.",
         };
       }
-      // The connector half is fenced the way the pool half is: only THIS person's pair (or the
-      // pre-§58 key that names no person) is retired from this page. A key bound into this
-      // person's reach through the library door may be another person's connector pair; that
-      // pair stands, and the page says so without naming them.
       const grant = file.grants.find((g) => g.actor === key);
       if (grant !== undefined && grant.user !== undefined && grant.user !== user) {
         othersPair = true;
       } else if (grant !== undefined) {
         const c = clientFor(file, grant.clientId);
-        // Whose binding this inbox is (§58): the revoke below is that person's alone, never the
-        // connector's every key.
         client = {
           clientId: grant.clientId,
           ...(c === undefined ? {} : { clientName: c.clientName, generation: c.generation }),
@@ -626,17 +524,10 @@ ${flowNote}`;
         };
       }
     }
-    // The §39 half: a standing write grant in the attached inbox pool, struck in the OWNER's
-    // voice — the session user's own seed, never the operator's.
     const pool = gw.attachedContainers.get(name);
     const standing =
       pool !== undefined &&
       holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, key, "write", pool.operatorAuthor);
-    // §58: a key may hold a sibling pool — a re-consent into another container spawns a second
-    // inbox and the first stands — and a revoke is the KEY's, so every pool of this key that still
-    // holds the grant is struck with the row's. Named on the confirm page before anything happens.
-    // Fenced to the person's own reach, like every row this page shows: a pool of the same key
-    // under someone else (reachable only through the library door) is neither named nor touched.
     const reach = subtreeOf(gw.containers(), user);
     const siblings = [...gw.connectionInboxes]
       .filter(
@@ -645,7 +536,7 @@ ${flowNote}`;
           sibling.endsWith(`:${key}`) &&
           reach.has(sibling) &&
           handle.gateway !== undefined &&
-          gw.attachedContainers.get(sibling) === handle.gateway && // not mid-drop
+          gw.attachedContainers.get(sibling) === handle.gateway &&
           holdsGrant(
             handle.gateway.reactor,
             handle.gateway.validityNow(),
@@ -657,9 +548,6 @@ ${flowNote}`;
       )
       .map(([sibling]) => sibling)
       .sort();
-    // A row whose own pool is not attached here cannot have its grant struck from this row, and a
-    // page that struck the siblings while saying this one "no longer writes" would be lying about
-    // the one pool a person came here for. Refuse, and name where the act can be done instead.
     if (pool === undefined && siblings.length > 0) {
       return {
         act: "refuse",
@@ -733,7 +621,7 @@ ${flowNote}`;
   const postRevoke = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const gated = await postGate(req, res);
     if (gated === undefined) return;
-    const gw = signerGround(res); // both halves author deltas under the store's law
+    const gw = signerGround(res);
     if (gw === undefined) return;
     const target = targetOf(gw, gated.user, gated.fields, res);
     if (target === undefined) return;
@@ -768,15 +656,12 @@ ${flowNote}`;
       refuse(res, 403, "This revoke was not confirmed from its own page, so nothing was revoked.");
       return;
     }
-    revokeTokens.delete(presented); // single-use, consumed before the act
+    revokeTokens.delete(presented);
     const plan = planRevoke(gw, gated.user, name, rec);
     if (plan.act === "refuse") {
       refuse(res, plan.status, plan.message);
       return;
     }
-    // The connector half runs FIRST: the generation bump is what kills a live bearer, and a panel
-    // that said "revoked" while a token still worked would be the exact lie this page must not
-    // tell. If it fails, nothing has happened yet and the refusal can honestly say so.
     if (plan.client !== undefined) {
       const clientId = plan.client.clientId;
       const strike = async (grant: { actor: string }): Promise<void> => {
@@ -793,15 +678,10 @@ ${flowNote}`;
           ),
         );
       };
-      const outcome = await revokeConnector(
-        ctx.connectors!.home,
-        clientId,
-        strike,
-        onFault,
-        // Always the pair's — including the pre-§58 pair that names no user; the whole-client
-        // revoke is the CLI's explicit act, never this page's.
-        { kind: "pair", user: plan.client.user },
-      );
+      const outcome = await revokeConnector(ctx.connectors!.home, clientId, strike, onFault, {
+        kind: "pair",
+        user: plan.client.user,
+      });
       if (outcome.kind === "no-such-client") {
         refuse(
           res,
@@ -838,9 +718,6 @@ ${flowNote}`;
         return;
       }
     }
-    // The §39 half: strike the write grant in the inbox pool, in the owner's own voice. If it
-    // fails AFTER the connector half succeeded, the page says exactly which half happened —
-    // a half-done revoke reported whole is the H7 shape.
     if (plan.inbox !== undefined) {
       try {
         await gw.revokeConnection({
@@ -874,10 +751,6 @@ ${flowNote}`;
         return;
       }
     }
-    // The key's sibling pools, named on the confirm page, are struck here in the owner's voice.
-    // A sibling that could not be struck is a fault the operator hears AND a refusal the person
-    // sees: the row's own inbox is struck by now, and a page headed "Revoked." over a pool the key
-    // still writes into would be the H7 shape. So the answer names what stands and says incomplete.
     const struckSiblings: string[] = [];
     const failedSiblings: string[] = [];
     if (plan.ownerSeed !== undefined) {
@@ -930,7 +803,6 @@ ${flowNote}`;
       );
       return;
     }
-    // §58: the act is the key's, never the whole connector's — whose other keys stand.
     const clientDone =
       plan.client === undefined
         ? ""

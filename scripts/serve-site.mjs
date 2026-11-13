@@ -1,8 +1,3 @@
-// Dev-only static server for site-dist/ — `node scripts/build-site.mjs && node
-// scripts/serve-site.mjs`. GitHub Pages does this job in production; this exists so the
-// tutorial can be walked locally (and by the repo's browser-pane verification) with zero
-// extra dependencies.
-
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize, resolve } from "node:path";
@@ -20,15 +15,6 @@ const TYPES = {
 };
 
 createServer((req, res) => {
-  // Dev-only escape hatch, invoked BY HAND from the page's console during a walkthrough
-  // verification (there is deliberately no caller in the page itself):
-  //   fetch("/dev-export", { method: "POST", headers: { "x-loam-dev": "1" },
-  //          body: JSON.stringify({ version: 1, operator: tutorialCtx.author,
-  //                 seed: localStorage.getItem("loam:tutorial:seed"),
-  //                 deltas: JSON.parse(loam.exportOffer(store)).deltas }) })
-  // so the finale's CLI leg can run against the REAL in-browser store. The custom header
-  // forces a CORS preflight this server never answers, so a foreign page cannot POST here.
-  // GitHub Pages has no such endpoint — the shipped page only downloads to the learner's disk.
   if (req.method === "POST" && req.url === "/dev-export") {
     if (req.headers["x-loam-dev"] !== "1") {
       res.writeHead(403).end();
@@ -47,7 +33,7 @@ createServer((req, res) => {
   try {
     decoded = decodeURIComponent(new URL(req.url, "http://x").pathname);
   } catch {
-    res.writeHead(400).end("malformed path"); // a bad %-escape must not crash the server
+    res.writeHead(400).end("malformed path");
     return;
   }
   const path = normalize(decoded).replace(/^([/\\])+/, "");

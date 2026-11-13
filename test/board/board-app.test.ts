@@ -1,13 +1,3 @@
-// §34's write side, over a real Gateway and the served doors: (a) the vocabulary binds through
-// /register and boardEvent is one call, one delta, latest-wins; (b) standing decides who writes —
-// a granted author passes, an ungranted one is refused; (f) `status: shipped` IS the exit, and
-// nothing leaves the ground; (g) an asOf read answers the board as it stood.
-//
-// Both levels throughout (P3 discipline): object-level through the door (what a query answers),
-// delta-level in the reactor (what actually landed — count, shape, author). The RENDERED half of
-// (f) — a shipped item leaving the waiting/in-flight sections of the page — is board-render.test.ts's
-// rail, beside the rest of the route assertions.
-
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { BOARD_ENTITY } from "../../demos/board/vocabulary.mjs";
 import {
@@ -54,14 +44,12 @@ describe("(a) the vocabulary through /register; boardEvent is one call, one delt
       title: "#262 — T64 piece 4: the receipt",
       status: "open",
     });
-    const before = statusDeltas(gw, ITEM).length; // creation claimed status once
+    const before = statusDeltas(gw, ITEM).length;
 
     const r1 = await boardEvent(base, "fable", ITEM, "review");
     expect(r1.json.errors, JSON.stringify(r1.json.errors)).toBeUndefined();
     const id = (r1.json.data as { boardEvent: { delta: string } }).boardEvent.delta;
 
-    // Delta level: the receipt names a landed delta shaped exactly as the template declared —
-    // one subject pointer at (item, status), one primitive value, nothing else.
     const landed = [...gw.reactor.snapshot()].find((d) => d.id === id);
     expect(landed).toBeDefined();
     expect(landed!.claims.pointers).toHaveLength(2);
@@ -75,7 +63,6 @@ describe("(a) the vocabulary through /register; boardEvent is one call, one delt
     expect(value!.target).toEqual({ kind: "primitive", value: "review" });
     expect(statusDeltas(gw, ITEM)).toHaveLength(before + 1);
 
-    // A second transition: the door answers the LATEST claim, and both survive as history.
     const r2 = await boardEvent(base, "fable", ITEM, "waiting-myk");
     expect(r2.json.errors).toBeUndefined();
     const read = await gql(base, `{ boardItem(entity: ${JSON.stringify(ITEM)}) { status } }`, "op");
@@ -99,7 +86,7 @@ describe("(b) standing decides who writes", () => {
     expect(res.json.errors, JSON.stringify(res.json.errors)).toBeUndefined();
     const id = (res.json.data as { boardEvent: { delta: string } }).boardEvent.delta;
     const landed = [...gw.reactor.snapshot()].find((d) => d.id === id);
-    expect(landed!.claims.author).toBe(FABLE); // attribution is the product
+    expect(landed!.claims.author).toBe(FABLE);
   });
 
   it("an ungranted author is refused — nothing lands, nothing changes", async () => {
@@ -109,10 +96,8 @@ describe("(b) standing decides who writes", () => {
     const res = await boardEvent(base, "stranger", ITEM, "shipped");
     expect(res.json.errors).toBeDefined();
     expect(res.json.errors!.length).toBeGreaterThan(0);
-    // Object level: the status the door answers is untouched.
     const read = await gql(base, `{ boardItem(entity: ${JSON.stringify(ITEM)}) { status } }`, "op");
     expect((read.json.data as { boardItem: { status: string } }).boardItem.status).toBe("review");
-    // Delta level: no delta landed at all, and none in the ground carries the stranger's key.
     const snapshot = [...gw.reactor.snapshot()];
     expect(snapshot).toHaveLength(beforeCount);
     expect(snapshot.some((d) => d.claims.author === STRANGER)).toBe(false);
@@ -133,7 +118,6 @@ describe("(f) status: shipped IS the exit — nothing is removed to leave the bo
     const res = await boardEvent(base, "fable", ITEM, "shipped");
     expect(res.json.errors).toBeUndefined();
 
-    // Object level: still fully queryable, props intact, status the exit value.
     const read = await gql(
       base,
       `{ boardItem(entity: ${JSON.stringify(ITEM)}) { title seam status } }`,
@@ -144,7 +128,6 @@ describe("(f) status: shipped IS the exit — nothing is removed to leave the bo
     expect(view["title"]).toBe("T64 — two-phase erasure");
     expect(view["seam"]).toBe("the slate, the closures, the cut, the receipt");
 
-    // Still LISTED: the board's own members carry it, shipped and all.
     const board = await gql(
       base,
       `{ board(entity: ${JSON.stringify(BOARD_ENTITY)}) { items } }`,
@@ -154,7 +137,6 @@ describe("(f) status: shipped IS the exit — nothing is removed to leave the bo
       .items;
     expect(items.some((i) => i["title"] === "T64 — two-phase erasure")).toBe(true);
 
-    // Delta level: the exit ADDED a claim; every prior status claim survives un-negated.
     const after = statusDeltas(gw, ITEM);
     expect(after).toHaveLength(history + 1);
     const struck = new Set(
@@ -180,7 +162,6 @@ describe("(g) as-of: yesterday's board is a reading, not an archive", () => {
     const res = await boardEvent(base, "fable", ITEM, "shipped");
     expect(res.json.errors).toBeUndefined();
 
-    // The two moments, read off the ground itself (the gateway clock is strictly monotonic).
     const stamps = statusDeltas(gw, ITEM)
       .map((d) => d.claims.timestamp)
       .sort((a, b) => a - b);
@@ -194,8 +175,8 @@ describe("(g) as-of: yesterday's board is a reading, not an archive", () => {
       "op",
     );
     const then = (past.json.data as { boardItem: { status: string; _asOf: number } }).boardItem;
-    expect(then.status).toBe("building"); // the prior status, after the later transition landed
-    expect(then._asOf).toBe(t2 - 1); // the pin rides the answer
+    expect(then.status).toBe("building");
+    expect(then._asOf).toBe(t2 - 1);
 
     const now = await gql(base, `{ boardItem(entity: ${JSON.stringify(ITEM)}) { status } }`, "op");
     expect((now.json.data as { boardItem: { status: string } }).boardItem.status).toBe("shipped");

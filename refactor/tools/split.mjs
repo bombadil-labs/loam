@@ -1,7 +1,3 @@
-// Code lines by subsystem, split into host-bound and host-free function code (see HOST_TYPE in
-// lib.mjs). With --files, one row per file instead. Comments and blank lines are not counted.
-// Usage: node refactor/tools/split.mjs [dir=src] [--files]
-
 import { classify, hostSplit, parse, pct, sourceFiles, subsystemOf } from "./lib.mjs";
 
 const args = process.argv.slice(2);

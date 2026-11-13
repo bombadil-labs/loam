@@ -1,10 +1,3 @@
-// Phase 18 — THE TAKE-HOME COMPLETES (SPEC §15 continuity, PR #53). Phase 17's wanderer kept
-// a whole store in a tab; tonight she takes it home. The tab freezes itself with exportOffer
-// (the exact bytes /federate would serve), `loam pull` lands the file in a laptop home that
-// holds HER seed — and because genesis is pure, the laptop store IS the tab store: the same
-// operator marker by content address, the law binding on arrival, the view matching hash for
-// hash. A store born in a browser, served from a laptop; nothing re-signed, nothing lost.
-
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
@@ -44,7 +37,6 @@ const laptop = mkdtempSync(join(tmpdir(), "wanderer-laptop-"));
 let notebook;
 let served;
 try {
-  // ---- the tab, as phase 17 left it: governed, registered, lived-in
   const seed = tab.mintSeed();
   const wanderer = tab.authorForSeed(seed);
   notebook = await tab.Gateway.boot(
@@ -82,7 +74,6 @@ try {
   const inTab = await notebook.query(`{ note(entity: "note:first") { text _hex } }`);
   const tabHex = inTab.data?.note?._hex;
 
-  // ---- 18.1: the export is a frozen federation offer, and it is honest about its shape
   const offer = tab.exportOffer(notebook);
   const parsed = JSON.parse(offer);
   const file = join(laptop, "notebook-export.json");
@@ -95,7 +86,6 @@ try {
     `${parsed.deltas.length} deltas in the file`,
   );
 
-  // ---- 18.2: `loam init --seed` + `loam pull` — the laptop store IS the tab store
   await run(["init", "--home", laptop, "--seed", seed], io);
   const code = await run(["pull", file, "--home", laptop], io);
   check(
@@ -105,7 +95,6 @@ try {
     out.find((l) => l.includes("accepted")) ?? "",
   );
 
-  // ---- 18.3: served from the laptop, the view matches HASH FOR HASH — the same store
   served = await run(["serve", "--http", "--home", laptop, "--token", "tok"], io, {
     detach: true,
   });
@@ -125,7 +114,6 @@ try {
     `tab ${String(tabHex).slice(0, 12)}… = laptop ${String(answer.data?.note?._hex).slice(0, 12)}…`,
   );
 
-  // ---- 18.4: pulling the same file again accepts nothing — union is union
   out.length = 0;
   await served.close();
   served = undefined;

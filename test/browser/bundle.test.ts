@@ -1,10 +1,3 @@
-// The shipped STORE artifact, pinned (SPEC §15): `dist/browser/index.js` is a self-contained
-// browser-safe ESM bundle — the whole Gateway, genesis, law, and the LocalStorageBackend,
-// zero `node:` specifiers, nothing left for a bundler to resolve. The proof is a boot: genesis
-// → register → claim → query, entirely inside the artifact, then a reopen from the same origin
-// to show the page's deltas were really persisted. And the curation is pinned too: no serve,
-// no fs-backed drivers, no CLI.
-
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -12,13 +5,10 @@ import { pathToFileURL } from "node:url";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { MemStorage } from "../store/mem-storage.js";
 
-// esbuild has a whole store to inline; give the build the same generous guard the other
-// heavy suites carry.
 vi.setConfig({ testTimeout: 20000, hookTimeout: 20000 });
 
 const BUNDLE = join(process.cwd(), "dist", "browser", "index.js");
 
-// The bundle's surface, typed only as far as this suite drives it.
 interface QueryResult {
   data?: Record<string, unknown> | null;
   errors?: string[];
@@ -53,7 +43,6 @@ const OPERATOR_SEED = "0e".repeat(32);
 const WRITER_SEED = "a1".repeat(32);
 const FERN = "plant:fern";
 
-// A tiny governed world, assembled entirely from the bundle's own exports.
 function plantGenesis(b: BrowserModule): unknown {
   const body = b.parseTerm({
     op: "group",
@@ -99,10 +88,6 @@ describe("the browser store bundle", () => {
     const text = readFileSync(BUNDLE, "utf8");
     expect(text).not.toMatch(/^import\s/m);
     expect(text).not.toMatch(/\brequire\(/);
-    // Zero node: SPECIFIERS. graphql v17 carries one guarded runtime probe —
-    // `process.getBuiltinModule("node:diagnostics_channel")` in a try/catch — which is a
-    // feature detection, not an import: nothing for a bundler to resolve, inert in a page.
-    // The exemption is exactly that call and specifier; anything else node: fails the line.
     for (const m of text.matchAll(/["']node:/g)) {
       const site = text.slice(Math.max(0, m.index - 30), m.index + 40);
       expect(site).toMatch(/getBuiltinModule\(["']node:diagnostics_channel["']\)/);
@@ -120,11 +105,9 @@ describe("the browser store bundle", () => {
     const b = (await import(pathToFileURL(BUNDLE).href)) as BrowserModule;
     const gateway = await b.Gateway.boot(new b.MemoryBackend(), plantGenesis(b));
 
-    // registered by genesis: it answers without a register() call
     const empty = await gateway.query(`{ plant(entity: "${FERN}") { height } }`);
     expect(empty.errors).toBeUndefined();
 
-    // governed: the granted writer claims; a stranger is refused
     const claimed = await gateway.query(
       `mutation { plant(entity: "${FERN}", height: 40) { height } }`,
       undefined,
@@ -156,7 +139,6 @@ describe("the browser store bundle", () => {
     expect(claimed.errors).toBeUndefined();
     await first.close();
 
-    // The next tab: no genesis, no register() — the store remembers its own shape and facts.
     const second = await b.Gateway.open(new b.LocalStorageBackend("tab", origin), {
       seed: OPERATOR_SEED,
     });
@@ -176,8 +158,6 @@ describe("the browser store bundle", () => {
     );
     expect(claimed.errors).toBeUndefined();
 
-    // The HTTP pull was only ever the transport: a second store in the SAME page federates by
-    // a direct call, trust-admission and all (a fresh store's trust policy is open).
     const listener = await b.Gateway.open(new b.MemoryBackend(), { seed: b.mintSeed() });
     const report = await listener.federate(teller.offeredDeltas());
     expect(report.accepted).toBeGreaterThan(0);

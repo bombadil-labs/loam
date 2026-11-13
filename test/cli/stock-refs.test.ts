@@ -1,31 +1,3 @@
-// T246 — the stock shelf learns refs (working spec §52, criteria a–f and i, plus the two
-// §14/§51 agreement rails: a §14-written edge is retractable through the §51 pair, and a refs
-// declaration the body does not back cannot open the §14 door).
-//
-// `event.attending` and `org.members` become DECLARED references (§51): each serves its typed
-// link/unlink pair, offers no primitive argument, and leaves `writable` — the refs declaration is
-// the write opening, for the §51 verbs and for the §14 `link<Type>` verb alike. Legacy primitive
-// values keep resolving in the mixed array beside real edges. `person.follows` joined in phase B
-// through the declared-substitution ceremony — flat reads by design, so the frozen depth rail's
-// assertion stays true; §52 (i) pins that parity beside it.
-//
-// TWO LEVELS, as P3 requires. Object level: the real CLI — init, register, serve, GraphQL over
-// HTTP — because the introspected surface is the cold client's entire documentation. Delta level:
-// gateway fixtures over MemoryBackend, where the authored pointers and the negation record are
-// inspectable.
-//
-// Deliberately NOT asserted, each a named gap rather than a silent one:
-//   - `severEvent(field: "attending")` refuses read-only in phase A — the §51 unlink pair is the
-//     retraction door for a refs prop, and widening §14 sever the way link widened is a behavior
-//     decision, not a repair;
-//   - the CLI's dependency-install path forwards `refs` (cli.ts), but no shelf entry with refs is
-//     any other entry's dependency today, so no public seam can drive that argument; the first
-//     refs-carrying dependency earns the rail;
-//   - the §51 generic machinery (reciprocal folds, undeclared-reciprocal warnings, _claim parity)
-//     is T245's frozen rail (test/gateway/edge-mutations.test.ts), not re-pinned here.
-// All fixture stores live in this file's own mkdtemp homes or MemoryBackends; nothing touches a
-// real ~/.loam.
-
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -43,9 +15,7 @@ import { stockSchema } from "../../src/stock/index.js";
 import { pickLatest } from "../gateway/fixtures.js";
 import { observed } from "../spike/garden.js";
 
-vi.setConfig({ testTimeout: 30_000 }); // real HTTP servers and sqlite stores, twice over
-
-// ── the CLI half: a real home, a real serve, the introspected door ──────────────────────────────
+vi.setConfig({ testTimeout: 30_000 });
 
 let home: string;
 const out: string[] = [];
@@ -81,7 +51,6 @@ const gql = async (
   return (await res.json()) as { data?: Record<string, unknown>; errors?: unknown[] };
 };
 
-// Hand-rendered type strings, so the expectations below stay literals.
 interface TypeRefJson {
   kind: string;
   name: string | null;
@@ -140,7 +109,6 @@ describe("§52 (a) — the introspected shelf teaches the truth, all three refer
     try {
       const fields = await mutationSurface(handle.url);
 
-      // The typed pairs, ID! on both args — the §51 shape, now on the shelf.
       for (const pair of [
         "linkevent_attending",
         "unlinkevent_attending",
@@ -151,7 +119,6 @@ describe("§52 (a) — the introspected shelf teaches the truth, all three refer
         expect(fields.get(pair)!.args, pair).toEqual({ entity: "ID!", target: "ID!" });
       }
 
-      // The primitive argument is GONE — exact arg sets, so a resurrected fossil arg fails here.
       expect(fields.get("event")!.args).toEqual({
         entity: "ID!",
         title: "PrimitiveValue",
@@ -166,14 +133,10 @@ describe("§52 (a) — the introspected shelf teaches the truth, all three refer
         description: "PrimitiveValue",
         website: "PrimitiveValue",
       });
-      // ...and the base mutation's description names the reference, not "read-only" (the §51
-      // typing that separates a reference prop from a prop nobody opened).
       expect(fields.get("event")!.description).toContain("Reference props");
       expect(fields.get("event")!.description).toContain("attending");
       expect(fields.get("event")!.description).not.toMatch(/Read-only here.*attending/);
 
-      // PHASE B: person.follows is a declared reference too — the last fossil path closes. The
-      // primitive argument is gone and the typed pair serves, ID! on both args.
       expect(fields.get("person")!.args).toEqual({
         entity: "ID!",
         name: "PrimitiveValue",
@@ -190,7 +153,6 @@ describe("§52 (a) — the introspected shelf teaches the truth, all three refer
 
 describe("§52 (b) — the §14 link verb is refs-aware, two-sided", () => {
   it("linkOrg links members with members OFF writable; a non-refs unopened field still refuses", async () => {
-    // The premise, pinned in the rail itself so it cannot pass by the old writable opening:
     const org = stockSchema("org")!.registration as { writable: string[] };
     expect(
       org.writable,
@@ -200,8 +162,6 @@ describe("§52 (b) — the §14 link verb is refs-aware, two-sided", () => {
     await run(["init", "--home", home], io());
     expect(await run(["register", "--stock", "org", "--home", home], io())).toBe(0);
     expect(await run(["register", "--stock", "person", "--home", home], io())).toBe(0);
-    // A bespoke lens carrying BOTH shapes at once: `members` declared in refs, `rivals` a plain
-    // prop deliberately left out of `writable`. Same §14 verb, opposite verdicts.
     const team = join(home, "team.json");
     writeFileSync(
       team,
@@ -236,14 +196,12 @@ describe("§52 (b) — the §14 link verb is refs-aware, two-sided", () => {
 
     const handle = await serveDetached(["--home", home, "--port", "0", "--token", "t"]);
     try {
-      // Ada exists by name, so the nested resolution below has something to show.
       let res = await gql(
         handle.url,
         `mutation { person(entity: "person:ada", name: "Ada") { name } }`,
       );
       expect(res.errors, JSON.stringify(res.errors)).toBeUndefined();
 
-      // The refs-authorized side: the frozen depth rail's exact call, with members off writable.
       res = await gql(
         handle.url,
         `mutation { linkOrg(entity: "org:labs", field: "members", target: "person:ada") { name } }`,
@@ -254,15 +212,11 @@ describe("§52 (b) — the §14 link verb is refs-aware, two-sided", () => {
       const members = (read.data?.["org"] as { members: unknown[] }).members;
       expect(members).toMatchObject([{ name: "Ada" }]);
 
-      // The writable-gated side: same verb, a non-refs field nobody opened, refused with the §14
-      // read-only voice — the refs awareness must not have deleted the gate.
       const refused = await gql(
         handle.url,
         `mutation { linkTeam(entity: "team:reds", field: "rivals", target: "team:blues") { title } }`,
       );
       expect(refused.errors?.join(" ")).toMatch(/"rivals" of Team is read-only/);
-      // ...and the bespoke lens's own refs field links, proving the verdict tracked the
-      // declaration rather than the lens.
       const linked = await gql(
         handle.url,
         `mutation { linkTeam(entity: "team:reds", field: "members", target: "person:ada") { members } }`,
@@ -281,10 +235,6 @@ describe("§52 (d) — COMPAT: a pre-retrofit primitive keeps resolving beside a
   it("write under the OLD registration, republish the NEW one, and the mixed array holds both", async () => {
     await run(["init", "--home", home], io());
 
-    // ACT 1 — the pre-§52 registration, its load-bearing facts literal in this fixture: NO
-    // expand in the body, no refs, `attending` in `writable` and typed primitive. The plain
-    // gather itself rides entityGatherJson() — the substrate helper yesterday's shelf shared,
-    // untouched by the retrofit — so what is pinned by hand is exactly what the retrofit moved.
     const oldEvent = join(home, "old-event.json");
     const LATEST = { pick: { order: { byTimestamp: "desc" } } };
     const EVERY = { all: { order: { byTimestamp: "asc" } } };
@@ -313,7 +263,6 @@ describe("§52 (d) — COMPAT: a pre-retrofit primitive keeps resolving beside a
 
     let handle = await serveDetached(["--home", home, "--port", "0", "--token", "t"]);
     try {
-      // The cold client's natural mistake, last week: a string into the primitive argument.
       const wrote = await gql(
         handle.url,
         `mutation { event(entity: "event:picnic", title: "Picnic", attending: "person:bob") { attending } }`,
@@ -324,7 +273,6 @@ describe("§52 (d) — COMPAT: a pre-retrofit primitive keeps resolving beside a
       await handle.close();
     }
 
-    // ACT 2 — the upgrade: `--stock event` EVOLVES the same registration entity, closure and all.
     out.length = 0;
     err.length = 0;
     expect(await run(["register", "--stock", "event", "--home", home], io())).toBe(0);
@@ -335,20 +283,17 @@ describe("§52 (d) — COMPAT: a pre-retrofit primitive keeps resolving beside a
 
     handle = await serveDetached(["--home", home, "--port", "0", "--token", "t"]);
     try {
-      // The retrofitted surface: the primitive argument is gone from this door...
       const fossil = await gql(
         handle.url,
         `mutation { event(entity: "event:picnic", attending: "person:eve") { attending } }`,
       );
       expect(fossil.errors?.join(" ")).toMatch(/Unknown argument "attending"/);
-      // ...while a plain prop beside it still writes (criterion e's two-sided door half).
       const title = await gql(
         handle.url,
         `mutation { event(entity: "event:picnic", title: "Spring picnic") { title } }`,
       );
       expect(title.errors, JSON.stringify(title.errors)).toBeUndefined();
 
-      // A real link lands beside the legacy value.
       let res = await gql(
         handle.url,
         `mutation { shallowPerson(entity: "person:ada", name: "Ada") { name } }`,
@@ -360,8 +305,6 @@ describe("§52 (d) — COMPAT: a pre-retrofit primitive keeps resolving beside a
       );
       expect(res.errors, JSON.stringify(res.errors)).toBeUndefined();
 
-      // THE MIXED ARRAY, two-sided: the legacy primitive (older, so first under `all` asc) AND
-      // the linked nested ShallowPerson view, in one read through the evolved lens.
       const read = await gql(handle.url, `{ event(entity: "event:picnic") { title attending } }`);
       expect(read.errors, JSON.stringify(read.errors)).toBeUndefined();
       const view = read.data?.["event"] as { title: string; attending: unknown[] };
@@ -375,8 +318,6 @@ describe("§52 (d) — COMPAT: a pre-retrofit primitive keeps resolving beside a
   });
 });
 
-// ── the gateway half: delta-level assertions over a MemoryBackend ───────────────────────────────
-
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
 const WRITER_SEED = "e1".repeat(32);
@@ -386,8 +327,6 @@ const SECOND_SEED = "e2".repeat(32);
 const EVENT = "event:hike";
 const MYK = "person:myk";
 
-// The shelf's own bytes through the ordinary publish door, closure sinks-first — the same
-// registrations `--stock` installs, minus the CLI.
 async function publishStock(gw: Gateway, name: string): Promise<void> {
   for (const entry of installOrder(name)) {
     const input = parseRegistrationInput(structuredClone(entry.registration));
@@ -432,8 +371,6 @@ async function freshDeltas(
   return backend.deltasSince(settled);
 }
 
-// Pointers normalized for structural comparison (H4: ids and signatures differ across authors
-// and moments; the SHAPE is what the criterion pins).
 const shapeOf = (d: Delta): unknown[] =>
   [...d.claims.pointers]
     .map((p) => ({
@@ -469,9 +406,6 @@ describe("§52 (c) — linkevent_attending authors the symmetric delta and the v
     );
     const linkedView = view(linked, "linkevent_attending");
 
-    // DELTA level: one delta, the writer's, carrying the §52 declaration's exact roles and
-    // contexts — {attending, at the person, context "attending"} + {attends, at the event,
-    // context "attending"} — the shape the shelf's expand follows and the reciprocal folds.
     const fresh = await freshDeltas(gateway, backend, settled);
     expect(fresh).toHaveLength(1);
     const edge = fresh[0]!;
@@ -497,8 +431,6 @@ describe("§52 (c) — linkevent_attending authors the symmetric delta and the v
       }),
     );
 
-    // OBJECT level: the attendee reads as a nested ShallowPerson view — name, nothing more —
-    // in the mutation's own answer and in a plain re-query alike.
     expect(linkedView["attending"]).toMatchObject([{ name: "Myk" }]);
     const reread = await gateway.query(`{ event(entity: "${EVENT}") { attending } }`);
     const attendees = view(reread, "event")["attending"] as Record<string, unknown>[];
@@ -516,15 +448,12 @@ describe("§52 (e) — the mutate seam refuses a primitive into a shelf referenc
     await publishStock(gateway, "org");
     const hooks = gateway.gqlHooks();
 
-    // The seam REST and direct callers reach — the GraphQL door's missing argument is not the
-    // only wall (§51.5), and the refusal coaches toward the pair, never toward `writable`.
     await expect(hooks.mutate("Event", EVENT, { attending: MYK }, WRITER_SEED)).rejects.toThrow(
       /"attending" of Event is a reference \(§51\).*linkevent_attending/,
     );
     await expect(hooks.mutate("Org", "org:labs", { members: MYK }, WRITER_SEED)).rejects.toThrow(
       /"members" of Org is a reference \(§51\).*linkorg_members/,
     );
-    // Two-sided: the plain prop beside each writes through the same seam.
     const ok = await hooks.mutate("Event", EVENT, { title: "The hike" }, WRITER_SEED);
     expect(ok.view["title"]).toBe("The hike");
     await gateway.close();
@@ -534,8 +463,6 @@ describe("§52 (e) — the mutate seam refuses a primitive into a shelf referenc
 describe("§52 (f) — unlink retracts the caller's own edge only; the legacy value and a second author survive", () => {
   it("object and delta level: one strike, writer's own, history intact", async () => {
     const { gateway, backend } = await world();
-    // The legacy primitive — the exact delta shape a pre-retrofit §14 write minted (subject +
-    // primitive value), planted directly because the retrofitted surface rightly refuses to.
     await gateway.append([observed(EVENT, "attending", "person:bob", 1_000, WRITER_SEED)]);
     const named = await gateway.query(
       `mutation { shallowPerson(entity: "${MYK}", name: "Myk") { name } }`,
@@ -557,7 +484,6 @@ describe("§52 (f) — unlink retracts the caller's own edge only; the legacy va
     );
     const [secondsEdge] = await freshDeltas(gateway, backend, afterWriter);
 
-    // The full mixed array before the retraction: legacy value first (oldest), then both edges.
     const before = await gateway.query(`{ event(entity: "${EVENT}") { attending } }`);
     const all = view(before, "event")["attending"] as unknown[];
     expect(all).toHaveLength(3);
@@ -568,15 +494,11 @@ describe("§52 (f) — unlink retracts the caller's own edge only; the legacy va
       undefined,
       { actor: WRITER_SEED },
     );
-    // OBJECT level, two-sided: the writer's edge is gone; the legacy primitive AND the second
-    // author's edge both stand.
     const after = view(unlinked, "unlinkevent_attending")["attending"] as unknown[];
     expect(after).toHaveLength(2);
     expect(after[0], "the legacy bystander").toBe("person:bob");
     expect(after[1], "the second author's edge").toMatchObject({ name: "Myk" });
 
-    // DELTA level: retraction is a claim — the edge delta survives beside its negation, the
-    // strike is the writer's own, and the second author's edge drew NO strike.
     await gateway.flush();
     const held = await idsOf(backend);
     expect(held.has(writersEdge!.id), "history survives — nothing purged").toBe(true);
@@ -591,10 +513,6 @@ describe("§52 (f) — unlink retracts the caller's own edge only; the legacy va
 });
 
 describe("§52 — a §14-written edge is retractable through the §51 pair (the role coincidence, live)", () => {
-  // The refs role and the role the §14 verb mints COINCIDE on the shelf (`members`, both ways) —
-  // that coincidence is what lets `unlinkorg_members` strike an edge `linkOrg` wrote. Here it
-  // becomes load-bearing: a shelf or verb change that breaks the agreement fails this rail,
-  // rather than leaving a user's store holding edges no typed door can retract.
   it("linkOrg mints the edge, unlinkorg_members strikes it; a second author's edge survives", async () => {
     const { gateway, backend } = await world();
     await publishStock(gateway, "org");
@@ -610,8 +528,6 @@ describe("§52 — a §14-written edge is retractable through the §51 pair (the
       { actor: WRITER_SEED },
     );
     const [writersEdge] = await freshDeltas(gateway, backend, settled);
-    // The premise, on the delta itself: the §14 edge carries the SAME role the refs declare —
-    // the agreement the unlink match below stands on.
     expect(
       writersEdge!.claims.pointers.some(
         (p) => p.role === "members" && p.target.kind === "entity" && p.target.entity.id === MYK,
@@ -633,11 +549,8 @@ describe("§52 — a §14-written edge is retractable through the §51 pair (the
       undefined,
       { actor: WRITER_SEED },
     );
-    // OBJECT level, two-sided: the writer's §14 edge is gone; the second author's stands.
     expect(view(unlinked, "unlinkorg_members")["members"]).toMatchObject([{ name: "Myk" }]);
 
-    // DELTA level: the §51 retraction landed on the §14 delta — the writer's own strike, the
-    // second author's edge untouched, nothing purged.
     await gateway.flush();
     expect((await idsOf(backend)).has(writersEdge!.id), "history survives").toBe(true);
     const strikes = gateway.reactor.negationsOf(writersEdge!.id);
@@ -651,11 +564,6 @@ describe("§52 — a §14-written edge is retractable through the §51 pair (the
 });
 
 describe("§52 — a refs declaration the body does not back cannot open the §14 door", () => {
-  // The two mismatch shapes, each refused in §14's own read-only voice: a declared role NO
-  // expand matches (the verb would mint the other prop's role), and a prefix-family role
-  // (`links` false — no single canonical role exists). Either one bypassing the writable gate
-  // would mint an edge folding into the prop's bucket under a role its own unlink can never
-  // match — writable through exactly one door, retractable through none.
   it("both mismatch shapes refuse read-only; the agreeing shelf prop still links", async () => {
     const { gateway } = await world();
     const allAsc = { kind: "all", order: { kind: "byTimestamp", dir: "asc" } } as const;
@@ -700,14 +608,12 @@ describe("§52 — a refs declaration the body does not back cannot open the §1
     );
     expect(outcome.bound).toBe(true);
 
-    // Shape 1: the declared role "advises" matches no expand — the verb would mint "members".
     const noExpand = await gateway.query(
       `mutation { linkAdvisory(entity: "advisory:board", field: "advisors", target: "${MYK}") { name } }`,
       undefined,
       { actor: WRITER_SEED },
     );
     expect(noExpand.errors?.join(" ")).toMatch(/"advisors" of Advisory is read-only/);
-    // Shape 2: a prefix-family reference — typing only, no single canonical role to author.
     const family = await gateway.query(
       `mutation { linkAdvisory(entity: "advisory:board", field: "contacts", target: "${MYK}") { name } }`,
       undefined,
@@ -715,8 +621,6 @@ describe("§52 — a refs declaration the body does not back cannot open the §1
     );
     expect(family.errors?.join(" ")).toMatch(/"contacts" of Advisory is read-only/);
 
-    // Two-sided: an AGREEING declaration on the same store still opens the door — the shelf's
-    // own event.attending, through the same §14 verb.
     const named = await gateway.query(
       `mutation { shallowPerson(entity: "${MYK}", name: "Myk") { name } }`,
     );
@@ -732,43 +636,32 @@ describe("§52 — a refs declaration the body does not back cannot open the §1
 });
 
 describe("§52 (i) — phase B: follows links typed, and the flat read the frozen rail asserts survives", () => {
-  // The reading deliberately has NO expand, so an entity pointer resolves to the bare id — the
-  // exact bytes frozen stock-depth.test.ts asserts as `follows: ["person:bob"]`. This rail proves
-  // that parity BESIDE the frozen file, so the equivalence cannot drift silently: if a future
-  // change nests the resolution, this reddens here before the frozen rail can be blamed.
-  // Two-sided unlink at the delta level (second author survives, history kept) is §52 (f)'s rail
-  // on the shared unlinkRefEntityImpl; this file asserts the follows round-trip at the door.
   it("link resolves flat, folds the far side, refuses the fossil, and unlinks clean", async () => {
     await run(["init", "--home", home], io());
     expect(await run(["register", "--stock", "person", "--home", home], io())).toBe(0);
     const handle = await serveDetached(["--home", home, "--port", "0", "--token", "t"]);
     try {
-      // The typed link — the same call the evolved depth rail now makes.
       let res = await gql(
         handle.url,
         `mutation { linkperson_follows(entity: "person:ada", target: "person:bob") { name } }`,
       );
       expect(res.errors, JSON.stringify(res.errors)).toBeUndefined();
 
-      // FLAT-READ PARITY: the resolved value is the bare id string, exactly the frozen assertion.
       const read = await gql(handle.url, `{ person(entity: "person:ada") { follows } }`);
       expect(read.errors, JSON.stringify(read.errors)).toBeUndefined();
       expect((read.data?.["person"] as { follows: unknown }).follows).toEqual(["person:bob"]);
 
-      // The far side folds under the declared reciprocal context, no expand needed.
       const far = await gql(handle.url, `{ person(entity: "person:bob") { _view } }`);
       expect(far.errors, JSON.stringify(far.errors)).toBeUndefined();
       const view = (far.data?.["person"] as { _view: Record<string, unknown> })._view;
       expect(view["followers"]).toEqual("person:ada");
 
-      // The fossil path is CLOSED at the schema itself: the argument no longer exists.
       const fossil = await gql(
         handle.url,
         `mutation { person(entity: "person:ada", follows: "person:carol") { name } }`,
       );
       expect(JSON.stringify(fossil.errors)).toMatch(/Unknown argument/);
 
-      // Unlink round-trip: the caller's own edge retracts and the read empties.
       res = await gql(
         handle.url,
         `mutation { unlinkperson_follows(entity: "person:ada", target: "person:bob") { name } }`,

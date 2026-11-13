@@ -1,16 +1,10 @@
-// T134 — `loam serve --oauth-allow-redirect`: opens §37 connector registration (POST
-// /oauth/register, behind the configured redirect-origin fence) when configured, and refuses a
-// malformed origin — or a store with no --public-url — at boot rather than silently doing nothing.
-// `test/server/oauth-register.test.ts` proves the DOOR behavior directly against `serve()`; this
-// file proves the CLI actually threads the flag there, mirroring `serve-public-url.test.ts`.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { run } from "../../src/cli/cli.js";
 
-vi.setConfig({ testTimeout: 20_000 }); // real listening servers
+vi.setConfig({ testTimeout: 20_000 });
 
 let home: string;
 const out: string[] = [];
@@ -56,8 +50,6 @@ describe("T134 — loam serve --oauth-allow-redirect", () => {
   });
 
   it("absent: POST /oauth/register is an unrouted path, exactly as before this ticket", async () => {
-    // A store configured for discovery but not registration: the endpoint the AS document advertises
-    // resolves as any other unmounted name would — the opt-in negative.
     const server = await serveDetached(["--public-url", PUBLIC_URL]);
     const reg = await registerAt(server.url, `${PUBLIC_URL}/cb`);
     const unmounted = await fetch(`${server.url}/nowhere-at-all`, { method: "POST" });
@@ -66,8 +58,6 @@ describe("T134 — loam serve --oauth-allow-redirect", () => {
   });
 
   it("configured: an allowlisted redirect registers; an off-allowlist one is refused", async () => {
-    // The flag carries two comma-separated origins, one padded with whitespace, so the CLI's own
-    // split/trim/filter is exercised rather than the library's alone.
     const server = await serveDetached([
       "--public-url",
       PUBLIC_URL,
@@ -105,7 +95,6 @@ describe("T134 — loam serve --oauth-allow-redirect", () => {
   });
 
   it("a malformed allowlist origin refuses at boot rather than refusing every registration", async () => {
-    // A default-port spelling url.origin would silently drop and never match — a startup error.
     const code = await run(
       [
         "serve",

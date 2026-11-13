@@ -1,7 +1,3 @@
-// A host is one substrate peer: it opens from its ordinary journal and admits through it. Each
-// case reads BOTH levels: the journal (what the peer admitted, and how it arrived) and the
-// gateway (what a reader sees). Pools stay off the journal until they take their own key.
-
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -54,7 +50,6 @@ const boot = (
     peerStore: backend.journalStore(),
   });
 
-// The journal's head, and its frame count: together they change on every commit.
 async function image(store: DurableOrdinaryJournalStore): Promise<string | undefined> {
   const read = await store.readJournal(OP);
   return read.status === "journal" ? `${read.head}/${read.frames.length}` : undefined;
@@ -77,13 +72,10 @@ describe("a host opened with a peer journal admits through it", () => {
     const d = note(1);
     await gw.append([d]);
     const state = await stateOf(backend.journalStore());
-    // delta level: the image admitted it, as a local arrival, and it is the store's row
     expect(state.base.admitted.has(d.id)).toBe(true);
     expect(state.base.arrivals.find((a) => a.id === d.id)?.sender).toBe("local");
     expect(await backend.holds(d.id)).toBe(true);
-    // every row the store holds is one the image admitted
     expect([...(await backend.ids())].every((id) => state.base.admitted.has(id))).toBe(true);
-    // object level: the gateway serves it
     expect(gw.reactor.get(d.id)).toBeDefined();
     await gw.close();
   });
@@ -111,7 +103,6 @@ describe("a host opened with a peer journal admits through it", () => {
     const erasure = signClaims(eraseClaims(live.id, OP, OP, 20_000), SEED);
     await gw.append([bystander, erasure]);
     const state = await stateOf(backend.journalStore());
-    // one transfer: the order and the ordinary delta share one transfer ordinal
     const arrivals = state.base.arrivals.filter(
       (a) => a.id === erasure.id || a.id === bystander.id,
     );
@@ -130,15 +121,12 @@ describe("a host opened with a peer journal admits through it", () => {
     const bystander = note(2);
     await gw.append([target]);
     await gw.append([bystander]);
-    await gw.erase(target.id).catch(() => undefined); // the report may be "not complete"
-    // delta level: the journal refuses the target
+    await gw.erase(target.id).catch(() => undefined);
     const state = await stateOf(backend.journalStore());
     expect(state.base.refusedIds.has(target.id)).toBe(true);
     expect(state.base.admitted.has(target.id)).toBe(false);
     expect(await backend.holds(target.id)).toBe(false);
-    // The bytes themselves are checked in the plaintext rail below.
     await gw.close();
-    // object level, after a reopen: the target never returns; the bystander is served
     const again = await boot(new SqliteBackend(path));
     expect(again.reactor.get(target.id)).toBeUndefined();
     expect(again.reactor.get(bystander.id)).toBeDefined();
@@ -156,10 +144,8 @@ describe("a host opened with a peer journal admits through it", () => {
       const order = signClaims(eraseClaims(target.id, OP, OP, 70_000), SEED);
       if (door === "append") await gw.append([order]);
       else await gw.federate([order], { admit: () => true });
-      // bytes: the target is gone, the bystander is held
       expect(await backend.holds(target.id)).toBe(false);
       expect(await backend.holds(bystander.id)).toBe(true);
-      // journal: the order is admitted, the target refused, and nothing is owed
       const state = await stateOf(backend.journalStore());
       expect(state.base.admitted.has(order.id)).toBe(true);
       expect(state.base.refusedIds.has(target.id)).toBe(true);
@@ -199,10 +185,8 @@ describe("a host opened with a peer journal admits through it", () => {
     await gw.close();
     const bytes = (f: string): Buffer => (existsSync(f) ? readFileSync(f) : Buffer.alloc(0));
     const file = Buffer.concat([bytes(path), bytes(`${path}-wal`)]);
-    // the bytes: the target's plaintext is nowhere in the file or its sidecar; the bystander's is
     expect(file.includes(Buffer.from(secret))).toBe(false);
     expect(file.includes(Buffer.from(kept))).toBe(true);
-    // and only then does the obligation read removed
     expect(state.obligations.filter((o) => o.targetId === target.id).map((o) => o.status)).toEqual([
       "removed",
     ]);
@@ -220,7 +204,7 @@ describe("a host opened with a peer journal admits through it", () => {
     await gw.erase(target.id);
     const later = note(2);
     await gw.append([later]);
-    const state = await stateOf(backend.journalStore()); // reopens from the checkpoint and frames
+    const state = await stateOf(backend.journalStore());
     expect(state.base.admitted.has(later.id)).toBe(true);
     expect(state.base.refusedIds.has(target.id)).toBe(true);
     await gw.close();
@@ -243,8 +227,6 @@ describe("a host opened with a peer journal admits through it", () => {
   it("the door and the write-through share one commit queue: neither loses a write", async () => {
     const backend = new MemoryBackend();
     const gw = await boot(backend);
-    // A delta that enters the reactor directly goes out through the write-through; the others go
-    // through the door. Both commit to one image, so both must be admitted.
     const raw = [4, 5, 6].map((n) => note(n));
     const door = [7, 8, 9].map((n) => note(n));
     const appends = door.map((d) => gw.append([d]));
@@ -261,7 +243,7 @@ describe("the journal is the authority over the rows", () => {
   it("a store with rows and no journal refuses to open, and its bytes do not change", async () => {
     const path = sqliteHome();
     const plain = new SqliteBackend(path);
-    await plain.append([note(1)]); // rows written by a store that never had an image
+    await plain.append([note(1)]);
     await plain.close();
     const hash = fileHash(path);
     const refused = new SqliteBackend(path);
@@ -300,10 +282,10 @@ describe("the journal is the authority over the rows", () => {
     db.prepare("DELETE FROM deltas WHERE id = ?").run(d.id);
     db.close();
     const again = await boot(new SqliteBackend(path));
-    expect(again.reactor.get(d.id)).toBeUndefined(); // nothing reconstructed from the journal
+    expect(again.reactor.get(d.id)).toBeUndefined();
     expect(again.reactor.get(bystander.id)).toBeDefined();
     const late = note(3);
-    await again.append([late]); // admission stays live
+    await again.append([late]);
     expect(again.reactor.get(late.id)).toBeDefined();
     await again.close();
   });
@@ -320,7 +302,7 @@ describe("the journal is the authority over the rows", () => {
     const backend = new SqliteBackend(path);
     const again = await boot(backend);
     expect(again.reactor.get(d.id)).toBeUndefined();
-    expect((await backend.quarantine()).map((r) => r.key)).toEqual([d.id]); // reported (§25)
+    expect((await backend.quarantine()).map((r) => r.key)).toEqual([d.id]);
     await again.close();
   });
 
@@ -331,11 +313,11 @@ describe("the journal is the authority over the rows", () => {
     await gw.append([kept]);
     await gw.close();
     const stray = note(2);
-    await new SqliteBackend(path).append([stray]); // a raw row, around the door
+    await new SqliteBackend(path).append([stray]);
     const again = await boot(new SqliteBackend(path));
     expect(again.reactor.get(stray.id)).toBeUndefined();
     expect(again.reactor.get(kept.id)).toBeDefined();
-    expect(again.rowsOutsideJournal).toBe(1); // held, not served, and counted for the report
+    expect(again.rowsOutsideJournal).toBe(1);
     await again.close();
   });
 
@@ -346,13 +328,12 @@ describe("the journal is the authority over the rows", () => {
     await gw.append([d]);
     await gw.close();
     const stray = note(2);
-    await new SqliteBackend(path).append([stray]); // a raw row the journal never admitted
+    await new SqliteBackend(path).append([stray]);
     const again = await Gateway.open(new SqliteBackend(path), { seed: SEED });
     expect(again.peer).toBeDefined();
     expect(again.reactor.get(d.id)).toBeDefined();
     expect(again.reactor.get(stray.id)).toBeUndefined();
     await again.close();
-    // No seed: the store's only journal names the peer, and the stray row stays unserved.
     const seedless = await Gateway.open(new SqliteBackend(path));
     expect(seedless.peer).toBeDefined();
     expect(seedless.reactor.get(stray.id)).toBeUndefined();
@@ -363,7 +344,6 @@ describe("the journal is the authority over the rows", () => {
     const path = sqliteHome();
     const gw = await boot(new SqliteBackend(path));
     await gw.close();
-    // The file holds the first peer's image and rows, and no image for the other key.
     const backend = new SqliteBackend(path);
     await expect(
       Gateway.boot(backend, assembleGenesis({ operatorSeed: OTHER_SEED }), {
@@ -392,11 +372,10 @@ describe("a pool is its own peer", () => {
     const pool = c.gateway!;
     expect(pool.peer?.journal.peerId).toBe(pool.operatorAuthor);
     expect(pool.operatorAuthor).not.toBe(OP);
-    const before = await image(backend.journalStore()); // after the host recorded the pool's key
+    const before = await image(backend.journalStore());
     const d = note(9);
     await pool.federate([d], { admit: () => true });
     expect(pool.reactor.get(d.id)).toBeDefined();
-    // the host's journal did not see the pool's write
     expect(await image(backend.journalStore())).toEqual(before);
     await gw.close();
   });
@@ -419,10 +398,10 @@ describe("two writers on one journal: catch up, re-check, retry", () => {
     const d1 = note(1);
     await a.append([d1]);
     const d2 = note(2);
-    await b.append([d2]); // b's head is stale: it reopens, takes in d1, and retries
+    await b.append([d2]);
     const state = await stateOf(bBackend.journalStore());
     expect(state.base.admitted.has(d1.id) && state.base.admitted.has(d2.id)).toBe(true);
-    expect(b.reactor.get(d1.id)).toBeDefined(); // b now serves what a wrote
+    expect(b.reactor.get(d1.id)).toBeDefined();
     await a.close();
     await b.close();
   });
@@ -435,7 +414,6 @@ describe("two writers on one journal: catch up, re-check, retry", () => {
     const granted = [...a.reactor.snapshot()].find((d) =>
       d.claims.pointers.some((p) => p.target.kind === "primitive" && p.target.value === WRITER),
     )!;
-    // a revokes the writer's grant; b has not seen it
     await a.append([signClaims(makeNegationClaims(OP, 20_000, granted.id), SEED)]);
     const late = note(3, WRITER_SEED);
     await expect(b.append([late])).rejects.toThrow(/not permitted/);
@@ -450,7 +428,6 @@ describe("two writers on one journal: catch up, re-check, retry", () => {
     const backend = new MemoryBackend();
     const real = backend.journalStore();
     let contended = false;
-    // Every commit after the boot finds the head moved by "another writer".
     const store: DurableOrdinaryJournalStore = {
       ...real,
       compareAndAppend: (...args) =>

@@ -1,4 +1,3 @@
-// A local operator invocation. Signed catalog files remain explicit inputs.
 import { readFileSync } from "node:fs";
 import { parseCommandDelta, serializeCommandDelta, type Primitive } from "@bombadil/rhizomatic";
 import { Gateway } from "../gateway/gateway.js";

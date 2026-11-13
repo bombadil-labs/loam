@@ -1,14 +1,3 @@
-// T174 — the operator's side of the register verb: minting a scoped grant, reading back what was
-// handed out, and killing it.
-//
-// `test/server/register-verb.test.ts` proves the DOOR honours the grant. This file proves the
-// operator can actually create one, SEE it, and revoke it — the three motions that make an
-// authority verb operable rather than merely implemented. `loam grant list` is the one surface an
-// operator has for reading their own delegations back, so a verb it cannot show is a verb nobody
-// can audit.
-//
-// Every store here is a fresh temp home. Nothing in this file touches a real ~/.loam.
-
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -35,7 +24,6 @@ const CONNECTOR = authorForSeed(CONNECTOR_SEED);
 const BYSTANDER_SEED = "e0".repeat(32);
 const BYSTANDER = authorForSeed(BYSTANDER_SEED);
 
-// Two connectors that have completed a token exchange — the state `loam grant` operates on.
 const seedConnectors = (): void => {
   const file: OAuthFile = {
     ...EMPTY_OAUTH,
@@ -75,7 +63,6 @@ const seedConnectors = (): void => {
   writeOAuthFile(home, file);
 };
 
-// What the GROUND says, read independently of anything the CLI prints.
 const prefixesInGround = async (author: string): Promise<string[]> => {
   const seed = readFileSync(join(home, "operator.seed"), "utf8").trim();
   const gateway = await Gateway.boot(
@@ -111,7 +98,6 @@ describe("T174 — loam grant <connector> --verb=register --prefix=<p>", () => {
     expect(code, printed()).toBe(0);
     expect(printed()).toContain("thread:");
     expect(await prefixesInGround(CONNECTOR)).toEqual(["thread:"]);
-    // Two-sided: the other connector got nothing.
     expect(await prefixesInGround(BYSTANDER)).toEqual([]);
   });
 
@@ -166,7 +152,6 @@ describe("T174 — loam grant list shows the verb and the prefix", () => {
     expect(listing).toContain("cli-thread");
     expect(listing).toContain("register");
     expect(listing).toContain("thread:");
-    // The bystander is listed too, and is NOT shown holding the prefix it was never given.
     const noteLine = listing
       .split("\n")
       .filter((l) => l.includes("cli-note"))
@@ -216,9 +201,6 @@ describe("T174 — the grant form is one connector at a time", () => {
 
 describe("T174 — the grant manual and its usage refusals", () => {
   it("`loam grant --help` documents the verb, the prefix, and the invocation", async () => {
-    // `grant` is absent from test/cli/help.test.ts's table, so the promise that every command
-    // names every flag it accepts is unenforced here. An authority flag with no manual is an
-    // authority nobody can find.
     expect(await run(["grant", "--help"], io())).toBe(0);
     const help = printed();
     expect(help).toContain("--verb");
@@ -245,9 +227,6 @@ describe("T174 — the grant manual and its usage refusals", () => {
   });
 
   it("UNREADABLE connector records refuse operationally — never as 'no such connector'", async () => {
-    // H9: a read that could not happen must not answer NO. Exit 1 (this store could not tell)
-    // is a different verdict from exit 2 (this store says there is no such connector), and an
-    // operator who confuses them mints a grant they think failed for the other reason.
     rmSync(join(home, "oauth.json"), { force: true });
     mkdirSync(join(home, "oauth.json"));
     const code = await run(

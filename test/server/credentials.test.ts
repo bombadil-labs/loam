@@ -1,15 +1,3 @@
-// §36 phase 1 (T122): credentials.json as a pure library. No door and no CLI read this file yet, so
-// every rail here calls src/server/credentials.ts directly — a login door's own rails arrive in a
-// later phase.
-//
-// NAMED GAPS, both of them, because an honest-looking comment over a weaker test is how this class
-// survives review (CLAUDE.md, SUBSTRATE-HAZARDS H10):
-//   - The mode assertions run on POSIX only. Windows reports 0666 for an ordinary file whatever
-//     `chmod` asked for, so a Windows run proves nothing about who may read a credential.
-//   - `fsync` is asserted by nothing below. Both fsync calls in `writeCredentials` are deletable
-//     with every rail here still green. An ESM named import of `node:fs` offers no spy point to
-//     intercept the call, so the honest move is to say so rather than fake a check that cannot fail.
-
 import { scryptSync } from "node:crypto";
 import {
   chmodSync,
@@ -40,8 +28,6 @@ import {
 
 const TEST_SCRYPT: ScryptParams = { N: 1024, r: 8, p: 1, keylen: 32 };
 const PASSWORD = "correct horse battery staple";
-// 32 hex chars = 16 bytes, at the shipped salt length, so a DAMAGE fixture that isn't testing the
-// salt itself does not also trip the minimum-salt-length check by accident.
 const LONG_SALT = "ab".repeat(16);
 
 let home: string;
@@ -54,9 +40,6 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-// Criterion 1: the salt reaches the derivation. A round trip through hashPassword/verifyPassword is
-// green even if `derive` ignores its salt argument, because both halves would ignore it together —
-// so the crossed-salt assertion is the one that actually pins this down.
 describe("the salt reaches the derivation", () => {
   it("two hashes of the same password differ, and each verifies only against its own salt", async () => {
     const first = await hashPassword(PASSWORD, TEST_SCRYPT);
@@ -69,9 +52,6 @@ describe("the salt reaches the derivation", () => {
   });
 });
 
-// Criterion 2: the stored bytes equal an independent scryptSync call, computed here rather than by
-// re-calling the function under test — an assertion against the pair under test would pass even if
-// hashPassword and verifyPassword shared the same wrong derivation.
 describe("the stored bytes are scrypt over the entry's own salt and params", () => {
   it("matches an independent scryptSync call", async () => {
     const entry = await hashPassword(PASSWORD, TEST_SCRYPT);
@@ -84,8 +64,6 @@ describe("the stored bytes are scrypt over the entry's own salt and params", () 
   });
 });
 
-// Criterion 3: an entry records the parameters it was created with, pinned against a hand-written
-// literal rather than read back from the entry itself.
 describe("an entry records its own creation parameters", () => {
   it("pins against the literal TEST_SCRYPT, not against the entry's own answer", async () => {
     const entry = await hashPassword(PASSWORD, TEST_SCRYPT);
@@ -96,9 +74,6 @@ describe("an entry records its own creation parameters", () => {
   });
 });
 
-// Criterion 4 + 9: every shape of damage refuses by throwing CredentialsUnreadable, never by
-// resolving to a match. "Cannot determine" is a distinct outcome from "no such user" (criterion 9's
-// ENOENT-as-empty case), which the last two entries below pin.
 describe("every shape of damage refuses, by name", () => {
   const DAMAGE: readonly (readonly [string, string])[] = [
     ["truncated mid-object", '{"version":1,"users":{"myk":'],
@@ -114,14 +89,10 @@ describe("every shape of damage refuses, by name", () => {
       '{"version":1,"users":{"myk":{"kind":"scrypt","salt":"","hash":"ab12","params":{"N":1024,"r":8,"p":1,"keylen":64}}}}',
     ],
     [
-      // The hash is the RIGHT length for its keylen (128 chars) and even, so the only check that
-      // can refuse it is the hex gate itself. Buffer.from(str, "hex") silently truncates at the
-      // first bad pair, so a rail that lets the length check answer for this proves nothing.
       "a non-hex hash",
       `{"version":1,"users":{"myk":{"kind":"scrypt","salt":"${LONG_SALT}","hash":"${"zz".repeat(64)}","params":{"N":1024,"r":8,"p":1,"keylen":64}}}}`,
     ],
     [
-      // 16 chars, even — clears the length floor and parity, so only the hex gate refuses.
       "a non-hex salt",
       `{"version":1,"users":{"myk":{"kind":"scrypt","salt":"${"zz".repeat(8)}","hash":"cd34","params":{"N":1024,"r":8,"p":1,"keylen":64}}}}`,
     ],
@@ -135,10 +106,6 @@ describe("every shape of damage refuses, by name", () => {
     ],
     ["an entry that is a string, not an object", '{"version":1,"users":{"myk":"just-a-string"}}'],
     [
-      // Every OTHER field is fully valid — salt long and hex, hash the right length, params
-      // complete — so the kind gate is the only check that can refuse. This is the gate that
-      // stops an unrecognised shape from being silently treated as scrypt; a fixture that is
-      // also broken elsewhere lets a different refusal answer for it.
       "an unknown credential kind",
       `{"version":1,"users":{"myk":{"kind":"telepathy","salt":"${LONG_SALT}","hash":"${"cd".repeat(64)}","params":{"N":1024,"r":8,"p":1,"keylen":64}}}}`,
     ],
@@ -171,24 +138,16 @@ describe("every shape of damage refuses, by name", () => {
     expect(() => readCredentials(home)).toThrow(CredentialsUnreadable);
   });
 
-  // Criterion 9's positive half: an absent file is a fresh home, not damage.
   it("a missing file reads as empty — an absent file is not damage", () => {
     expect(readCredentials(home)).toEqual({ version: 1, users: {} });
   });
 
-  // Criterion 9's negative half, and the positive control for it: only ENOENT means "empty". A file
-  // that exists but names a directory (a distinct, non-ENOENT read fault) still refuses, so the
-  // empty-file path cannot be satisfied by any read failure whatsoever.
   it("a read fault that is not ENOENT still refuses, rather than reading as empty", () => {
-    // credentials.json is itself a directory: readFileSync fails EISDIR, not ENOENT — a distinct,
-    // real fault that the empty-file fallback must not swallow.
     mkdirSync(path());
     expect(() => readCredentials(home)).toThrow(CredentialsUnreadable);
   });
 
   it("checkEntry bounds scrypt parameters against a DoS-sized N, r or p", async () => {
-    // A genuinely valid entry as the baseline, so only `params` varies — a fixed too-short salt or
-    // hash here would let the wrong check fail and hide whether the bound itself works.
     const base = await hashPassword(PASSWORD, TEST_SCRYPT);
     const withParams = (params: ScryptParams): unknown => ({ ...base, params });
     expect(() => checkEntry(withParams({ ...TEST_SCRYPT, N: 2 ** 24 }), "test")).toThrow(
@@ -203,10 +162,6 @@ describe("every shape of damage refuses, by name", () => {
     expect(() => checkEntry(withParams({ ...TEST_SCRYPT, keylen: 4 }), "test")).toThrow(
       CredentialsUnreadable,
     );
-    // A large `p` alone must not buy back the CPU time the memory bound denied it. N=131072, r=1
-    // costs 16 MiB (well under the 64 MiB memory bound) but, at p=16, its CPU cost (N*r*p =
-    // 2,097,152) is double the 1,048,576 ceiling — so the memory bound passing must not be read as
-    // the CPU bound passing too.
     expect(() => checkEntry(withParams({ N: 2 ** 17, r: 1, p: 16, keylen: 32 }), "test")).toThrow(
       CredentialsUnreadable,
     );
@@ -216,10 +171,6 @@ describe("every shape of damage refuses, by name", () => {
   it("checkEntry pins the CPU bound precisely: 8x the default cost is refused, not 9x", async () => {
     const base = await hashPassword(PASSWORD, TEST_SCRYPT);
     const withParams = (params: ScryptParams): unknown => ({ ...base, params });
-    // N=8192, r=9: memory cost is 128*8192*9 = 9,437,184 bytes, comfortably under the 64 MiB memory
-    // bound. At p=16 the CPU cost (N*r*p = 1,179,648) sits strictly between the real 8x-default
-    // ceiling (1,048,576) and a hypothetical 9x-default ceiling (1,179,648) — so a boundary drawn one
-    // multiple too loose would admit this entry, and the real bound must not.
     expect(() => checkEntry(withParams({ N: 8192, r: 9, p: 16, keylen: 32 }), "test")).toThrow(
       CredentialsUnreadable,
     );
@@ -228,13 +179,9 @@ describe("every shape of damage refuses, by name", () => {
   it("checkEntry admits the memory bound's own exact edge, and refuses one N-step past it", async () => {
     const base = await hashPassword(PASSWORD, TEST_SCRYPT);
     const withParams = (params: ScryptParams): unknown => ({ ...base, params });
-    // N=32768, r=16: N*r=524,288, exactly the 64 MiB bound (128*524,288 = 67,108,864 bytes). This
-    // also pins the bound's own arithmetic (`MAX_MEMORY_BYTES / 128`, not `/ 129` or some other
-    // divisor) — a wrong divisor shifts this exact edge either open or closed.
     expect(() =>
       checkEntry(withParams({ N: 32768, r: 16, p: 1, keylen: 32 }), "test"),
     ).not.toThrow();
-    // N=65536, r=16: doubles N*r to 1,048,576 — unambiguously past the bound from any direction.
     expect(() => checkEntry(withParams({ N: 65536, r: 16, p: 1, keylen: 32 }), "test")).toThrow(
       CredentialsUnreadable,
     );
@@ -247,12 +194,9 @@ describe("every shape of damage refuses, by name", () => {
     expect(() => checkEntry(withParams({ ...TEST_SCRYPT, N: 1 }), "test")).toThrow(
       CredentialsUnreadable,
     );
-    // Bitwise ops coerce to int32, so a non-integer that LOOKS power-of-two under that coercion
-    // (1024.5 truncates to 1024) must still be refused by the explicit Number.isInteger check.
     expect(() => checkEntry(withParams({ ...TEST_SCRYPT, N: 1024.5 }), "test")).toThrow(
       CredentialsUnreadable,
     );
-    // A number that is simply not a power of two at all, regardless of the integer check.
     expect(() => checkEntry(withParams({ ...TEST_SCRYPT, N: 1000 }), "test")).toThrow(
       CredentialsUnreadable,
     );
@@ -266,10 +210,6 @@ describe("every shape of damage refuses, by name", () => {
     );
   });
 
-  // A fabricated entry whose hash length always matches its own keylen, so a keylen boundary test
-  // does not accidentally throw on the SEPARATE hash-length check instead of the one under test —
-  // that coupling is why a `keylen: 32.5` test against a fixed 64-hex-char hash could not
-  // distinguish the keylen check's own logic from the hash-length check downstream of it.
   const fakeEntry = (params: ScryptParams): unknown => ({
     kind: "scrypt",
     salt: LONG_SALT,
@@ -278,10 +218,6 @@ describe("every shape of damage refuses, by name", () => {
   });
 
   it("checkEntry's keylen floor sits exactly at 16 bytes", () => {
-    // A non-integer keylen is not separately rail-tested here: `hash.length` is always a whole
-    // number of hex characters, and `keylen * 2` for any non-integer keylen can never equal one —
-    // so the hash-length check (rail above) refuses every non-integer keylen on its own, making
-    // checkParams's own integer check defense-in-depth rather than the only guard.
     expect(() => checkEntry(fakeEntry({ ...TEST_SCRYPT, keylen: 16 }), "test")).not.toThrow();
     expect(() => checkEntry(fakeEntry({ ...TEST_SCRYPT, keylen: 15 }), "test")).toThrow(
       CredentialsUnreadable,
@@ -301,9 +237,6 @@ describe("every shape of damage refuses, by name", () => {
   });
 
   it('checkEntry refuses a raw entry that is null — typeof null is "object"', () => {
-    // `typeof null === "object"`, so the null check must stay a separate clause rather than folding
-    // into the typeof check — collapsing them would let a null entry fall through to a property
-    // access on null and crash with a bare TypeError instead of a named CredentialsUnreadable.
     expect(() => checkEntry(null, "test")).toThrow(CredentialsUnreadable);
   });
 
@@ -321,30 +254,22 @@ describe("every shape of damage refuses, by name", () => {
 
   it("readCredentials builds `users` with no prototype: `__proto__` is an ordinary key", async () => {
     const entry = await hashPassword(PASSWORD, TEST_SCRYPT);
-    // Written as raw text, never through a JS object literal — `{ __proto__: entry }` as a literal
-    // sets the prototype rather than an own property, which would silently drop the key before
-    // JSON.stringify ever saw it and prove nothing.
     const entryJson = JSON.stringify(entry);
     writeFileSync(path(), `{"version":1,"users":{"__proto__":${entryJson},"myk":${entryJson}}}`);
     const file = readCredentials(home);
     expect(Object.getPrototypeOf(file.users)).toBeNull();
     expect(entryFor(file, "__proto__")).toEqual(entry);
     expect(entryFor(file, "myk")).toEqual(entry);
-    // and the real Object.prototype is untouched
     expect(Object.getPrototypeOf({})).toBe(Object.prototype);
   });
 });
 
 describe("writing credentials.json", () => {
-  // POSIX only: the whole subject is a mode transition, and Windows reports 0666 for an ordinary
-  // file whatever chmod asked for.
   it.skipIf(process.platform === "win32")(
     "lands at 0600 even when the path already sat at 0644",
     async () => {
       const entry = await hashPassword(PASSWORD, TEST_SCRYPT);
       writeCredentials(home, { version: 1, users: { myk: entry } });
-      // The fresh-create path is its own claim: assert it BEFORE forcing the downgrade, or this
-      // rail only ever proves the rewrite half.
       expect(statSync(path()).mode & 0o777).toBe(0o600);
       chmodSync(path(), 0o644);
       expect(statSync(path()).mode & 0o777).toBe(0o644);
@@ -370,7 +295,6 @@ describe("writing credentials.json", () => {
     writeCredentials(home, { version: 1, users: { ...before.users, wren: before.users["myk"]! } });
     const after = readCredentials(home);
     expect(Object.keys(after.users).sort()).toEqual(["myk", "wren"]);
-    // no temp of THIS writer's making is left behind; the stranger's own leftover is untouched
     expect(
       readdirSync(home).filter((n) => n.endsWith(".tmp") && n !== "credentials.json.tmp"),
     ).toEqual([]);
@@ -381,7 +305,7 @@ describe("writing credentials.json", () => {
     const entry = await hashPassword(PASSWORD, TEST_SCRYPT);
     writeCredentials(home, { version: 1, users: { myk: entry } });
     rmSync(path(), { force: true });
-    mkdirSync(path()); // rename onto an existing directory fails, forcing the catch path
+    mkdirSync(path());
     expect(() => writeCredentials(home, { version: 1, users: { myk: entry } })).toThrow();
     expect(readdirSync(home).filter((n) => n.endsWith(".tmp"))).toEqual([]);
   });
@@ -401,7 +325,7 @@ describe("writing credentials.json", () => {
 
 describe("the shipped scrypt parameters", () => {
   it("hash and verify each other, and reject a wrong password", async () => {
-    expect(DEFAULT_SCRYPT.N & (DEFAULT_SCRYPT.N - 1)).toBe(0); // a power of two, as scrypt demands
+    expect(DEFAULT_SCRYPT.N & (DEFAULT_SCRYPT.N - 1)).toBe(0);
     expect(DEFAULT_SCRYPT.N).toBeGreaterThanOrEqual(16384);
     expect(DEFAULT_SCRYPT.keylen).toBeGreaterThanOrEqual(32);
     const entry = await hashPassword(PASSWORD);

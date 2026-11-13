@@ -1,21 +1,3 @@
-// T146 — the human doors answer humans in HTML, and JSON callers keep their exact bytes.
-//
-// The discriminator under test: a POST is a BROWSER FORM SUBMISSION when its content-type is
-// form-urlencoded AND its Accept asks for text/html — what real Chrome sends on a form
-// navigation. Every frozen rail and API caller sends fetch's default accept, so the frozen JSON
-// shapes are pinned by files this one must not touch (login-door.test.ts, login-csrf.test.ts,
-// referrer-policy.test.ts); the byte-exact expectations in (b) here are HAND-WRITTEN copies of
-// those shapes (H10), so a drift in either frame goes red in THIS file, beside the HTML rail
-// it must stay in step with.
-//
-// What this file deliberately does not assert: the real browser walk (wrong password, then
-// right, then the signed-in → admin → sign-out link-walk) lives in test/browser/human-doors.test.ts,
-// where real Chrome sends the real headers. This file proves the seam; that one proves a person
-// can use it. And the 503 refusals (busy door, unreachable ground) are not exercised in the HTML
-// frame: they ride the same refuseDoor seam (a) pins, and building a vanished-mount or held-hash
-// fixture here would duplicate login-door.test.ts (q)/(s) for no new seam coverage — the frame
-// rail that would close it fully is a browser story against a broken store.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,14 +11,13 @@ import { roleClaims, userClaims } from "../../src/server/users.js";
 import { PRESESSION_COOKIE, SESSION_COOKIE } from "../../src/server/session.js";
 import { SAME_ORIGIN, cookiesOf, formTokenOf, valueOf } from "../helpers/session-fixture.js";
 
-vi.setConfig({ testTimeout: 20_000 }); // real listening servers
+vi.setConfig({ testTimeout: 20_000 });
 
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
 const CHEAP: ScryptParams = { N: 1024, r: 8, p: 1, keylen: 32 };
 const PASSWORD = "correct horse";
 
-/** What a real browser's form navigation asks for; fetch's default is star-slash-star. */
 const BROWSER_ACCEPT = {
   accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 } as const;
@@ -78,7 +59,6 @@ async function doorServer(
   return { base: handle.url, gateway };
 }
 
-/** A fresh stateless pre-session: nonce cookie value + the form token minted for it. */
 async function formPair(base: string): Promise<{ token: string; nonce: string }> {
   const form = await fetch(`${base}/login`);
   const nonce = valueOf(cookiesOf(form).find((c) => c.startsWith(`${PRESESSION_COOKIE}=`))!);
@@ -97,7 +77,6 @@ function postLogin(
   });
 }
 
-/** Sign in and keep both halves a page needs: the session cookie and its own form token. */
 async function signInFull(
   base: string,
   user: string,
@@ -125,13 +104,11 @@ describe("T146 — a browser form POST is answered in HTML", () => {
     expect(refused.status).toBe(401);
     expect(refused.headers.get("content-type")).toContain("text/html");
     expect(refused.headers.get("referrer-policy")).toBe("same-origin");
-    expect(cookiesOf(refused)).toEqual([]); // a refusal sets nothing
+    expect(cookiesOf(refused)).toEqual([]);
     const body = await refused.text();
-    // The one-refusal sentence, exactly the JSON's — and the form, intact, user preserved.
     expect(body).toContain("the login was refused");
     expect(body).toContain('action="/login"');
     expect(body).toContain('name="user" value="myk"');
-    // The token the refusal page carries is honest: the retry with the right password succeeds.
     const retry = await postLogin(
       base,
       { form_token: formTokenOf(body), user: "myk", password: PASSWORD },
@@ -143,7 +120,6 @@ describe("T146 — a browser form POST is answered in HTML", () => {
 
   it("(b) the JSON caller's bytes did not move — hand-written, byte-exact", async () => {
     const { base } = await doorServer();
-    // The identical wrong-password POST, minus the browser Accept: the frozen JSON shape.
     const pair = await formPair(base);
     const refused = await postLogin(
       base,
@@ -154,26 +130,21 @@ describe("T146 — a browser form POST is answered in HTML", () => {
     expect(refused.headers.get("content-type")).toContain("application/json");
     expect(refused.headers.get("referrer-policy")).toBe("no-referrer");
     expect(await refused.text()).toBe('{"errors":["the login was refused"]}');
-    // The provenance refusal, JSON frame.
     const cross = await postLogin(base, { user: "myk", password: PASSWORD }, {});
     expect(cross.status).toBe(403);
     expect(await cross.text()).toBe(
       '{"errors":["this request did not come from this store\'s own page, so it is refused — ' +
         'reload the page and try again"]}',
     );
-    // The orphan logout, JSON frame.
     const orphan = await fetch(`${base}/logout`, { method: "POST", headers: SAME_ORIGIN });
     expect(orphan.status).toBe(401);
     expect(await orphan.text()).toBe('{"errors":["no live session is presented here"]}');
-    // An application/json Accept is a JSON caller too, whatever the content-type says.
     const jsonAccept = await postLogin(
       base,
       { user: "myk", password: PASSWORD },
       { accept: "application/json" },
     );
     expect(jsonAccept.headers.get("content-type")).toContain("application/json");
-    // And a browser Accept WITHOUT the form content-type is a JSON caller too — both conjuncts
-    // of the discriminator are load-bearing, so each is pinned alone.
     const htmlAcceptOnly = await fetch(`${base}/login`, {
       method: "POST",
       headers: { "content-type": "application/json", ...BROWSER_ACCEPT },
@@ -181,8 +152,6 @@ describe("T146 — a browser form POST is answered in HTML", () => {
     });
     expect(htmlAcceptOnly.status).toBe(403);
     expect(htmlAcceptOnly.headers.get("content-type")).toContain("application/json");
-    // A caller that merely TOLERATES html behind its preferred JSON is a JSON caller: text/html
-    // must be the accept's first media range, the shape every browser form navigation sends.
     const tolerated = await postLogin(
       base,
       { user: "myk", password: PASSWORD },
@@ -206,8 +175,6 @@ describe("T146 — a browser form POST is answered in HTML", () => {
     expect(wrongPassword.status).toBe(401);
     expect(unknownName.status).toBe(401);
     expect(roleless.status).toBe(401);
-    // The page may echo the name its own caller just typed; it may say nothing else that
-    // differs. Strip that echo and the three bodies must be byte-identical — no oracle.
     const withoutEcho = (html: string): string =>
       html.replace(/name="user" value="[^"]*"/, 'name="user"');
     const bodies = await Promise.all([wrongPassword.text(), unknownName.text(), roleless.text()]);
@@ -233,7 +200,7 @@ describe("T146 — a browser form POST is answered in HTML", () => {
     expect(cookiesOf(refused)).toEqual([]);
     const body = await refused.text();
     expect(body.toLowerCase()).toContain("reload");
-    expect(body).toContain('action="/login"'); // the nonce was presented, so the form re-renders
+    expect(body).toContain('action="/login"');
   });
 
   it("(e) a browser's orphan logout lands on a page that offers the way in", async () => {
@@ -251,22 +218,15 @@ describe("T146 — a browser form POST is answered in HTML", () => {
     expect(orphan.headers.get("content-type")).toContain("text/html");
     const body = await orphan.text();
     expect(body).toContain("no live session is presented here");
-    // No cookie was presented, so no honest form token exists — the page links instead.
     expect(body).toContain('href="/login"');
   });
 
   it("(h) an HTML-frame refusal slides no idle window — the salvage renders through peek, never touch", async () => {
-    // The frozen no-slide rail (login-csrf (b2)) never enters the HTML frame, and the HTML
-    // refusal is the one new path that reads the session row on its way to a refusal. If the
-    // salvage ever read it through `touch`, refused browser traffic would keep a victim's
-    // session alive forever. Same clock fixture as (b2), driven through the browser frame.
     let clock = 0;
     const { base } = await doorServer({ idleMs: 1000, monotonicNow: () => clock });
     const myk = await signInFull(base, "myk");
     const sessionCookie = { cookie: `${SESSION_COOKIE}=${myk.sessionId}` };
     clock = 900;
-    // Clears the guard (session token binds), is refused on its merits, and renders the HTML
-    // salvage — the assertion on content-type proves the refusal path under test actually ran.
     const refused = await postLogin(
       base,
       { form_token: myk.formToken, user: "myk", password: "not it" },
@@ -274,11 +234,9 @@ describe("T146 — a browser form POST is answered in HTML", () => {
     );
     expect(refused.status).toBe(401);
     expect(refused.headers.get("content-type")).toContain("text/html");
-    // Past the ORIGINAL window: a slid session would still answer Signed in here.
     clock = 1500;
     const after = await fetch(`${base}/login`, { headers: sessionCookie });
     expect(await after.text()).not.toContain("Signed in");
-    // The control: a session ADMITTED at 900 does slide to 1900 (two-sided, in this fixture).
     clock = 0;
     const second = await signInFull(base, "myk");
     const secondCookie = { cookie: `${SESSION_COOKIE}=${second.sessionId}` };
@@ -302,17 +260,13 @@ describe("T146 — the pages link each other", () => {
     });
     expect(await signedIn.text()).toContain('href="/admin"');
 
-    // ada has no container yet: the create-offer page still carries the sign-out form.
     const ada = await signInFull(base, "ada");
     const adaCookie = { cookie: `${SESSION_COOKIE}=${ada.sessionId}` };
     const offer = await fetch(`${base}/admin`, { headers: adaCookie });
-    // The whole form, markup and all — a garbled button or close tag is a form a person
-    // cannot use, so the assertions pin the exact markup (a mutation probe survived less).
     const offerHtml = await offer.text();
     expect(offerHtml).toContain('<form method="post" action="/logout">');
     expect(offerHtml).toContain('<button type="submit">sign out</button>\n</form>');
 
-    // With a root, the dashboard carries it too.
     await fetch(`${base}/admin/create-root`, {
       method: "POST",
       headers: {
@@ -327,7 +281,6 @@ describe("T146 — the pages link each other", () => {
     expect(dashboardHtml).toContain('<form method="post" action="/logout">');
     expect(dashboardHtml).toContain('<button type="submit">sign out</button>\n</form>');
 
-    // A refusal page is no longer a dead end.
     const refused = await fetch(
       `${base}/admin/container?name=${encodeURIComponent("somebody-else")}`,
       { headers: adaCookie },
@@ -353,10 +306,7 @@ describe("T146 — the pages link each other", () => {
       body: new URLSearchParams({ form_token: ada.formToken }).toString(),
     });
     const dashboard = await (await fetch(`${base}/admin`, { headers: adaCookie })).text();
-    // The invited shape is the door's own precondition, pre-filled: the name input opens with
-    // `ada:` already typed, so completing it cannot produce a name the door refuses for shape.
     expect(dashboard).toContain('<input name="name" value="ada:">');
-    // Two-sided: the completion of exactly that invitation is accepted.
     const declared = await fetch(`${base}/admin/declare`, {
       method: "POST",
       redirect: "manual",

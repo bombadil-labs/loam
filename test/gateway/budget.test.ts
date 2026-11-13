@@ -1,12 +1,3 @@
-// Door resource budgets (SPEC §25). §12 caps the STRANGER at the public door as a safety law; a
-// GRANTED author is trusted, so metering their append VOLUME is deployment config, not a
-// constitutional invariant — and being Loam, config is data. An operator-signed declaration at
-// `loam:budget` names an author and the maximum count of deltas they may hold; the
-// append door consults it, re-resolved live, so raising a quota is a delta not a restart. Absent
-// a declaration a granted author stays UNMETERED (today's behavior — this slice is additive).
-// Only the operator's voice budgets in a governed store; an ungoverned store meters no one; and
-// none of this touches §12's stranger caps, which remain law.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims, type Claims } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
@@ -34,8 +25,6 @@ import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "./fixtures.js";
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
 
-// A fresh governed store where the gardener and surveyor hold write standing but hold zero
-// deltas of their own yet — so a budget's arithmetic is exact and legible.
 async function governed(): Promise<Gateway> {
   const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
   await gateway.append([
@@ -50,8 +39,6 @@ const setBudget = (gateway: Gateway, subject: string, max: number, ts = Date.now
   return gateway.append([delta]).then(() => delta);
 };
 
-// A budget declaration with ARBITRARY limit dimensions — the shape a newer store would author, so
-// forward-compatibility can be exercised (an unknown dimension is tolerated here, never rejected).
 const budgetWith = (
   subject: string,
   limits: readonly { readonly role: string; readonly value: number }[],
@@ -73,8 +60,6 @@ const budgetWith = (
   ],
 });
 
-// A distinct gardener-authored delta each call — distinct timestamps give distinct ids, so each
-// is a genuine unit of volume.
 const grow = (gateway: Gateway, ts: number, seed = GARDENER_SEED) =>
   gateway.append([observed(FERN, "height", ts, ts, seed)]);
 
@@ -95,11 +80,10 @@ describe("per-author door budgets (SPEC §25)", () => {
       readBudgetPolicy(gateway.reactor, gateway.validityNow(), OPERATOR).get(GARDENER)?.maxAppends,
     ).toBe(2);
 
-    await expect(grow(gateway, 1001)).resolves.toMatchObject({ accepted: 1 }); // held 0 → 1
-    await expect(grow(gateway, 1002)).resolves.toMatchObject({ accepted: 1 }); // held 1 → 2
-    await expect(grow(gateway, 1003)).rejects.toThrow(/over budget/); // held 2, no room
+    await expect(grow(gateway, 1001)).resolves.toMatchObject({ accepted: 1 });
+    await expect(grow(gateway, 1002)).resolves.toMatchObject({ accepted: 1 });
+    await expect(grow(gateway, 1003)).rejects.toThrow(/over budget/);
 
-    // The refusal moved nothing: the gardener still holds exactly the two the quota allows.
     let held = 0;
     for (const d of gateway.reactor.snapshot()) if (d.claims.author === GARDENER) held += 1;
     expect(held).toBe(2);
@@ -111,7 +95,6 @@ describe("per-author door budgets (SPEC §25)", () => {
     await setBudget(gateway, GARDENER, 1, 5000);
     await expect(grow(gateway, 1001)).resolves.toMatchObject({ accepted: 1 });
     await expect(grow(gateway, 1002)).rejects.toThrow(/over budget/);
-    // The surveyor, unbudgeted, appends without limit.
     for (let i = 0; i < 4; i += 1) {
       await expect(grow(gateway, 2000 + i, SURVEYOR_SEED)).resolves.toMatchObject({ accepted: 1 });
     }
@@ -123,16 +106,14 @@ describe("per-author door budgets (SPEC §25)", () => {
     await setBudget(gateway, GARDENER, 2, 5000);
     await grow(gateway, 1001);
     await grow(gateway, 1002);
-    await expect(grow(gateway, 1003)).rejects.toThrow(/over budget/); // metered out at 2
+    await expect(grow(gateway, 1003)).rejects.toThrow(/over budget/);
 
-    // A fresh declaration raises the ceiling — a delta, not a reboot — and the same live
-    // gateway lets the next append through.
     await setBudget(gateway, GARDENER, 3, 5001);
     expect(
       readBudgetPolicy(gateway.reactor, gateway.validityNow(), OPERATOR).get(GARDENER)?.maxAppends,
     ).toBe(3);
-    await expect(grow(gateway, 1004)).resolves.toMatchObject({ accepted: 1 }); // held 2 → 3
-    await expect(grow(gateway, 1005)).rejects.toThrow(/over budget/); // and metered again at 3
+    await expect(grow(gateway, 1004)).resolves.toMatchObject({ accepted: 1 });
+    await expect(grow(gateway, 1005)).rejects.toThrow(/over budget/);
     await gateway.close();
   });
 
@@ -141,16 +122,11 @@ describe("per-author door budgets (SPEC §25)", () => {
     await setBudget(gateway, GARDENER, 3, 5000);
     const first = observed(FERN, "height", 1, 1001, GARDENER_SEED);
     await gateway.append([first]);
-    await grow(gateway, 1002); // held 2
+    await grow(gateway, 1002);
 
-    // Grow-only honesty: a negation is ITSELF a delta. The gardener negating their own claim
-    // spends the third slot rather than reclaiming one — footprint stays monotonic.
     await gateway.append([signClaims(makeNegationClaims(GARDENER, 1003, first.id), GARDENER_SEED)]);
-    await expect(grow(gateway, 1004)).rejects.toThrow(/over budget/); // held 3 (incl. the negation)
+    await expect(grow(gateway, 1004)).rejects.toThrow(/over budget/);
 
-    // The one thing that lowers the footprint is an operator ERASURE (§11) — it removes a delta
-    // from the ground and the reactor is rebuilt, so the gardener's held count falls and the
-    // door reopens on the next request, live.
     await gateway.erase(first.id);
     await expect(grow(gateway, 1005)).resolves.toMatchObject({ accepted: 1 });
     await gateway.close();
@@ -162,7 +138,6 @@ describe("per-author door budgets (SPEC §25)", () => {
     await grow(gateway, 1001);
     await expect(grow(gateway, 1002)).rejects.toThrow(/over budget/);
 
-    // The operator strikes the budget declaration; the ceiling lifts entirely, live.
     await gateway.append([
       signClaims(makeNegationClaims(OPERATOR, 5001, budget.id), OPERATOR_SEED),
     ]);
@@ -175,8 +150,6 @@ describe("per-author door budgets (SPEC §25)", () => {
 
   it("a non-operator's budget declaration binds nothing in a governed store", async () => {
     const gateway = await governed();
-    // The surveyor holds write standing, so the declaration LANDS as data — but only the
-    // operator's voice budgets, so it meters no one.
     await gateway.append([signClaims(budgetClaims(GARDENER, 1, SURVEYOR, 5000), SURVEYOR_SEED)]);
     expect(readBudgetPolicy(gateway.reactor, gateway.validityNow(), OPERATOR).size).toBe(0);
     for (let i = 0; i < 4; i += 1) {
@@ -243,9 +216,6 @@ describe("per-author door budgets (SPEC §25)", () => {
 
   it("tolerates a dimension it does not recognize, still enforcing the one it does (forward-compat)", async () => {
     const gateway = await governed();
-    // A newer store's declaration: a volume cap AND a `maxRate` cap this store cannot enforce yet.
-    // The door must ACCEPT the unknown dimension (never reject a newer store's limit) and go on
-    // enforcing maxAppends — this is what lets the budget vocabulary grow without a migration.
     await gateway.append([
       signClaims(
         budgetWith(
@@ -262,15 +232,13 @@ describe("per-author door budgets (SPEC §25)", () => {
     expect(
       readBudgetPolicy(gateway.reactor, gateway.validityNow(), OPERATOR).get(GARDENER)?.maxAppends,
     ).toBe(1);
-    await expect(grow(gateway, 1001)).resolves.toMatchObject({ accepted: 1 }); // maxAppends honored
-    await expect(grow(gateway, 1002)).rejects.toThrow(/over budget/); // the unknown dimension ignored
+    await expect(grow(gateway, 1001)).resolves.toMatchObject({ accepted: 1 });
+    await expect(grow(gateway, 1002)).rejects.toThrow(/over budget/);
     await gateway.close();
   });
 
   it("a declaration bearing ONLY an unrecognized dimension leaves the author unmetered here", async () => {
     const gateway = await governed();
-    // A future rate-only budget: accepted (never rejected), but a store that cannot enforce rate
-    // meters nothing by it — the honest forward-compatible reading, not a silent full stop.
     await gateway.append([
       signClaims(budgetWith(GARDENER, [{ role: "maxRate", value: 1 }], 5000), OPERATOR_SEED),
     ]);
@@ -292,12 +260,9 @@ describe("per-author door budgets (SPEC §25)", () => {
       signClaims(grantClaims(STORE_ENTITY, GARDENER, "write", OPERATOR, 9001), OPERATOR_SEED),
     ]);
     gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
-    // The trusted CEILING — a per-author budget — is set on the gardener...
     await setBudget(gateway, GARDENER, 1, 5000);
     await gateway.append([signClaims(publicClaims(["Plant"], OPERATOR, 10_000), OPERATOR_SEED)]);
 
-    // ...and the stranger FLOOR still meters anonymous watches on its own §12 budget, wholly
-    // independent: the first public watch takes the one slot, the second is refused there.
     const first = await gateway.subscribePublic(
       `subscription { plant(entity: "plant:a") { _hex } }`,
     );

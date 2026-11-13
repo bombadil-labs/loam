@@ -1,9 +1,3 @@
-// The ordinary journal store seam (rhizomatic 0.11.0-next.6), per driver. These rails drive the
-// substrate's OrdinaryJournalPeer directly over each adapter: no gateway is involved, so what they
-// prove is the storage contract itself. The erasure rail checks the BYTES of the sqlite file and
-// its -wal sidecar, because a row-only absence proof is not a proof (the frames and checkpoints
-// hold payloads too).
-
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -96,13 +90,13 @@ describe("the journal store seam, per driver", () => {
       const peer = await opened(store);
       const d = note(3);
       expect((await admit(peer, [d])).status).toBe("committed");
-      const again = await opened(store); // a reopen replays the frames and checks the rows
+      const again = await opened(store);
       expect(again.availableDeltas().has(d.id)).toBe(true);
       const head = again.currentHead();
       expect(
         await store.compareAndSettlePurge!(OP, head, "x", new Uint8Array([7]), d.id, 1),
       ).toEqual({ status: "absence-refuted", targetId: d.id });
-      expect(await store.readHead(OP)).toEqual({ status: "head", head }); // unchanged
+      expect(await store.readHead(OP)).toEqual({ status: "head", head });
     });
   }
 });
@@ -131,12 +125,11 @@ describe("erasure through the journal, proven at the bytes", () => {
     });
     expect(erased.status).toBe("committed");
     const owed = peer.snapshot().obligations.find((o) => o.targetId === target.id)!;
-    // before any rebase the settle is refused: the admitting frame still holds the payload
     await backend.purge([target.id]);
     expect((await peer.reportPurge(target.id, owed.generation, { status: "removed" })).status).toBe(
       "absence-refuted",
     );
-    const reopened = await opened(store); // a refuted settle asks for a reopen
+    const reopened = await opened(store);
     expect((await reopened.rebase()).status).toBe("durable");
     expect(
       (await reopened.reportPurge(target.id, owed.generation, { status: "removed" })).status,
@@ -145,7 +138,7 @@ describe("erasure through the journal, proven at the bytes", () => {
     const bytes = (f: string): Buffer => (existsSync(f) ? readFileSync(f) : Buffer.alloc(0));
     const file = Buffer.concat([bytes(path), bytes(`${path}-wal`)]);
     expect(file.includes(Buffer.from(secret))).toBe(false);
-    expect(file.includes(Buffer.from("BYSTANDER-KEPT-MARKER"))).toBe(true); // two-sided
+    expect(file.includes(Buffer.from("BYSTANDER-KEPT-MARKER"))).toBe(true);
   });
 
   it("mirror: a settle refutes absence while the shadow tier holds a copy", async () => {
@@ -168,7 +161,6 @@ describe("settle paths after an interrupted checkpoint, and against a stale head
     const first = new SqliteBackend(path);
     await first.journalStore().compareAndAppend(OP, null, "", null, []);
     await first.close();
-    // What a rebase leaves when its checkpoint meets a reader: the marker, still standing.
     const db = new Database(path);
     db.prepare("INSERT INTO meta (key, value) VALUES ('rebase-wal-outstanding', ?)").run(OP);
     db.close();
@@ -225,7 +217,6 @@ describe("a mirror head that moves while the shadow tier is asked", () => {
           ? store.compareAndSettlePurge!(OP, "", "x", frame, d.id, 1)
           : store.compareAndAppendErasure!(OP, "", "x", frame, [], [d.id]);
       await reading;
-      // Another writer moves the head through the primary while the shadow read is pending.
       await primary.journalStore().compareAndAppend(OP, "", "moved", new Uint8Array([1]), []);
       release();
       expect(await result).toEqual({ status: "conflict" });
@@ -245,7 +236,7 @@ describe("a damaged admitted row degrades the open (§25)", () => {
     db.prepare("DELETE FROM deltas WHERE id = ?").run(gone.id);
     db.close();
     const store2 = new SqliteBackend(path).journalStore();
-    await expect(OrdinaryJournalPeer.open(store2, OP)).rejects.toThrow(/admitted row mismatch/); // strict
+    await expect(OrdinaryJournalPeer.open(store2, OP)).rejects.toThrow(/admitted row mismatch/);
     const degraded = await OrdinaryJournalPeer.open(store2, OP, { allowDegraded: true });
     expect(degraded.status).toBe("degraded");
     if (degraded.status !== "degraded") return;

@@ -1,5 +1,3 @@
-// T288 regression: a received operand can become unavailable without revoking the exact
-// channel lifecycle's cleanup authority. Only this test's in-memory stores are erased/dropped.
 import { describe, expect, it } from "vitest";
 import { verifyDelta, type Delta } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -66,8 +64,6 @@ describe("T288 channel cleanup after real received-source erasure", () => {
       const targetPool = gatewayOf(target.pool);
       const targetBackend = targetPool.backend;
 
-      // Existing root erase requires root-held target bytes. Holding the exact already-received
-      // source here does not invent custody; the real earlier channel sync proved that custody.
       await gw.federate([erasedSource]);
       const erase = await gw.erase(erasedSource.id);
       expect(erase.citations).toContain(receipt.id);
@@ -88,8 +84,6 @@ describe("T288 channel cleanup after real received-source erasure", () => {
       expect(await primary.holds(root.id)).toBe(true);
       expect(await gatewayOf(sibling.pool).backend.holds(siblingSource.id)).toBe(true);
 
-      // Install the observer AFTER source erasure: it witnesses drop's actual physical purge,
-      // not the earlier exact-ID erasure. The backend still contains ordinary seeded bytes.
       expect((await targetBackend.deltasSince(new Set())).length).toBeGreaterThan(0);
       const purge = targetBackend.purge.bind(targetBackend);
       let purges = 0;

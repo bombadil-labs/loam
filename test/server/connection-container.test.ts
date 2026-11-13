@@ -1,14 +1,3 @@
-// §39 / T138 — a connection binds to a container (the inbox model). The 17 acceptance criteria of
-// the working spec, railed here. A connection binds to exactly one container: reads GATHER that
-// container (its own ground plus every inbox pool bound to it), writes LAND in a per-connection inbox
-// pool as the owner, each connection signs with its own key that is provably the owner's, and
-// negation binds by MEMBERSHIP — a strike admitted to the gather is in play, whoever wrote it.
-//
-// Two levels throughout (the P3 doctrine): the DELTA level asks what is in `containerScope` /
-// `connectionScope`; the OBJECT level asks what a READER resolves through a Schema — federate the
-// scoped read into a fresh store, register PLANT, and query. The two come apart exactly when
-// suppression is involved, which is where H1 lives.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -24,19 +13,17 @@ import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 
 const OP_SEED = "3a".repeat(32);
 const OP = authorForSeed(OP_SEED);
-const OWNER_SEED = "b4".repeat(32); // Alice, the container owner
+const OWNER_SEED = "b4".repeat(32);
 const OWNER = authorForSeed(OWNER_SEED);
-const CONN_SEED = "c5".repeat(32); // a connection actor seed — signs its own writes
+const CONN_SEED = "c5".repeat(32);
 const CONN = authorForSeed(CONN_SEED);
-const CONN2_SEED = "d6".repeat(32); // a second connection, same owner
+const CONN2_SEED = "d6".repeat(32);
 const CONN2 = authorForSeed(CONN2_SEED);
-const FOREIGN_SEED = "e7".repeat(32); // neither the owner nor any connection
+const FOREIGN_SEED = "e7".repeat(32);
 const FOREIGN = authorForSeed(FOREIGN_SEED);
 
 const OAK = "plant:oak";
 
-// The owner (Alice) holds write standing on her own store — the connection grants live in the inbox
-// pools, but the fixtures also let the owner seed primary data directly.
 const boot = async (backend?: MemoryBackend): Promise<Gateway> => {
   const gw = await Gateway.boot(
     backend ?? new MemoryBackend(),
@@ -54,7 +41,6 @@ const boot = async (backend?: MemoryBackend): Promise<Gateway> => {
 const declare = (spec: Parameters<typeof containerClaims>[0], ts: number): Delta =>
   signClaims(containerClaims(spec, OP, ts), OP_SEED);
 
-// A strike in some author's own voice — a negation delta pointing at a delta.
 const strikeBy = (targetId: string, seed: string, at: Stamp): Delta =>
   signClaims(
     {
@@ -89,9 +75,6 @@ const bind = (
     ...(backend !== undefined ? { backend } : {}),
   });
 
-// OBJECT LEVEL: land the scoped read in a fresh store and ask what a READER resolves for `entity`'s
-// height — never merely which ids crossed. `null` means the height field resolved to nothing (the
-// only height claim was struck, or none was present).
 const heightVia = async (deltas: readonly Delta[], entity: string): Promise<unknown> => {
   const dest = await Gateway.open(new MemoryBackend(), {});
   await dest.federate(deltas, { admit: () => true });
@@ -112,7 +95,6 @@ describe("§39 criterion 1 — provenance does not gate visibility; membership d
         1000,
       ),
     ]);
-    // Admitted by federation (the deliberate act, §39.2), authored by a foreign key.
     const elsewhere = observed(FERN, "height", 30, 900, FOREIGN_SEED);
     await gw.federate([elsewhere], { admit: () => true });
     await bind(gw, "alice:folklore", CONN_SEED);
@@ -138,16 +120,13 @@ describe("§39 criterion 2 — a narrow binding cannot read a sibling's members"
       ),
     ]);
     const onlyFriends = observed(FERN, "message", "for friends", 900, OWNER_SEED);
-    const ownMember = observed(FERN, "height", 30, 901, OWNER_SEED); // a folklore-own member
+    const ownMember = observed(FERN, "height", 30, 901, OWNER_SEED);
     await gw.append([onlyFriends, ownMember]);
     await bind(gw, "alice:folklore", CONN_SEED);
 
-    // The refusal is a SCOPE answer, not an error: reading folklore simply does not include it.
-    // The POSITIVE control is load-bearing — without it, a folklore scope that resolved EMPTY (a
-    // broken Term, an empty gather) would pass the negative vacuously.
     const read = gw.connectionScope({ bound: "alice:folklore" }).map((d) => d.id);
-    expect(read).toContain(ownMember.id); // folklore does resolve its own members
-    expect(read).not.toContain(onlyFriends.id); // but not the sibling's
+    expect(read).toContain(ownMember.id);
+    expect(read).not.toContain(onlyFriends.id);
     await gw.close();
   });
 });
@@ -191,8 +170,8 @@ describe("§39 criterion 4 — a folklore write does not appear in friends (two-
     await inbox.gateway!.append([w]);
 
     const friends = gw.connectionScope({ bound: "alice:friends" }).map((d) => d.id);
-    expect(friends).not.toContain(w.id); // the target is absent
-    expect(friends).toContain(bystander.id); // the live bystander survives
+    expect(friends).not.toContain(w.id);
+    expect(friends).toContain(bystander.id);
     await gw.close();
   });
 });
@@ -238,7 +217,7 @@ describe("§39 criterion 6 — two connections are distinguishable at the delta 
     const a2 = inbox2.gateway!.reactor.get(w2.id)!.claims.author;
     expect(a1).toBe(CONN);
     expect(a2).toBe(CONN2);
-    expect(a1).not.toBe(a2); // DIFFER, not merely both non-empty
+    expect(a1).not.toBe(a2);
     await gw.close();
   });
 });
@@ -255,9 +234,6 @@ describe("§39 criterion 7 — the connection's delegation and a store grant coe
     const inbox = await bind(gw, "alice:folklore", CONN_SEED);
     const pool = inbox.gateway!;
 
-    // The connection's authority lives in the INBOX pool's own ground: an owner-signed, sealed
-    // delegation scoped to this pool's name (README ruling 6). It is preceded by the pool genesis and
-    // the operator's owner-admin grant, so it is not the pool's first delta. No grant names the key.
     const prim = (d: Delta, role: string) => {
       const t = d.claims.pointers.find((p) => p.role === role)?.target;
       return t?.kind === "primitive" ? t.value : undefined;
@@ -266,7 +242,7 @@ describe("§39 criterion 7 — the connection's delegation and a store grant coe
       (d) => prim(d, "kind") === "delegation" && prim(d, "key") === CONN,
     );
     expect(delegations).toHaveLength(1);
-    expect(delegations[0]!.claims.author).toBe(OWNER); // owner-authored authority
+    expect(delegations[0]!.claims.author).toBe(OWNER);
     expect(prim(delegations[0]!, "scope")).toBe(inbox.entity);
     expect(prim(delegations[0]!, "delegable")).toBe(false);
     const grantsNamingConn = [...pool.reactor.snapshot()].filter(
@@ -279,7 +255,6 @@ describe("§39 criterion 7 — the connection's delegation and a store grant coe
         ) && prim(d, "subject") === CONN,
     );
     expect(grantsNamingConn).toEqual([]);
-    // The connection's write standing resolves through the chain (delegation → owner-admin).
     expect(
       holdsGrant(
         pool.reactor,
@@ -291,7 +266,6 @@ describe("§39 criterion 7 — the connection's delegation and a store grant coe
       ),
     ).toBe(true);
 
-    // A store-targeting grant shape still validates UNCHANGED beside it, in the real store.
     await gw.append([signClaims(grantClaims(STORE_ENTITY, FOREIGN, "write", OP, 2000), OP_SEED)]);
     expect(holdsGrant(gw.reactor, gw.validityNow(), STORE_ENTITY, FOREIGN, "write", OP)).toBe(true);
     await gw.close();
@@ -311,24 +285,18 @@ describe("§39 criterion 8 — negation by membership: per-container divergence 
         1001,
       ),
     ]);
-    // D1 in the primary — a member of BOTH containers (both select the height context).
     const d1 = observed(FERN, "height", 30, 900, OWNER_SEED);
-    // A bystander in a different entity, also a member of both — it must survive in folklore.
     const oak = observed(OAK, "height", 50, 910, OWNER_SEED);
     await gw.append([d1, oak]);
-    // D2 (negating D1) admitted to FOLKLORE only, via its inbox.
     const inbox = await bind(gw, "alice:folklore", CONN_SEED);
     const d2 = strikeBy(d1.id, CONN_SEED, gw.stamp(CONN));
     await inbox.gateway!.append([d2]);
 
-    // DELTA level: D2 is a member of folklore's gather, and NOT of friends'.
     const folklore = gw.connectionScope({ bound: "alice:folklore" }).map((d) => d.id);
     const friends = gw.connectionScope({ bound: "alice:friends" }).map((d) => d.id);
     expect(folklore).toContain(d2.id);
     expect(friends).not.toContain(d2.id);
 
-    // OBJECT level, both containers: folklore resolves WITHOUT D1; friends still shows D1; the
-    // bystander survives in folklore.
     expect(await heightVia(gw.connectionScope({ bound: "alice:folklore" }), FERN)).not.toBe(30);
     expect(await heightVia(gw.connectionScope({ bound: "alice:friends" }), FERN)).toBe(30);
     expect(await heightVia(gw.connectionScope({ bound: "alice:folklore" }), OAK)).toBe(50);
@@ -345,28 +313,21 @@ describe("§39 criterion 9 — the strand rail (H1 relocated across the pool bou
         1000,
       ),
     ]);
-    const d1 = observed(FERN, "height", 30, 900, OWNER_SEED); // primary member
+    const d1 = observed(FERN, "height", 30, 900, OWNER_SEED);
     await gw.append([d1]);
     const inbox = await bind(gw, "alice:folklore", CONN_SEED);
-    const d2 = strikeBy(d1.id, CONN_SEED, gw.stamp(CONN)); // the strike, in the inbox pool
+    const d2 = strikeBy(d1.id, CONN_SEED, gw.stamp(CONN));
     await inbox.gateway!.append([d2]);
 
-    // DELTA level: BOTH cross into the gather. A gather that returns D1 without its admitted D2 is
-    // the failure this rail exists to catch (it is RED before the inbox composition lands).
     const scoped = gw.connectionScope({ bound: "alice:folklore" });
     const ids = scoped.map((d) => d.id);
     expect(ids).toContain(d1.id);
     expect(ids).toContain(d2.id);
-    // OBJECT level: the View resolves WITHOUT the negated claim.
     expect(await heightVia(scoped, FERN)).not.toBe(30);
     await gw.close();
   });
 
   it("union closure spans grounds: D1 in an inbox, its bare negation in the primary, still suppressed", async () => {
-    // The strike here is a bare negation in the PRIMARY — no context Term selects it, so it is NOT a
-    // direct member of any ground; it is reachable only by closing negation ACROSS the pool boundary.
-    // A per-ground closure treats the pool as a boundary and hands the reader D1 live. This is killed
-    // only by the union closure (decision 1).
     const gw = await boot();
     await gw.append([
       declare(
@@ -375,13 +336,13 @@ describe("§39 criterion 9 — the strand rail (H1 relocated across the pool bou
       ),
     ]);
     const inbox = await bind(gw, "alice:folklore", CONN_SEED);
-    const d1 = observed(FERN, "height", 40, gw.stamp(CONN), CONN_SEED); // inbox member
+    const d1 = observed(FERN, "height", 40, gw.stamp(CONN), CONN_SEED);
     await inbox.gateway!.append([d1]);
-    const d2 = strikeBy(d1.id, OP_SEED, gw.stamp(OP)); // bare negation, in the primary
+    const d2 = strikeBy(d1.id, OP_SEED, gw.stamp(OP));
     await gw.append([d2]);
 
     const scoped = gw.connectionScope({ bound: "alice:folklore" });
-    expect(scoped.map((d) => d.id)).toContain(d2.id); // the strand was pulled across the boundary
+    expect(scoped.map((d) => d.id)).toContain(d2.id);
     expect(await heightVia(scoped, FERN)).not.toBe(40);
     await gw.close();
   });
@@ -398,18 +359,16 @@ describe("§39 criterion 10 — the negation's author is irrelevant at read time
     ]);
     const d1 = observed(FERN, "height", 30, 900, OWNER_SEED);
     await gw.append([d1]);
-    // Without any strike, D1 is live — the control that proves the strike is what suppresses.
     expect(await heightVia(gw.connectionScope({ bound: "alice:folklore" }), FERN)).toBe(30);
 
     const inbox = await bind(gw, "alice:folklore", CONN_SEED);
-    // A FOREIGN-authored strike, admitted to folklore's gather by federation into its inbox.
     const foreignStrike = strikeBy(d1.id, FOREIGN_SEED, gw.stamp(FOREIGN));
     expect(foreignStrike.claims.author).toBe(FOREIGN);
     await inbox.gateway!.federate([foreignStrike], { admit: () => true });
 
     const scoped = gw.connectionScope({ bound: "alice:folklore" });
     expect(scoped.map((d) => d.id)).toContain(foreignStrike.id);
-    expect(await heightVia(scoped, FERN)).not.toBe(30); // suppressed, author notwithstanding
+    expect(await heightVia(scoped, FERN)).not.toBe(30);
     await gw.close();
   });
 });
@@ -442,12 +401,10 @@ describe("§39 criterion 11 — the binding is an upper bound (wide reaches; nar
     await bind(gw, "bob:root", CONN_SEED);
     await bind(gw, "alice:folklore", CONN2_SEED);
 
-    // Wide (bound to the root) reaches the child by naming it.
     const wide = gw
       .connectionScope({ bound: "bob:root", containers: ["bob:sub"] })
       .map((d) => d.id);
     expect(wide).toContain(h.id);
-    // Narrow (bound to folklore) naming bob:sub refuses — bob:sub is outside its subtree.
     expect(() => gw.connectionScope({ bound: "alice:folklore", containers: ["bob:sub"] })).toThrow(
       /upper bound|outside its subtree/,
     );
@@ -477,8 +434,8 @@ describe("§39 criterion 12 — the degenerate case (Charlie's root heap) works 
     await inbox.gateway!.append([w]);
 
     const read = gw.connectionScope({ bound: "charlie:root" }).map((d) => d.id);
-    expect(read).toContain(heap.id); // the pre-existing heap
-    expect(read).toContain(w.id); // the connection write
+    expect(read).toContain(heap.id);
+    expect(read).toContain(w.id);
     await gw.close();
   });
 });
@@ -499,16 +456,12 @@ describe("§39 criterion 13 — revocation is two-sided", () => {
 
     await gw.revokeConnection({ inbox: inbox1, connectionKey: CONN, ownerSeed: OWNER_SEED });
 
-    // The revoked connection's NEW write refuses.
     await expect(
       inbox1.gateway!.append([observed(FERN, "height", 99, gw.stamp(CONN), CONN_SEED)]),
     ).rejects.toThrow();
-    // A SECOND connection's write still lands.
     const w2 = observed(FERN, "height", 43, gw.stamp(CONN2), CONN2_SEED);
     await inbox2.gateway!.append([w2]);
     expect(inbox2.gateway!.reactor.get(w2.id)).toBeDefined();
-    // Every delta the revoked connection wrote keeps its author in its pool (delta level), and
-    // leaves the parent's gather, where the second connection's write stands (object level, M3).
     expect(inbox1.gateway!.reactor.get(past.id)!.claims.author).toBe(CONN);
     const scope = gw.connectionScope({ bound: "alice:folklore" }).map((d) => d.id);
     expect([scope.includes(past.id), scope.includes(w2.id)]).toEqual([false, true]);
@@ -532,18 +485,15 @@ describe("§39 criterion 14 — the door refuses a write into a container the ke
     const inbox1 = await bind(gw, "alice:folklore", CONN_SEED);
     const inbox2 = await bind(gw, "alice:friends", CONN2_SEED);
 
-    // Into a different inbox: refused, and the message names the store entity, never the inbox id.
     let intoOther: unknown;
     await inbox2
       .gateway!.append([observed(FERN, "height", 7, gw.stamp(CONN), CONN_SEED)])
       .catch((e: unknown) => (intoOther = e));
     expect(intoOther).toBeInstanceOf(Error);
     expect((intoOther as Error).message).not.toContain("inbox:");
-    // Into the primary: refused too.
     await expect(
       gw.append([observed(FERN, "height", 8, gw.stamp(CONN), CONN_SEED)]),
     ).rejects.toThrow();
-    // The bound inbox still accepts it — proving the refusals are about the target, not the key.
     await inbox1.gateway!.append([observed(FERN, "height", 9, gw.stamp(CONN), CONN_SEED)]);
     await gw.close();
   });
@@ -554,13 +504,11 @@ describe("§39 criterion 15 — the connection's seed never enters the ground", 
     const scanFor = (gws: Gateway[], secret: string): boolean =>
       gws.some((g) => [...g.reactor.snapshot()].some((d) => JSON.stringify(d).includes(secret)));
 
-    // Instrument first (H7): plant a delta whose value IS the seed and prove the scan catches it.
     const planted = await boot();
     await planted.append([observed(FERN, "message", CONN_SEED, 900, OP_SEED)]);
     expect(scanFor([planted], CONN_SEED)).toBe(true);
     await planted.close();
 
-    // Then a clean store: a full grant → write → revoke cycle, and the seed is nowhere.
     const gw = await boot();
     await gw.append([
       declare(
@@ -579,7 +527,6 @@ describe("§39 criterion 15 — the connection's seed never enters the ground", 
 describe("§39 criterion 16 — no existing delta changes shape; no §20 migration is owed", () => {
   it("a container declared without inboxOf resolves identically and is not composed as an inbox", async () => {
     const gw = await boot();
-    // The pre-existing shape: a plain container declaration, no inboxOf pointer.
     await gw.append([
       declare(
         { container: "alice:folklore", trust: "curated", posture: "shared", membership: HEIGHTS },
@@ -590,10 +537,9 @@ describe("§39 criterion 16 — no existing delta changes shape; no §20 migrati
     await gw.append([h]);
 
     const rec = gw.containers().containers.get("alice:folklore")!;
-    expect(rec.inboxOf).toBeUndefined(); // the new field is absent — the old shape reads unchanged
+    expect(rec.inboxOf).toBeUndefined();
     expect(gw.containerScope({ containers: ["alice:folklore"] }).map((d) => d.id)).toEqual([h.id]);
 
-    // And an inbox declaration is shape-distinguishable by the presence of the pointer.
     await bind(gw, "alice:folklore", CONN_SEED);
     const inboxRec = gw.containers().containers.get(`inbox:alice:folklore:${CONN}`)!;
     expect(inboxRec.inboxOf).toBe("alice:folklore");
@@ -613,8 +559,6 @@ describe("§39 criterion 17 — only an owner-authored grant extends membership"
     const inbox = await bind(gw, "alice:folklore", CONN_SEED);
     const pool = inbox.gateway!;
 
-    // CONN holds WRITE but not ADMIN. Its grant for CONN2 lands but is INEFFECTIVE (a non-admin
-    // granter roots no authority), so CONN2's write is still refused — membership is not extended.
     await pool.append([
       signClaims(
         withStamp(pool.stamp(CONN), (t) => grantClaims(STORE_ENTITY, CONN2, "write", CONN, t)),
@@ -625,7 +569,6 @@ describe("§39 criterion 17 — only an owner-authored grant extends membership"
       pool.append([observed(FERN, "height", 7, gw.stamp(CONN2), CONN2_SEED)]),
     ).rejects.toThrow();
 
-    // The OWNER holds admin (rooted in the operator), so the owner's grant DOES extend membership.
     await pool.append([
       signClaims(
         withStamp(pool.stamp(OWNER), (t) => grantClaims(STORE_ENTITY, CONN2, "write", OWNER, t)),
@@ -648,15 +591,11 @@ describe("§39 — the inbox drops to a total forget (two-sided)", () => {
         1000,
       ),
     ]);
-    // A DIRECT member of the container in the primary ground — the second bystander §39.5.17 names.
     const primaryMember = observed(FERN, "height", 33, 1100, OWNER_SEED);
     await gw.append([primaryMember]);
 
     const backend1 = new MemoryBackend();
     const backend2 = new MemoryBackend();
-    // A purge SPY on the dropped inbox's backend: `holds` throws once drop() closes the store, so
-    // witness the byte removal at the purge call instead — an INDEPENDENT proof the target left the
-    // bytes, beside drop()'s own refuse-on-survivors verify (not delegated to the code under test).
     const purged: string[] = [];
     const origPurge = backend1.purge.bind(backend1);
     backend1.purge = (ids: Iterable<string>): Promise<number> => {
@@ -670,19 +609,14 @@ describe("§39 — the inbox drops to a total forget (two-sided)", () => {
     const w2 = observed(OAK, "height", 50, gw.stamp(CONN2), CONN2_SEED);
     await inbox1.gateway!.append([w1]);
     await inbox2.gateway!.append([w2]);
-    expect(await backend1.holds(w1.id)).toBe(true); // baseline: the bytes are there before the drop
+    expect(await backend1.holds(w1.id)).toBe(true);
 
     await inbox1.drop();
 
-    // The target is GONE, proven at the bytes: the purge spy saw w1's id, AND drop()'s internal
-    // verify refuses to close if any survive — two independent byte witnesses. The table and read
-    // confirm it downward.
     expect(purged).toContain(w1.id);
     expect(gw.containers().containers.has(`inbox:alice:folklore:${CONN}`)).toBe(false);
     const scoped = gw.connectionScope({ bound: "alice:folklore" }).map((d) => d.id);
     expect(scoped).not.toContain(w1.id);
-    // The bystanders SURVIVE — drop struck one inbox, not the container: the sibling inbox's bytes,
-    // and the container's own direct member, both remain readable.
     expect(await backend2.holds(w2.id)).toBe(true);
     expect(scoped).toContain(w2.id);
     expect(scoped).toContain(primaryMember.id);
@@ -697,18 +631,12 @@ describe("§39 — the inbox drops to a total forget (two-sided)", () => {
         1000,
       ),
     ]);
-    // The regression this guards: a connection RETRACTS a primary claim (a strike written into its
-    // inbox). If detach merely marked the inbox inactive, the strike would leave the gather and the
-    // retracted claim would resolve LIVE again — a silent un-suppression across the pool boundary.
     const d1 = observed(FERN, "height", 30, 900, OWNER_SEED);
     await gw.append([d1]);
     const inbox = await bind(gw, "alice:folklore", CONN_SEED);
     await inbox.gateway!.append([strikeBy(d1.id, CONN_SEED, gw.stamp(CONN))]);
-    // The retraction holds through the gather (positive control that the state is real).
     expect(await heightVia(gw.connectionScope({ bound: "alice:folklore" }), FERN)).not.toBe(30);
-    // Detach refuses rather than un-suppressing — and names the operations that DO belong.
     await expect(inbox.detach()).rejects.toThrow(/durable|drop\(\)|revoke/);
-    // The retraction still holds — nothing was uncovered.
     expect(await heightVia(gw.connectionScope({ bound: "alice:folklore" }), FERN)).not.toBe(30);
     await gw.close();
   });

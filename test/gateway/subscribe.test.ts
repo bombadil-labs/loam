@@ -1,17 +1,9 @@
-// Step 4's live half: GraphQL subscribe. A subscription is a dynamic view — an initial
-// snapshot, then one patch per relevant change: `_fromHex → _hex`, what moved, and the fields
-// re-resolved. Backed by a lazily-created, cached materialization per (schema, entity);
-// irrelevant writes are silence; ending the iterator ends the delivery.
-
 import { describe, expect, it, vi } from "vitest";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 import { FERN } from "../spike/garden.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE, garden, governedBootstrap } from "./fixtures.js";
 
-// A generous hang-guard for genuine failures; the passing paths resolve in microseconds (patches
-// are queued synchronously by the awaited mutation), so this only ever matters if something is
-// actually broken, and it gives a loaded machine ample headroom over the default.
 vi.setConfig({ testTimeout: 20_000 });
 
 const KEEPER_SEED = "c3".repeat(32);
@@ -29,7 +21,7 @@ const SUBSCRIPTION = `subscription {
 
 async function keeperGateway(): Promise<Gateway> {
   const gateway = await Gateway.open(new MemoryBackend(), { seed: KEEPER_SEED });
-  await gateway.append(governedBootstrap(KEEPER_SEED)); // the keeper governs; the authors may write
+  await gateway.append(governedBootstrap(KEEPER_SEED));
   await gateway.append(garden);
   gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
   return gateway;
@@ -37,9 +29,6 @@ async function keeperGateway(): Promise<Gateway> {
 
 type Events = AsyncGenerator<Record<string, unknown>>;
 
-// One in-flight next() per stream, so `expectSilence` (which parks a read to prove nothing comes)
-// never leaks a pending promise or issues a concurrent next() — the graphql async iterator does
-// not tolerate overlapping next() calls, and a leaked one is a silent flake waiting to happen.
 const inflight = new WeakMap<Events, Promise<IteratorResult<Record<string, unknown>>>>();
 
 function take(events: Events): Promise<IteratorResult<Record<string, unknown>>> {
@@ -51,17 +40,12 @@ function take(events: Events): Promise<IteratorResult<Record<string, unknown>>> 
   return events.next();
 }
 
-// The next patch. No wall-clock race: the patch is pushed synchronously by the mutation we
-// already awaited, so this resolves at once; a genuine hang is caught by the per-test timeout.
 async function nextPatch(events: Events): Promise<PlantPatch> {
   const item = await take(events);
   if (item.done === true) throw new Error("stream ended");
   return (item.value as { plant: PlantPatch }).plant;
 }
 
-// Assert no patch arrives within `ms`. Holds a single in-flight next() (reused by the next read),
-// so nothing leaks and no concurrent next() is issued; load-robust, because a correctly-silent
-// stream simply never resolves the held read.
 async function expectSilence(events: Events, ms = 200): Promise<void> {
   const held = inflight.get(events) ?? events.next();
   inflight.set(events, held);
@@ -75,7 +59,6 @@ async function expectSilence(events: Events, ms = 200): Promise<void> {
     inflight.delete(events);
     throw new Error("expected silence but a patch arrived");
   }
-  // silence confirmed: the held read stays parked for whatever reads (or closes) the stream next.
 }
 
 describe("subscribe: an initial snapshot, then patches", () => {
@@ -84,12 +67,12 @@ describe("subscribe: an initial snapshot, then patches", () => {
     const events = await gateway.subscribe(SUBSCRIPTION);
 
     const initial = await nextPatch(events);
-    expect(initial._fromHex).toBeNull(); // a snapshot comes from nowhere
+    expect(initial._fromHex).toBeNull();
     expect(initial.height).toBe(34);
 
     await gateway.query(`mutation { plant(entity: "${FERN}", height: 40) { height } }`);
     const patch = await nextPatch(events);
-    expect(patch._fromHex).toBe(initial._hex); // old-hash → new-hash
+    expect(patch._fromHex).toBe(initial._hex);
     expect(patch._hex).not.toBe(initial._hex);
     expect(patch._changed).toContain("height");
     expect(patch.height).toBe(40);
@@ -101,7 +84,7 @@ describe("subscribe: an initial snapshot, then patches", () => {
   it("irrelevant writes are silence", async () => {
     const gateway = await keeperGateway();
     const events = await gateway.subscribe(SUBSCRIPTION);
-    await nextPatch(events); // the snapshot
+    await nextPatch(events);
     await gateway.query(`mutation { plant(entity: "plant:moss", height: 3) { height } }`);
     await expectSilence(events);
     await events.return(undefined);
@@ -115,10 +98,10 @@ describe("subscribe: an initial snapshot, then patches", () => {
     await nextPatch(a);
     await nextPatch(b);
 
-    await a.return(undefined); // a leaves the garden
+    await a.return(undefined);
     await gateway.query(`mutation { plant(entity: "${FERN}", height: 41) { height } }`);
     expect((await nextPatch(b)).height).toBe(41);
-    expect((await a.next()).done).toBe(true); // a left; its stream is over, not just quiet
+    expect((await a.next()).done).toBe(true);
 
     await b.return(undefined);
     await gateway.close();
@@ -127,8 +110,7 @@ describe("subscribe: an initial snapshot, then patches", () => {
   it("a change that leaves the view identical is silence, not a no-op patch", async () => {
     const gateway = await keeperGateway();
     const events = await gateway.subscribe(SUBSCRIPTION);
-    await nextPatch(events); // the snapshot (height 34, picked latest)
-    // A NEW delta (later timestamp) claiming the same height: the HView moves, the View doesn't.
+    await nextPatch(events);
     await gateway.query(`mutation { plant(entity: "${FERN}", height: 34) { height } }`);
     await expectSilence(events);
     await events.return(undefined);
@@ -139,15 +121,14 @@ describe("subscribe: an initial snapshot, then patches", () => {
     const gateway = await keeperGateway();
     const events = await gateway.subscribe(SUBSCRIPTION);
     const initial = await nextPatch(events);
-    // Three writes while nobody reads:
     await gateway.query(`mutation { plant(entity: "${FERN}", height: 40) { height } }`);
     await gateway.query(`mutation { plant(entity: "${FERN}", height: 41) { height } }`);
     await gateway.query(`mutation { plant(entity: "${FERN}", tag: "tall") { tag } }`);
     const patch = await nextPatch(events);
-    expect(patch._fromHex).toBe(initial._hex); // the chain starts where the reader left off
-    expect(patch.height).toBe(41); // and ends at the present
+    expect(patch._fromHex).toBe(initial._hex);
+    expect(patch.height).toBe(41);
     expect(patch._changed).toEqual(expect.arrayContaining(["height", "tag"]));
-    await expectSilence(events); // nothing else pending: the three writes were one patch
+    await expectSilence(events);
     await events.return(undefined);
     await gateway.close();
   });
@@ -155,13 +136,12 @@ describe("subscribe: an initial snapshot, then patches", () => {
   it("a patch coalescing into an undrained snapshot stays a snapshot", async () => {
     const gateway = await keeperGateway();
     const events = await gateway.subscribe(SUBSCRIPTION);
-    // Nobody has read the initial snapshot yet; a mutation lands on top of it.
     await gateway.query(`mutation { plant(entity: "${FERN}", height: 40) { height } }`);
     const first = await nextPatch(events);
-    expect(first._fromHex).toBeNull(); // still a snapshot — just a newer one
-    expect(first._changed).toBeNull(); // both signals agree
+    expect(first._fromHex).toBeNull();
+    expect(first._changed).toBeNull();
     expect(first.height).toBe(40);
-    await expectSilence(events); // and it was ONE event
+    await expectSilence(events);
     await events.return(undefined);
     await gateway.close();
   });
@@ -169,9 +149,8 @@ describe("subscribe: an initial snapshot, then patches", () => {
   it("a sink that cannot re-resolve fails its own stream with the error, even parked", async () => {
     const gateway = await keeperGateway();
     const events = await gateway.subscribe(SUBSCRIPTION);
-    await nextPatch(events); // drain the snapshot; the reader parks next
+    await nextPatch(events);
     const parked = events.next();
-    // Sabotage re-resolution: the stream's captured materialization read throws from now on.
     const broken = gateway.reactor as unknown as { materializedView: () => never };
     broken.materializedView = () => {
       throw new Error("the ground gave way");
@@ -200,7 +179,7 @@ describe("subscribe: an initial snapshot, then patches", () => {
     const gateway = await keeperGateway();
     const events = await gateway.subscribe(SUBSCRIPTION);
     await nextPatch(events);
-    const parked = events.next(); // parked, waiting for an event that will never come
+    const parked = events.next();
     await gateway.close();
     expect((await parked).done).toBe(true);
   });
@@ -211,7 +190,7 @@ describe("subscribe: an initial snapshot, then patches", () => {
       plant(entity: "plant:moss") { _hex _fromHex height }
     }`);
     const initial = (await events.next()).value as { plant: PlantPatch };
-    expect(initial.plant.height).toBeNull(); // nothing known yet — an honest empty snapshot
+    expect(initial.plant.height).toBeNull();
 
     await gateway.query(`mutation { plant(entity: "plant:moss", height: 3) { height } }`);
     const patch = (await events.next()).value as { plant: PlantPatch };

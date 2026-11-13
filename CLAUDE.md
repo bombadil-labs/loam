@@ -33,10 +33,8 @@ designed work does **not** live in the spec; it lives as a **ticket** in the sto
 lands, and the landing PR **adds its section as a new `spec/NN-slug.md` file** (with its Provenance
 footer) plus a row in the `SPEC.md` index, in the same change — and **ARCHIVES the ticket it
 realized** (`adlc ticket archive <id> --write --authorize`, moving the shard to
-`.adlc/ticket-archive/`), never deletes it. The distinction is load-bearing (T69): the CI rail
-backstop computes its frozen set from the base tree's shards in BOTH directories, so a deleted
-ticket un-freezes its rails at the exact moment they start protecting landed behavior — the freeze
-would live only while the work was unfinished.
+`.adlc/ticket-archive/`), never deletes it. The archive keeps the record of what the ticket's rails
+were; no CI job reads it during the refactor.
 Each landing writing its *own* file is deliberate: disjoint sections stop colliding, so concurrent
 landings almost never touch the same file (editing an existing section file is the rare exception —
 a bugfix or one-off correction).
@@ -90,18 +88,7 @@ any upgrade: `npm run adlc:patch`, then `adlc init` (idempotent — it owns `.gi
 a gate you expect to FAIL actually fails. A gate you have never seen red has proven nothing, and
 that applies to the toolchain as much as to a rail.
 
-**The rail backstop runs in CI** (`scripts/rails-guard-ci.mjs`, wired in `.github/workflows/ci.yml`).
-ADLC's PreToolUse hook is only the in-session layer and explicitly does **not** gate Bash — a shell
-cannot be reliably parsed — so a rail edited through a shell command is caught by the CI diff gate or
-by nothing. The wrapper exists because the bare gate will not scan the store and treats an ADDED file
-as an edit, which would fail the very PR that first writes a ticket's rails; it therefore guards only
-rails that already exist on the base. First-authoring is invisible, everything after it is frozen.
-**The ONE exemption is an authorized vocabulary rename** (Myk, 2026-07-26): declared in
-`scripts/rail-renames.json`, read from the BASE tree only — a branch cannot self-authorize — and
-exempting a frozen-rail edit iff base + the declared substitution is byte-identical to the branch's
-file (directly or after the repo's own prettier). Two PRs, mechanically enforced: land the
-declaration, then land the rename. A red gate always means stop; no future context window needs
-lore about which red was blessed.
+**CI runs `npm run check` only.** No CI job guards frozen tests during the refactor.
 
 **THREE adlc gates run via LOCAL PATCHES — re-apply after any adlc upgrade with `npm run
 adlc:patch`.** They patch a GLOBAL package, so `npm i -g @adlc/cli` wipes them; that is why they are
@@ -164,10 +151,6 @@ pre-cutover entries were never signed, and the ceremony deliberately did NOT bac
 onto them. It appended one signed `manifest-cutover` record that ATTESTS them and discloses the count
 in its own body. That is the honest shape — you cannot sign what you did not witness — so a bare
 `verify` failing on that history is correct behaviour, not a broken chain.
-
-**CI pins a FLOOR of `@adlc/cli@^1.10.0`** at all three install sites. A pre-forest toolkit does not
-know the segmented store exists; it would write the frozen single-file root instead, silently, and
-report success.
 
 **`adlc run <phase>` asserts the phase's evidence exists, and the names are EXACT.** You record with
 `adlc gate-manifest record <gate-name> --ticket <id>` and assert with `adlc run <phase> --ticket
@@ -328,8 +311,9 @@ reader resolve through a Schema, or a door serve?* The middle is not the top —
 `reactor.negationsOf(...)` is still delta-level structure; the object-level question is what a
 **View** contains and what a **door** answers. When the two disagree, that disagreement is usually
 the bug, and neither assertion alone can see it. Where one level is genuinely out of scope, **name
-the gap in the test file** and say which rail would close it; an honest-looking comment over a
-weaker test is how this class keeps surviving review.
+the gap in the test's title** (`it("... [gap: no door-level assertion]")`) or in
+`src/gateway/SUBSTRATE-HAZARDS.md`, and say which rail would close it. The code carries no
+comments, so a gap left unnamed is invisible.
 
 Where a working spec exists, **its acceptance criteria ARE the rail list** — each criterion already
 names its verification path, so P3 is transcription, not invention. If a criterion has no test yet,
@@ -387,7 +371,7 @@ descending order of independence:
    |---|---|---|
    | `npm run lint` | free, already in `npm run check` | H6's common case — the `.hyperschema.name` comparison is an ESLint error |
    | `adlc hollow-test --target <file>` | no tokens | *could this pass with the fix reverted?* — mechanically, on every changed line |
-   | 1–3 routed lenses | a spin-up each | what mutation cannot reach: a vacuous fixture, a header that overclaims, a feature that could be deleted whole |
+   | 1–3 routed lenses | a spin-up each | what mutation cannot reach: a vacuous fixture, a title that overclaims, a feature that could be deleted whole |
    | `loam-verifier` | one per FINDING | refuting what a lens claimed — not one per lens |
 
    A survivor from `hollow-test` is a finding with no model involved, and a clean run *narrows* the
@@ -441,9 +425,8 @@ only step that reads the code without the ticket's assumptions.
 **P6 — the landing PR writes the ticket's design as a new `spec/NN-slug.md` file, the LAST step and
 the only step that touches `spec/`**: the whole section closed by its `**Provenance.**` footer (the
 PR link(s) + a short implementation note), plus its row in the `SPEC.md` index, and it ARCHIVES the
-realized ticket (`adlc ticket archive <id> --write --authorize` — never a deletion: an archived
-ticket's `rails` stay in the frozen set the CI backstop reads, and a deleted ticket's rails
-un-freeze at the exact moment they start protecting landed behavior; T69).
+realized ticket (`adlc ticket archive <id> --write --authorize` — never a deletion. The archive
+keeps the record of what the ticket's rails were; no CI job reads it during the refactor.)
 It is written FROM the settled working spec, re-cast as narrative —
 `spec/` records what IS, in prose, for a reader; the working spec was a gateable instrument for a
 builder. Different genres, different lifetimes; do not paste one into the other. The spec grows only
@@ -618,16 +601,15 @@ busy.
   one reason per sentence; then the rails, and what to read. Every sentence obeys the style. Prefer
   a list to a paragraph. Delete a sentence that only sets a mood. Name a risk in its own sentence.
   The register is a maintenance manual, not an essay — and the same holds for the board brief.
-- **Comments explain the code; HISTORY goes in the journal** (Myk, 2026-07-21). A comment answers
-  *what will bite whoever changes this next* — a non-obvious substrate behavior, an invariant, why
-  not the obvious thing. It does **not** narrate how the code got here: what an audit found, what an
-  earlier draft got wrong, why a test was skipped, which PR changed it. That is `JOURNAL.md`, the
-  commit message, and `.adlc/findings.jsonl` — all of which a reader can reach, and none of which
-  costs context on every read of the file.
-  **The tell: if a comment names a PR, an audit, a draft, or a person, it is history in the wrong
-  file.** Don't restate a hazard `SUBSTRATE-HAZARDS.md` already owns — cite it (`H6`) in one line.
-  A test header says what the rail asserts and what it deliberately does not; not its rewrite
-  history. Legacy cruft is not free: it churns tokens forever and crowds the real signal.
+- **The code carries no comments** (Myk, 2026-11-12). `npm run check` refuses one
+  (`npm run comments:check`). Only tool directives stay: `eslint-disable`, `@ts-expect-error`,
+  `prettier-ignore`, coverage hints, `@vitest-environment`, and their kin. The script keeps a tool
+  directive only in an exact allowed form and refuses any other comment that looks like a directive.
+  A hazard lives in
+  `src/gateway/SUBSTRATE-HAZARDS.md`. History lives in the journal and in commit messages. A test
+  title says what the rail asserts. A known gap goes in the title or in SUBSTRATE-HAZARDS.md. If a
+  missing comment causes a real defect, record the defect in the journal first. Then propose a
+  change to this rule. `node scripts/strip-comments.mjs <path>` removes comments from a file.
 - ~~**Every breaking on-wire change ships a migration** (Myk, 2026-07-12)~~ — **SUPERSEDED
   2026-09-25 by the greenfield ruling** (Myk; `refactor/README.md`): no migrations and no backward
   compatibility. A breaking change changes the bytes and nothing carries old stores forward; a

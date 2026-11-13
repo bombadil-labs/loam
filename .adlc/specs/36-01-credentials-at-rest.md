@@ -95,10 +95,12 @@ This phase must not add a door. This phase must not add a CLI command.
 7. The mode assertion (criterion 6) runs on POSIX only and is skipped on Windows, because Windows
    reports 0666 for an ordinary file regardless of what `chmod` requested. The test file states, in a
    comment, that a Windows run proves nothing about who may read a credential.
-   Verified by `test/server/credentials.test.ts`.
+   Verified by `test/server/credentials.test.ts`. The comment was removed on 2026-11-12; the POSIX
+   skip in that file is the only check that exists now.
 8. `fsync` is asserted by nothing in this test file, because an ESM named import of `node:fs` offers
    no spy point to intercept the call. The test file names this gap in a comment rather than hiding
-   it behind an assertion that cannot fail. Verified by `test/server/credentials.test.ts`.
+   it behind an assertion that cannot fail. Verified by `test/server/credentials.test.ts`. The
+   comment was removed on 2026-11-12; no check exists now.
 9. A store with no `credentials.json` yet (an `ENOENT` read) reads as an empty file — no users, no
    fault. A file that exists and cannot be parsed still refuses, and a read error other than
    `ENOENT` refuses too, rather than being treated as an empty store.

@@ -1,6 +1,3 @@
-// GENERATED from docs/*.md by scripts/build-docs.mjs — do not edit by hand.
-// Regenerate: `node scripts/build-docs.mjs`; `--check` diffs without writing (run by the build).
-
 export interface DocTopic {
   readonly topic: string;
   readonly summary: string;

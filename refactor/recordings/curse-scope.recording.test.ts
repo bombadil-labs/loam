@@ -1,36 +1,3 @@
-// Records the scope of a channel curse. Ruling 11 decided it: a curse is pool-local.
-// `curseChannelLaw` strikes the cursed lens's live registration bindings in the channel's POOL only,
-// with the pool's own key; a ROOT registration that only shares the name stays live and served.
-//
-// Cast: `peer` is alice, a real gateway that publishes the lens `Plant` and the tag "alice's tag"
-// on the fern. `operator` is this store; it opens the channel `friends` with prefix `alice`, so the
-// pool serves the lens `alice:Plant`. In the root, the operator writes the tag "root tag" on the
-// fern. `tag` resolves with `all`, so a query shows every ground the answering lens reads.
-//
-// Explicit root-origin law reads the root, even when its name resembles a channel namespace.
-// The four b1/b2 before/after answers therefore contain root tag only; their earlier recording
-// mixed in alice's tag by prefix inference. Pool-only and differently named controls stay unchanged.
-// This correction does not move any binding, strike, or curse outcome.
-//
-// Recorded (`curse-scope.cases`), per case, before and after the curse:
-// - delta level: every registration binding in the pool and in the root, as location + lens name +
-//   live or struck, and the negations that the curse added in each ground. Ids are not recorded:
-//   a binding id hashes the gateway clock, so the projection keeps the goldens stable.
-// - served level: the root surface's rows, as lens name + the ground the row came from + its
-//   hyperschema entity, whether `def` resolves each lens of interest, and
-//   the GraphQL answer for `alice_Plant` and for the control lens.
-// - the curse call's outcome: resolved, or the text of its refusal.
-//
-// Cases: (a) the pool lens alone; (b) the same plus an independent root registration published by
-// the operator under the name `alice:Plant`, before the channel opens and after it syncs; (c) a
-// root registration under the different name `Sprout`, the control bystander.
-//
-// Deliberately not recorded: the lift (`{ lift: true }`), the standing sync's re-blessing after a
-// curse, a bound connection's container surface, and a store whose bindings predate the pool
-// move. The clock is a counter: each `Date.now()` call returns the next integer from a fixed start,
-// so the run is repeatable. A frozen clock does not work here: with every timestamp equal, the sync
-// parks the lens ("persisted but does not serve") and nothing is blessed.
-
 import { afterEach, describe, it, vi } from "vitest";
 import type { Delta, Reactor } from "@bombadil/rhizomatic";
 import { isRegistrationBinding } from "../../src/gateway/adopt-vocab.js";
@@ -66,9 +33,6 @@ const lensAt = (d: Delta): string | undefined => {
   return id.startsWith("schema:") ? id.slice("schema:".length) : id;
 };
 
-/** Every registration binding in a ground, as lens name + live or struck at `now`, the scope's
- * own validity time, sorted. Struck means a surviving negation by the binding's own author or by
- * the ground's own key (a pool governs the copies it holds, ruling 11). */
 function bindings(reactor: Reactor, now: number, groundKey: string): string[] {
   const byGround = negatedAt(reactor, now, groundKey);
   return [...reactor.snapshot()]
@@ -80,7 +44,6 @@ function bindings(reactor: Reactor, now: number, groundKey: string): string[] {
     .sort();
 }
 
-/** The negations in `reactor` that strike a registration binding, as the struck binding's lens. */
 function strikes(reactor: Reactor): string[] {
   const byId = new Map([...reactor.snapshot()].map((d) => [d.id, d]));
   const out: string[] = [];

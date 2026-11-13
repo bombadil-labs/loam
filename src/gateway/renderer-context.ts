@@ -21,7 +21,6 @@ interface BoundRendererContext {
   readonly now: () => number;
 }
 
-/** Trusted host selection, not a channel activation or transport capability. */
 export type RendererContext = RootRendererContext | BoundRendererContext;
 const issued = new WeakSet<object>();
 
@@ -76,7 +75,6 @@ export function createBoundRendererContext(input: {
   return context;
 }
 
-/** Re-read authority at each call and after each asynchronous authority boundary. */
 export function rendererContextStands(context: unknown): context is RendererContext {
   if (!issued.has(context as object)) return false;
   const selected = context as RendererContext;

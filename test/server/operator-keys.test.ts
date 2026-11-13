@@ -1,12 +1,3 @@
-// §36 phase 3 (T124), the per-operator-keys letters A-I from
-// `.adlc/specs/36-03-the-bootstrap-the-role-commands-and-per-operator-keys.md`. The CLI's own
-// behaviour (delta counts, refusals, help text) is `test/cli/user-roles.test.ts`; this file asserts
-// the GROUND/GRANT mechanics: whose signature counts, and why — `lawfulStrikersJson`,
-// `governedGatherBody` and `dataStruck` (`src/gateway/accounts.ts`, unmodified by this ticket).
-//
-// Two levels, every time a negation is in play (CLAUDE.md's P3 rule): the DELTA level (is the
-// strike genuinely in the reactor?) and the OBJECT level (does a governed reader honor it?).
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -51,10 +42,6 @@ async function ground(): Promise<{
   return { reactor: gateway.reactor, operator: gateway.operator!, close: () => gateway.close() };
 }
 
-// A throwaway data claim + its negation, admitted straight into a Reactor (bypassing the append
-// door, exactly as phase 2's own rails do) — this file is testing the TRUST MASK, not standing.
-// `strikerSeed` signs the NEGATION — the key under test; the claim itself is signed by a fixed,
-// irrelevant throwaway seed (entities are unowned, so anyone with write standing may claim one).
 const CLAIMANT_SEED = "00".repeat(32);
 function plantAndStrike(reactor: Reactor, strikerSeed: string, uniqueTs: number) {
   const claimant = authorForSeed(CLAIMANT_SEED);
@@ -105,18 +92,13 @@ describe("B — a delegated operator's own grant never widens the trusted set", 
 
     const bobSeed = randomBytes(32).toString("hex");
     const bobKey = authorForSeed(bobSeed);
-    // Alice, NOT the store's seed, signs a grant for bob — malformed law is refused for everyone,
-    // but this is well-formed (a grant carries exactly one subject and one verb); it is simply not
-    // OPERATOR-authored, which is the only thing `lawfulStrikersJson` checks.
     const aliceGrantForBob = signClaims(
       grantClaims(STORE_ENTITY, bobKey, "admin", aliceKey, 100),
       aliceSeed,
     );
     const admitted = g.reactor.ingest(aliceGrantForBob);
-    expect(admitted.status).toBe("accepted"); // delta level: it IS in the store
+    expect(admitted.status).toBe("accepted");
 
-    // Object level: bob's own strike of a probe claim must NOT bind. His only grant is alice's,
-    // and alice is not the store's seed — depth is bounded by AUTHORSHIP, not by the chain's length.
     const probe = plantAndStrike(g.reactor, bobSeed, 200);
     expect(dataStruck(g.reactor, Date.now(), g.operator)(probe.claim.id)).toBe(false);
     await g.close();
@@ -171,7 +153,6 @@ describe("C — two operators are distinguishable in the ground", () => {
     expect(bobGrant).toBeDefined();
     expect(aliceGrant!.claims.author).toBe(operator);
     expect(bobGrant!.claims.author).toBe(operator);
-    // The grants name the users; the door resolves each to that user's own key, and not the other.
     const now = Date.now();
     expect(holdsGrant(g.reactor, now, STORE_ENTITY, aliceKey, "admin", operator)).toBe(true);
     expect(holdsGrant(g.reactor, now, STORE_ENTITY, bobKey, "admin", operator)).toBe(true);
@@ -190,14 +171,14 @@ describe("D — a granted key's strike resolves for a governed reader; an ungran
 
     const g1 = await ground();
     const bound = plantAndStrike(g1.reactor, aliceSeed, 10);
-    expect(g1.reactor.negationsOf(bound.claim.id)).toContain(bound.negation.id); // delta level
-    expect(dataStruck(g1.reactor, Date.now(), g1.operator)(bound.claim.id)).toBe(true); // object level: bound
+    expect(g1.reactor.negationsOf(bound.claim.id)).toContain(bound.negation.id);
+    expect(dataStruck(g1.reactor, Date.now(), g1.operator)(bound.claim.id)).toBe(true);
     await g1.close();
 
     const g2 = await ground();
     const unbound = plantAndStrike(g2.reactor, strangerSeed, 20);
-    expect(g2.reactor.negationsOf(unbound.claim.id)).toContain(unbound.negation.id); // delta level: present
-    expect(dataStruck(g2.reactor, Date.now(), g2.operator)(unbound.claim.id)).toBe(false); // object level: inert
+    expect(g2.reactor.negationsOf(unbound.claim.id)).toContain(unbound.negation.id);
+    expect(dataStruck(g2.reactor, Date.now(), g2.operator)(unbound.claim.id)).toBe(false);
     await g2.close();
   });
 });
@@ -230,8 +211,6 @@ describe("F — no on-wire migration is owed: shapes are pinned literals, not se
       grantClaims(STORE_ENTITY, "ed25519:pinned-subject-key", "admin", operator, 12345),
       FIXED_SEED,
     );
-    // Pinned against a LITERAL computed once and hard-coded (H10) — never against the function's
-    // own answer. A change here means a delta's bytes moved and a §20 migration step is owed.
     expect(roleDelta.id).toBe(
       "1e20352ef6e9922ca6df144cded11f0541059a6e503ee9e10e8764407238e44b1b82",
     );
@@ -276,7 +255,6 @@ describe("13b — remove-role strikes the grant too: two-sided at the governed-r
     const finnSeedRead = readUserSeed(home, "finn");
     const finnSeed = finnSeedRead.kind === "present" ? finnSeedRead.seed : "";
 
-    // Both resolve before eve's role is removed.
     const gBefore = await ground();
     const eveProbe = plantAndStrike(gBefore.reactor, eveSeed, 50);
     expect(dataStruck(gBefore.reactor, Date.now(), gBefore.operator)(eveProbe.claim.id)).toBe(true);
@@ -288,11 +266,11 @@ describe("13b — remove-role strikes the grant too: two-sided at the governed-r
     const eveProbeAfter = plantAndStrike(gAfter.reactor, eveSeed, 60);
     expect(dataStruck(gAfter.reactor, Date.now(), gAfter.operator)(eveProbeAfter.claim.id)).toBe(
       false,
-    ); // eve: gone
+    );
     const finnProbeAfter = plantAndStrike(gAfter.reactor, finnSeed, 70);
     expect(dataStruck(gAfter.reactor, Date.now(), gAfter.operator)(finnProbeAfter.claim.id)).toBe(
       true,
-    ); // finn: unaffected
+    );
     await gAfter.close();
   });
 });

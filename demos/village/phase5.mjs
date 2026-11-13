@@ -1,6 +1,3 @@
-// Phase 5 — Federation, pairwise: pulls, idempotence, inert foreign law, the hive's lens,
-// convergence, and verification at the boundary.
-
 import { makeDelta, signClaims } from "@bombadil/rhizomatic";
 import {
   AUTHORS,
@@ -32,7 +29,6 @@ try {
   for (const name of ["commons", "reel", "hive", "almanac"]) stores[name] = await openStore(name);
   const { commons, reel, hive, almanac } = stores;
 
-  // 5.1 — almanac pulls the commons
   const first = await pullFrom(almanac.gateway, commons.base, opToken("commons"));
   const second = await pullFrom(almanac.gateway, commons.base, opToken("commons"));
   const wrenHere = await gql(
@@ -47,7 +43,6 @@ try {
     `accepted ${first.accepted} then ${second.accepted}; ${JSON.stringify(wrenHere.body?.data?.dossier)}`,
   );
 
-  // 5.2 — foreign law inert: commons' registrations SIT here, bind nothing
   const foreignRegs = countRegCtx(almanac.gateway);
   const circleAbsent = await gql(
     almanac.base,
@@ -62,7 +57,6 @@ try {
     `${foreignRegs} registration-context deltas in the almanac store`,
   );
 
-  // 5.3 — reel pulls commons: companions get their names inside Miles's app
   await pullFrom(reel.gateway, commons.base, opToken("commons"));
   const wrenOnReel = await gql(
     reel.base,
@@ -76,7 +70,6 @@ try {
     JSON.stringify(wrenOnReel.body?.data?.person),
   );
 
-  // 5.4 — the hive federates THROUGH ITS LENS: grumbles stay home
   const hiveGrumbles = countGrumbles(hive.gateway);
   const offered = hive.gateway.offeredDeltas().length;
   const held = [...hive.gateway.reactor.snapshot()].length;
@@ -98,10 +91,6 @@ try {
     `hive holds ${held}, offers ${offered} (grumbles home: ${hiveGrumbles}); almanac grumbles: ${almanacGrumbles}; wren attended ${JSON.stringify(attendance.body?.data?.dossier?.attended)}`,
   );
 
-  // 5.5 — convergence: an entity whose deltas fully crossed resolves to the SAME hex under
-  // the SAME law on two different machines. person:odile — profile + follows (commons) +
-  // one companionship (reel) — is exactly reel's holdings after its pull; the almanac, having
-  // pulled reel too, holds the same slice for her.
   await pullFrom(almanac.gateway, reel.base, opToken("reel"));
   const q = `{ person(entity: "person:odile") { _hex } }`;
   const onReel = (await gql(reel.base, tok("miles", "reel"), q)).body?.data?.person?._hex;
@@ -113,7 +102,6 @@ try {
     `reel ${onReel?.slice(0, 24)}… almanac ${onAlmanac?.slice(0, 24)}…`,
   );
 
-  // 5.6 — verification at the boundary: forgery and anonymity refused, honesty lands
   const honest = signClaims(
     {
       ...((t) => ({ timestamp: t, validFrom: t }))(Date.now()),

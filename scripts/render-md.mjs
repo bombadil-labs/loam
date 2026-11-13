@@ -1,10 +1,3 @@
-// A small, deliberate markdown renderer for the guides the landing page carries (docs/*.md → HTML
-// fragments). It covers exactly what those two documents use — ATX headings, paragraphs, fenced
-// code, blockquotes, unordered lists, and inline code / bold / em / links — and nothing else: a
-// construct it does not know renders as a paragraph rather than silently vanishing. The guides
-// are the source of truth; this exists so the site never carries a hand-maintained second copy of
-// them (the same rule the capabilities book follows).
-
 const escape = (s) =>
   s
     .replaceAll("&", "&amp;")
@@ -12,7 +5,6 @@ const escape = (s) =>
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
 
-/** A URL-safe id for a heading: lowercase, words joined by hyphens. */
 export const slug = (text) =>
   text
     .toLowerCase()
@@ -20,8 +12,6 @@ export const slug = (text) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
 
-// Inline markup, applied to already-escaped text. Code spans are protected first so nothing
-// inside them is re-interpreted.
 function inline(raw, linkOf) {
   const codes = [];
   let text = escape(raw).replace(/`([^`]+)`/g, (_, code) => {
@@ -38,13 +28,6 @@ function inline(raw, linkOf) {
   return text.replace(/\u0000(\d+)\u0000/g, (_, i) => codes[Number(i)]);
 }
 
-/**
- * Render a markdown document to an HTML fragment.
- *
- * `opts.linkOf` rewrites link targets (a `.md` sibling becomes an in-page anchor, say);
- * `opts.headingShift` demotes every heading by that many levels so a document's `#` becomes the
- * page's `h2`. Every heading carries an id from its text, so a table of contents can point at it.
- */
 export function renderMarkdown(source, opts = {}) {
   const linkOf = opts.linkOf ?? ((href) => href);
   const shift = opts.headingShift ?? 0;
@@ -75,7 +58,7 @@ export function renderMarkdown(source, opts = {}) {
         body.push(lines[i]);
         i += 1;
       }
-      i += 1; // the closing fence
+      i += 1;
       const lang = fence[1] === "" ? "" : ` class="language-${fence[1]}"`;
       out.push(`<pre><code${lang}>${escape(body.join("\n"))}</code></pre>`);
       continue;

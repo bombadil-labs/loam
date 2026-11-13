@@ -1,16 +1,3 @@
-// SPEC §56 criteria (T255): a caller may ask who the door thinks they are. Under mask: drop,
-// an anonymous reader and an empty store are indistinguishable from outside — a masked-auth
-// failure renders as a welcoming empty state, confidently wrong (H9 at the door; the
-// synchronicity artifact paid it). The answer: `loam_whoami` on the MCP roster and
-// `GET /:mount/whoami` as the non-MCP sibling, both resolving THIS request's identity and
-// reading its standing from the GROUND, so a revocation binds on the very next call.
-//
-// The four kinds are the contract: operator, connector (a token the oauth exchange minted),
-// actor (a configured bearer acting as a key), anonymous — each answer distinct, truthful,
-// and the anonymous one saying IN WORDS that reads are masked and views fold empty.
-//
-// Erasure standing rule: every store here is this file's own memory/mkdtemp fixture.
-
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -36,7 +23,7 @@ const RAE_SEED = "3b".repeat(32);
 const RAE = authorForSeed(RAE_SEED);
 const CONNECTOR_SEED = "3c".repeat(32);
 const CONNECTOR = authorForSeed(CONNECTOR_SEED);
-const MYK_SEED = "3d".repeat(32); // the person whose consent bound the connector
+const MYK_SEED = "3d".repeat(32);
 const JOURNAL = "myk:journal";
 const INBOX = inboxName(JOURNAL, CONNECTOR);
 const CLIENT_ID = "https://claude.ai/oauth/mcp-oauth-client-metadata";
@@ -57,13 +44,6 @@ const client = (): OAuthClient => ({
   generation: 1,
 });
 
-/**
- * A store with every kind at the door: the operator token, two actor tokens (ada granted, rae
- * her sibling), and a connector whose oauth grant and live token are written FILE-FIRST — the
- * exact rows the PKCE dance persists, without the dance (oauth-token.test.ts proves the dance;
- * this file proves the answer). The connector's standing is its INBOX POOL's (SPEC §58): the pool
- * is bound here as the exchange would bind it, and the primary grants the key nothing.
- */
 async function fourDoorStore(): Promise<{ base: string; gateway: Gateway }> {
   const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
   let ts = 9001;
@@ -72,9 +52,6 @@ async function fourDoorStore(): Promise<{ base: string; gateway: Gateway }> {
     signClaims(grantClaims(STORE_ENTITY, ADA, "register", OPERATOR, ts++, "sync:"), OPERATOR_SEED),
     signClaims(grantClaims(STORE_ENTITY, RAE, "write", OPERATOR, ts++), OPERATOR_SEED),
   ]);
-  // The container the connection binds to, DECLARED — as consent declares it. A binding whose
-  // container does not stand is one whose writes could land where nothing reads them, and the
-  // door refuses it; a fixture that skipped the declaration would assert standing the door denies.
   const myk = authorForSeed(MYK_SEED);
   const owned = (container: string, parent?: string) =>
     signClaims(
@@ -115,7 +92,7 @@ async function fourDoorStore(): Promise<{ base: string; gateway: Gateway }> {
         actor: CONNECTOR,
         grantedAt: 2000,
         standing: true,
-        user: "myk", // §58: the key is the (client, user) pair's, pooled in the person's container
+        user: "myk",
         container: JOURNAL,
         inbox: INBOX,
       },
@@ -218,7 +195,6 @@ describe("T255 (a) — four kinds, four distinct truthful answers", () => {
     expect(a.operator).toBe(false);
     expect(a.binding).toEqual({ user: "myk", container: JOURNAL, inbox: INBOX });
     expect(a.note).toContain(INBOX);
-    // The write standing it reports is the POOL's (§58): the primary grants the key nothing.
     expect(
       holdsGrant(
         gateway.reactor,
@@ -239,8 +215,6 @@ describe("T255 (a) — four kinds, four distinct truthful answers", () => {
     expect(a.operator).toBe(false);
     expect(a.write).toBe(false);
     expect(a.masked).toBe(true);
-    // The sentence the synchronicity artifact needed: an empty view for THIS caller is not an
-    // empty store.
     expect(a.note).toMatch(/masked/i);
     expect(a.note).toMatch(/empty/i);
   });
@@ -251,7 +225,6 @@ describe("T255 (b) — the answer reads the ground: a revocation binds on the ve
     const { base, gateway } = await fourDoorStore();
     expect((await restWhoami(base, "ada-token")).write).toBe(true);
 
-    // The operator strikes ada's write grant — the surviving grants no longer speak for her.
     const writeGrant = [...gateway.reactor.snapshot()].find(
       (d) =>
         d.claims.pointers.some((p) => p.role === "verb" && p.target.kind === "primitive") &&
@@ -268,7 +241,7 @@ describe("T255 (b) — the answer reads the ground: a revocation binds on the ve
 
     const ada = await restWhoami(base, "ada-token");
     expect(ada.write).toBe(false);
-    expect(ada.registerPrefixes).toEqual(["sync:"]); // the untouched grant still speaks
+    expect(ada.registerPrefixes).toEqual(["sync:"]);
     const rae = await restWhoami(base, "rae-token");
     expect(rae.write).toBe(true);
   });
@@ -282,7 +255,7 @@ describe("T255 (b) — the answer reads the ground: a revocation binds on the ve
       ownerSeed: MYK_SEED,
     });
     const after = await restWhoami(base, BEARER);
-    expect(after.kind).toBe("connector"); // the token still names it — standing is the pool's
+    expect(after.kind).toBe("connector");
     expect(after.write).toBe(false);
     expect((await restWhoami(base, "ada-token")).write).toBe(true);
   });

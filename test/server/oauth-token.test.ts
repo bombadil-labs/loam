@@ -1,17 +1,3 @@
-// §37 phase 15 — the token exchange (T136). Criteria 1–7 and 11–13 of
-// .adlc/specs/37-15-the-token-exchange-and-revocation.md, transcribed. `POST /oauth/token` redeems a
-// single-use authorization code for a per-connector actor seed and a bearer token. Revocation
-// (criteria 8–10) lives in its sibling oauth-revoke.test.ts.
-//
-// Most criteria run END-TO-END through a live serve(): register → consent → redeem → write, so the
-// enforcing code answers rather than a stand-in. The two CONCURRENCY criteria (3, 4) cannot be posed
-// through fetch — the in-flight window is a few synchronous statements wide — so they drive the token
-// door and the register door directly, sharing the one `redeeming` map serve() wires between them,
-// with a bind barrier the test releases by hand.
-//
-// EVERY AUTHORSHIP ASSERTION READS THE STORE'S OWN DELTAS (session-authorship.test.ts's lesson): a
-// view resolves values and says nothing about who signed them, so criterion 6 asserts at BOTH levels.
-
 import { EventEmitter } from "node:events";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -62,17 +48,12 @@ afterEach(async () => {
   while (homes.length > 0) rmSync(homes.pop()!, { recursive: true, force: true });
 });
 
-// --- PKCE ----------------------------------------------------------------------------------------
-
 const b64url = (buf: Buffer): string => buf.toString("base64url");
-/** A fresh PKCE pair: a 43-char verifier and its S256 challenge, both real (RFC 7636). */
 const pkce = (): { verifier: string; challenge: string } => {
-  const verifier = b64url(randomBytes(32)); // 43 chars, unreserved
+  const verifier = b64url(randomBytes(32));
   const challenge = b64url(createHash("sha256").update(verifier).digest());
   return { verifier, challenge };
 };
-
-// --- the end-to-end fixture ----------------------------------------------------------------------
 
 const clientRecord = (over: Partial<OAuthClient> = {}): OAuthClient => ({
   clientId: CLIENT_ID,
@@ -99,7 +80,6 @@ async function connectorServer(
 
   const home = mkdtempSync(join(tmpdir(), "loam-oauth-token-"));
   homes.push(home);
-  // The token door signs the write grant with <home>/operator.seed — the same key the gateway holds.
   initHome(home, OPERATOR_SEED);
   writeCredentials(home, { version: 1, users: { myk: await hashPassword(PASSWORD, CHEAP) } });
   writeOAuthFile(home, { ...EMPTY_OAUTH, clients: [opts.client ?? clientRecord()] });
@@ -142,7 +122,6 @@ async function signIn(base: string): Promise<string> {
   return valueOf(cookiesOf(res).find((c) => c.startsWith(`${SESSION_COOKIE}=`))!);
 }
 
-/** Sign in, approve the consent page WITH a PKCE challenge, and return the minted code + verifier. */
 async function mintCode(
   base: string,
   challenge: string,
@@ -176,7 +155,7 @@ async function mintCode(
       code_challenge: fieldOf(html, "code_challenge"),
       code_challenge_method: "S256",
       state: fieldOf(html, "state"),
-      bind_new: "journal", // §58: a connection lives in one container under the person's name
+      bind_new: "journal",
     }).toString(),
     redirect: "manual",
   });
@@ -239,7 +218,6 @@ describe("§37 phase 15 — the token exchange", () => {
     const { verifier, challenge } = pkce();
     const code = await mintCode(base, challenge);
 
-    // A WRONG verifier is refused — and burns the code.
     const wrong = await redeem(base, {
       code,
       code_verifier: verifier.slice(0, -1) + (verifier.endsWith("A") ? "B" : "A"),
@@ -247,13 +225,10 @@ describe("§37 phase 15 — the token exchange", () => {
     expect(wrong.status).toBe(400);
     expect(await errorOf(wrong)).toBe("invalid_grant");
 
-    // The RIGHT verifier afterwards is refused too: the code is already gone.
     const after = await redeem(base, { code, code_verifier: verifier });
     expect(after.status).toBe(400);
     expect(await errorOf(after)).toBe("invalid_grant");
 
-    // Positive control: a FRESH code with the correct verifier mints once — so the two refusals are
-    // about single-use, not about redemption being broken for everyone.
     const fresh = pkce();
     const freshCode = await mintCode(base, fresh.challenge);
     const ok = await redeem(base, { code: freshCode, code_verifier: fresh.verifier });
@@ -264,7 +239,6 @@ describe("§37 phase 15 — the token exchange", () => {
   it("(2) a code is bound to its client and its redirect_uri", async () => {
     const { base } = await connectorServer();
 
-    // Another client's id.
     const a = pkce();
     const codeA = await mintCode(base, a.challenge);
     const wrongClient = await redeem(base, {
@@ -275,7 +249,6 @@ describe("§37 phase 15 — the token exchange", () => {
     expect(wrongClient.status).toBe(400);
     expect(await errorOf(wrongClient)).toBe("invalid_grant");
 
-    // A different redirect_uri than it was bound to.
     const b = pkce();
     const codeB = await mintCode(base, b.challenge);
     const wrongUri = await redeem(base, {
@@ -286,7 +259,6 @@ describe("§37 phase 15 — the token exchange", () => {
     expect(wrongUri.status).toBe(400);
     expect(await errorOf(wrongUri)).toBe("invalid_grant");
 
-    // Positive control: the exact bound pair mints.
     const c = pkce();
     const codeC = await mintCode(base, c.challenge);
     const ok = await redeem(base, { code: codeC, code_verifier: c.verifier });
@@ -303,13 +275,11 @@ describe("§37 phase 15 — the token exchange", () => {
     const file = readOAuthFile(home);
     expect(file.grants).toHaveLength(1);
     const grant = file.grants[0]!;
-    // The seed is a fresh key — NOT the operator's, and its own actor is derived from it.
     expect(grant.actorSeed).not.toBe(OPERATOR_SEED);
     expect(grant.actor).toBe(authorForSeed(grant.actorSeed));
     expect(grant.actor).not.toBe(OPERATOR);
     expect(grant.standing).toBe(true);
 
-    // A second redemption (a fresh code for the SAME client) REUSES the seed — no second is minted.
     const p2 = pkce();
     const code2 = await mintCode(base, p2.challenge);
     const ok2 = await redeem(base, { code: code2, code_verifier: p2.verifier });
@@ -333,14 +303,11 @@ describe("§37 phase 15 — the token exchange", () => {
     const wrote = await mutate(base, token, 81);
     expect(wrote.status).toBe(200);
 
-    // The DELTA level: the height delta carries the connector's actor, not the operator's — and
-    // it lives in the connection's INBOX POOL (SPEC §58), never in the primary.
     const pool = gateway.connectionInboxes.get(grant.inbox!)!.gateway!;
     expect(authorsOfHeight(pool, 81)).toEqual([grant.actor]);
     expect(authorsOfHeight(pool, 81)).not.toContain(OPERATOR);
     expect(authorsOfHeight(gateway, 81)).toEqual([]);
 
-    // AND a reading: the resolved plant view holds the value the connector wrote.
     const read = await fetch(`${base}/default/graphql`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
@@ -360,7 +327,6 @@ describe("§37 phase 15 — the token exchange", () => {
       }
     ).access_token;
 
-    // The operator-only door REFUSES the connector token — proof it names no operator identity.
     const fed = await fetch(`${base}/default/federate`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
@@ -368,10 +334,6 @@ describe("§37 phase 15 — the token exchange", () => {
     });
     expect(fed.status, "federate refuses the connector token").toBe(403);
 
-    // `register` STOPPED BEING AN OPERATOR-ONLY DOOR at §58 S2: a bound connection names law under
-    // its own container path, so an empty body now draws a shape complaint rather than the
-    // authority refusal. What the connector still cannot do is shape the ROOT, and that — not the
-    // status code an empty body happens to draw — is what this case was always about.
     const root = await fetch(`${base}/default/register`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
@@ -398,8 +360,6 @@ describe("§37 phase 15 — the token exchange", () => {
     });
     expect(root.status, "register refuses a ROOT name from the connector token").toBe(403);
 
-    // Positive control: the operator token opens federate (so the 403s are about the identity, not a
-    // door that refuses everyone).
     const asOperator = await fetch(`${base}/default/federate`, {
       method: "POST",
       headers: { authorization: "Bearer op-token" },
@@ -408,8 +368,6 @@ describe("§37 phase 15 — the token exchange", () => {
   });
 
   it("(11) an unknown bearer token costs no file read — a bounded index miss", () => {
-    // Drive the door directly so the file reader can be COUNTED. The unknown-token path must not read
-    // the file (which would derive one author per grant); only a KNOWN digest pays a read.
     const home = mkdtempSync(join(tmpdir(), "loam-oauth-token-11-"));
     homes.push(home);
     const seed = randomBytes(32).toString("hex");
@@ -424,7 +382,7 @@ describe("§37 phase 15 — the token exchange", () => {
           actor: authorForSeed(seed),
           grantedAt: 1,
           standing: true,
-          user: "myk", // §58: the key is the (client, user) pair's, pooled in the person's container
+          user: "myk",
           container: "myk:journal",
           inbox: "inbox:myk:journal:direct",
         },
@@ -442,14 +400,11 @@ describe("§37 phase 15 — the token exchange", () => {
       bind: bindNowhere,
       readFile,
     });
-    // One read at construction (to seed the index). Reset the counter for the probe.
     reads = 0;
 
-    // An UNKNOWN digest: no read, and undefined.
     expect(door.resolve("f".repeat(64))).toBeUndefined();
     expect(reads).toBe(0);
 
-    // The KNOWN digest DOES read (to re-check the generation) and resolves to the actor seed.
     expect(door.resolve(digest)).toEqual({
       actor: seed,
       binding: { user: "myk", container: "myk:journal", inbox: "inbox:myk:journal:direct" },
@@ -469,15 +424,11 @@ describe("§37 phase 15 — the token exchange", () => {
     expect((await mutate(base, token, 82)).status).toBe(200);
     const grant = readOAuthFile(home).grants[0]!;
 
-    // The scan: does the store's whole delta-set carry a secret, as a substring anywhere?
     const containsSecret = (deltas: readonly unknown[], secret: string): boolean =>
       JSON.stringify(deltas).includes(secret);
 
-    // INSTRUMENT-MUST-FAIL-FIRST: plant a delta holding the seed and prove the scan catches it —
-    // otherwise the clean result below would prove only that the scanner is broken.
     expect(containsSecret([{ leaked: grant.actorSeed }], grant.actorSeed)).toBe(true);
 
-    // Now the real snapshot: none of the four secrets is in any delta.
     const snapshot = [...gateway.reactor.snapshot()];
     for (const secret of [grant.actorSeed, token, p.verifier, p.challenge]) {
       expect(containsSecret(snapshot, secret)).toBe(false);
@@ -489,33 +440,22 @@ describe("§37 phase 15 — the token exchange", () => {
     const p = pkce();
     const code = await mintCode(base, p.challenge);
 
-    // Hold the connector-records lock as another live process: withOAuthFile times out and throws
-    // OAuthFileBusy on the very first (burn) write, so the redemption cannot even read the code.
     writeFileSync(oauthLockPath(home), `999999:${randomBytes(8).toString("hex")}\n`);
 
     const locked = await redeem(base, { code, code_verifier: p.verifier });
     expect(locked.status).toBe(503);
     const body = await locked.text();
-    expect(body).toContain("lock"); // the branch that answered — a 503 about the lock, not a 400
-    expect(body).not.toContain(home); // no home path reaches the caller
+    expect(body).toContain("lock");
+    expect(body).not.toContain(home);
 
     rmSync(oauthLockPath(home), { force: true });
 
-    // Positive control naming which branch answered: with the lock gone, an ordinary bad request is a
-    // 400 whose body names its own reason — so "503 + lock" genuinely separates the two.
     const bad = await redeem(base, { code: "not-a-real-code", code_verifier: p.verifier });
     expect(bad.status).toBe(400);
     expect(await errorOf(bad)).toBe("invalid_grant");
   });
 });
 
-// --- criteria 3 & 4: the in-flight eviction pin and the redemption count -------------------------
-//
-// Driven at the door layer, sharing the one `redeeming` map serve() wires between the register door
-// (which reads it for its eviction pin) and the token door (which counts into it). A bind
-// barrier holds redemptions in the in-flight window — code burnt, grant not yet standing — on demand.
-
-/** A fake node req that emits a form body, and a res that captures status + body. */
 function fakeReq(body: string): IncomingMessage {
   const req = new EventEmitter() as unknown as IncomingMessage & EventEmitter;
   (req as { method?: string }).method = "POST";
@@ -566,11 +506,9 @@ const codeRecord = (clientId: string, digest: string, challenge: string): OAuthC
   issuedAt: 1,
   codeChallenge: challenge,
   generation: 1,
-  user: "myk", // §58: a code carries the binding consent recorded
+  user: "myk",
   container: "myk:journal",
 });
-// §58: the door binds the connection where the code says; these direct-door rails stand up no
-// ground, so the pool's name is answered as given.
 const bindNowhere = (): Promise<string> => Promise.resolve("inbox:myk:journal:direct");
 
 describe("§37 phase 15 — the eviction pin and the redemption count", () => {
@@ -578,9 +516,6 @@ describe("§37 phase 15 — the eviction pin and the redemption count", () => {
     const home = mkdtempSync(join(tmpdir(), "loam-oauth-pin-"));
     homes.push(home);
     const seed = randomBytes(32).toString("hex");
-    // Four registered clients at cap 4: one with a GRANT, one with a live CODE, one IN FLIGHT
-    // (pinned only by the redeeming count), and one plain (evictable). Register door evicts the
-    // oldest EVICTABLE to admit a fifth.
     writeOAuthFile(home, {
       ...EMPTY_OAUTH,
       clients: [
@@ -606,7 +541,6 @@ describe("§37 phase 15 — the eviction pin and the redemption count", () => {
       registration: { home, allowRedirectOrigins: [ALLOW_ORIGIN], maxClients: 4, redeeming },
     });
 
-    // A fifth registration: someone must be evicted. The only evictable client is "plain".
     const { res, captured } = fakeRes();
     doors.handle(
       "/oauth/register",
@@ -616,11 +550,10 @@ describe("§37 phase 15 — the eviction pin and the redemption count", () => {
     return captured.done.then(() => {
       expect(captured.status).toBe(201);
       const after = new Set(readOAuthFile(home).clients.map((c) => c.clientId));
-      // All three pinned survive; only the plain one was evicted.
       expect(after.has("has-grant")).toBe(true);
       expect(after.has("has-code")).toBe(true);
       expect(after.has("in-flight")).toBe(true);
-      expect(after.has("plain")).toBe(false); // the positive control: an UNpinned client DID go
+      expect(after.has("plain")).toBe(false);
     });
   });
 
@@ -638,7 +571,6 @@ describe("§37 phase 15 — the eviction pin and the redemption count", () => {
     });
 
     const redeeming = new Map<string, number>();
-    // A bind barrier: it blocks until the test releases it, and counts its calls.
     let calls = 0;
     const gates: Array<() => void> = [];
     const bind = (): Promise<string> =>
@@ -666,27 +598,21 @@ describe("§37 phase 15 — the eviction pin and the redemption count", () => {
       return captured;
     };
 
-    // Both redemptions reach the in-flight window and block in bind. The pin counts TWO.
     const r1 = start("code-one", c1.verifier);
     const r2 = start("code-two", c2.verifier);
     await vi.waitFor(() => expect(calls).toBe(2));
     expect(redeeming.get(CLIENT_ID)).toBe(2);
 
-    // Release the FIRST. It finishes and decrements — but the second still needs the pin, so a flag
-    // (which the first would have cleared) would be wrong here. The count still holds it.
     gates[0]!();
     await r1.done;
     expect(r1.status).toBe(200);
     expect(redeeming.get(CLIENT_ID)).toBe(1);
 
-    // Release the second: now the pin clears.
     gates[1]!();
     await r2.done;
     expect(r2.status).toBe(200);
     expect(redeeming.get(CLIENT_ID)).toBeUndefined();
 
-    // A THROW in the mint must not leak the count (released in `finally`). A fresh client with NO
-    // grant and a bind that rejects: the redemption fails, and the pin is clean afterwards.
     const c3 = pkce();
     const d3 = createHash("sha256").update("code-three").digest("hex");
     writeOAuthFile(home, {
@@ -714,8 +640,8 @@ describe("§37 phase 15 — the eviction pin and the redemption count", () => {
       res,
     );
     await captured.done;
-    expect(captured.status).toBe(503); // the throw surfaced as a refusal
-    expect(redeeming.get("throwing-client")).toBeUndefined(); // and the count did not leak
+    expect(captured.status).toBe(503);
+    expect(redeeming.get("throwing-client")).toBeUndefined();
   });
 
   it("(5b) the seed is written BEFORE the bind: a failed bind leaves it for the retry to reuse", async () => {
@@ -754,8 +680,6 @@ describe("§37 phase 15 — the eviction pin and the redemption count", () => {
       return captured;
     };
 
-    // First attempt: the bind FAILS. Because the seed is written first, a grant record is left
-    // behind (standing false) rather than nothing — this is the ordering criterion 5 names.
     const failing = makeTokenDoor({
       home,
       redeeming,
@@ -770,7 +694,6 @@ describe("§37 phase 15 — the eviction pin and the redemption count", () => {
     const seed = afterFail[0]!.actorSeed;
     expect(seed).not.toBe(OPERATOR_SEED);
 
-    // The retry succeeds and REUSES that seed — no second is minted, none is stranded.
     const ok = makeTokenDoor({
       home,
       redeeming,
@@ -781,7 +704,7 @@ describe("§37 phase 15 — the eviction pin and the redemption count", () => {
     expect(second.status).toBe(200);
     const afterOk = readOAuthFile(home).grants;
     expect(afterOk).toHaveLength(1);
-    expect(afterOk[0]!.actorSeed).toBe(seed); // the SAME seed, reused
+    expect(afterOk[0]!.actorSeed).toBe(seed);
     expect(afterOk[0]!.standing).toBe(true);
   });
 });

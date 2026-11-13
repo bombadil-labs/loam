@@ -1,9 +1,3 @@
-// Phase RENDERCAP — THE DOOR THAT SAYS "BUSY" (SPEC §23.9, ticket T18). The village's public
-// square gains a rendered notice board, and a crowd hammers it: more anonymous readers at once
-// than the door will spawn workers for. The over-cap callers get a clean "busy" that names
-// nothing; the board keeps serving; and the host never wavers. The cap is the anonymous door's
-// own discipline — the operator's token door renders past it.
-
 import { check, openStore, summary } from "./harness.mjs";
 
 const BOARD_BUNDLE =
@@ -41,8 +35,6 @@ try {
   await gw.publishRenderer({ route: "board", schema: "Notice", consumes: ["note"], bundle: BOARD_BUNDLE });
   await gw.declarePublic(["Notice"]);
 
-  // RENDERCAP.1 — the crowd: six anonymous readers at once against a cap of two. The door serves
-  // what it can and says "busy" to the rest — cleanly, naming nothing.
   const crowd = await Promise.all(
     Array.from({ length: 6 }, () => gw.serveRoute("board", subject, "public")),
   );
@@ -57,7 +49,6 @@ try {
     `served: ${served}, busy: ${busy.length} of 6`,
   );
 
-  // RENDERCAP.2 — the slots come back: the board serves everyone who queues politely.
   let sequentialOk = true;
   for (let i = 0; i < 4; i += 1) {
     const r = await gw.serveRoute("board", subject, "public");
@@ -70,7 +61,6 @@ try {
     `4/4 sequential renders 200: ${sequentialOk}`,
   );
 
-  // RENDERCAP.3 — the operator's own door is not the anonymous fan: it renders past the cap.
   const spinning = [
     gw.serveRoute("board", subject, "public"),
     gw.serveRoute("board", subject, "public"),

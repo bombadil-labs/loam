@@ -1,8 +1,3 @@
-// How hermetic a source tree is already. Runs hermetic's prefer-hermetic rule in report mode, so
-// nothing is changed. Every candidate function is already hermetic, liftable by the rule's fix,
-// or left for a person. Shares are given by count and by code lines.
-// Usage: node refactor/tools/hermetic-census.mjs [dir=src]
-
 import path from "node:path";
 import { candidates, classify, codeLines, lintHermetic, parse, pct, sourceFiles } from "./lib.mjs";
 

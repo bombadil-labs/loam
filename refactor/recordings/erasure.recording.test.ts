@@ -1,11 +1,3 @@
-// Records Loam's erasure decisions over one corpus of tombstones: the door's shape check, the
-// refused-id set, the receipt ledger, the as-of annotation and the strike closure a slate seeds.
-// Scope: raw ingest, so no door and no purge runs; this pins decisions, not byte removal.
-//
-// One recorded behavior is due to change: a struck tombstone is "forgiven" and its id may return.
-// Myk ruled on 2026-09-25 (PLAN.md F3) that an erasure is eternal. When Loam implements that, the
-// `refused` recordings move, on purpose.
-
 import { describe, it } from "vitest";
 import { Reactor, type Claims, type Delta } from "@bombadil/rhizomatic";
 import { forgottenSince, receiptLedger, sealCommitment } from "../../src/gateway/erase.js";
@@ -142,8 +134,6 @@ describe("recordings: erasure decisions", () => {
     await record("erasure.ingest", ingestTrace(CORPUS).verdicts);
   });
 
-  // F1: erasing a strike brings its target back. Removal is modeled as a ground without the
-  // strike's bytes, the state a completed purge leaves; the purge itself is not run here.
   it("a strike's target before and after the strike's bytes are removed", async () => {
     const reading = (deltas: readonly Delta[]) => {
       const r = reactorOf(deltas);

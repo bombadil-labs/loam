@@ -1,14 +1,3 @@
-// SPEC §14: clearing is retraction. There is finally a way through the surface to REMOVE a value —
-// and it is not `set(null)`, it is the DUAL of resolution: negate the caller's OWN surviving
-// contributions in a field's gathered bucket. One mechanism, correct across every Policy because
-// the read side does the Policy work — pick falls to the next survivor, an `all` list loses your
-// tag, a `merge` withdraws your addend, and a field only you spoke for goes ABSENT, which the
-// reader renders per its own `absentAs` (the null-ness lives in the lens, never on a reference).
-//
-// The decision this suite pins (Myk, 2026-07-12): retract-your-own is the FLOOR AND THE CEILING.
-// A clear never touches another author's contribution — to keep OTHERS' claims out of a view you
-// filter them in the schema Policy, not by negating a delta you did not sign.
-
 import { describe, expect, it } from "vitest";
 import { verifyDelta } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -19,8 +8,6 @@ import { isStoreLocal } from "../../src/gateway/recovery-cut.js";
 
 const KEEPER_SEED = "c3".repeat(32);
 
-// The governed garden: the keeper operates; the gardener and surveyor hold write standing; the
-// settled garden already carries BOTH their voices on every policy kind (height/tag/readings).
 async function keeperGateway(backend = new MemoryBackend()): Promise<Gateway> {
   const gateway = await Gateway.open(backend, { seed: KEEPER_SEED });
   await gateway.append(governedBootstrap(KEEPER_SEED));
@@ -41,24 +28,20 @@ const viewOf = (r: { data?: unknown }): PlantView =>
 describe("clear (§14): retraction is the dual of resolution", () => {
   it("pick — retracting your own hands the field to the next survivor, then to absence", async () => {
     const gateway = await keeperGateway();
-    // height: gardener@1000=30, surveyor@2000=34; pick-latest → 34.
     let read = await gateway.query(`{ plant(entity: "${FERN}") { height } }`);
     expect((read.data as { plant: { height: number } }).plant.height).toBe(34);
 
-    // the surveyor withdraws THEIR reading — the field falls to the gardener's, still standing.
     const afterSurveyor = await gateway.query(clear(FERN, ["height"]), undefined, {
       actor: SURVEYOR_SEED,
     });
     expect(afterSurveyor.errors).toBeUndefined();
     expect(viewOf(afterSurveyor).height).toBe(30);
 
-    // the gardener withdraws theirs too — no voice remains, so the key resolves to ABSENCE (null).
     const afterGardener = await gateway.query(clear(FERN, ["height"]), undefined, {
       actor: GARDENER_SEED,
     });
     expect(viewOf(afterGardener).height).toBeNull();
 
-    // and a plain re-query agrees: the field is genuinely gone, not a stale mutation echo.
     read = await gateway.query(`{ plant(entity: "${FERN}") { height } }`);
     expect((read.data as { plant: { height: number | null } }).plant.height).toBeNull();
     await gateway.close();
@@ -66,28 +49,25 @@ describe("clear (§14): retraction is the dual of resolution", () => {
 
   it("retract-your-own is scoped: a clear never touches another author's contribution", async () => {
     const gateway = await keeperGateway();
-    // tag is an `all` union: gardener=shade, surveyor=fronds.
     const after = await gateway.query(clear(FERN, ["tag"]), undefined, { actor: GARDENER_SEED });
     expect(after.errors).toBeUndefined();
-    expect(viewOf(after).tag).toEqual(["fronds"]); // only the gardener's shade withdrew
+    expect(viewOf(after).tag).toEqual(["fronds"]);
     await gateway.close();
   });
 
   it("merge — a clear withdraws your addend, and the reduction recomputes", async () => {
     const gateway = await keeperGateway();
-    // readings is `merge count`: gardener + surveyor → 2.
     const read = await gateway.query(`{ plant(entity: "${FERN}") { readings } }`);
     expect((read.data as { plant: { readings: number } }).plant.readings).toBe(2);
     const after = await gateway.query(clear(FERN, ["readings"]), undefined, {
       actor: GARDENER_SEED,
     });
-    expect(viewOf(after).readings).toBe(1); // the surveyor's reading still counts
+    expect(viewOf(after).readings).toBe(1);
     await gateway.close();
   });
 
   it("absence renders per absentAs — a cleared field falls to the lens's fallback, not null", async () => {
     const gateway = await keeperGateway();
-    // watered is absentAs(constant:false). The gardener asserts true, then clears it.
     await gateway.query(
       `mutation { plant(entity: "${FERN}", watered: true) { watered } }`,
       undefined,
@@ -99,7 +79,7 @@ describe("clear (§14): retraction is the dual of resolution", () => {
       actor: GARDENER_SEED,
     });
     expect(after.errors).toBeUndefined();
-    expect(viewOf(after).watered).toBe(false); // the absentAs constant, NOT null — null-ness is the lens's
+    expect(viewOf(after).watered).toBe(false);
     await gateway.close();
   });
 
@@ -107,7 +87,6 @@ describe("clear (§14): retraction is the dual of resolution", () => {
     const gateway = await keeperGateway();
     await gateway.query(clear(FERN, ["height"]), undefined, { actor: SURVEYOR_SEED });
     await gateway.query(clear(FERN, ["height"]), undefined, { actor: GARDENER_SEED });
-    // absent now — but a new claim (the surveyor changed their mind) repopulates it correctly.
     const repopulated = await gateway.query(
       `mutation { plant(entity: "${FERN}", height: 50) { height } }`,
       undefined,
@@ -123,8 +102,7 @@ describe("clear (§14): retraction is the dual of resolution", () => {
     const settled = new Set([...garden, ...governedBootstrap(KEEPER_SEED)].map((d) => d.id));
     await gateway.query(clear(FERN, ["height"]), undefined, { actor: GARDENER_SEED });
     await gateway.flush();
-    const fresh = (await backend.deltasSince(settled)).filter((d) => !isStoreLocal(d)); // the store's own incarnation marker is not a write
-    // the gardener contributed exactly one height (30) → exactly one negation, theirs, verified.
+    const fresh = (await backend.deltasSince(settled)).filter((d) => !isStoreLocal(d));
     expect(fresh).toHaveLength(1);
     const neg = fresh[0]!;
     expect(verifyDelta(neg)).toBe("verified");
@@ -145,7 +123,7 @@ describe("clear (§14): retraction is the dual of resolution", () => {
     await gateway.query(clear(FERN, ["height"]), undefined, { actor: GARDENER_SEED });
     await gateway.flush();
     const afterSecond = (await backend.deltasSince(settled)).length;
-    expect(afterSecond).toBe(afterFirst); // the second clear finds only already-negated entries
+    expect(afterSecond).toBe(afterFirst);
     await gateway.close();
   });
 
@@ -169,11 +147,10 @@ describe("clear (§14): retraction is the dual of resolution", () => {
 
   it("a stranger with nothing of their own clears nothing — retraction has no reach beyond you", async () => {
     const gateway = await keeperGateway();
-    // the stranger never wrote here; their clear finds no own-contribution and changes nothing.
     const stranger = "e4".repeat(32);
     const after = await gateway.query(clear(FERN, ["height"]), undefined, { actor: stranger });
     expect(after.errors).toBeUndefined();
-    expect(viewOf(after).height).toBe(34); // untouched: both real readings still stand
+    expect(viewOf(after).height).toBe(34);
     await gateway.close();
   });
 });
@@ -188,33 +165,29 @@ const removed = (r: { data?: unknown }): PlantView =>
 describe("remove (§14 amendment): value-scoped retraction", () => {
   it("withdraws only your own contribution of a value — the rest of the field stands", async () => {
     const gateway = await keeperGateway();
-    // tag `all`: gardener=shade, surveyor=fronds → [shade, fronds].
     const after = await gateway.query(remove(FERN, "tag", ["shade"]), undefined, {
       actor: GARDENER_SEED,
     });
     expect(after.errors).toBeUndefined();
-    expect(removed(after).tag).toEqual(["fronds"]); // gardener's shade withdrawn, surveyor's stays
+    expect(removed(after).tag).toEqual(["fronds"]);
     await gateway.close();
   });
 
   it("cannot remove a value you did not author — retract-your-own holds for a single value too", async () => {
     const gateway = await keeperGateway();
-    // the gardener tries to remove the SURVEYOR's fronds; nothing of the gardener's matches → no-op.
     const after = await gateway.query(remove(FERN, "tag", ["fronds"]), undefined, {
       actor: GARDENER_SEED,
     });
-    expect(removed(after).tag).toEqual(["shade", "fronds"]); // both still stand
+    expect(removed(after).tag).toEqual(["shade", "fronds"]);
     await gateway.close();
   });
 
   it("withdraws a specific merge addend — the reduction recomputes without it", async () => {
     const gateway = await keeperGateway();
-    // readings `merge count`: gardener=7, surveyor=9 → 2. Remove the gardener's 7 → 1.
     const mine = await gateway.query(remove(FERN, "readings", [7]), undefined, {
       actor: GARDENER_SEED,
     });
     expect(removed(mine).readings).toBe(1);
-    // removing the surveyor's 9 as the gardener does nothing — not the gardener's addend.
     const notMine = await gateway.query(remove(FERN, "readings", [9]), undefined, {
       actor: GARDENER_SEED,
     });
@@ -233,7 +206,6 @@ describe("remove (§14 amendment): value-scoped retraction", () => {
 });
 
 describe("writability (§14 amendment): front-door discipline", () => {
-  // A lens that opens ONLY height to writes; tag/watered/readings are read-only at the surface.
   async function writableGateway(): Promise<Gateway> {
     const gateway = await Gateway.open(new MemoryBackend(), { seed: KEEPER_SEED });
     await gateway.append(governedBootstrap(KEEPER_SEED));
@@ -251,9 +223,7 @@ describe("writability (§14 amendment): front-door discipline", () => {
         actor: GARDENER_SEED,
       },
     );
-    // `tag` is not a writable field, so it is not an argument the schema knows.
     expect(result.errors?.join(" ")).toMatch(/tag|unknown|not defined/i);
-    // the writable field still writes fine
     const ok = await gateway.query(
       `mutation { plant(entity: "${FERN}", height: 40) { height } }`,
       undefined,
@@ -274,7 +244,6 @@ describe("writability (§14 amendment): front-door discipline", () => {
       actor: GARDENER_SEED,
     });
     expect(removedRes.errors?.join(" ")).toMatch(/read-only/);
-    // clearing the WRITABLE field is allowed
     const okClear = await gateway.query(clear(FERN, ["height"]), undefined, {
       actor: GARDENER_SEED,
     });
@@ -290,9 +259,8 @@ describe("writability (§14 amendment): front-door discipline", () => {
     await gw.publishRegistration(PLANT, PLANT_POLICY, [FERN], undefined, undefined, undefined, [
       "height",
     ]);
-    await gw.flush(); // persist without closing the shared backend
+    await gw.flush();
 
-    // A fresh gateway replays the registration — writability rode the registration delta.
     const reopened = await Gateway.open(backend, { seed: KEEPER_SEED });
     const cleared = await reopened.query(clear(FERN, ["tag"]), undefined, { actor: GARDENER_SEED });
     expect(cleared.errors?.join(" ")).toMatch(/read-only/);

@@ -1,5 +1,3 @@
-// T288 P3 regressions: local protection walks each finite lineage once, and protected channel
-// identity is derived from effective referenced history and the container reader's declaration.
 import { afterEach, describe, expect, it } from "vitest";
 import {
   authorForSeed,
@@ -141,7 +139,6 @@ describe("T288 protected ingress closure has bounded linear work", () => {
       };
       return { ...delta, claims };
     });
-    // An empty ground: the protected set sweeps the arrival log once, then reads only the batch.
     const empty = { snapshot: () => [], arrivalLog: () => [] } as unknown as Reactor;
 
     const protectedIds = protectedIngressIds(empty, watched);
@@ -243,13 +240,11 @@ describe("T288 channel declaration identity follows container resolution", () =>
         kind === "protected" ? "open" : "legacy",
       );
 
-      // Federation admits this verified operator-authored row as ordinary data. The container
-      // reader rejects it as a declaration because trust and posture are absent.
       const malformed = signClaims(
         {
           author: OP,
           timestamp: declarationDelta.claims.timestamp + 100,
-          validFrom: gw.now(), // held now; only the ordering time runs ahead
+          validFrom: gw.now(),
           pointers: [entity("container", channel.name, CTX_CONTAINER)],
         },
         SEED,
@@ -308,7 +303,7 @@ describe("T288 channel declaration identity follows container resolution", () =>
       {
         author: OP,
         timestamp: declarationDelta.claims.timestamp + 100,
-        validFrom: gw.now(), // held now; only the ordering time runs ahead
+        validFrom: gw.now(),
         pointers: [
           entity("container", channel.name, CTX_CONTAINER),
           entity("container", "container:unrelated", CTX_CONTAINER_EXCLUDED),

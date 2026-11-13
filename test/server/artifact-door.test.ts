@@ -1,20 +1,3 @@
-// The artifact ASSESSMENT door does not exist to a non-operator, in the RIGHT uniform shape for each
-// caller. The reason is specific: a page emitted from what this door describes carries the renderer's
-// BUNDLE SOURCE verbatim, which no existing door discloses (`serveRoute` discloses only the bundle's
-// output). Deciding to publish your code is the operator's, and so is every answer describing it.
-//
-// "DOES NOT EXIST" HAS TWO UNIFORM SHAPES, NOT ONE, and the door must match the right one per caller. An
-// earlier reading of this criterion asked for a single response byte-identical across an actor token, no
-// token, and a bad token — which `src/server/http.ts` cannot give and should not, because a bad or absent
-// token never reaches the verb switch at all. It is refused before mount resolution matters, precisely so
-// an anonymous prober learns nothing about which mounts exist:
-//
-//   token-bearing non-operator → 404 uniform ACROSS VERBS   (this door looks like every unknown one)
-//   no token, or a bad token   → 401 uniform ACROSS MOUNTS  (no 404-vs-401 oracle)
-//
-// Two families, both deliberate. This suite asserts BOTH, byte for byte against the responses the server
-// already gives, so neither reveals that `artifact` is a verb the server knows.
-
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
@@ -66,7 +49,6 @@ const get = (path: string, token?: string): Promise<Response> =>
     headers: token === undefined ? {} : { authorization: `Bearer ${token}` },
   });
 
-// A response reduced to the three things a prober can see: status, every header we set, and the body.
 const shape = async (res: Response): Promise<string> =>
   JSON.stringify({
     status: res.status,
@@ -112,8 +94,6 @@ describe("§30 criterion 16: the pack door is the operator's, and to anyone else
     const door = await get(PACK, "not-a-token");
     const unknown = await get(UNKNOWN_VERB, "not-a-token");
     expect(await shape(door)).toBe(await shape(unknown));
-    // The other half of that family: a mount that does not exist answers identically, so an
-    // anonymous prober cannot learn which mounts the server has.
     const nowhere = await get("/no-such-mount/artifact/plant/x", "not-a-token");
     expect(await shape(nowhere)).toBe(await shape(await get(PACK, "not-a-token")));
   });
@@ -127,9 +107,6 @@ describe("§30 criterion 16: the pack door is the operator's, and to anyone else
   });
 
   it("a MALFORMED path is the same nonexistence, not a guess at what was meant", async () => {
-    // `appRouteOf` wants exactly two non-empty segments. A door that filled in a default for a missing
-    // entity would answer about a route the caller never named — and since the answer describes a
-    // publication, guessing here means answering the wrong question with the operator's authority.
     const unknown = await shape(await get(UNKNOWN_VERB, "op-token"));
     for (const bad of [
       "/garden/artifact/plant",
@@ -139,13 +116,10 @@ describe("§30 criterion 16: the pack door is the operator's, and to anyone else
     ]) {
       expect(await shape(await get(bad + "?connector=My%20Loam", "op-token")), bad).toBe(unknown);
     }
-    // …and the well-formed path still answers, so this is not passing by everything being refused.
     expect((await get(PACK, "op-token")).status).toBe(200);
   });
 
   it("a REFUSAL reaches the operator in the door's own words — one shape for every door", async () => {
-    // The refusal is the operator's own: they already proved they may see this door, so a uniform
-    // 404 here would hide a reason they need. Every other identity never gets this far.
     const res = await get(
       "/garden/artifact/plant/" + encodeURIComponent(FERN) + "?connector=",
       "op-token",

@@ -1,21 +1,3 @@
-// T103(a) — A PULL INTO A SERVED HOME SAYS SO. `loam pull` and `loam register` open their own
-// sqlite handle beside any `loam serve` holding the same store. That server reads the new deltas
-// on its next request, but what it loaded at boot does not grow from them until a restart. The
-// rail is the honest sentence — a stderr warning that names the server and what waits for a
-// restart — never a refusal: the pull still succeeds, exit 0, count printed.
-//
-// The detection direction is the rail's real subject (H9, inverted for a probe whose SILENCE is
-// the hazard): only two silences are earned — no serving record at all, and a record whose pid is
-// provably dead. A record that cannot be read, cannot be parsed, or is missing its fields WARNS.
-// These rails hold both sides: the warning fires against a genuinely live server (a real detached
-// serve, not a fixture record), and the earned silences stay silent.
-//
-// Deliberately not asserted here: that the running server later ingests anything (it does not —
-// the pull door and the watcher are T103's unbuilt halves); the record-present-but-UNREADABLE
-// branch (a non-ENOENT read error also warns, but no portable fixture can make a file unreadable
-// on every CI platform — chmod is advisory on Windows and a no-op under root); and nothing about
-// `~/.loam` or any path outside this test's own mkdtemp.
-
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -28,7 +10,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 
-vi.setConfig({ testTimeout: 20_000 }); // real sqlite homes and a real HTTP server
+vi.setConfig({ testTimeout: 20_000 });
 
 const WARNING = /waits for a restart/;
 
@@ -51,7 +33,6 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-// A small frozen offer to pull — any lawful deltas will do; the rail is about the warning.
 async function offerFile(): Promise<string> {
   const peer = await Gateway.boot(
     new MemoryBackend(),
@@ -106,17 +87,17 @@ describe("T103(a) — pull and register into a served home say the server will n
 
     quiet();
     const code = await run(["pull", offer, "--home", home], io());
-    expect(code).toBe(0); // the warning qualifies the success; it never revokes it
+    expect(code).toBe(0);
     expect(out.join("\n")).toMatch(/accepted/);
     const warned = err.join("\n");
     expect(warned).toMatch(WARNING);
-    expect(warned).toMatch(/pid \d+/); // it names the server it found...
-    expect(warned).toContain(server.url); // ...and where that server answers
+    expect(warned).toMatch(/pid \d+/);
+    expect(warned).toContain(server.url);
 
     await server.close();
     quiet();
     expect(await run(["pull", offer, "--home", home], io())).toBe(0);
-    expect(err.join("\n")).not.toMatch(WARNING); // a clean shutdown earns the silence
+    expect(err.join("\n")).not.toMatch(WARNING);
   });
 
   it("register warns the same way against a served home", async () => {
@@ -134,7 +115,6 @@ describe("T103(a) — pull and register into a served home say the server will n
     await server.close();
     const offer = await offerFile();
 
-    // A pid that certainly lived and certainly exited: a crash's stale record, reconstructed.
     const dead = spawnSync(process.execPath, ["-e", ""]);
     writeFileSync(
       join(home, "serving.json"),
@@ -160,20 +140,16 @@ describe("T103(a) — pull and register into a served home say the server will n
     expect(await run(["pull", offer, "--home", home], io())).toBe(0);
     expect(err.join("\n")).toMatch(WARNING);
 
-    // Legible JSON that answers neither "who" nor "which store" is still a maybe, and a maybe warns.
     writeFileSync(join(home, "serving.json"), JSON.stringify({ startedAt: "yesterday" }));
     quiet();
     expect(await run(["pull", offer, "--home", home], io())).toBe(0);
     expect(err.join("\n")).toMatch(WARNING);
 
-    // JSON that parses to no object at all is the same maybe — warned, never thrown over.
     writeFileSync(join(home, "serving.json"), "null");
     quiet();
     expect(await run(["pull", offer, "--home", home], io())).toBe(0);
     expect(err.join("\n")).toMatch(WARNING);
 
-    // A pid no process table could hold, over THIS store: the record is garbage, and garbage
-    // must warn as a maybe rather than be probed into a confident silence.
     writeFileSync(
       join(home, "serving.json"),
       JSON.stringify({ pid: -3, url: "http://127.0.0.1:1", store: resolve(storePath(home)) }),
@@ -182,11 +158,6 @@ describe("T103(a) — pull and register into a served home say the server will n
     expect(await run(["pull", offer, "--home", home], io())).toBe(0);
     expect(err.join("\n")).toMatch(/may be serving/);
 
-    // A LIVE pid (this very process) but NO store field: the probe cannot say which world is
-    // served, so it must warn — and it must warn by RETURNING, never by throwing. The store check
-    // is what stops `resolve(undefined)` from becoming an uncaught TypeError two lines on; delete
-    // it and this pull would exit non-zero with no warning, which is why the exit code is asserted
-    // as hard as the message.
     writeFileSync(
       join(home, "serving.json"),
       JSON.stringify({ pid: process.pid, url: "http://127.0.0.1:1" }),
@@ -197,12 +168,12 @@ describe("T103(a) — pull and register into a served home say the server will n
   });
 
   it("a pull into a DIFFERENT store file in the same home is not the trap, and stays quiet", async () => {
-    const server = await serveDetached(); // serves the home's default store
+    const server = await serveDetached();
     const offer = await offerFile();
     quiet();
     const other = join(dir, "other.sqlite");
     expect(await run(["pull", offer, "--home", home, "--store", other], io())).toBe(0);
-    expect(err.join("\n")).not.toMatch(WARNING); // the served world is not the one that moved
+    expect(err.join("\n")).not.toMatch(WARNING);
     await server.close();
   });
 });

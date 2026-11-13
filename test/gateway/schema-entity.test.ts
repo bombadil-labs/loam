@@ -1,9 +1,3 @@
-// §21 slice 2 at the gateway: the resolution Schema is a first-class entity, and each published
-// VERSION freezes against its own content-addressed VersionedSchema snapshot. This is the heart of the
-// lift — publishing a lens plants a living `schema:<name>` node AND a frozen snapshot, evolving mints a
-// NEW snapshot without disturbing the old (coexist, never supersede), and §17's version door resolves
-// each old version against ITS snapshot so a reading, once pinned, answers forever.
-
 import { describe, expect, it } from "vitest";
 import {
   DeltaSet,
@@ -29,7 +23,6 @@ const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
 
 const pickAsc: Policy = { kind: "pick", order: { kind: "byTimestamp", dir: "asc" } };
-// PLANT_POLICY with a `note` prop added — an evolution that changes the resolution bytes.
 const EVOLVED: Schema = {
   ...PLANT_POLICY,
   props: new Map([...PLANT_POLICY.props, ["note", pickAsc]]),
@@ -54,7 +47,6 @@ describe("§21 slice 2: the Schema is a first-class entity", () => {
       schemaLivingEntityFor("Plant"),
       Date.now(),
     );
-    // the living lens is a genuine domain node now — named, resolvable, carrying the policy
     expect(living.name).toBe("Plant");
     expect([...living.props.keys()].sort()).toEqual([...PLANT_WRITABLE].sort());
     expect(living.props.get("height")?.kind).toBe("pick");
@@ -66,24 +58,20 @@ describe("§21 slice 2: the Schema is a first-class entity", () => {
     const ground = (): DeltaSet => DeltaSet.from([...gw.reactor.snapshot()]);
     const v1Snapshot = versionedSchemaEntityFor("Plant", PLANT_POLICY);
     const v2Snapshot = versionedSchemaEntityFor("Plant", EVOLVED);
-    expect(v1Snapshot).not.toBe(v2Snapshot); // different resolution bytes → different content address
+    expect(v1Snapshot).not.toBe(v2Snapshot);
 
-    // both snapshots load BEFORE evolution only for v1; v2 does not exist yet
     expect(() => loadSchema(ground(), v2Snapshot, Date.now())).toThrow();
     expect(loadSchema(ground(), v1Snapshot, Date.now()).name).toBe("Plant");
 
-    // evolve the lens: add `note`
     await gw.publishRegistration(PLANT, EVOLVED, [FERN], undefined, undefined, undefined, [
       ...PLANT_WRITABLE,
       "note",
     ]);
 
-    // BOTH snapshots now answer — the old frozen reading was not disturbed by minting the new one
     const v1 = loadSchema(ground(), v1Snapshot, Date.now());
     const v2 = loadSchema(ground(), v2Snapshot, Date.now());
-    expect(v1.props.has("note")).toBe(false); // v1 froze before `note` existed
-    expect(v2.props.has("note")).toBe(true); // v2 sees it
-    // the living entity has moved on to the latest reading
+    expect(v1.props.has("note")).toBe(false);
+    expect(v2.props.has("note")).toBe(true);
     expect(loadSchema(ground(), schemaLivingEntityFor("Plant"), Date.now()).props.has("note")).toBe(
       true,
     );
@@ -98,8 +86,6 @@ describe("§21 slice 2: the Schema is a first-class entity", () => {
     ]);
     const versions = gw.registrationVersions().filter((v) => v.hyperschema.name === "Plant");
     expect(versions.map((v) => v.version)).toEqual([1, 2]);
-    // v1's schema is the frozen v1 reading (no `note`); v2's is the evolved one — each resolved from
-    // ITS OWN snapshot, not the shared living entity, which is exactly §17's per-version freezing.
     expect(versions[0]!.schema.props.has("note")).toBe(false);
     expect(versions[1]!.schema.props.has("note")).toBe(true);
     await gw.close();
@@ -111,14 +97,12 @@ describe("§21 slice 2: the Schema is a first-class entity", () => {
       ...PLANT_WRITABLE,
       "note",
     ]);
-    // the live lens now reads the evolved schema (has `note`)
     const bound = () =>
       readRegistrations(gw.reactor, gw.validityNow(), OPERATOR).find(
         (r) => r.hyperschema.name === "Plant",
       )!;
     expect(bound().schema.props.has("note")).toBe(true);
 
-    // strike the LATEST registration (v2) — its living-entity publish is NOT itself negated
     const versions = gw.registrationVersions().filter((v) => v.hyperschema.name === "Plant");
     await gw.append([
       signClaims(
@@ -132,11 +116,8 @@ describe("§21 slice 2: the Schema is a first-class entity", () => {
       ),
     ]);
 
-    // the live surface must recede to v1's reading (no `note`) — it resolves the surviving binding's
-    // snapshot, not the living entity, which still holds v2's bytes
     expect(gw.registrationVersions().filter((v) => v.hyperschema.name === "Plant")).toHaveLength(1);
     expect(bound().schema.props.has("note")).toBe(false);
-    // the living entity is unchanged — it is a first-class node, just not the live read path
     expect(
       loadSchema(
         DeltaSet.from([...gw.reactor.snapshot()]),

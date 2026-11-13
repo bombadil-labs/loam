@@ -1,8 +1,3 @@
-// `holdsAny` and `ids` (SPEC §11): does a store hold bytes filed under ANY id, on any tier it
-// owns, and which ids? The whole-store forms of `holds`, with the same reach and fail-closed. Each driver: empty
-// answers false, one byte answers true, a purge back to empty answers false. The mirror pair
-// answers true while EITHER tier holds, and refuses when a tier cannot answer. The archive counts
-// a crash-left `.tmp` and refuses on a fan it cannot read. All stores are this file's own temp dirs.
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,8 +23,6 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 const one = (): Delta => observed(FERN, "height", 1, 1, GARDENER_SEED);
-// Can this user, on this filesystem, be denied a directory listing? Root cannot be, and Windows
-// does not deny a read through chmod; where it cannot, the unreadable-fan half does not run.
 const eaccesForceable = ((): boolean => {
   const probe = mkdtempSync(join(tmpdir(), "loam-holds-any-probe-"));
   try {
@@ -42,12 +35,9 @@ const eaccesForceable = ((): boolean => {
     chmodSync(probe, 0o755);
     try {
       rmSync(probe, { recursive: true, force: true });
-    } catch {
-      // A scratch dir a scanner still holds is not this file's concern; the answer stands.
-    }
+    } catch {}
   }
 })();
-// Where a read cannot be denied (Windows, root), the unreadable-fan case is a visible skip.
 const denied = eaccesForceable ? it : it.skip;
 
 async function roundTrip(store: StoreBackend) {
@@ -118,7 +108,6 @@ describe("holdsAny and ids: the whole-store byte probe and the inventory", () =>
     await primary.append([d]);
     await primary.purge([d.id]);
     expect(await new MirrorBackend(primary, mirror).holdsAny()).toBe(true);
-    // The inventory is the union: the mirror's lone byte is listed although the primary lost it.
     expect(await new MirrorBackend(primary, mirror).ids()).toEqual(new Set([d.id]));
   });
   it("mirror: a tier with no probe makes the store unprovable, never empty", async () => {
@@ -138,7 +127,6 @@ describe("holdsAny and ids: the whole-store byte probe and the inventory", () =>
     const store = new ArchiveBackend(root);
     expect(await store.holdsAny()).toBe(false);
     mkdirSync(join(root, "ab"), { recursive: true });
-    // A stray file of another shape is not this store's bytes: purge never sweeps it.
     writeFileSync(join(root, "ab", "notes.json"), "{}");
     expect(await store.holdsAny()).toBe(false);
     expect(await store.ids()).toEqual(new Set());

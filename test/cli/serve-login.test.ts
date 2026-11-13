@@ -1,9 +1,3 @@
-// §36 phase 5 — the CLI half of the login door (T126): criteria (m) and (t) of
-// .adlc/specs/36-05-the-login-door.md. `loam serve` opens the doors iff the home holds
-// credentials.json AT BOOT, and refuses the Secure-cookie trap (a non-loopback bind over plain
-// HTTP would set a cookie no browser keeps). The door behavior itself is
-// test/server/login-door.test.ts's; this file proves only that the CLI threads it.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { run } from "../../src/cli/cli.js";
 import { hashPassword, writeCredentials } from "../../src/server/credentials.js";
 
-vi.setConfig({ testTimeout: 20_000 }); // real listening servers
+vi.setConfig({ testTimeout: 20_000 });
 
 let home: string;
 const out: string[] = [];
@@ -24,8 +18,6 @@ beforeEach(() => {
   err.length = 0;
 });
 afterEach(() => {
-  // This rmSync doubles as the handle-leak rail serve-public-url.test.ts documents: a refused
-  // boot that left the store open turns this removal into EPERM on Windows.
   rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -52,20 +44,17 @@ async function serveDetached(
 
 describe("T126 — loam serve and the login doors", () => {
   it("(m) a home with credentials.json opens the doors; one without does not; a late write waits for the next serve", async () => {
-    // Without: /login answers what any unresolvable name answers.
     const bare = await serveDetached();
     const loginBefore = await fetch(`${bare.url}/login`);
     const other = await fetch(`${bare.url}/zzz`);
     expect(loginBefore.status).toBe(other.status);
     expect(await loginBefore.text()).toBe(await other.text());
 
-    // The probe is boot-time: credentials written under a RUNNING server change nothing.
     await writeUsers();
     const still = await fetch(`${bare.url}/login`);
     expect(still.status).toBe(other.status);
     await bare.close();
 
-    // The next serve sees them: the form, with its token.
     const opened = await serveDetached();
     const login = await fetch(`${opened.url}/login`);
     expect(login.status).toBe(200);
@@ -85,7 +74,6 @@ describe("T126 — loam serve and the login doors", () => {
     expect(said).toMatch(/https|TLS/i);
     expect(said).toMatch(/--public-url|loopback/i);
 
-    // Both cures boot: an https public URL in front, or the loopback default.
     const proxied = await serveDetached([
       "--host",
       "0.0.0.0",
@@ -100,8 +88,6 @@ describe("T126 — loam serve and the login doors", () => {
   });
 
   it("(t2) the refusal keys on the credentials, not on the bind: a users-less wide bind still boots", async () => {
-    // Without this, a mutant refusing EVERY non-loopback plain-HTTP bind — a regression for every
-    // pre-§36 --host deployment — stays green in this file (a P5 lens's finding).
     const wide = await serveDetached(["--host", "0.0.0.0"]);
     expect((await fetch(`${wide.url.replace("0.0.0.0", "127.0.0.1")}/zzz`)).status).toBeGreaterThan(
       0,

@@ -1,28 +1,3 @@
-// T104 — the words on the front door, and the header they ride in on.
-//
-// test/server/front-door.test.ts (frozen) pins the greeting's SHAPE: one constant body, blind to
-// mounts, tokens and public declarations, enumerating nothing. This file rails the CONTENT that
-// arrived after it froze, at both levels:
-//
-//   * object level — what a browser at `/` actually receives: a page that says what Loam is,
-//     names `/login` as the human door (a fixed path, not store knowledge), and carries
-//     `Referrer-Policy: same-origin`, the house policy for documents this store serves
-//     (test/server/referrer-policy.test.ts bans the no-referrer combination outright), plus the
-//     no-script CSP and a cache policy the constant body earns;
-//   * TRUTH level — the page may not promise what the store cannot honour. Two claims are named
-//     here because the page made both and neither was true: permanence is a DEFAULT, since an
-//     erasure (SPEC §11) really removes bytes; and federation merges what a store's trust policy
-//     admits (SPEC §8), not whatever it meets. The rail asserts the qualifiers are present AND
-//     that the unqualified spellings are gone — a reworded overpromise is the failure to catch;
-//   * delta level — the greeting's bytes across the ONE axis the frozen file could not know
-//     about: whether the operator configured human accounts. A greeting that varied on `users`
-//     would be an oracle for "this store has people"; it must be byte-identical either way.
-//
-// Deliberately not asserted here: constancy across mounts/tokens/declarations (frozen file owns
-// it), the uniform-refusal discipline on mount paths (test/server/dynamic-mounts.test.ts), and
-// the greeting's full bytes — the prose may be reworded without editing a rail. Only the two
-// structural lines a browser needs (the doctype and the charset) are pinned below.
-
 import { join } from "node:path";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -49,7 +24,6 @@ afterEach(async () => {
   while (homes.length > 0) rmSync(homes.pop()!, { recursive: true, force: true });
 });
 
-/** A store with no human accounts at all — the plainest server that can greet. */
 async function bareStore(): Promise<string> {
   const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
   gateways.push(gateway);
@@ -63,7 +37,6 @@ async function bareStore(): Promise<string> {
   return handle.url;
 }
 
-/** The same store with the login doors open: a user, a role, credentials on disk. */
 async function peopledStore(): Promise<string> {
   const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
   gateways.push(gateway);
@@ -94,14 +67,11 @@ describe("T104 — the greeting's words and headers", () => {
     const res = await fetch(`${base}/`);
     expect(res.status).toBe(200);
     const text = await res.text();
-    // The two structural lines: a real document, declaring the charset its em-dashes need.
     expect(text.startsWith("<!doctype html>")).toBe(true);
     expect(text).toContain('<meta charset="utf-8">');
-    // What Loam is: the three properties of the merge, in the page's own words.
     expect(text).toMatch(/delta/i);
     expect(text).toMatch(/union/i);
     expect(text).toMatch(/order-blind, idempotent, conflict-free/);
-    // The human door is a working link, not a mention — a browser can click it.
     expect(text).toContain('<a href="/login">');
     expect(text).toMatch(/sign in/i);
   });
@@ -109,16 +79,10 @@ describe("T104 — the greeting's words and headers", () => {
   it("promises only what the store honours: history is a default an erasure can take back, and federation admits", async () => {
     const base = await bareStore();
     const text = await (await fetch(`${base}/`)).text();
-    // Writes add rather than replace — and the page says so as a DEFAULT, then names the act
-    // that undoes it. A page that mentions permanence without erasure is the overpromise.
     expect(text).toMatch(/by default/i);
     expect(text).toMatch(/erasure/i);
     expect(text).toMatch(/takes bytes back/i);
-    // Federation names the gate: a peer's deltas arrive because the trust policy admits them.
     expect(text).toMatch(/agreed to admit/i);
-    // And the unqualified spellings stay gone. These are the exact claims the page made before
-    // they were measured against SPEC §11 and §8; a rewrite that reintroduces the sense of any
-    // of them should extend this list rather than delete it.
     expect(text).not.toMatch(/nothing is overwritten/i);
     expect(text).not.toMatch(/the ground remembers/i);
     expect(text).not.toMatch(/stores that meet simply merge/i);
@@ -130,37 +94,28 @@ describe("T104 — the greeting's words and headers", () => {
     const res = await fetch(`${base}/`);
     expect(res.headers.get("content-type")).toContain("text/html");
     expect(res.headers.get("referrer-policy")).toBe("same-origin");
-    // The same no-script CSP the session pages carry: the greeting has no script and no form
-    // today, and the header is what keeps that true of whatever it grows into.
     const csp = res.headers.get("content-security-policy") ?? "";
     expect(csp).toContain("script-src 'none'");
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain("form-action 'self'");
     expect(csp).toContain("base-uri 'none'");
-    // Cacheable on purpose: the body is a compile-time constant, identical for every caller, so
-    // a shared cache cannot leak by holding it. `no-store` here would only cost round trips.
     expect(res.headers.get("cache-control")).toBe("public, max-age=300");
   });
 
   it("is byte-identical whether or not accounts exist — naming /login reveals nothing about people", async () => {
     const bare = await bareStore();
     const peopled = await peopledStore();
-    // First, prove the axis is live — the two stores genuinely differ at /login — so the
-    // parity below compares two different worlds, not one server twice.
     const bareLogin = await fetch(`${bare}/login`);
     const peopledLogin = await fetch(`${peopled}/login`);
     expect(bareLogin.status).toBe(401);
     expect(peopledLogin.status).toBe(200);
     expect(peopledLogin.headers.get("content-type")).toContain("text/html");
-    // Now the parity: the greeting itself must not see that difference.
     const bareAnswer = await fetch(`${bare}/`);
     const peopledAnswer = await fetch(`${peopled}/`);
     expect(bareAnswer.status).toBe(200);
     const bareText = await bareAnswer.text();
     expect(bareText).toContain("A Loam store serves here.");
     expect(await peopledAnswer.text()).toBe(bareText);
-    // The header rides constant too — a policy that appeared only when /login was live would be
-    // the same oracle in a different field.
     for (const header of ["referrer-policy", "content-security-policy", "cache-control"]) {
       expect(peopledAnswer.headers.get(header), header).toBe(bareAnswer.headers.get(header));
     }

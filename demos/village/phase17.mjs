@@ -1,16 +1,6 @@
-// Phase 17 — THE TAB: a full store in the page (SPEC §15, PR #51). A wanderer passes the
-// village with no server, no home directory, no port — just a browser tab. This phase drives
-// the SHIPPED store artifact (`dist/browser/index.js`, the `@bombadil/loam/browser` bundle)
-// end to end: a governed store boots against a localStorage origin, pulls the commons over
-// real HTTP (an aggregator with a URL bar), answers through its OWN law over the imported
-// ground, survives the tab closing, and honors erasure down to the origin's keys. The same
-// Gateway the village runs on ports — on a different driver, exactly as §8 promised.
-
 import { pathToFileURL } from "node:url";
 import { check, join, openStore, opToken, ROOT, signClaims, sleep, summary } from "./harness.mjs";
 
-// The page's localStorage, shimmed: the driver takes any synchronous Storage witness, so the
-// phase IS the origin. (In a real tab this is window.localStorage, byte for byte.)
 function origin() {
   const map = new Map();
   return {
@@ -21,11 +11,10 @@ function origin() {
     getItem: (k) => map.get(k) ?? null,
     setItem: (k, v) => map.set(k, v),
     removeItem: (k) => map.delete(k),
-    keys: () => [...map.keys()], // phase-side privilege: reach behind the seam to look
+    keys: () => [...map.keys()],
   };
 }
 
-// The tab: the shipped artifact, imported as a page would import it.
 const tab = await import(pathToFileURL(join(ROOT, "..", "..", "dist", "browser", "index.js")).href);
 
 const NOTE_BODY = {
@@ -43,11 +32,10 @@ let commons;
 let notebook;
 let reopened;
 try {
-  // ---- the tab is born governed: genesis, register, claim, query — all inside the artifact
   const storage = origin();
-  const wandererSeed = tab.mintSeed(); // minted where it will live: the page
+  const wandererSeed = tab.mintSeed();
   const wanderer = tab.authorForSeed(wandererSeed);
-  storage.setItem("loam:notebook:seed", wandererSeed); // §15: the seed at its own key
+  storage.setItem("loam:notebook:seed", wandererSeed);
   const genesis = tab.assembleGenesis({
     operatorSeed: wandererSeed,
     registrations: [
@@ -55,7 +43,7 @@ try {
         hyperschema: { name: "Note", alg: 1, body: tab.parseTerm(NOTE_BODY) },
         schema: tab.parseSchema({ props: { text: PICK, about: PICK }, default: PICK }),
         roots: ["note:first"],
-        writable: ["text", "about"], // immutable-by-default (§14/§21): name the writable fields
+        writable: ["text", "about"],
       },
     ],
   });
@@ -91,16 +79,10 @@ try {
     `note in view and at its own key`,
   );
 
-  // ---- the tab pulls the village over real HTTP: an aggregator with a URL bar
   commons = await openStore("commons");
   await commons.gateway.append([
     signClaims(
       {
-        // The commons' CURRENT word on Wren, and it must read as the latest: phase 12 left a
-        // future-dated "regret" bio on the commons (ts + 10_000_000, to top Mallory's forgeries)
-        // and erased it only on the ALMANAC — per-instance erasure (§11) means the commons still
-        // serves it. So the tab, pulling the commons, would see that stale future-dated regret
-        // under a naive pick-latest unless this claim out-dates it. +20_000_000 clears the fixture.
         ...((t) => ({ timestamp: t, validFrom: t }))(Date.now() + 20_000_000),
         author: commons.operator,
         pointers: [
@@ -126,7 +108,6 @@ try {
     `${pulled.accepted} deltas crossed; no Person surface until the wanderer says so`,
   );
 
-  // ---- her own lens over the imported ground: the reader decides everything
   await notebook.publishRegistration(
     { name: "Person", alg: 1, body: tab.parseTerm(NOTE_BODY) },
     tab.parseSchema({ props: { bio: PICK }, default: PICK }),
@@ -140,7 +121,6 @@ try {
     String(hers.data?.person?.bio),
   );
 
-  // ---- the tab closes; another opens on the same origin — everything remembered, uncoded
   await notebook.close();
   reopened = await tab.Gateway.open(new tab.LocalStorageBackend("notebook", storage), {
     seed: storage.getItem("loam:notebook:seed"),
@@ -156,7 +136,6 @@ try {
     "no register() call anywhere: the surface is a function of the store",
   );
 
-  // ---- erasure reaches the page: erasure → purge → removeItem, and the door holds
   await reopened.erase(note.id, { reason: "the wanderer travels light" });
   let refused = "";
   try {
@@ -169,12 +148,12 @@ try {
     "erasure in the tab clears the origin's key and the door refuses the id's return",
     storage.getItem(`loam:notebook:${note.id}`) === null &&
       /was erased/.test(refused) &&
-      storage.getItem("loam:notebook:seed") !== null, // the seed key was never a delta
+      storage.getItem("loam:notebook:seed") !== null,
     "bytes gone; the signed hole remains; the seed untouched",
   );
 } finally {
   await reopened?.close().catch(() => {});
   await commons?.close().catch(() => {});
-  await sleep(200); // let the port settle before the process exits
+  await sleep(200);
 }
 summary("phase 17 — the tab");

@@ -1,11 +1,3 @@
-// A reading never shows an erased delta, even while its bytes are still held. An erasure is stored
-// before the purge, and an erasure appended directly purges nothing. Asked at the object level,
-// through a Schema (present, as-of, and a live subscription), with the bytes checked at the delta
-// level first so the test cannot pass because a purge happened. Every case names a bystander.
-//
-// Deliberately not asserted: `select` and `freeze`. They stay unfiltered, because the erasure run
-// reads through them.
-
 import { describe, expect, it } from "vitest";
 import { makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
 import { eraseClaims } from "../../src/gateway/erase-law.js";
@@ -42,10 +34,10 @@ describe("a reading never shows an erased delta", () => {
     const claim = observed(FERN, "height", 30, 1000, OP_SEED);
     const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
     await gw.append([claim, bystander]);
-    expect(await fern(gw)).toEqual({ height: 30, tag: ["shade"] }); // control
+    expect(await fern(gw)).toEqual({ height: 30, tag: ["shade"] });
 
     await gw.append([signClaims(eraseClaims(claim.id, op, op, 2000), OP_SEED)]);
-    expect(gw.reactor.get(claim.id)).toBeDefined(); // the bytes are still held
+    expect(gw.reactor.get(claim.id)).toBeDefined();
 
     expect(await fern(gw)).toEqual({ height: null, tag: ["shade"] });
     expect(await fern(gw, 1500)).toEqual({ height: null, tag: ["shade"] });
@@ -67,8 +59,6 @@ describe("a reading never shows an erased delta", () => {
     await gw.close();
   });
 
-  // An erasure touches no watched entity, so open streams end with `done`, and a reader
-  // resubscribes into the narrowed reading. Both write paths do this.
   it.each([
     ["append", false],
     ["federate", true],

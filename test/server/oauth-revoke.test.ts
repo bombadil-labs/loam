@@ -1,14 +1,3 @@
-// §37 phase 15 — revocation (T136). Criteria 8–10 and the revoke side of 13 of
-// .adlc/specs/37-15-the-token-exchange-and-revocation.md, transcribed. Revocation bumps a client's
-// GENERATION and strikes its ground write grant. That makes every live token and in-flight code stop
-// matching at once, so a running server refuses the connector on its next request with NO restart —
-// and it never touches the connector's past deltas.
-//
-// Revocation runs IN-PROCESS here (revokeConnector against the same home the live server reads), not
-// via a spawned CLI: criterion 9 is precisely "the SAME live process, no restart", and a MemoryBackend
-// gateway cannot be shared with a child process anyway. The strike goes through the test's own gateway
-// handle — the same seam the CLI and serve() use.
-
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -153,7 +142,7 @@ async function mintCode(base: string, challenge: string): Promise<string> {
       code_challenge: fieldOf(html, "code_challenge"),
       code_challenge_method: "S256",
       state: fieldOf(html, "state"),
-      bind_new: "journal", // §58: a connection lives in one container under the person's name
+      bind_new: "journal",
     }).toString(),
     redirect: "manual",
   });
@@ -176,7 +165,6 @@ async function redeem(base: string, code: string, verifier: string): Promise<Res
   });
 }
 
-/** The whole path: consent → redeem → the bearer token. */
 async function tokenFor(base: string): Promise<string> {
   const p = pkce();
   const code = await mintCode(base, p.challenge);
@@ -205,7 +193,6 @@ const heightDeltas = (gateway: Gateway, height: number): Delta[] =>
       ),
   );
 
-/** Strike the connector's ground write grant — the seam the CLI and serve() both drive. */
 const strikeVia =
   (gateway: Gateway) =>
   async (grant: OAuthGrant): Promise<void> => {
@@ -218,23 +205,19 @@ const strikeVia =
 describe("§37 phase 15 — revocation", () => {
   it("(8) revocation bumps a GENERATION: a code issued before a revoke mints nothing after it", async () => {
     const { base, home, gateway } = await connectorServer();
-    // Make the connector real first (a standing grant), so the revoke has a grant to strike.
     await tokenFor(base);
 
-    // Issue a code UNDER the current generation, then revoke.
     const p = pkce();
     const staleCode = await mintCode(base, p.challenge);
     const before = readOAuthFile(home).clients[0]!.generation;
     const outcome = await revokeConnector(home, CLIENT_ID, strikeVia(gateway));
     expect(outcome.kind).toBe("revoked");
-    expect(readOAuthFile(home).clients[0]!.generation).toBe(before + 1); // the generation bumped
+    expect(readOAuthFile(home).clients[0]!.generation).toBe(before + 1);
 
-    // The stale code cannot mint: its generation no longer matches the client's.
     const refused = await redeem(base, staleCode, p.verifier);
     expect(refused.status).toBe(400);
     expect(((await refused.json()) as { error: string }).error).toBe("invalid_grant");
 
-    // Positive control: a code issued AFTER the revoke (under the new generation) redeems.
     const q = pkce();
     const freshCode = await mintCode(base, q.challenge);
     const ok = await redeem(base, freshCode, q.verifier);
@@ -246,24 +229,18 @@ describe("§37 phase 15 — revocation", () => {
     const token = await tokenFor(base);
     const pool = gateway.connectionInboxes.get(readOAuthFile(home).grants[0]!.inbox!)!.gateway!;
 
-    // Positive control: the token works BEFORE the revoke — into its inbox pool (SPEC §58).
     expect((await mutate(base, token, 90)).status).toBe(200);
     expect(heightDeltas(pool, 90)).toHaveLength(1);
     expect(heightDeltas(gateway, 90)).toEqual([]);
 
-    // Revoke against the same home the live server reads. No serve() restart happens.
     const outcome = await revokeConnector(home, CLIENT_ID, strikeVia(gateway));
     expect(outcome.kind).toBe("revoked");
 
-    // The very next request with the same token is refused — the door is the same live instance.
     const after = await mutate(base, token, 91);
     expect(after.status).toBe(401);
-    expect(heightDeltas(gateway, 91)).toEqual([]); // and nothing landed, anywhere
+    expect(heightDeltas(gateway, 91)).toEqual([]);
     expect(heightDeltas(pool, 91)).toEqual([]);
 
-    // AND it stays refused across a re-grant: a fresh token (new generation) works, but the OLD
-    // token never resurrects — the generation gate, not just the grant record, is what binds. Grant
-    // deletion alone would let the old token authenticate as the re-granted identity.
     const fresh = await tokenFor(base);
     expect((await mutate(base, fresh, 94)).status).toBe(200);
     expect((await mutate(base, token, 95)).status).toBe(401);
@@ -276,22 +253,15 @@ describe("§37 phase 15 — revocation", () => {
     const { actor, inbox } = readOAuthFile(home).grants[0]!;
     const pool = gateway.connectionInboxes.get(inbox!)!.gateway!;
 
-    // The connector writes BEFORE revoke — into its inbox pool (SPEC §58). This is the bystander
-    // that must survive.
     expect((await mutate(base, token, 92)).status).toBe(200);
     expect(heightDeltas(pool, 92).map((d) => d.claims.author)).toEqual([actor]);
 
     await revokeConnector(home, CLIENT_ID, strikeVia(gateway));
 
-    // Access is GONE: a new write with the token is refused, and nothing lands.
     expect((await mutate(base, token, 93)).status).toBe(401);
     expect(heightDeltas(gateway, 93)).toEqual([]);
     expect(heightDeltas(pool, 93)).toEqual([]);
 
-    // The BYSTANDER survives: the pre-revoke delta still names the connector's actor AND still
-    // resolves through the bound container's reading — revocation removed access, not the
-    // connector's history. The operator's own read is the primary's, which the pool never
-    // composes into (the other half of §58): it answers the garden's latest height.
     expect(heightDeltas(pool, 92).map((d) => d.claims.author)).toEqual([actor]);
     const bound = { container: "myk:journal", inbox: inbox! };
     expect(gateway.resolvedNode("Plant", FERN, undefined, undefined, bound).view["height"]).toBe(
@@ -309,26 +279,17 @@ describe("§37 phase 15 — revocation", () => {
   it("(13) a locked revoke refuses without leaking the home path; an unknown client is named", async () => {
     const { home, gateway } = await connectorServer();
 
-    // Hold the connector-records lock: revokeConnector cannot take it and returns `locked`, with no
-    // home path in any surfaced fault.
     writeFileSync(oauthLockPath(home), `999999:${randomBytes(8).toString("hex")}\n`);
     const faults: string[] = [];
     const locked = await revokeConnector(home, CLIENT_ID, strikeVia(gateway), (m) =>
       faults.push(m),
     );
     expect(locked.kind).toBe("locked");
-    // The load-bearing check is the CALLER-facing RESULT. `revoke` is operator-driven (`loam grant
-    // revoke`), so `onFault` carries the home path to the operator's own terminal by design and stays
-    // empty on this path — asserting the fault channel alone would be vacuous (the review's finding).
-    // What must never carry the path is the value the caller receives back: a locked result is a bare
-    // `{ kind: "locked" }`, no home path and no internal flag name.
     expect(JSON.stringify(locked)).not.toContain(home);
     expect(JSON.stringify(locked)).not.toContain("operator.seed");
-    expect(faults.join("\n")).not.toContain(home); // and the fault channel stayed clean here too
+    expect(faults.join("\n")).not.toContain(home);
     rmSync(oauthLockPath(home), { force: true });
 
-    // Positive control naming which branch answered: an unknown client is a distinct `no-such-client`
-    // outcome, not a lock fault — so "locked" genuinely separates the two.
     const unknown = await revokeConnector(home, "connector-nobody", strikeVia(gateway));
     expect(unknown.kind).toBe("no-such-client");
   });

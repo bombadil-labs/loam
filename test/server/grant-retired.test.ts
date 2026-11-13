@@ -1,4 +1,3 @@
-// T279: container-bound registration is fenced by the binding; unbound grants survive.
 import { describe, expect, it } from "vitest";
 import { signClaims } from "@bombadil/rhizomatic";
 import { readRegistrations } from "../../src/gateway/registration.js";
@@ -84,7 +83,6 @@ describe("§58 — a connection's fence is its container, and a grant adds nothi
     const ada = await connect(base, "ada", "journal");
     await declareAs(gateway, "ada:journal", OPEN);
 
-    // The grant an operator could mint before this slice: a prefix in nobody's container.
     const actor = readOAuthFile(connectorsHome).grants[0]!.actor;
     await gateway.append([
       signClaims(
@@ -95,23 +93,16 @@ describe("§58 — a connection's fence is its container, and a grant adds nothi
       ),
     ]);
 
-    // TWO-SIDED, and the pair is the whole point. Inside the container: admitted, by the binding
-    // alone. Outside it: refused, though a grant names that very prefix.
     const inside = await registerAs(base, ada, "ada:journal:log");
     expect(inside.status, `inside its own container: ${inside.body}`).toBe(200);
     const granted = await registerAs(base, ada, "sync:log");
     expect(granted.status, "the granted prefix confers nothing now").toBe(403);
-    // The refusal is the register door's constitutional one, and it says nothing about the grant
-    // — a caller learns that the act needs an operator, not that a prefix it holds was ignored.
     expect(granted.body, "the constitutional refusal").toMatch(/registration is constitutional/);
     expect(granted.body, "and it does not name the prefix the grant held").not.toContain("sync:");
     await closeAll();
   });
 
   it("an unbound key holding a grant still registers: this retires it for CONNECTIONS", async () => {
-    // The narrowing is aimed at a BINDING's fence. A token that names an actor and no container is
-    // not a §58 connection, and its grant is untouched — otherwise this would be a different and
-    // much larger change, made by accident.
     const { base, gateway } = await connectionServer({
       tokens: { "keyed-token": { actor: "4d".repeat(32) } },
     });

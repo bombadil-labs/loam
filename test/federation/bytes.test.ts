@@ -1,15 +1,6 @@
-// T8's contract: adopting rhizomatic 0.5.0 pulls in 0.4.0's additive `bytes` Target kind. Loam
-// need not PRODUCE bytes yet (that is §23's binary-asset story), but it MUST NOT break RECEIVING
-// one. A federated, foreign delta carrying a `{ kind: "bytes", mime, value }` target must survive
-// every door it touches — the federation wire (JSON canonical base64url, rhizomatic's profile),
-// the gql serialization surface, the generic translator, and the repair/legibility reader — none
-// of which enumerate target kinds exhaustively, so a fourth kind passes through unharmed.
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
 
-// Each HTTP case boots real servers; a generous hang-guard keeps machine load from tripping the
-// default per-test timeout.
 vi.setConfig({ testTimeout: 20_000 });
 
 import { grantClaims } from "../../src/gateway/accounts.js";
@@ -27,12 +18,8 @@ const OP_A = "0a".repeat(32);
 const OP_B = "0b".repeat(32);
 const TRANSLATOR_SEED = "0d".repeat(32);
 
-// A minimal PNG signature — real, non-empty binary so the base64url round-trip has something to
-// mangle if it were going to.
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff, 0x10]);
 
-// A foreign delta whose `avatar` pointer carries raw bytes. The subject rides the `profile`
-// context — inert to the Plant lens, so it exercises the doors without pretending to be a Plant.
 const avatarDelta = (subject: string, ts: number, seed: string): Delta =>
   signClaims(
     {
@@ -85,10 +72,8 @@ describe("bytes Target kind (rhizomatic 0.4.0, adopted in T8): Loam receives, ne
     const a = await instance(OP_A);
     const b = await instance(OP_B);
     const delta = avatarDelta("person:wren", 1000, GARDENER_SEED);
-    await a.gateway.append([delta]); // gardener is granted write on A
+    await a.gateway.append([delta]);
 
-    // B pulls A over HTTP — the delta crosses as JSON (canonical unpadded base64url for the
-    // bytes) and is reconstructed, its id recomputed and checked, on the way in.
     const report = await pullFrom(b.gateway, a.url, a.token);
     expect(report.accepted).toBeGreaterThan(0);
 
@@ -97,7 +82,6 @@ describe("bytes Target kind (rhizomatic 0.4.0, adopted in T8): Loam receives, ne
     const target = bytesTargetOf(landed!);
     expect(target?.kind).toBe("bytes");
     expect(target?.kind === "bytes" && target.mime).toBe("image/png");
-    // Byte parity across the crossing: the raw bytes are exactly what A signed.
     expect(target?.kind === "bytes" && Array.from(target.value)).toEqual(Array.from(PNG));
   });
 
@@ -109,7 +93,6 @@ describe("bytes Target kind (rhizomatic 0.4.0, adopted in T8): Loam receives, ne
         grantClaims(STORE_ENTITY, authorForSeed(TRANSLATOR_SEED), "write", operator, 1),
         OP_A,
       ),
-      // a translation spec so the translator has real work to sweep the ground with
       signClaims(
         translationClaims(
           "avatars",
@@ -124,23 +107,16 @@ describe("bytes Target kind (rhizomatic 0.4.0, adopted in T8): Loam receives, ne
     gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     gateways.push(gateway);
 
-    // The foreign bytes delta arrives through the federation-in door (verification, not grant).
     const delta = avatarDelta("person:wren", 3000, GARDENER_SEED);
     const report = await gateway.federate([delta]);
     expect(report.accepted).toBeGreaterThan(0);
 
-    // gql serialization door: a query over a store that now HOLDS a bytes target must still serve.
     const res = await gateway.query(`{ plant(entity: "${FERN}") { height } }`);
     expect(res.errors ?? []).toEqual([]);
 
-    // translator door: it sweeps every delta in the snapshot, the bytes source among them, and
-    // its selective kind-checks simply skip the bytes pointer — no exhaustiveness break. The
-    // avatar recognizer matches the bytes delta, so the pass reports work without crashing on it.
     const swept = await translate(gateway, { seed: TRANSLATOR_SEED });
     expect(swept.matched).toBeGreaterThan(0);
 
-    // repair/legibility reader door: it walks every pointer of the ground and skips non-entity
-    // targets — the bytes pointer among them — without stumbling.
     expect(() =>
       legibilityWarnings([...gateway.reactor.snapshot()], gateway.operator),
     ).not.toThrow();

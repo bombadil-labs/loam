@@ -1,6 +1,3 @@
-// Phase 4 — The schema lifecycle: create → use → evolve live → both shapes at once →
-// deprecate → revive → and the old ground under old law answers exactly as it always did.
-
 import { makeNegationClaims, signClaims, VOCAB_PREFIX } from "@bombadil/rhizomatic";
 import { Gateway, SqliteBackend } from "../../dist/index.js";
 import {
@@ -37,7 +34,6 @@ let reel = await openStore("reel");
 const copyPath = join(homeOf("reel"), "reel-at-T.sqlite");
 let recordedHex;
 try {
-  // Seed s3: the screening the whole phase watches.
   await gql(
     reel.base,
     tok("miles", "reel"),
@@ -48,14 +44,13 @@ try {
     companionClaims(S3, "person:wren", Date.now() + 1),
   ]);
 
-  // 4.1 — pin the hex AND the ground itself
   const at_T = await gql(
     reel.base,
     tok("miles", "reel"),
     `{ screening(entity: "${S3}") ${V1_FIELDS} }`,
   );
   recordedHex = at_T.body?.data?.screening?._hex;
-  await reel.close(); // single writer: close before copying the file
+  await reel.close();
   copyFileSync(join(homeOf("reel"), "store.sqlite"), copyPath);
   reel = await openStore("reel");
   check(
@@ -65,7 +60,6 @@ try {
     recordedHex?.slice(0, 32) + "…",
   );
 
-  // 4.2 — a v1 subscriber, watching
   const v1Stream = await sseOpen(
     reel.base,
     tok("miles", "reel"),
@@ -79,7 +73,6 @@ try {
     JSON.stringify(v1Snap?.screening)?.slice(0, 120),
   );
 
-  // 4.3 — EVOLVE, live, over HTTP
   const evolved = await registerHttp(reel.base, opToken("reel"), loadSpec("screening-v2.json"));
   check(
     "4.3",
@@ -88,7 +81,6 @@ try {
     JSON.stringify(evolved.body),
   );
 
-  // 4.4 — new readers see v2
   const noteGone = await gql(
     reel.base,
     tok("miles", "reel"),
@@ -109,7 +101,6 @@ try {
     JSON.stringify(v2Read.body?.data?.screening),
   );
 
-  // 4.5 — the old stream keeps its promised shape
   await gql(
     reel.base,
     tok("miles", "reel"),
@@ -124,7 +115,6 @@ try {
   );
   await v1Stream.close();
 
-  // 4.6 — both shapes at once: v1's law re-registered at its own entity
   const classic = await registerHttp(
     reel.base,
     opToken("reel"),
@@ -150,7 +140,6 @@ try {
     `classic=${JSON.stringify(classicRead.body?.data?.screeningClassic)}`,
   );
 
-  // 4.7 — nothing ever breaks: old ground + old law = the exact old answer
   const frozen = await Gateway.open(new SqliteBackend(copyPath), { seed: reel.seed });
   const replayed = await frozen.query(`{ screening(entity: "${S3}") ${V1_FIELDS} }`);
   const frozenHex = replayed.data?.screening?._hex;
@@ -162,7 +151,6 @@ try {
     `${frozenHex?.slice(0, 32)}… === ${recordedHex?.slice(0, 32)}…`,
   );
 
-  // 4.8 — deprecation is negation
   const classicDef = findDefinition(reel.gateway, "hyperschema:ScreeningClassic");
   const retirement = signClaims(
     makeNegationClaims(reel.operator, Date.now(), classicDef.id),
@@ -184,7 +172,6 @@ try {
     (gone.body?.errors ?? []).join(" ").slice(0, 90),
   );
 
-  // 4.9 — revival: negate the negation
   await reel.gateway.append([
     signClaims(makeNegationClaims(reel.operator, Date.now(), retirement.id), reel.seed),
   ]);
@@ -203,7 +190,6 @@ try {
     JSON.stringify(back.body?.data ?? back.body?.errors),
   );
 
-  // 4.10 — an identical republish binds nothing new
   const genBefore = reel.gateway.materializationFor("Screening");
   await registerHttp(reel.base, opToken("reel"), loadSpec("screening-v2.json"));
   const genAfter = reel.gateway.materializationFor("Screening");

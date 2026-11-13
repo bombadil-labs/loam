@@ -1,14 +1,3 @@
-// Ordinary reads cost their own footprint, not the store (rhizomatic SPEC-17 P7). The rail counts
-// every reactor access a whole read makes: the indexed lookups, and the two whole-store doors
-// (`snapshot`, `arrivalLog`). A present read, an as-of read, the pinned door and a governed read
-// must never open a whole-store door, and must make the same accesses with 0 and with 2000
-// unrelated facts in the store. The rail also checks answers where the read's selection splits a
-// negation chain or cuts a fact said after the as-of moment, at the delta level and the View level.
-//
-// Not covered here, and named in the PR: the slate probe and the governed lowering still walk the
-// whole erasure index and the grant history on governed stores. Those grow with law, not with data,
-// so the bystanders below cannot see them.
-
 import { describe, expect, it, vi } from "vitest";
 import {
   authorForSeed,
@@ -43,12 +32,9 @@ const GUARDED: HyperSchema = { name: "Guarded", alg: 1, body: governedGatherBody
 const strike = (target: Delta, t: number): Delta =>
   signClaims(makeNegationClaims(authorForSeed(GARDENER_SEED), t, target.id), GARDENER_SEED);
 
-// d ← n1 ← n2 on SPLIT. At 1500, n1 has been said and n2 has not, so d is struck as of 1500 and
-// live now.
 const chainHead = observed(SPLIT, "height", 7, 1000, GARDENER_SEED);
 const chainStrike = strike(chainHead, 1100);
 const chainRevive = strike(chainStrike, 1800);
-// Said at 2000, holding since 1000: an as-of read at 1500 has not heard it yet.
 const lateSaid = observed(MOSS, "height", 9, { timestamp: 2000, validFrom: 1000 }, GARDENER_SEED);
 
 const mossFacts = () => [
@@ -83,7 +69,6 @@ async function plainStore(count: number): Promise<Gateway> {
 }
 
 async function governedStore(count: number, lenses = 1): Promise<Gateway> {
-  // Further governed lenses sit in the registry beside Guarded; a read of Guarded lowers them too.
   const extra = Array.from({ length: lenses - 1 }, (_, n) => ({
     hyperschema: { ...GUARDED, name: `Guarded${n}` },
     schema: PLANT_POLICY,
@@ -122,7 +107,6 @@ const ACCESSES = [
 ] as const;
 type Accesses = Record<(typeof ACCESSES)[number], number> & { anchored: AnchoredRead[] };
 
-// Every reactor access made while `read` runs, and every anchored read it made.
 function accesses(gw: Gateway, read: () => void): Accesses {
   const spies = ACCESSES.map((m) => [m, vi.spyOn(gw.reactor, m)] as const);
   const anchored = vi.spyOn(gw.reactor, "evalAnchored");
@@ -137,8 +121,6 @@ function accesses(gw: Gateway, read: () => void): Accesses {
 const pinnedPlant = (gw: Gateway) =>
   gw.registrationVersions().filter((v) => lensOf(v) === "Plant")[0]!;
 
-// Each case prepares outside the measurement (finding the pinned version reads the registration
-// log) and returns the read itself.
 const reads: [string, (gw: Gateway) => () => void, (n: number) => Promise<Gateway>][] = [
   ["a present read", (gw) => () => gw.resolvedNode("Plant", MOSS), plainStore],
   ["an as-of read", (gw) => () => gw.resolvedNode("Plant", MOSS, 1500), plainStore],

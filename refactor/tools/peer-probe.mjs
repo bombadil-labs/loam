@@ -1,15 +1,7 @@
-// The peer probe: container code uses a child only through `Peer` (ruling 13). The census counts the
-// tree's gateway-typed members; this closes what it cannot see, a child reached through a handle an
-// opener returns. It type-checks src/ with every such handle's `gateway` typed as a `Peer`, in memory.
-// Any error that causes in container code (src/gateway, src/federation) outside the openers is a use
-// of a child beyond its peer interface, and fails the check.
-// Usage: node refactor/tools/peer-probe.mjs
-
 import path from "node:path";
 import ts from "typescript";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
-// Every handle an opener returns with a child in it. A declaration that moves fails the probe.
 const HANDLES = [
   {
     file: "src/gateway/container.ts",
@@ -22,7 +14,6 @@ const HANDLES = [
     asPeer: '  readonly gateway: import("./peer.js").Peer;\n',
   },
 ];
-// The opener attaches, discards and closes children, so it holds each as its gateway.
 const OPENERS = new Set(["src/gateway/container.ts", "src/gateway/quarantine-pool.ts"]);
 const CONTAINER_CODE = /^src\/(gateway|federation)\//;
 

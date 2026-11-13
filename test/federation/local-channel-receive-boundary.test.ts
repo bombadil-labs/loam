@@ -1,5 +1,3 @@
-// T288 P3 addendum: the service must perform admission, never sign caller-selected receipt IDs.
-// Direct calls below own the ordinary per-name commit queue, as the internal API requires.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { Gateway, type FederationReport } from "../../src/gateway/gateway.js";
@@ -61,7 +59,6 @@ function receive(
   opening: LocalChannelOpening,
   offer: readonly Delta[],
 ): Promise<ReceiveResult> {
-  // Missing export is intentionally an API-shape red before repair, not a behavioral verdict.
   return withChannelCommit(gw, opening.channel, () =>
     ingest.receiveChannelOfferInCommit(gw, opening, offer),
   );
@@ -94,7 +91,6 @@ describe("T288 receive service boundary", () => {
     const durableBefore = ids(await f.gw.backend.deltasSince(new Set()));
     let refused = false;
     try {
-      // Exercise the JavaScript boundary even after the TypeScript union narrows.
       const oldInput = {
         action: "received",
         channel: f.ch.name,
@@ -108,7 +104,6 @@ describe("T288 receive service boundary", () => {
     const afterAttempt = ids(events(f.gw));
     const durableAfterAttempt = ids(await f.gw.backend.deltasSince(new Set()));
     const receivedAfterAttempt = ids(evidence(f.gw, f.ch.name).received);
-    // Execute the real positive control even when the forbidden writer wrongly succeeds.
     f.offering.push(a);
     const report = await f.ch.sync();
     expect(report.accepted).toBe(0);
@@ -227,7 +222,6 @@ describe("T288 receive service boundary", () => {
   it("receipt-stage refusal returns the actual successful source report and only a later offer can prove those bytes", async () => {
     const f = await fixture();
     const a = fact(10);
-    // The host writes through its peer journal: the fault sits on the journal's commit.
     const journal = (f.gw.backend as MemoryBackend).journalStore();
     const real = journal.compareAndAppend.bind(journal);
     const fault = vi.spyOn(journal, "compareAndAppend").mockImplementation(async (...args) => {

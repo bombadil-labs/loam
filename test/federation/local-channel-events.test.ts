@@ -1,32 +1,3 @@
-// T288 — local receive is an act of this channel service, not a transferable signature.
-// All destructive fixtures are MemoryBackend instances or this file's own mkdtemp SQLite stores.
-// Raw writes below represent the explicitly trusted restore/corruption boundary, never federation.
-//
-// RAILS-RED on origin/main, the seven local-channel suites copied in: none LOADS there. Each imports
-// src/federation/local-channel-events.js, which this slice adds, so vitest reports seven failed
-// suites and no cases. The revert probes an independent review ran on this tree, one guard deleted
-// per probe: the append door's protected refusal (8 red), the federate door's (7 red), the
-// transitive closure over strikes (6 red), the local-control branch of standingErasures (1 red),
-// the eraseReplica authority check (1 red), the two-opens ambiguity (1 red), the exact declaration
-// checks on sync (4 red), the partial-opening guard on retry (1 red), and a protected-set memo that
-// never sweeps the arrival log (red across the suites). Measured again at 110 cases: a marker that
-// does not make this channel's erased history unavailable (1 red); a re-open that ignores whether
-// the caller's options agree with the standing record, cached handle or not (1 red); a guard or a
-// sync that compares an omitted `from` against the record instead of accepting it (1 red each);
-// an attached replica that starts out authorized to purge a local event (1 red).
-//
-// REVISED AS A WHOLE FOR SPEC 64 (T289), before this file froze: every lifecycle literal carries the
-// parent-container pointer, and the two erase(open) cases pin the new rule — a live opening cannot
-// be erased, the drop comes first, and a dropped incarnation's erase takes its receipts and close.
-// RAILS-RED of the revised file on the T288 tip (4e3b8b52): 10 red, 65 green. The greens are the
-// T288 cases the revision did not touch, controls that the pointer and the rule narrowed nothing
-// else; the reds are the six literal comparisons, the two erase(open) cases, and the two
-// preplanted-erasure cases whose predicted ids moved with the pointer.
-//
-// WHAT THESE RAILS DO NOT ASSERT: a reader resolving through a Schema or a door over the `received`
-// operand. No consumer resolves through it yet; `sourceStanding` re-ingests the operand into a fresh
-// Reactor and asks lawfulNegated, which is the nearest reader available. The slice that first
-// resolves through `received` owes the object-level rail.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   authorForSeed,
@@ -108,7 +79,6 @@ async function home(primary = new FaultBackend()) {
     primary,
     assembleGenesis({ operatorSeed: SEED, registrations: [] }),
     {
-      // A successful drop closes the old backend. A fresh open must receive fresh physical ground.
       channelBackend: (name) => {
         const backend = new FaultBackend();
         pools.set(name, backend);
@@ -162,7 +132,6 @@ function header(name: string, action: string, into = "friends") {
     e("parent-container", into, EVENT),
   ];
 }
-// Independently spelled literal fixtures; no production event builder/parser is imported.
 function openLiteral(name: string, status: string, declaration: string, bound?: string): Claims {
   return {
     author: OP,
@@ -213,8 +182,6 @@ function markedErase(target: Delta): Delta {
     ],
   });
 }
-// A pool under its own key holds the host's order re-signed for it: every pointer kept, plus the
-// pool as its one receiver.
 function orderIn(pool: Gateway, erasure: Delta): Delta | undefined {
   const pointers = JSON.stringify(erasure.claims.pointers);
   return [...pool.reactor.snapshot()].find(
@@ -259,17 +226,13 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 async function legacyFixture(gw: Gateway) {
-  // Real service creates the ordinary declarations/status. Removing ONLY new events simulates
-  // a supported pre-vocabulary history; the ordinary channel behavior is not mocked.
   const fixture = await channel(gw);
   const protectedIds = ids(events(gw));
   await gw.backend.purge(protectedIds);
-  // Reopen a copied, trusted old history to avoid inventing a reactor deletion API.
   const root = new MemoryBackend();
   await plant(root, await gw.backend.deltasSince(new Set()), gw.operatorAuthor);
   const poolBytes = await fixture.pool.backend.deltasSince(new Set());
   let poolBackend = new MemoryBackend();
-  // The pool is its own peer: its copy is its journal's, under its own key.
   await plant(poolBackend, poolBytes, fixture.pool.operatorAuthor);
   const restored = await Gateway.open(root, {
     seed: SEED,
@@ -289,7 +252,6 @@ async function legacyFixture(gw: Gateway) {
   };
 }
 
-// API opts are intentionally typed at the call site: T288's report is opt-in, not a changed default.
 describe("T288 actual ingest attestation", () => {
   it("reports unique sorted accepted AND identical held IDs only when explicitly requested", async () => {
     const { gw } = await home();
@@ -489,7 +451,6 @@ describe("T288 exact local lifecycle and independent v1 vocabulary", () => {
     expect(localChannelEvidence(old.gw, old.name)).toEqual({ state: "legacy" });
     expect(events(old.gw)).toEqual([]);
     await old.gw.dropChannel(old.name);
-    // New physical backend for the next lifetime.
     old.freshBackend();
     const fresh = await old.gw.openChannel({ into: "friends", prefix: "peer", source: old.source });
     expect(opened(old.gw, fresh.name).received).toEqual([]);
@@ -565,7 +526,6 @@ describe("T288 protected ingress is unconditional across same-key homes", () => 
     await b.gw.append([legacy]);
     expect(b.gw.channelStatus(ch.name)).toHaveLength(1);
     expect(localChannelEvidence(b.gw, ch.name)).toEqual({ state: "legacy" });
-    // A's primary events are also ordinary seed input when A creates another channel pool.
     const extra = await channel(a.gw, peer(), "extra");
     expect(events(extra.pool)).toEqual([]);
     const server = await serve({
@@ -627,7 +587,6 @@ describe("T288 protected ingress is unconditional across same-key homes", () => 
     await gw.append([target, ordinaryStrike]);
     expect(gw.reactor.get(ordinaryStrike.id)).toBeDefined();
     for (const d of [s, ss, erase]) {
-      // For ss the protected target is batch-proposed, so closure must be transitive in any order.
       const batch = d === ss ? [ss, s] : [d];
       await expect(gw.append(batch)).rejects.toThrow();
       expect(
@@ -728,7 +687,6 @@ describe("T288 honest local received operand", () => {
     offering.push(a, b);
     await ch.sync();
     const receipt = events(gw, "received")[0]!;
-    // Existing root erasure acts on a root-held target; seed the same exact source before its cut.
     await gw.federate([a]);
     const report = await gw.erase(a.id);
     expect(report.citations).toContain(receipt.id);
@@ -763,9 +721,7 @@ describe("T288 honest local received operand", () => {
     for (const attempt of attempts) {
       try {
         attempt();
-      } catch {
-        /* immutable copies may throw */
-      }
+      } catch {}
     }
     expect(JSON.stringify(opened(gw, ch.name))).toBe(before);
     expect(sourceStanding(gw, ch.name, a.id)).toBe(false);
@@ -1052,10 +1008,8 @@ describe("T288 partial writes and shared channel commit order", () => {
     });
     await entered.promise;
     const scheduler = gw.keepSyncing({ everyMs: 20 });
-    // Wait for an actual scheduler pull. No elapsed-time assumption can substitute for entry.
     await schedulerPull.promise;
     expect(pulls).toBe(2);
-    // Drop queues first; the scheduler's post-pull commit must then reject its stale association.
     const dropping = gw.dropChannel(ch.name);
     schedulerOffer.resolve([fact(2)]);
     lock.resolve();
@@ -1073,8 +1027,6 @@ describe("T288 partial writes and shared channel commit order", () => {
   }, 10000);
 });
 
-// Replace only the protected rows of an owned fixture, preserving real status/declaration/pool
-// association. This is trusted history injection to test the projector, not an import loophole.
 async function literalFixture() {
   const fixture = await home();
   const current = await channel(fixture.gw);
@@ -1095,7 +1047,6 @@ describe("T288 strict literal history and exact attachment projection", () => {
     await raw(f.gw, [open, received]);
     expect(opened(f.gw, f.ch.name).opening.id).toBe(open.id);
     expect(ids(opened(f.gw, f.ch.name).received)).toEqual([a.id]);
-    // Unknown-target negation was generic before these rows existed; it cannot gain local power.
     await raw(f.gw, [strike(open)]);
     expect(opened(f.gw, f.ch.name).opening.id).toBe(open.id);
     const close = signed(closeLiteral(f.ch.name, open.id));
@@ -1272,8 +1223,6 @@ describe("T288 strict literal history and exact attachment projection", () => {
 });
 
 describe("T288 explicit trusted-local event erasure and protected controls", () => {
-  // A composed scope can hold a local-control erasure beside the event's retained bytes: a pool can
-  // own a channel of its own. The scope's own erasures must hide that event; a bystander event stays.
   it("a scope holding a local-control erasure and its event's bytes hides the event", async () => {
     const { gw } = await home();
     const { ch, offering } = await channel(gw);
@@ -1284,7 +1233,6 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     await ch.sync();
     const bystander = events(gw, "received").find((d) => d.id !== target.id)!;
     await gw.erase(target.id, { reason: "withdraw local evidence" });
-    // The event's bytes as a pool that still held them would, beside the store's erasure.
     const scope = [...gw.reactor.snapshot(), target];
     const hidden = erasedInDeltas(scope, OP);
     expect(hidden.has(target.id)).toBe(true);
@@ -1320,7 +1268,6 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     expect(value(erasure, "local-control-kind")).toBe("erase");
     expect(verifyDelta(erasure)).toBe("verified");
     expect(ref(erasure, "erases")).not.toBe(bystander.id);
-    // Legitimate host fan-out must retain the same marked signed control in its attached pool.
     const held = orderIn(pool, erasure);
     expect(held).toBeDefined();
     expect(verifyDelta(held!)).toBe("verified");
@@ -1366,7 +1313,6 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     await ch.sync();
     const opening = opened(gw, ch.name).opening;
     const receipt = events(gw, "received")[0]!;
-    // Spec 64: a live opening cannot be erased. The refusal names the pool and the road.
     const before = [...gw.reactor.snapshot()].length;
     await expect(gw.erase(opening.id)).rejects.toThrow(/its pool's declaration still stands/);
     await expect(gw.erase(opening.id)).rejects.toThrow(/Drop the channel first/);
@@ -1374,11 +1320,9 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     expect(gw.reactor.get(opening.id)).toBeDefined();
     expect(pool.reactor.get(fact().id)).toBeDefined();
     expect(localChannelEvidence(gw, ch.name).state).toBe("open");
-    // Still receiving: nothing about the channel changed.
     offering.push(fact(2));
     await ch.sync();
     expect(ids(opened(gw, ch.name).received)).toEqual([fact().id, fact(2).id].sort());
-    // Drop first. Then the erase proceeds and takes the incarnation's receipts and close with it.
     await gw.dropChannel(ch.name);
     const close = events(gw, "close")[0]!;
     const report = await gw.erase(opening.id);
@@ -1387,7 +1331,6 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
       expect(gw.reactor.get(gone)).toBeUndefined();
       expect(await gw.backend.holds(gone)).toBe(false);
     }
-    // Every member carries its own marker naming this channel; the root's other records stand.
     expect(
       [...gw.reactor.snapshot()].filter(
         (d) => inLocalContext(d, LOCAL_CONTROL) && localControlChannel(d) === `channel:${ch.name}`,
@@ -1407,13 +1350,11 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     const opening = opened(gw, ch.name).opening;
     await expect(gw.erase(opening.id)).rejects.toThrow(/Drop the channel first/);
     expect(gw.reactor.get(opening.id)).toBeDefined();
-    // A DETACHED pool is still live: its declaration stands. Measured on a sibling channel.
     const { ch: kept } = await channel(gw, peer(), "peer2");
     const keptOpening = opened(gw, kept.name).opening;
     await kept.pool.detach("kept for extraction");
     await expect(gw.erase(keptOpening.id)).rejects.toThrow(/its pool's declaration still stands/);
     expect(gw.reactor.get(keptOpening.id)).toBeDefined();
-    // Drop, then erase. The marker names this channel and the history reads erased, never legacy.
     await gw.dropChannel(ch.name);
     await gw.erase(opening.id);
     expect(gw.reactor.get(opening.id)).toBeUndefined();
@@ -1433,7 +1374,6 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
       state: "unavailable",
       reason: "erased opening",
     });
-    // A fresh open of the same name is a new protected opening that receives cleanly.
     gw.federationChannels.delete(ch.name);
     const fresh = await gw.openChannel({
       into: "friends",
@@ -1457,16 +1397,13 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
         from: "https://peer.example/other",
         source,
       });
-    // With the handle cached, the mismatch refuses instead of handing back the cached handle.
     await expect(other()).rejects.toThrow("drop it before opening it another way");
     expect(gw.federationChannels.get(ch.name)).toBe(ch);
-    // Without a live handle, the same refusal, and nothing is cached. The message names no source.
     gw.federationChannels.delete(ch.name);
     const refusal = await other().catch((e: Error) => e.message);
     expect(refusal).toContain("drop it before opening it another way");
     expect(refusal).not.toContain("peer.example");
     expect(gw.federationChannels.has(ch.name)).toBe(false);
-    // A caller that names no source agrees with whatever stands: the MCP door never records one.
     const unnamed = await gw.openChannel({ into: "friends", prefix: "peer", source });
     offering.push(fact(2));
     await unnamed.sync();
@@ -1506,7 +1443,6 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     const receipt = events(gw, "received")[0]!;
     primary.failPurge = true;
     await expect(gw.erase(receipt.id)).rejects.toThrow();
-    // The order is admitted, so the reading drops the receipt; its bytes stay held and owed.
     expect(gw.reactor.get(receipt.id)).toBeUndefined();
     expect(await primary.holds(receipt.id)).toBe(true);
     expect(opened(gw, ch.name).received).toEqual([]);
@@ -1532,8 +1468,6 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     const erasure = markedErase(target);
     expect(gw.reactor.get(erasure.id)).toBeUndefined();
     await expect(gw.eraseReplica(erasure, target.id)).rejects.toThrow();
-    // An ATTACHED pool has no authority of its own either: a real marked erasure from another
-    // home, valid in shape and signed by the same operator key, is refused until THIS parent holds it.
     const { gw: elsewhere } = await home();
     const { ch: far } = await channel(elsewhere);
     const farOpening = opened(elsewhere, far.name).opening.id;
@@ -1549,7 +1483,6 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
             p.target.deltaRef.delta === farOpening,
         ),
     )!;
-    // Signed for this pool as its receiver, so only the authority check stands in its way.
     const farOrder = signed({
       ...farTombstone.claims,
       pointers: [...farTombstone.claims.pointers, p("receiver", pool.operatorAuthor!)],
@@ -1562,7 +1495,6 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     expect(gw.reactor.get(target.id)).toBeDefined();
     expect(gw.reactor.get(erasure.id)).toBeUndefined();
     expect(localChannelEvidence(gw, ch.name).state).toBe("open");
-    // An independent replica with copied trusted fixture bytes still has no attached authority.
     const standalone = await Gateway.open(new MemoryBackend(), { seed: SEED });
     homes.push(standalone);
     await raw(standalone, [target]);
@@ -1616,8 +1548,6 @@ describe("T288 explicit trusted-local event erasure and protected controls", () 
     const firstReceipt = events(gw, "received")[0]!;
     const firstErase = await gw.erase(firstReceipt.id);
     const template = gw.reactor.get(firstErase.erasure)!;
-    // Learn only the supported writer's pointer placement, not its authority decision. The v1
-    // marker's semantic shape is independently asserted in the exact-ID erase rail above.
     offering.length = 0;
     offering.push(fact(2));
     await ch.sync();
@@ -1751,8 +1681,6 @@ describe("T288 durable trusted history, distinct from content import", () => {
     expect(imported.admittedIds).not.toContain(expected.opening.id);
     expect(events(thirdHome)).toEqual([]);
     expect(localChannelEvidence(thirdHome, ch.name)).toEqual({ state: "legacy" });
-    // This explicitly does NOT claim to detect dishonest prepopulation: preserving guarded
-    // whole-history bytes is trusted restoration of one logical authority, not creating a new home.
   });
   it("supported pending local erasure can finish after reopen without generic negation or recovery changes", async () => {
     const original = await home();

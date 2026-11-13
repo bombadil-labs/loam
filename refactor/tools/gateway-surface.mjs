@@ -1,7 +1,3 @@
-// The Gateway class: its members, which files reach into them, and how many files touch each one.
-// A file "touches" a member when it reads `x.member` on a variable or parameter typed as Gateway.
-// Usage: node refactor/tools/gateway-surface.mjs [dir=src]
-
 import ts from "typescript";
 import { parse, sourceFiles } from "./lib.mjs";
 

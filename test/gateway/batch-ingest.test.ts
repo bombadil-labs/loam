@@ -1,7 +1,3 @@
-// An admitted batch enters the reactor as one update, so a warm view refreshes once per batch and
-// not once per delta. The rail asserts both levels: the reactor saw one batch (delta level), and
-// the View equals the one a delta-at-a-time store answers (object level).
-
 import { describe, expect, it, vi } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -47,7 +43,6 @@ describe("batch ingest", () => {
     const apart = await published();
     apart.reactor.subscribe(apart.matName("Plant"), () => void (changes.apart += 1));
     for (const d of facts) await apart.append([d]);
-    // The warm view refreshed once for the batch, and once per delta when they came apart.
     expect(changes).toEqual({ together: 1, apart: 40 });
     expect(together.reactor.materializedView(together.matName("Plant"), FERN)).toBeDefined();
     const now = Math.max(together.now(), apart.now());
@@ -97,8 +92,6 @@ describe("batch ingest", () => {
       GARDENER_SEED,
     );
     await gw.append([claim, strike]);
-    // Together they leave the view as it was, so it emits no frame at all. One at a time, the
-    // claim's frame would show 555 before the strike's frame withdrew it.
     expect(views).toEqual([]);
     expect(gw.resolvedNode("Plant", FERN, undefined, gw.now()).view["height"]).not.toBe(555);
     await gw.close();

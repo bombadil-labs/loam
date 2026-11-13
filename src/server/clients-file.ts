@@ -1,37 +1,13 @@
-// `clients.json` (SPEC §57): the record half of a minted client credential — the name, the
-// PUBLIC author, and the sha-256 digest of the bearer `loam client mint` printed once. The
-// signing seed is NOT here: it lives beside this file as `client.<name>.seed` (0600, the
-// `user.<name>.seed` convention), so listing what exists never touches a secret.
-//
-// The door reads this file PER REQUEST (http.ts's identify), which is the token half of §57's
-// freshness split: a mint authenticates and a revoke refuses on the very next request, no
-// restart — while the GRANTS the mint appended live in the served reactor from boot and move at
-// restart. The two halves are stated apart wherever either surfaces.
-//
-// oauth-file.ts's two reading rules hold here verbatim: a file this module cannot fully parse
-// means it CANNOT DETERMINE what is minted — it throws, and every caller refuses ("cannot
-// determine" is never "nothing is"). Unlike oauth.json there is no cross-process lock: the
-// server only ever READS this file, and both writers are CLI invocations by the operator's own
-// hand — the PKCE dance that made oauth.json's server a concurrent writer has no analogue here.
-// The write is still atomic (tmp + rename), so a reader never sees half a file.
-
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-/** One minted client: its name, its public author, and the digest its bearer hashes to. */
 export interface ClientRecord {
   readonly name: string;
-  /** sha-256 hex of the bearer — the bearer itself is printed once at mint and never stored. */
   readonly digest: string;
-  /** The client's PUBLIC author — what its deltas name. Never the seed. */
   readonly actor: string;
-  /**
-   * The resolved store file the mint appended this key's grants into. Revoke refuses a
-   * different store rather than striking over the wrong operand set and reporting the grants
-   * gone — a closure evaluated against a store the grants were never in is H7 in file form.
-   */
+
   readonly store: string;
-  readonly mintedAt: number; // wall clock, for `loam client` listings to come
+  readonly mintedAt: number;
 }
 
 export interface ClientsFile {
@@ -73,7 +49,6 @@ function checkShape(raw: unknown, path: string): ClientsFile {
   return file as unknown as ClientsFile;
 }
 
-/** Absent is EMPTY (a home that never minted is ordinary); malformed THROWS (rule 1 above). */
 export function readClientsFile(home: string): ClientsFile {
   const path = clientsPath(home);
   let text: string;
@@ -100,8 +75,6 @@ export function writeClientsFile(home: string, file: ClientsFile): void {
   renameSync(tmp, path);
 }
 
-/** The client's signing seed, read from its own 0600 file. Throws when unreadable — the door
- *  catches and refuses, the CLI reports; neither guesses. */
 export function readClientSeed(home: string, name: string): string {
   return readFileSync(clientSeedPath(home, name), "utf8").trim();
 }

@@ -1,5 +1,3 @@
-// Phase 2 — Live views: SSE mechanics on single stores.
-
 import { check, gql, openStore, sseOpen, summary, tok } from "./harness.mjs";
 
 const stores = {};
@@ -8,7 +6,6 @@ try {
   stores.reel = await openStore("reel");
   const { commons, reel } = stores;
 
-  // 2.1 — snapshot semantics
   const wrenStream = await sseOpen(
     commons.base,
     tok("wren", "commons"),
@@ -24,7 +21,6 @@ try {
     JSON.stringify(snap?.person)?.slice(0, 140),
   );
 
-  // 2.2 — a bio update patches with the hex chain
   const beforeHex = snap.person._hex;
   await gql(
     commons.base,
@@ -41,13 +37,12 @@ try {
     `changed=${JSON.stringify(patch?.person?._changed)}`,
   );
 
-  // 2.3 — two subscribers, two entities: each hears only their own
   const milesStream = await sseOpen(
     commons.base,
     tok("miles", "commons"),
     `subscription { person(entity: "person:miles") { bio _changed } }`,
   );
-  await milesStream.nextFrame(); // miles snapshot
+  await milesStream.nextFrame();
   await gql(
     commons.base,
     tok("miles", "commons"),
@@ -64,7 +59,6 @@ try {
       : `LEAKED: ${JSON.stringify(wrenSilence.frame)}`,
   );
 
-  // 2.4 — a view-identical write is silence, not a no-op patch
   await gql(
     commons.base,
     tok("wren", "commons"),
@@ -78,7 +72,6 @@ try {
     noop.silent ? "" : JSON.stringify(noop.frame),
   );
 
-  // 2.5 — reel: a rating revision patches with the chain
   const sStream = await sseOpen(
     reel.base,
     tok("miles", "reel"),

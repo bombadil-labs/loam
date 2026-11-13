@@ -1,10 +1,3 @@
-// §58 S1b (T262): the ledger names each KEY a connector holds — one per person who consented —
-// with that key's own binding and that key's own live-token count, never the connector's total.
-// The T205 ledger rail (`grant-ledger.test.ts`) is frozen and seeds one pre-§58 key per client, so a
-// per-connector count and a per-key count coincide there; this file is where they differ.
-//
-// Erasure standing rule: every store here is this file's own mkdtemp fixture.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -88,7 +81,6 @@ describe("§58 — one connector, two people, two keys on the ledger", () => {
     });
     expect(await run(["grant", "list", "--home", home], io()), printed()).toBe(0);
     const listing = printed();
-    // The ledger abbreviates an author; the row is found by the same prefix it prints.
     const ada = rowFor(listing, ADA.slice(0, 20));
     const bea = rowFor(listing, BEA.slice(0, 20));
     expect(ada, listing).not.toBe("");
@@ -99,7 +91,6 @@ describe("§58 — one connector, two people, two keys on the ledger", () => {
     expect(bea).toContain("bea · bea:notes");
     expect(bea).toContain("1 live token");
     expect(bea).not.toContain("1 live tokens");
-    // Neither row is the other's, and the seeds never print.
     expect(ada).not.toContain(BEA.slice(0, 20));
     expect(listing).not.toContain(ADA_SEED);
     expect(listing).not.toContain(BEA_SEED);
@@ -146,7 +137,6 @@ describe("§58 — `loam grant <id> --verb=register` names whose key, when a con
     expect(await mint("--user=ada"), printed()).toBe(0);
     out.length = 0;
     err.length = 0;
-    // The grant landed on ADA's key and no other: her row holds register, bea's does not.
     expect(await run(["grant", "list", "--home", home], io()), printed()).toBe(0);
     const listing = printed();
     expect(rowFor(listing, ADA.slice(0, 20))).toContain("register");
@@ -169,18 +159,11 @@ describe("§58 — `loam grant <id> --verb=register` names whose key, when a con
   });
 });
 
-// --- a REAL bound connection in a real home ------------------------------------------------------
-// The cases above write grant records by hand, which is enough to test the ledger's arithmetic. The
-// two below need the thing itself: a container, an inbox pool on disk, and the owner-authored write
-// grant inside it — because that grant IS a §58 connection's standing, and both surfaces under test
-// were reading the primary and reporting on something else.
-
 const CONN_SEED = "c3".repeat(32);
 const CONN = authorForSeed(CONN_SEED);
 const OWNER_SEED = "0a".repeat(32);
 const CLIENT = "cli-claude";
 
-/** Bind a connection in `home`, exactly as the consent flow would, and return its inbox name. */
 async function bindInHome(user: string, container: string): Promise<string> {
   const seed = readSeed(home);
   const operator = authorForSeed(seed);
@@ -219,7 +202,6 @@ async function bindInHome(user: string, container: string): Promise<string> {
   return name;
 }
 
-/** Does the pool still grant the connection write standing? Asked of the pool's own ground. */
 async function poolGrantsWrite(inbox: string): Promise<boolean> {
   const seed = readSeed(home);
   const gw = await Gateway.boot(
@@ -264,14 +246,13 @@ const connectorRecord = (inbox: string) => ({
 describe("§58 — the ledger reads the pool, because that is where the standing is", () => {
   it("a live bound connection reads as holding write standing in its inbox, not as holding none", async () => {
     const inbox = await bindInHome("ada", "ada:journal");
-    expect(await poolGrantsWrite(inbox)).toBe(true); // the fixture really is live
+    expect(await poolGrantsWrite(inbox)).toBe(true);
     writeOAuthFile(home, connectorRecord(inbox));
 
     expect(await run(["grant", "list", "--home", home], io())).toBe(0);
     const row = rowFor(printed(), CONN.slice(0, 20));
     expect(row).toContain(`write in ${inbox}`);
     expect(row).not.toContain("no grant in the ground");
-    // The verdict column and the live count follow the same answer the door gives.
     expect(row).toContain("write");
   });
 
@@ -292,10 +273,7 @@ describe("§58 — revoke negates the grant that IS the standing, and reports wh
 
     expect(await run(["grant", "revoke", CLIENT, "--home", home], io())).toBe(0);
 
-    // DELTA LEVEL: the grant that carries the connection's standing no longer stands.
     expect(await poolGrantsWrite(inbox)).toBe(false);
-    // OBJECT LEVEL: the report names the inbox it struck, and claims no store-wide strike — this
-    // store never landed one, and a sentence that said otherwise would be the H7 shape.
     const said = printed();
     expect(said).toContain(`the connection's own grant negated in ${inbox}`);
     expect(said).not.toContain("store-wide write grant");
@@ -308,7 +286,6 @@ describe("§58 — revoke negates the grant that IS the standing, and reports wh
     const said = printed();
     expect(said).toContain("could not reach inbox:ada:journal:never-stood");
     expect(said).toContain("still stands");
-    // And it does not claim a strike it did not make.
     expect(said).not.toContain("the connection's own grant negated");
   });
 });

@@ -1,8 +1,3 @@
-// `loam user recover` (step 5, PR 3e-2; refactor/audit/user-recovery.md). Driven through the real
-// CLI where it can be, and through `recoverUser` with a faulty store where a failure must be forced
-// on one side or the other of the operator's atomic append. Every case reads the key files, the
-// journal, and the store afterwards: what the command says must be what is there.
-
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -57,7 +52,6 @@ const journal = (name: string) => `${userSeedPath(home, name)}.recovery`;
 const archives = (name: string) =>
   readdirSync(home).filter((f) => f.startsWith(`user.${name}.seed.replaced-`));
 
-// A short-lived Gateway over the same store (the store is single-writer; never held across run()).
 async function ground<T>(fn: (gw: Gateway, operator: string) => T | Promise<T>): Promise<T> {
   const seed = readSeed(home);
   const gw = await Gateway.boot(
@@ -85,7 +79,6 @@ async function adaAndBea(): Promise<{ k1: string; bea: string }> {
   return { k1: seedKey("ada")!, bea: seedKey("bea")! };
 }
 
-// A store backend whose appends fail on cue, and whose reopen can fail too.
 function faulty(mode: {
   append?: "before" | "after";
   reopen?: "fail";
@@ -97,7 +90,6 @@ function faulty(mode: {
     opens += 1;
     if (mode.reopen === "fail" && opens > 1) throw new Error("the disk is not answering");
     const real = new SqliteBackend(path);
-    // One rule for both write paths: a direct append, and a commit through the host's journal.
     const guard = async <T>(batch: readonly Delta[], commit: () => Promise<T>): Promise<T> => {
       if (mode.binding === "after") {
         const binds = batch.some((d) =>
@@ -110,8 +102,6 @@ function faulty(mode: {
         if (binds) throw new Error("the store failed after writing the binding");
         return n;
       }
-      // Only the record's append fails (it alone carries `retired`); genesis and the barrier
-      // append before it pass.
       if (
         mode.append === undefined ||
         appendsFailed ||
@@ -152,7 +142,6 @@ function faulty(mode: {
     });
   };
 }
-// Attaches each inbox pool on its first boot only: the recovery cuts it, and a rerun cannot reach it.
 const attachedOnce = (): ((pool: string) => StoreBackend) => {
   const real = channelBackendFor(home, io);
   const seen = new Set<string>();
@@ -175,8 +164,6 @@ const direct = (extra: Partial<RecoverOptions>): RecoverOptions => ({
 describe("E1: a recovery moves the user to a new key, and the old key holds nothing", () => {
   it("K2 is the root and holds admin; K1 holds nothing; K1's writes are K2's own; bea is untouched", async () => {
     const { k1, bea } = await adaAndBea();
-    // A literal grant naming K1, which the recovery strikes for the record (the fence already
-    // refuses K1 whatever it names).
     const literal = await ground(async (gw, op) => {
       const g = signClaims(
         grantClaims(STORE_ENTITY, k1, "write", op, gw.stamp(op).timestamp),
@@ -196,7 +183,6 @@ describe("E1: a recovery moves the user to a new key, and the old key holds noth
     );
     expect(k1RootClaims.length).toBeGreaterThan(0);
     expect(await run(["user", "recover", "ada", "--replace-seed", "--home", home], io)).toBe(0);
-    // delta: K1's literal grant and K1's root claims are struck in the host
     await ground((gw) => {
       for (const id of [literal, ...k1RootClaims]) {
         expect(gw.reactor.negationsOf(id).length).toBeGreaterThan(0);
@@ -204,11 +190,9 @@ describe("E1: a recovery moves the user to a new key, and the old key holds noth
     });
     const k2 = seedKey("ada")!;
     expect(k2).not.toBe(k1);
-    // files: the old seed archived, not deleted; no journal left
     expect(archives("ada")).toHaveLength(1);
     expect(authorForSeed(readFileSync(join(home, archives("ada")[0]!), "utf8").trim())).toBe(k1);
     expect(existsSync(journal("ada"))).toBe(false);
-    // the store and the door
     expect(await rootOfAda()).toBe(k2);
     expect(await holds(k2, "admin")).toBe(true);
     expect(await holds(k1, "admin")).toBe(false);
@@ -274,7 +258,6 @@ describe("E8: the journal, the key files, and the append that may or may not hav
     expect(existsSync(journal("ada"))).toBe(true);
     expect(archives("ada")).toHaveLength(1);
     expect(seedKey("ada")).not.toBe(k1);
-    // The rerun reads the store, finds the attempt never landed, and rolls it back.
     err.length = 0;
     expect(await recoverUser(direct({}))).toBe(1);
     expect(err.join("\n")).toMatch(/rolled back/);
@@ -299,7 +282,6 @@ describe("E8: the journal, the key files, and the append that may or may not hav
     expect(await recoverUser(direct({}))).toBe(1);
     expect(seedKey("ada")).toBe(k1);
     expect(existsSync(journal("ada"))).toBe(false);
-    // and then a clean run recovers
     expect(await recoverUser(direct({}))).toBe(0);
     expect(await rootOfAda()).toBe(seedKey("ada"));
   });
@@ -351,7 +333,6 @@ describe("the second append, the new key file, and clocks", () => {
 
   it("an operator ordering floor ahead of the clock does not delay the recovery's validity", async () => {
     const { k1 } = await adaAndBea();
-    // An operator claim ordered an hour ahead: every later operator stamp orders after it.
     await ground(async (gw, op) => {
       const t = Date.now();
       await gw.append([
@@ -430,7 +411,6 @@ describe("an unsigned strike is not a strike", () => {
         readSeed(home),
       );
       await gw.append([g]);
-      // Held raw, unsigned: a door would refuse it; the store still holds it.
       await gw.backend.append([makeDelta(makeNegationClaims(op, gw.stamp(op).timestamp, g.id))]);
       return g.id;
     });
@@ -454,7 +434,6 @@ describe("what the recovery strikes of the old key", () => {
       const a = signClaims(grantClaims("tenant:garden", k1, "write", op, t), seed);
       const b = signClaims(grantClaims(STORE_ENTITY, k1, "write", op, t + 1), seed);
       await gw.append([a, b]);
-      // A strike of `b` that starts in an hour: not yet a strike.
       await gw.append([
         signClaims({ ...makeNegationClaims(op, t + 2, b.id), validFrom: t + 3_600_000 }, seed),
       ]);
@@ -535,7 +514,6 @@ describe("E6 and E9: inboxes", () => {
     expect(await connWrites(pool)).toBe(true);
     expect(await run(["user", "recover", "ada", "--replace-seed", "--home", home], io)).toBe(0);
     expect(await connWrites(pool)).toBe(false);
-    // delta: the old root's delegation to CONN in the inbox is struck
     await ground((gw) => {
       const g = gw.connectionInboxes.get(pool)!.gateway!;
       const delegations = [...g.reactor.snapshot()].filter((d) =>
@@ -563,7 +541,6 @@ describe("E6 and E9: inboxes", () => {
   it("H6: an inbox not attached refuses the recovery before anything is written; attached, it completes", async () => {
     const { k1 } = await adaAndBea();
     const pool = await bindAdasConnection();
-    // No pool backend: the declared inbox cannot be attached, so it could not be cut.
     expect(await recoverUser(direct({}))).toBe(2);
     expect(err.join("\n")).toMatch(/declared but not attached/);
     expect(existsSync(journal("ada"))).toBe(false);
@@ -595,7 +572,7 @@ describe("E6 and E9: inboxes", () => {
   it("a record erased after it landed: the rerun says so, keeps the journal, and claims nothing", async () => {
     await adaAndBea();
     await bindAdasConnection();
-    expect(await recoverUser(direct({ channelBackend: attachedOnce() }))).toBe(1); // the inbox is not attached: PENDING
+    expect(await recoverUser(direct({ channelBackend: attachedOnce() }))).toBe(1);
     const j = JSON.parse(readFileSync(journal("ada"), "utf8")) as { record: string };
     await ground(async (gw, op) => {
       await gw.append([
@@ -613,10 +590,9 @@ describe("E6 and E9: inboxes", () => {
   it("an abandon whose new attempt is refused keeps the old journal", async () => {
     await adaAndBea();
     await bindAdasConnection();
-    expect(await recoverUser(direct({ channelBackend: attachedOnce() }))).toBe(1); // PENDING
+    expect(await recoverUser(direct({ channelBackend: attachedOnce() }))).toBe(1);
     const before = readFileSync(journal("ada"), "utf8");
     rmSync(userSeedPath(home, "ada"));
-    // The new attempt's preflight will refuse: ada's grant by name is struck.
     await ground(async (gw, op) => {
       const g = [...gw.reactor.arrivalLog()].find((d) =>
         d.claims.pointers.some(
@@ -638,7 +614,7 @@ describe("E6 and E9: inboxes", () => {
   it("an abandon finishes the predecessor's inbox cleanup as well as its own", async () => {
     const { k1 } = await adaAndBea();
     const pool = await bindAdasConnection();
-    expect(await recoverUser(direct({ channelBackend: attachedOnce() }))).toBe(1); // the inbox not attached: K1's delegation unstruck
+    expect(await recoverUser(direct({ channelBackend: attachedOnce() }))).toBe(1);
     expect(await delegationsIn(pool, k1)).toEqual([false]);
     rmSync(userSeedPath(home, "ada"));
     expect(
@@ -653,8 +629,7 @@ describe("E6 and E9: inboxes", () => {
   it("a history broken after the attempt landed: the rerun claims nothing and keeps the journal", async () => {
     await adaAndBea();
     await bindAdasConnection();
-    expect(await recoverUser(direct({ channelBackend: attachedOnce() }))).toBe(1); // PENDING
-    // A competing first record breaks ada's chain; this attempt's record is still held and unerased.
+    expect(await recoverUser(direct({ channelBackend: attachedOnce() }))).toBe(1);
     await ground(async (gw, op) => {
       const other = authorForSeed("e9".repeat(32));
       await gw.append([
@@ -677,7 +652,7 @@ describe("E6 and E9: inboxes", () => {
   it("an abandon whose new attempt fails before it commits hands the journal back to the old attempt", async () => {
     await adaAndBea();
     await bindAdasConnection();
-    expect(await recoverUser(direct({ channelBackend: attachedOnce() }))).toBe(1); // PENDING: K2's inbox work unfinished
+    expect(await recoverUser(direct({ channelBackend: attachedOnce() }))).toBe(1);
     const k2Journal = readFileSync(journal("ada"), "utf8");
     rmSync(userSeedPath(home, "ada"));
     expect(
@@ -698,7 +673,6 @@ describe("E6 and E9: inboxes", () => {
   it("an erased strike in the inbox is not a strike: recovery lands a fresh one", async () => {
     const { k1 } = await adaAndBea();
     const pool = await bindAdasConnection();
-    // The inbox's own law: the strike and its erasure are signed by the pool's key.
     const [delegation, erasedStrike] = await ground(async (gw) => {
       const g = gw.connectionInboxes.get(pool)!.gateway!;
       const op = g.operatorAuthor!;
@@ -732,10 +706,9 @@ describe("E6 and E9: inboxes", () => {
   it("a struck root claim while the attempt is pending: the rerun claims nothing", async () => {
     await adaAndBea();
     await bindAdasConnection();
-    expect(await recoverUser(direct({ channelBackend: attachedOnce() }))).toBe(1); // PENDING
+    expect(await recoverUser(direct({ channelBackend: attachedOnce() }))).toBe(1);
     const k2 = seedKey("ada")!;
     await ground(async (gw, op) => {
-      // The ROOT claim (context loam.root), not the lineage claim, which also names K2.
       const claim = [...gw.reactor.byTarget("user:ada")].find((id) => {
         const ptrs = gw.reactor.get(id)!.claims.pointers;
         return (

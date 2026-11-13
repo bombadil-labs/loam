@@ -1,32 +1,3 @@
-// Records Loam's answers about a bound connection's inbox before step 5 moves a connection's
-// standing onto the principal read. Today the connection key acts by one sealed delegation, held in
-// its inbox pool's own ground; the parent container's read composes that pool through `inboxOf`.
-//
-// Cast: `writer` is ada, the owner of container `ada` (membership `authoredBy(writer)`). `subadmin`
-// is her bound connection. `peer` is the key that replaces ada's first key in the slate case.
-//
-// Recorded:
-// - `principal.inbox-boundary`: the owner's delegation carries a `validUntil` T. Before and after
-//   T: the pool door's verdict on a write by the connection key, the parent reads (the bound
-//   resolution and `containerScope`), the delegation's own state, and how many frames a live
-//   `watch` over the root's container term and over the pool received when the clock crossed T
-//   with nothing written. Neither term reads delegations, so those counts cannot show whether the
-//   boundary timer fired; PR 3h's rail needs a term that does.
-// - `principal.inbox-revoked`: after `revokeConnection`, the parent reads of the connection's
-//   earlier write, the pool door, and who struck each delegation record in the pool.
-// - `principal.clear-connection-writes`: the owner clears a field only her connection wrote,
-//   unbound and bound. What each call answered, the parent reads, and the strikes in the pool.
-// - `principal.slate-owner`: a slate over ada's writes, before and after her key is replaced by a
-//   fresh write grant for `peer` (the present-day rotation), and the root door's verdict on each
-//   key's next write. The slate names its members by id, so it is unchanged by the rotation BY
-//   CONSTRUCTION; it cannot show whether `peer`'s write would join a principal-keyed container.
-//
-// Deliberately not recorded: a slate cannot stand over the owner's container itself, because a
-// slate's container must carry a frozen `membershipAt`/`version`; the slate case condemns ada's
-// writes by id instead. GraphQL subscriptions (a bound context is refused, and the unbound one reads
-// the root's materialization, which the root `watch` already covers). Restart and on-disk pools
-// (see `connection-delegation.test.ts`). The owner's own writes to the parent after a revoke.
-
 import { afterEach, describe, it, vi } from "vitest";
 import { makeNegationClaims, type Claims, type Delta, type Schema } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
@@ -72,7 +43,6 @@ const prim = (d: Delta, role: string): unknown => {
   return t?.kind === "primitive" ? t.value : undefined;
 };
 
-// What a delta says, by signing key: `@who: value`, or its roles when it carries no value.
 const said = (d: Delta): string => {
   const v = prim(d, "value") ?? prim(d, "text");
   return `${nameOf(d.claims.author)}: ${v === undefined ? d.claims.pointers.map((p) => p.role).join("+") : JSON.stringify(v)}`;
@@ -109,7 +79,6 @@ const settle = async <T>(p: Promise<T>): Promise<unknown> => {
   }
 };
 
-// The clock is faked from boot; `tick` moves it one second, so every stamp is fixed.
 function clock() {
   let at = NOW;
   vi.setSystemTime(at);
@@ -121,7 +90,6 @@ function clock() {
   };
 }
 
-// A gateway whose operator is the store seed, ada holding write, her container declared.
 async function bootAda(tick: () => void): Promise<Gateway> {
   const gw = await Gateway.boot(
     new MemoryBackend(),
@@ -157,7 +125,6 @@ const delegationsIn = (pool: Gateway): Delta[] =>
     .filter((d) => prim(d, "kind") === "delegation" && prim(d, "key") === KEY.subadmin)
     .sort((a, b) => a.claims.timestamp - b.claims.timestamp);
 
-// Both reads of the parent: the bound resolution of `note:ada` and the composed container scope.
 const attempt = (read: () => unknown): unknown => {
   try {
     return read();
@@ -179,7 +146,6 @@ const resolveParent = (gw: Gateway) => ({
   ),
 });
 
-// Takes the next frame if one is already queued, else answers `none` after the event loop turns.
 const pending = async (it: AsyncGenerator<Delta[], void, unknown>): Promise<Delta[] | "none"> => {
   const next = it.next().then((r) => (r.done === true ? "none" : r.value));
   const idle = new Promise<"none">((res) => setImmediate(() => res("none")));
@@ -198,7 +164,6 @@ describe("recordings: a bound connection's inbox", () => {
       ownerSeed: SEEDS.writer,
     });
     const pool = handle.gateway!;
-    // The owner re-signs her delegation with an end, and strikes the open-ended one.
     const T = c.at + 10_000;
     c.tick();
     const [open] = delegationsIn(pool);
@@ -238,7 +203,6 @@ describe("recordings: a bound connection's inbox", () => {
       parent: resolveParent(gw),
       poolDoor: await door(pool, note("subadmin", c.at, "connection's write before T")),
     };
-    // Watchers over the root's container term and over the pool, then the clock crosses T.
     const rootWatch = gw.watch(authoredBy(KEY.writer));
     const poolWatch = pool.watch({
       op: "select",
@@ -331,7 +295,6 @@ describe("recordings: a bound connection's inbox", () => {
     const write = [...pool.reactor.snapshot()].find(
       (d) => d.claims.author === KEY.subadmin && prim(d, "value") === "by-connection",
     );
-    // Recorded, not asserted: a later PR that moves the write out of the pool shows as a diff.
     const strikesInPool = () =>
       write === undefined
         ? "the connection's write is not in the pool"
@@ -425,7 +388,6 @@ describe("recordings: a bound connection's inbox", () => {
         unresolved: s.unresolved ?? null,
       }));
     const before = verdict();
-    // The rotation: the operator grants the new key write and strikes the first key's grant.
     const [firstGrant] = survivingWriteGrantIds(
       gw.reactor,
       gw.validityNow(),

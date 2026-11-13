@@ -1,26 +1,3 @@
-// The CONTAINER (SPEC §27, ticket T32) — the named generalization of the quarantine pool, and the
-// at-rest vocabulary for §27.1's knob vector. A container is an entity the operator names,
-// declared by an operator-signed claim at `loam.container`; the declaration is the at-rest form
-// of the knobs, re-resolved live from the ground like `loam:trust` — a knob change is a delta,
-// never a restart. Two knobs are NOT knobs (§28.4 proved neither transition is a flag flip):
-// `trust` and `posture` are immutable per container entity, enforced at the door AND at the
-// reader, because a flip has two arrival paths and only one passes a door.
-//
-// Bytes follow the POSTURE; law follows the TRUST. The posture axis is STORAGE, and the two words
-// say only that: a SHARED container is a query over ground this store already holds — pointer
-// arrangement, zero copies — and a SEPARATE container keeps its own bytes in its own store, because
-// discard-with-zero-trace is the one thing sharing cannot provide. Trust decides which postures
-// are lawful (§28.3: untrusted must be separate — delegated admission over shared ground is
-// refused); posture decides where bytes are paid. The quarantine (SPEC §24) is ONE PRESET of
-// this primitive: UNTRUSTED · separate · one-way-seeded · droppable — `openQuarantine` keeps its
-// signature and its behavior, implemented over `openContainerImpl` below.
-//
-// The two "trusts" are §28.1's two AXES, never one value: the knob's `trust` role is the
-// EFFECTIVENESS axis (whose trust domain the content belongs to); the `loam:trust` declaration
-// filed AT the container entity (§28.6) is the ADMISSION axis (who may federate INTO it).
-// Admission resolves from the subject declaration and never from the knob; posture legality
-// gates on the knob and never from the roster.
-
 import type { Peer } from "./peer.js";
 import { poolOwner, ownerTerm } from "./inbox-owner.js";
 export { poolOwner } from "./inbox-owner.js";
@@ -88,17 +65,6 @@ const retractionOf = (targetId: string, author: string, timestamp: number): Clai
   pointers: [{ role: "negates", target: { kind: "delta", deltaRef: { delta: targetId } } }],
 });
 
-// --- the scope-merge operation (SPEC §27.4's decided formalism) ---------------------------------
-
-// A read scope is union(active containers) MINUS excluded, and "active" is defined, not implied:
-// a container is ACTIVE iff its declaration survives AND no surviving detach record covers it.
-// The parent edge is containment, never auto-inclusion — a child participates by its own
-// membership. Exclusion operates on the active union (excluded-but-declared is in the union and
-// then subtracted — that is what makes re-inclusion a pure negation), and the result carries the
-// forward negation closure of what it admits (H1, fourth site): exclusion may narrow what a
-// scope sees, never revive what was struck. Every unresolvable dependency FAILS THE READ CLOSED —
-// a dangling membershipAt, an unreachable store — because an empty-set fallback would shrink a
-// scoped result into partial data with no error, the H9 shape on the read side.
 export function containerScopeImpl(
   gw: Gateway,
   opts: { containers?: readonly string[] } = {},
@@ -129,20 +95,9 @@ export function containerScopeImpl(
     return { deltas: contribution.rows.filter((d) => ids.has(d.id)), ground, membership: ids };
   };
 
-  // Each active container's members, from its own ground — the primary for a shared scope,
-  // its own store for an attached separate container.
   const membersOf = (name: string) => {
     const rec = table.containers.get(name)!;
     if (rec.posture === "separate") {
-      // THIS STORE IS THAT CONTAINER. A separate container's ground is a one-way seeded copy of its
-      // host's, so it carries the host's declaration OF ITSELF — and a scope built INSIDE it then
-      // asks it to attach itself, which it can never do. Its own reactor holds exactly those bytes,
-      // so answering from there is the reading, not a fallback: H9's concern is a scope resolving as
-      // if a container were EMPTY, and this is the one case where the bytes are already in hand.
-      //
-      // Without it a pool cannot resolve any lens whose gather scopes the parent — which is every
-      // lens a channel blesses. It survives a restart only because of this: a re-attach re-pulses
-      // the seeding edge, and a full replay then builds the scope that asks the question.
       if (name === gw.poolHandle) return memberRows(gw, name);
       const pool = gw.attachedContainers.get(name);
       if (pool === undefined || !gw.quarantinePools.has(pool)) {
@@ -176,15 +131,9 @@ export function containerScopeImpl(
     return memberRows(gw, name, gw.select(term, serving?.now));
   };
 
-  // A connection inbox composes into its parent by AUTHORITY (README ruling 8, M3): the CLAIMS its
-  // owner, and the keys acting for the owner in this pool, wrote. A revoked or expired connection's
-  // claims stay in the pool (drop() and forensics read it whole) and leave the parent's view. Its
-  // past STRIKES of claims the parent admits still cross: the union negation closure below admits a
-  // strike whatever its author (H1; §39 criterion 10). A pool whose owner cannot be read fails the
-  // read, as an unattached one does (H9).
   const contributionOf = (name: string): { deltas: Delta[]; ground: Gateway } => {
     const all = membersOf(name);
-    if (serving !== undefined) return all; // the child already applied its owner filter
+    if (serving !== undefined) return all;
     if (!name.startsWith("inbox:") || name === gw.poolHandle) return all;
     const owner = poolOwner(all.ground);
     if ("refusal" in owner) {
@@ -193,12 +142,6 @@ export function containerScopeImpl(
     return { deltas: all.ground.select(ownerTerm(all.ground, owner, name)), ground: all.ground };
   };
 
-  // The gather is the requested ACTIVE containers PLUS every active inbox pool bound to one of them
-  // (SPEC §39): an inbox is a separate container whose declaration marks its parent with `inboxOf`,
-  // and a connection's writes land in that pool. The pool stays a container in its own right — drop()
-  // and forensics still reach it — but its members COMPOSE into the parent's gather here. An inbox
-  // that is active yet unattached faults through membersOf like any separate container (H9): a
-  // parent read must never silently drop a connection's writes.
   const toGather: string[] = [];
   const seenGather = new Set<string>();
   const addGather = (name: string): void => {
@@ -207,16 +150,13 @@ export function containerScopeImpl(
     toGather.push(name);
   };
   for (const name of requested) {
-    if (!isActive(name)) continue; // a detach cover contributes NOTHING, without any exclusion
+    if (!isActive(name)) continue;
     addGather(name);
     for (const [inboxName, rec] of table.containers) {
       if (rec.inboxOf === name && isActive(inboxName)) addGather(inboxName);
     }
   }
 
-  // EVERY contributing ground is remembered per delta, never a first-wins home (the suppression
-  // lens's finding): a separate store's snapshot and a shared query can admit the SAME id, and only
-  // one of their grounds may hold the strike — the snapshot is point-in-time, the primary is live.
   const contributions = new Map<Gateway, Map<string, Delta>>();
   for (const name of toGather) {
     const { deltas, ground } =
@@ -226,8 +166,6 @@ export function containerScopeImpl(
     contributions.set(ground, per);
   }
 
-  // The minus side: members of every excluded, declared, ACTIVE container — a detached container
-  // is out of the scope-merge world entirely (it contributed nothing for the union to subtract).
   const minus = new Set<string>();
   for (const name of table.excluded) {
     if (!table.containers.has(name) || !isActive(name)) continue;
@@ -237,12 +175,6 @@ export function containerScopeImpl(
     } else for (const d of members.deltas) minus.add(d.id);
   }
 
-  // Subtract, THEN close — over the UNION of every contributing ground, not per-ground (SPEC §39,
-  // decision 1). A parent composes its own ground with each inbox pool, and a strike of an admitted
-  // delta can live in ANY of them; a per-ground closure treats a separate pool as a closure boundary
-  // and hands the reader a claim while its strike sits one ground over. Union closure re-admits any
-  // negation whose target survives the subtraction, across every ground, never the reverse
-  // (narrowing may drop a claim; it must never revive one).
   const grounds = [...contributions.keys()];
   const admitted: Delta[] = [];
   const seen = new Set<string>();
@@ -261,34 +193,16 @@ export function containerScopeImpl(
       );
 }
 
-/**
- * Does `into` still receive? The switch a container had when a channel opened is not the switch it
- * has now, and a leeway change is a delta the next request obeys (SPEC §58 position 4) — so the
- * fold and the doors ask again, exactly as the open request asked. An absent leeway is every
- * switch off, here as everywhere.
- */
-// The opener's walk over the tree: each child as its gateway, because the opener attaches, discards
-// and closes them. Only this file walks children this way; container code walks peers.
 const openerPools = (parent: Gateway): Iterable<Gateway> => parent.store.tableOf(parent).pools;
 
-/** The attached gateway of pool `name` (a connection inbox or a channel pool), or undefined. */
 export function attachedPool(gw: Gateway, name: string): Peer | undefined {
   return gw.store.inboxes(gw).get(name)?.gateway ?? gw.store.channels(gw).get(name)?.gateway;
 }
 
-/**
- * Does the connection that opened this channel still STAND — its inbox pool attached and its
- * write grant surviving there? A channel the person opened has no opener and always stands. The
- * cascade (SPEC §58 position 4): a channel is rooted in the binding that opened it; revoking the
- * binding revokes the channel on the next request, and a channel nobody revoked is untouched.
- */
 export function openerStands(
   gw: Gateway,
   channel: { readonly openedBy?: string; readonly openedFrom?: string },
 ): boolean {
-  // A record that names an OPENER but no binding is a bound channel this cascade cannot weigh —
-  // one stamped before the binding was recorded. It fails CLOSED, matching the door, which admits
-  // only the inbox the record names: served to nobody rather than served to everybody.
   if (channel.openedFrom === undefined) return channel.openedBy === undefined;
   const inbox = gw.connectionInboxes.get(channel.openedFrom)?.gateway;
   if (inbox === undefined) return false;
@@ -301,7 +215,7 @@ export function openerStands(
     STORE_ENTITY,
     key,
     "write",
-    inbox.operatorAuthor, // the inbox's grants are its own law (step 6 inventory, pattern 3)
+    inbox.operatorAuthor,
   );
 }
 
@@ -326,14 +240,6 @@ export function connectionScopeImpl(
     }
     return false;
   };
-  // THE WHOLE SUBTREE by default: a workspace reads its own nested rooms, which is what position 2
-  // decided and what S1 first shipped too narrowly. An explicit `containers` list still narrows it,
-  // and every entry is fenced by `within` — the binding is an upper bound, never a routing rule.
-  //
-  // FAIL-CLOSED IS THE PRICE, and it is the right one (Myk, 2026-09-02): a descendant that is
-  // separate and unattached faults the whole read through `membersOf`, so one unreachable room
-  // stops the workspace rather than quietly shrinking it (H9). Detach a room to take it out of
-  // scope deliberately.
   const targets = opts.containers ?? subtreeUnder(table, opts.bound);
   for (const t of targets) {
     if (!within(t)) {
@@ -347,61 +253,33 @@ export function connectionScopeImpl(
   return containerScopeImpl(gw, { containers: targets }, serving);
 }
 
-// --- the runtime handle ---------------------------------------------------------------------------
-
 export interface ContainerOptions {
-  /** The store a SEPARATE container lives in. Defaults to a fresh in-memory backend. */
   readonly backend?: StoreBackend;
-  /**
-   * The seeding predicate (§24.2) — the degenerate form of the membership knob. SEPARATE only.
-   */
+
   readonly admit?: (d: Delta) => boolean;
-  /** The membership Term (§24.10/§27.6): a SEPARATE container's SEEDING scope, or a SHARED one's query. */
   readonly membership?: unknown;
-  /** Attach a DECLARED container: knobs and membership resolve from the table. */
   readonly name?: string;
-  /** Anonymous containers name their knobs explicitly (the preset path). */
   readonly trust?: ContainerTrust;
   readonly posture?: ContainerPosture;
-  /**
-   * A federation channel's pool (§46.1). The opener marks it before it attaches, so no door that
-   * routes to it can see it unmarked.
-   */
+
   readonly channelPool?: true;
 }
 
 export interface Container {
-  /** Exact declaration captured at attachment, never advanced by later imports. */
   readonly declarationId?: string | undefined;
-  /** The declared entity, absent for an anonymous container (today's nameless pool). */
   readonly entity?: string;
   readonly trust: ContainerTrust;
   readonly posture: ContainerPosture;
-  /**
-   * A SEPARATE container's own gateway over its own store; a SHARED one has none — criterion 6.
-   */
+
   readonly gateway?: Gateway;
-  /**
-   * The current members, as a READING-safe set on both postures: a SHARED container's live query
-   * PLUS the forward negation closure of what it admits (H1 — a struck member crosses with its
-   * strike, deliberately more than `select`'s raw dset), or a SEPARATE one's surviving ground
-   * (which carries its strikes natively). One name, one closure contract.
-   */
+
   members(): Delta[];
-  /** Re-pulse the one-way inbound seeding edge. SEPARATE only; a SHARED container refuses. */
   reseed(): Promise<FederationReport>;
-  /**
-   * DISCARD: purge + byte-verify (SEPARATE), strike the declaration (named). Refuses over doubt.
-   */
+
   drop(): Promise<void>;
-  /** KEEP: close without purging; a NAMED container lands the at-rest detach record. */
   detach(note?: string): Promise<void>;
 }
 
-// Open a container over this store — the generalized body behind `Gateway.openContainer` AND
-// (with `voice: "openQuarantine"`, trust/posture preset) `Gateway.openQuarantine`. The voice
-// parameter keeps the preset's refusal prefixes byte-stable: those strings are matched by rails
-// and by code, and the lifting must not move them.
 export async function openContainerImpl(
   gw: Gateway,
   opts: ContainerOptions = {},
@@ -500,7 +378,6 @@ function openShared(
   }
   const resolveTerm = (): unknown => {
     if (spec.entity !== undefined) {
-      // Live: the declaration owns the knob, so every read re-resolves it from the table.
       const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
       const rec = table.containers.get(spec.entity);
       if (rec === undefined) {
@@ -531,7 +408,7 @@ function openShared(
     }
     return spec.membership;
   };
-  resolveTerm(); // prove it resolvable NOW — an opener must not hand back a handle that only fails later
+  resolveTerm();
   return {
     ...(spec.entity !== undefined ? { entity: spec.entity } : {}),
     trust: spec.trust,
@@ -546,7 +423,6 @@ function openShared(
       );
     },
     drop: async () => {
-      // A shared container holds no bytes of its own; dropping it is striking its declaration.
       const signer = gw.signer;
       if (spec.entity === undefined || signer === undefined) return;
       const ids = survivingDeclarationIds(
@@ -564,7 +440,7 @@ function openShared(
     detach: async (note?: string) => {
       const entity = spec.entity;
       const signer = gw.signer;
-      if (entity === undefined || signer === undefined) return; // anonymous: recordless
+      if (entity === undefined || signer === undefined) return;
       await gw.append([
         signer.sign(
           withStamp(gw.stamp(), (t) => detachClaims(entity, note, gw.operatorAuthor!, t)),
@@ -574,16 +450,6 @@ function openShared(
   };
 }
 
-// The SEPARATE posture: a second gateway on its OWN backend, seeded ONE-WAY from the primary by
-// federation, sharing THE PRIMARY's operator (§24.1 — the one sanctioned shared-seed case: the store
-// is the operator's own arena, so the operator's erasure stays authoritative there, §24.8). The edge
-// is inbound only — nothing is ever wired back. This is the T72 body, generalized: the settle, the
-// seeding closure, the drop-verify, and the detach are the invariants the lifting preserves.
-// Which key governs a pool. Every pool is its own journal peer under its own key: a store that
-// cannot keep a journal is refused. A pool the host recorded must load that key (else it is
-// refused); a fresh, empty pool mints one, and the host records it first; an anonymous pool's key
-// lives for this process. A store that holds bytes the host never recorded was made by an earlier
-// Loam and is refused (ruling 10). No pool ever opens under the host's key.
 async function poolGovernor(
   gw: Gateway,
   name: string | undefined,
@@ -617,7 +483,6 @@ async function poolGovernor(
         "is refused.",
     );
   }
-  // An anonymous pool never reopens, so its key lives for this process only and needs no record.
   if (name === undefined) return { seed: memoryPoolKeys().create("anonymous") };
   const seed = keys.create(name);
   await gw.append([
@@ -654,13 +519,6 @@ async function openSeparate(
       `${voice}: "${spec.entity}" is already attached here — drop() or detach() it first`,
     );
   }
-  // A SEPARATE container's store may not BE a store already in this tree. The whole posture is
-  // that its bytes are its own and can be discarded whole; handed the opener's backend, a
-  // "sequestered" write lands in canonical ground while every surface says it did not — and since
-  // drop()'s fan-out walks the WHOLE tree (poolsBeneath), a nested pool handed ANY ancestor's or
-  // sibling's backend would have that store purged wholesale by a drop above it: parent ground,
-  // bystanders, erasures. Identity only — two handles onto one file are not decidable here —
-  // but the obvious mistake is, at every level.
   if (spec.backend !== undefined) {
     if (spec.backend === gw.backend) {
       throw new Error(
@@ -681,13 +539,6 @@ async function openSeparate(
     }
   }
   const backend: StoreBackend = spec.backend ?? new MemoryBackend();
-  // SETTLE ERASURE DEBT BEFORE THE CONTAINER OPENS (T72). A durable store being (re)opened may hold
-  // bytes whose erasures landed at the primary while it was detached — the seeding edge
-  // DELIVERS an erasure as data and executes nothing, so attaching first would boot a reader
-  // that resolves the forgotten byte LIVE beside its own erasure. The primary's surviving
-  // erasures are authoritative here (the container shares its operator), so the debt is swept at
-  // the bytes NOW — before any reactor replays the store — and a store that cannot be proven
-  // clean of it refuses to attach at all (H9: unproven bytes do not come back inside the walls).
   const dead = [...readErasures(gw.reactor, gw.validityNow(), gw.operatorAuthor)];
   if (dead.length > 0) {
     let owed: Set<string>;
@@ -715,18 +566,6 @@ async function openSeparate(
       );
     }
   }
-  // THE PEN WRITES INTO THE POOL (SPEC §23.3 × §24.7). A write-enabled renderer signs its form-submits
-  // as a per-renderer granted author whose SEED lives in config, and the pool was opened without that
-  // config — so a quarantined app's every write refused "this renderer's pen is not provisioned", and a
-  // probationary app could only ever paint a frozen preview. The pool already holds the operator's own
-  // seed, which is strictly stronger custody than any pen, so carrying the pens across adds no key the
-  // pool did not have. Authorization is NOT loosened either, and the door is where that is enforced:
-  // the pen's grant reaches the pool as data, but a seeded copy is frozen until someone re-pulses the
-  // edge, so `writeRouteImpl` asks the ROOT store's live word through the store's verified chain before it signs —
-  // the same call mounts.ts makes about §12 publicness, for the same reason (a revocation must
-  // arrive). The pens travel only into an UNTRUSTED pool: that is the container the frame exists for,
-  // and it leaves a curated container and a §39 inbox pool — which build authority in their OWN
-  // ground on purpose — exactly as they were.
   const probationary = spec.trust === "untrusted";
   const own = await poolGovernor(gw, spec.entity, backend);
   const pool = await gw.openChild(backend, {
@@ -734,38 +573,16 @@ async function openSeparate(
     peerStore: (backend as JournalBackend).journalStore(),
     ...(probationary && gw.options.pens !== undefined ? { pens: gw.options.pens } : {}),
   });
-  // Marked before anything attaches it: a pool becomes a mount the moment it attaches, and a channel
-  // pool seen unmarked would serve an anonymous copy of this store's ground.
   if (spec.channelPool === true) pool.channelPool = true;
   gw.store.attach(pool, gw);
-  // The child's law policy: an inbox selects nothing from its host; every other pool holds seeded
-  // host copies and selects the host for them.
   const hosts = hostChain(gw.signer.author, gw.childLaw);
   pool.childLaw = spec.entity?.startsWith("inbox:") ? inboxLaw(hosts) : seededLaw(hosts);
-  // Every pool pins its host chain as erasure governors: a host's order binds here only when it
-  // names this pool as its receiver (SPEC-6 §3).
   pool.pinErasureGovernors(hosts);
   pool.readUsersFrom(gw.userGroundHost());
-  // A probationary pool KNOWS it is one, for the renderer door's sequestered frame (SPEC §24.7).
   if (probationary) {
     pool.probation = spec.entity === undefined ? {} : { container: spec.entity };
   }
-  // THE §24.5 RESOURCE ENVELOPE — the operator's second undelegatable power (the first is erasure
-  // reach, §24.8). A child may admit deltas its parent does not trust, and what keeps that safe to
-  // HOST is that the operator can still cap the bill.
-  //
-  // THE CEILING RIDES EVERY SEPARATE CONTAINER, enveloped or not, and the reason is a strike. A
-  // container's ground is a one-way seeded COPY, re-pulsed only on reseed — so a declaration that
-  // crossed the edge and was later STRUCK on the parent stays live in the copy (H1: the strike does
-  // not follow it). A pool opened INSIDE that container resolves against the copy. So the ceiling
-  // below is resolved from the OPENER's live reactor and composed downward: every descendant is
-  // bounded by what the operator's ground says right now, however stale the ground it sits on.
-  // Nothing below the operator can widen; it can only tighten.
   pool.poolHandle = spec.entity ?? `anonymous#${(gw.store.tableOf(gw).anonymousOpened += 1)}`;
-  // The ground is the ROOT's, passed down unchanged: a container's own reactor is a seeded copy, and
-  // resolving a descendant's ceiling from it would read a declaration the operator struck after the
-  // seeding as still live — at the report AND at the gate, so the two would agree on the wrong
-  // answer and no single-sided assertion could see it.
   const ground =
     gw.envelopeGround ??
     ((subject?: string): QuarantineEnvelope =>
@@ -775,15 +592,6 @@ async function openSeparate(
   const outerCeiling = gw.envelopeCeiling;
   const operatorsCeiling =
     outerCeiling === undefined ? ownEnvelope : clampedTo(ownEnvelope, outerCeiling);
-  // THE ENVELOPE BINDS (SPEC §58 position 3): a container's leeway names an envelope SIZE, and a
-  // pool opened inside it renders under that size, clamped UNDER the operator's ceiling and never
-  // over it, so a large size on a small store is the store's own limit. Whether a size governs is
-  // asked again on EVERY resolve, from the ROOT's live table — a pool's own reactor is a seeded
-  // copy, and a pool nested in a pool would otherwise read a table that never saw the leeway — so
-  // a leeway declared after the pool opened binds it, one withdrawn later releases it to the
-  // operator's ceiling, and a size change is a delta the next render obeys. A pool the root's
-  // table does not hold (one nested inside a pool) is placed by its NAME, which climbs to the
-  // nearest container the root does hold.
   const rootGateway = gw.store.rootOf(gw);
   const ceiling =
     spec.entity === undefined
@@ -800,13 +608,6 @@ async function openSeparate(
           return now === undefined ? operatorsCeiling() : SIZE_ENVELOPES[now.leeway.envelope];
         }, operatorsCeiling);
   pool.envelopeCeiling = ceiling;
-  // ENFORCEMENT attaches to an UNTRUSTED container, and to EVERYTHING BELOW ONE. A curated container
-  // opened directly on the primary keeps the store's ordinary door budgets — the argument for
-  // metering a child is that it admits what its parent does not trust. But a curated container opened
-  // INSIDE a pool is still inside the pool: its `trust` knob is read from the pool's seeded copy of
-  // the container table, where a strike on the parent never lands, so letting that knob decide
-  // metering would let a metered pool host an unmetered child at the operator's expense. Once you are
-  // below an untrusted container, you are metered.
   if (spec.trust === "untrusted" || gw.envelope !== undefined) {
     pool.envelope = newPoolEnvelope(pool.poolHandle, spec.entity, ceiling);
   }
@@ -816,19 +617,8 @@ async function openSeparate(
         `degenerate form of the same knob (§24.10)`,
     );
   }
-  // A membership Term is proven at the door (parse + dset-sort, via the same select the reading
-  // surface serves) and re-evaluated on every pulse — the scope is LIVE, like the ground it cuts.
   if (spec.membership !== undefined) gw.select(spec.membership);
   const base = spec.admit;
-  // The members are the scope's dset PLUS its negation closure (§28.4). A scope may narrow what the
-  // container sees; it may never resurrect what was struck — `negated` ranging over the operand set
-  // means a claim admitted without its retraction reads as live inside.
-  //
-  // BOTH KNOBS OWE THIS, and the predicate is the one that looks exempt: it is applied per delta, so
-  // there seems to be nothing to close over. There is — a predicate selects DOMAIN facts, and a
-  // negation carries only a `negates` pointer (no entity, no context), so a hand-picked subset can
-  // never match one. The closure runs over the offer the predicate was about to filter, which keeps
-  // it forward-only and costs no extra pass over the ground.
   const memberAdmit = (offer: readonly Delta[]): ((d: Delta) => boolean) | undefined => {
     if (spec.membership === undefined && base === undefined) return undefined;
     const selected =
@@ -837,8 +627,6 @@ async function openSeparate(
     return (d) => members.has(d.id);
   };
   const reseed = (): Promise<FederationReport> => {
-    // Every erasure that binds here, this ground's own or a host's order naming this ground,
-    // reaches a pool under its own key as this ground's order naming that pool.
     const offer = gw
       .offeredDeltas()
       .map((d) =>
@@ -851,14 +639,10 @@ async function openSeparate(
     const admit = memberAdmit(offer);
     return pool.federate(
       offer,
-      // A scope narrows what the container SEES, never what it must FORGET (§24.8): the operator's
-      // erasures pass the seeding edge unconditionally, membership and predicate alike.
       admit === undefined ? {} : { admit: (d) => isErasure(d.claims) || admit(d) },
     );
   };
-  await reseed(); // one-way INBOUND seeding; the reverse leg is never wired
-  // Bind the operator's federated schemas so the container RESOLVES the seeded ground — a dry-run
-  // reads a living lens, not raw deltas. (Foreign law stays inert until promoted.)
+  await reseed();
   pool.replayRegistrations();
   await pool.preloadResolvers();
   gw.quarantinePools.add(pool);
@@ -866,19 +650,11 @@ async function openSeparate(
   const unregister = (): void => {
     gw.quarantinePools.delete(pool);
     if (spec.entity !== undefined) gw.attachedContainers.delete(spec.entity);
-    // The back-pointer goes with the attachment. A detached pool is nobody's replica, and a stale
-    // host would be a live handle into a store this one no longer reaches.
     gw.store.detach(pool);
   };
 
   if (spec.entity !== undefined) {
     gw.attachedContainers.set(spec.entity, pool);
-    // Reattach settles the LISTING: negate EVERY surviving detach record for this entity, in ONE
-    // batch — append validates and lands a batch whole, so two records clear together or not at
-    // all (H4: one negation must not leave the container half-listed). After the attach
-    // succeeded, never before: a refused attach must leave the records standing. And if the
-    // batch itself cannot land, the attach ROLLS BACK — the alternative is an attached pool the
-    // caller holds no handle to, listed as detached while it is not.
     const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
     const records = table.detached.get(spec.entity) ?? [];
     if (records.length > 0) {
@@ -916,15 +692,7 @@ async function openSeparate(
           ),
     members: () => [...pool.reactor.snapshot()],
     reseed,
-    // Drop DISCARDS — at the bytes, on every backend (T72). Purge everything the container can NAME,
-    // then VERIFY at the bytes (holds — a purge's count is evidence, never the verdict, T70),
-    // and on any survivor REFUSE while leaving it attached: a store that cannot prove
-    // discard stays inside the erasure fan-out rather than slipping out of it.
     drop: async () => {
-      // Nested stores sweep sequentially, so a later refusal arrives over an already-swept
-      // prefix. The refusal must say so — a report claiming an intact tree over a partially
-      // emptied one is a report that can be false — and it must not offer detach()-to-keep
-      // when part of what would be "kept" is already gone.
       const emptied: string[] = [];
       const refuse = (why: string, cause?: unknown): never => {
         const forward =
@@ -942,28 +710,18 @@ async function openSeparate(
           cause === undefined ? undefined : { cause },
         );
       };
-      // One store's discard, proven at the bytes. The dead set is everything the pool can NAME —
-      // and a read alone cannot name it all (a mirror's `deltasSince` is primary-only, and a RETRY
-      // after a partial purge reads EMPTY): the session reactor remembers what the read cannot,
-      // so the enumeration is their union; and the §25 quarantine pen — rows a read SET ASIDE
-      // as corrupt, still legible bytes on disk — is swept by its own door, since no id-keyed
-      // purge can reach a row whose id was never returned.
       const discardBytes = async (target: Gateway, who: string): Promise<void> => {
         const ids = new Set((await target.backend.deltasSince(new Set())).map((d) => d.id));
         for (const d of target.reactor.snapshot()) ids.add(d.id);
         if (isRepairable(target.backend)) {
           for (const row of await target.backend.quarantine()) {
             await target.backend.discardRow(row.key);
-            // A pen key is the row's id where the driver knows one (sqlite) — feed it to the
-            // byte verdict below too; discardRow's boolean is evidence, never the verdict (H7).
             ids.add(row.key);
           }
         }
         if (ids.size > 0) {
           const batch = [...ids];
           await target.backend.purge(batch);
-          // The verdict, H9-closed: a probe that cannot answer has proven nothing, so a
-          // rejecting store refuses the drop exactly like a retaining one.
           let survivors: Set<string>;
           if (target.backend.heldAmong) {
             survivors = await target.backend.heldAmong(batch);
@@ -978,9 +736,6 @@ async function openSeparate(
             );
           }
         }
-        // The pen's own byte verdict: quarantine() recomputes only when a read walks the origin,
-        // so walk it again and ask — a discardRow that returned true while removing nothing
-        // (or a storage-keyed row the id probe cannot see) must refuse here, not read as clean.
         if (isRepairable(target.backend)) {
           await target.backend.deltasSince(new Set());
           const pen = await target.backend.quarantine();
@@ -988,12 +743,6 @@ async function openSeparate(
             refuse(`${who}'s §25 pen still holds ${pen.length} set-aside row(s) after the sweep`);
           }
         }
-        // The whole-store verdict: a byte no read and no session named (a mirror tier a partial
-        // purge left behind) is still this store's, and a drop that reported it clean would be
-        // false at the bytes (H7). A driver without the probe leaves that byte to heal, as before.
-        // A journaled pool: every row on every tier first, then the journal, and then nothing at
-        // all may remain. The journal goes last, because a store left with rows and no journal
-        // cannot reopen, and a refused drop must leave its pool reopenable.
         const journaled = holdsJournals(target.backend);
         if (journaled && (await target.backend.holdsAnyRow())) {
           refuse(
@@ -1013,9 +762,6 @@ async function openSeparate(
           );
         }
       };
-      // The subtree, in the SAME walk the §24.5 envelope report runs (`poolsBeneath` — one
-      // traversal, two consumers, so what a report can bill a drop can always reach). Collected
-      // before anything is purged: a pool attached mid-drop is outside this order's jurisdiction.
       const beneath = [...poolsBeneath(pool, openerPools, `${pool.poolHandle ?? "?"}/`)];
       try {
         for (const { pool: nested, handle } of beneath) {
@@ -1023,8 +769,6 @@ async function openSeparate(
           emptied.push(`"${handle}"`);
         }
         await discardBytes(pool, "this pool");
-        // What no read and no session ever named is heal's to surface (§11); a store that can
-        // answer the whole-store question refuses above rather than read as clean.
       } catch (err) {
         if (err instanceof Error && err.message.startsWith("drop refused:")) throw err;
         refuse(
@@ -1035,18 +779,11 @@ async function openSeparate(
         );
       }
       unregister();
-      // The whole subtree closes with the drop, deepest first: a nested pool proven empty must
-      // not survive as a live handle on a discarded store.
       for (const { pool: nested } of [...beneath].reverse()) {
         gw.store.detach(nested);
         await nested.close();
       }
       await pool.close();
-      // A NAMED container proven empty strikes its own declaration: leaving it standing would turn
-      // every future erase into a completeness refusal over a store that provably ceased. Last of
-      // all, and wrapped — at this point the BYTES are settled, so a failure here is a LISTING
-      // fault, and the caller must be told exactly what state they hold rather than handed a raw
-      // append error that claims nothing.
       if (spec.entity !== undefined) {
         try {
           for (const id of survivingDeclarationIds(
@@ -1073,11 +810,6 @@ async function openSeparate(
         }
       }
     },
-    // Detach KEEPS — the deliberate act, distinct in name from the discard. No purge, no
-    // verification: the caller is choosing to hold these bytes outside the fan-out, and
-    // reattachment is openContainer over the surviving store. A NAMED container lands the
-    // at-rest record FIRST (T72's named deferral, fulfilled): if the record cannot land, the
-    // container stays attached — the erasure guard must never lose sight of bytes it was promised.
     detach: async (note?: string) => {
       const entity = spec.entity;
       if (entity !== undefined) {
@@ -1093,47 +825,24 @@ async function openSeparate(
   };
 }
 
-// --- the connection binding (SPEC §39: a connection binds to a container) ------------------------
-
 export interface BindConnectionOptions {
-  /** The parent container this connection is bound to. Its gather composes the inbox pool. */
   readonly container: string;
-  /** The connection's actor public key — provably the owner's, signs every connection write. */
   readonly connectionKey: string;
-  /** The owner's signing seed (their §36 session in the real flow). Authors the connection grant. */
   readonly ownerSeed: string;
-  /** The owner's Loam user name, when known: their admin grant in the inbox then names the user
-   *  and follows their current root. Absent, it names the owner's key. */
+
   readonly ownerName?: string;
-  /** The inbox pool's own store. Defaults to a fresh in-memory backend. */
   readonly backend?: StoreBackend;
 }
 
-// The pool a BOUND request writes into (SPEC §58): the live handle for the binding's inbox. Fail
-// CLOSED on every miss — an unattached pool (no backend factory, bytes missing at boot, dropped) and
-// a pool mid-drop (unregistered, its handle not yet cleared) both refuse. There is no fallback to
-// this store: a connection's write landing in the primary is exactly the leak the binding closes.
 export function poolForBindingImpl(gw: Gateway, binding: ConnectionBinding): Gateway {
   return bindingPoolOf(gw, binding);
 }
 
-/** The pool a binding's writes land in, as a peer: the same answer `poolForBindingImpl` gives. */
 export function bindingPeer(gw: Gateway, binding: ConnectionBinding): Peer {
   return bindingPoolOf(gw, binding);
 }
 
 function bindingPoolOf(gw: Gateway, binding: ConnectionBinding): Gateway {
-  // THE CONTAINER FIRST. A pool outlives the container it was bound under: dropping a shared
-  // container strikes its declaration and leaves the inbox declared and attached. Without this
-  // the write lands durably in the pool and the read that follows it refuses by name, so the door
-  // answers 200 with an error over a delta that is really there — and every retry mints another.
-  // Refuse before anything is signed; the connection is bound nowhere until it consents again.
-  //
-  // THE WHOLE CHAIN, NOT THE NAME. A shared drop strikes only the container it names, so dropping
-  // a container leaves its descendants standing — including one a connection is bound to. Asking
-  // the name alone let that connection keep appending law into a subtree the person had removed
-  // from every page they have: unseeable, and un-droppable, because their pages walk edges. This
-  // is the same question the MCP roster asks; both write on the binding's authority, so both ask it.
   const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   if (chainBreaksAt(table, binding.container) !== undefined) {
     throw new Error(
@@ -1159,10 +868,6 @@ function bindingPoolOf(gw: Gateway, binding: ConnectionBinding): Gateway {
   return held.gateway;
 }
 
-/**
- * Is delegation record `d` struck for good: a negation by its own signer or the operator, already in
- * force, with no end, and nothing held against that negation? (principalSuppression honors only those two.)
- */
 function delegationStruckForGood(
   reactor: Ground,
   now: number,
@@ -1181,11 +886,6 @@ function delegationStruckForGood(
   });
 }
 
-// Spawn (or resume) a per-connection inbox pool for `container` and provision its authority chain.
-// The pool is a SEPARATE container marked `inboxOf: container`, so its members compose into the
-// parent's gather (containerScopeImpl). Its seeding scope selects only this connection's own deltas,
-// so it starts clean and only connection writes land in it. Idempotent on (container, connectionKey):
-// a live handle resumes untouched, and a re-open never double-grants (holdsGrant guards both grants).
 export async function bindConnectionImpl(
   gw: Gateway,
   opts: BindConnectionOptions,
@@ -1195,16 +895,10 @@ export async function bindConnectionImpl(
       "bindConnection: only an operated store can bind a connection to a container (§39)",
     );
   }
-  // The inbox's declaration is the host's law, signed by the host; the owner grant and the strikes
-  // below are the pool's own law, signed by the pool's governing key (the same key until step 6).
   const hostSigner = gw.signer;
   const operator = gw.operatorAuthor!;
   const owner = authorForSeed(opts.ownerSeed);
   const name = inboxName(opts.container, opts.connectionKey);
-  // A named owner must BE that user's current root, read through the operator's governed user
-  // record. After a re-point the old key is no longer the user; after the operator strikes the
-  // root the user has no key at all. Either way a seed file must not mint a fresh writable inbox:
-  // refuse before anything is written. Only a caller that names no user binds by key.
   const userSubject = opts.ownerName === undefined ? undefined : `${USER_PREFIX}${opts.ownerName}`;
   const currentRoot =
     userSubject === undefined
@@ -1221,16 +915,9 @@ export async function bindConnectionImpl(
     );
   }
 
-  // Durable (decision 3): a live handle for a STANDING declaration resumes — its grant chain is
-  // re-verified below, idempotently, so a pool re-attached at boot is provisioned exactly like one
-  // this process spawned. The handle's own drop is the one place a handle is cleared, and it clears
-  // only once the pool is unregistered, so a held handle is always a standing declaration; the
-  // table is still consulted, defensively, so a struck name can never be resumed from a handle.
   const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   const declared = table.containers.has(name);
   const held = declared ? gw.connectionInboxes.get(name) : undefined;
-  // A drop unregisters the pool before its declaration is struck and its handle cleared; in that
-  // window the handle stands over a closed pool. Binding must not answer with it.
   if (held !== undefined && gw.attachedContainers.get(name) !== held.gateway) {
     throw new Error(
       `bindConnection: the inbox ${name} is being dropped — bind again once the drop has settled`,
@@ -1238,15 +925,6 @@ export async function bindConnectionImpl(
   }
   const live = held;
   if (!declared) {
-    // The inbox seeds only THIS connection's deltas, and only those written AFTER the binding
-    // (SPEC §58 criterion 8): a delta the key authored elsewhere before it was bound here — under
-    // a pre-§58 store-wide grant, say — is not this pool's, at the bytes. This membership is the
-    // SEEDING scope: it picks which of the parent's deltas are copied into the pool, and a write
-    // made into the pool itself is always the pool's. The cut is on the claim's signed `timestamp`,
-    // taken from the operator's ordering clock and never from the key's own held claims, so a key
-    // that once signed a far-future claim still seeds what it writes after the binding. A
-    // connection is provably the owner's, so the pool is the owner's trust domain (curated),
-    // separate storage.
     const boundAt = gw.stamp().timestamp;
     const membership = {
       op: "select",
@@ -1277,9 +955,6 @@ export async function bindConnectionImpl(
     ]);
   }
 
-  // Durability is the store's choice, not the connection's (the channel pools' rule, §46): a store
-  // with a pool backend factory keeps the inbox on disk, so a binding outlives the process that
-  // made it and `resumeInboxes` re-attaches it at the next boot.
   const backend = opts.backend ?? gw.options.channelBackend?.(name);
   const inbox =
     live ??
@@ -1290,46 +965,16 @@ export async function bindConnectionImpl(
   const pool = inbox.gateway!;
   pool.honorDelegationsAt(name);
 
-  // The pool's own law (the owner grant, the strikes, and the checks that read them) is authored
-  // and judged by the POOL's governing key; users stay host facts, resolved with the host's key.
-  // The two keys are equal until step 6.
   const poolLaw = pool.operatorAuthor!;
-  // The authority chain, in the pool's OWN ground (decision 2): the operator authors the owner's
-  // ADMIN grant, then the OWNER — the user's root — signs a sealed DELEGATION to the connection key,
-  // scoped to this pool's name (README ruling 6). The pool is its own gateway with its own store
-  // entity, so this never touches the real store's authority; grantHeld resolves connection-write →
-  // owner's delegation → owner-admin → operator. The store operator appears once here
-  // (administrative provisioning, §39.1 point 3) and never on the read/write data path.
-  // A named owner is the user's current root (checked above), so the grant names the USER and
-  // follows them across a re-point; a caller that names no user gets a grant naming the key.
   const ownerSubject = userSubject ?? owner;
   if (!holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, owner, "admin", poolLaw)) {
     await pool.issueGrant(ownerSubject, "admin");
   }
-  // ONE OWNER PER POOL. The pool's name carries the connection key, and a key belongs to one
-  // person, so any other root here is that person's REPLACED seed. After a replacement the old key
-  // would keep two powers: its delegation still lets the connection write, and its admin grant lets
-  // it sign a fresh one after the person revokes. So every bind asks of THIS owner, signs a fresh
-  // delegation when the current key has none, and strikes, in the operator's voice, every other
-  // root's standing delegation to this key and every other root's admin grant here.
-  // Write grants naming another root are left alone: only an admin grant carries delegation
-  // (grantHeld). If that ever loosens, this cleanup must strike them too.
-  // EVERY held record of another root, struck or not: a strike with its own `validUntil` lapses, and
-  // the record would stand again. Skipped only when the operator already struck it for good, so a
-  // repeated bind adds nothing.
   const now = pool.validityNow();
-  // A grant's subject may name a user; what matters is the key it resolves to now. Subjects that
-  // resolve to someone other than the owner (or to no one) are another root's; the owner's own
-  // user-named grant is kept.
   const otherSubjects = grantSubjects(pool.reactor).filter((subject) => {
     const key = subjectKeyAt(pool.reactor, now, operator, subject);
-    // A user whose root cannot be read right now (a strike that may lapse, a root not valid yet)
-    // is not known to be someone else: leave their grant, never strike it for good on a guess.
     return key !== undefined && key !== owner;
   });
-  // A user-named grant resolves to the user's CURRENT root, but every root that name could ever
-  // name may hold a delegation to this key — the old root after a re-point is exactly the replaced
-  // seed above — so each is another root here unless it is the owner.
   const couldBe = grantSubjects(pool.reactor)
     .filter((subject) => subject.startsWith(USER_PREFIX))
     .flatMap((subject) => keysSubjectCouldName(pool.reactor, now, operator, subject));
@@ -1340,9 +985,6 @@ export async function bindConnectionImpl(
     operatorStruckForGood(pool.reactor, now, poolLaw, id, opts.connectionKey);
   const stale = [
     ...delegationRecordsFor(pool.reactor, others, opts.connectionKey).map((d) => d.id),
-    // EVERY admin grant naming another root, whoever issued it: an admin grant from any effective
-    // admin binds (grantHeld), so filtering by issuer would leave one standing. A strike on an
-    // inert one costs a delta and creates nothing.
     ...otherSubjects.flatMap((subject) => heldGrantIds(pool.reactor, subject, "admin")),
   ].filter((id) => !struckForGood(id));
   const fresh = !keyActsFor(pool.reactor, now, { root: owner }, opts.connectionKey, name, poolLaw);
@@ -1368,22 +1010,6 @@ export async function bindConnectionImpl(
   return handle;
 }
 
-// The ONE kind of handle an inbox pool is held by, whether this process spawned it or re-attached
-// it at boot. An inbox is DURABLE (§39 decision 3): the connection lifecycle is bind / revoke /
-// drop, never detach. Detach is the KEEP path — it marks the pool inactive WITHOUT striking its
-// declaration or purging its bytes, so a strike a connection wrote into its inbox would silently
-// stop being gathered and a primary-ground claim it retracted would resolve LIVE again. That
-// asymmetric un-suppression has no place in the lifecycle, so the handle refuses detach and names
-// the two operations that DO belong: drop() for a total forget, revokeConnection to refuse further
-// writes while keeping the record.
-//
-// Drop ends the live binding — clear the durable handle so a later bind spawns fresh rather than
-// resuming a purged pool. The delete runs in a `finally`, but ONLY once the pool is unregistered:
-// a drop the store REFUSES (bytes that survive the purge) throws before unregistering, and the pool
-// then stands exactly as before — attached, declared, its grant live — so its handle must stand
-// too, or the binding is stranded on every door (no revoke, no re-bind, no second drop) until a
-// restart. After a real purge, even if the declaration-strike append fails, the stale handle must
-// not survive to be resumed.
 function inboxHandle(gw: Gateway, name: string, inbox: Container): Container {
   const baseDrop = inbox.drop.bind(inbox);
   return {
@@ -1405,19 +1031,12 @@ function inboxHandle(gw: Gateway, name: string, inbox: Container): Container {
   };
 }
 
-// Attach every declared inbox pool at boot (SPEC §58): a binding made by one process is readable by
-// the next. The pool's grant chain lives in its own ground, so re-attaching needs no seed — only
-// the store's pool backend factory, which is where the bytes went. Idempotent, and failure-tolerant
-// per pool, exactly like `resumeChannels`: a pool whose bytes are missing must not stop the store
-// from booting, and a read of it meets containerScope's refusal by name, which is the honest answer.
 export async function resumeInboxesImpl(gw: Gateway): Promise<void> {
   if (gw.operatorAuthor === undefined) return;
   const table = readContainerTable(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   for (const [name, rec] of table.containers) {
     if (rec.inboxOf === undefined || !name.startsWith("inbox:")) continue;
     if (gw.connectionInboxes.has(name) || table.detached.has(name)) continue;
-    // No factory, no bytes: an EMPTY in-memory pool would answer as if the connection wrote
-    // nothing (H9), so the pool is left unattached and a read of it refuses by name instead.
     const backend = gw.options.channelBackend?.(name);
     if (backend === undefined) continue;
     try {
@@ -1425,21 +1044,14 @@ export async function resumeInboxesImpl(gw: Gateway): Promise<void> {
       handle.gateway?.honorDelegationsAt(name);
       gw.connectionInboxes.set(name, inboxHandle(gw, name, handle));
     } catch {
-      continue; // left unattached, deliberately; see above
+      continue;
     }
   }
 }
 
-// Revoke a connection, owner-authored (§39.3c): negate the delegation that lets its key act for the
-// owner, and strike any write grant naming the key, which a pool bound before delegations still
-// holds. The door then refuses new writes signed by that key; past deltas keep their author and stay
-// in the pool, and leave the parent's view, since the parent composes a pool by its owner's
-// authority. Other connections are untouched — one-connection blast radius, two-sided by
-// construction.
 export async function revokeConnectionImpl(opts: {
   inbox: Container;
   connectionKey: string;
-  /** The owner's seed, or `asPool` for the pool's own governing voice (its signer). */
   ownerSeed?: string;
   asPool?: boolean;
 }): Promise<void> {
@@ -1447,7 +1059,6 @@ export async function revokeConnectionImpl(opts: {
   if (pool === undefined) {
     throw new Error("revokeConnection: the inbox has no pool of its own — nothing to revoke (§39)");
   }
-  // The pool's own voice signs inside the pool, never with a host seed: its law is its own (step 6).
   const voice =
     opts.asPool === true || opts.ownerSeed === undefined ? undefined : seedSigner(opts.ownerSeed);
   const owner = opts.asPool === true ? pool.operatorAuthor : voice?.author;
@@ -1456,13 +1067,6 @@ export async function revokeConnectionImpl(opts: {
   }
   const now = pool.validityNow();
   const scope = principalScopeOf(pool.reactor);
-  // A grant naming a user whose root cannot be read right now may stand again later, and the
-  // delegations it would carry cannot be found now. The owner's voice refuses rather than report a
-  // revoke that might not stick; the operator's voice strikes every delegation to this key instead.
-  // A held owner-side admin grant counts even if it does not bind now — struck for a while, or
-  // waiting on its issuer, it may stand again. Only the operator, the owner side and the connection
-  // itself write in an inbox, and the connection cannot mint keys with standing here, so its own
-  // grant-shaped deltas are the ones to ignore: it must not be able to block its own revoke.
   const unreadable = grantSubjects(pool.reactor).filter(
     (subject) =>
       subject.startsWith(USER_PREFIX) &&
@@ -1473,9 +1077,6 @@ export async function revokeConnectionImpl(opts: {
           !operatorStruckForGood(pool.reactor, now, pool.operatorAuthor, id, opts.connectionKey),
       ),
   );
-  // A grant naming a user whose root is, or could become, this very key would let it write with
-  // no delegation to strike: a root claim held here struck for now, or not valid yet, revives
-  // with no new delta. Refuse rather than report a revoke that cannot hold.
   const naming = grantSubjects(pool.reactor).filter(
     (subject) =>
       subject.startsWith(USER_PREFIX) &&
@@ -1488,11 +1089,6 @@ export async function revokeConnectionImpl(opts: {
         ),
       ),
   );
-  // Authority that may activate LATER: any key a held admin grant here could ever name (a literal
-  // subject struck for a while, or a user's root claim not valid yet or struck for now). A
-  // delegation from such a key to this connection comes alive with no new delta. So every such
-  // delegation not already struck for good is struck now — when this revoke's voice binds on it
-  // (its own signature, or the operator's) — or the revoke refuses before striking anything.
   const byOperator = owner === pool.operatorAuthor;
   const candidates = new Set<string>();
   for (const subject of grantSubjects(pool.reactor)) {
@@ -1506,10 +1102,6 @@ export async function revokeConnectionImpl(opts: {
       if (key !== opts.connectionKey) candidates.add(key);
     }
   }
-  // The operator's voice binds on every delegation, so it closes the rest outright: every root that
-  // ever signed a delegation to this key here, whether or not a grant names it now. A root a user
-  // could be re-pointed to later is among them, which is what makes an unreadable user safe to
-  // revoke in this voice.
   if (byOperator) {
     for (const key of delegationRootsTo(pool.reactor, opts.connectionKey)) {
       if (key !== opts.connectionKey) candidates.add(key);
@@ -1575,8 +1167,6 @@ export async function revokeConnectionImpl(opts: {
           voice.sign(withStamp(pool.stamp(owner), (t) => revocationClaims(id, owner, t))),
         ),
   );
-  // The strikes landed; whether they BIND is the suppression rule's call (the signer or the
-  // operator only). Report success only once the door refuses the key.
   if (
     holdsGrant(
       pool.reactor,
@@ -1594,19 +1184,10 @@ export async function revokeConnectionImpl(opts: {
   }
 }
 
-// --- the erase completeness guard (SPEC §24.8 × the mint) ----------------------------------------
-
-// The mint makes containers enumerable AT REST, and erase fans out over the ATTACHED set — after
-// a restart those can differ. The honest rule: erase refuses to report completeness while the
-// resolved table names a SEPARATE-posture container — untrusted OR curated, since bytes follow
-// posture — that is neither currently attached nor covered by a surviving detach record. An
-// unreachable store is a named fault, never a silent gap; a covered one is listed as deliberately
-// kept. (The full locator machinery rides T78's mounts; this is the rule, shipped with the mint.)
 export function unreachableStoreReport(gw: Gateway): {
   faults: string[];
   kept: string[];
-  /** The FAULT containers by entity name. `faults` carries sentences; a reader that must name a TIER
-   *  needs the name, and deriving one by parsing a refusal message is how a report goes stale. */
+
   faultEntities: string[];
 } {
   const now = gw.validityNow();
@@ -1614,24 +1195,8 @@ export function unreachableStoreReport(gw: Gateway): {
   const faults: string[] = [];
   const kept: string[] = [];
   const faultEntities: string[] = [];
-  // §28.4's knobs must not flip through the survival algebra either: strike the earliest
-  // declaration while a later shared one survives, and the posture would change separate→shared
-  // with the bytes still on disk — dissolving this guard through a door no validator watches. So
-  // the guard reads the LINEAGE from history: a separate declaration that is negated now, or whose
-  // own validity has ended, still names a store of its own.
-  //
-  // Both tests are present-time reads, and that loses no case. A negation that has expired or has
-  // not begun leaves the declaration live, so the live table names the container as separate. A
-  // declaration that has not begun has had no store to attach, so it names none yet.
-  //
-  // Expiry is NOT a forget. An entity whose separate declaration merely ended — with or without a
-  // successor — stays named until a detach record covers it. The one honest forget is the explicit
-  // act: negating EVERY declaration ends the entity and clears the guard, unchanged.
   const lineageSeparate = new Set<string>();
   const endedSeparate = new Set<string>();
-  // Names with any held declaration NOT negated now, whatever its posture or its own window. Only
-  // negating every declaration forgets a container whole; anything short of that keeps its store
-  // named, including a successor that has not started yet.
   const notForgotten = new Set<string>();
   if (gw.operatorAuthor !== undefined) {
     const negated = negatedAt(gw.reactor, now, gw.operatorAuthor);
@@ -1648,7 +1213,6 @@ export function unreachableStoreReport(gw: Gateway): {
       if (!struck) endedSeparate.add(name);
     }
   }
-  // "ended" marks an entity the live table no longer names at all.
   const named = new Map<string, string>();
   for (const [entity, rec] of table.containers) {
     if (rec.posture === "separate" || lineageSeparate.has(entity)) named.set(entity, rec.posture);
@@ -1685,8 +1249,6 @@ export function unreachableStoreReport(gw: Gateway): {
               `Cover it with a detach record, or forget the container whole and declare a new name.`,
     );
   }
-  // A surviving detach record whose declaration is gone is a store mid-forget: still parked at
-  // the operator's own say-so, so it is reported kept rather than silently absent.
   for (const entity of table.detached.keys()) {
     if (!table.containers.has(entity) && !kept.includes(entity)) kept.push(entity);
   }

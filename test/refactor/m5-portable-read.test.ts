@@ -1,7 +1,3 @@
-// M5 slice 1: the portable batch read through the published package endpoint. A Plant read built
-// from Loam's own signed source and original definition acts must answer the same HView and View
-// digests the native read answers for the same entity, ground and time.
-
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -48,7 +44,6 @@ const textOf = (d: Delta, role: string): string | undefined => {
   return t?.kind === "primitive" && typeof t.value === "string" ? t.value : undefined;
 };
 
-/** The Plant read's scope and S(scope) under the read closure, from the reactor's anchored read. */
 function scoped(gw: Gateway, now: number): { scope: string[]; source: Delta[] } {
   const closed = readClosedIds(gw, now);
   const read = gw.reactor.evalAnchored(
@@ -206,7 +201,6 @@ describe("M5 slice 1: the routed door", () => {
       `{ bedWithPlants(entity: "${BED}") { plants _hex _hviewHex } }`,
     ])
       expect(await query(portable, source)).toEqual(await query(native, source));
-    // Every one of those reads really took the portable route.
     expect(routes.map((r) => [r.lens, r.route])).toEqual([
       ["Plant", "portable"],
       ["Plant", "portable"],
@@ -218,8 +212,6 @@ describe("M5 slice 1: the routed door", () => {
 });
 
 describe("M5 slice 1: a child reading pinned by hash", () => {
-  // The Bed program with its child reading pinned by hash, not named. Native evaluation resolves
-  // the pin through the registry, so the portable closure must carry the same signed Plant act.
   const pinned = {
     ...BED_WITH_PLANTS,
     name: "BedPinned",
@@ -248,8 +240,6 @@ describe("M5 slice 1: a child reading pinned by hash", () => {
 });
 
 describe("M5 schedule 5: another SQLite handle changes the store", () => {
-  // A journal-backed store, and a second connection that writes beside the gateway. Rows changed
-  // through that connection never pass the gateway, so only the store's own revision can show it.
   const height34 = garden.find((d) => d.claims.timestamp === 2000)!;
   const replacement = observed(FERN, "height", 77, 2500, GARDENER_SEED);
 
@@ -294,19 +284,15 @@ describe("M5 schedule 5: another SQLite handle changes the store", () => {
       db.close();
       expect(await first.backend.holds(height34.id)).toBe(false);
 
-      // The read prepared before the change refuses at its final source check.
       expect(await runPortableRead(route.signer, route.prepared)).toMatchObject({
         status: "refused",
         stage: "gather",
         code: "source-unavailable",
       });
-      // A new read refuses too: memory still holds the row, and it cannot vouch for the store.
       await expect(first.gw.readNode("Plant", FERN)).rejects.toThrow(/source-unavailable/);
       await first.gw.close();
       await first.backend.close();
 
-      // Reopened, the gateway reads the store as it is: the removed height is gone, the tag stays,
-      // and a row the journal never admitted is held but never served.
       const second = await durable(path);
       const read = await second.gw.readNode("Plant", FERN);
       expect(read.view["height"]).toBe(30);

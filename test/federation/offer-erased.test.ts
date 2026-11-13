@@ -1,12 +1,3 @@
-// The federation offer never serves an erased delta, even while its bytes are still held. A
-// erasure is ground before the purge, and an erasure appended directly purges nothing, so the
-// store can hold both the order and the bytes for as long as that lasts. Asked at both levels: what
-// the offer carries (delta), and what a peer that federates it resolves (object). Every case names
-// a bystander that must still arrive.
-//
-// Deliberately not asserted: `select` and `freeze`. They stay raw, because the erasure cut reads
-// through them.
-
 import { describe, expect, it } from "vitest";
 import { makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { eraseClaims } from "../../src/gateway/erase-law.js";
@@ -45,10 +36,10 @@ describe("the federation offer drops erased ids", () => {
     const claim = observed(FERN, "height", 30, 1000, OP_SEED);
     const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
     await gw.append([claim, bystander]);
-    expect(ids(gw.offeredDeltas()).has(claim.id)).toBe(true); // control: live before the order
+    expect(ids(gw.offeredDeltas()).has(claim.id)).toBe(true);
 
     await gw.append([signClaims(eraseClaims(claim.id, op, op, 2000), OP_SEED)]);
-    expect(gw.reactor.get(claim.id)).toBeDefined(); // the bytes are still held: no purge ran
+    expect(gw.reactor.get(claim.id)).toBeDefined();
 
     const offered = ids(gw.offeredDeltas());
     expect(offered.has(claim.id)).toBe(false);
@@ -72,8 +63,6 @@ describe("the federation offer drops erased ids", () => {
     await gw.append([signClaims(eraseClaims(strike.id, op, op, 3000), OP_SEED)]);
     expect(gw.reactor.get(strike.id)).toBeDefined();
 
-    // The store still holds the strike, so offering the claim without it would show a retracted
-    // claim as live to the peer.
     const offered = ids(gw.offeredDeltas());
     expect(offered.has(strike.id)).toBe(false);
     expect(offered.has(claim.id)).toBe(false);
@@ -85,9 +74,6 @@ describe("the federation offer drops erased ids", () => {
     await Promise.all([gw.close(), peer.close()]);
   });
 
-  // Deliberate over-filtering. The counterstrike U makes the claim live in the full ground, but the
-  // offer still withholds it, because the store holds the condemned strike S and does not offer it.
-  // The offer errs toward disclosing less until the purge lands.
   it("withholds a claim whose erased strike is itself counterstruck, by design", async () => {
     const gw = await boot(OP_SEED);
     const op = gw.operatorAuthor!;
@@ -97,7 +83,7 @@ describe("the federation offer drops erased ids", () => {
     const strike = signClaims(makeNegationClaims(op, 2000, claim.id), OP_SEED);
     const counter = signClaims(makeNegationClaims(op, 2500, strike.id), OP_SEED);
     await gw.append([strike, counter]);
-    expect(await fern(gw)).toEqual({ height: 30, tag: ["shade"] }); // live before the order
+    expect(await fern(gw)).toEqual({ height: 30, tag: ["shade"] });
     await gw.append([signClaims(eraseClaims(strike.id, op, op, 3000), OP_SEED)]);
     expect(gw.reactor.get(strike.id)).toBeDefined();
 

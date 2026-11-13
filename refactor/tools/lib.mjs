@@ -1,11 +1,7 @@
-// Shared helpers for the census scripts. Every script parses with the TypeScript compiler, so a
-// comment, a string and code are told apart by the syntax tree, never by a regex.
-
 import fs from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 
-// Where each source file belongs. The first matching pattern wins.
 export const SUBSYSTEMS = [
   [
     /gateway\/(registration|binding-policy|trust|public|budget|genesis|leeway|container-identity|gather|asof|receive-policy|receive-snapshot|bytes|repair)\.ts$/,
@@ -36,7 +32,6 @@ export const SUBSYSTEMS = [
 export const subsystemOf = (rel) =>
   (SUBSYSTEMS.find(([re]) => re.test(rel)) ?? [null, "unassigned"])[1];
 
-// Every .ts file under `dir`, declarations excluded, as repo-relative paths.
 export function sourceFiles(dir = "src") {
   return fs
     .readdirSync(dir, { recursive: true })
@@ -58,7 +53,6 @@ const STRINGY = new Set([
   ts.SyntaxKind.TemplateTail,
 ]);
 
-// One byte class per character: 0 whitespace, 1 code, 2 comment, 3 string literal.
 export function classify({ text, sf }) {
   const cls = new Uint8Array(text.length);
   const mark = (s, e, c) => {
@@ -77,7 +71,6 @@ export function classify({ text, sf }) {
   return cls;
 }
 
-// Lines in [s, e) that hold at least one code or string character.
 export function codeLines(text, cls, s = 0, e = text.length) {
   let n = 0;
   let lineStart = s;
@@ -95,7 +88,6 @@ export function codeLines(text, cls, s = 0, e = text.length) {
   return n;
 }
 
-// Every comment block, with consecutive `//` lines merged into one block.
 export function commentBlocks({ text, sf }) {
   const seen = new Set();
   const raw = [];
@@ -125,13 +117,9 @@ export function commentBlocks({ text, sf }) {
   return blocks;
 }
 
-// A function is host-bound when a parameter's type names the host: the Gateway, a container, a
-// backend, or an HTTP request or response. Everything else counts as host-free.
 export const HOST_TYPE =
   /\b(Gateway|Container|QuarantinePool|Bound|StoreBackend|Server|IncomingMessage|ServerResponse)\b/;
 
-// Code lines in one file, and how many of them sit in host-bound top-level functions. A class body
-// counts as host-bound, because its methods reach the instance through `this`.
 export function hostSplit(parsed, cls) {
   const { text, sf } = parsed;
   const total = codeLines(text, cls);
@@ -154,9 +142,6 @@ export function hostSplit(parsed, cls) {
   return { total, host: Math.min(host, total) };
 }
 
-// The functions hermetic's prefer-hermetic rule considers: outermost functions bound to a name.
-// That is function declarations, variable initializers, and members of top-level objects and
-// classes. Callbacks and nested functions are not candidates.
 export function candidates({ sf }) {
   const out = [];
   const isFn = (n) => n && (ts.isArrowFunction(n) || ts.isFunctionExpression(n));
@@ -191,8 +176,6 @@ export function candidates({ sf }) {
   }));
 }
 
-// Lint files with hermetic's rules and nothing else. Inline eslint comments are ignored, so the
-// repo's own disable directives cannot hide or add findings.
 export async function lintHermetic(cwd, patterns, rules) {
   const [{ ESLint }, tseslint, { default: hermetic }] = await Promise.all([
     import("eslint"),
@@ -225,12 +208,9 @@ export function option(args, name, fallback) {
   return i >= 0 && i + 1 < args.length ? args[i + 1] : fallback;
 }
 
-// The import graph over `files`: file -> Map(target -> { value, names }), plus external modules
-// and the rhizomatic names each file imports. A type-only import has `value: false`.
 export function importGraph(files) {
   const known = new Set(files);
 
-  // file -> Map(target -> { value: boolean, names: Set<string> })
   const edges = new Map();
   const external = new Map();
   const rhizomatic = new Map();
@@ -271,7 +251,7 @@ export function importGraph(files) {
       if (ts.isImportDeclaration(st) && ts.isStringLiteral(st.moduleSpecifier)) {
         const c = st.importClause;
         const names = [];
-        let value = !c; // a bare `import "x"` runs the module
+        let value = !c;
         if (c?.name) {
           names.push(c.name.text);
           value = true;
@@ -314,7 +294,6 @@ export function importGraph(files) {
   return { edges, external, rhizomatic };
 }
 
-// Strongly connected components (Tarjan). With `withTypes` false, type-only imports are ignored.
 export function stronglyConnected(edges, withTypes) {
   let index = 0;
   const stack = [];
@@ -349,11 +328,8 @@ export function stronglyConnected(edges, withTypes) {
   return found.sort((a, b) => b.length - a.length);
 }
 
-// Code that decides; the doors, the CLI and the clients may read the clock.
 const CORE = /^src\/(gateway|federation|store|runner|surface|migrate|stock)\//;
 
-// The last name in a receiver chain: `gw.options` → "options", `x["reactor"]` → "reactor",
-// `globalThis.Date` → "Date". Anything else has no name.
 function lastName(node) {
   if (ts.isIdentifier(node)) return node.text;
   if (ts.isPropertyAccessExpression(node)) return node.name.text;
@@ -364,7 +340,6 @@ function lastName(node) {
   return undefined;
 }
 
-// A member reference `recv.name` or `recv["name"]`: [receiver, name], or undefined.
 function member(node) {
   if (ts.isPropertyAccessExpression(node)) return [node.expression, node.name.text];
   if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)) {
@@ -373,10 +348,6 @@ function member(node) {
   return undefined;
 }
 
-// The members that hold the container tree, the container code that may not touch them, and the
-// files allowed to. Container code reads a child only as a Peer, through the Store. The doors and
-// commands (src/server, src/cli) are facades over one container of the store, not containers, so
-// they may look a container up in the table (step6-container-split.md).
 const TREE_MEMBERS = new Set([
   "attachedTo",
   "parentOf",
@@ -393,9 +364,6 @@ const TREE_MEMBERS = new Set([
 ]);
 const CONTAINER_CODE = /src\/(gateway|federation)\//;
 const TREE_OWNERS = /src\/gateway\/(container|store)\.ts$/;
-// The facade's own definitions: these members of class Gateway, in gateway.ts, serve the doors and
-// commands. A member is exempt only while its body is exactly the one-line definition below
-// (whitespace aside); any other body is counted like any other code. Nothing else is exempt.
 const FACADE_FILE = /src\/gateway\/gateway\.ts$/;
 const FACADE_DEFINITIONS = new Map([
   ["quarantinePools", "{return this.store.tableOf(this).pools;}"],
@@ -405,14 +373,10 @@ const FACADE_DEFINITIONS = new Map([
   ["poolForBinding", "{return poolForBindingImpl(this, binding);}"],
 ]);
 
-// The ratchet's per-file counts. They are syntactic: a read through an alias the syntax tree
-// cannot see (a variable holding `options`, a computed key) is not counted.
 export function couplingCountsOf(file, text) {
   const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
   const core = CORE.test(file.replace(/\\/g, "/"));
   const counts = { seedReads: 0, snapshotRefs: 0, coreClockReads: 0, treeReach: 0 };
-  // Lines that reach across containers: a parent link or a child map, read or written anywhere but
-  // the opener and the store itself (step6-container-split.md). Distinct lines, not occurrences.
   const reachLines = new Set();
   const unix = file.replace(/\\/g, "/");
   const opener = !CONTAINER_CODE.test(unix) || TREE_OWNERS.test(unix);
@@ -420,7 +384,6 @@ export function couplingCountsOf(file, text) {
   const isClock = (recv) => ["Date", "performance"].includes(lastName(recv));
   const visit = (n) => {
     if (facade && definesFacadeMember(n, sf)) return;
-    // A bare call counts too: an opener's function that hands a child out as a Gateway.
     if (!opener && ts.isCallExpression(n) && ts.isIdentifier(n.expression)) {
       if (TREE_MEMBERS.has(n.expression.text)) {
         reachLines.add(sf.getLineAndCharacterOfPosition(n.getStart(sf)).line);
@@ -436,7 +399,6 @@ export function couplingCountsOf(file, text) {
         reachLines.add(sf.getLineAndCharacterOfPosition(n.getStart(sf)).line);
       }
     }
-    // `const { seed } = options`, `const { now } = Date`
     if (ts.isVariableDeclaration(n) && ts.isObjectBindingPattern(n.name) && n.initializer) {
       const from = lastName(n.initializer);
       for (const el of n.name.elements) {
@@ -457,7 +419,6 @@ export function couplingCountsOf(file, text) {
   return counts;
 }
 
-// Is `n` a getter or method of class Gateway whose body is exactly its facade definition?
 function definesFacadeMember(n, sf) {
   if (!ts.isGetAccessorDeclaration(n) && !ts.isMethodDeclaration(n)) return false;
   const owner = n.parent;
@@ -468,9 +429,6 @@ function definesFacadeMember(n, sf) {
   return expected !== undefined && squash(n.body.getText(sf)) === squash(expected);
 }
 
-// How many Gateway members one container may use of another: the members the `Peer` type in
-// src/gateway/peer.ts picks. 0 when the file is absent. Any other shape of `Peer` (an intersection,
-// an interface, a Pick of anything but string literals) fails the census rather than be miscounted.
 export function peerSurfaceOf(files) {
   const file = files.find((f) => f.replace(/\\/g, "/").endsWith("src/gateway/peer.ts"));
   if (file === undefined) return 0;
@@ -502,7 +460,6 @@ export function peerSurfaceOf(files) {
   return parts.length;
 }
 
-// Every ratchet count over `files`.
 export function couplingCounts(files) {
   const cycles = stronglyConnected(importGraph(files).edges, false);
   const totals = {

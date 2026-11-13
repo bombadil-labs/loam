@@ -1,11 +1,3 @@
-// The writers name the USER (step 5, PR 3d-ii C): provisioning's write grant, and a bound
-// connection's owner admin grant in its inbox pool, name `user:<name>`, so they follow the user's
-// current root. Each case asks the delta (what the grant names) and the door (which key it
-// authorizes). A writer names the user only when the user's root resolves to the key it would
-// otherwise name; else it names the key, as before.
-//
-// Recovery itself (`loam user recover`) is 3e; the re-point here is the operator's root claim.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -36,7 +28,6 @@ afterAll(() => {
   for (const dir of temps) rmSync(dir, { recursive: true, force: true });
 });
 
-// A host where ada is a user whose root is the gardener's key, and bea is a user with no root.
 async function home(): Promise<Gateway> {
   const gw = await Gateway.boot(
     new MemoryBackend(),
@@ -165,10 +156,8 @@ describe("bind names the owner by user when their root is the owner's key", () =
     await gw.append([op(rootClaims("ada", K2, OP, 700))]);
     const before = gw.reactor.size;
     await expect(bind(gw, CONN_SEED, "ada")).rejects.toThrow(/current key is not the one/);
-    // nothing was written, and no inbox is held
     expect(gw.reactor.size).toBe(before);
     expect([...gw.connectionInboxes.keys()]).toEqual([]);
-    // bystander: ada's current root binds, by name, and its connection writes
     const inbox = (
       await gw.bindConnection({
         container: "home:ada",
@@ -199,7 +188,6 @@ describe("after a re-point, the new root re-binds and can revoke", () => {
       })
     ).entity!;
     const handle = gw.connectionInboxes.get(inbox)!;
-    // delta: the old root's delegation to CONN is struck in the operator's voice
     const old = [...conn.reactor.snapshot()].filter(
       (d) =>
         d.claims.author === GARDENER &&
@@ -207,10 +195,8 @@ describe("after a re-point, the new root re-binds and can revoke", () => {
     );
     expect(old.length).toBeGreaterThan(0);
     for (const d of old) expect(conn.reactor.negationsOf(d.id).length).toBeGreaterThan(0);
-    // door: the new root's revoke succeeds, and the connection stops writing
     await gw.revokeConnection({ inbox: handle, connectionKey: CONN, ownerSeed: K2_SEED });
     expect(await door(conn, observed(FERN, "height", 9, 1009, CONN_SEED))).toBe("refused");
-    // bystander: a connection nobody revoked, re-bound by the new root, still writes
     const again = (
       await gw.bindConnection({
         container: "home:ada",
@@ -238,9 +224,7 @@ describe("R3: a re-point moves the user-named grant, and nothing else carries ov
     expect(
       holdsGrant(pool.reactor, now, STORE_ENTITY, GARDENER, "admin", pool.operatorAuthor),
     ).toBe(false);
-    // The connection wrote by the OLD root's delegation; a recovered user re-authorizes (PLAN).
     expect(await door(pool, observed(FERN, "height", 2, 1001, CONN_SEED))).toBe("refused");
-    // Bystander: a connection bound without a user name keeps the gardener's key grant, and writes.
     expect(await door(bystanderPool, observed(FERN, "height", 3, 1002, OTHER_SEED))).toBe(
       "admitted",
     );

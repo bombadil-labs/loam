@@ -1,22 +1,3 @@
-// The REST door (SPEC §17) — the seam's second witness, and the proof the seam is real. One
-// registration, two doors: this module derives an OpenAPI 3.1 document and a router from the
-// same Registered set GraphQL materializes, through the same hooks (so it CANNOT invent
-// authority), with the same refusals. Born versioned (§17 amendment): every surviving
-// registration is an answerable version — `v<N>` is the human alias (the Nth surviving, in
-// ground order; aliases shift when a version is withdrawn), and the registration delta's
-// content address is the version's true name (`@<hash>` addresses it directly; a withdrawn
-// hash answers 410 Gone, which is not the same silence as never-existed).
-//
-// Transport-free on purpose: handleRest speaks (method, segments, body) → (status, body), and
-// the HTTP server adapts. A compiled surface (§17's horizon) would adapt the same function to
-// a very different wire.
-//
-// Two narrowings, stated plainly (narrowing is a generator's right): this door serves lenses
-// REGISTERED AS DATA — a process-lifetime register() call files no registration delta, has no
-// true name, and therefore no version here; its door is GraphQL. And the PUBLIC projection
-// serves only the LATEST version of each declared name — the anonymous world stays strictly
-// inside what public GraphQL answers, and its version history stays its own business.
-
 import type { Primitive } from "@bombadil/rhizomatic";
 import { bytesEnvelope } from "../gateway/bytes.js";
 import type { ConnectionBinding, Gateway } from "../gateway/gateway.js";
@@ -34,14 +15,6 @@ const refuse = (status: number, ...errors: string[]): RestResult => ({
   body: { errors },
 });
 
-// The version families a door may see. The full door sees every surviving version. The
-// public door sees ONLY THE LATEST version of each declared name: a public declaration was
-// made about the door that existed when it was signed, and retroactively publishing every
-// historical policy would widen the anonymous surface past what public GraphQL can answer —
-// a smaller world stays smaller through every door, and its version count stays its own
-// business. (Note the narrowing stated in the module header: the REST door serves lenses
-// REGISTERED AS DATA; a process-lifetime register() call has no registration delta, no true
-// name, and therefore no version here — its door is GraphQL.)
 function versionsFor(gateway: Gateway, door: "full" | "public"): RegistrationVersion[] {
   const all = gateway.registrationVersions();
   if (door === "full") {
@@ -50,11 +23,6 @@ function versionsFor(gateway: Gateway, door: "full" | "public"): RegistrationVer
     const admitted = new Set(surface.registered.map((r) => lensOf(r)));
     return all.filter((v) => admitted.has(lensOf(v)));
   }
-  // Public: the LATEST version of each bare-declared name (unchanged) PLUS any specifically PINNED-public
-  // version (SPEC §23.8 — a declaration is publication, so the operator's declared `Name@<deltaId>` pin is
-  // anonymously answerable at the REST `@<deltaId>` door, symmetric to the pinned renderer route). Pins
-  // are appended after the latest, so a bare-declared name keeps its natural highest vN alias; the pin's
-  // stable access is its `@<deltaId>`. With no pins declared this is exactly the old latest-only set.
   const surface = gateway.surface("public");
   const bare = new Set((surface?.registered ?? []).map((r) => lensOf(r)));
   const latest = new Map<string, RegistrationVersion>();
@@ -66,7 +34,6 @@ function versionsFor(gateway: Gateway, door: "full" | "public"): RegistrationVer
   return out;
 }
 
-// vN aliases are PER SCHEMA NAME: Film v1 and Book v1 coexist. Ground order within a name.
 function aliased(versions: readonly RegistrationVersion[]): Map<string, RegistrationVersion[]> {
   const byName = new Map<string, RegistrationVersion[]>();
   for (const v of versions) {
@@ -77,10 +44,6 @@ function aliased(versions: readonly RegistrationVersion[]): Map<string, Registra
   return byName;
 }
 
-// --- the OpenAPI document ----------------------------------------------------------------------
-
-// A prop's OpenAPI shape, derived from its policy kind — honest about what resolution
-// produces, permissive where a policy is (a pick answers whatever primitive was claimed).
 function propSchema(kind: string): Record<string, unknown> {
   switch (kind) {
     case "all":
@@ -93,11 +56,7 @@ function propSchema(kind: string): Record<string, unknown> {
   }
 }
 
-// A resolved field's OpenAPI shape comes from its DECLARED output type (SPEC §22.6), not the policy —
-// the resolver changes what the value IS, so the document must describe the field it actually serves.
 function resolverPropSchema(type: string): Record<string, unknown> {
-  // A bytes field (SPEC §23.7) serves the self-describing envelope, documented `format: binary` so a
-  // consumer reads "these are bytes" from the schema — the raw bytes ride the byte-door behind `ref`.
   if (type === "bytes") {
     return {
       type: "object",
@@ -132,13 +91,8 @@ export function buildOpenApi(
   for (const [name, versions] of byName) {
     versions.forEach((v, i) => {
       const alias = i + 1;
-      // The view object carries POLICY PROPS ONLY; entity and the content addresses live at
-      // the body's top level — the document must describe the body that actually answers.
       const viewProperties: Record<string, unknown> = {};
       const writeProperties: Record<string, unknown> = {};
-      // Writability: a registration names its `writable` fields, and only those appear in the write
-      // body — the document must describe the writes that actually answer (SPEC §14). Immutable-by-
-      // default (§21): absent a `writable` list, NONE are writable, so the write body carries no props.
       const writable = new Set(v.writable ?? []);
       for (const [prop, pp] of v.schema.props) {
         const resolver = v.resolvers?.[prop];
@@ -243,7 +197,7 @@ export function buildOpenApi(
     openapi: "3.1.0",
     info: {
       title: `loam: ${mount}`,
-      version: "live", // the document regenerates as the store evolves — itself a view
+      version: "live",
       description:
         "A materialized surface over a Loam store (SPEC §17). Every version listed here " +
         "stays answerable; @<registration-hash> addresses a version by its true name.",
@@ -252,13 +206,6 @@ export function buildOpenApi(
   };
 }
 
-// --- the router ----------------------------------------------------------------------------
-
-// GET/POST /rest/<vN | @hash>/<schema>/<entity>. Transport-free; the caller has already
-// resolved identity to a door ("full" with an optional actorSeed, or "public").
-// The resolved node as a REST body: the view beside its content addresses, and — on an as-of
-// read (SPEC §26) — the time pin and the erasure annotation, riding alongside exactly as `_hex`
-// does and never inside the resolved data. A present read carries neither.
 const nodeBody = (node: {
   entity: string;
   view: Record<string, unknown>;
@@ -268,8 +215,6 @@ const nodeBody = (node: {
   forgotten?: number[];
 }): Record<string, unknown> => ({
   entity: node.entity,
-  // A bytes leaf anywhere in the view becomes the §23.7 envelope; raw bytes are not JSON (bytesEnvelope
-  // passes everything else through unchanged and is a no-op when the view holds none).
   view: bytesEnvelope(node.view),
   _hex: node.hex,
   _hviewHex: node.hviewHex,
@@ -297,8 +242,6 @@ export async function handleRest(
     return refuse(400, "the entity segment is not decodable");
   }
 
-  // The time pin (SPEC §26): `?asOf=<T>` reads the ground as it stood at that millisecond. A
-  // read parameter — meaningful on GET; a write is always present-tense, so POST/DELETE ignore it.
   let asOf: number | undefined;
   if (asOfRaw !== undefined && asOfRaw !== "") {
     const t = Number(asOfRaw);
@@ -309,7 +252,6 @@ export async function handleRest(
   const versions = versionsFor(gateway, door);
   const family = aliased(versions).get(schemaName);
 
-  // Resolve the version the path names — alias or true name.
   let pinned: RegistrationVersion | undefined;
   if (/^v[1-9]\d*$/.test(vTag)) {
     const n = Number(vTag.slice(1));
@@ -319,11 +261,6 @@ export async function handleRest(
     const hash = vTag.slice(1);
     pinned = versions.find((v) => v.deltaId === hash && lensOf(v) === schemaName);
     if (pinned === undefined) {
-      // Withdrawn is not never-existed — but ONLY the full door is owed that distinction,
-      // and only for a hash that really was a LAWFUL registration of THIS schema, since
-      // struck by the operator (readWithdrawnRegistrations). The public door answers a
-      // uniform 404 for every unknown hash: an anonymous caller must learn nothing about
-      // what this ground holds beyond the declared world (§12's discipline, kept here).
       if (door === "full") {
         const withdrawn = gateway.withdrawnRegistrations();
         if (withdrawn.some((w) => w.deltaId === hash && w.lensName === schemaName)) {
@@ -339,10 +276,6 @@ export async function handleRest(
     return refuse(404, "a version is v<N> or @<registration-hash>");
   }
 
-  // The warm path (the door's live `hooks.resolve`) is valid ONLY when the named version is the store's
-  // CURRENT latest AND the door's live surface actually serves this lens (a bare-name public declaration,
-  // or the full door). A declared PIN (§23.8) — even one that happens to be the latest — otherwise answers
-  // through pinned resolution, which needs no live surface, so a pin-only public store still serves it.
   const liveSurface = gateway.surface(door);
   const servesLive = liveSurface?.registered.some((r) => lensOf(r) === schemaName) ?? false;
   const trueLatest = gateway
@@ -352,14 +285,7 @@ export async function handleRest(
   const isLatest = servesLive && pinned.deltaId === trueLatest?.deltaId;
 
   if (method === "GET") {
-    // The latest version answers through the warm path — the same resolve GraphQL uses, so
-    // agreement is by construction; an older version answers through pinned resolution.
-    // Every gateway throw folds into a structured refusal, exactly as handleGraphql folds
-    // them: a resolver error must not become a 500 that leaks internals on any door.
     try {
-      // The latest reading rides the live surface; a pinned version answers through pinned resolution,
-      // which needs no live surface — so a store that declared ONLY a pin (§23.8) still serves it.
-      // Membership in versionsFor already enforced the declaration: an undeclared @hash never reached here.
       const node =
         isLatest && liveSurface !== undefined
           ? liveSurface.hooks.resolve(schemaName, entity, asOf, binding)
@@ -370,7 +296,6 @@ export async function handleRest(
     }
   }
 
-  // Writes need the live surface + its hooks (a pinned write still re-resolves through them).
   if (liveSurface === undefined) return refuse(404, "nothing here is public");
   const hooks: SurfaceHooks = liveSurface.hooks;
 
@@ -388,8 +313,6 @@ export async function handleRest(
     if (props === null || typeof props !== "object" || Array.isArray(props)) {
       return refuse(400, "the body must be a JSON object of properties");
     }
-    // The version shapes the write: a property this version's policy does not name is
-    // refused HERE, exactly as GraphQL's argument grammar refuses it there.
     const known = new Set(pinned.schema.props.keys());
     const clean: Record<string, Primitive> = {};
     for (const [k, v] of Object.entries(props)) {
@@ -409,8 +332,6 @@ export async function handleRest(
       return { status: 200, body: nodeBody(answered) };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      // The same outcomes the other doors map: standing and erasure refusals are 403, a
-      // degraded gateway is the server's trouble (503, as /append answers), the rest 400.
       if (/can no longer persist/.test(message)) return refuse(503, message);
       if (/not permitted|was erased|refused|read-only/.test(message)) return refuse(403, message);
       return refuse(400, message);
@@ -418,11 +339,6 @@ export async function handleRest(
   }
 
   if (method === "DELETE") {
-    // Clearing is retraction (SPEC §14): DELETE retracts the caller's OWN contributions. The body
-    // resolves. The body speaks two shapes: a JSON ARRAY of field names clears those fields whole
-    // (empty/absent → every prop this version resolves); a JSON OBJECT `{ field: [values] }` is the
-    // §14-amendment value-scoped REMOVE — retract only the caller's own contributions of those
-    // values. The public door is a smaller, read-only world — it retracts no more than it writes.
     if (door === "public") return refuse(403, "the public door is a smaller world: read-only");
     const known = [...pinned.schema.props.keys()];
     const isPrim = (v: unknown): v is Primitive =>
@@ -437,7 +353,6 @@ export async function handleRest(
       }
     }
 
-    // The value-scoped REMOVE shape: an object of field → values.
     if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
       const spec = parsed as Record<string, unknown>;
       for (const [field, values] of Object.entries(spec)) {
@@ -474,7 +389,6 @@ export async function handleRest(
       }
     }
 
-    // The whole-field CLEAR shape: an array of field names (or empty → all).
     let fields: string[] = known;
     if (parsed !== undefined) {
       if (!Array.isArray(parsed) || parsed.some((f) => typeof f !== "string")) {

@@ -1,17 +1,3 @@
-// §58 S1, criterion (d) — the story rail (T262). REAL Chrome, over CDP, walks the consent page as
-// a person with no containers and no seed: the password, the binding field, the redirect with a
-// code — and then the connector's half, exactly as claude.ai would do it: redeem the code, present
-// the bearer, and file a claim. The claim lands in the connection's inbox inside the container the
-// person named, the person's home and seed exist because the page made them, and the bearer reads
-// its claim back. Nothing lands in the primary ground.
-//
-// Every other §58 rail hand-builds its requests; this one exists because a green suite once hid a
-// consent page no human could use (T143). What it deliberately does NOT cover: the container's
-// admin page after the fact (the admin rails), and any browser but Chrome (§36-06's decision).
-// Chrome ABSENT is a FAILURE, not a skip — resolveChrome() throws, naming LOAM_CHROME.
-//
-// Erasure standing rule: every store here is this file's own mkdtemp/memory fixture.
-
 import { createServer, type Server } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
@@ -71,7 +57,6 @@ beforeAll(async () => {
     ...PLANT_WRITABLE,
   ]);
 
-  // ada has a password and NOTHING else: no seed on disk, no container in the store.
   home = mkdtempSync(join(tmpdir(), "loam-consent-story-"));
   initHome(home, OPERATOR_SEED);
   writeCredentials(home, { version: 1, users: { ada: await hashPassword(PASSWORD, CHEAP) } });
@@ -137,7 +122,6 @@ const graphql = (token: string, query: string): Promise<Response> =>
 
 describe("§58 S1 — the story, in a real browser", () => {
   it("ada, with no seed and no container, consents into ada:journal; the connector files a claim there", async () => {
-    // Before: nothing of hers exists but a password.
     expect(existsSync(userSeedPath(home, "ada"))).toBe(false);
     expect(gateway.containers().containers.has("ada")).toBe(false);
 
@@ -158,7 +142,6 @@ describe("§58 S1 — the story, in a real browser", () => {
     await tab.navigate(`${base}/oauth/authorize?${query.toString()}`);
     const page = (await bodyText(tab)) as string;
     expect(page).toContain("Approve a connector?");
-    // The page asks where the connection lives. She has nothing yet, so she names a leaf.
     await tab.eval('document.getElementById("bind_new").value = "journal"');
     await submit(tab, "/oauth/authorize");
     const where = (await tab.eval("location.href")) as string;
@@ -167,13 +150,11 @@ describe("§58 S1 — the story, in a real browser", () => {
     expect(code).toBeTruthy();
     tab.close();
 
-    // The page made her home, her leaf, and her seed — in one act, without a terminal.
     const table = gateway.containers().containers;
     expect(table.get("ada")?.parent).toBeUndefined();
     expect(table.get("ada:journal")?.parent).toBe("ada");
     expect(existsSync(userSeedPath(home, "ada"))).toBe(true);
 
-    // The connector's half, as claude.ai does it: redeem the code for a bearer.
     const redeemed = await fetch(`${base}/oauth/token`, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -191,9 +172,6 @@ describe("§58 S1 — the story, in a real browser", () => {
     const inbox = inboxName("ada:journal", grant.actor);
     expect(grant).toMatchObject({ user: "ada", container: "ada:journal", inbox, standing: true });
 
-    // The bearer files a claim. It lands in the connection's inbox inside ada:journal — the pool
-    // holds it, the container's scope composes it, the primary holds nothing of the key's — and
-    // the bearer reads it back through the same door.
     const wrote = await graphql(
       token,
       `mutation { plant(entity: "${FERN}", height: 58) { height } }`,
@@ -212,7 +190,6 @@ describe("§58 S1 — the story, in a real browser", () => {
     expect(((await read.json()) as { data: { plant: { height: number } } }).data.plant.height).toBe(
       58,
     );
-    // No store-wide grant ever stood for the key; whoami says where it is bound.
     expect(
       holdsGrant(
         gateway.reactor,

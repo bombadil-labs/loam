@@ -1,15 +1,3 @@
-// T244 — the stock graph's dependency machinery (working spec §50, criterion 2).
-//
-// The dependency set of a shelf entry is DERIVED from its hyperschema body — the substrate's own
-// walkers collect every schema and reading reference an expand names — and mapped to entries by
-// the one-lens-per-entry rule. Nothing here reads a declared list, because none exists to read.
-//
-// THE HAND-WRITTEN TABLE IS THE POINT (H10). A closure test that walks with the same code the
-// production walk uses under-collects identically on a shared bug and goes vacuously green. The
-// EXPECTED table below is authored by hand, entry by entry, and the covers-check pins that the
-// table names every shelf entry — so a new entry cannot land without a human writing down what
-// it depends on, and a walk that misses a Term shape disagrees with the table instead of itself.
-
 import { describe, expect, it } from "vitest";
 import { STOCK_SCHEMAS, stockNames } from "../../src/stock/index.js";
 import {
@@ -20,11 +8,8 @@ import {
   stockDependencies,
 } from "../../src/stock/graph.js";
 
-// Every entry's direct dependencies, BY HAND. Order inside a row is not asserted (sets compare);
-// the row set is. Editing the shelf means editing this table in the same change — that is a
-// feature, not a chore: the table is the human-legible dependency contract.
 const EXPECTED: Record<string, readonly string[]> = {
-  event: ["shallow-person"], // §52: attending expands into ShallowPerson, exactly as org.members
+  event: ["shallow-person"],
   note: [],
   org: ["shallow-person"],
   person: [],
@@ -46,17 +31,12 @@ describe("stock dependencies are derived from the bytes", () => {
     }
   });
 
-  // Shelf closure: every reading any body names is itself a shelf entry. `stockDependencies`
-  // throws on a dangling reference, so closure is "no entry throws" — asserted entry by entry so
-  // a failure names its entry rather than dying on the first.
   it("the shelf is closed — no body references a reading off the shelf", () => {
     for (const entry of STOCK_SCHEMAS) {
       expect(() => stockDependencies(entry.name), entry.name).not.toThrow();
     }
   });
 
-  // Termination: the reading-reference graph is a DAG. `installOrder` topo-sorts and throws on a
-  // cycle, so acyclicity is "every entry orders".
   it("the reading-reference graph is acyclic, and org orders sinks-first", () => {
     for (const entry of STOCK_SCHEMAS) {
       expect(() => installOrder(entry.name), entry.name).not.toThrow();
@@ -68,8 +48,6 @@ describe("stock dependencies are derived from the bytes", () => {
     expect(installOrder("note").map((e) => e.name)).toEqual(["note"]);
   });
 
-  // The one-lens-per-entry rule, both directions: the CLI name is the kebab-case of the lens
-  // name, and no two entries provide the same lens.
   it("every entry's CLI name is the kebab-case of its lens name, and lenses are unique", () => {
     const lenses = new Set<string>();
     for (const entry of STOCK_SCHEMAS) {
@@ -80,8 +58,6 @@ describe("stock dependencies are derived from the bytes", () => {
     }
   });
 
-  // The kebab rule on names today's shelf does not exercise: digits stay attached to their word.
-  // Pinned because the rule is PROTOCOL — a future entry must map the same way on every store.
   it("cliNameOf keeps digits with their word", () => {
     expect(cliNameOf("Sha256Sum")).toBe("sha256-sum");
     expect(cliNameOf("ShallowPerson")).toBe("shallow-person");
@@ -93,11 +69,6 @@ describe("stock dependencies are derived from the bytes", () => {
     );
   });
 
-  // THE 1:1 THE RESOLVER RESTS ON. `referencedLenses` folds an expand's schema ref (a PROGRAM
-  // name) and its reading ref (a LENS name) into one set that `stockDependencies` resolves
-  // against entry LENS names — sound only while every entry's lens equals its program. This rail
-  // makes that invariant load-bearing instead of accidental: a future two-name entry fails here
-  // and forces the resolver to split the two kinds before it can mis-map a dependency (H6).
   it("every entry's lens name equals its program name", () => {
     for (const entry of STOCK_SCHEMAS) {
       const program = (entry.registration as { hyperschema: { name: string } }).hyperschema.name;
@@ -105,11 +76,6 @@ describe("stock dependencies are derived from the bytes", () => {
     }
   });
 
-  // The pinned-ref refusal, driven red directly — the shelf itself never carries one, so without
-  // this the guard is code no test has seen fail. The cycle and dangling-reference throws in
-  // installOrder/stockDependencies remain exercised only as shelf properties (the shelf is closed
-  // and acyclic, so their red paths need an injected shelf no public seam accepts); that gap is
-  // accepted and named here rather than hidden.
   it("a pinned schema reference in a body refuses rather than being skipped", () => {
     expect(() =>
       referencedLenses({
@@ -122,9 +88,6 @@ describe("stock dependencies are derived from the bytes", () => {
     ).toThrow(/pinned/);
   });
 
-  // The walk sees the expand's BOTH names — the child program (`schema`) and the child reading
-  // (`reading`). A walk that collected only one would still pass a shelf where the two coincide,
-  // so this asserts against a body where they are made to differ.
   it("referencedLenses collects both the expand's schema and its reading", () => {
     const refs = referencedLenses({
       op: "expand",

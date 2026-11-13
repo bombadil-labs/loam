@@ -1,7 +1,3 @@
-// T152 — the shared fixture's own rail: it signs in against a LIVE door, so it cannot drift
-// silently while every consumer mocks around it. The helper is not a mock; the assertions here
-// are against real HTTP, exactly what the ~15 copies used to do by hand.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -62,9 +58,6 @@ describe("the shared session fixture", () => {
       headers: { cookie: `${SESSION_COOKIE}=${session}` },
     });
     expect(res.status).toBe(200);
-    // The anchor is ada, not chrome: an ANONYMOUS /admin answers 200 with the login form, so the
-    // assertion must prove the session was honored — the signed-in page speaks of ada's own
-    // (empty) subtree, which no login page ever says.
     const page = await res.text();
     expect(page).toMatch(/No container bears your name yet/);
     expect(page).toMatch(/ada/);

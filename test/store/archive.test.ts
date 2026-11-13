@@ -1,10 +1,3 @@
-// The cold driver's own promises, beyond the shared contract. An archive is a directory of
-// canonical delta files — `<root>/<id[0..2)>/<id>.json` — where the FILENAME is the content
-// address. That buys three things worth pinning: the layout is stable (rsync/tar/cp are backup
-// tools), a file that does not recompute to its own name is corruption (a rename cannot forge a
-// delta), and copying files between two archives IS replication, because union-by-id is the
-// merge and the id is the name.
-
 import {
   cpSync,
   mkdirSync,
@@ -22,10 +15,6 @@ import { claimsToJson, makeDelta, type Delta } from "@bombadil/rhizomatic";
 import { ArchiveBackend } from "../../src/store/archive.js";
 import { FERN, GARDENER_SEED, SURVEYOR_SEED, observed } from "../spike/garden.js";
 
-// The archive does real filesystem work — one file per delta, write+fsync+rename each — and the
-// many-ids purge sweep writes ~100 of them, which blows vitest's 5s default on a loaded CI
-// runner. The same generous hang-guard the other heavy suites carry; it only ever matters when
-// something is genuinely stuck.
 vi.setConfig({ testTimeout: 20_000 });
 
 const signed = observed(FERN, "height", 30, 1000, GARDENER_SEED);
@@ -54,10 +43,10 @@ describe("ArchiveBackend layout", () => {
       claims: unknown;
       sig?: string;
     };
-    expect(row.claims).toEqual(claimsToJson(signed.claims)); // canonical claims, human-readable
+    expect(row.claims).toEqual(claimsToJson(signed.claims));
     expect(row.sig).toBe(signed.sig);
     const bare = JSON.parse(readFileSync(fileFor(root, unsigned.id), "utf8")) as { sig?: string };
-    expect(bare.sig).toBeUndefined(); // no signature, no field — nothing to disagree with later
+    expect(bare.sig).toBeUndefined();
     await store.close();
   });
 
@@ -78,15 +67,12 @@ describe("ArchiveBackend layout", () => {
     const root = freshRoot();
     const store = new ArchiveBackend(root);
     await store.append([signed]);
-    // the clutter real directories accumulate — ignored, in the root and in the fan
     writeFileSync(join(root, "README.txt"), "the seed vault\n");
     writeFileSync(join(root, ".DS_Store"), "junk");
-    writeFileSync(join(root, "loose.json"), "{}"); // only the fan holds deltas; the root is porch
+    writeFileSync(join(root, "loose.json"), "{}");
     writeFileSync(join(root, signed.id.slice(0, 2), "notes.txt"), "not a delta");
-    // the straggler a crash leaves behind — half-written, never renamed, ignored by reads
     writeFileSync(join(root, signed.id.slice(0, 2), `${signed.id}.json.9999.tmp`), '{"claims');
     expect(ids(await store.deltasSince(new Set()))).toEqual(ids([signed]));
-    // but a delta-shaped file that cannot be read back is corruption, refused loudly
     writeFileSync(join(root, signed.id.slice(0, 2), `${"0".repeat(64)}.json`), "not json {");
     await expect(store.deltasSince(new Set())).rejects.toThrow(/corruption/);
     await store.close();
@@ -95,21 +81,15 @@ describe("ArchiveBackend layout", () => {
 
 describe("ArchiveBackend.holds sees the bytes, not the bookkeeping (ticket T67)", () => {
   it("a `.tmp` straggler planted BEHIND the seam still reads as held", async () => {
-    // Planting it with a raw write rather than an append is the whole point: `onDisk` is an index
-    // of what THIS handle completed, so a `holds` built on it cannot see a crash-left copy — and a
-    // crash-left copy is exactly the byte §11 promises went. Index the work you COMPLETED, never
-    // the data you expect to FIND (H8).
     const root = freshRoot();
     const store = new ArchiveBackend(root);
     const fan = join(root, signed.id.slice(0, 2));
     mkdirSync(fan, { recursive: true });
     writeFileSync(join(fan, `${signed.id}.json.9999.tmp`), '{"claims');
 
-    // No read can see it — that is correct for reads, and why a read cannot answer §11.
     expect(await store.deltasSince(new Set())).toEqual([]);
     expect(await store.holds(signed.id)).toBe(true);
 
-    // ...and the sweep that reaches it is the same one `holds` mirrors.
     expect(await store.purge([signed.id])).toBe(1);
     expect(await store.holds(signed.id)).toBe(false);
     await store.close();
@@ -126,8 +106,6 @@ describe("ArchiveBackend.holds sees the bytes, not the bookkeeping (ticket T67)"
       join(wrongFan, `${signed.id}.json`),
     );
     rmSync(join(root, signed.id.slice(0, 2), `${signed.id}.json`), { force: true });
-    // The canonical name is gone; the delta is still on disk under a name a `fileFor` lookup
-    // would miss. A targeted probe that only stats the canonical path would report it forgotten.
     expect(await store.holds(signed.id)).toBe(true);
     await store.close();
   });
@@ -138,13 +116,11 @@ describe("ArchiveBackend stays a set", () => {
     const root = freshRoot();
     const store = new ArchiveBackend(root);
     await store.append([signed]);
-    // a human drags a copy into the wrong fan — union tolerates the file, reads stay a set
     const wrongFan = join(root, "zz");
     mkdirSync(wrongFan, { recursive: true });
     cpSync(fileFor(root, signed.id), join(wrongFan, `${signed.id}.json`));
     expect(ids(await store.deltasSince(new Set()))).toEqual(ids([signed]));
     await store.close();
-    // a fresh handle (no memory of the write) also returns the set exactly once
     const again = new ArchiveBackend(root);
     expect(ids(await again.deltasSince(new Set()))).toEqual(ids([signed]));
     await again.close();
@@ -158,10 +134,10 @@ describe("ArchiveBackend replication by copy", () => {
     const a = new ArchiveBackend(rootA);
     const b = new ArchiveBackend(rootB);
     await a.append([signed, unsigned]);
-    await b.append([other, unsigned] /* one overlap — copies collide harmlessly */);
+    await b.append([other, unsigned]);
     await a.close();
     await b.close();
-    cpSync(rootA, rootB, { recursive: true, force: true }); // rsync, tar, a USB stick — same move
+    cpSync(rootA, rootB, { recursive: true, force: true });
     const merged = new ArchiveBackend(rootB);
     expect(ids(await merged.deltasSince(new Set()))).toEqual(ids([signed, other, unsigned]));
     await merged.close();
@@ -177,8 +153,6 @@ describe("ArchiveBackend purge sweeps files, not id-by-fan", () => {
     );
     await store.append(many);
 
-    // Half get a crash-left straggler beside them; a quarter are purged with no file at all (the
-    // already-swept case a retry produces), so the count must be DISTINCT IDS ACTUALLY FOUND.
     const doomed = many.slice(0, 30);
     for (const d of doomed.slice(0, 15)) {
       writeFileSync(`${fileFor(root, d.id)}.31337.tmp`, readFileSync(fileFor(root, d.id)));
@@ -192,7 +166,6 @@ describe("ArchiveBackend purge sweeps files, not id-by-fan", () => {
 
     const left = await store.deltasSince(new Set());
     expect(left.length).toBe(30);
-    // No straggler survives — the assertion that reads the directory rather than the API.
     const stragglers = readdirSync(root, { withFileTypes: true })
       .filter((f) => f.isDirectory())
       .flatMap((f) => readdirSync(join(root, f.name)))

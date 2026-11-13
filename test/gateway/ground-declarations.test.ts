@@ -1,20 +1,3 @@
-// A ground's declarations hold across a reseat: the user ground and what a door read withholds.
-// The Gateway seats one record on each reactor it sets (ground-declarations.ts). A reseat that left
-// it behind would read users from the bare reactor, and would count erased, held grants again.
-//
-// Each case holds an erased delta ACROSS the reseat. An order admitted through a door takes its
-// target out of the admitted set, so a reseat would drop the bytes and prove nothing. The order
-// here lands by direct ingest, the way a derived emission lands: the journal keeps the target.
-// Each case is two-sided: the erased delta stops counting, and a named bystander still counts.
-//
-// The other two declarations have their reseat rails elsewhere. The delegation scope:
-// test/gateway/connection-delegation.test.ts ("the pool keeps its scope when its reactor is
-// replaced"). The erasure pins: test/gateway/ground-revision.test.ts (the pin case) and the pool
-// cases of test/gateway/erasure-fanout.test.ts.
-//
-// Named gap: the read-withheld case asks `dataStruck`, the one reader of that declaration. The
-// door that consumes it is federation translation, which this file does not drive.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { dataStruck, grantClaims } from "../../src/gateway/accounts.js";
@@ -58,7 +41,6 @@ async function door(gw: Gateway, d: Delta): Promise<"admitted" | "refused"> {
   }
 }
 
-/** Order `target` erased with no door: its bytes stay held, here and across a reseat. */
 function orderHeld(gw: Gateway, target: Delta): void {
   const order = op(eraseClaims(target.id, target.claims.author, OP, 5000));
   expect(gw.reactor.ingest(order).status).toBe("accepted");
@@ -81,13 +63,13 @@ describe("a ground's declarations hold across a reseat", () => {
     const second = op(rootClaims("ada", K2, OP, 13));
     await gw.append([second]);
     const root = () => subjectKeyAt(gw.reactor, gw.validityNow(), OP, "user:ada");
-    expect(root()).toBe(K2); // control: the later claim wins while it stands
+    expect(root()).toBe(K2);
 
     orderHeld(gw, second);
     expect(root()).toBe(K1);
 
     await reseated(gw);
-    expect(gw.reactor.get(second.id)).toBeDefined(); // still held: only the declaration hides it
+    expect(gw.reactor.get(second.id)).toBeDefined();
     expect(root()).toBe(K1);
     expect(await door(gw, observed(FERN, "height", 1, 6000, K1_SEED))).toBe("admitted");
     expect(await door(gw, observed(FERN, "height", 2, 6001, K2_SEED))).toBe("refused");
@@ -105,14 +87,14 @@ describe("a ground's declarations hold across a reseat", () => {
       op(makeNegationClaims(OP, 2001, byOperator.id)),
     ]);
     const struck = (d: Delta) => dataStruck(gw.reactor, gw.validityNow(), OP)(d.id);
-    expect(struck(byWriter)).toBe(true); // control: the granted key's strike binds
+    expect(struck(byWriter)).toBe(true);
     expect(struck(byOperator)).toBe(true);
 
     orderHeld(gw, grant);
     expect(struck(byWriter)).toBe(false);
 
     await reseated(gw);
-    expect(gw.reactor.get(grant.id)).toBeDefined(); // still held: only the declaration hides it
+    expect(gw.reactor.get(grant.id)).toBeDefined();
     expect(struck(byWriter)).toBe(false);
     expect(struck(byOperator)).toBe(true);
     await gw.close();

@@ -1,7 +1,3 @@
-// Criterion 17: a new pool is its own peer under its own key K_p. The host records K_p before the
-// pool uses it. An older pool (bytes, no key record) is refused (ruling 10). A host erasure binds in
-// the pool only as an order that names the pool as its receiver (SPEC-6 §3).
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, OrdinaryJournalPeer, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { containerClaims } from "../../src/gateway/container-law.js";
@@ -63,16 +59,14 @@ describe("criterion 17: a fresh pool starts under its own key", () => {
     const pool = c.gateway!;
     const kp = pool.operatorAuthor!;
     expect(kp).not.toBe(OP);
-    expect(recordedPoolKey(gw.reactor, OP, "container:k17")).toBe(kp); // the host's record
-    expect(pool.peer?.journal.peerId).toBe(kp); // its own journal peer
-    // its first incarnation marker is signed by K_p
+    expect(recordedPoolKey(gw.reactor, OP, "container:k17")).toBe(kp);
+    expect(pool.peer?.journal.peerId).toBe(kp);
     const markers = [...pool.reactor.snapshot()].filter((d) =>
       d.claims.pointers.some(
         (p) => p.target.kind === "entity" && p.target.entity.context === CTX_INCARNATION,
       ),
     );
     expect(markers.map((d) => d.claims.author)).toEqual([kp]);
-    // it admits a write into its own journal
     const d = note(9);
     await pool.federate([d], { admit: () => true });
     const opened = await OrdinaryJournalPeer.open(poolStore.journalStore(), kp);
@@ -86,10 +80,10 @@ describe("criterion 17: a fresh pool starts under its own key", () => {
     const gw = await hostWith(hostStore, memoryPoolKeys());
     await declare(gw, "container:k17b");
     await gw.openContainer({ name: "container:k17b", backend: poolStore });
-    const other = await hostWith(hostStore, memoryPoolKeys()); // a key source that lost the key
+    const other = await hostWith(hostStore, memoryPoolKeys());
     await expect(
       other.openContainer({ name: "container:k17b", backend: poolStore }),
-    ).rejects.toThrow(PoolKeyMissing); // a typed cause: a report never parses the message
+    ).rejects.toThrow(PoolKeyMissing);
     await gw.close();
   });
 
@@ -99,7 +93,6 @@ describe("criterion 17: a fresh pool starts under its own key", () => {
     const gw = await hostWith(hostStore, memoryPoolKeys());
     await declare(gw, "container:k17e");
     await gw.openContainer({ name: "container:k17e", backend: poolStore });
-    // An embedder's open with no key source: it gets a fresh one, which lacks the recorded key.
     const bare = await Gateway.open(hostStore, { seed: SEED });
     await expect(
       bare.openContainer({ name: "container:k17e", backend: poolStore }),
@@ -109,7 +102,7 @@ describe("criterion 17: a fresh pool starts under its own key", () => {
 
   it("a host opened directly still gives a named pool its own key, and refuses an older pool", async () => {
     const hostStore = new MemoryBackend();
-    const gw = await Gateway.open(hostStore, { seed: SEED }); // no boot, no key source passed
+    const gw = await Gateway.open(hostStore, { seed: SEED });
     await declare(gw, "container:k17f");
     const c = await gw.openContainer({ name: "container:k17f", backend: new MemoryBackend() });
     const kp = c.gateway!.operatorAuthor!;
@@ -149,7 +142,6 @@ describe("criterion 17: a fresh pool starts under its own key", () => {
       kind: "primitive",
       value: pool.operatorAuthor,
     });
-    // object level: the erased delta cannot come back into the pool; a bystander can
     expect((await pool.federate([target], { admit: () => true })).accepted).toBe(0);
     expect((await pool.federate([bystander], { admit: () => true })).accepted).toBe(1);
     await gw.close();
@@ -161,7 +153,7 @@ describe("criterion 17: a fresh pool starts under its own key", () => {
     const p = (await gw.openQuarantine()).gateway;
     await gw.append([target]);
     await p.federate([target], { admit: () => true });
-    await gw.erase(target.id); // fans out to p as an order naming p
+    await gw.erase(target.id);
     expect(p.reactor.get(target.id)).toBeUndefined();
     const q = (await p.openQuarantine()).gateway;
     const orders = [...q.reactor.snapshot()].filter((d) =>
@@ -173,12 +165,11 @@ describe("criterion 17: a fresh pool starts under its own key", () => {
       value: q.operatorAuthor,
     });
     expect((await q.federate([target], { admit: () => true })).accepted).toBe(0);
-    expect((await q.federate([note(43)], { admit: () => true })).accepted).toBe(1); // bystander
+    expect((await q.federate([note(43)], { admit: () => true })).accepted).toBe(1);
     await gw.close();
   });
 
   it("a refused channel attach closes the pool store it opened", async () => {
-    // On Windows an open handle blocks the file's removal; the refusal must leave nothing open.
     class Closing extends MemoryBackend {
       wasClosed = false;
       override async close(): Promise<void> {
@@ -193,7 +184,7 @@ describe("criterion 17: a fresh pool starts under its own key", () => {
     await gw.openContainer({ name: "container:k17h", backend: poolStore });
     const handles: Closing[] = [];
     const lost = await Gateway.boot(hostStore, assembleGenesis({ operatorSeed: SEED }), {
-      poolKeys: memoryPoolKeys(), // the pool's key is not in this source
+      poolKeys: memoryPoolKeys(),
       channelBackend: () => {
         const b = new Closing();
         handles.push(b);
@@ -207,7 +198,6 @@ describe("criterion 17: a fresh pool starts under its own key", () => {
 
   it("an older pool (bytes, no key record) is refused, and its bytes do not change", async () => {
     const gw = await hostWith(new MemoryBackend(), memoryPoolKeys());
-    // The name even carries the missing-key diagnostic: the cause is typed, never read off text.
     const name = "container:its key is not here";
     await declare(gw, name);
     const poolStore = new MemoryBackend();
@@ -232,7 +222,6 @@ describe("criterion 17: a fresh pool starts under its own key", () => {
     const bystander = note(21);
     await gw.append([target, bystander]);
     await pool.federate([target, bystander], { admit: () => true });
-    // a host order with no receiver, or naming another peer, is testimony in the pool
     const bare = signClaims(eraseClaims(target.id, OP, OP, 40_000), SEED);
     const elsewhere = signClaims(
       eraseClaims(target.id, OP, OP, 40_001, undefined, undefined, OTHER_PEER),
@@ -241,7 +230,6 @@ describe("criterion 17: a fresh pool starts under its own key", () => {
     await expect(pool.append([bare])).rejects.toThrow(/operator's alone/);
     await expect(pool.append([elsewhere])).rejects.toThrow(/operator's alone/);
     expect(pool.reactor.get(target.id)).toBeDefined();
-    // the host's erase fans out an order it signs for this pool, naming K_p
     await gw.erase(target.id);
     const orders = [...pool.reactor.snapshot()].filter(
       (d) => d.claims.pointers.some((p) => p.role === "erases") && d.claims.author === OP,
@@ -252,7 +240,7 @@ describe("criterion 17: a fresh pool starts under its own key", () => {
       value: kp,
     });
     expect(pool.reactor.get(target.id)).toBeUndefined();
-    expect(pool.reactor.get(bystander.id)).toBeDefined(); // two-sided
+    expect(pool.reactor.get(bystander.id)).toBeDefined();
     await gw.close();
   });
 });

@@ -1,5 +1,3 @@
-// The nested Bed fixture the M5 tests share: a bed whose plants expand through the Plant reading.
-
 import { parseTerm, signClaims } from "@bombadil/rhizomatic";
 import { FERN, GARDENER, GARDENER_SEED } from "../spike/garden.js";
 

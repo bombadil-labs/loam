@@ -1,12 +1,3 @@
-// Caches that must follow validity. A claim counts only inside its own [validFrom, validUntil), so a
-// boundary can change an answer with nothing written. Each case writes everything first, then moves
-// only the clock (fake `Date`, no timer is fired), and reads again. A cache keyed by writes alone
-// keeps serving the answer from before the boundary.
-//
-// Covered: the container table (the table itself, and `containerScope`, a read that depends on it)
-// and the tokenless public door (`queryPublic`). Not covered here: the validity timer; these reads
-// must be right at the boundary whether or not the timer has fired yet.
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
 import { containerClaims } from "../../src/gateway/container-law.js";
@@ -20,7 +11,7 @@ import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 
 const OP_SEED = "5b".repeat(32);
 const OP = authorForSeed(OP_SEED);
-const T = 2_000_000; // the boundary
+const T = 2_000_000;
 
 afterEach(() => {
   vi.useRealTimers();
@@ -77,7 +68,6 @@ describe("the container table follows validity", () => {
     vi.setSystemTime(T + 1);
     expect(gw.containers().containers.has("container:timed")).toBe(false);
 
-    // Back before the boundary (a host clock step): the table answers for that time again.
     vi.setSystemTime(T - 1);
     expect(gw.containers().containers.has("container:timed")).toBe(true);
     await gw.close();
@@ -88,7 +78,6 @@ describe("the container table follows validity", () => {
     vi.setSystemTime(T - 100);
     const gw = await boot();
     const h = observed(FERN, "height", 30, T - 200, OP_SEED);
-    // A live bystander, declared now: it stays in the table on both sides of T.
     const bystander = signClaims(
       containerClaims(
         { container: "container:always", trust: "curated", posture: "shared", membership: HEIGHTS },
@@ -170,10 +159,6 @@ describe("the public door follows validity", () => {
   });
 });
 
-// A CONTROL, not a gate: it passes on the base. `dropChannelCommit` (channel.ts) and
-// `deriveReceiptImpl` (slate.ts) hold one negation reader across `await gw.append(...)`. That is safe
-// only because the substrate's reader clears its memo after an accepted ingest. This pins that
-// premise at the Loam seam, so a substrate change that broke it fails here first.
 describe("a negation reader held across an append sees the append", () => {
   it("negatedAt built before a strike answers true after it", async () => {
     const gw = await boot();

@@ -1,11 +1,3 @@
-// The open door's law (SPEC §12). An operator-signed declaration at `loam:public` names which
-// REGISTERED schemas answer without a token — query and subscribe only. The declaration is
-// data: union across surviving declarations, revocation is one negation, and in a governed
-// store only the operator's voice opens anything. Anonymous execution runs against a
-// RESTRICTED GraphQL schema — the public schemas' query + subscription fields and no Mutation
-// type at all — so a write through the public door is a validation impossibility, not a
-// policed string.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims, type Claims } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
@@ -27,8 +19,6 @@ const OPERATOR = authorForSeed(OPERATOR_SEED);
 const MALLORY_SEED = "e4".repeat(32);
 const MALLORY = authorForSeed(MALLORY_SEED);
 
-// A second registered schema that is NEVER declared public: the restricted surface must not
-// merely fail to answer it — it must not even admit it exists.
 const LEDGER = { ...PLANT, name: "Ledger" };
 
 async function governedGarden(): Promise<Gateway> {
@@ -45,7 +35,6 @@ async function governedGarden(): Promise<Gateway> {
 }
 
 const declare = (gateway: Gateway, schemas: string[], seed = OPERATOR_SEED, ts = Date.now()) => {
-  // Ordered at `ts`, but never valid later than now: a declaration here is meant to hold at once.
   const delta = signClaims(
     { ...publicClaims(schemas, authorForSeed(seed), ts), validFrom: Math.min(ts, Date.now()) },
     seed,
@@ -77,7 +66,6 @@ describe("the loam.public law", () => {
     const gateway = await governedGarden();
     const declaration = await declare(gateway, ["Plant"], OPERATOR_SEED, 10_000);
 
-    // Mallory holds write standing — the strike LANDS as data, but the law does not bend.
     await gateway.append([
       signClaims(makeNegationClaims(MALLORY, 10_001, declaration.id), MALLORY_SEED),
     ]);
@@ -85,7 +73,6 @@ describe("the loam.public law", () => {
       true,
     );
 
-    // The operator's own strike closes the door.
     await gateway.append([
       signClaims(makeNegationClaims(OPERATOR, 10_002, declaration.id), OPERATOR_SEED),
     ]);
@@ -172,7 +159,6 @@ describe("the loam.public law", () => {
     const report = await gateway.federate([malformed]);
     expect(report.rejected).toBe(1);
     expect(report.accepted).toBe(0);
-    // and a WELL-FORMED one crosses (the store's trust policy is open by default)
     const sound = signClaims(publicClaims(["Plant"], OPERATOR, 10_001), OPERATOR_SEED);
     const crossed = await gateway.federate([sound]);
     expect(crossed.accepted).toBe(1);
@@ -199,11 +185,9 @@ describe("the restricted surface", () => {
     const answer = await gateway.queryPublic(`{ plant(entity: "${FERN}") { height } }`);
     expect((answer.data as { plant: { height: number } }).plant.height).toBe(34);
 
-    // Not merely unanswered — unknown to the validator.
     const denied = await gateway.queryPublic(`{ ledger(entity: "ledger:1") { height } }`);
     expect(denied.errors?.join(" ")).toMatch(/Cannot query field/);
 
-    // Introspection is a feature here: it reveals ONLY the public shapes.
     const shapes = await gateway.queryPublic(`{ __schema { types { name } } }`);
     const names = (shapes.data as { __schema: { types: Array<{ name: string }> } }).__schema.types
       .map((t) => t.name)
@@ -226,11 +210,9 @@ describe("the restricted surface", () => {
     );
     expect(claimAttempt.errors?.length).toBeGreaterThan(0);
 
-    // And the refusals refused: the ground did not move.
     const after = await gateway.query(`{ plant(entity: "${FERN}") { height } }`);
     expect((after.data as { plant: { height: number } }).plant.height).toBe(34);
 
-    // The restricted schema simply has no mutation root.
     const probe = await gateway.queryPublic(`{ __schema { mutationType { name } } }`);
     expect(
       (probe.data as { __schema: { mutationType: null | { name: string } } }).__schema.mutationType,
@@ -279,16 +261,13 @@ describe("the restricted surface", () => {
     gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     await declare(gateway, ["Plant"]);
 
-    // The first unregistered entity takes the public door's one slot...
     const first = await gateway.subscribePublic(
       `subscription { plant(entity: "plant:a") { _hex } }`,
     );
     expect((await first.next()).done).toBe(false);
-    // ...the second is refused at the public door...
     await expect(
       gateway.subscribePublic(`subscription { plant(entity: "plant:b") { _hex } }`),
     ).rejects.toThrow(/public door/);
-    // ...and the authenticated surface still watches new entities, unbothered.
     const full = await gateway.subscribe(`subscription { plant(entity: "plant:c") { _hex } }`);
     expect((await full.next()).done).toBe(false);
     await first.return(undefined);
@@ -301,8 +280,6 @@ describe("the restricted surface", () => {
     await declare(gateway, ["Orchard"]);
     expect(gateway.hasPublicSurface()).toBe(false);
 
-    // The declaration names Plant too late? No — declare Plant now; the surface appears with
-    // no restart: the door is a lens over live data.
     await declare(gateway, ["Plant"], OPERATOR_SEED, Date.now() + 1);
     expect(gateway.hasPublicSurface()).toBe(true);
     const writes = await gateway.queryPublic(`{ plant(entity: "${FERN}") { height } }`);

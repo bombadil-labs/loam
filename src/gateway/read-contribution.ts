@@ -1,4 +1,3 @@
-// Serving rows are owned by the peer, before a parent unions them with any other ground.
 import type { Delta } from "@bombadil/rhizomatic";
 import type { Gateway } from "./gateway.js";
 import { poolOwner, ownerTerm } from "./inbox-owner.js";
@@ -6,13 +5,9 @@ import { condemnedClosure, readClosedIds } from "./slate-law.js";
 
 export interface ReadContribution {
   readonly rows: readonly Delta[];
-  /** Historically eligible approved strikes, including those outside the membership filter. */
   readonly negations: readonly Delta[];
-  /** Current suppression links, independent of asOf; metadata cannot reinsert future bytes. */
   readonly negationTargets: ReadonlyMap<string, readonly string[]>;
-  /** Only targets of withheld strikes cross into another peer's suppression scope. */
   readonly withheldTargets: ReadonlySet<string>;
-  /** Raw membership ids support exclusion without disclosing withheld row contents. */
   readonly membership: ReadonlySet<string>;
 }
 
@@ -69,7 +64,6 @@ export function readContributionImpl(
   };
 }
 
-/** Forward suppression closure over approved testimony only; raw peer reactors are not inputs. */
 export function closeContributions(
   contributions: Iterable<ReadContribution>,
   admitted: readonly Delta[],
@@ -90,8 +84,6 @@ export function closeContributions(
       }
     }
   }
-  // A target can itself be a strike held by another contributor. Withholding that link
-  // must also withhold what it held down; otherwise composition revives the next target.
   const hidden = [...withheld];
   while (hidden.length > 0) {
     for (const target of strikes.get(hidden.pop()!) ?? []) {

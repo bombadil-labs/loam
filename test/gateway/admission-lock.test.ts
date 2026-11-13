@@ -1,8 +1,3 @@
-// Admission is serialized per gateway: a batch is checked against the state the batches before it
-// left, never a state they are still writing. Each case starts two admissions without awaiting the
-// first, so an unserialized door would check both against the same state. Asserted at both levels:
-// what the store holds, and what the pause reports.
-
 import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Claims, type Delta } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
@@ -24,7 +19,6 @@ afterEach(async () => {
   for (const gw of open.splice(0)) await gw.close();
 });
 
-// A store where K1 may write, and a prepared cut that would pause K1 (no record, so no commit).
 async function world(): Promise<{ gw: Gateway; cut: Delta }> {
   const gw = await Gateway.boot(new MemoryBackend(), assembleGenesis({ operatorSeed: OP_SEED }));
   open.push(gw);

@@ -1,9 +1,3 @@
-// SPEC §25's contract at the CLI: `loam repair` reads the quarantine side channel and settles
-// it, and it is the operator's alone (like erasure) — running it in the home that holds the
-// operator seed IS that authority. list reports every set-aside row + why, plus the entity-id
-// legibility warnings; discard removes garbage from the origin; re-admit returns a row whose
-// transient cause cleared; leave is an idempotent no-op. Repair never edits bytes into validity.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,16 +27,12 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-// Damage a stored row behind the seam: swap in other well-formed claims so the row no longer
-// recomputes to its own id — a torn sync or a devtools scribble.
 function corrupt(path: string, id: string, claims: unknown): void {
   const db = new Database(path);
   db.prepare("UPDATE deltas SET claims = ? WHERE id = ?").run(JSON.stringify(claims), id);
   db.close();
 }
 
-// Init a home, then plant a governed store at its default path holding two operator facts.
-// Returns the facts and the store path so a test can damage a row.
 async function plantedHome(): Promise<{
   path: string;
   seed: string;
@@ -86,8 +76,6 @@ describe("loam repair list", () => {
 
   it("surfaces an entity-id legibility warning for an app delta at a reserved loam: name", async () => {
     const { path, seed } = await plantedHome();
-    // A stranger's delta pointing at the constitutional store entity — binds nothing (the
-    // readers honor only operator authorship), but collides in NAME, a legibility hole.
     const strangerSeed = "cc".repeat(32);
     const stranger = signClaims(
       {
@@ -141,13 +129,12 @@ describe("loam repair discard / re-admit / leave round-trip", () => {
 
   it("re-admit returns a row whose transient cause cleared, without reconstructing bytes", async () => {
     const { path, a, b } = await plantedHome();
-    // Capture a's honest claims, damage it, confirm it quarantines, then let it re-sync.
     const honest = claimsToJson(a.claims);
     corrupt(path, a.id, claimsToJson(b.claims));
     await run(["repair", "list", "--home", home], io());
     expect(out.join("\n")).toMatch(/id-mismatch/);
 
-    corrupt(path, a.id, honest); // the correct bytes re-synced in place — no repair forged them
+    corrupt(path, a.id, honest);
     out.length = 0;
     const code = await run(["repair", "re-admit", a.id, "--home", home], io());
     expect(code).toBe(0);
@@ -177,7 +164,7 @@ describe("loam repair discard / re-admit / leave round-trip", () => {
 
 describe("loam repair is the operator's alone", () => {
   it("refuses when the home holds no operator seed", async () => {
-    const code = await run(["repair", "list", "--home", home], io()); // home never initialized
+    const code = await run(["repair", "list", "--home", home], io());
     expect(code).toBe(1);
     expect(err.join("\n")).toMatch(/operator/);
   });

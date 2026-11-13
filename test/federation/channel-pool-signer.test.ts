@@ -1,7 +1,3 @@
-// A channel's records are signed by the ground they land in (step 5 PR 3j-2): the pool's own law
-// (its arrival stamps) by the pool's governing key, the host's law (the pool's declaration) by the
-// host's. The pool's key comes from the host's pool key source, fixed here so the test can name it.
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { authorForSeed, type Delta } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";

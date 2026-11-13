@@ -1,15 +1,3 @@
-// PACHYDERM — the third real Loam app: a timeline with no company (ticket T24). Three sovereign
-// stores — Alice, Bob, Carol. Posts live where their authors live; following someone IS pulling
-// their store; and the feed is a well-known entity (feed:main) that every author links onto — so
-// in YOUR store, the union of everyone you pull IS your combined timeline, and the lens that
-// resolves it is YOURS to swap. The algorithm is a lens you own.
-//
-// The erasure act tells the TRUTH about federated forgetting, which most social protocols
-// theater around: Alice's erasure purges HER store byte-for-byte, but her erasure is FOREIGN
-// law in Bob's store — it binds nothing there (§11: erasure is each operator's alone). Bob still
-// remembers, because sovereignty cuts both ways; and then Bob HONORS her request with his own
-// operator's erasure. No delete-request pretending to be a guarantee: real semantics, said aloud.
-
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -113,7 +101,6 @@ try {
     true,
   );
 
-  // ALICE POSTS — her claims, her store, her signature (the resolver renders it).
   await q(alice.gateway, `mutation { handle(person: "person:alice", name: "alice") { delta } }`);
   await post(alice, "a1", "the mycelium is humming today");
   await post(alice, "a2", "signed, sovereign, and slightly smug about it");
@@ -128,12 +115,7 @@ try {
       String(direct.data?.post?.text ?? "").includes("@"),
     `timeline attributed: ${aliceTL.every((t) => t.includes("@"))}; direct: ${JSON.stringify(direct.data?.post?.text)}`,
   );
-  // Once an `expand` names the child's reading (rhizomatic 0.8 / #23), the child resolves through its
-  // OWN reading — so Post's §22 attribution resolver now decorates each post EMBEDDED in the feed, not
-  // only a post read on its own. The gap pachy.2 used to document honestly is closed (T26).
 
-  // BOB FOLLOWS ALICE — following IS pulling. The well-known feed entity means her posts land on
-  // HIS feed:main: the union is the timeline.
   await pullFrom(bob.gateway, alice.base, "op-alice");
   await post(bob, "b1", "just followed alice, the network is a verb here");
   const bobTL = await timelineTexts(bob);
@@ -144,7 +126,6 @@ try {
     `bob's timeline: ${bobTL.length} posts`,
   );
 
-  // BOB REPLIES AND BOOSTS — edges citing her post, provenance forever.
   await post(bob, "b2", "@alice same, humming here too");
   await q(bob.gateway, `mutation { replyTo(post: "post:b2", parent: "post:a1") { delta } }`);
   await q(bob.gateway, `mutation { boost(post: "post:b-boost", original: "post:a2") { delta } }`);
@@ -155,9 +136,6 @@ try {
     (reply.data?.post?.re ?? []).includes("post:a1"),
   );
 
-  // CAROL FOLLOWS BOTH — her one pull-pair builds the three-voice timeline; her LATEST lens reads
-  // the same ground as a different algorithm (the newest post alone). Two lenses, one feed, her
-  // store, her choice: the algorithm is a lens she owns.
   await pullFrom(carol.gateway, alice.base, "op-alice");
   await pullFrom(carol.gateway, bob.base, "op-bob");
   const carolTL = await timelineTexts(carol);
@@ -169,7 +147,6 @@ try {
     `timeline: ${carolTL.length} posts; latest: ${JSON.stringify(carolLatest.data?.latest?.post?.text ?? "").slice(0, 40)}`,
   );
 
-  // THE TIMELINE SERVES ANONYMOUSLY from each store — the UI is data too.
   const page = await carol.gateway.serveRoute("timeline", "feed:main", "public");
   check(
     "pachy.6",
@@ -178,9 +155,6 @@ try {
     `render: ${page.status}, ${page.body.length} bytes`,
   );
 
-  // ERASURE, TOLD HONESTLY. Alice erases a1: HER store forgets byte-for-byte. Her erasure is
-  // FOREIGN law in Bob's store — it binds nothing there; Bob still remembers, because sovereignty
-  // cuts both ways. Then Bob HONORS the request with his own operator's erasure. No theater.
   const FORGOTTEN = "the mycelium is humming today";
   const a1Text = [...alice.gateway.reactor.snapshot()].find((d) =>
     JSON.stringify(d).includes(FORGOTTEN),
@@ -189,7 +163,7 @@ try {
   const aliceForgot = !JSON.stringify(await alice.backend.deltasSince(new Set())).includes(
     FORGOTTEN,
   );
-  await pullFrom(bob.gateway, alice.base, "op-alice"); // the erasure travels, but it is foreign law
+  await pullFrom(bob.gateway, alice.base, "op-alice");
   const bobRemembers = JSON.stringify(await bob.backend.deltasSince(new Set())).includes(FORGOTTEN);
   const bobsCopy = [...bob.gateway.reactor.snapshot()].find((d) =>
     JSON.stringify(d).includes(FORGOTTEN),

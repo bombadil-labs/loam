@@ -1,24 +1,7 @@
-// The soup meter (SPEC §49 position 5, T212): the store reporting its own accumulation — claims
-// per day per container, and the share that is periodic-shaped. A READING and nothing else: it
-// consults no write path and no write path consults it, because a heuristic that blocks writes
-// will one day block a true fact. The meter names a probable pulse-law violation; a human
-// tickets the writer.
-//
-// THE METRONOME TEST reads `claims.timestamp` — the author's own clock — over streams grouped
-// by (author, first entity id). A stream is named when it has enough ticks to be a verdict
-// rather than a rhythm (PERIODIC_MIN) and its inter-arrival spread is tight (coefficient of
-// variation under PERIODIC_CV): a poller stamps like a clock, a person stamps like a life. A
-// writer that jitters its stamps on purpose evades this by design — the meter is honesty
-// instrumentation, not an adversarial control.
-//
-// COST: one container-scope read per container, the summary's own bill (H8 note there).
-
 import type { Delta } from "@bombadil/rhizomatic";
 import type { Gateway } from "./gateway.js";
 
-/** Fewer ticks than this is rhythm, not verdict. */
 export const PERIODIC_MIN = 6;
-/** Inter-arrival coefficient of variation at or under this reads as a metronome. */
 export const PERIODIC_CV = 0.1;
 
 export interface PeriodicStream {
@@ -73,7 +56,7 @@ export function soupMeterImpl(
       const gaps: number[] = [];
       for (let i = 1; i < stamps.length; i++) gaps.push(stamps[i]! - stamps[i - 1]!);
       const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
-      if (mean <= 0) continue; // identical stamps are a burst, not a beat
+      if (mean <= 0) continue;
       const variance = gaps.reduce((a, g) => a + (g - mean) ** 2, 0) / gaps.length;
       if (Math.sqrt(variance) / mean > PERIODIC_CV) continue;
       periodic.push({

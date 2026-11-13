@@ -1,5 +1,3 @@
-// Phase 1 — Isolated read/write, per store: constitutions, profiles, edges, authz negatives.
-
 import {
   PEOPLE,
   appendAs,
@@ -17,19 +15,16 @@ import {
 } from "./harness.mjs";
 import { constitute } from "./harness.mjs";
 
-const T0 = 1_000_000; // fixed constitutional clock — re-runs dedup by content address
+const T0 = 1_000_000;
 const stores = {};
 try {
   for (const name of ["commons", "reel", "hive"]) stores[name] = await openStore(name);
   const { commons, reel, hive } = stores;
 
-  // Standing, not ownership (authors-not-owners): each store's operator opens the door to its
-  // residents — and that is ALL. Nobody adopts anyone else's vocabulary; pointing is free.
   await constitute(commons, ["wren", "miles", "odile"], T0);
   await constitute(reel, ["miles"], T0);
   await constitute(hive, ["odile"], T0);
 
-  // 1.1 — Wren self-authors her profile over HTTP
   const w = await gql(
     commons.base,
     tok("wren", "commons"),
@@ -43,7 +38,6 @@ try {
     JSON.stringify(wp ?? w.body?.errors),
   );
 
-  // 1.2 — more profiles, follow edges, and the nested Circle
   await gql(
     commons.base,
     tok("miles", "commons"),
@@ -74,7 +68,6 @@ try {
     circleText.slice(0, 200),
   );
 
-  // 1.3 — reel: films, a solo screening, and FilmNight nesting
   await gql(
     reel.base,
     tok("miles", "reel"),
@@ -115,7 +108,6 @@ try {
     `screening=${JSON.stringify(s1p)} night=${nightText.slice(0, 120)}`,
   );
 
-  // 1.4 — a screening WITH companions: person refs into another store's vocabulary
   await gql(
     reel.base,
     tok("miles", "reel"),
@@ -139,7 +131,6 @@ try {
     withText.slice(0, 160),
   );
 
-  // 1.5 — hive: colony status with a frank grumble; a gathering with attendees
   await gql(
     hive.base,
     tok("odile", "hive"),
@@ -174,7 +165,6 @@ try {
     JSON.stringify(cp),
   );
 
-  // 1.6 — the authorization negatives
   const denials = [];
   const m1 = await gql(
     commons.base,
@@ -207,7 +197,6 @@ try {
     `${denials.map(([who, m]) => `${who}: ${m.slice(0, 60)}`).join(" | ")} | register=${reg.status} federate=${fed.status}`,
   );
 
-  // 1.7 — determinism: same query → same hex; a write moves it
   const q = `{ person(entity: "person:wren") { _hex } }`;
   const h1 = (await gql(commons.base, tok("wren", "commons"), q)).body?.data?.person?._hex;
   const h2 = (await gql(commons.base, tok("wren", "commons"), q)).body?.data?.person?._hex;

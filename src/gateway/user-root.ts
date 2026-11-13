@@ -1,13 +1,3 @@
-// Which key a Loam USER acts from right now, read at the door. A grant may name a user
-// (`user:<name>`) rather than a key; the door resolves it to the user's current root at read time,
-// so re-pointing a user's root (recovery) moves every grant that names them at once.
-//
-// This is the indexed twin of `rootOf` in src/server/users.ts, which resolves through the user's
-// operator-only View. The door cannot afford a View per grant per write, so this reads the user
-// entity's own index with the same rules: operator-signed claims only, valid at `now`, not negated
-// by the operator, the latest by timestamp winning with a tie going to the smaller id. The two must
-// agree; test/gateway/user-grants.test.ts holds them to it.
-
 import {
   computeId,
   verifyDelta,
@@ -20,11 +10,8 @@ import type { Ground } from "./ground.js";
 
 export const CTX_USER = "loam.user";
 export const CTX_ROLE = "loam.role";
-/** The user's current ROOT key (README ruling 5): the principal every key of theirs acts for. */
 export const CTX_ROOT = "loam.root";
 
-// A user name reaches an entity id, a JSON object key, and an HTML page. Keep it to the characters
-// that are safe in all three, and short enough to read in a provenance trail.
 const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
 export function userNameDefect(name: string): string | undefined {
@@ -44,14 +31,7 @@ const AUTHOR = /^ed25519:[0-9a-f]{64}$/;
 
 const NONE: ReadonlySet<string> = new Set();
 
-// Every operator claim at a user entity decides authority (the user's record, roles, root and
-// recovery history), and a reactor can hold raw-ingested rows no door verified. So every reader of
-// those claims signature-checks one before use, as the substrate checks principal evidence; a
-// verdict is cached per object, id and signature. The same holds for an operator negation of such a
-// claim, and for a counter-negation of that: an unsigned one strikes nothing. `resolveUserView`
-// hides the same rows from the View, so the indexed readers and the View reader agree.
 const verifiedCache = new WeakMap<Delta, { readonly id: string; readonly sig: string }>();
-/** Does `d` carry its author's valid signature over its own content address? */
 export function verified(d: Delta): boolean {
   const hit = verifiedCache.get(d);
   if (hit !== undefined && hit.id === d.id && hit.sig === d.sig && computeId(d.claims) === d.id) {
@@ -62,23 +42,8 @@ export function verified(d: Delta): boolean {
   return true;
 }
 
-// --- recovery (step 5, PR 3e; refactor/audit/user-recovery.md) ---------------------------------
-//
-// A recovery is operator-signed history at the user entity: a RECORD in `loam.recovery` naming the
-// key it replaces (`previous`), the new `root`, the record it `supersedes`, and every key the chain
-// has `retired` so far; and a LINEAGE claim in `loam.lineage` carrying the same root and retired set
-// with a pointer to its record, so the lineage survives the record's erasure. Both are also filed at
-// one store-wide index entity, so every recovery is found without a scan.
-//
-// Recovery is DURABLE: a record or lineage claim counts from the moment it is held, whatever its
-// validity or negations. Only erasure removes one. Timestamps never order recoveries; `supersedes`
-// does. A history that is not one chain (two first records, two records superseding one, a
-// `supersedes` or a lineage pointing at a record not held, a malformed claim) is BROKEN, and fails
-// closed: the user has no root, and every key the history names holds no standing.
-
 export const CTX_RECOVERY = "loam.recovery";
 export const CTX_LINEAGE = "loam.lineage";
-/** The index entity every recovery record and lineage claim is also filed at. */
 export const RECOVERIES = "loam:recoveries";
 
 export interface RecoverySpec {
@@ -97,7 +62,6 @@ const filed = (name: string, context: string) => [
   { role: "index", target: { kind: "entity", entity: { id: RECOVERIES, context } } } as const,
 ];
 
-/** The operator's recovery record. */
 export function recoveryClaims(spec: RecoverySpec, operator: string, t: number): Claims {
   return {
     timestamp: t,
@@ -114,12 +78,10 @@ export function recoveryClaims(spec: RecoverySpec, operator: string, t: number):
   };
 }
 
-/** The key a well-formed recovery record retires (its `previous`), or undefined. */
 export function recordPrevious(d: Delta): string | undefined {
   return filedFor(d, CTX_RECOVERY) === undefined ? undefined : parse(d, "record")?.previous;
 }
 
-/** The lineage claim written beside a recovery record: its root and retired set, and the record. */
 export function lineageClaims(
   spec: {
     readonly name: string;
@@ -152,10 +114,6 @@ interface Parsed {
   readonly retired: readonly string[];
 }
 
-// The user a claim is filed for in `context`, when it carries BOTH filings the record shape
-// requires: exactly one at `user:<name>` and exactly one at the index entity, in that same context.
-// A claim missing either is not recovery evidence for any reader, so the per-user reader and the
-// store-wide one always see the same claims.
 function filedFor(d: Delta, context: string): string | undefined {
   let user: string | undefined;
   let users = 0;
@@ -172,8 +130,6 @@ function filedFor(d: Delta, context: string): string | undefined {
   return users === 1 && index === 1 ? user : undefined;
 }
 
-// Every held operator claim that is recovery evidence for `name` in `context`, signed by the cut and
-// not erased. Validity and negations are not asked: recovery is durable history.
 function heldAt(
   reactor: Ground,
   operator: string,
@@ -192,7 +148,6 @@ function heldAt(
   return out;
 }
 
-// Every key a claim names, well-formed or not: what a broken history quarantines.
 function namedKeys(d: Delta): string[] {
   return d.claims.pointers.flatMap((p) =>
     p.target.kind === "primitive" &&
@@ -203,7 +158,6 @@ function namedKeys(d: Delta): string[] {
   );
 }
 
-// A record or lineage claim's fields, or undefined when it is malformed.
 function parse(d: Delta, kind: "record" | "lineage"): Parsed | undefined {
   const one = new Map<string, string>();
   const retired: string[] = [];
@@ -241,7 +195,6 @@ const sameSet = (a: readonly string[], b: Iterable<string>): boolean => {
   return a.length === bs.length && a.every((k, i) => k === bs[i]);
 };
 
-// The retired set a record must carry: its predecessor's, plus its own previous, minus its root.
 function expectedRetired(record: Parsed, predecessor: Parsed | undefined): Set<string> {
   const out = new Set(predecessor?.retired ?? []);
   if (record.previous !== undefined) out.add(record.previous);
@@ -249,19 +202,16 @@ function expectedRetired(record: Parsed, predecessor: Parsed | undefined): Set<s
   return out;
 }
 
-/** A user's recovery history: none, one chain (its head's root and the keys it retired), or broken. */
 export type RecoveryChain =
   | { readonly kind: "none" }
   | {
       readonly kind: "chain";
-      /** The head record's id: what the next recovery supersedes. */
       readonly head: string;
       readonly root: string;
       readonly retired: ReadonlySet<string>;
     }
   | { readonly kind: "broken"; readonly implicated: ReadonlySet<string> };
 
-/** Read `name`'s recovery history as it stood at `cut`, with `erased` counted as gone. */
 export function recoveryChain(
   reactor: Ground,
   operator: string | undefined,
@@ -289,8 +239,6 @@ export function recoveryChain(
     next.set(r.supersedes, r);
   }
   if (firsts.length !== 1) return broken;
-  // Each record's cumulative retired set must follow from its held predecessor, and each lineage
-  // claim must repeat its record: the evidence a later erasure leaves behind has to be true.
   for (const r of byId.values()) {
     const pred = r.supersedes === undefined ? undefined : byId.get(r.supersedes);
     if (!sameSet(r.retired, expectedRetired(r, pred))) return broken;
@@ -304,12 +252,6 @@ export function recoveryChain(
   return { kind: "chain", head: head.id, root: head.root, retired: new Set(head.retired) };
 }
 
-/**
- * Why `delta` is not admissible as recovery evidence, or undefined. The door refuses a malformed
- * operator recovery record or lineage claim, and one whose cumulative retired set does not follow
- * from the record it names: once that record is erased, the successor is all the evidence left, so
- * it must have been true when it arrived.
- */
 export function recoveryDefect(
   delta: Delta,
   reactor: Ground,
@@ -320,8 +262,6 @@ export function recoveryDefect(
   const touches = delta.claims.pointers.some(
     (p) =>
       p.target.kind === "entity" &&
-      // Only this door's two contexts: other records share the index entity (cuts, outcomes and
-      // incarnation markers, recovery-cut.ts) and are judged there.
       (p.target.entity.context === CTX_RECOVERY || p.target.entity.context === CTX_LINEAGE),
   );
   if (!touches || operator === undefined || delta.claims.author !== operator) return undefined;
@@ -333,9 +273,6 @@ export function recoveryDefect(
   const kind = context === CTX_RECOVERY ? "record" : "lineage";
   const parsed = parse(delta, kind);
   if (parsed === undefined) return `a malformed recovery ${kind}`;
-  // A record arriving in the same atomic batch counts as held: a recovery lands whole. A record the
-  // store has erased, or that an erasure in this batch erases, does not, even while its bytes are
-  // still held: the readers already count it as gone, so a successor naming it would be an orphan.
   const heldRecord = (id: string): Parsed | undefined => {
     if (gone().has(id)) return undefined;
     const held = reactor.get(id);
@@ -363,10 +300,6 @@ export function recoveryDefect(
   return undefined;
 }
 
-/**
- * Every key that holds no standing in this ground because a recovery retired it: the retired keys
- * of each user's chain, and every key a broken history implicates.
- */
 export function retiredKeysOf(
   reactor: Ground,
   operator: string | undefined,
@@ -393,10 +326,6 @@ export function retiredKeysOf(
   return out;
 }
 
-/**
- * The previous root each unbroken recovery chain in this ground names for a record whose root is
- * `root`: the keys `root` recovered from. The history `keysEverOf` follows.
- */
 export function recoveredFrom(
   reactor: Ground,
   operator: string | undefined,
@@ -413,17 +342,11 @@ export function recoveredFrom(
     const r = name === undefined ? undefined : parse(d, "record");
     if (name === undefined || r === undefined || r.root !== root || r.previous === undefined)
       continue;
-    // Only an unbroken chain carries lineage: a broken history names no one's past.
     if (recoveryChain(reactor, operator, name, erased).kind === "chain") out.add(r.previous);
   }
   return [...out];
 }
 
-/**
- * The recoveries in `user`'s unbroken chain whose new ROOT is `root`: each record's id and the key it
- * retired. What the history reader pairs a cut with. Keyed by the user as well as the root: two users
- * may share a root, and one's recoveries are not the other's history.
- */
 export function recoveriesOf(
   reactor: Ground,
   operator: string | undefined,
@@ -449,9 +372,6 @@ export function recoveriesOf(
   return out;
 }
 
-// Is there a standing operator root claim for `name` naming `key` at `now`: valid, not negated by
-// the operator (as of `cut`), not erased, signed by the cut? The chain decides WHICH key may be the
-// root; this decides whether the operator's own root claim for it stands.
 function standingRootClaim(
   reactor: Ground,
   now: number,
@@ -494,11 +414,6 @@ function standingRootClaim(
   return false;
 }
 
-/**
- * The root `name` reads as under a recovery chain, or `undefined` when there is none; `null` when the
- * chain gives the user no root (broken, or the head's root has no standing operator claim). Shared by
- * the indexed reader here and the View reader (`rootOf`), so the two cannot differ.
- */
 export function chainRoot(
   reactor: Ground,
   now: number,
@@ -516,13 +431,6 @@ export function chainRoot(
     : null;
 }
 
-/**
- * The value each context's latest standing operator claim at `user:<name>` holds. Standing:
- * operator-signed, filed at that entity in that context, valid at `now`, not negated by the
- * operator, not erased. The latest by timestamp wins, a tie going to the smaller id, BEFORE its
- * value is read, as the View's pick does: a latest claim with no single value resolves to nothing
- * rather than letting an older one through.
- */
 function latestValues(
   reactor: Ground,
   now: number,
@@ -548,9 +456,6 @@ function latestValues(
     const filing = d.claims.pointers.filter(
       (p) => p.target.kind === "entity" && p.target.entity.id === entity,
     );
-    // The View's value for a claim: its single non-filing pointer, whatever its role, rendered as
-    // the resolver renders it (a primitive's value, an entity's or delta's id). Anything else is
-    // not a single value, and resolves to nothing.
     const rest = d.claims.pointers.filter((p) => !filing.includes(p));
     const target = rest.length === 1 ? rest[0]!.target : undefined;
     const rendered =
@@ -580,13 +485,6 @@ function latestValues(
   return new Map([...best].map(([context, b]) => [context, b.value]));
 }
 
-/**
- * The root key `name` acts from at `now` in this ground, or undefined: no operator, no standing
- * user record naming them, or no root that is a well-formed key. Absence is absence; a caller
- * holding a grant that names this user gets no standing from it. `erased` holds ids erased but
- * not yet purged, which count as gone, as they do for the View reader. `cut` reads the ground as
- * it stood at an as-of instant: only deltas signed by then, claims and strikes alike.
- */
 export function userRootAt(
   reactor: Ground,
   now: number,
@@ -598,62 +496,40 @@ export function userRootAt(
   if (operator === undefined) return undefined;
   const values = latestValues(reactor, now, operator, name, erased, cut);
   if (values.get(CTX_USER) !== name) return undefined;
-  // Once a user has a recovery chain, only its head's root is eligible (the fence).
   const fenced = chainRoot(reactor, now, operator, name, erased, cut);
   if (fenced !== undefined) return fenced ?? undefined;
   const root = values.get(CTX_ROOT);
   return typeof root === "string" && AUTHOR.test(root) ? root : undefined;
 }
 
-// Where a ground reads its users, and which of their claims are erased but still held. A pool
-// holds no user records; it reads its host's. The Gateway declares this for its ground, because
-// the erasure reader lives above this module.
 export interface UserGround {
   readonly reactor: Reactor;
-  /**
-   * The key whose user records bind in this ground: the governing key of the ground that holds the
-   * users. A pool reads its host's users, so its user ground names the HOST's key, which differs
-   * from the pool's own governing key once each pool has one (step 6). Absent, the caller's own.
-   */
+
   readonly governor?: string;
   readonly erased: () => ReadonlySet<string>;
-  /** An as-of read's instant: the ground holds only what was signed by then. */
   readonly cut?: number;
 }
-/** Declare where `reactor`'s grants naming users read those users. */
 export function declareUserGround(reactor: Reactor, ground: () => UserGround): void {
   declarationsOf(reactor).users = ground;
 }
 
-/** Whose user records bind in `ground`: its governor, else the caller's own key. */
 export const usersGovernor = (ground: UserGround, operator: string | undefined) =>
   ground.governor ?? operator;
 
-/** Where `reactor` reads its users: the declared ground, else itself. */
 export function userGroundOf(reactor: Reactor): UserGround {
   return declarationsOf(reactor).users?.() ?? { reactor, erased: () => NONE };
 }
 
-/**
- * Every root key `name` could be read as under RAW evaluation, which ignores validity: the keys
- * named by the operator's root claims for that user, less any the operator struck (a strike
- * counts while it survives its own strikes, whatever its window). Empty unless some such operator
- * claim still names the user. This is the raw posture the grants themselves get: validity ignored,
- * every surviving operator strike binding. It is NOT a superset of the present root — a strike that
- * has lapsed counts here and not at `now`.
- */
 export function userRootsRaw(
   ground: UserGround,
   operator: string | undefined,
   name: string,
 ): string[] {
-  operator = usersGovernor(ground, operator); // user records bind under the ground's governor
+  operator = usersGovernor(ground, operator);
   if (operator === undefined) return [];
   const { reactor } = ground;
   const erased = ground.erased();
   const cut = ground.cut ?? Infinity;
-  // Once a user has a recovery chain, raw machinery trusts the head's root alone, and only while an
-  // operator root claim names it; a broken history trusts no one.
   const chain = recoveryChain(reactor, operator, name, erased, cut);
   if (chain.kind === "broken") return [];
   const entity = userEntity(name);
@@ -701,10 +577,6 @@ export function userRootsRaw(
   return [...roots].sort();
 }
 
-/**
- * The key a grant's `subject` names at `now`: the subject itself when it is not a user reference,
- * else that user's current root, read from this ground's declared user ground (or itself).
- */
 export function subjectKeyAt(
   reactor: Reactor,
   now: number,
@@ -723,13 +595,6 @@ export function subjectKeyAt(
   );
 }
 
-/**
- * Could `subject` EVER name `key` here: it is that key, or it names a user for whom this ground
- * (or its host) holds an operator-signed root claim naming `key` — valid or not yet, struck or not,
- * since a strike can lapse and a window can open — unless the operator struck it for good (a strike already in force, with no end, nothing held
- * against it). A revoke that must stop `key` for good asks
- * this, not what the subject names right now.
- */
 export function subjectCouldName(
   reactor: Reactor,
   now: number,
@@ -755,8 +620,6 @@ export function subjectCouldName(
       (p) => p.target.kind === "primitive" && p.target.value === key,
     );
     if (!atRoot || !names) continue;
-    // Struck for good by the operator — in force, no end, nothing held against the strike — and
-    // this claim can never name the key again.
     const dead = ground.negationsOf(id).some((n) => {
       const neg = ground.get(n);
       return (
@@ -772,11 +635,6 @@ export function subjectCouldName(
   return false;
 }
 
-/**
- * Every key `subject` could EVER name here: the subject itself when it is a key, else every key an
- * operator-signed root claim for that user names — valid or not yet, struck or not — unless the
- * operator struck that claim for good. What a revoke must account for before it reports success.
- */
 export function keysSubjectCouldName(
   reactor: Reactor,
   now: number,

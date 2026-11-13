@@ -1,6 +1,3 @@
-// The renderer context's guard accepts only a real gateway. The brand is claimed once, by
-// gateway.ts; no other module can mark an object, and a borrowed prototype is not a gateway.
-
 import { describe, expect, it } from "vitest";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { claimGatewayMarker, isGateway } from "../../src/gateway/gateway-brand.js";

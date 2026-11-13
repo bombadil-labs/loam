@@ -1,10 +1,3 @@
-// The open door, served (SPEC §12). Anonymous requests reach ONLY the restricted read surface
-// of mounts whose operator declared schemas public — and to an anonymous caller, a mount with
-// nothing public answers exactly like a mount that does not exist (no mount-name oracle). A
-// presented-but-wrong token is 401 always: bad credentials never downgrade to anonymous. CORS
-// rides every response, because bearer tokens are explicit headers, never ambient — a
-// wildcard origin lends no authority.
-
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 
@@ -20,15 +13,13 @@ import { PLANT, PLANT_POLICY, PLANT_WRITABLE, garden } from "../gateway/fixtures
 
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
-const ALICE_SEED = "a1".repeat(32); // the gardener's seed
+const ALICE_SEED = "a1".repeat(32);
 
 let handle: ServerHandle;
 let base: string;
 let commonsGateway: Gateway;
 let commonsDeclaration: Delta;
 
-// The garden: Plant registered and declared public. The meadow: governed, nothing public.
-// The commons: public until the revocation test strikes its declaration.
 async function governed(): Promise<Gateway> {
   const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
   await gateway.append([

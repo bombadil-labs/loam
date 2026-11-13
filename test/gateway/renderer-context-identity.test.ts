@@ -1,5 +1,3 @@
-// T287: the issued context's own nested binding cannot be retargeted to another live scope.
-// Scope is asserted through actual worker first paint and gestures, not a freeze flag alone.
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -99,15 +97,11 @@ describe("issued renderer binding identity", () => {
       if (first.kind !== "bound" || second.kind !== "bound")
         throw new Error("fixture requires bound contexts");
       const options = { gesture: { reads: [{ lens: "Plant", entity: OTHER }], state: {} } };
-      // The alternate identity is genuinely live: retargeting cannot fail accidentally because
-      // its container, inbox, registration, or data are missing.
       await prepareRendererInContext(renderer, second);
       const sibling = await renderRendererInContext(renderer, FERN, second, options);
       expect(sibling.status).toBe(200);
       expect(sibling.body).toContain("first=301|gesture=302");
 
-      // Mutate the ISSUED nested record, not the input object the factory copied. Reflect.set
-      // permits a refused write without making the exception's class/text part of the contract.
       Reflect.set(first.binding, "container", second.binding.container);
       Reflect.set(first.binding, "inbox", second.binding.inbox);
       await prepareRendererInContext(renderer, first);

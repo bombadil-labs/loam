@@ -1,11 +1,3 @@
-// §46 criterion 7 — deltas added at the publisher AFTER the channel opened arrive without the
-// receiver running a command. Driven through the real standing instruction, not a hand-called sync:
-// a rail that called `sync()` itself would prove the sync works and say nothing about whether
-// anything ever calls it, which is the whole promise of the story.
-//
-// The transport stays behind the channel contract on purpose. This poller is the implementation
-// today; a push transport would replace it without changing anything above.
-
 import { describe, expect, it } from "vitest";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -45,7 +37,6 @@ describe("§46 — the standing instruction", () => {
         ch.pool.gateway!.reactor.arrivalLog().some((d) => d.id === later.id),
       );
       expect(arrived).toBe(true);
-      // And the channel's own record shows it succeeded — the story's observable half.
       expect(me.channelStatus(ch.name)[0]!.lastSyncedAt).toBeGreaterThan(0);
     } finally {
       await standing.stop();
@@ -69,8 +60,6 @@ describe("§46 — the standing instruction", () => {
       const after = observed(FERN, "height", 88, 12000, "a1".repeat(32));
       await alice.append([after]);
       await new Promise((r) => setTimeout(r, 200));
-      // Two-sided: the poller genuinely stopped, so the first rail is not passing on a timer that
-      // never turns off.
       expect(ch.pool.gateway!.reactor.arrivalLog().some((d) => d.id === after.id)).toBe(false);
     } finally {
       await alice.close();

@@ -1,7 +1,3 @@
-// A Storage with no window: Map-backed, insertion-ordered, and honest about quota — setItem
-// past the byte budget throws the same QuotaExceededError a browser throws. This is the
-// injectable shim the LocalStorageBackend suites run on (no jsdom; the seam is structural).
-
 import type { StorageLike } from "../../src/store/local-storage.js";
 
 export class MemStorage implements StorageLike {
@@ -34,7 +30,6 @@ export class MemStorage implements StorageLike {
     this.map.delete(key);
   }
 
-  // Test-side conveniences — reaching behind the seam is the harness's privilege, not the API's.
   keys(): string[] {
     return [...this.map.keys()];
   }

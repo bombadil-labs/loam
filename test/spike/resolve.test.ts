@@ -1,7 +1,3 @@
-// SPEC §2, "Resolution & policy": resolveView(Schema, HView) → View. One gathered HView backs
-// many resolutions; pluralism is policy choice. pick = one truth, all = set union, conflicts =
-// contested-kept, merge = reduction; a resolved View is content-addressed and deterministic.
-
 import { describe, expect, it } from "vitest";
 import {
   DeltaSet,
@@ -23,8 +19,6 @@ import {
   observed,
 } from "./garden.js";
 
-// The contested garden: two authors measured the fern differently; tags accumulate; the kind
-// is agreed once.
 const deltas = [
   observed(FERN, "height", 30, 1000, GARDENER_SEED),
   observed(FERN, "height", 34, 2000, SURVEYOR_SEED),
@@ -60,7 +54,7 @@ describe("spike: resolveView(Schema, HView) → View", () => {
     const trusting = (author: string) =>
       policy({ height: { kind: "pick", order: { kind: "byAuthorRank", authors: [author] } } });
     expect(asObj(resolveView(trusting(GARDENER), hview))["height"]).toBe(30);
-    expect(asObj(resolveView(trusting(SURVEYOR), hview))["height"]).toBe(34); // same HView
+    expect(asObj(resolveView(trusting(SURVEYOR), hview))["height"]).toBe(34);
   });
 
   it("all: set union, deterministically ordered", () => {
@@ -74,8 +68,8 @@ describe("spike: resolveView(Schema, HView) → View", () => {
       kind: { kind: "conflicts", order: { kind: "byTimestamp", dir: "desc" } },
     });
     const view = asObj(resolveView(contested, hview));
-    expect(view["height"]).toEqual([34, 30]); // both claims held, newest first
-    expect(view["kind"]).toBeUndefined(); // a single agreed value is not a conflict
+    expect(view["height"]).toEqual([34, 30]);
+    expect(view["kind"]).toBeUndefined();
   });
 
   it("merge: reduction over the bucket", () => {
@@ -94,8 +88,8 @@ describe("spike: resolveView(Schema, HView) → View", () => {
       height: { kind: "absentAs", constant: 0, then: pickLatest },
     });
     const view = asObj(resolveView(defaulted, hview));
-    expect(view["watered"]).toBe(false); // nobody has claimed watering
-    expect(view["height"]).toBe(34); // presence passes through to the inner policy
+    expect(view["watered"]).toBe(false);
+    expect(view["height"]).toBe(34);
   });
 
   it("byPred: matching claims outrank the rest", () => {

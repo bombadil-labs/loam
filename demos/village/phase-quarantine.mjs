@@ -1,16 +1,3 @@
-// Phase QUARANTINE — A PLACE WHERE UNTRUSTED LAW MAY BIND (SPEC §24, slice 1). Today foreign law is
-// inert-by-default: safe, but untestable. The quarantine closes that gap — a SECOND store over the
-// operator's own ground, seeded ONE-WAY from the primary, where a stranger's app could run sequestered.
-// This act stands one up over the almanac, shows the ONE-WAY GLASS (the pool mirrors the primary's living
-// ground; a write in the pool never reaches the primary), then the non-negotiable law: ERASE a fact in the
-// primary and watch it vanish from the quarantine too (§11 reaches through the glass — no erasure-evasion),
-// and finally DROP the whole pool and show the primary unscathed (discard = erase-by-construction).
-//
-// Then the T16 correction (§24.8, PR #120): the fan-out RE-DERIVES ITS OWN REACH. The operator CLOSES the
-// almanac's trust door — the posture that used to swallow the erasure silently — and nests a pool inside
-// a pool (P → Q → R, a tree the old fan-out never walked). One erase in the primary, and the byte is gone
-// from every tier: trust policy is admission configuration, erasure is law, and depth is no shelter.
-
 import { parseSchema, parseTerm, signClaims } from "@bombadil/rhizomatic";
 import { trustClaims } from "../../dist/index.js";
 import { check, openStore, summary } from "./harness.mjs";
@@ -55,13 +42,11 @@ try {
   };
   const holds = (gw, id) => [...gw.reactor.snapshot()].some((d) => d.id === id);
 
-  // Register the lens and lay two facts: a durable title, and a secret that will later be forgotten.
   await primary.publishRegistration(DOSSIER, SCHEMA, [subject], undefined, undefined, undefined, ["note", "title"]);
   await primary.append([fact("title", "The Townhall Dossier", Date.now())]);
   const secret = fact("note", "a private thing, to be forgotten", Date.now() + 1);
   await primary.append([secret]);
 
-  // QUARANTINE.1 — stand up a one-way pool; it RESOLVES the primary's living ground.
   pool = await primary.openQuarantine();
   check(
     "quarantine.1",
@@ -71,7 +56,6 @@ try {
     `pool reads note: ${JSON.stringify(await fieldOf(pool.gateway, "note"))}`,
   );
 
-  // QUARANTINE.2 — the glass is ONE-WAY: a write in the pool stays in the pool.
   const poolOnly = fact("note", "scribbled inside the sandbox", Date.now() + 1);
   await pool.gateway.append([poolOnly]);
   check(
@@ -81,7 +65,6 @@ try {
     `pool has it: ${holds(pool.gateway, poolOnly.id)}, primary has it: ${holds(primary, poolOnly.id)}`,
   );
 
-  // QUARANTINE.3 — ERASE the secret in the primary; it vanishes from the quarantine too (§24.8, the law).
   await primary.erase(secret.id, { reason: "the subject exercised their right to be forgotten" });
   check(
     "quarantine.3",
@@ -90,8 +73,6 @@ try {
     `gone from primary: ${!holds(primary, secret.id)}, gone from pool: ${!holds(pool.gateway, secret.id)}`,
   );
 
-  // QUARANTINE.4 — DROP the pool; the primary is unscathed (discard = erase-by-construction). Its durable
-  // title still resolves, exactly as before — the sandbox and everything in it simply cease to exist.
   await pool.drop();
   pool = undefined;
   check(
@@ -101,9 +82,6 @@ try {
     `primary title after drop: ${JSON.stringify(await fieldOf(primary, "title"))}`,
   );
 
-  // QUARANTINE.5 — the T16 correction (§24.8, PR #120). The operator CLOSES the trust door (the posture
-  // that used to swallow the erasure silently) and nests a pool INSIDE a pool: P → Q → R. The scribes'
-  // draft room has a draft room of its own, and both hold the primary's living ground.
   const FORGOTTEN = "a confidence that must not survive, at any depth";
   const secret2 = fact("note", FORGOTTEN, Date.now() + 10);
   await primary.append([secret2]);
@@ -119,9 +97,6 @@ try {
     `Q holds it: ${holds(nestedOuter.gateway, secret2.id)}, R holds it: ${holds(nestedInner.gateway, secret2.id)}`,
   );
 
-  // QUARANTINE.6 — one erase in the primary, and the byte is gone from EVERY tier of the tree,
-  // content-string-at-rest: trust policy is admission configuration, erasure is LAW (§11 reaches
-  // through the glass unconditionally), and the fan-out now walks the whole tree.
   await primary.erase(secret2.id, { reason: "forgotten at every depth, or the operator learns why" });
   const tierForgot = (gw) => {
     const ground = [...gw.reactor.snapshot()];
@@ -134,8 +109,6 @@ try {
     `forgot in P: ${tierForgot(primary)}, Q: ${tierForgot(nestedOuter.gateway)}, R: ${tierForgot(nestedInner.gateway)}`,
   );
 
-  // Reopen the trust door (a later declaration wins): the almanac is the village's aggregator, and
-  // the other phases expect its federation door open.
   await primary.append([signClaims(trustClaims("open", [], operator, Date.now() + 20), almanac.seed)]);
   await nestedInner.drop();
   nestedInner = undefined;

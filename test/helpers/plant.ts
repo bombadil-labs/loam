@@ -1,11 +1,3 @@
-// Plant deltas around the door: no Loam check runs, the way a replanted cold copy or an older
-// writer's rows arrive. A journaled host's rows are its journal's, so the plant is a local arrival
-// in that journal: one transfer per delta, in the order given, because readers order events by
-// arrival and one transfer's arrivals are simultaneous. An erasure order owes a purge when the
-// store holds its target. An empty store given `peer` starts that peer's
-// journal first (a seeded store, as a host would write it); an empty store with no `peer` takes
-// the rows directly.
-
 import type { Delta } from "@bombadil/rhizomatic";
 import { erasureTarget, isErasure } from "../../src/gateway/erase-law.js";
 import { admitErasureOrders, admitLocal, openHostPeer } from "../../src/gateway/peer-admission.js";

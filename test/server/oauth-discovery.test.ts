@@ -1,17 +1,7 @@
-// T133 — §37 phase 12/15: discovery and the 401. Two RFC well-known documents and a
-// `WWW-Authenticate` challenge on the MCP door's refusal. This phase mints nothing — no client, no
-// code, no token — so there is no door here for a rail to probe past discovery itself.
-//
-// WHAT THIS FILE DOES NOT ASSERT: `fsync`-shaped or filesystem-level claims (there is no file in
-// this phase) and the raw `Host` header — the WHATWG `fetch` used throughout forbids setting it
-// (Node silently keeps the real one), so the "foreign Host" half of criterion (e) is covered by the
-// `req.headers` grep in the working spec instead; this file covers its `X-Forwarded-*` half, which
-// `fetch` does allow.
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 
-vi.setConfig({ testTimeout: 20_000 }); // real listening servers
+vi.setConfig({ testTimeout: 20_000 });
 
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -33,7 +23,7 @@ import {
 
 const OP_SEED = "7c".repeat(32);
 const OP = authorForSeed(OP_SEED);
-const PUBLIC_URL = "https://loam.example:8443"; // deliberately NOT the local test server's address
+const PUBLIC_URL = "https://loam.example:8443";
 
 const boot = async (opts: { public?: boolean } = {}): Promise<Gateway> => {
   const gw = await Gateway.boot(
@@ -84,7 +74,6 @@ describe("T133 — the discovery documents are pure functions of one configured 
       expect(resource.authorization_servers[0]).toBe(issuer);
       expect(challengeFor(raw)).toContain(`"${issuer}/.well-known/oauth-protected-resource"`);
     }
-    // Both spellings agree with each other, which is what "one function" buys.
     expect(issuerFor("http://x:1")).toBe(issuerFor("http://x:1/"));
   });
 
@@ -110,8 +99,6 @@ describe("T133 — the discovery documents are pure functions of one configured 
 
   it("(d) PKCE S256 only, and a public client with no secret — EXACT lists, not a superset check", () => {
     const doc = authorizationServerDocument(PUBLIC_URL);
-    // toEqual, not toContain: a widened list that still permitted "plain" alongside "S256" would
-    // pass a .toContain("S256") assertion while reopening exactly the hole PKCE closes.
     expect(doc["code_challenge_methods_supported"]).toEqual(["S256"]);
     expect(doc["token_endpoint_auth_methods_supported"]).toEqual(["none"]);
   });
@@ -120,8 +107,6 @@ describe("T133 — the discovery documents are pure functions of one configured 
     const first = challengeFor(PUBLIC_URL);
     const second = challengeFor(PUBLIC_URL);
     expect(first).toBe(second);
-    // Hand-derived expectation, not a comparison of the function to itself (H10): the literal
-    // shape a rail must catch a regression against is written out here, independently.
     expect(first).toBe(
       `Bearer resource_metadata="${issuerFor(PUBLIC_URL)}/.well-known/oauth-protected-resource"`,
     );
@@ -170,8 +155,8 @@ describe("T133 — (b2) --public-url is an http(s) origin, case-insensitively, w
 });
 
 describe("T133 — the well-known documents are served, off configured publicUrl alone", () => {
-  let garden: Gateway; // has a public declaration — exercises http.ts's public-surface path
-  let meadow: Gateway; // exists, no public declaration
+  let garden: Gateway;
+  let meadow: Gateway;
   let handle: ServerHandle;
   let base: string;
 
@@ -222,9 +207,6 @@ describe("T133 — the well-known documents are served, off configured publicUrl
   });
 
   it("(e3) a mount named .well-known cannot shadow discovery — precedence is pinned", async () => {
-    // The audit's second finding: the discovery check runs before mount resolution in http.ts, and
-    // no rail pinned that ordering — a refactor moving it after would have stayed green. This
-    // fixture constructs the collision outright.
     const shadow = await boot();
     const h2 = await serve({
       mounts: { ".well-known": shadow },
@@ -244,10 +226,6 @@ describe("T133 — the well-known documents are served, off configured publicUrl
   });
 
   it("(e2) a forged raw Host header — WITH forwarded headers beside it — changes nothing", async () => {
-    // The audit's finding: WHATWG fetch forbids setting Host, so the criterion's Host half went
-    // untested and its named fallback (a grep) existed only as prose. node:http CAN set Host, so
-    // the rail is closable in this harness — pin the bytes to the configured publicUrl under the
-    // most hostile spelling a proxy chain can deliver.
     const { request } = await import("node:http");
     const raw = (path: string, headers: Record<string, string>) =>
       new Promise<string>((resolve, reject) => {
@@ -271,8 +249,6 @@ describe("T133 — the well-known documents are served, off configured publicUrl
         "x-forwarded-proto": "https",
       });
       expect(hostile).toBe(baseline);
-      // Positive control: the baseline itself is the configured document, not some refusal both
-      // spellings share.
       const doc = JSON.parse(baseline) as { resource?: string; issuer?: string };
       expect(doc.resource ?? doc.issuer).toContain(new URL(PUBLIC_URL).host);
       expect(hostile).not.toContain("evil.example");
@@ -294,12 +270,12 @@ describe("T133 — the well-known documents are served, off configured publicUrl
       const headed = await ask(base, path, { method: "HEAD" });
       expect(headed.status).toBe(got.status);
       expect(headed.headers.get("content-type")).toBe(got.headers.get("content-type"));
-      expect(headed.text).toBe(""); // HEAD carries no body
+      expect(headed.text).toBe("");
     }
   });
 
   it("(n) registration/authorize/token are not routed by this phase — ordinary 401, not an OAuth error", async () => {
-    const noAuth = await ask(base, "/nowhere-at-all"); // the baseline uniform refusal
+    const noAuth = await ask(base, "/nowhere-at-all");
     for (const [path, method] of [
       ["/oauth/register", "POST"],
       ["/oauth/authorize", "GET"],
@@ -320,7 +296,7 @@ describe("T133 — the well-known documents are served, off configured publicUrl
       expect(answer.status).toBe(401);
     }
     const challenge = onPublicMount.headers.get("www-authenticate");
-    expect(challenge).toBe(challengeFor(PUBLIC_URL)); // positive control: present AND correct
+    expect(challenge).toBe(challengeFor(PUBLIC_URL));
     expect(onPrivateMount.headers.get("www-authenticate")).toBe(challenge);
     expect(onAbsentMount.headers.get("www-authenticate")).toBe(challenge);
     expect(onPublicMount.text).toBe(onPrivateMount.text);
@@ -343,9 +319,6 @@ describe("T133 — the well-known documents are served, off configured publicUrl
   });
 
   it("(j) a tokenless graphql refusal carries NO www-authenticate — the header is the MCP door's alone", async () => {
-    // "garden" is skipped here: it declared a public surface, so a tokenless graphql POST there
-    // reaches the anonymous door itself (a 400 on the missing body) rather than the 401 this rail
-    // means to probe. "meadow" (no public surface) and "nowhere" (absent) both refuse outright.
     const onPrivateMount = await ask(base, "/meadow/graphql", { method: "POST" });
     const onAbsentMount = await ask(base, "/nowhere/graphql", { method: "POST" });
     expect(onPrivateMount.status).toBe(401);
@@ -367,7 +340,6 @@ describe("T133 — (g)/(k) discovery is opt-in: no --public-url, no door, no hea
       tokens: { "op-token": { operator: true } },
       port: 0,
       host: "127.0.0.1",
-      // no publicUrl
     });
     base = handle.url;
   });

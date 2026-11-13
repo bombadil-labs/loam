@@ -1,15 +1,3 @@
-// T146 — the human journey, in real Chrome. door-smoke.test.ts (frozen) proved a person can get
-// IN when everything goes right; this file proves a person who gets something WRONG is never
-// stranded on a bare JSON document, and that the pages link each other into a walk:
-//
-//   story A — a wrong password lands the browser on the sign-in page again, refusal stated,
-//             the typed user still in the field; retyping only the password signs in.
-//   story B — the link-walk: signed-in page → /admin by its own link → sign out by the admin
-//             page's own form → the signed-out page.
-//
-// Chrome ABSENT is a FAILURE, not a skip (cdp.ts's rule) — a skipped browser rail is how T143
-// shipped. This is a NEW file beside the frozen one; it imports the driver and edits nothing.
-
 import { createServer } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -46,8 +34,6 @@ beforeAll(async () => {
   homes.push(home);
   writeCredentials(home, { version: 1, users: { alice: await hashPassword(PASSWORD, CHEAP) } });
 
-  // The browser sends a REAL Origin, so ownOrigins — derived from publicUrl — must name the
-  // address Chrome actually uses (door-smoke's probe pattern: reserve a port, then bind it).
   const probe = createServer();
   await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
   const storePort = (probe.address() as { port: number }).port;
@@ -73,7 +59,6 @@ afterAll(async () => {
 const fill = (tab: Tab, name: string, value: string): Promise<unknown> =>
   tab.eval(`document.querySelector('input[name="${name}"]').value = ${JSON.stringify(value)}`);
 
-/** Submit the page's form whose action matches, and wait for the navigation it causes. */
 const submit = async (tab: Tab, action: string): Promise<void> => {
   const done = tab.loaded(`the navigation after submitting ${action}`);
   await tab.eval(`document.querySelector('form[action="${action}"]').submit()`);
@@ -89,8 +74,6 @@ describe("T146 — a person who gets it wrong is never stranded", () => {
     await fill(tab, "user", "alice");
     await fill(tab, "password", "not it");
     await submit(tab, "/login");
-    // A page, not a JSON document: the refusal is stated, the form is standing, and the user
-    // field still says alice — the person retypes one field, not two.
     const refusedText = await bodyText(tab);
     expect(refusedText).toContain("the login was refused");
     const formStands = await tab.eval(`document.querySelector('form[action="/login"]') !== null`);
@@ -106,8 +89,6 @@ describe("T146 — a person who gets it wrong is never stranded", () => {
   it("story B: the link-walk — signed-in names /admin, and the admin page's own form signs out", async () => {
     const tab = await browser.tab();
     await tab.navigate(`${base}/login`);
-    // Story A may have left a session in the shared cookie jar; the signed-in page is fine
-    // either way — reach it, then walk.
     const signedIn = await tab.eval(`document.querySelector('form[action="/logout"]') !== null`);
     if (!signedIn) {
       await fill(tab, "user", "alice");
@@ -115,12 +96,10 @@ describe("T146 — a person who gets it wrong is never stranded", () => {
       await submit(tab, "/login");
     }
     expect(await bodyText(tab)).toContain("Signed in.");
-    // The signed-in page names /admin — follow ITS link, no typed URL.
     const link = tab.loaded("the navigation into /admin");
     await tab.eval(`document.querySelector('a[href="/admin"]').click()`);
     await link;
     expect((await tab.eval("location.pathname")) as string).toBe("/admin");
-    // The admin page carries the sign-out form — use IT, and land signed out.
     await submit(tab, "/logout");
     expect(await bodyText(tab)).toContain("Signed out.");
     tab.close();

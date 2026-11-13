@@ -1,17 +1,3 @@
-// T153 item 2 — the shared capped body reader and field parser (src/server/body.ts). The four
-// doors read bodies through ONE module now; these rails pin the module's own contract so a later
-// consolidation cannot drift the semantics the door suites already pin end-to-end:
-//
-//   - readBodyStrict REFUSES past the cap (BodyTooLarge, the 413 transport contract) and answers
-//     the text within it.
-//   - readBodyLenient answers `undefined` past the cap and on a socket error (the form gates
-//     speak their own refusal, never the transport's).
-//   - parseBodyFields is the strict write-door parse (JSON primitives or urlencoded strings,
-//     malformed JSON THROWS); parseLoginBodyFields is the login-door parse (a typo in a
-//     password is a wrong password, never a 503, so JSON errors swallow to an empty map and
-//     non-string values are skipped); parseUrlEncoded is the plain field map (`+` = space,
-//     UTF-8 percent-escapes, duplicates last-wins).
-
 import { EventEmitter } from "node:events";
 import type { IncomingMessage } from "node:http";
 import { describe, expect, it } from "vitest";

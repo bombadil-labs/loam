@@ -1,22 +1,3 @@
-// SPEC §30 — the pack door: `loam.artifact` as a declaration, and the emitted page as a build PRODUCT
-// re-derived from surviving law on every call.
-//
-// WHAT THIS FILE ASSERTS, at both levels. DELTA level: the declaration is a union over surviving lawful
-// deltas, refused as malformed law at BOTH doors, and an erasure lands. OBJECT level: what this door
-// ANSWERS — the manifest it would grant, the coordinates it would hand a page, and every one of the six
-// refusals firing with its own reason.
-//
-// The emission arrived, so the byte-level assertions arrived with it: the bundle recovered from a page
-// content-addresses EQUAL to the binding's, the page carries no view data, and it references no external
-// host through any channel.
-//
-// WHAT IT DELIBERATELY DOES NOT ASSERT. "The emitted page contains the pen name nowhere" — unsatisfiable
-// against a verbatim-riding bundle for exactly the bindings that COMPLY with §23.3, since a compliant
-// renderer must SHOW which pen it writes under. The pen's SEED is the custody question, it lives in
-// `GatewayOptions.pens`, and the negative sweep over the token table below is what covers it. The
-// runtime half of that obligation — the host's writer-identity statement as the LAST claim in the DOM —
-// is `test/site/artifact-shell.test.ts`'s.
-
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -38,10 +19,6 @@ const OP_SEED = "0e".repeat(32);
 const OP = authorForSeed(OP_SEED);
 const PEN_SEED = "1a".repeat(32);
 
-// The FLOOR fixture: a pure function of its node, reaching for no host global. It reads a `consumes`
-// field, `hex`, AND `tag` — a prop OUTSIDE `consumes` — which is the load-bearing part rather than a
-// flourish: the host route hands the bundle the WHOLE resolved view, so a shell that asked only for
-// `consumes` would render differently here, and a fixture reading only `consumes` could never see it.
 const FLOOR_BUNDLE = `export default function (node) {
   var tags = node.view.tag === undefined ? "-" : String(node.view.tag);
   return "<p>h=" + node.view.height + " tag=" + tags + " hex=" + node.hex.slice(0, 8) + "</p>";
@@ -57,8 +34,6 @@ const boot = (over: Record<string, unknown> = {}): Promise<Gateway> =>
       registrations: [
         { hyperschema: PLANT, schema: PLANT_POLICY, roots: [FERN], writable: [...PLANT_WRITABLE] },
       ],
-      // §6's two keys: the pen's SEED is custody (config, below) and this is the other half — an
-      // operator grant of write standing. Provisioning is not authorization.
       grants: [grantClaims(STORE_ENTITY, PEN, "write", OP, 9_001)],
     }),
     { renderTimeoutMs: 10_000, ...over },
@@ -72,7 +47,6 @@ const spec = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-// A store ready to pack: a fact, a renderer, and the route declared publishable.
 const ready = async (over: Record<string, unknown> = {}, gwOver = {}): Promise<Gateway> => {
   const gw = await boot(gwOver);
   await gw.append([observed(FERN, "height", 42, 1000, OP_SEED)]);
@@ -91,7 +65,6 @@ describe("§30 criterion 1: one bundle, two hosts, one content address", () => {
     const recovered = bundleFromPage(page);
     expect(recovered).toBe(FLOOR_BUNDLE);
     expect(esmAddress(recovered!)).toBe(esmAddress(gw.renderers()[0]!.bundle));
-    // …and the SAME binding still serves its HTML unchanged at the host route.
     const served = await gw.serveRoute("plant", FERN, "full");
     expect(served.status).toBe(200);
     expect(served.body).toContain("h=42 tag=-");
@@ -103,9 +76,6 @@ describe("§30 criterion 1: one bundle, two hosts, one content address", () => {
     const binding = gw.renderers()[0]!;
     const delta = [...gw.reactor.snapshot()].find((d) => d.id === binding.deltaId)!;
     const roles = delta.claims.pointers.map((p) => p.role).sort();
-    // Delta level. The whole point of Recommendation 1: the duality is a property of the HOST, so the
-    // binding carries no target vocabulary and no per-target bundle role — one hash, no signed-vs-
-    // executed gap, and §23.5's latest-per-route law untouched because no new key is introduced.
     expect(roles).toEqual(["bundle", "consumes", "renders", "route", "schema"]);
     expect(roles).not.toContain("target");
     expect(roles).not.toContain("reads");
@@ -121,12 +91,8 @@ describe("§30 criterion 3: the page carries no data", () => {
     await gw.publishRenderer(spec());
     await gw.declareArtifact(["plant"]);
     const { page } = pack(gw);
-    // The value is legible through the door and ABSENT from the emitted bytes.
     expect((await gw.serveRoute("plant", FERN, "full")).body).toContain(SENTINEL);
     expect(page).not.toContain(SENTINEL);
-    // Negatively over the WHOLE token/seed table, so a renamed field cannot hide a leak. The pen's
-    // SEED is what was ever at risk here, and it is safe by construction: it lives server-side in
-    // GatewayOptions.pens, and no artifact has a server.
     for (const secret of [OP_SEED, PEN_SEED, OP]) expect(page).not.toContain(secret);
     await gw.close();
   });
@@ -136,8 +102,6 @@ describe("§30 criterion 4 (static half): the page requests nothing from an exte
   it("references no http(s) URL as a request target, and contains no eval or new Function", async () => {
     const gw = await ready();
     const { page } = pack(gw, { storeAddress: "https://example.test/garden/mcp" });
-    // No code path builds a request at an external host. The store address appears only as the
-    // human-readable onboarding copy a viewer READS — never as a target the page requests.
     for (const form of [
       /fetch\s*\(\s*["'`]https?:/,
       /new\s+XMLHttpRequest/,
@@ -148,13 +112,8 @@ describe("§30 criterion 4 (static half): the page requests nothing from an exte
     ]) {
       expect(page).not.toMatch(form);
     }
-    // The three names DO appear once each — inside the confined realm's scrub list, which exists to
-    // REMOVE them. A rail matching the bare token would have to be satisfied by not naming the thing
-    // being taken away, which is the opposite of what this criterion wants.
     expect(page).not.toMatch(/\beval\s*\(/);
     expect(page).not.toMatch(/new\s+Function/);
-    // The mount mechanism is a data:/blob: module import — the bytes the operator signed are the
-    // bytes that run. A textual rewrite would reintroduce the signed-vs-executed gap §23.1 closes.
     expect(page).toMatch(/createObjectURL|data:text\/javascript/);
     await gw.close();
   });
@@ -168,8 +127,6 @@ describe("§30 criterion 2: publication is a declaration, and it fail-closes bot
     expect(() => pack(gw)).toThrow(/not declared publishable/);
     await gw.declareArtifact(["plant"]);
     expect(pack(gw).manifest).toContain("loam_query");
-    // Strike the declaration: the door stops emitting on the very next call, with no restart. The
-    // declaration is a derived view over deltas, so removal is an ordinary lawful negation.
     const declaration = [...gw.reactor.snapshot()].find((d) =>
       d.claims.pointers.some(
         (p) => p.target.kind === "entity" && p.target.entity.context === "loam.artifact",
@@ -184,8 +141,6 @@ describe("§30 criterion 2: publication is a declaration, and it fail-closes bot
   });
 
   it("a malformed declaration is refused at BOTH doors — it opens nothing while looking open", async () => {
-    // Delta level: `artifactDefect` is the validator, and it is wired into the append door and the
-    // ingest door alike, so the two cannot disagree about what lawful loam:artifact data is.
     expect(artifactDefect(artifactClaims([], OP, 1))).toMatch(/at least one route/);
     expect(artifactDefect(artifactClaims(["plant"], OP, 1))).toBeUndefined();
     const gw = await boot();
@@ -194,15 +149,9 @@ describe("§30 criterion 2: publication is a declaration, and it fail-closes bot
       OP_SEED,
     );
     await expect(gw.append([malformed])).rejects.toThrow(/malformed law/);
-    // …and the INGEST door refuses the very same bytes. A declaration OPENS something, so a
-    // malformed one must be refused wherever it arrives; the two doors disagreeing is how a store
-    // ends up holding law no reader will honour. Ingest counts rather than throws — a peer's bad
-    // delta is rejected, not an error thrown at the operator.
     const receipt = await gw.federate([malformed], { admit: () => true });
     expect(receipt.accepted).toBe(0);
     expect(receipt.rejected).toBe(1);
-    // A WELL-FORMED one lands through the same door, so this is not a rail that passes by refusing
-    // everything.
     const good = signClaims(
       withStamp(gw.stamp(OP), (t) => artifactClaims(["plant"], OP, t)),
       OP_SEED,
@@ -216,7 +165,6 @@ describe("§30 criterion 2: publication is a declaration, and it fail-closes bot
 
 describe("§30 criterion 6: the manifest is minimal, enumerated, and never constitutional", () => {
   it("read-only lists loam_query; write-enabled adds loam_mutate; loam_register never appears", async () => {
-    // A store whose schema names NO writable field: immutable-by-default, so nothing may be written.
     const readOnly = await Gateway.boot(
       new MemoryBackend(),
       assembleGenesis({
@@ -232,8 +180,6 @@ describe("§30 criterion 6: the manifest is minimal, enumerated, and never const
 
     const writing = await ready();
     expect(pack(writing).manifest).toEqual(["loam_query", "loam_mutate"]);
-    // Constitutional, in every emission: loam_register would ask a viewer for store-shaping
-    // authority in order to draw a view.
     expect(pack(writing).manifest).not.toContain("loam_register");
     await writing.close();
   });
@@ -241,9 +187,6 @@ describe("§30 criterion 6: the manifest is minimal, enumerated, and never const
 
 describe("§30 criterion 9a: the pen refuses without acknowledgement, and the host route is unchanged", () => {
   it("refuses a pen-holding binding by name, and proceeds once acknowledged", async () => {
-    // A pen over the schema's WHOLE writable set, so this rail sees the pen refusal alone —
-    // criterion 11's narrowing refusal is a separate look, and bundling them would let either pass
-    // for the other.
     const gw = await ready(
       { writable: [...PLANT_WRITABLE], pen: "editor" },
       { pens: { editor: PEN_SEED } },
@@ -267,7 +210,6 @@ describe("§30 criterion 9a: the pen refuses without acknowledgement, and the ho
     const gw = await ready({ writable: ["height"], pen: "editor" }, { pens: { editor: PEN_SEED } });
     const out = await gw.writeRoute("plant", FERN, { height: 9 }, "full");
     expect(out.status).toBe(200);
-    // Delta level: the author of what landed is the PEN, not the operator and not a viewer.
     const authors = [...gw.reactor.snapshot()]
       .filter((d) =>
         d.claims.pointers.some(
@@ -282,10 +224,6 @@ describe("§30 criterion 9a: the pen refuses without acknowledgement, and the ho
 
 describe("§30 criterion 11: a narrower binding writable does not ride silently", () => {
   it("refuses naming both sets, then proceeds and pins the acknowledged list", async () => {
-    // The schema allows four fields; this binding narrows to one. `writeRoute` enforces the binding's
-    // own list at the door, atop the schema's; `loam_mutate` does not go through `writeRoute`, so on
-    // this host only the schema's list binds. Not a widening of anyone's authority — but it IS a
-    // difference between two hosts serving one route, and it is decidable here.
     const gw = await ready({ writable: ["height"], pen: "editor" }, { pens: { editor: PEN_SEED } });
     expect(() => pack(gw, { acknowledgePen: true })).toThrow(
       /narrows writes to \[height\] while the schema allows \[height, tag, watered, readings\]/,
@@ -307,7 +245,6 @@ describe("§30 criterion 12: a version-pinned binding refuses rather than packin
       expect((err as Error).message).toMatch(/pins a frozen reading, and MCP has no pinned read/);
       expect((err as Error).message).toMatch(/version argument on loam_query/);
     }
-    // Nothing is answered before every refusal has run: no partial assessment either.
     expect(answered).toBeUndefined();
     await gw.close();
   });
@@ -337,10 +274,6 @@ describe("§30 criterion 13a: a consumed field the schema DECLARES bytes refuses
     await gw.declareArtifact(["plant"]);
     expect(() => pack(gw)).toThrow(/declares `bytes`/);
     expect(() => pack(gw)).toThrow(/CSP blocks every external host/);
-    // The decidability is NARROWER than it sounds: `type` is declared on a RESOLVER, so a plain
-    // policy-shaped field carries no declared type at all, and `gql.ts` types the envelope at the
-    // VALUE level too. A `tag`-consuming renderer over the same store packs — pack-time refusal for
-    // the subset we can prove, and the shell's legible degrade for the rest.
     await gw.publishRenderer(spec({ route: "tagged", consumes: ["tag"] }));
     await gw.declareArtifact(["tagged"]);
     expect(() => gw.packArtifact("tagged", FERN, { server: "My Loam" })).not.toThrow();
@@ -370,13 +303,10 @@ describe("§30 criterion 14: withdrawal darkens the emission and the route toget
     await gw.erase(binding.deltaId, { reason: "the renderer is withdrawn" });
     expect(() => pack(gw)).toThrow(/no renderer is bound/);
     expect((await gw.serveRoute("plant", FERN, "full")).status).toBe(404);
-    // Delta level, both directions: the target is gone AND the door remembers the hole — a re-send
-    // of the very bytes is refused rather than quietly re-admitted.
     expect([...gw.reactor.snapshot()].some((d) => d.id === binding.deltaId)).toBe(false);
     await expect(gw.append([delta])).rejects.toThrow(
       /an erasure at loam:erasure refuses its return/,
     );
-    // …and a named live bystander survives: the fact the renderer read is untouched.
     expect(
       [...gw.reactor.snapshot()].some((d) =>
         d.claims.pointers.some(
@@ -400,10 +330,6 @@ describe("§30 criterion 27: an unusable connector display name refuses at pack 
   });
 
   it("a valid name packs, and the page names it", async () => {
-    // The header records what is NOT refusable: two publishers telling viewers to name their
-    // connector the same thing is a collision the packer cannot see — it has no way to know what
-    // else a viewer installed. Its runtime face is `selection_required` (criterion 15), so the
-    // hazard is documentation plus a degraded state, never a refusal.
     const gw = await ready();
     expect(pack(gw, { server: "Garden Store" }).coordinates.server).toBe("Garden Store");
     await gw.close();
@@ -411,17 +337,9 @@ describe("§30 criterion 27: an unusable connector display name refuses at pack 
 });
 
 describe("§30 criterion 34c: a store that OUTLIVES the realm is refused at pack time", () => {
-  // A worker global scope has no `window` and no `localStorage` — which is what made the realm look
-  // sufficient — but it DOES have these, as bare identifiers, so `terminate()` alone does NOT empty
-  // the compartment. A byte-scan over one conforming page could never have seen it.
   it.each(["indexedDB", "caches", "BroadcastChannel", "importScripts"])(
     "refuses a bundle reaching %s, and names THAT channel rather than a boilerplate list",
     async (channel) => {
-      // Anchored on the part of the message that VARIES. The refusal also interpolates the first three
-      // worker-family names as prose, so a bare `new RegExp(channel)` matched boilerplate present
-      // regardless of what the scan reported — a scan that always named the wrong global would have
-      // passed for three of these four. (That the SCAN reports the right name is
-      // `test/gateway/artifact-scan.test.ts`'s subject; this asserts the door repeats it faithfully.)
       const bundle = `export default (n) => { var k = ${channel}; return "<p>" + n.view.height + "</p>"; };`;
       const gw = await ready({ bundle });
       expect(() => pack(gw)).toThrow(new RegExp(`globals — ${channel} \\(worker\\)`));
@@ -447,8 +365,6 @@ describe("§30 criterion 37a: a host-only affordance cannot silently ride", () =
   ])(
     "refuses a bundle referencing %s, so an app cannot become artifact-only in silence",
     async (_n, bundle) => {
-      // The design decision this defends: a host affordance reaches an app by MEDIATION — a gesture the
-      // shell honors — never by ambient reach. T79 ships the seam without shipping a prompt verb.
       const gw = await ready({ bundle });
       expect(() => pack(gw)).toThrow(/host affordance reaches an app by MEDIATION/);
       await gw.close();
@@ -467,11 +383,8 @@ describe("§30 criterion 23 (delta half) / 26 (delta half): erasure lands, and t
     const before = await gw.serveRoute("plant", FERN, "full");
     expect(before.body).toContain("h=42");
     await gw.erase(fact.id, { reason: "the gardener asked" });
-    // Delta level: the bytes are gone, and a named live bystander — the renderer binding itself —
-    // survives, so this is not a rail that could pass by over-purging.
     expect([...gw.reactor.snapshot()].some((d) => d.id === fact.id)).toBe(false);
     expect(gw.renderers()).toHaveLength(1);
-    // Object level: the door no longer serves the value.
     expect((await gw.serveRoute("plant", FERN, "full")).body).not.toContain("h=42");
     await gw.close();
   });
@@ -479,10 +392,6 @@ describe("§30 criterion 23 (delta half) / 26 (delta half): erasure lands, and t
 
 describe("§30 criterion 21 (the shared-clock half): both hosts carry the SAME number", () => {
   it("the coordinates carry the host's OWN render budget, not a baked constant", () => {
-    // A page emitted from these coordinates adopts the server host's budget, so the two hosts are
-    // visibly the same clock and an operator cannot ship an app that only works where they tested it.
-    // Asserted as a default here and as a tightening below, because a hard-coded 500 satisfies one and
-    // not both. (Whether the emitted page READS the number is the emission's own rail.)
     expect(RENDER_TIMEOUT_MS).toBe(500);
     expect(readFileSync(join(process.cwd(), "src", "gateway", "artifact.ts"), "utf8")).toContain(
       "gw.options.renderTimeoutMs ?? RENDER_TIMEOUT_MS",
@@ -497,11 +406,6 @@ describe("§30 criterion 21 (the shared-clock half): both hosts carry the SAME n
 });
 
 it("the ALREADY-EMITTED bytes are unaffected by a later withdrawal — the accepted residual", async () => {
-  // Criterion 26's delta half. The page a stranger already holds is the one thing withdrawal cannot
-  // reach, and that is ACCEPTED and pinned here rather than implied: the DATA never outlives its
-  // source (criterion 3 proves it at the bytes) and the CODE always does. The follow-on that would
-  // close it is a `loam_manifest(route)` read over constitutional publication state, checked before
-  // mounting — a new disclosure decision, and not this ticket's. If it lands, this inverts.
   const gw = await ready();
   const { page } = pack(gw);
   const binding = gw.renderers()[0]!;
@@ -509,7 +413,6 @@ it("the ALREADY-EMITTED bytes are unaffected by a later withdrawal — the accep
     signClaims(makeNegationClaims(OP, 9_000_000, binding.deltaId, "retire the renderer"), OP_SEED),
   ]);
   expect(() => pack(gw)).toThrow();
-  // The bytes in hand still carry the whole app. `test/site/artifact-shell.test.ts` drives them.
   expect(bundleFromPage(page)).toBe(FLOOR_BUNDLE);
   expect(page).toContain("loam-app");
   await gw.close();
@@ -526,5 +429,4 @@ describe("§30: an erase order is still the operator's, and this door widens not
   });
 });
 
-// An erasure's shape is erase.ts's; this file only ever asks it to exist.
 void eraseClaims;

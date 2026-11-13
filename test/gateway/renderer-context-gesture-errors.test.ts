@@ -1,6 +1,3 @@
-// T287: bound operational read faults share the initial read's uniform refusal boundary.
-// Missing lenses stay scoped not_served answers. Success/absence controls run real workers;
-// only operational fault seams are injected.
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -143,7 +140,7 @@ describe("bound renderer gesture failure boundary", () => {
     });
     expect(response).toEqual(gone);
     expect(read.mock.calls.map((args) => args[1])).toEqual([FERN, OTHER]);
-    expect(renders).not.toHaveBeenCalled(); // neither the raw error nor HTML crosses into a worker
+    expect(renders).not.toHaveBeenCalled();
   });
 
   it("renders an unavailable bound lens as an ordinary scoped not_served answer", async () => {

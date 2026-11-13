@@ -1,7 +1,3 @@
-// An inbox's grants are its own law, read with the POOL's key (step 6 inventory, pattern 3). Every
-// pool holds a key of its own, distinct from the host's, so only the pool's key finds the grant.
-// Both a minted key and one the key source supplies are pinned.
-
 import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed } from "@bombadil/rhizomatic";
 import { openerStands } from "../../src/gateway/container.js";

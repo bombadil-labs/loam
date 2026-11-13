@@ -1,8 +1,3 @@
-// Phase 10 (PR #22) — THE CRASH: the almanac keeps a seed vault (an archive mirror); its
-// sqlite is lost mid-story; the next open heals from the vault BEFORE the gateway
-// reads, and the dossiers hold as if nothing happened. Cold storage is a combinator over the
-// seam: a lagging copy is merely behind, and restore is union.
-
 import { readdirSync } from "node:fs";
 import { dropStore, check, constitute, gql, openStore, opToken, summary, tok } from "./harness.mjs";
 
@@ -15,7 +10,6 @@ const wrenBio = async (base) =>
 
 let almanac;
 try {
-  // 10.1 — the vault fills in the same appends that fill the store
   almanac = await openStore("almanac");
   await constitute(almanac, ["wren", "miles", "odile", "petra"], 1_000_000);
   await gql(
@@ -34,7 +28,6 @@ try {
   const bioBefore = await wrenBio(almanac.base);
   await almanac.close();
 
-  // 10.2 — THE CRASH: the sqlite is gone entirely; the next open replants from the vault
   dropStore("almanac");
   almanac = await openStore("almanac");
   check(
@@ -45,7 +38,6 @@ try {
     `${almanac.healed.toPrimary} replanted`,
   );
 
-  // 10.3 — the dossiers hold: same question, same answer, as if nothing happened
   const bioAfter = await wrenBio(almanac.base);
   check(
     "10.3",
@@ -54,7 +46,6 @@ try {
     `bio: ${JSON.stringify(bioAfter)}`,
   );
 
-  // 10.4 — life continues: a post-crash write reaches store and vault alike
   await gql(
     almanac.base,
     tok("wren", "almanac"),

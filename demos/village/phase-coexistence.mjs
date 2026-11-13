@@ -1,10 +1,3 @@
-// Phase COEXISTENCE — ONE GATHER, MANY READINGS (SPEC §21.7, ticket T2). The symmetry the spec
-// promised from the start: HyperSchema : HyperView :: Schema : View, and one hyperschema carries
-// many living lenses. The almanac's dossier gather gains a second reading — FirstImpressions, the
-// archival lens that keeps the FIRST thing anyone said about a villager (oldest-wins, the town's
-// founding memory) — served beside the broad Dossier, evolving on its own clock, and deliberately
-// NOT declared public: the anonymous door learns nothing of what the operator kept private.
-
 import { parseSchema, parseTerm, signClaims } from "@bombadil/rhizomatic";
 import { check, openStore, summary } from "./harness.mjs";
 
@@ -41,7 +34,6 @@ try {
   const read = async (field) =>
     (await gw.query(`{ ${field}(entity: "${subject}") { note } }`)).data?.[field]?.note;
 
-  // Two claims across the years; the broad lens reads the latest word, the archive the first.
   await gw.publishRegistration(
     DESK,
     parseSchema({ name: "Townbook", alg: 1, props: { note: LATEST }, default: LATEST }),
@@ -53,7 +45,6 @@ try {
   );
   await gw.append([say("newly arrived, all promise", 1000), say("keeper of the commons", 2000)]);
 
-  // COEXIST.1 — the second lens joins; the first is NOT evicted (the pre-§21.7 registry evicted).
   await gw.publishRegistration(
     DESK,
     parseSchema({ name: "FirstImpressions", alg: 1, props: { note: OLDEST }, default: OLDEST }),
@@ -67,8 +58,6 @@ try {
     `latest: ${JSON.stringify(await read("townbook"))} · first: ${JSON.stringify(await read("firstImpressions"))}`,
   );
 
-  // COEXIST.2 — each lens evolves on its own clock: the archive narrows to silence (drops `note`),
-  // and the broad reading never flinches.
   await gw.publishRegistration(
     DESK,
     parseSchema({ name: "FirstImpressions", alg: 1, props: {}, default: OLDEST }),
@@ -84,7 +73,6 @@ try {
     `broad: ${JSON.stringify(broadStill)}`,
   );
 
-  // COEXIST.3 — loam.public admits lens by lens: Townbook is declared, FirstImpressions is not.
   await gw.declarePublic(["Townbook"]);
   const pub = await gw.queryPublic(`{ townbook(entity: "${subject}") { note } }`);
   const leak = await gw.queryPublic(`{ firstImpressions(entity: "${subject}") { note } }`);

@@ -1,9 +1,3 @@
-// Records how Loam's negation readers treat a strike with its own validity interval. Each strike is
-// read at the moment before its boundary, at it, and after it. Beside Loam's readers sits the
-// substrate's answer: a `trust` mask for the operator, evaluated at the read time. Since step 4 the
-// two agree in every cell; a cell where they differ is a moved decision.
-// Scope: raw ingest for the readers; one booted gateway for a registration's served surface.
-
 import { afterEach, describe, it, vi } from "vitest";
 import {
   evalTerm,
@@ -23,7 +17,7 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { PLANT, PLANT_POLICY } from "../../test/gateway/fixtures.js";
 import { bothOrders, idsOf, KEY, record, SEEDS, signed, strike, type Who } from "./corpus.js";
 
-const T = 100; // every boundary in this corpus
+const T = 100;
 
 afterEach(() => {
   vi.useRealTimers();
@@ -42,7 +36,6 @@ const claim = (t: number, label: string): Delta => {
   return signed(claims, "writer", label);
 };
 
-/** A strike on `target` by `by`, created at 50 and valid over `interval`. */
 const timedStrike = (
   target: Delta,
   by: Who,
@@ -77,7 +70,6 @@ const CORPUS: readonly Delta[] = [
 ];
 const CLAIMS = [starts, ends, revives, plain];
 
-// The substrate's own answer: which claims survive the operator's strikes at `now`.
 const substrateLive = (r: Reactor, now: number): Set<string> => {
   const term = parseTerm({
     op: "mask",

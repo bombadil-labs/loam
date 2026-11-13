@@ -1,76 +1,33 @@
-// The surface seam (SPEC §17). GraphQL was never the surface; it was the first surface. A
-// registration — (HyperSchema, Schema), filed as deltas — is interface-agnostic truth, and
-// every door a store answers through is a MATERIALIZATION derived from it. This module is
-// that seam, published exactly as the store seam is (src/store/backend.ts): the gateway owns
-// STATE and provides these hooks; a generator owns SHAPE and derives a door; every generator
-// is an interchangeable witness to the registrations.
-//
-// Doors share one law. The hooks are the only way through — resolve/mutate/watch/claim all
-// run the gateway's own authorization, admission, and erasure discipline — so a generator
-// CANNOT invent authority or widen a projection; it can only narrow one (a read-only door
-// passes "read"). Two doors that disagree about lawful data are a bug by definition; the
-// contract test for any new generator is agreement with the doors that already exist — one
-// ground, one registration, the same view, _hex for _hex.
-
 import type { HyperSchema, Schema, Primitive, View } from "@bombadil/rhizomatic";
 import type { ConnectionBinding } from "../gateway/gateway.js";
 import type { ClaimTemplates, RefSpecs, ResolverSpecs } from "../gateway/registration.js";
 
-// One registered lens, as a generator receives it: the hyperschema (gather), its resolution
-// schema, the roots it holds live, and (optionally) the claim templates its mutations compile to.
 export interface Registered {
   readonly hyperschema: HyperSchema;
   readonly schema: Schema;
   readonly roots: readonly string[];
-  // The LENS name (§21.7): what a generator keys its family on — sibling lenses share the
-  // hyperschema, never the lens. Absent means the degenerate 1:1 reading (the hyperschema's name).
   readonly lensName?: string;
   readonly mutations?: ClaimTemplates;
-  // Front-door writability (SPEC §14, immutable-by-default): the fields that accept a surface write;
-  // the rest are read-only (assert / clear / remove / link / sever refused). Absent → NO field is
-  // writable (§21's deny-by-default posture).
   readonly writable?: readonly string[];
-  // Custom resolvers (SPEC §22), per field — a generator reads each resolved field's declared OUTPUT
-  // TYPE to advertise the field honestly (the value is a computation the Policy algebra never named).
   readonly resolvers?: ResolverSpecs;
-  // Reference declarations (SPEC §51), per prop — what a generator derives link/unlink mutations
-  // from, and the props whose primitive write argument must NOT be offered.
   readonly refs?: RefSpecs;
 }
 
-// What flows from a root resolution to a door's field readers: one resolution, many reads.
-// `hex` is the content address of the resolved view — the same value through EVERY door.
 export interface ResolvedNode {
   readonly entity: string;
   readonly view: Record<string, View>;
   readonly hex: string;
   readonly hviewHex: string;
-  // The time pin (SPEC §26): present only on an AS-OF read — the moment T this view was
-  // resolved against ("the ground as it stood at T"). Absent on a present-tense read, which is
-  // the live materialization by construction. It rides the response beside `hex`, never inside
-  // the resolved data.
   readonly asOf?: number;
-  // The erasure annotation (SPEC §26/§11): on an as-of read, the sorted timestamps at which this
-  // ground lawfully forgot something SINCE the moment T — an erasure spoken after T may have
-  // redacted a fact that stood at T, so the read confesses each discontinuity's moment (never the
-  // content: an erasure remembers THAT it forgot and WHEN, not what; the count is their length).
-  // Absent on a present read (the present already reflects every erasure as ordinary absence).
   readonly forgotten?: number[];
-  // The SLATE-SUPPRESSION confession (SPEC §29.3): how many ids a standing slate withheld from the
-  // ground this view was resolved over. In the same register as `forgotten` and for the same reason —
-  // an as-of read at a moment before a slate would otherwise serve the condemned delta, and the
-  // narrowing that stops it is worth confessing rather than hiding. Absent when nothing is suppressed.
   readonly suppressed?: number;
 }
 
-// A subscription event: the re-resolved node plus where it came from and what moved.
 export interface PatchNode extends ResolvedNode {
-  readonly fromHex: string | null; // null on the initial snapshot
-  readonly changed: readonly string[] | null; // null on the initial snapshot
+  readonly fromHex: string | null;
+  readonly changed: readonly string[] | null;
 }
 
-// One concrete pointer of a claim, as a door hands it to the gateway: either an entity
-// pointer (at + context) or a primitive (value) — never both, never neither.
 export interface ClaimPointerSpec {
   readonly role: string;
   readonly at?: string;
@@ -78,27 +35,14 @@ export interface ClaimPointerSpec {
   readonly value?: Primitive;
 }
 
-// The hooks the gateway provides to every generator. Nothing here speaks any interface's
-// language: resolve answers a view, mutate compiles a write to a signed claim through the
-// door discipline, watch streams re-resolutions, claim lands raw signed pointers. The
-// GATEWAY owns all four; a door only translates its dialect into these calls.
-// Every hook takes a trailing `binding` (SPEC §58): a bound connection's request — its writes land
-// in its inbox pool and its reads resolve over the container its consent named. Absent, the request
-// is the operator's or a store-wide actor's, on this store's own ground.
 export interface SurfaceHooks {
-  // A named operation must check that its source is legible BEFORE signing or making listing
-  // declarations. Optional for non-federated generators; gateway surfaces supply this guard.
   assertSource?(schemaName: string, binding?: ConnectionBinding): void;
-  // Resolve a view at an entity. An optional `asOf` (SPEC §26) reads a MOMENT: the ground as it
-  // stood at timestamp T, resolved by the same program — omit it and the read is present-tense.
   resolve(
     schemaName: string,
     entity: string,
     asOf?: number,
     binding?: ConnectionBinding,
   ): ResolvedNode;
-  // The same read through its route, where the host offers one (SPEC-16 M5): an eligible ordinary
-  // read may run the portable batch path, which is asynchronous. Absent means `resolve` serves.
   resolveRead?(
     schemaName: string,
     entity: string,
@@ -112,10 +56,6 @@ export interface SurfaceHooks {
     actorSeed?: string,
     binding?: ConnectionBinding,
   ): Promise<ResolvedNode>;
-  // Clearing is retraction (SPEC §14): negate the caller's OWN surviving contributions to each
-  // named field, so it resolves to what survives — the next pick, the remaining tags, the
-  // withdrawn addend — or, if the caller was its only voice, to absence (rendered per absentAs).
-  // Retract-your-own is the whole reach: a clear never touches a delta the caller did not author.
   clear(
     schemaName: string,
     entity: string,
@@ -123,8 +63,6 @@ export interface SurfaceHooks {
     actorSeed?: string,
     binding?: ConnectionBinding,
   ): Promise<ResolvedNode>;
-  // Remove ONE value (SPEC §14 amendment): retract only the caller's own contribution(s) to `field`
-  // whose claimed value is one of `values` — the rest of the field, theirs and everyone's, stands.
   remove(
     schemaName: string,
     entity: string,
@@ -133,9 +71,6 @@ export interface SurfaceHooks {
     actorSeed?: string,
     binding?: ConnectionBinding,
   ): Promise<ResolvedNode>;
-  // Link an edge (SPEC §14 edge verbs): assert an edge delta — the same per-prop shape as a write,
-  // but its value pointer targets an ENTITY, followed by the gather's `expand` into the child's
-  // view. Pure sugar over `assert`; offered only for a field whose schema declares an edge role.
   link(
     schemaName: string,
     entity: string,
@@ -145,8 +80,6 @@ export interface SurfaceHooks {
     actorSeed?: string,
     binding?: ConnectionBinding,
   ): Promise<ResolvedNode>;
-  // Sever an edge (SPEC §14 edge verbs): retract YOUR OWN edge deltas in `field` — all of them, or
-  // only those pointing at one of `targets`. Pure sugar over `retract`; the dual of link.
   sever(
     schemaName: string,
     entity: string,
@@ -155,10 +88,6 @@ export interface SurfaceHooks {
     actorSeed?: string,
     binding?: ConnectionBinding,
   ): Promise<ResolvedNode>;
-  // Lens-derived edge writes (SPEC §51): assert ONE symmetric two-pointer edge delta into a
-  // declared reference prop — its exact shape (roles and contexts) derived from the registration's
-  // `refs` declaration, never supplied by the caller — and retract the caller's OWN matching
-  // edge(s). The dual pair the generated `link<n>_<P>` / `unlink<n>_<P>` mutations resolve through.
   linkRef(
     schemaName: string,
     entity: string,
@@ -181,10 +110,6 @@ export interface SurfaceHooks {
     actorSeed?: string,
     binding?: ConnectionBinding,
   ): Promise<{ delta: string }>;
-  // The listing door (T110): the distinct entities the lens's backing container holds evidence
-  // for, resolved through the lens — one page, ascending by entity id, `after` exclusive. Only
-  // a FULL projection may derive a field from this hook: enumeration is authed-only (public
-  // enumeration is §12's deferred question), so a read door that offered it would be widening.
   list(
     schemaName: string,
     opts?: { limit?: number; after?: string },
@@ -192,13 +117,8 @@ export interface SurfaceHooks {
   ): Promise<ResolvedNode[]>;
 }
 
-// A projection is a door's capability posture (SPEC §17): "full" derives reads and writes;
-// "read" derives a smaller world — narrowing is a generator's right, widening never is.
 export type SurfaceProjection = "full" | "read";
 
-// The seam itself: a generator derives a door (of whatever type — a GraphQLSchema, an OpenAPI
-// document + router, a compiled artifact) from the registrations and the hooks. buildGqlSchema
-// (src/gateway/gql.ts) is the first witness; the REST door is the second.
 export type SurfaceGenerator<Door> = (
   defs: readonly Registered[],
   hooks: SurfaceHooks,

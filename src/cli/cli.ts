@@ -1,11 +1,3 @@
-// The `loam` command: argument routing, help, version — every subcommand shipped. Deliberately
-// a tiny hand-rolled parser (see args.ts): the surface is a handful of subcommands, and a
-// framework would be the heaviest dependency in the package.
-//
-// `run` returns a numeric exit code, EXCEPT `serve --http` with { detach }, which returns the
-// live ServerHandle so a caller (a test, or a supervisor) can drive and close it. The default
-// `serve` blocks until the process is signalled.
-
 import { runOperatorCommand } from "./command.js";
 import { randomBytes } from "node:crypto";
 import {
@@ -158,15 +150,11 @@ export interface IO {
 }
 
 export interface RunOptions {
-  readonly detach?: boolean; // serve: return the handle instead of blocking
-  readonly version?: string; // override the reported version (tests)
-  /** `user create` and guided `init`: ask for a secret some other way than the terminal (embedders; tests). */
+  readonly detach?: boolean;
+  readonly version?: string;
   readonly readSecret?: (prompt: string) => Promise<string>;
-  /** guided `init`: ask in the open — the first user's name — some other way than the terminal. */
   readonly readInput?: (prompt: string) => Promise<string>;
-  /** `user create` and guided `init`: the scrypt cost, for a caller that must not pay the interactive default (tests). */
   readonly scrypt?: ScryptParams;
-  /** `serve`: the federation poll interval. Only a test has any business shortening a minute. */
   readonly syncEveryMs?: number;
 }
 
@@ -191,23 +179,18 @@ type CommandName =
   | "erasures";
 
 interface CommandSpec {
-  readonly summary: string; // the line the top-level help shows
-  readonly usage: string; // the invocation, positionals spelled out
-  readonly flags: ReadonlySet<string>; // the whole allowlist — what rejectUnknown permits
-  readonly booleans?: ReadonlySet<string>; // the subset taking no value — what parseArgs is told
-  readonly notes?: readonly string[]; // the prose a flag list cannot carry
+  readonly summary: string;
+  readonly usage: string;
+  readonly flags: ReadonlySet<string>;
+  readonly booleans?: ReadonlySet<string>;
+  readonly notes?: readonly string[];
 }
 
-// The shelf listing `--help` prints, its column sized to the longest NAME — a fixed pad narrower
-// than `shallow-person` concatenated that name with its summary, the exact defect the help-column
-// layout exists to prevent. A function declaration so both COMMANDS entries below can call it.
 function stockShelfLines(): string[] {
   const width = Math.max(...STOCK_SCHEMAS.map((s) => s.name.length)) + 2;
   return STOCK_SCHEMAS.map((s) => `  ${s.name.padEnd(width)}${s.summary}`);
 }
 
-// Each command's vocabulary, ONCE: the sets `--help` prints are the very sets the parser and the
-// allowlist are handed (via parseFor), so a command's manual cannot drift from what it accepts.
 const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
   command: {
     summary: "run an operator-local signed retain or pinned evaluation",
@@ -306,10 +289,6 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
       "supersede",
       "yes",
     ]),
-    // `--yes` is a bare confirmation, not a value. Without this the parser demanded a value and
-    // `federate drop --channel X --yes` could not be typed correctly by anyone.
-    // `--pen` is the same shape: §6's second key for an app that can WRITE, asked as a word. So is
-    // `--supersede`: moving a mounted route to the peer's newer code is a decision, not a default.
     booleans: new Set(["yes", "pen", "supersede"]),
     notes: [
       "Federation is container-to-container. `open` names the container you receive INTO and the",
@@ -569,9 +548,6 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
   },
 };
 
-// One blurb per flag NAME — a name means the same thing in every command that takes it. The LIST a
-// command shows comes from its own allowlist, so a flag added there appears in its help whether or
-// not anyone wrote it a blurb: an unexplained flag is still printed, never silently omitted.
 const FLAG_HELP: Readonly<
   Record<string, { readonly arg: string; readonly note: string; readonly required?: boolean }>
 > = {
@@ -644,9 +620,6 @@ const FLAG_HELP: Readonly<
 
 function topHelp(): string {
   const names = Object.keys(COMMANDS) as CommandName[];
-  // The column fits the longest command NAME rather than a fixed ten: a name exactly as wide as the
-  // pad would butt straight against its summary, which is the same defect `helpFor` already fixed
-  // one level down.
   const width = Math.max(...names.map((n) => n.length)) + 2;
   const commands = names.map((name) => `  ${name.padEnd(width)}${COMMANDS[name].summary}`);
   return [
@@ -669,8 +642,6 @@ function helpFor(command: CommandName): string {
       spec.booleans?.has(name) === true || arg === "" ? `--${name}` : `--${name} ${arg}`;
     return { shown, note: required === true ? `${note} (required)` : note };
   });
-  // The column fits the command's longest flag, capped so a very long one wraps its note to the
-  // next line rather than stretching every row.
   const width =
     rows.length === 0 ? 18 : Math.min(Math.max(...rows.map((r) => r.shown.length)) + 2, 26);
   const options = rows.map(({ shown, note }) => {
@@ -690,7 +661,6 @@ function helpFor(command: CommandName): string {
 
 const isCommand = (name: string): name is CommandName => Object.hasOwn(COMMANDS, name);
 
-// Parse a command's arguments through its OWN spec — the one the help text renders.
 function parseFor(command: CommandName, args: readonly string[]): Parsed {
   const spec = COMMANDS[command];
   const parsed = parseArgs(args, spec.booleans ?? new Set());
@@ -698,22 +668,6 @@ function parseFor(command: CommandName, args: readonly string[]): Parsed {
   return parsed;
 }
 
-// Every store this CLI opens, opened the same way: the sqlite driver's one-time freelist scrub is
-// best-effort — a second handle can refuse it and the store opens regardless — so its deferral
-// rides the operator's log. A scrub nobody hears about is a §11 promise quietly left unkept.
-
-// A federation channel's pool needs DURABLE bytes: a separate container defaults to memory, and a
-// channel that forgets its peer on restart is not federation (T189). One sqlite file per pool,
-// inside the home.
-//
-// THE FILENAME MUST BE INJECTIVE, and folding unsafe characters to "_" is not. `channel:team a:alice`
-// and `channel:team_a:alice` are distinct containers that both folded to `channel_team_a_alice`, so
-// two channels shared one file — and `drop()` enumerates a store's whole contents, so severing one
-// would have purged the bystander's bytes while the CLI printed "other channels are untouched".
-// That is the over-purge direction, which has no recovery.
-//
-// So the name carries a hash of the FULL pool name. The readable slug is kept for a human reading
-// `ls`, but identity lives in the digest, where the folding cannot reach it.
 export function channelBackendFor(home: string, io: IO): (pool: string) => SqliteBackend {
   return (pool: string) => {
     const dir = join(home, "channels");
@@ -724,8 +678,6 @@ export function channelBackendFor(home: string, io: IO): (pool: string) => Sqlit
   };
 }
 
-// Boot reads past a row it cannot read and serves the rest (§25), so an entity whose delta was set
-// aside reads as absent. The count is the one thing that tells an operator the absence is damage.
 const setAsideLine = (rows: number): string =>
   `${rows} unreadable row${rows === 1 ? " was" : "s were"} set aside, and what ` +
   `${rows === 1 ? "it carries does" : "they carry do"} not read — \`loam repair list\` names them`;
@@ -734,11 +686,6 @@ function openStore(path: string, io: IO): SqliteBackend {
   return new SqliteBackend(path, { onScrubDeferred: (why) => io.err(why) });
 }
 
-// WHO IS SERVING THIS HOME. `loam serve` leaves a record beside config.json; the offline
-// commands (pull, register) consult it so a success report can say the one thing sqlite cannot:
-// a running server reads new deltas on its next request, but what it loaded at boot does not
-// change through a second handle. Removed on clean shutdown; a crash leaves it behind, and the
-// dead-pid check below is what keeps the stale record quiet.
 const servingFile = (home: string): string => join(home, "serving.json");
 
 const recordServing = (home: string, url: string, store: string): void => {
@@ -746,11 +693,6 @@ const recordServing = (home: string, url: string, store: string): void => {
   writeFileSync(servingFile(home), `${JSON.stringify(record)}\n`);
 };
 
-// The staleness probe, and its direction is the whole design (H9, inverted: this probe's SILENCE
-// is what licenses the trap, so uncertainty must never read as absence). Two silences are earned —
-// no record at all, and a recorded pid that is provably dead. A record that cannot be read,
-// cannot be parsed, or is missing its fields WARNS: a false warning costs a sentence; a false
-// silence costs an operator an afternoon of disbelieving their own store.
 function servingWarning(home: string, store: string): string | undefined {
   const who = servingProbe(home, store);
   if (who === undefined) return undefined;
@@ -762,9 +704,6 @@ function servingWarning(home: string, store: string): string | undefined {
   );
 }
 
-// WHO the serving record names, without the tail about staleness — `servingWarning` qualifies a
-// success with it, and a verb the running server would UNDO refuses with it. `certain` is false
-// when the record exists and cannot be read: a maybe, which both callers treat as a yes.
 function servingProbe(
   home: string,
   store: string,
@@ -780,7 +719,6 @@ function servingProbe(
   try {
     raw = readFileSync(file, "utf8");
   } catch (err) {
-    // ENOENT is the one absence this probe may trust: nothing claims to be serving.
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     return uncertain;
   }
@@ -800,14 +738,10 @@ function servingProbe(
   ) {
     return uncertain;
   }
-  // A server on a DIFFERENT store file is not this trap: the world that moved is not the one
-  // being served. (Same-path spellings are resolved; a genuinely different file stays quiet.)
   if (resolve(record.store) !== resolve(store)) return undefined;
   try {
-    process.kill(record.pid, 0); // signal 0: existence check, nothing delivered
+    process.kill(record.pid, 0);
   } catch (err) {
-    // ESRCH is checked-and-no — a crash's leftover record. Anything else (EPERM: alive, not
-    // ours) means a process is there, and a process we cannot ask is a process we warn about.
     if ((err as NodeJS.ErrnoException).code === "ESRCH") return undefined;
   }
   const url = typeof record.url === "string" ? record.url : undefined;
@@ -818,11 +752,6 @@ function servingProbe(
   };
 }
 
-// §54 — the guided flow's trigger, PURE and exported for its rail: the TTY bit is an argument, so
-// both sides (a terminal with no flags; a pipe with one guided flag) are pinnable without a pty.
-// `--home` and `--seed` are deliberately absent from the list: they belong to the bare init that
-// hundreds of scripts and frozen rails call flagless through a pipe, and a flag that means "the
-// same init, elsewhere" must not change which flow runs.
 export function isGuidedInit(parsed: Pick<Parsed, "flags" | "booleans">, tty: boolean): boolean {
   return (
     tty ||
@@ -837,13 +766,10 @@ export function isGuidedInit(parsed: Pick<Parsed, "flags" | "booleans">, tty: bo
 async function cmdInit(args: readonly string[], io: IO, options: RunOptions): Promise<number> {
   const parsed = parseFor("init", args);
   if (parsed.positionals.length > 0) {
-    // `loam init <seed>` is the natural typo for `--seed <seed>` — refuse it, and NEVER echo
-    // the value, lest a seed reach a terminal or a shell history via the error.
     io.err("init takes no positional arguments (import a seed with `loam init --seed <hex>`)");
     return 2;
   }
   if (!isGuidedInit(parsed, process.stdin.isTTY === true)) {
-    // The bare init, byte-for-byte (§54 rule 3): the two files, the one line, nothing asked.
     const home = parsed.flags.get("home") ?? defaultHome();
     const result = initHome(home, parsed.flags.get("seed"));
     io.out(
@@ -856,8 +782,6 @@ async function cmdInit(args: readonly string[], io: IO, options: RunOptions): Pr
   return cmdInitGuided(parsed, io, options);
 }
 
-// The `--stock` selection, validated WHOLE before anything lands — a typo'd third name must not
-// surface after two entries installed.
 function stockSelection(chosen: string, io: IO): readonly StockSchema[] | number {
   if (chosen === "all") return STOCK_SCHEMAS;
   const picked: StockSchema[] = [];
@@ -888,21 +812,11 @@ function stockSelection(chosen: string, io: IO): readonly StockSchema[] | number
   return picked;
 }
 
-// §54's shelf pass — the same §50 machinery `register --stock` runs (installOrder for the
-// closure, skip-if-bound keyed on the LENS name, the pre-flight contest refusal, the divergence
-// warning), over the UNION of the selection and with the skip applied to EVERY entry, targets
-// included: rule 7 makes a guided re-run the ordinary skip-if-bound install, where `register`'s
-// own door deliberately re-publishes its target (the evolve path). cmdRegister's dep loop is
-// this loop's sibling; a change to either's report should visit both. The staleness warning at
-// the end is T243's: a fresh init precedes serve by construction (§54 rule 4), but a RE-RUN can
-// land into a home a live server answers from boot-time memory.
 async function installStock(
   home: string,
   selection: readonly StockSchema[],
   io: IO,
 ): Promise<number> {
-  // The union closure, sinks first: each entry's own installOrder is topological, and
-  // first-arrival dedup keeps every dependency ahead of its dependents.
   const order: StockSchema[] = [];
   const seen = new Set<string>();
   for (const chosen of selection) {
@@ -937,8 +851,6 @@ async function installStock(
       if (rows === undefined) contenders.set(lens, [r]);
       else rows.push(r);
     }
-    // Pre-flight, the whole order before any delta lands (§50): a lens served by a foreign-named
-    // program cannot compose with stock, and installing beside it would evict it.
     for (const entry of order) {
       const lens = entryLensName(entry);
       const rows = contenders.get(lens);
@@ -961,8 +873,6 @@ async function installStock(
       const rows = contenders.get(lens);
       if (rows !== undefined) {
         io.out(`loam: ${entry.name} already bound — skipped`);
-        // Compare against the contender that actually serves the reference — the pre-flight
-        // proved one exists — never an arbitrary row of a contested name.
         const stockProgram = programOf(entry.registration as { hyperschema: { name: string } });
         const serving = rows.find((r) => programOf(r) === stockProgram)!;
         const differs = divergenceOf(entry, serving);
@@ -989,17 +899,13 @@ async function installStock(
       io.out(`loam: stocked ${entry.name}`);
       for (const warning of outcome.warnings ?? []) io.err(`loam: ${warning}`);
       if (!outcome.bound) {
-        // Unreachable through this door: a same-lens contender is skipped above, and a rival body
-        // under the same program name makes the substrate throw at publish. If the substrate
-        // learns a new way to persist-without-binding, fail loudly rather than crown a surface
-        // that is not there (H7).
         throw new Error(
           `init: stock ${entry.name} landed but does not bind here — ${outcome.reason}`,
         );
       }
     }
   } catch (err) {
-    await gateway.close().catch(() => {}); // never let a close failure mask the real refusal
+    await gateway.close().catch(() => {});
     throw err;
   }
   await gateway.close();
@@ -1008,14 +914,9 @@ async function installStock(
   return 0;
 }
 
-// §54 — the guided flow: operator, first user (operator role — rule 5: the first user owns the
-// box), the stock shelf, the printed next step. Every refusal that precedes initHome leaves the
-// directory untouched — a guided invocation that cannot finish must not half-start.
 async function cmdInitGuided(parsed: Parsed, io: IO, options: RunOptions): Promise<number> {
   const skipUser = parsed.booleans.has("no-user");
   const skipStock = parsed.booleans.has("no-stock");
-  // Rule 2: skipping is explicit, so a skip beside its own subject is a contradiction, refused
-  // rather than ranked.
   if (parsed.flags.has("user") && skipUser) {
     io.err(
       "init: --user and --no-user contradict — name the first user, or skip creating one, " +
@@ -1039,8 +940,6 @@ async function cmdInitGuided(parsed: Parsed, io: IO, options: RunOptions): Promi
   }
   const tty = process.stdin.isTTY === true;
   const named = parsed.flags.get("user");
-  // Rule 1, failed closed before any write: the name is never invented, so a flow that cannot
-  // obtain one refuses, naming its two exits.
   if (!skipUser && named === undefined && !tty && options.readInput === undefined) {
     io.err(
       "init: the guided flow creates the store's first user, and this run has no terminal to " +
@@ -1050,8 +949,6 @@ async function cmdInitGuided(parsed: Parsed, io: IO, options: RunOptions): Promi
     return 2;
   }
   const passwordPath = parsed.flags.get("password-file");
-  // Rule 1's other half, the same posture: the password arrives at a terminal or from a file,
-  // never invented and never guessed at off a pipe.
   if (!skipUser && passwordPath === undefined && !tty && options.readSecret === undefined) {
     io.err(
       "init: the first user's password wants a terminal to be asked on — pass " +
@@ -1069,8 +966,6 @@ async function cmdInitGuided(parsed: Parsed, io: IO, options: RunOptions): Promi
   let filePassword: string | undefined;
   if (!skipUser && passwordPath !== undefined) {
     try {
-      // A trailing newline — or a lone \r — is how editors, `echo`, and Windows leave a file; no
-      // login form can type either, so stripping the tail is tolerance, not truncation.
       filePassword = readFileSync(passwordPath, "utf8").replace(/[\r\n]+$/, "");
     } catch (err) {
       io.err(
@@ -1088,7 +983,6 @@ async function cmdInitGuided(parsed: Parsed, io: IO, options: RunOptions): Promi
     }
   }
 
-  // From here the flow writes, step by step, each step voicing its own report.
   const home = parsed.flags.get("home") ?? defaultHome();
   const init = initHome(home, parsed.flags.get("seed"));
   io.out(
@@ -1113,16 +1007,10 @@ async function cmdInitGuided(parsed: Parsed, io: IO, options: RunOptions): Promi
       io.err(`init: ${defect}`);
       return 2;
     }
-    // Rule 7: a re-run's duplicate is user-create's own refusal, voiced and then stepped PAST —
-    // the shelf still deserves its skip-if-bound pass — while any other failure stops the flow
-    // (stocking the shelf behind a mistyped password would be side effects behind a refusal).
-    // The pre-read only steers control; the message stays the machinery's own.
     let dupBefore = false;
     try {
       dupBefore = entryFor(readCredentials(home), name) !== undefined;
-    } catch {
-      // unreadable credentials: cmdUserCreate names it in its own voice, and the flow stops below
-    }
+    } catch {}
     const createParsed: Parsed = {
       flags: new Map(),
       repeated: new Map(),
@@ -1146,7 +1034,6 @@ async function cmdInitGuided(parsed: Parsed, io: IO, options: RunOptions): Promi
     if (code !== 0) return code;
   }
   if (exit !== 0) return exit;
-  // Rule 6: the flow ends with the next step, so the story continues without a manual.
   const lines = [
     "loam: the store is ready — the next step:",
     `  loam serve --http --home ${home} --token <pick-a-secret>`,
@@ -1164,14 +1051,6 @@ async function cmdInitGuided(parsed: Parsed, io: IO, options: RunOptions): Promi
   return 0;
 }
 
-// Restore an empty host store from its archive, through a new peer journal. Returns the count
-// admitted; 0 when the store is not empty or the archive holds nothing living.
-/**
- * Restore an empty host store from its archive, through a new peer journal. Returns the count
- * admitted; 0 when there is nothing to restore. A marker file stands while the restore runs, so a
- * restore a fault interrupted is resumed by the next serve rather than served half done.
- * @internal — exported for its rail
- */
 export async function restoreIntoJournal(
   primary: StoreBackend,
   archive: StoreBackend,
@@ -1194,8 +1073,6 @@ export async function restoreIntoJournal(
   if (marker !== undefined && !resuming) writeFileSync(marker, "");
   const { peer } = await openHostPeer(primary.journalStore(), authorForSeed(seed));
   const state = peer.journal.snapshot().base;
-  // One transfer per delta: readers order events by arrival, and one transfer's arrivals are
-  // simultaneous. The archive keeps no arrival order, so signed time order stands in for it.
   const ordered = [...rows]
     .filter((d) => !state.admitted.has(d.id) && !state.refusedIds.has(d.id))
     .sort(
@@ -1203,8 +1080,6 @@ export async function restoreIntoJournal(
     );
   const at = Date.now();
   for (const d of ordered) {
-    // Only an order this store's law binds refuses its target; any other erasure-shaped delta is
-    // testimony, and arrives as an ordinary one.
     const targetId = isErasure(d.claims) ? erasureTarget(d.claims) : undefined;
     if (targetId === undefined || !dead.has(targetId)) {
       await admitLocal(peer, [d], at, () => false);
@@ -1231,7 +1106,6 @@ async function cmdServe(
     io.err("serve: only --http is supported today (pass --http)");
     return 2;
   }
-  // The token comes from --token or the LOAM_TOKEN env (containers pass it that way).
   const token = parsed.flags.get("token") ?? process.env["LOAM_TOKEN"];
   if (token === undefined || token.length === 0) {
     io.err("serve: a token is required (--token or LOAM_TOKEN) — an unlockable door is a wall");
@@ -1243,12 +1117,6 @@ async function cmdServe(
     return 2;
   }
   const home = parsed.flags.get("home") ?? defaultHome();
-  // The login doors (SPEC §36 phase 5) open iff the home holds users, probed AT BOOT — a
-  // credentials.json written under a running server waits for the next serve. The Secure-cookie
-  // trap is refused before anything opens: the session cookie's `__Host-` prefix requires
-  // `Secure`, and a browser discards a Secure cookie from a non-TLS, non-loopback origin — so a
-  // LAN bind over plain HTTP would show a login form whose successful POST sets a cookie no
-  // browser keeps. An honest refusal beats that silent loop.
   const withUsers = existsSync(credentialsPath(home));
   const hostFlag = parsed.flags.get("host") ?? "127.0.0.1";
   const publicUrlFlag = parsed.flags.get("public-url");
@@ -1265,19 +1133,12 @@ async function cmdServe(
       return 2;
     }
   }
-  // Boot is turnkey: an uninitialized home mints (or imports via LOAM_SEED) an operator identity
-  // now, so a fresh container serves without an out-of-band `loam init`. Idempotent.
   const init = initHome(home, process.env["LOAM_SEED"]);
   if (init.created) io.out(`loam: initialized ${home}\n  operator ${init.operator}`);
   const seed = readSeed(home);
   const path = storePath(home, parsed.flags.get("store"));
 
-  // The optional cold store (--archive, or `archive` in config.json): the sqlite primary gains
-  // an archive mirror, healed BEFORE boot — boot reads the backend once, so a lost sqlite is
-  // replanted from the archive's memory before the gateway ever looks. Lag is safe (union) but
-  // never silent: it reaches the operator's log.
   const vault = archivePath(home, parsed.flags.get("archive"));
-  // A restore a fault interrupted left a partial journal; serving it would serve half a store.
   if (vault === undefined && existsSync(`${path}.restoring`)) {
     io.err(
       `serve: a restore of ${path} from its archive did not finish. This store holds only part of ` +
@@ -1297,24 +1158,18 @@ async function cmdServe(
     });
     let healed;
     try {
-      // The law reaches the vault (SPEC §11): erased ids — read straight off BOTH tiers,
-      // before any reactor exists — are excluded from the union, so a cold copy can never
-      // replant what the operator erased.
-      // A negated erasure's target stays refused forever, so it is swept and never restored.
       const dead = neverReturns(
         [...(await backend.deltasSince(new Set())), ...(await archive.deltasSince(new Set()))],
-        Date.now(), // no gateway yet, so no validity floor: the wall clock is the read time
+        Date.now(),
         authorForSeed(seed),
       );
-      // A host store lives in its peer journal, and the archive keeps rows only. So a lost primary
-      // is restored through a new journal, one local arrival per living row, in signed time order.
       const restored = await restoreIntoJournal(backend, archive, dead, seed, `${path}.restoring`);
       if (restored > 0) {
         io.out(`loam: healed — ${restored} deltas restored from the archive into a new journal`);
       }
       healed = await mirror.heal(dead);
     } catch (err) {
-      await mirror.close().catch(() => {}); // never let a close failure mask the real refusal
+      await mirror.close().catch(() => {});
       throw err;
     }
     if (healed.toPrimary > 0 || healed.toMirror > 0) {
@@ -1322,16 +1177,6 @@ async function cmdServe(
         `loam: healed — ${healed.toPrimary} deltas replanted from the archive, ${healed.toMirror} newly archived`,
       );
     }
-    // The squatter half of the same heal (§25), which rides `mirror.lastRestore` rather than the
-    // report. Reading it here is not optional bookkeeping: it is the obligation that surface carries,
-    // since a signal nobody reads is a swallowed error with extra steps (H9).
-    //
-    // `undefined` is NOT an empty report and must not print as one — it means no heal reached the pen,
-    // so nothing is known about it. Collapsing the two with `?? []` would put the exact conversion the
-    // sentinel exists to refuse in the one place the obligation lives. UNREACHABLE from here today: a
-    // rejected heal rethrows above, so this boot never reads a cleared surface. It is written for the
-    // caller that catches — and it is untested for exactly that reason, which is worth more said than
-    // dressed up in a rail that would have to fake a reachability this file does not have.
     const restore = mirror.lastRestore;
     if (restore === undefined) {
       io.err(
@@ -1339,18 +1184,12 @@ async function cmdServe(
           "a negation may be stranded and this boot cannot tell you. `loam repair list` can.",
       );
     }
-    // A restore CHANGED the ground the gateway is about to boot on, so it is named per id rather than
-    // counted — a restored negation un-strands a strike, and the operator should see what came back.
     for (const id of restore?.restored ?? []) {
       io.out(
         `loam: restored ${id} from the archive — a corrupt row was squatting on that id; any negation ` +
           `it carries suppresses again`,
       );
     }
-    // The sweep's refusals are load-bearing: a report nobody reads is a swallowed error with
-    // extra steps (H9). A refused sweep means an erased id's bytes may still be at rest on
-    // some tier — serve continues (refusing to boot trades a leak for an outage), but the
-    // operator is told.
     for (const failure of healed.purgeFailures) {
       io.err(
         `loam: the boot sweep could not finish an erasure — bytes the operator ordered forgotten ` +
@@ -1358,45 +1197,26 @@ async function cmdServe(
           `the erasure (or restart) to finish the sweep.`,
       );
     }
-    // Same reasoning, the other repair: a row still set aside means the store is about to serve with a
-    // strike stranded — a retracted value, a revoked grant, or an erasure reading LIVE (§25/H1).
-    // Serving is still right (a legible store beats an outage), and saying nothing is not.
     for (const failure of restore?.stranded ?? []) {
       io.err(`loam: ${failure} Serving anyway; \`loam repair list\` names what the pen holds.`);
     }
-    // And what heal DECLINED to plant. This one is not a fault report but a refusal: the archive holds
-    // deltas this boot deliberately did not admit, because an unreadable row may be an erasure nobody
-    // could see (§11) or a set-aside strike would have been left behind its target (H1).
     for (const withheld of restore?.replantWithheld ?? []) {
       io.err(`loam: ${withheld}`);
     }
     backend = mirror;
   }
 
-  // Provisioned renderer pens (SPEC §23.3, T102): every `pen.<name>.seed` in the home, read at
-  // boot — the same moment users and credentials are read — and fed to `GatewayOptions.pens` so a
-  // write-enabled renderer's form POSTs have a key to sign with. A pen file that exists but cannot
-  // provision is a FAULT on the operator's log, never a silent skip: silence here resurfaces as a
-  // 403 on the first form submit, the exact puzzle the seed-file convention exists to end.
   const { pens, faults: penFaults } = readPenSeeds(home);
   for (const fault of penFaults) io.err(`loam: ${fault}`);
 
-  // Boot the store from its genesis (idempotent): a fresh store is born governed; an existing
-  // one simply re-lands the same operator identity.
   const gateway = await Gateway.boot(backend, assembleGenesis({ operatorSeed: seed }), {
     pens,
-    // The serving process must reach a channel's pool that another process opened, or a bound
-    // federated lens resolves over an empty ground and answers null (T189).
     channelBackend: channelBackendFor(home, io),
-    // The other half of a persisted channel: the address rides its record, the credential lives
-    // here (T196). A channel whose token is missing is not rebuilt, and says so rather than
-    // sitting in the list reporting `receiving`.
     channelToken: (c) => {
       const held = readChannelToken(home, c);
       return held.kind === "present" ? held.seed : undefined;
     },
   });
-  // On the journal path a row the journal never admitted is held and never served. Say so.
   if (gateway.rowsOutsideJournal > 0) {
     const n = gateway.rowsOutsideJournal;
     io.err(
@@ -1413,14 +1233,8 @@ async function cmdServe(
       tokens: { [token]: { operator: true } },
       port,
       host: hostFlag,
-      // Minted client bearers (SPEC §57): the door reads this home's clients.json per request,
-      // so a `loam client mint` or `revoke` beside this server binds with no restart.
       clients: { home },
       ...(publicUrlFlag === undefined ? {} : { publicUrl: publicUrlFlag }),
-      // Connector registration (SPEC §37 phase 13), opt-in: absent, POST /oauth/register resolves
-      // as an unrouted path. serve() refuses this beside no --public-url, and boot-validates each
-      // origin. The door's own fault channel is this log line — its detail names the home's path
-      // and must never reach an unauthenticated caller.
       ...(allowRedirectFlag === undefined
         ? {}
         : {
@@ -1433,8 +1247,6 @@ async function cmdServe(
               onFault: (message: string) => io.err(`loam: ${message}`),
             },
           }),
-      // A local fault the CALLER must never read (it names paths and other users) still has to
-      // reach the operator; the door's own channel is this log line.
       ...(withUsers
         ? {
             users: {
@@ -1447,31 +1259,16 @@ async function cmdServe(
         : {}),
     });
   } catch (err) {
-    await gateway.close().catch(() => {}); // never let a close failure mask the real refusal
+    await gateway.close().catch(() => {});
     throw err;
   }
   recordServing(home, server.url, path);
   io.out(
     `loam: serving ${path} at ${server.url}/default${vault === undefined ? "" : `\n  archive ${vault}`}` +
       (withUsers ? `\n  login at ${publicUrlFlag ?? server.url}/login` : "") +
-      // Name the provisioned pens so "is my pen provisioned" is answered at boot, not by a 403.
       (Object.keys(pens).length === 0 ? "" : `\n  pens ${Object.keys(pens).sort().join(", ")}`),
   );
 
-  // THE STANDING INSTRUCTION (§46 story S7, T196). Channels were rebuilt at boot from their records
-  // and the home's credentials; this is what makes them pull. Without it a restarted store keeps its
-  // data, resumes nothing, and goes on reporting `receiving` — the report outliving the behaviour.
-  //
-  // ALWAYS ARMED, and the old conditional is the bug this replaces. A channel can be opened while
-  // the store is SERVING — `loam_federate_connect` on the MCP roster does exactly that — and the
-  // tick re-reads `federationChannels` on every pass, so an interval armed over an empty map polls
-  // a channel opened later. Arming only when a channel existed AT BOOT produced precisely the shape
-  // the note above warns against: a channel `federate list` reports as `receiving` that nothing has
-  // ever polled, for the life of the process.
-  //
-  // An idle store pays nothing for it. A tick with no channels iterates an empty map and writes
-  // NOTHING, which is §49.1's rule for anything periodic, and the timer is unref'd so it never
-  // holds the process open.
   const everyMs = options.syncEveryMs ?? 60_000;
   const seconds = Math.max(1, Math.round(everyMs / 1000));
   const standing = gateway.keepSyncing({ everyMs });
@@ -1482,10 +1279,7 @@ async function cmdServe(
   );
   const unresumed = gateway.channelStatus().filter((c) => !gateway.federationChannels.has(c.name));
   for (const c of unresumed) {
-    // An honest report of a channel that CANNOT sync, rather than a list that says `receiving`
-    // about something nothing is polling (H9).
     const fault = gateway.channelAttachFaults.get(c.name);
-    // A pool whose own key is missing stays refused whatever reopens it: the key must come back.
     const road =
       fault?.keyMissing === true
         ? `Restore its key in ${path}.poolkeys.json, then restart.`
@@ -1501,8 +1295,6 @@ async function cmdServe(
     );
   }
 
-  // Closing the server also releases the gateway (and its backend file) — one shutdown, whole.
-  // The serving record goes LAST: while any of this can still fail, a live pid is still true.
   const handle: ServerHandle = {
     ...server,
     async close(): Promise<void> {
@@ -1515,7 +1307,6 @@ async function cmdServe(
 
   if (options.detach === true) return handle;
 
-  // Foreground: hold until signalled, then shut down cleanly.
   await new Promise<void>((resolve) => {
     const stop = (): void => resolve();
     process.once("SIGINT", stop);
@@ -1525,23 +1316,14 @@ async function cmdServe(
   return 0;
 }
 
-// The shelf, as a sentence — every refusal that names a stock name owes the reader the full set.
-// Stock names are shipped constants and public by construction, so listing them discloses nothing:
-// this is a menu, not an oracle.
 const stockShelf = (): string => stockNames().join(", ");
 
-// WHERE A REGISTRATION CAME FROM — a file the operator wrote, or a shape we ship. The two differ in
-// exactly one respect (how the JSON is obtained) and in no other: both hand the same `unknown` to
-// the same `parseRegistrationInput`, so a stock shape has no privileged path and no weaker check.
-// `origin` is only what a refusal names, so the reader knows which of the two to go fix.
 interface RegistrationSource {
   readonly origin: string;
   readonly json: unknown;
-  /** Set when the source is the shelf: the stock name, so the install can walk its closure. */
   readonly stockName?: string;
 }
 
-// Resolve `loam register`'s arguments to one source, or to an exit code and a said reason.
 function registrationSource(parsed: Parsed, io: IO): RegistrationSource | number {
   const stock = parsed.flags.get("stock");
   const file = parsed.positionals[0];
@@ -1561,9 +1343,6 @@ function registrationSource(parsed: Parsed, io: IO): RegistrationSource | number
       );
       return 2;
     }
-    // A CLONE, deliberately: `parseRegistrationInput` passes arrays through by reference, and the
-    // shelf is a module-level constant shared by every call in the process. Handing it out once
-    // would let a downstream mutation rewrite the shape every later `--stock` registers.
     return {
       origin: `--stock ${entry.name}`,
       json: structuredClone(entry.registration),
@@ -1597,12 +1376,6 @@ function registrationSource(parsed: Parsed, io: IO): RegistrationSource | number
   }
 }
 
-// Register a schema from a file: { name, alg?, body, policy, roots, entity? } — the body and
-// policy in their JSON profiles. `--stock <name>` reads a shipped shape instead of a file, and
-// changes nothing downstream of that. The definition and its registration land as operator-signed
-// deltas in the home's store; the next serve generates the surface from them. Offline by
-// design (the store is single-writer): register before serving, or use POST /:mount/register
-// against a running server.
 async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
   const parsed = parseFor("register", args);
   const source = registrationSource(parsed, io);
@@ -1633,19 +1406,7 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
   let outcome: PublishOutcome;
   let evolves = false;
   try {
-    // THE STOCK GRAPH (§50): a shelf entry's body may expand edges into other shelf readings, so
-    // `--stock <name>` installs the entry's dependency CLOSURE, sinks first — each dependency the
-    // same verbatim registration through the same validator (§42.1: what changes is only how the
-    // JSON is obtained, and obtaining several files is still only that). A required lens already
-    // bound is SKIPPED, keyed on the LENS name (a bespoke reading may live under any program
-    // name — H6), and composed with; when the bound reading is not stock-identical, one stderr
-    // line says so, naming both compared layers. Never a refusal: sovereignty stays, drift
-    // becomes visible.
     if (source.stockName !== undefined) {
-      // EVERY contender per lens, not latest-arbitrary: a contested lens (two entities claiming
-      // one name) must not be projected down to whichever row a Map insertion kept, because the
-      // pre-flight refusal below is a sovereignty decision and would otherwise decide from half
-      // the picture.
       const contenders = new Map<string, Registration[]>();
       for (const r of readRegistrations(
         gateway.reactor,
@@ -1659,21 +1420,10 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
       }
       const order = installOrder(source.stockName);
       const deps = order.slice(0, -1);
-      // An EVOLVE is a republish at the SAME registration entity — never mere lens membership. A
-      // bespoke binding holding this lens from another entity is a contest, and the qualified
-      // `does not bind` report below is that case's honest voice (§42.4); an "evolves" line there
-      // would claim an act that did not happen.
       const targetEntity = schemaEntityFor(input.hyperschema, input.entity);
       evolves = (contenders.get(entryLensName(order[order.length - 1]!)) ?? []).some(
         (r) => r.entity === targetEntity,
       );
-      // PRE-FLIGHT, before any delta lands — the WHOLE order, target included. The substrate
-      // resolves an expand's `schema` ref by PROGRAM name and admits one reading per lens, so a
-      // required lens is composable only when some contender serves it under the program name
-      // the stock body references. When none does, publishing stock beside it would evict or
-      // crash — the exact destruction H6 warns about — so refuse here, with the store untouched:
-      // sovereignty outranks convergence when the two collide (§50). A bespoke binding that
-      // SHARES the program name passes through to the ordinary §42.4 qualified outcome.
       for (const dep of order) {
         const lens = entryLensName(dep);
         const rows = contenders.get(lens);
@@ -1697,8 +1447,6 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
         const rows = contenders.get(lens);
         if (rows !== undefined) {
           io.out(`loam: ${dep.name} already bound — skipped`);
-          // Compare against the contender that actually serves the reference — the pre-flight
-          // proved one exists — never an arbitrary row of a contested name.
           const stockProgram = programOf(dep.registration as { hyperschema: { name: string } });
           const serving = rows.find((r) => programOf(r) === stockProgram)!;
           const differs = divergenceOf(dep, serving);
@@ -1742,12 +1490,10 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
       input.refs,
     );
   } catch (err) {
-    await gateway.close().catch(() => {}); // never let a close failure mask the real refusal
+    await gateway.close().catch(() => {});
     throw err;
   }
   await gateway.close();
-  // Re-registering is the ordinary evolve path, and the report says which kind of act this was —
-  // a store upgrading its stock reading should read "evolve", not a second identical "registered".
   if (evolves) {
     io.out(
       `loam: ${lensNameFor(input.hyperschema, input.schema)} was already bound — this publish evolves it`,
@@ -1757,37 +1503,18 @@ async function cmdRegister(args: readonly string[], io: IO): Promise<number> {
     `loam: registered ${input.hyperschema.name} at ${schemaEntityFor(input.hyperschema, input.entity)}\n` +
       `  the definition is deltas now — the next serve grows the surface from it`,
   );
-  // Registration-time cautions (§51) have exactly one reader at this door: the operator's eyes.
   for (const warning of outcome.warnings ?? []) io.err(`loam: ${warning}`);
-  // PERSISTED IS NOT BOUND. `publishRegistration` reports a publish whose replay could not bind —
-  // a rival body under the same program name, a lens another entity already answers for — and the
-  // deltas are down either way, so the line above stays true. What would be false is leaving the
-  // operator to read "the next serve grows the surface from it" when it will not. Qualified rather
-  // than blocked, exactly as the staleness warning below is: the write happened.
   if (!outcome.bound) {
     io.err(
       `loam: the deltas landed, but this registration does not bind here — ${outcome.reason}\n` +
         `  a serve of this home will not grow the surface from it until that is settled`,
     );
   }
-  // A server already holding this store reads the registration on its next request. The warning
-  // names that server and what waits for its restart; it qualifies the report, never blocks it.
   const staleness = servingWarning(home, path);
   if (staleness !== undefined) io.err(`loam: ${staleness}`);
   return 0;
 }
 
-// Land a peer's deltas in the home's store: one command, one door, two sources (SPEC §15).
-// A URL is a live peer (`pullFrom` — a single anti-entropy step); a file is a frozen offer
-// (the same body /federate serves, exported from a browser store or saved off the wire).
-// Both cross through Gateway.federate: verification, trust-admission, erasures at the door.
-// No standing needed — union is union; whether the imported law BINDS is decided by whose
-// operator seed this home holds, never by this command.
-// §46 — federation is container-to-container. The verbs mirror the tool surface T188 exposes to an
-// agent, with ONE deliberate asymmetry: `drop` needs `--yes` here and cannot be reached at all by an
-// MCP caller, because an agent staging an irreversible purge and a person confirming it are
-// different acts on different surfaces.
-/** `--bless` on `federate open`: absent means yes, and only the two words are understood. */
 function blessFlagOf(raw: string | undefined): boolean {
   if (raw === undefined) return true;
   if (raw === "true" || raw === "false") return raw === "true";
@@ -1810,11 +1537,6 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
     );
     return 2;
   }
-  // WHAT EACH VERB TAKES — because the parser's allowlist is per COMMAND, and `federate` is five
-  // commands wearing one name. Without this, a flag one verb reads is silently accepted by all the
-  // others: `bless-app --bless false` granted the resolvers and left the channel blessing, and the
-  // operator was told nothing. That direction is the dangerous one — a dropped `--route` merely
-  // fails to do something, while a dropped `--bless` fails to STOP something.
   const TAKES: Record<string, readonly string[]> = {
     open: ["from", "into", "prefix", "token", "bless"],
     list: [],
@@ -1823,8 +1545,6 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
     drop: ["channel", "yes"],
   };
   const takes = new Set(["home", "store", ...(TAKES[verb] ?? [])]);
-  // BOTH PARSER MAPS. A declared boolean lands in `booleans` and never in `flags`, so reading one
-  // is a check that half the names always pass.
   const strayFlags = [...parsed.flags.keys(), ...parsed.booleans]
     .filter((f) => !takes.has(f))
     .sort();
@@ -1846,10 +1566,6 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
   const init = initHome(home);
   if (init.created) io.out(`loam: initialized ${home}\n  operator ${init.operator}`);
   const path = storePath(home, parsed.flags.get("store"));
-  // A RUNNING SERVER UNDOES THESE TWO. It holds every channel in the memory it booted with: it
-  // keeps pulling a channel dropped here and rewrites the purged pool on its next tick, and it
-  // re-stamps a channel's record from its own copy, so a freeze made here is ignored and then
-  // overwritten. A report of either would describe a store that is not the one serving.
   if (verb === "drop" || verb === "set") {
     const serving = servingProbe(home, path);
     if (serving !== undefined) {
@@ -1887,12 +1603,7 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
   try {
     if (verb === "list") {
       const rows = gateway.channelStatus();
-      // The container table, read ONCE for the whole listing (H8): a channel whose `into` no longer
-      // resolves here is ORPHANED — the receiving container was struck, so its pool sits outside
-      // every subtree and no page shows it, yet it still receives (T218).
       const containers = gateway.containers().containers;
-      // Read ONCE for the whole listing. `channelApps` walks the ground to find the channels, so
-      // asking it per row would make a listing quadratic in the store (H8).
       const appsByChannel = new Map<string, ReturnType<typeof gateway.channelApps>>();
       for (const a of gateway.channelApps()) {
         appsByChannel.set(a.channel, [...(appsByChannel.get(a.channel) ?? []), a]);
@@ -1904,11 +1615,6 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
         return 0;
       }
       for (const r of rows) {
-        // A RECORD THIS STORE CANNOT READ GETS NO HEALTH LINE AT ALL. Every value below is a
-        // coercion, and coercion defaults toward health — an absent time reads 0, which this
-        // command spells "never synced", and a NaN reaches `toISOString`, which throws and took the
-        // whole listing down with it. Naming the fields is the point: a person goes and looks at
-        // the record instead of at a guess.
         if (r.unreadable.length > 0) {
           io.out(
             `${r.name}\n  UNREADABLE — its record does not carry ${r.unreadable.join(", ")} in ` +
@@ -1918,34 +1624,14 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
           );
           continue;
         }
-        // "never synced" is spelled out rather than shown as a zero: a channel that has never
-        // reached its peer must not read like one that is merely quiet (H9, §46 criterion 8).
         const when =
           r.lastSyncedAt === 0
             ? "never synced"
             : `last recorded sync ${new Date(r.lastSyncedAt).toISOString()}`;
         const trouble =
           r.consecutiveFailures > 0 ? `, ${r.consecutiveFailures} failed attempt(s) since` : "";
-        // An APP a peer sent is code, and no toggle above mounts it (§24.6). An operator who cannot
-        // see what arrived cannot decide about it, so every arrival is named here — and the bundle's
-        // address is printed so two stores can compare notes.
-        //
-        // FOUR STATES, NOT TWO. A single "blessed" flag said "nothing runs" while blessed code ran
-        // (a peer had shipped new code at the route) and printed a remedy that throws. What an
-        // operator needs to see is the pair: what the peer OFFERS, and what this store RUNS.
-        // LONG ENOUGH TO PASTE INTO `--expect`. Twelve characters looked tidy and were four real
-        // ones, since every id starts `1e20` — so the documented workflow (read the list, paste the
-        // id) refused every time. A listing that cannot supply its own remedy is not a listing.
         const short = (h: string): string => h.slice(0, 28);
-        // TWO SENTENCES PER APP: what the peer OFFERS, and what this store DOES about it — then the
-        // remedy for that exact state. Every earlier shape of this printed one line that had to
-        // cover several states, and each time the line was wrong for one of them and its remedy
-        // refused. A remedy is part of a report's truth: printing a command that throws is a false
-        // statement about the store, made on the surface a person reads before deciding.
         const apps = (appsByChannel.get(r.name) ?? []).map((a) => {
-          // THE RECIPE CARRIES EVERY FLAG THE DOOR WILL DEMAND. An app that holds a pen is refused
-          // without `--pen` (§6's two keys), so a recipe that omitted it was a printed command that
-          // throws — and worse, it left the operator unaware that this app asks to WRITE.
           const bless =
             `\`loam federate bless-app --channel ${r.name} --route ${a.route}` +
             (a.wantsPen === undefined ? "" : " --pen");
@@ -1953,10 +1639,6 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
             a.hash === undefined
               ? `\n  app "${a.route}" — the peer WITHDREW it`
               : `\n  app "${a.route}" — the peer offers ${short(a.hash)}`;
-          // WHY IT ANSWERS NOTHING, when it does not. Each cause has a different remedy and none of
-          // them is "bless it", so each says the thing that is actually in the way.
-          // "MOUNTED" only when something is. A shadowed row can have no blessing at all — the
-          // name is simply the operator's — and blessing it would land and still answer nothing.
           const here = a.mounted === undefined ? "nothing of it is mounted" : "it is MOUNTED here";
           const stuck =
             a.shadowed !== undefined
@@ -1966,8 +1648,6 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
                 ? `\n    it is MOUNTED here and answers nothing: the lens it reads is not bound ` +
                   "here\n    lift the curse on that lens, or re-bless it, and this answers again"
                 : undefined;
-          // WITHDRAWN FIRST. There is nothing to bless and nothing newer to move onto, so every
-          // remedy below would refuse — the only act left is dropping the channel.
           if (a.hash === undefined) {
             return (
               offers +
@@ -1978,30 +1658,21 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
             );
           }
           if (stuck !== undefined) return offers + stuck;
-          // NOTHING IS MOUNTED and nothing can be: a route of the operator's own holds that name
-          // inside the pool, and the blessing door refuses it by name. `stuck` cannot speak for this
-          // one — it says "it is MOUNTED here", and nothing is.
           if (a.blocked !== undefined) {
             return (
               `${offers}\n    it cannot mount: ${a.blocked} holds that name\n` +
               "    a peer's app cannot take a name your own law answers"
             );
           }
-          // A pin names a delta of the PEER's store, which this one does not hold: the blessing door
-          // refuses it by name, so offering the blessing here would be offering a refusal.
           if (a.unmountable !== undefined) {
             return (
               `${offers}\n    it cannot mount here: ${a.unmountable}\n` +
               "    only the peer can change that; nothing on this side will" +
-              // A re-point to a pinned binding leaves an EARLIER blessing serving, and saying only
-              // "it cannot mount" would leave an operator believing that route answers nothing.
               (a.serving === undefined
                 ? ""
                 : `\n    this store still runs the app it blessed (${short(a.serving)}) at "${a.serves}"`)
             );
           }
-          // What an app ASKS FOR, said once and near the top: a pen is the one property of an
-          // arrival that changes what blessing it means, rather than only what it draws.
           const asks =
             a.wantsPen === undefined
               ? ""
@@ -2016,8 +1687,6 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
             `    to move it onto what the peer offers now: ${bless} --supersede\``
           );
         });
-        // A LENS WHOSE RESOLVER CODE IS WITHHELD is a decision waiting on a person, exactly as an
-        // inert app is — and the help points here for it, so here is where it has to appear.
         const withheld = gateway
           .withheldOn(r.name)
           .map(
@@ -2025,10 +1694,6 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
               `\n  lens "${lens}" — its computed fields REFUSE: the peer's resolver code is not run here\n` +
               `    to run it: \`loam federate bless-app --channel ${r.name} --resolvers "${lens}"\``,
           );
-        // ORPHANED — the receiving container is gone. A resumed sync keeps writing this peer's bytes
-        // to a pool nothing reads, so the marker names the two verbs that release it: drop forgets
-        // the pool whole, `set --receiving false` freezes the pull. Read from the same table every
-        // row consults, so it costs no extra walk.
         const orphaned = !containers.has(r.into)
           ? `\n  orphaned — its receiving container "${r.into}" is gone: no subtree reaches this ` +
             `pool and no page shows it, yet it still receives. Release it: \`loam federate drop ` +
@@ -2061,13 +1726,9 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
         into,
         prefix,
         from,
-        // The same strictness the `set` verb keeps, for the same reason — and this door is worse to
-        // guess at, because its report never prints the resulting blessing state.
         bless: blessFlagOf(parsed.flags.get("bless")),
         source: sourceFor(from, token, (f) => readFileSync(f, "utf8"), parseOffer),
       });
-      // The credential is written where secrets live, so the next boot can resume this channel.
-      // The address went onto its record; this is the half that must never be a delta (T196).
       if (token !== undefined) writeChannelToken(home, channel.name, token);
       const report = await channel.sync();
       io.out(
@@ -2085,8 +1746,6 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
             : "") +
           "  union is union; syncing again is safe",
       );
-      // The channel is on disk and a restart resumes it; a server running now polls only the
-      // channels it booted with, so it will not follow this one until then.
       const serving = servingProbe(home, path);
       if (serving !== undefined) {
         io.err(
@@ -2106,10 +1765,6 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
 
     if (verb === "set") {
       const next: { receiving?: boolean; blessing?: boolean } = {};
-      // EXACTLY `true` OR `false`. `!== "false"` reads `FALSE`, `0`, `no` and `off` as ON — and the
-      // direction is the one that matters: an operator typing `--bless FALSE` to stop new law
-      // binding would have turned it on and been told the channel was blessing, in a sentence they
-      // had just asked to make false. A spelling this does not understand is a refusal.
       const toggle = (flag: string): boolean | undefined => {
         const raw = parsed.flags.get(flag);
         if (raw === undefined) return undefined;
@@ -2139,17 +1794,8 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
     }
 
     if (verb === "bless-app") {
-      // TWO ACTS, ONE VERB, because they are the same decision about the same channel: let a
-      // peer's code run here. `--route` mounts an app; `--resolvers` lets the code behind one
-      // lens's computed fields run. Neither rides the blessing toggle, and neither rides the other.
       const lens = parsed.flags.get("resolvers");
       if (lens !== undefined) {
-        // THE TWO ACTS ARE SEPARATE, and the flags that belong to the other one are refused rather
-        // than dropped. `--route` mounts an app; `--pen` and `--supersede` qualify that mount; and
-        // `--expect` pins an app's identity, which a lens's resolver law does not have. Asked for
-        // both acts at once, an operator would have got one and heard about one. BOTH parser maps
-        // are read: a declared boolean lands in `booleans` and never in `flags`, so testing one is
-        // a test that half the names always pass.
         const stray = ["route", "expect", "pen", "supersede"].filter(
           (f) => parsed.flags.has(f) || parsed.booleans.has(f),
         );
@@ -2164,13 +1810,7 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
           );
           return 2;
         }
-        // THE NAME THE ACT USED, not the one that was typed. `--resolvers Plant` is a supported
-        // form and the reader below answers prefixed names, so comparing the operator's own string
-        // would be a check that can never match — a guard that passes because it is empty.
         const served = await gateway.blessChannelResolvers(name, lens);
-        // READ IT BACK. The grant replaces a binding whose address is identical to the one it
-        // replaces, so "it landed" and "it took the name" are different questions — and announcing
-        // the first as the second is the shape this file refuses everywhere else (H7).
         if (gateway.withheldOn(name).includes(served)) {
           io.err(
             `federate bless-app: ${name} published the grant for "${served}", and its fields still ` +
@@ -2201,21 +1841,14 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
         supersede: parsed.booleans.has("supersede"),
         ...(expected === undefined ? {} : { expect: expected }),
       });
-      // Report what the store ANSWERS WITH, not what the call returned. A blessing that landed and
-      // does not serve — its lens withdrawn, say — must not be announced as a mount (H7).
       const app = gateway.channelApps(name).find((a) => a.route === route);
       if (app?.blessed !== true) {
-        // NAME THE CAUSE, or name that it is unknown. The first version of this line always blamed
-        // the lens, which is wrong for the commonest case: a name of the operator's own in the way.
         const why =
           app?.shadowed !== undefined
             ? `${app.shadowed} holds that name — ${app.remedy ?? "move it and this answers"}`
             : app?.dark === true
               ? "the lens it reads is not bound here — lift the curse on it, or re-bless it"
               : "check `loam federate list` for what this store says about it";
-        // EXIT 2, because a script that reads 0 here reads a mount. The blessing DID land and is
-        // not lost — it answers the moment what is in the way moves — and the message says so, so
-        // nobody re-runs this looking for a different result.
         io.err(
           `federate bless-app: ${name} blessed the app "${route}", and "${app?.serves ?? route}" ` +
             `answers nothing\n  ${why}\n  the blessing is on the ground; it serves when that clears`,
@@ -2230,7 +1863,6 @@ async function cmdFederate(args: readonly string[], io: IO): Promise<number> {
       return 0;
     }
 
-    // drop
     if (!parsed.booleans.has("yes")) {
       const held = gateway.channelStatus(name)[0];
       io.err(
@@ -2268,7 +1900,7 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
     io.err("pull takes exactly one source");
     return 2;
   }
-  const isUrl = /^https?:\/\//i.test(source); // URI schemes are case-insensitive (RFC 3986)
+  const isUrl = /^https?:\/\//i.test(source);
   const token = parsed.flags.get("token") ?? process.env["LOAM_TOKEN"];
   if (isUrl && (token === undefined || token.length === 0)) {
     io.err(
@@ -2310,8 +1942,6 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
     },
   );
   let report: FederationReport;
-  // Pull's own dimension: deltas the peer sent that would not even reconstruct (see PullReport).
-  // The file path cannot produce it — parseOffer refuses a corrupt file whole.
   let unreconstructable = 0;
   try {
     if (isUrl) {
@@ -2322,21 +1952,14 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
       report = await gateway.federate(offered!);
     }
   } catch (err) {
-    await gateway.close().catch(() => {}); // never let a close failure mask the real refusal
+    await gateway.close().catch(() => {});
     throw err;
   }
-  // The report prints BEFORE close: the deltas are durable the moment federate returns, and
-  // a close failure must not swallow the news that they landed.
   io.out(
     `loam: pulled ${source}\n` +
       `  ${report.accepted} accepted, ${report.rejected} refused, of ${report.offered} offered — ` +
       `union is union; pulling again is safe`,
   );
-  // A delta that will not reconstruct fails on the BYTES, not on timing, so every later pull
-  // drops the same ones — this line is the operator's only cue. It names the count and BOTH
-  // cures, because the door genuinely cannot tell a rotted offer from a peer speaking a newer
-  // delta shape than this puller (PullReport carries the reasoning). Never silent, and never a
-  // guessed cause: prescribing "the peer must repair it" would be H7 in a new place.
   if (unreconstructable > 0) {
     io.err(
       `loam: ${unreconstructable} of the offered deltas would not reconstruct and were ` +
@@ -2345,13 +1968,9 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
         `both sides' versions`,
     );
   }
-  // A running serve reads the accepted deltas on its next request, but what it set up at boot (an
-  // open container, a channel) does not grow from them. Say so under the count, and never block.
   const staleness = servingWarning(home, path);
   if (staleness !== undefined) io.err(`loam: ${staleness}`);
   if (init.created) {
-    // The fork is the operator's (SPEC §15): a home minted THIS run holds a brand-new seed,
-    // so whatever law rode the offer is another operator's here — inert by design.
     io.out(
       "  this home minted its own operator just now, so the offer's law is another's here —\n" +
         "  same-operator continuity wants `loam init --seed <hex>` before the pull",
@@ -2364,11 +1983,6 @@ async function cmdPull(args: readonly string[], io: IO): Promise<number> {
 async function cmdStore(args: readonly string[], io: IO): Promise<number> {
   const parsed = parseFor("store", args);
   const home = parsed.flags.get("home") ?? defaultHome();
-  // The home is only a DIRECTION to the store file: an explicit --store override never opens
-  // config.json (relative values still resolve inside the home; absolute values need no home at
-  // all), and an existing read-only home is fine for a command that only reads config. The refusal
-  // is reserved for the one cure-naming shape the paper-cut is about: a home that cannot supply
-  // config.json at all.
   let path: string;
   try {
     path = storePath(home, parsed.flags.get("store"));
@@ -2392,8 +2006,6 @@ async function cmdStore(args: readonly string[], io: IO): Promise<number> {
   } finally {
     await backend.close();
   }
-  // Rows held and none readable is not an empty store. Every command that boots refuses it with
-  // this sentence, and a count of zero here would be the one door that says otherwise.
   if (deltas.length === 0 && setAside > 0) {
     io.err(`loam: ${unreadableStoreMessage(setAside)}`);
     return 1;
@@ -2403,14 +2015,6 @@ async function cmdStore(args: readonly string[], io: IO): Promise<number> {
   return 0;
 }
 
-// `loam repair` (SPEC §25): read the quarantine side channel and settle it. Repair is the
-// operator's alone — like erasure (§11) — and running it in a home that holds the operator seed
-// IS that authority; a home with no seed cannot repair, exactly as it cannot erase.
-//
-//   loam repair list                — every quarantined row + why, plus entity-id legibility warnings
-//   loam repair discard   <key>     — remove a quarantined row's bytes from the origin (garbage out)
-//   loam repair re-admit  <key>     — re-run admission; a row whose transient cause cleared returns
-//   loam repair leave     <key>     — inaction is legal; an idempotent no-op that says so
 async function cmdRepair(args: readonly string[], io: IO): Promise<number> {
   const parsed = parseFor("repair", args);
   const sub = parsed.positionals[0];
@@ -2437,7 +2041,6 @@ async function cmdRepair(args: readonly string[], io: IO): Promise<number> {
   try {
     switch (sub) {
       case "list": {
-        // The read is what fills the pen; the good deltas feed the legibility scan.
         const good = await backend.deltasSince(new Set());
         const pen = await backend.quarantine();
         const warnings = legibilityWarnings(good, operator);
@@ -2460,8 +2063,6 @@ async function cmdRepair(args: readonly string[], io: IO): Promise<number> {
             }
           }
         }
-        // §25/H1: a quarantined negation no longer suppresses its target, so a retracted value,
-        // revoked grant, or erasure reads live again — the operator must be told, loudly.
         const stranded = strandedStrikeWarnings(pen);
         if (stranded.length > 0) {
           io.out(
@@ -2488,7 +2089,7 @@ async function cmdRepair(args: readonly string[], io: IO): Promise<number> {
           );
           return 2;
         }
-        await backend.deltasSince(new Set()); // fill the pen, so we only discard a quarantined row
+        await backend.deltasSince(new Set());
         const pen = await backend.quarantine();
         if (!pen.some((r) => r.key === key)) {
           io.err(
@@ -2538,7 +2139,7 @@ async function cmdRepair(args: readonly string[], io: IO): Promise<number> {
           io.err("repair leave wants a key: `loam repair leave <key>`");
           return 2;
         }
-        await backend.deltasSince(new Set()); // fill the pen, so we only leave a quarantined row
+        await backend.deltasSince(new Set());
         if (!(await backend.quarantine()).some((r) => r.key === key)) {
           io.err(`repair leave: ${key} is not quarantined — \`loam repair list\` shows what is.`);
           return 2;
@@ -2558,9 +2159,6 @@ async function cmdRepair(args: readonly string[], io: IO): Promise<number> {
   }
 }
 
-// `loam artifact pack` — a THIN HTTP CLIENT of `GET /:mount/artifact/<route>/<entity>`, and nothing
-// more. Every refusal and every word of the verdict comes from the door, so a refusal reads identically
-// here, over HTTP, and from a direct call. The one shape for every door.
 async function cmdArtifact(args: readonly string[], io: IO): Promise<number> {
   const parsed = parseFor("artifact", args);
   if (parsed.positionals[0] !== "pack") {
@@ -2591,9 +2189,6 @@ async function cmdArtifact(args: readonly string[], io: IO): Promise<number> {
   const query = new URLSearchParams({ connector });
   const storeAddress = parsed.flags.get("store-address");
   if (storeAddress !== undefined) query.set("store", storeAddress);
-  // A boolean flag lands in `parsed.booleans`, never in `flags` (args.ts) — reading it from the wrong
-  // map is silently always-false, which is a refusal the operator cannot acknowledge their way past
-  // however many times they type the flag.
   if (parsed.booleans.has("acknowledge-pen")) query.set("acknowledgePen", "1");
   if (parsed.booleans.has("acknowledge-writable")) query.set("acknowledgeWritable", "1");
   const [mount, route, entity] = parts as [string, string, string];
@@ -2603,16 +2198,12 @@ async function cmdArtifact(args: readonly string[], io: IO): Promise<number> {
   const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
   const text = await res.text();
   if (!res.ok) {
-    // The door's own words, unchanged. A CLI that rephrased a refusal would be a second source of
-    // truth about what a renderer may be published as.
     let said = text;
     try {
       const body: unknown = JSON.parse(text);
       const errors = (body as { errors?: unknown }).errors;
       if (Array.isArray(errors) && errors.length > 0) said = errors.map(String).join("; ");
-    } catch {
-      /* not JSON: the body IS the reason */
-    }
+    } catch {}
     io.err(`artifact pack: ${said}`);
     return 2;
   }
@@ -2623,8 +2214,6 @@ async function cmdArtifact(args: readonly string[], io: IO): Promise<number> {
   };
   const out = parsed.flags.get("out");
   if (out !== undefined) {
-    // The PAGE where the door served one, so `--out page.html` is a page rather than a verdict wrapping
-    // one; the whole answer otherwise, so nothing is silently dropped.
     const bytes = verdict.page ?? text;
     writeFileSync(out, bytes, "utf8");
     io.out(`loam: wrote ${out} (${bytes.length} bytes)`);
@@ -2634,11 +2223,6 @@ async function cmdArtifact(args: readonly string[], io: IO): Promise<number> {
   return 0;
 }
 
-// `loam user` (SPEC §36 phase 3, T124): the bootstrap door for a person, and the role commands.
-// Home access is the proof of operatorship — the same authority erasure and repair need — so
-// there is no remote way in. See the working spec (.adlc/specs/36-03-*.md) for the full model;
-// comments here name only what would bite a future reader of THIS file.
-/** Strike a root pointer whose key was never saved. True when the strike landed. */
 async function strikeRoot(
   path: string,
   seed: string,
@@ -2685,15 +2269,11 @@ async function cmdUser(args: readonly string[], io: IO, options: RunOptions): Pr
     io.err(`user ${sub} takes exactly one name`);
     return 2;
   }
-  // Checked before ANY path is built from `name` — a name is a single path component (no `/`),
-  // never a traversal, whether it reaches a credential entry key or a seed file name.
   const nameDefect = userNameDefect(name);
   if (nameDefect !== undefined) {
     io.err(`user ${sub}: ${nameDefect}`);
     return 2;
   }
-  // MINTING ONLY. `assign-role` and `remove-role` act on a person who already exists, and a store
-  // may hold one named before the reservation; refusing here would strand them.
   if (sub === "create") {
     const reserved = reservedNameDefect(name);
     if (reserved !== undefined) {
@@ -2705,9 +2285,6 @@ async function cmdUser(args: readonly string[], io: IO, options: RunOptions): Pr
   if (sub === "create") return cmdUserCreate(name, parsed, home, io, options);
   if (sub === "recover") {
     const path = storePath(home, parsed.flags.get("store"));
-    // A running server answers from the memory it booted with: it would go on treating the old key
-    // as the user's until it restarts. The recovery's history stays safe either way (a store shows
-    // history only up to a cut it holds), so this is honesty, not a lock.
     const serving = servingProbe(home, path);
     if (serving !== undefined) {
       io.err(
@@ -2751,8 +2328,6 @@ async function cmdUserCreate(
   const init = initHome(home);
   if (init.created) io.out(`loam: initialized ${home}\n  operator ${init.operator}`);
 
-  // The credential-existence check runs BEFORE prompting: an existing credential means this name
-  // is fully provisioned already, and there is nothing a password prompt could accomplish.
   let existing;
   try {
     existing = readCredentials(home);
@@ -2791,21 +2366,14 @@ async function cmdUserCreate(
   const gateway = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }));
   let known: boolean;
   let already: ReadonlySet<UserRole>;
-  let mintedKey: string | undefined; // set only when this call just appended a fresh operator grant
-  let mintedRoot: string | undefined; // the root pointer naming that key, struck if its seed is lost
+  let mintedKey: string | undefined;
+  let mintedRoot: string | undefined;
   try {
-    // ASK THE GROUND, not only the credential file — the two halves of a user can come apart (a
-    // credential removed by hand, or a write that failed after the deltas landed), and appending a
-    // SECOND user record for the same name is the shape that outlives that: `pickLatest` would
-    // resolve whichever record won, silently.
     known =
       resolveUserView(gateway.reactor, gateway.operator, gateway.validityNow(), name) !== undefined;
     already = known
       ? rolesOf(gateway.reactor, gateway.operator, gateway.validityNow(), name)
       : new Set<UserRole>();
-    // A name that belonged to someone is not given to a new person: a struck role can lapse, and
-    // the old key and its grants live outside the user record. Only erasure frees it, and the
-    // key file is not erasure's to remove.
     if (!known) {
       const trace = nameStillHeld(gateway.reactor, operator, gateway.validityNow(), name);
       const keyFile = readUserSeed(home, name);
@@ -2854,14 +2422,12 @@ async function cmdUserCreate(
       await gateway.append(deltas);
     }
   } catch (err) {
-    await gateway.close().catch(() => {}); // never let a close failure mask the real refusal
+    await gateway.close().catch(() => {});
     throw err;
   }
   await gateway.close();
 
   if (known && already.size === 0) {
-    // The record stands and no role reads from it. Repairing that means appending a role binding,
-    // which is a role decision — this command does not make one on the way to writing a password.
     io.err(
       `user create: the ground holds a record for ${name} but no readable role, and this ` +
         `command will not add one. Nothing was written. \`loam store\` shows what is there.`,
@@ -2875,15 +2441,9 @@ async function cmdUserCreate(
     );
     return 2;
   }
-  // Past this point either a fresh user just landed (mintedKey set iff role is operator), or this
-  // is a REPAIR run: the ground already matches what was asked, and only the credential (never
-  // seen above, by the check at the top) — and, for operator, possibly the seed file too — is
-  // outstanding. `mintedKey` covers the fresh case; repair checks the seed file's own presence.
   if (known && role === "operator") {
     const seedRead = readUserSeed(home, name);
     if (seedRead.kind !== "present") {
-      // Writing the credential here would report success while ${name} still cannot sign
-      // anything — the same lost-key shape the role commands already name a recovery for.
       io.err(
         `user create: the ground already binds ${name} to operator, but ${userSeedPath(home, name)} ` +
           (seedRead.kind === "absent" ? "is missing" : `is unreadable (${seedRead.detail})`) +
@@ -2895,10 +2455,6 @@ async function cmdUserCreate(
     }
   }
 
-  // The seed file lands BEFORE the credential (§36.3.1.3): if the credential write then fails, a
-  // re-run's repair path above finds the seed already present and only has the credential left to
-  // write. The other order would strand a fresh operator forever behind the top-of-command
-  // "credential already exists" refusal, with no seed file ever written.
   if (mintedKey !== undefined) {
     try {
       writeUserSeed(home, name, mintedKey);
@@ -2918,8 +2474,6 @@ async function cmdUserCreate(
     }
   }
 
-  // Re-read the file HERE rather than trusting the snapshot from before the prompts, the hash and
-  // the boot — another `user create` may have added an entry in that window.
   let current;
   try {
     current = readCredentials(home);
@@ -2954,20 +2508,6 @@ async function cmdUserCreate(
   return 0;
 }
 
-// The surviving (non-negated-by-the-operator) claims at `entity`/`context` matching `matches` — the
-// primitive this file's role commands need and `rolesOf` does not expose: WHICH deltas to strike,
-// not just what a reader resolves. Single-level survival (does an OPERATOR-authored negation target
-// this id), matching the trust the substrate's own `mask: {trust: ...}` already applies when
-// resolving a role or a grant — this file does not re-derive a deeper chain.
-//
-// SPLIT BY SURVIVAL, because "struck" and "never planted" are opposite answers that a surviving-set
-// alone cannot tell apart: one is a standing nobody has retired, the other is a standing somebody
-// DID, and re-planting the second silently un-revokes it.
-//
-// `isStruck` decides survival. The default is the raw read above, which ignores validity; only pen
-// records use it, and nothing else reads them. Grants and roles pass the operator's negation reader
-// at `now`, which counts a strike only while it is valid: the door's constitution walk (`struck` in
-// accounts.ts) reads a grant's strikes so, and `rolesOf` reads a role's so, and each must agree.
 interface ClaimStanding {
   readonly surviving: string[];
   readonly struck: string[];
@@ -3029,16 +2569,6 @@ const survivingRoleClaimIds = (
     negatedAt(reactor, now, operator),
   ).surviving;
 
-// Every grant this store's own seed authored for `subject` — the CURRENT holder of a name's seed
-// file, never a historical one (the working spec's §36.3.1.7 names that residual) — split by
-// whether the operator has struck it at `now`. `verb` narrows to one action: a grant naming the
-// subject is not the same fact as a grant naming the subject FOR WRITE, and asking the loose
-// question of a pen would read an `admin` grant as write standing the door would then refuse.
-//
-// This is NOT the door's reading. It counts only the operator's strikes, where the door also
-// honours an effective admin's strike. It does not read the grant's own validity window, where
-// the door counts a grant only inside it. So "surviving" here means "the operator has not struck
-// it", which is the selection a revoke strikes; it is not a claim that the door honours it.
 const grantStanding = (
   reactor: Ground,
   now: number,
@@ -3070,9 +2600,6 @@ const survivingGrantClaimIds = (
   subject: string,
 ): string[] => grantStanding(reactor, now, operator, subject).surviving;
 
-// Which author a named pen signs as, according to the ground, and the record deltas that say so.
-// A record whose author no longer matches the seed file on disk is the whole point: that is a
-// RE-KEY, and the author it names is the standing that must be struck.
 function penRecordsFor(
   reactor: Ground,
   operator: string,
@@ -3155,7 +2682,6 @@ async function cmdUserRole(
       if (role === "operator") {
         mintedKey = randomBytes(32).toString("hex");
         const subject = authorForSeed(mintedKey);
-        // A fresh key re-points the user's root to it: the old key keeps its history, not its role.
         assignedRoot = signClaims(
           withStamp(gateway.stamp(operator), (t) => rootClaims(name, subject, operator, t)),
           seed,
@@ -3178,7 +2704,6 @@ async function cmdUserRole(
         try {
           writeUserSeed(home, name, mintedKey);
         } catch (err) {
-          // The root now names a key nobody holds. Strike it, so the pointer falls back.
           const struck =
             assignedRoot !== undefined &&
             (await gateway
@@ -3215,7 +2740,6 @@ async function cmdUserRole(
       return 0;
     }
 
-    // mode === "remove"
     if (!held.has(role)) {
       io.out(`loam: ${name} does not hold ${role} — nothing was appended`);
       return 0;
@@ -3225,9 +2749,6 @@ async function cmdUserRole(
     if (role === "operator") {
       const seedRead = readUserSeed(home, name);
       if (seedRead.kind === "unreadable") {
-        // "Cannot determine" must never read as "safe to proceed" (H9): the file may still be
-        // legible to someone else, so this refuses the WHOLE command rather than striking the
-        // role alone and reporting a partial success as if it were a complete one.
         io.err(
           `user remove-role: ${userSeedPath(home, name)} could not be read ` +
             `(${seedRead.detail}) — this command will not guess whether that key is still live, ` +
@@ -3236,11 +2757,6 @@ async function cmdUserRole(
         return 1;
       }
       if (seedRead.kind === "present" && !isSeedHex(seedRead.seed)) {
-        // The same test `loam serve` applies at boot, applied BEFORE authorForSeed can throw a
-        // parser error that quotes the file — a string that fails this test may still be a key,
-        // and a refusal is no place to print one. Malformed is not absent: the grant in the
-        // ground names a key this file no longer derives, so striking the role alone would
-        // report a partial success (H9); the whole command refuses instead.
         io.err(
           `user remove-role: ${userSeedPath(home, name)} exists but does not hold a 64-hex seed, ` +
             `so this command cannot derive which key's grants to negate — nothing was negated, and ` +
@@ -3249,8 +2765,6 @@ async function cmdUserRole(
         );
         return 1;
       }
-      // The operator role's admin grant names the USER now (older stores: the key). Only ADMIN
-      // grants go, under either subject: a write grant is the user's own standing, not the role's.
       const now = gateway.validityNow();
       grantIds = grantStanding(gateway.reactor, now, operator, userEntity(name), "admin").surviving;
       if (seedRead.kind === "present") {
@@ -3306,11 +2820,6 @@ async function cmdPen(args: readonly string[], io: IO): Promise<number> {
     io.err("pen create takes exactly one name");
     return 2;
   }
-  // Checked before ANY path is built from `name` — a pen name is a single path component (the seed
-  // file's own name), never a traversal. The user-name grammar is exactly that discipline.
-  // A pen meets the same reservation, said in the pen's own terms. A pen mints a seed file and a
-  // grant rather than a container, so the reason is not the pen's own path: it is that the name is
-  // reserved store-wide, and a pen and a person must not be able to collide on one.
   const reservedPen = reservedNameDefect(name);
   const nameDefect =
     userNameDefect(name) ??
@@ -3331,13 +2840,6 @@ async function cmdPen(args: readonly string[], io: IO): Promise<number> {
   const init = initHome(home);
   if (init.created) io.out(`loam: initialized ${home}\n  operator ${init.operator}`);
 
-  // The pen's THREE facts (§6). The seed file is CUSTODY; the ground's grant is AUTHORIZATION; the
-  // ground's PEN RECORD says which author this NAME is supposed to sign as. Any of them can exist
-  // without the others — a crash between two writes, a hand-copied file, a deleted seed — and the
-  // record is what makes the third case survivable: without it, a replaced key keeps its standing
-  // under an author derivable only from the file that is gone.
-  //
-  // Every outcome is decided from all three BEFORE anything moves, because two of them are refusals.
   const seedRead = readPenSeed(home, name);
   if (seedRead.kind === "unreadable") {
     io.err(
@@ -3347,9 +2849,6 @@ async function cmdPen(args: readonly string[], io: IO): Promise<number> {
     return 1;
   }
   if (seedRead.kind === "present" && !isSeedHex(seedRead.seed)) {
-    // The same test `loam serve` applies at boot. Granting around it would mint standing for a pen
-    // the next boot refuses to provision. The file is NOT quoted back: a string that fails this
-    // test may still be a key, and a refusal is no place to print one.
     io.err(
       `pen create: ${penSeedPath(home, name)} exists but does not hold a 64-hex seed, which is ` +
         `what \`loam serve\` requires of a pen at boot — so this command refuses it too, rather ` +
@@ -3372,9 +2871,6 @@ async function cmdPen(args: readonly string[], io: IO): Promise<number> {
     const records = penRecordsFor(gateway.reactor, operator, name);
 
     if (seedRead.kind === "present") {
-      // ASK THE GROUND for this key's write standing rather than trusting this run's own memory,
-      // and read the STRUCK grants too: a revoked pen and a never-granted one look identical to a
-      // "does anything survive" question, and re-planting the first would un-revoke it silently.
       const held = authorForSeed(seedRead.seed);
       const standing = grantStanding(
         gateway.reactor,
@@ -3384,9 +2880,6 @@ async function cmdPen(args: readonly string[], io: IO): Promise<number> {
         "write",
       );
       if (standing.surviving.length > 0) {
-        // `grantStanding` names only what the operator has not struck. Whether the author HOLDS
-        // the grant is the door's question — the grant's own window and an admin's strike count
-        // there — so the sentence asks the door, at the same read time.
         const honoured = holdsGrant(
           gateway.reactor,
           gateway.validityNow(),
@@ -3422,9 +2915,6 @@ async function cmdPen(args: readonly string[], io: IO): Promise<number> {
       penSeed = seedRead.seed;
       outcome = "repaired";
     } else {
-      // The seed file lands BEFORE the grant (the `user create` ordering, for the same reason): if
-      // the append then fails, a re-run finds the seed present, the grant absent, and repairs the
-      // grant alone. The other order would strand a live grant whose freshly-minted key was lost.
       penSeed = randomBytes(32).toString("hex");
       try {
         writePenSeed(home, name, penSeed);
@@ -3439,9 +2929,6 @@ async function cmdPen(args: readonly string[], io: IO): Promise<number> {
     }
     const penAuthor = authorForSeed(penSeed);
 
-    // A record naming a DIFFERENT author is a key this run replaces, so its standing goes with it:
-    // the record, and EVERY surviving grant that author holds — any verb, because a key you are
-    // replacing because it leaked must not keep signing anything at all.
     const deltas: Delta[] = [];
     let at = Date.now();
     for (const stale of records.filter((r) => r.author !== penAuthor)) {
@@ -3495,7 +2982,6 @@ async function cmdPen(args: readonly string[], io: IO): Promise<number> {
           `  a write grant for its author is in ${path}\n` +
           `  a renderer binding names it with pen: "${name}"; the next serve reads the seed file`,
   );
-  // Serve reads pen seeds at BOOT, so a live server will not see this pen until it restarts.
   const staleness = servingWarning(home, path);
   if (staleness !== undefined) io.err(`loam: ${staleness}`);
   return 0;
@@ -3517,9 +3003,6 @@ async function cmdGrant(args: readonly string[], io: IO): Promise<number> {
     io.err(`grant ${sub}: ${unusable}`);
     return 1;
   }
-  // A bare positional is a CLIENT ID being granted something — `loam grant <id> --verb=…`. The two
-  // reserved words stay subcommands, so a connector whose id is literally "list" or "revoke" is
-  // unreachable this way; the ids this store mints are opaque and never those two.
   if (sub !== "list" && sub !== "revoke") return cmdGrantMint(sub, parsed, home, io);
   if (sub === "list") return cmdGrantList(home, parsed, io);
 
@@ -3535,7 +3018,6 @@ async function cmdGrant(args: readonly string[], io: IO): Promise<number> {
   return cmdGrantRevoke(clientId, parsed, home, io);
 }
 
-// The connector whose actor a `--verb` grant would name, or the reason there is none.
 function connectorActor(
   home: string,
   clientId: string,
@@ -3553,9 +3035,6 @@ function connectorActor(
     );
     return { code: 1 };
   }
-  // One key per (client, user) since §58: a connector two people consented holds two, and a
-  // grant names one of them — `--user=<name>` says which when there is more than one. A single
-  // grant, bound or pre-§58, needs no name.
   const grants = grantsFor(file, clientId);
   if (grants.length === 0) {
     io.err(
@@ -3585,11 +3064,6 @@ function connectorActor(
   };
 }
 
-// `loam grant <client_id> --verb=register --prefix=<p>` records a namespace grant for a key.
-// It does not widen a bound connection's container fence. Only `register` is minted here:
-// `write` standing is the token exchange's to grant (it mints the actor seed in the same breath),
-// and `admin` is not a connector's
-// to hold. The grant is one operator-signed delta, so revoking it is one strike.
 async function cmdGrantMint(
   clientId: string,
   parsed: Parsed,
@@ -3670,27 +3144,10 @@ async function cmdGrantMint(
         `request refuses`,
     );
   }
-  // The fence re-reads standing per request from a refreshed view, so a live server honors this
-  // grant on its next request. The warning still names the server and what waits for a restart.
   const staleness = servingWarning(home, path);
   if (staleness !== undefined) io.err(`loam: ${staleness}`);
   return 0;
 }
-
-// --- the grant ledger (T205) ---------------------------------------------------------------------
-//
-// Every author with standing at the store entity, on one screen. Two halves joined on the author
-// key: the GROUND's grant deltas, and what the HOME knows about who holds each key — its
-// `user.<name>.seed` and `pen.<name>.seed` files, and its connector records.
-//
-// The join is loose in BOTH directions, and that is the whole design. A grant whose subject matches
-// no file and no connector record is still a row (`unattributed`): a key with standing that nothing
-// here can name is the most important line on the screen, never the one to drop. And a seed file
-// with no grant is still a row: custody without authorization is the question `loam pen create`
-// left open — is this pen provisioned, or merely present — and an omitted row answers neither.
-//
-// A struck grant is SHOWN struck rather than filtered. The ledger is opened on the morning a key
-// leaked, and on that morning an omission and a revocation look identical.
 
 type LedgerKind = "user" | "pen" | "connector" | "unattributed";
 const KIND_ORDER: Readonly<Record<LedgerKind, number>> = {
@@ -3700,38 +3157,17 @@ const KIND_ORDER: Readonly<Record<LedgerKind, number>> = {
   unattributed: 3,
 };
 
-// The cell an absent fact prints: a name nothing claims, a verb nobody granted, a key this home
-// cannot derive. Never blank — a blank cell reads as an oversight rather than as an answer.
 const LEDGER_NONE = "—";
 
-/**
- * One identity the home can name, and the key it holds. `author` is ABSENT when the file or record
- * exists and this command could not derive a key from it — unknown, never "nobody" (H9) — and the
- * row still prints, carrying `note` to say why.
- */
 interface HomeIdentity {
   readonly kind: "user" | "pen" | "connector";
   readonly name: string;
   readonly author?: string;
-  /** Facts that ride the standing column: a connector's generation and tokens, or a fault. */
   readonly note?: string;
-  /**
-   * A §58 connection's inbox pool, when its grant record names one. The pool's own ground carries
-   * the connection's write standing, so a ledger that reads only the primary would report a live
-   * connection as holding none — which is the one thing this listing promises never to do.
-   */
+
   readonly inbox?: string;
 }
 
-/**
- * Every identity the HOME provisions, read through the same primitives `loam serve` provisions with
- * (`readUserSeed` / `readPenSeed` / `isSeedHex`), so the ledger cannot report a pen as provisioned
- * that a boot would refuse.
- *
- * THROWS if the home cannot be listed. That is deliberate: an unlistable home makes every seed file
- * invisible, and every grant in the ground would then render `unattributed` — a ledger inventing the
- * exact alarm it exists to raise.
- */
 function homeIdentities(home: string): HomeIdentity[] {
   const out: HomeIdentity[] = [];
   for (const entry of readdirSync(home).sort()) {
@@ -3741,7 +3177,7 @@ function homeIdentities(home: string): HomeIdentity[] {
     const name = match[2] as string;
     const path = kind === "user" ? userSeedPath(home, name) : penSeedPath(home, name);
     const read = kind === "user" ? readUserSeed(home, name) : readPenSeed(home, name);
-    if (read.kind === "absent") continue; // raced away between the listing and the read
+    if (read.kind === "absent") continue;
     if (read.kind === "unreadable") {
       out.push({ kind, name, note: `${path} is unreadable, so its key cannot be named here` });
       continue;
@@ -3755,15 +3191,11 @@ function homeIdentities(home: string): HomeIdentity[] {
   return out;
 }
 
-// The connector half of the same question. A client with no grant has registered and never
-// completed a token exchange, so it has no acting identity for a grant to name yet; `standing:
-// false` means its seed exists and its inbox pool has not yet stood.
 function connectorIdentities(file: OAuthFile): HomeIdentity[] {
   const out: HomeIdentity[] = [];
   for (const client of file.clients) {
     const name = `${client.clientId} (${client.clientName})`;
     const grants = grantsFor(file, client.clientId);
-    // Live tokens are counted per KEY (§58: one per person), never per connector.
     const factsFor = (user: string | undefined): string => {
       const tokens = file.tokens.filter(
         (t) => t.clientId === client.clientId && t.user === user,
@@ -3771,11 +3203,6 @@ function connectorIdentities(file: OAuthFile): HomeIdentity[] {
       return `generation ${client.generation} · ${tokens} live token${tokens === 1 ? "" : "s"}`;
     };
     const facts = factsFor(undefined);
-    // EVERY key this connector ever signed with, not merely its current one. Revocation destroys the
-    // key and keeps the name, so a re-keyed connector is several authors under one client id, and
-    // each holds standing until its own grant is struck. Naming only the latest would strand the
-    // others under `unattributed` — the same hole one re-key further along. And since §58 a live
-    // connector holds one key per person who consented, each bound to that person's container.
     const revocations = revocationsFor(file, client.clientId);
     for (const r of revocations) {
       out.push({
@@ -3786,7 +3213,6 @@ function connectorIdentities(file: OAuthFile): HomeIdentity[] {
       });
     }
     for (const grant of grants) {
-      // A bound grant says whose and where; a pre-§58 one reads exactly as it always did.
       const where =
         grant.user === undefined || grant.container === undefined
           ? facts
@@ -3800,7 +3226,6 @@ function connectorIdentities(file: OAuthFile): HomeIdentity[] {
       });
     }
     if (grants.length === 0 && revocations.length === 0) {
-      // Registered and never through a token exchange: there is no key to attribute anything to.
       out.push({ kind: "connector", name, note: `no acting identity yet · ${facts}` });
     }
   }
@@ -3811,29 +3236,15 @@ interface GroundGrant {
   readonly id: string;
   readonly subject: string;
   readonly verb: string;
-  readonly granter: string; // who signed it — the operator, or an admin acting under one
+  readonly granter: string;
   readonly at: number;
   readonly prefix?: string;
-  /** When an HONORED strike retired it. Absent when nothing with standing struck it. */
   readonly struckAt?: number;
-  /** A negation names it and binds nothing: no standing, itself struck, or outside its window. */
   readonly inertStrike: boolean;
-  /** The grant's own [validFrom, validUntil) does not hold at the read time. */
   readonly outOfWindow: boolean;
-  /** Why this grant is not law at all, when it is not. Malformed law binds nothing for anyone. */
   readonly defect?: string;
 }
 
-/**
- * Every grant-shaped delta filed at the store entity, whoever signed it. Whether one BINDS is
- * `grantsNaming`'s question and is asked separately, because the two answers are different facts: a
- * grant nobody honours is still a row, and a row that quietly vanished is the omission this ledger
- * exists to make impossible.
- *
- * A grant-shaped delta carrying no subject or no verb names nobody and confers nothing (`grantHeld`
- * matches on both), so there is no author for it to put on the screen. Constitutional law refuses
- * such a delta at the door; only a store predating that check can hold one.
- */
 function groundGrants(reactor: Reactor, now: number, operator: string): GroundGrant[] {
   const out: GroundGrant[] = [];
   for (const id of reactor.byTarget(STORE_ENTITY)) {
@@ -3856,11 +3267,6 @@ function groundGrants(reactor: Reactor, now: number, operator: string): GroundGr
       if (p.role === "prefix") prefix = p.target.value;
     }
     if (subject === undefined || verb === undefined) continue;
-    // WHICH strike, not merely whether one exists. `honoredStrikeOn` runs the constitution's own
-    // walk, so an inert negation — one struck itself, or signed by an author with no standing to
-    // strike — never supplies the caption. Reading `negationsOf` raw would let a writer's inert
-    // strike at t1 mask the operator's lawful one at t2 and under-report the exposure window, which
-    // is the one number this ledger exists to get right.
     const honored = honoredStrikeOn(reactor, now, id, operator);
     const defect = constitutionalDefect(delta);
     out.push({
@@ -3879,18 +3285,6 @@ function groundGrants(reactor: Reactor, now: number, operator: string): GroundGr
   return out;
 }
 
-/**
- * Why a grant that nothing struck still binds nothing. The reasons are genuinely different and an
- * operator acts differently on each, so one catch-all sentence would be false for most of them:
- *
- *  - MALFORMED LAW binds nothing for anyone, the operator included, and no re-granting fixes it.
- *  - OUT OF WINDOW: the grant's own [validFrom, validUntil) does not hold at the read time.
- *  - REGISTER is not delegable. An admin may mint `write` and `admin` all day; `register` from any
- *    author but the operator is refused by `grantsNaming` no matter how sound its chain, because the
- *    store signs registrations with the OPERATOR'S key. Saying "no chain reaches the operator" here
- *    would send an operator to repair a chain that is already intact.
- *  - Otherwise the chain really is the answer: whoever signed it holds no effective admin standing.
- */
 function whyNotBinding(g: GroundGrant, operator: string): string {
   if (g.defect !== undefined) return `malformed law — ${g.defect}`;
   if (g.outOfWindow) return "the grant's own validity window does not hold now";
@@ -3900,16 +3294,11 @@ function whyNotBinding(g: GroundGrant, operator: string): string {
   return "no chain of admin standing reaches the operator";
 }
 
-// An author, short enough for a column and long enough to identify: the algorithm tag in full, then
-// twelve characters of the key. The abbreviation never elides the middle — an operator matching a
-// key against a log matches a PREFIX.
 function shortAuthor(author: string): string {
   const keyAt = author.indexOf(":") + 1;
   return author.length - keyAt <= 12 ? author : `${author.slice(0, keyAt + 12)}…`;
 }
 
-// A column-aligned table. Every column but the last is padded to its widest cell; the last carries
-// free text and stays ragged, and its line is trimmed so an empty cell leaves no trail.
 function ledgerTable(header: readonly string[], rows: readonly (readonly string[])[]): string[] {
   const all = [header, ...rows];
   const last = header.length - 1;
@@ -3953,8 +3342,6 @@ async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<numbe
     );
     return 1;
   }
-  // The standing comes from the GROUND, through the same derivation the registration door reads — so
-  // this listing cannot show an operator a standing the door would not honour, or hide one it would.
   let seed: string;
   try {
     seed = readSeed(home);
@@ -3967,9 +3354,6 @@ async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<numbe
     return 1;
   }
   const path = storePath(home, parsed.flags.get("store"));
-  // WITH the pool backend factory (§58): a bound connection's write grant lives in its inbox
-  // pool's own ground, and a gateway that attaches no pools cannot see it. Without this the
-  // ledger reports every live connection as holding no standing.
   const gateway = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }), {
     channelBackend: channelBackendFor(home, io),
   });
@@ -3977,8 +3361,6 @@ async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<numbe
   const rows: LedgerRow[] = [];
   try {
     const grants = groundGrants(gateway.reactor, gateway.validityNow(), operator);
-    // One pass per distinct subject, reusing the door's own derivation rather than re-deriving
-    // effectiveness here: two answers to "does this bind" is one too many.
     const binding = new Set<string>();
     for (const subject of new Set(grants.map((g) => g.subject))) {
       for (const held of grantsNaming(gateway.reactor, gateway.validityNow(), subject, operator))
@@ -3989,16 +3371,12 @@ async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<numbe
 
     for (const g of grants) {
       const live = binding.has(g.id);
-      // "negated" is the word an operator scans this column for, so it appears in exactly ONE answer
-      // here: the one where a negation WITH STANDING actually retired the grant. Every other phrasing
-      // says "negation", never "negated", or a reader grepping the ledger lands on a row that is not.
       const inert = g.inertStrike ? " · a negation names it and binds nothing" : "";
       const standing = live
         ? `live${inert}`
         : g.struckAt !== undefined
           ? `negated ${new Date(g.struckAt).toISOString()}`
           : `does not bind — ${whyNotBinding(g, operator)}${inert}`;
-      // A grant naming a USER stands for the user's current root: show that key, and the user's row.
       const named = g.subject.startsWith(USER_PREFIX)
         ? g.subject.slice(USER_PREFIX.length)
         : undefined;
@@ -4015,13 +3393,9 @@ async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<numbe
         at: g.at,
         tiebreak: g.id,
       };
-      // Every identity holding this key gets the row — a key copied into two files holds standing
-      // under both names, and naming only the first would hide the second.
       const holders = identities.filter((i) =>
         named === undefined ? i.author === g.subject : i.kind === "user" && i.name === named,
       );
-      // A grant naming a user is that user's row even when this home holds no file for them: the
-      // grant itself says whose it is.
       if (holders.length === 0) {
         rows.push(
           named === undefined
@@ -4038,9 +3412,6 @@ async function cmdGrantList(home: string, parsed: Parsed, io: IO): Promise<numbe
     for (const i of identities) {
       if (i.author !== undefined && granted.has(i.author)) continue;
       if (i.kind === "user" && granted.has(`${USER_PREFIX}${i.name}`)) continue;
-      // A §58 connection's standing is its POOL's (SPEC §58): the owner-authored write grant in
-      // the inbox, never a store-wide one. Ask the pool the same question the door asks, so the
-      // two surfaces of one store cannot answer differently about one key.
       const pool = i.inbox === undefined ? undefined : gateway.connectionInboxes.get(i.inbox);
       const bound =
         pool?.gateway !== undefined &&
@@ -4126,8 +3497,6 @@ async function cmdGrantRevoke(
   }
   const operator = authorForSeed(seed);
   const path = storePath(home, parsed.flags.get("store"));
-  // WITH the pool backend factory: since §58 a connection's write standing lives in its inbox
-  // pool, and a revoke that cannot attach the pool cannot strike the grant that matters.
   const gateway = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }), {
     channelBackend: channelBackendFor(home, io),
   });
@@ -4136,10 +3505,6 @@ async function cmdGrantRevoke(
   const unreachablePools: string[] = [];
   const unrevokedPools: string[] = [];
   try {
-    // BOTH HALVES, and the report below says which ones happened. The store-wide grant is the
-    // pre-§58 shape (nothing lands one now); the pool grant is what a bound connection actually
-    // writes on. Striking one and announcing both is the H7 shape the admin page's own revoke
-    // guards against, and this path used to have it.
     const strike = async (grant: OAuthGrant): Promise<void> => {
       const ids = survivingGrantClaimIds(
         gateway.reactor,
@@ -4164,24 +3529,15 @@ async function cmdGrantRevoke(
       const revoke = (voice: { ownerSeed: string } | { asPool: true }) =>
         gateway.revokeConnection({ inbox: handle, connectionKey: grant.actor, ...voice });
       try {
-        // The person's own voice first. If their seed was replaced since the bind, the new key
-        // has no standing in the pool and did not sign what lets the connection write, so its
-        // strike is refused or does not bind. The pool's own governing voice may strike any
-        // delegation in it, so the command strikes in that voice instead, through the pool's signer.
         const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
         await revoke({ ownerSeed: owner.seed }).catch(async (first: unknown) => {
           if (/nothing in this inbox lets/.test(message(first))) throw first;
-          // If the operator's retry finds nothing left to strike, the FIRST failure is the truth
-          // about this pool: something the strike could not reach may still let the key write.
           await revoke({ asPool: true }).catch((second: unknown) => {
             throw /nothing in this inbox lets/.test(message(second)) ? first : second;
           });
         });
         struckPools.push(grant.inbox);
       } catch (err) {
-        // Nothing lets the key write there — already revoked, or never provisioned — is not a
-        // failure, and the report claims nothing either way. Any other refusal means the key may
-        // still write there, and the report must say so.
         const said = err instanceof Error ? err.message : String(err);
         if (!/nothing in this inbox lets/.test(said))
           unrevokedPools.push(`${grant.inbox} (${said})`);
@@ -4193,8 +3549,6 @@ async function cmdGrantRevoke(
         io.err(`grant revoke: this store holds no connector ${clientId} — \`loam grant list\``);
         return 2;
       case "no-such-pair":
-        // The CLI revokes the WHOLE client; a pair scope is the admin page's, so this answer is
-        // not one this command can be given — named here so the type stays exhaustive.
         io.err(`grant revoke: ${clientId} holds no key for that person — \`loam grant list\``);
         return 2;
       case "locked":
@@ -4209,8 +3563,6 @@ async function cmdGrantRevoke(
         );
         return 1;
       case "revoked": {
-        // The report names what was actually struck. Access dies with the generation bump and the
-        // deleted record whatever the grants did, so the sentence separates the two.
         const struck = [
           ...(struckGround.length === 0
             ? []
@@ -4242,7 +3594,6 @@ async function cmdGrantRevoke(
           return 1;
         }
         {
-          // As for the mint above: a live server reads the strike on its next request.
           const staleness = servingWarning(home, path);
           if (staleness !== undefined) io.err(`loam: ${staleness}`);
         }
@@ -4253,18 +3604,6 @@ async function cmdGrantRevoke(
     await gateway.close();
   }
 }
-
-// --- minted clients (SPEC §57, T256) -------------------------------------------------------------
-//
-// `loam client mint <name>` is the non-interactive credential in one motion: a signing seed the
-// home keeps, the grants that give its key standing, and a bearer printed once. Write standing is
-// STORE-WIDE by design — pointing is free, entity ids are unowned, and the fences are attribution
-// (every delta names the client's own author) plus each reader's trust mask, never a door prefix.
-// Only register and federate carry a scope, because those verbs reach the store's shared surfaces.
-//
-// The seed file cannot collide with `user.<name>.seed` or `pen.<name>.seed` — it wears its own
-// `client.` stem — and the name is fenced to what a filename can carry, so the record can never
-// point at a path outside the home.
 
 const CLIENT_NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
 
@@ -4310,8 +3649,6 @@ async function cmdClientMint(name: string, parsed: Parsed, home: string, io: IO)
     );
     return 2;
   }
-  // A scope flag that resolves to NOTHING is refused rather than read as "no fence wanted": the
-  // caller asked for a fence, and minting without one would hand out more than they asked.
   const prefixes = splitScopes(parsed.flags.get("register-prefix"));
   if (parsed.flags.get("register-prefix") !== undefined && prefixes.length === 0) {
     io.err("client mint: --register-prefix wants a non-empty namespace, like `medialog:`");
@@ -4379,8 +3716,6 @@ async function cmdClientMint(name: string, parsed: Parsed, home: string, io: IO)
   } finally {
     await gateway.close();
   }
-  // Grants first, files second: a failure between the two strands standing for a key nobody
-  // holds — inert — where the other order would hand out a bearer whose grants never landed.
   writeFileSync(clientSeedPath(home, name), `${clientSeed}\n`, { mode: 0o600 });
   writeClientsFile(home, {
     version: 1,
@@ -4424,10 +3759,6 @@ async function cmdClientRevoke(
     return 1;
   }
   const record = file.clients.find((c) => c.name === name);
-  // A record-less client with a seed file is a mint that died between its two file writes: the
-  // key and its grants are real, only the record is missing — and refusing here would strand
-  // them forever, since mint's own duplicate check sees the seed and says "already exists".
-  // The seed's derived author is the same identity the record would have carried.
   let actor: string;
   if (record !== undefined) {
     actor = record.actor;
@@ -4451,9 +3782,6 @@ async function cmdClientRevoke(
   }
   const operator = authorForSeed(seed);
   const path = storePath(home, parsed.flags.get("store"));
-  // The closure is only as honest as its operand set. The record remembers which store the
-  // grants landed in; striking over a different one would find nothing, report the grants
-  // struck, and destroy the record this command finds the client by — so a mismatch refuses.
   if (record !== undefined && resolve(record.store) !== resolve(path)) {
     io.err(
       `client revoke: "${name}" was minted into ${record.store}, not ${resolve(path)} — ` +
@@ -4464,25 +3792,10 @@ async function cmdClientRevoke(
   const gateway = await Gateway.boot(openStore(path, io), assembleGenesis({ operatorSeed: seed }));
   let struckCount = 0;
   try {
-    // Strike FIRST, retire the record second: a strike is idempotent over the surviving set, so
-    // a failure between the two leaves a rerunnable revoke — the other order deletes the record
-    // this command finds the client by, and the retry would answer "no such client" while the
-    // grants stand.
-    //
-    // The strike set is the effective grants whose subject is literally this key (`grantsNaming`),
-    // not a flat scan: it carries strike survival transitively and includes standing an effective
-    // admin minted. It is never widened to the keys that act for a user, so revoking a connection
-    // cannot strike its user's own grants. (A grant naming this key whose
-    // ISSUER's own chain is currently broken survives dormant and unstruck — a property of the
-    // admin chain, shared with every revoke surface, not widened here.)
     const ids = grantsNaming(gateway.reactor, gateway.validityNow(), actor, operator).map(
       (g) => g.id,
     );
     struckCount = ids.length;
-    // A record carries the store its grants landed in; a record-less orphan carries nothing, so
-    // the store guard above cannot protect it. The fallback: if this store holds NO delta naming
-    // the key at all, this is the wrong store, not a completed rerun — refuse, and above all keep
-    // the seed, which is the orphan's only remaining handle on its grants.
     if (record === undefined && ids.length === 0) {
       const everNamed = [...gateway.reactor.snapshot()].some((d) =>
         d.claims.pointers.some(
@@ -4529,22 +3842,6 @@ async function cmdClientRevoke(
   return 0;
 }
 
-// --- the erasure surface (SPEC §11, §29; T206) ---------------------------------------------------
-//
-// Two readers over machinery that already exists — §29.1's slate record, printed, and the per-id
-// receipts `standingErasures` governs admission with. Neither invents erasure semantics, and
-// neither widens what any sweep can destroy.
-//
-// A CHANNEL'S POOL IS ITS OWN FILE, and a store that does not attach it reads smaller than it is.
-// A separate container's bytes are unreadable until it is attached, and `slate list` computes its
-// affected set over exactly those containers — a pool attached over empty MEMORY would answer "no
-// overlap" for a wall full of condemned deltas. `serve` opens them, so these verbs do too.
-//
-// The cold ARCHIVE is deliberately NOT opened here. A mirror is a shadow, not a second voice:
-// `deltasSince` answers from the primary, and replanting what the primary lost is `serve`'s boot
-// heal, not a reader's job. The archive matters where bytes are REMOVED, not where they are read.
-
-/** The home's operator identity, or the said reason there is none. Erasure has exactly one signer. */
 function operatorSeed(home: string, label: string, io: IO): string | { code: number } {
   try {
     return readSeed(home);
@@ -4558,13 +3855,6 @@ function operatorSeed(home: string, label: string, io: IO): string | { code: num
   }
 }
 
-/**
- * A gateway over the home's store with every standing channel's own pool file attached.
- *
- * `vault` is passed ONLY by `erase`, which removes bytes. A read answers from the primary —
- * `deltasSince` does — so opening the cold tier for a listing would buy nothing and would write this
- * command's genesis into the vault.
- */
 async function openTiers(
   home: string,
   seed: string,
@@ -4572,15 +3862,8 @@ async function openTiers(
   io: IO,
   vaults: readonly string[] = [],
 ): Promise<{ gateway: Gateway; path: string; lagged: string[] }> {
-  // A LAGGING MIRROR IS A QUALIFICATION, not a diagnostic. `MirrorBackend.append` swallows a
-  // mirror-write failure into `onLag` while `purge` and `holds` on that same tier can still
-  // succeed — so a run can exit 0 saying the archive was swept while the tier never took the
-  // erasure. Collected rather than printed here, so the caller can file it WITH the claim it
-  // weakens, or report it as a fault, depending on how the run ends.
   const lagged: string[] = [];
   const path = storePath(home, parsed.flags.get("store"));
-  // One mirror per vault, folded. `MirrorBackend` composes: purge and the byte verdict each reach
-  // both sides, so a nest of them reaches every tier in the chain.
   const backend: StoreBackend = vaults.reduce<StoreBackend>(
     (below, vault) =>
       new MirrorBackend(below, new ArchiveBackend(vault), {
@@ -4594,42 +3877,20 @@ async function openTiers(
       }),
     openStore(path, io),
   );
-  // `channelBackend` and NOT `channelToken`: the pool's own file has to be attached, or a channel's
-  // bytes sit outside this store's reach. The TOKEN only rebuilds a live syncing Channel, and none
-  // of these verbs sync — carrying it would open a network client for a command that reads a store.
   const gateway = await Gateway.boot(backend, assembleGenesis({ operatorSeed: seed }), {
     channelBackend: channelBackendFor(home, io),
   });
   return { gateway, path, lagged };
 }
 
-// A content address, short enough for a column and long enough to identify. The abbreviation never
-// elides the middle — an operator matching an id against a log matches a PREFIX. `shortAuthor` does
-// the same job for an author, where the algorithm tag has to survive.
 const shortId = (id: string): string => (id.length <= 13 ? id : `${id.slice(0, 12)}…`);
 
-/**
- * The §25 pen, said out loud — because a row it holds is OUTSIDE everything these verbs print.
- *
- * `deltasSince` sets a row the driver could not admit ASIDE rather than returning it, so the reactor
- * never sees it. Two inversions follow and neither is visible on the screens above: a set-aside
- * operator negation of an erasure leaves a WITHDRAWN erasure printing as live, and a set-aside
- * erasure leaves a forgotten id printing as never forgotten. The receipt listing's own copy argues
- * that an omission and a revocation must not look alike; a row the reader never saw is the same
- * failure one layer further down.
- */
 interface PenReading {
-  /** Which of the three states this is — an empty pen, rows in it, or a pen nobody could read. */
   readonly state: "empty" | "rows" | "unreadable";
-  /** The sentence to print, absent only when the pen is empty AND readable. */
   readonly text?: string;
 }
 
 async function setAsideWarning(gw: Gateway): Promise<PenReading> {
-  // EVERY STORE THESE VERBS READ, not the primary alone. `openTiers` attaches each channel's pool
-  // precisely so its deltas are in scope, and a pool is its own driver with its own pen — so a
-  // sentence that read only the host's would report an all-clear over a container it just brought
-  // into the reading.
   const stores = [gw, ...gw.quarantinePools];
   let rows = 0;
   let stranded = 0;
@@ -4666,20 +3927,10 @@ async function setAsideWarning(gw: Gateway): Promise<PenReading> {
   };
 }
 
-// A list an operator has to act on, capped so one enormous slate cannot bury the block it sits in —
-// and the remainder COUNTED rather than dropped, because a silent truncation on a compliance screen
-// is the omission these readers exist to prevent.
 function capped(ids: readonly string[], limit = 8, total = ids.length): string {
   if (total <= limit) return ids.join(", ");
   return `${ids.slice(0, limit).join(", ")}, and ${total - limit} more`;
 }
-
-// --- `loam slate list` ---------------------------------------------------------------------------
-//
-// A slate prints as a BLOCK, not a table row, and `federate list` is the precedent: a store holds a
-// handful of slates, each dense with compliance facts, and every address on one must be readable in
-// FULL so the operator can act on it. A table would abbreviate exactly the fields a legal record
-// must not abbreviate. The receipt listing below goes the other way, for the opposite reason.
 
 const closureList = (closes: readonly string[]): string =>
   closes.length === 0 ? "none" : closes.join(", ");
@@ -4689,8 +3940,6 @@ function slateBlock(s: SlateReport): string[] {
   const say = (label: string, text: string): void => {
     lines.push(`  ${label.padEnd(14)}${text}`);
   };
-  // The FORM is named, never guessed: a reader of a permanent compliance record must never be left
-  // wondering whether an identifier is a person or a preimage (§29.1).
   say(
     "requested by",
     `${s.requestedBy} (${
@@ -4698,12 +3947,6 @@ function slateBlock(s: SlateReport): string[] {
     })`,
   );
   say("requested at", new Date(s.requestedAt).toISOString());
-  // The lapse TIGHTENS what a slate closes (§29.4) — but only over a set it can read, and only if
-  // that set has anything in it. Saying "`read` is closed too" about a slate that closes nothing
-  // would promise a protection this store is not delivering, on the line an operator reads first.
-  // The two ways to enforce nothing get their OWN sentence: `enforcedBy` returns empty for an
-  // unreadable set AND for an empty one, and only the first prints an UNRESOLVED row — so one
-  // shared cross-reference would point half its readers at a line that is not on the screen.
   const idle =
     s.unresolved !== undefined
       ? " — LAPSED (§29.4), and see UNRESOLVED below: no door is closed by it"
@@ -4718,10 +3961,6 @@ function slateBlock(s: SlateReport): string[] {
         : ""
     }`,
   );
-  // ZERO IS NOT UNKNOWN. A slate whose frozen set cannot be read here has a condemned set — it was
-  // identified and frozen at an address that is printed on the next line — and this store merely
-  // cannot resolve it. Printing "0 deltas" would tell a compliance officer nothing was ever slated,
-  // which is the collapse `readFrozenTerm` refuses one layer down.
   say(
     "condemned",
     s.unresolved !== undefined
@@ -4732,8 +3971,6 @@ function slateBlock(s: SlateReport): string[] {
   say("closes", `${closureList(s.closes)} — enforcing ${closureList(s.enforced)}`);
   say("record", s.record);
   if (s.reason !== undefined) say("reason", s.reason);
-  // A slate that enforces nothing is the one state an operator most needs to see: reporting
-  // `closes` as though it were in force would be a claim of protection never delivered.
   if (s.unresolved !== undefined) {
     say("UNRESOLVED", `${s.unresolved} — so this slate closes no door at all`);
   }
@@ -4749,10 +3986,6 @@ function slateBlock(s: SlateReport): string[] {
     );
   }
   if (s.duplicates.length > 0) {
-    // NAMED, not counted. This is the one screen whose purpose is to act before the cut, and a
-    // count tells an operator a copy exists without telling them which id to slate.
-    // Sliced BEFORE the map: `duplicates` grows with the ground, and building a string for every
-    // one of them to print eight is the walk this screen is otherwise careful to avoid.
     say(
       "duplicates",
       `${s.duplicates.length} record(s) link to a member and must be slated by their own ids: ` +
@@ -4802,13 +4035,8 @@ async function cmdSlate(args: readonly string[], io: IO): Promise<number> {
   } finally {
     await gateway.close();
   }
-  // STDOUT, with the claim it qualifies. `loam slate list > proof.txt` files an absence, and the
-  // sentence saying the reader never saw the set-aside rows belongs in the same file.
   if (pen.text !== undefined) io.out(`loam: ${pen.text}`);
   if (slates.length === 0) {
-    // SCOPED TO THE SIGNER, because that is exactly how wide the check was: a slate is the
-    // operator's alone, and `readSlates` asks about THIS home's operator key. Over a store governed
-    // by another key an unqualified "nothing is staged" would be an absence never verified.
     io.out(
       `loam: no slate signed by ${shortAuthor(authorForSeed(seed))} stands over ${path} — ` +
         `nothing is staged for erasure\n` +
@@ -4828,46 +4056,14 @@ async function cmdSlate(args: readonly string[], io: IO): Promise<number> {
   return 0;
 }
 
-/**
- * Cold archives inside this home that the command was NOT told about.
- *
- * `loam serve --archive <dir>` does not write that name into `config.json`, so a home can own a cold
- * tier its own configuration never mentions — and every other tier a sweep reaches is discovered
- * from the GROUND and fails closed, while this one is discovered from a flag and would fail open.
- * That asymmetry is the whole reason this exists: the archive is the tier whose retention has no
- * recovery, and a report that omitted it would be false in the one direction §11 cannot undo.
- *
- * Detected by SHAPE, from the layout `ArchiveBackend` writes and nothing else does: a fan directory
- * of two hex characters holding a file named for a content address. Three deliberate widenings, each
- * because the SWEEPER is that wide and a detector narrower than its sweeper fails OPEN:
- *
- *  - the file need not sit in its matching fan (`purge` hunts a MISFILED copy, and it is still bytes);
- *  - the `.json.<pid>.tmp` straggler an interrupted append leaves counts (`purge` hunts that too);
- *  - a fan reached through a SYMLINK counts — a `Dirent` for one answers `isDirectory()` false while
- *    the path behind it is a perfectly good vault;
- *  - a fan may be named ANYTHING. `ArchiveBackend` puts no name filter on its own root entries, so a
- *    hex-only rule here would be narrower than the sweeper on a fourth axis.
- *
- * It descends a few levels, because `--archive backup/vault` resolves inside the home and a
- * single-level probe would miss it, and it tests the home ITSELF for `--archive .`.
- *
- * NAMED GAP, and it is the honest limit: `--archive` also takes an ABSOLUTE path, so a vault parked
- * outside the home is beyond any walk this command can afford. The help text and the README say so.
- */
 const ARCHIVED_FILE = /^[0-9a-f]{30,}\.json(\..*)?$/;
 const VAULT_SEARCH_DEPTH = 3;
 
-/** What the scan found, and what it could not look at. An unreadable directory is neither. */
 interface VaultScan {
   readonly vaults: string[];
-  /** Directories the scan could not read. A guard that called these empty would fail OPEN (H9). */
   readonly unreadable: string[];
 }
 
-// ENOENT and ENOTDIR are ANSWERS: nothing is there. Every other error means the directory exists and
-// this process could not look inside it — a mode bit, a foreign uid, a mount that refuses readdir.
-// `ArchiveBackend` draws exactly this line for the same directories and RETHROWS the rest, so a
-// probe that swallowed them would be narrower than the sweeper it exists to guard.
 function listOrFault(dir: string): { entries: Dirent[] } | { unreadable: true } {
   try {
     return { entries: readdirSync(dir, { withFileTypes: true }) };
@@ -4877,7 +4073,6 @@ function listOrFault(dir: string): { entries: Dirent[] } | { unreadable: true } 
   }
 }
 
-/** A path's real form when it exists, and itself when it does not — one spelling per directory. */
 function realOrSelf(dir: string): string {
   try {
     return realpathSync(dir);
@@ -4889,44 +4084,22 @@ function realOrSelf(dir: string): string {
 function scanForVaults(home: string, named: readonly string[]): VaultScan {
   const vaults: string[] = [];
   const unreadable: string[] = [];
-  // REAL paths, so an alias and its target are one directory. Two spellings of one vault would
-  // otherwise make the named one still count as unnamed under its other name, and naming that one
-  // would flip the refusal onto the first — no invocation could ever satisfy the guard.
   const real = realOrSelf;
   const namedReal = new Set(named.map(real));
   const seen = new Set<string>();
   const walk = (dir: string, depth: number, known?: ReturnType<typeof listOrFault>): void => {
     const here = real(dir);
-    if (seen.has(here)) return; // a symlink cycle is a cycle however it is spelled
+    if (seen.has(here)) return;
     seen.add(here);
     const isNamedHere = namedReal.has(here);
-    // THE LISTING THE CALLER ALREADY PAID FOR. Every fan was read once to classify it and again to
-    // recurse into it, which doubles the syscalls on a home full of directories (H8).
     const listed = known ?? listOrFault(dir);
     if ("unreadable" in listed) {
-      // NAMED OR NOT. Skipping a named one let the run proceed past this pre-work guard and fail
-      // LATER, after the erasure had landed, when `ArchiveBackend` rejected the same root — the
-      // one state worse than refusing. It also made this guard's own sentence false: the refusal
-      // tells the operator that naming the path does not clear it, and naming it did.
       unreadable.push(dir);
       return;
     }
-    // The named vault is SKIPPED AS A RESULT and still walked THROUGH. Returning here would leave a
-    // second vault parked INSIDE the named one invisible to this guard — and to the sweeper, which
-    // reads each fan one level and never recurses. It would also make `--archive .` (the home
-    // itself) switch the whole probe off.
-    // THE FANS ARE PROBED WHETHER OR NOT THIS DIRECTORY WAS NAMED. Only the CONCLUSION — "this is
-    // an unnamed vault" — belongs to the unnamed case. Skipping the loop for a named vault also
-    // skipped its unreadable fans, and at exactly `VAULT_SEARCH_DEPTH` the recursion below stops
-    // too, so an unreadable fan under a named vault at the bound was seen by nobody: the run
-    // cleared this pre-work guard and failed later, after the erasure had landed.
     let archival = false;
     const fans = new Map<string, ReturnType<typeof listOrFault>>();
     for (const entry of listed.entries) {
-      // NO NAME FILTER on the fan, because `ArchiveBackend` has none: it reads every non-file
-      // entry of its root and sweeps what looks like a delta inside. A hex-only rule here would be
-      // narrower than the sweeper on a fourth axis, which is the failure this whole probe exists
-      // to avoid — a restored backup under `vault/restored/` is bytes the purge would reach.
       if (entry.isFile()) continue;
       const fan = listOrFault(join(dir, entry.name));
       fans.set(join(dir, entry.name), fan);
@@ -4938,14 +4111,13 @@ function scanForVaults(home: string, named: readonly string[]): VaultScan {
     }
     if (archival && !isNamedHere) {
       vaults.push(dir);
-      return; // a vault's own fans hold files, not vaults
+      return;
     }
     if (depth === 0) return;
     for (const entry of listed.entries) {
       if (entry.isFile()) continue;
       const child = join(dir, entry.name);
       const fan = fans.get(child);
-      // An unreadable fan is already recorded above; walking it would record it twice.
       if (fan !== undefined && "unreadable" in fan) continue;
       walk(child, depth - 1, fan);
     }
@@ -4954,28 +4126,16 @@ function scanForVaults(home: string, named: readonly string[]): VaultScan {
   return { vaults: vaults.sort(), unreadable: unreadable.sort() };
 }
 
-/**
- * The masks a served door reads under that no registration names. One today: §36's login reading,
- * whose hyperschema `resolveUserView` assembles and runs itself. A mask that cannot be assembled is
- * DROPPED rather than guessed at — the reading then reports one reader fewer, which is a narrower
- * claim and not a false one, and it says so.
- */
 function loginDoorReadings(seed: string, unconsulted: string[]): ExtraReading[] {
   try {
     return [
       {
         reading: "LoamUser (§36's login door)",
         policy: programMaskJson(userHyperSchema(authorForSeed(seed)).body),
-        // RAW, because `resolveUserView` runs this hyperschema over the reactor's own snapshot and
-        // §29 read closure never reaches it. Modelled as closed, a role binding inside a standing
-        // slate's condemned set is invisible in both readings and its revival goes unsaid.
         ground: "raw" as const,
       },
     ];
   } catch (err) {
-    // NOT to stderr. This says the revival check speaks for one reader fewer, which is the same
-    // fact `RevivalReport.unconsulted` carries to stdout — and one screen cannot report the same
-    // limitation on two streams depending on which code path noticed it.
     unconsulted.push(
       `LoamUser (§36's login door) — its reading could not be assembled: ${
         err instanceof Error ? err.message : String(err)
@@ -4985,15 +4145,6 @@ function loginDoorReadings(seed: string, unconsulted: string[]): ExtraReading[] 
   }
 }
 
-/**
- * WHERE the bytes for an id still are, asked of every store this command opened — the host AND each
- * attached pool, which is the set §11's own sweep fans into.
- *
- * `gateway.backend.holds` answers for the host alone. A refusal that probed only there would print
- * nothing while a peer's delta sat legible in `channels/*.sqlite`, and its silence would read as
- * "no tier holds it" — T40's shape, arriving through a new door. A store that cannot be ASKED is
- * named separately: unprovable is not clean (H9).
- */
 async function heldWhere(
   gw: Gateway,
   id: string,
@@ -5013,41 +4164,21 @@ async function heldWhere(
   return { held, unprovable };
 }
 
-/**
- * What a removal brought back to life, said the same way on both exits.
- *
- * `when` is the whole reason this is one function. On the success path the revival is news the
- * operator can still act on; on the FAULT path the purge has already happened, and the fault's own
- * advice is "resolve and re-run" — so the sentence must not let a reader think a re-run undoes it.
- * Nothing does. The re-run boots on the post-purge ground, where the strike is already gone and
- * nothing appears to have come back at all, which is why this is the only run that can say it.
- */
 function reportRevived(
   io: IO,
   report: RevivalReport,
   host: Gateway,
   when: "now" | "already",
-  // WHETHER THE THING REMOVED WAS A WITHDRAWAL. The as-of disclosure below is about a claim a
-  // strike still hides in the present ground; where no strike was destroyed there is nothing for
-  // that door to serve differently, and an unconditional hedge is one nobody reads.
   removedNegation = false,
-  /** How many channel lenses this store serves — see the boundary line below. */
   channels = 0,
 ): void {
-  // The success path files a document; the fault path reports a failure. Same sentences, and the
-  // stream follows which of the two this is.
   const say = (line: string): void => (when === "now" ? io.out(line) : io.err(line));
   const revived = report.revived;
-  // EACH BOUNDARY NAMES ITS GROUND. Two stores can register the same lens name, so a bare list can
-  // print one name as both consulted and unconsulted on one screen and leave the operator unable to
-  // tell which door to go read.
   const at = (rows: readonly ReadingAt[]): string =>
     capped(
       rows.map((row) => `${row.reading}${row.ground === host ? "" : " (in an attached pool)"}`),
       4,
     );
-  // THE BOUNDARIES FIRST, because they qualify the list below them — and because they are the ways
-  // this check can be silent for a reason other than "nothing came back".
   if (report.reopened.length > 0) {
     say(
       `loam: THAT ERASURE REOPENED ${report.reopened.length} READING(S): ${at(report.reopened)}. ` +
@@ -5071,9 +4202,6 @@ function reportRevived(
         `"nothing came back" below now speaks for that many readers fewer.`,
     );
   }
-  // TWO READERS THIS CHECK CANNOT MODEL, said where the other boundaries are said. Both are
-  // properties of the READER rather than of this store's masks, so no enumeration of registered
-  // Schemas reaches either.
   if (channels > 0) {
     say(
       `loam: ${channels} channel read door(s) were not modelled. A channel lens serves the POOL's ` +
@@ -5089,10 +4217,6 @@ function reportRevived(
         `the check below speaks for that many readers fewer.`,
     );
   }
-  // BEFORE THE EARLY RETURN. The sentence below is about a claim that is identical in both
-  // readings and live only at the as-of door — which is exactly the case where this list is EMPTY.
-  // Printed after the return, the disclosure was suppressed in the only state it was written for,
-  // and silence on this screen reads as "nothing came back".
   if (removedNegation) {
     say(
       `loam: and §26's AS-OF door was not read. It reconstructs the ground at a timestamp, so a ` +
@@ -5101,26 +4225,11 @@ function reportRevived(
     );
   }
   if (revived.length === 0) return;
-  // WHICH READER, per claim, because a store does not have one. Naming the mask is the difference
-  // between a fact and a guess, and the two shipped masks genuinely disagree about the same delta.
-  // NAMES THE READINGS, never a category. A store's readers are its registered Schemas plus the
-  // `drop` floor, and which of them can see a returned claim is the fact an operator acts on — an
-  // adjective like "governed" describes a class this store may not contain.
-  // UNDER THE MASK THAT GOVERNS THOSE READINGS, not "to" them. The live set is the whole ground a
-  // mask admits; a lens ALSO has its own gather, which selects an entity and a set of pointer
-  // contexts. So this names every door whose suppression rule stopped hiding the claim, and a lens
-  // whose gather does not select the delta will not show it. Saying "live again to Note" about a
-  // grant delta that no Note reading can ever return is a false sentence on a compliance screen.
   const where = (r: Revival): string =>
     `${r.id} — live again under the mask that governs ${capped(r.readings, 4)}${
       r.ground === host ? "" : ", in an attached pool rather than at this store's own door"
     }`;
   say(
-    // NOT "that was a strike": the removed delta is whatever it was, and a grant can shrink the
-    // trusted-striker set and free claims without having withdrawn any of them itself.
-    // DISTINCT CLAIMS in the headline, one ROW per place each came back. A claim readable again in
-    // this store and in a pool is one claim in two doors, and counting the rows would inflate the
-    // number an operator reads first.
     `loam: THAT ERASURE ${when === "now" ? "BROUGHT" : "HAS ALREADY BROUGHT"} ` +
       `${new Set(revived.map((r) => r.id)).size} CLAIM(S) BACK. Removing it un-suppressed them:\n` +
       revived
@@ -5137,16 +4246,6 @@ function reportRevived(
       `reversible in a way an erasure is not.`,
   );
 }
-
-// --- `loam erase <deltaId> --reason "<why>"` -----------------------------------------------------
-//
-// One delta, one order, one receipt. This WRAPS §11's existing single-delta erase and adds no
-// erasure semantics: the same single authority, the same completeness guard, the same byte verdict
-// tier by tier. Nothing becomes deletable here that an embedding script could not already delete.
-//
-// The archive IS opened for this verb, because this is where bytes are REMOVED. A purge that swept
-// only the primary would leave a cold copy at rest and report the erasure complete — the report
-// false in the one direction §11 cannot recover from.
 
 async function cmdErase(args: readonly string[], io: IO): Promise<number> {
   const parsed = parseFor("erase", args);
@@ -5183,17 +4282,6 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
   }
   const seed = operatorSeed(home, "erase", io);
   if (typeof seed !== "string") return seed.code;
-  // REPEATABLE, and UNIONED with the home's own config. One home can hold more than one cold
-  // tier, and a last-wins flag left such a home permanently refused: name either vault and the
-  // other is still unnamed, so no invocation satisfied the guard. Two things this is NOT:
-  //
-  //  - not a delimited list. No delimiter is safe inside a path, and a comma in one would silently
-  //    become two wrong paths — `ArchiveBackend` MKDIRS its root, so both would be created empty,
-  //    both would answer "no bytes here", and the screen would report a vault as swept that this
-  //    command had just invented beside it.
-  //  - not a REPLACEMENT for config.json's archive. Every other tier is discovered from the ground
-  //    and fails closed; dropping a configured vault because a flag was also given would be the one
-  //    tier a flag can silently switch off.
   const seenVault = new Set<string>();
   const vaults = [
     archivePath(home),
@@ -5202,13 +4290,10 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
     .filter((one): one is string => one !== undefined)
     .filter((one) => {
       const key = realOrSelf(one);
-      if (seenVault.has(key)) return false; // two spellings of one vault are one vault
+      if (seenVault.has(key)) return false;
       seenVault.add(key);
       return true;
     });
-  // BEFORE ANY WORK, the same discipline §27.7's completeness guard applies to a container store:
-  // a tier this command was not told about would be a silent gap in the sweep, so it refuses rather
-  // than purging the primary and calling the erasure complete.
   const scan = scanForVaults(home, vaults);
   if (scan.unreadable.length > 0) {
     io.err(
@@ -5222,11 +4307,6 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
     );
     return 1;
   }
-  // ABSOLUTE, because that is the only spelling `--archive` accepts back. A relative value is
-  // re-resolved INSIDE the home, so a home-prefixed path pasted from this refusal becomes
-  // `<home>/<home>/…`, matches nothing, and fires the same refusal again — a loop an operator
-  // cannot leave by following the instruction. Absolute for an absolute `--home` too, where it
-  // already worked: one spelling, not one that depends on how the home was written.
   const unnamed = scan.vaults.map((v) => resolve(v));
   if (unnamed.length > 0) {
     io.err(
@@ -5241,46 +4321,27 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
     );
     return 1;
   }
-  // WHICH OF THESE ALREADY EXISTED. `scanForVaults` is meticulous about an UNNAMED vault and
-  // tests a named one not at all — and `ArchiveBackend` MKDIRS its root, so a mistyped `--archive`
-  // becomes an empty tier that answers "no bytes here" and is then listed as swept. Recorded before
-  // anything opens it, and disclosed beside the sweep.
   const invented = vaults.filter((one) => !existsSync(one));
   const { gateway, path, lagged } = await openTiers(home, seed, parsed, io, vaults);
   let done: Awaited<ReturnType<Gateway["erase"]>>;
   let pools: number;
   let revived: RevivalReport;
   let pen: PenReading;
-  // Hoisted because the success screen below the try/catch reads them too.
   let wasNegation = false;
   let channelCount = 0;
   try {
     pools = gateway.quarantinePools.size;
     pen = await setAsideWarning(gateway);
-    // WHAT COMES BACK, OBSERVED RATHER THAN DERIVED. The live set is read here and again after the
-    // order, and the difference is the answer — see `liveEverywhere` for why no walk of the removed
-    // delta's own pointers can be trusted to find it.
-    // THE LOGIN DOOR'S READING IS NOT A REGISTERED ONE. `resolveUserView` runs its hyperschema
-    // directly, so the store's registration table does not hold it — and a revoked role binding
-    // coming back at that door is precisely the event this warning exists for.
     const doorFaults: string[] = [];
     const doors = loginDoorReadings(seed, doorFaults);
     for (const fault of doorFaults) {
       io.out(`loam: ${fault}. The revival check below speaks for one reader fewer.`);
     }
-    // ONE MOMENT FOR BOTH READINGS. §29 read closure lapses on a deadline, so two clocks would
-    // report a slate's own expiry as claims this erasure brought back.
-    // WAS THE THING REMOVED A WITHDRAWAL? Asked while it is still here; afterwards there is
-    // nothing left to ask. It decides only whether §26's as-of door is worth naming below.
     wasNegation =
       gateway.reactor.get(id)?.claims.pointers.some((p) => p.role === "negates") === true;
-    // Counted while the store is open, for the boundary line about channel lenses.
     channelCount = gateway.channelStatus().length;
     const moment = Date.now();
     const before = readGrounds(gateway, doors, moment);
-    // SAID BEFORE THE PURGE, not after. On a large store the two readings are the slow part of
-    // this verb, and a screen that prints nothing until the end invites the one response that
-    // cannot be undone: an interrupt in the middle of a sweep.
     io.out(
       `loam: reading ${before.reduce((n, g) => n + g.present.size, 0)} delta(s) across ` +
         `${before.length} ground(s) to see what this removal brings back. On a large store this ` +
@@ -5291,23 +4352,7 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
     try {
       done = await gateway.erase(id, { reason });
     } catch (err) {
-      // 1, never 2. Every refusal the gateway raises here — nothing to erase, a container this
-      // sweep cannot reach, a tier that could not be proven clean — is a state of the STORE, and 2
-      // stays what a malformed invocation means. The distinction is what lets a script retry one
-      // and fix the other.
       io.err(`erase ${id}: ${err instanceof Error ? err.message : String(err)}`);
-      // A FAILED ERASURE STILL PURGED THE LOCAL TIERS. §11 lands the erasure, purges, re-seats,
-      // and only then reports a replica that refused — so a strike can already be gone while the
-      // order reads as failed, and the claim it withdrew is already live. Said HERE because no
-      // later run can say it: the re-run boots on the post-purge ground, where nothing came back.
-      // A failed RE-SEAT leaves the old reactor in place, so this reading can be taken over ground
-      // the purge already changed underneath it. Silence would then read as "nothing came back"
-      // when the honest answer is "this could not be measured" (H9). The tell is the erased delta's
-      // bytes: if a ground still holds them, the removal did not land there. (A reactor is not the
-      // tell: a journaled store drops an erased id from serving before its bytes go.)
-      // EVERY GROUND THE SWEEP TOUCHED, not the host alone. A pool re-seats in its own turn and
-      // a failure there is folded into the fault list, leaving no mark on the host — so asking the
-      // host only reports "measured" about a reading taken over a pool the purge changed underneath.
       const heldBy = await Promise.all(
         [gateway, ...gateway.quarantinePools].map((g) => g.backend.holds(id).catch(() => true)),
       );
@@ -5325,38 +4370,17 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
         gateway.operatorAuthor,
       ).find((t) => erasureTarget(t.claims) === id);
       if (already !== undefined) {
-        // A receipt exists — but a receipt is a promise, and this run just failed to keep one. The
-        // two states read very differently to a compliance officer, so the sweep is ASKED rather
-        // than assumed: an id erased cleanly long ago, versus one whose erasure stands over bytes
-        // that are still here.
-        // THE PROBE CANNOT ASK AN UNATTACHED CONTAINER, and the completeness guard fires
-        // precisely because one is declared and not attached. `erasureOutstanding` walks the host,
-        // its erasures and the ATTACHED pools — so over exactly the state that made this run
-        // refuse, its silence means "not asked" rather than "clean". Read as clean, this screen
-        // tells a compliance officer the store forgot a record, naming the settled date, about the
-        // one tier it could not look in.
         const stores = unreachableStoreReport(gateway);
         const unreachable = stores.faultEntities;
-        // A KEPT CONTAINER IS NOT ASKED EITHER. `unreachableStoreReport` routes a container covered
-        // by a surviving detach record to `kept` rather than to `faults`, and `erasureOutstanding`
-        // walks only what is ATTACHED — so a store whose first run honestly printed KEPT OUTSIDE
-        // would have its second run print a settled date with no mention of it.
         const keptNote =
           stores.kept.length === 0
             ? ""
             : ` ${stores.kept.length} container(s) were KEPT OUTSIDE this sweep at your own ` +
               `say-so, and were not asked: this speaks for the tiers this run entered.`;
-        // THE SAME THREE STATES THE RECEIPT READER PRINTS. `erasureOutstanding` folds "a tier
-        // refused the question" into "outstanding", so this screen asserted the sweep was NOT
-        // finished over a store where nothing had been established either way — while
-        // `erasures show` called that same state UNPROVEN. One store, two answers.
         const standing = await erasureStanding(gateway, id).catch((): ErasureStanding => "unasked");
         const outstanding = standing === "held" || standing === "owed";
         const recorded = new Date(already.claims.timestamp).toISOString();
         const reader = `\`loam erasures show ${already.id}\``;
-        // THREE STATES, because two of them are not the same fact. The sweep is measurably
-        // unfinished; or it is unfinished-or-not and this run cannot tell; or it settled. Only the
-        // last may name a date and call the record forgotten.
         io.err(
           outstanding
             ? `loam: a receipt already names ${id}, recorded ${recorded} — and the sweep it ` +
@@ -5376,11 +4400,6 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
                   `asked every tier it opened: none of them still holds it.${keptNote} ${reader}`,
         );
       }
-      // "NOT HELD HERE" IS A CLAIM ABOUT THE GROUND, NOT ABOUT THE BYTES. Asked rather than
-      // assumed — and the causes are LISTED, never diagnosed: this probe reaches every tier the
-      // command opened, so a true answer could be a set-aside row, a cold copy no read replants, or
-      // a purge that refused. Naming one of the three as the cause would be a second guess wearing
-      // the authority of a measurement.
       const where = await heldWhere(gateway, id);
       if (where.held.length > 0) {
         io.err(
@@ -5404,9 +4423,6 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
             `there. A tier that cannot answer has proven nothing.`,
         );
       }
-      // THE GUARD'S OWN ADVICE NAMES LIBRARY CALLS. `openContainer` and `detach()` are embedding
-      // API, and an operator reading this in a terminal has neither — so the refusal, left alone,
-      // sets up a retry loop they cannot break. Say what CAN be done from here.
       if (unreachableStoreReport(gateway).faultEntities.length > 0) {
         io.err(
           `loam: \`openContainer\` and \`detach()\` above are EMBEDDING API and no CLI verb reaches ` +
@@ -5418,11 +4434,6 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
       }
       return 1;
     }
-    // THE RECEIPT OUTLIVES A FAILED READING. `cameBack` walks slates, masks and every pool, and
-    // any of that can throw — over a ground this erase has just changed. Thrown here, the run
-    // would purge the bytes, land the erasure, and print a stack trace instead of the receipt id
-    // the operator needs to read it back. The reading is a QUALIFICATION of the claim; losing it
-    // must not lose the claim.
     try {
       revived = cameBack();
     } catch (err) {
@@ -5448,9 +4459,6 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
     `loam: erased ${done.erased}\n` +
       `  receipt      ${done.erasure}${done.minted ? "" : "  (REUSED, not minted by this run)"}\n` +
       `  spoken by    ${done.spokenBy ?? `${LEDGER_NONE} this receipt does not record whose record it forgot`}\n` +
-      // THE RECEIPT'S OWN SENTENCE, never the flag's. A retry after a fault REUSES the standing
-      // erasure and drops `--reason` on the floor, so echoing the argument would print one reason
-      // here and a different one from `erasures show` on the very next line.
       `  reason       ${done.reasons.length === 0 ? `${LEDGER_NONE} this receipt records none` : done.reasons.join(" · ")}\n` +
       (done.minted || done.reasons.includes(reason)
         ? ""
@@ -5458,9 +4466,6 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
           `  a receipt is immutable. Negating it withdraws the record; the id stays refused forever (§11).\n`) +
       `  the bytes are gone, asked tier by tier: ${swept.join(", ")}\n` +
       `  \`loam erasures show ${done.erasure}\` reads the receipt back` +
-      // The count now spans every WALKABLE tier the byte verdict walks (T216) — a pool-resident
-      // dangler is counted here, not just the primary's. It does not span a WALL: a tier the verdict
-      // names `unproven` cannot be reached to enumerate its danglers, so the count omits it, as it must.
       (done.citations.length === 0
         ? ""
         : `\n  ${done.citations.length} surviving delta(s) still point at the hole: ` +
@@ -5471,11 +4476,6 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
           `${capped(done.kept)}`),
   );
   reportRevived(io, revived, gateway, "now", wasNegation, channelCount);
-  // A RETRY ANSWERS FOR ITSELF ONLY. When the receipt was reused, an earlier run already purged
-  // whatever it purged — this run booted on that ground, so an empty revival reading here is a
-  // statement about this run and not about the erasure. The fault path carries the same caveat for
-  // the same reason; silence would let a second operator read a clean screen and conclude nothing
-  // ever came back.
   if (!done.minted) {
     io.out(
       `loam: this run REUSED a standing receipt, so the revival reading above answers for THIS run ` +
@@ -5483,8 +4483,6 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
         `after the first can see it.`,
     );
   }
-  // A store the sweep deliberately did not enter cannot be read for revivals either. The KEPT line
-  // above names those containers; this says what the silence over them is worth.
   const looked =
     revived.reopened.length === 0 &&
     revived.remasked.length === 0 &&
@@ -5499,16 +4497,6 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
         `removed from a kept store would revive there unseen.`,
     );
   }
-  // WHAT THE SWEEP DOES NOT REACH, on every run. The home surfaces and the ESM tier come from the
-  // same two constants `health()` reads; the erasure-wide limits come from the constant the §29.7
-  // compliance receipt reads. An operator who forgets a user's record delta and reads a bare
-  // "erased" would believe the home's own credential file went with it. It did not, and a copy
-  // re-spoken under another id did not either — said here before anyone has to ask.
-  // THE BYTE VERDICT CANNOT SEE A SET-ASIDE ROW. `holds` asks the table for the erased ID, and a
-  // §25 row is precisely one whose stored claims no longer match the id it is filed under — so an
-  // erased record's plaintext can be legible inside a row filed under a different id, and every
-  // tier still answers "gone". The two read-only verbs already disclose the pen; the verb that
-  // makes the byte claim is the one that most needs to.
   if (pen.text !== undefined) {
     io.out(
       `loam: ${pen.text}\n  AND THE VERDICT ABOVE COULD NOT SEE THEM: a byte probe asks by id, while a ` +
@@ -5516,10 +4504,6 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
         `be legible inside one.`,
     );
   }
-  // AN ARCHIVE OUTSIDE THE HOME IS THE ONE TIER THIS RUN CANNOT LOOK FOR. `--archive` takes an
-  // absolute path, so `serve --archive /var/backups/vault` leaves a cold tier that config.json
-  // never names and no walk of the home can find. The help text and the README both say so; the
-  // screen that makes the BYTE CLAIM said nothing, which is the one place it matters.
   for (const lag of lagged) io.out(`loam: ${lag}`);
   if (invented.length > 0) {
     io.out(
@@ -5529,11 +4513,6 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
         `did not touch it.`,
     );
   }
-  // TRUE ON BOTH BRANCHES, and it used to print on only one. An archive at an ABSOLUTE path
-  // outside the home is invisible to the probe whether or not another vault was named — so the
-  // operator who names an in-home vault reads "asked tier by tier" as the whole answer while
-  // /var/backups still holds the record. The search bound is disclosed with it: the walk reaches a
-  // few levels inside the home and a vault parked deeper is equally out of sight.
   io.out(
     vaults.length === 0
       ? `loam: NO cold archive was consulted — this home's config.json names none and none was ` +
@@ -5565,12 +4544,6 @@ async function cmdErase(args: readonly string[], io: IO): Promise<number> {
   return 0;
 }
 
-// --- `loam erasures list | show <id>` ----------------------------------------------------------
-
-// WHAT A STANDING RECEIPT IS WORTH, in one cell. An erasure is a PROMISE: §11 lands it, then
-// purges, then reports a replica that refused — so a receipt can stand over bytes that are still on
-// this disk. Printing "forgotten at <date>" from the receipt alone states a completion nothing
-// asked about, which is the overclaim these screens exist to prevent.
 const SWEEP_CELL: Record<ErasureStanding, string> = {
   settled: "swept — no tier this run opened still holds it",
   held: "NOT SWEPT — a tier this run opened STILL HOLDS the bytes",
@@ -5584,23 +4557,17 @@ function receiptDetail(r: ErasureReceipt, standing: ErasureStanding): string {
     lines.push(`  ${label.padEnd(14)}${text}`);
   };
   say("erased", r.erased);
-  // A stated absence, never a blank. The door requires `spoken-by`, but replay does not, so a
-  // receipt replanted from a cold copy can survive without one — and an empty cell on a compliance
-  // log reads as an oversight rather than as the answer it is.
   say(
     "spoken by",
     r.spokenBy ?? `${LEDGER_NONE} this receipt does not record whose record it forgot`,
   );
   say("ordered by", `${r.orderedBy} (the instance operator — §11 admits no other signer)`);
-  // ORDERED, not finished. The two are one act only when the sweep below says so.
   say("ordered at", new Date(r.at).toISOString());
   say(
     "reason",
     r.reasons.length === 0 ? "none recorded — this receipt cannot say why" : r.reasons.join(" · "),
   );
   if (r.slate !== undefined) say("slate", `${r.slate} — one member of that cut (§29.6)`);
-  // THE DATE ABOVE IS THE ORDER'S, NOT THE SWEEP'S. Asked here rather than assumed, because this is
-  // the screen a compliance officer reads.
   say("sweep", SWEEP_CELL[standing]);
   lines.push(
     "  the receipt remembers THAT this id was forgotten, and none of what it said — which is what",
@@ -5609,7 +4576,6 @@ function receiptDetail(r: ErasureReceipt, standing: ErasureStanding): string {
   return lines.join("\n");
 }
 
-/** The receipts an invocation will actually print — all of them for `list`, one row for `show`. */
 function wantedRows(
   receipts: readonly ErasureReceipt[],
   sub: "list" | "show",
@@ -5619,14 +4585,6 @@ function wantedRows(
   return rows.map((r) => r.erased);
 }
 
-/**
- * Either address answers, and a PREFIX of either does too.
- *
- * The listing abbreviates every id to twelve characters, and its own closing line tells the
- * operator to run `loam erasures show <id>`. Matching only in full made that instruction
- * unfollowable from the screen that prints it — the same shape as a refusal naming a path its own
- * flag will not take. An ambiguous prefix is refused rather than guessed.
- */
 function matchesReceipt(r: ErasureReceipt, wanted: string): boolean {
   if (wanted.length < 8) return r.erasure === wanted || r.erased === wanted;
   return r.erasure.startsWith(wanted) || r.erased.startsWith(wanted);
@@ -5664,17 +4622,6 @@ async function cmdErasures(args: readonly string[], io: IO): Promise<number> {
   }
   const seed = operatorSeed(home, `erasures ${sub}`, io);
   if (typeof seed !== "string") return seed.code;
-  // THE COLD TIER IS OPENED HERE, unlike in the slate reader, because this screen makes a claim
-  // ABOUT THE BYTES. The archive stays shut where a verb only READS the ground — a mirror is a
-  // shadow and `deltasSince` answers from the primary — but "swept" is a byte verdict, and one
-  // computed without asking the vault this home's own config.json names is the overclaim this
-  // whole file exists to refuse.
-  //
-  // UNCONDITIONALLY, exactly as `erase` opens it. A prior `existsSync` guard here failed OPEN in
-  // the one direction that costs: a vault behind an unreadable parent, or an unmounted path,
-  // answers "does not exist" to a stat — so the tier was skipped, no probe could throw, and every
-  // row printed SWEPT about a store nobody had asked. Opened, the same directory makes `holds`
-  // throw, and the cell reads UNPROVEN, which is what was actually established.
   const configured = archivePath(home);
   const cold = configured === undefined ? [] : [configured];
   const { gateway, path } = await openTiers(home, seed, parsed, io, cold);
@@ -5685,13 +4632,6 @@ async function cmdErasures(args: readonly string[], io: IO): Promise<number> {
   try {
     ledger = receiptLedger(gateway.reactor, gateway.validityNow(), gateway.operatorAuthor);
     pen = await setAsideWarning(gateway);
-    // ASKED WHILE THE TIERS ARE STILL OPEN. `openTiers` has the host and every attached pool right
-    // here; once this block closes them the screen can only repeat what the receipt says, and a
-    // receipt is a promise rather than a report. One walk of the erasure set per ground, then a
-    // point lookup per id — never a scan per row.
-    // ONLY WHAT THIS INVOCATION WILL PRINT. `show` names one receipt; asking the standing of
-    // every receipt in the ledger to print one row is a walk per row of a screen nobody asked for.
-    // `list` prints them all, so it pays for them all.
     standings = await erasureStandings(gateway, wantedRows(ledger.receipts, sub, wanted));
     const stores = unreachableStoreReport(gateway);
     outside = [...stores.faultEntities, ...stores.kept];
@@ -5700,11 +4640,7 @@ async function cmdErasures(args: readonly string[], io: IO): Promise<number> {
   }
   const standingOf = (erased: string): ErasureStanding =>
     standings.standings.get(erased) ?? "unasked";
-  // STDOUT, for the reason the slate reader gives: a filed absence carries its own limits.
   if (pen.text !== undefined) io.out(`loam: ${pen.text}`);
-  // AND THE TIER THIS SCREEN COULD NOT ASK. `--archive <path>` never writes its name into
-  // config.json, so a home can be served with a cold vault its own configuration does not mention —
-  // and every "swept" below then speaks for tiers that do not include it.
   io.out(
     configured !== undefined
       ? `loam: the sweep column below asked ${path}, every attached pool, and the cold archive at ` +
@@ -5714,10 +4650,6 @@ async function cmdErasures(args: readonly string[], io: IO): Promise<number> {
           `config.json names no cold archive — if this store is served with \`--archive <dir>\`, ` +
           `that vault was NOT asked and may still hold what a row here calls swept.`,
   );
-  // AND THE CONTAINERS THIS SWEEP WOULD NOT HAVE ENTERED. `unreachableStoreReport` routes a
-  // container covered by a detach record to `kept` and an unattached one to `faults`; neither is
-  // in the probe's reach, so a row can read SWEPT over bytes sitting in either. The erase screens
-  // treat this disclosure as load-bearing, and this is the screen a compliance officer reads.
   if (outside.length > 0) {
     io.out(
       `loam: ${outside.length} container(s) are OUTSIDE every verdict below — ` +
@@ -5727,13 +4659,7 @@ async function cmdErasures(args: readonly string[], io: IO): Promise<number> {
   }
 
   if (sub === "show") {
-    // EITHER address answers. The operator holding a complaint has the id that was erased; the
-    // operator holding an erase's own output has the receipt's address, and neither should have to
-    // know which of the two this verb wanted.
     const found = ledger.receipts.filter((r) => matchesReceipt(r, wanted ?? ""));
-    // AN AMBIGUOUS PREFIX IS NOT A CHOICE THIS COMMAND MAY MAKE. Two receipts under one prefix is
-    // an operator asking about a row this screen cannot identify, and picking either would answer
-    // a question nobody asked.
     if (found.length > 1 && !found.some((r) => r.erasure === wanted || r.erased === wanted)) {
       io.err(
         `erasures show: ${wanted} names ${found.length} receipts here — ` +
@@ -5742,11 +4668,6 @@ async function cmdErasures(args: readonly string[], io: IO): Promise<number> {
       return 2;
     }
     if (found.length === 0) {
-      // "NOT AN ID THIS STORE FORGOT" WOULD CONTRADICT THE GROUND for a negated id. Striking a
-      // erasure withdraws the erasure, and the receipt leaves the surviving set — so an id this
-      // store really did forget, and then forgave, reads here exactly like one it never held. The
-      // count of receipts that do not bind is already in hand; the listing discloses it, and so
-      // must this, or the two screens disagree about the same store.
       io.err(
         `erasures show: no receipt STANDS for ${wanted} — not as a receipt, and not as an id ` +
           `this store is currently forgetting. \`loam erasures list\` shows what stands.` +
@@ -5757,9 +4678,6 @@ async function cmdErasures(args: readonly string[], io: IO): Promise<number> {
               `malformed. If ${wanted}'s erasure was negated, the id is still refused forever, but no ` +
               `receipt stands for it, so this screen cannot tell it apart from an id never held.`),
       );
-      // 1, not 2. The id is well formed and the invocation is correct — what is missing is a receipt
-      // in THIS store, which is a state rather than a typo. Two lines up, `erase` draws the same
-      // line for the same reason, and a script tells them apart by exactly this.
       return 1;
     }
     for (const r of found) io.out(receiptDetail(r, standingOf(r.erased)));
@@ -5774,10 +4692,6 @@ async function cmdErasures(args: readonly string[], io: IO): Promise<number> {
         `§11) or malformed. Named here rather than dropped: an omission and a revocation look ` +
         `identical on a screen that only loses the row.`;
   if (ledger.receipts.length === 0) {
-    // SCOPED TO THE SIGNER, because that is exactly how wide the check was: erasure is the
-    // operator's alone, and this reads THIS home's operator key. Over a store governed by another
-    // key — a `--store` pointed elsewhere, a replaced seed — an unqualified "has forgotten nothing"
-    // would be an absence the command never verified.
     io.out(
       `loam: ${path} has forgotten nothing — no erasure signed by ` +
         `${shortAuthor(authorForSeed(seed))} stands here${withheld}`,
@@ -5794,8 +4708,6 @@ async function cmdErasures(args: readonly string[], io: IO): Promise<number> {
       shortId(r.erased),
       shortId(r.erasure),
       new Date(r.at).toISOString(),
-      // NOT "forgotten at". The timestamp is when the ORDER was signed; whether the sweep it
-      // promised finished is a separate question, and it is asked per row rather than assumed.
       standingOf(r.erased) === "settled" ? "swept" : standingOf(r.erased).toUpperCase(),
       r.spokenBy === undefined ? LEDGER_NONE : shortAuthor(r.spokenBy),
       r.reasons.length === 0 ? LEDGER_NONE : r.reasons.join(" · "),
@@ -5803,8 +4715,6 @@ async function cmdErasures(args: readonly string[], io: IO): Promise<number> {
   )) {
     io.out(line);
   }
-  // A REFUSAL THE CELL CANNOT SHOW. "Held here" outranks "unasked there", so a row can read NOT
-  // SWEPT — a true sentence — while the reason it cannot be trusted further is invisible.
   const refused = ledger.receipts.filter((r) => standings.unasked.has(r.erased));
   if (refused.length > 0) {
     io.out(
@@ -5830,8 +4740,6 @@ function defaultHome(): string {
   return process.env["LOAM_HOME"] ?? ".loam";
 }
 
-// A port is 0 (ephemeral) through 65535, an integer, or absent (the default). Anything else —
-// a typo'd letter, a negative, a float — is refused, never silently coerced to a random port.
 function parsePort(raw: string | undefined): number | undefined {
   if (raw === undefined) return 4321;
   if (!/^\d+$/.test(raw)) return undefined;
@@ -5839,14 +4747,12 @@ function parsePort(raw: string | undefined): number | undefined {
   return n <= 65535 ? n : undefined;
 }
 
-// The entry point. Returns an exit code, or (serve --http --detach) a live ServerHandle.
 export async function run(
   argv: readonly string[],
   io: IO,
   options: RunOptions = {},
 ): Promise<number | ServerHandle> {
   const [typed, ...rest] = argv;
-  // `tombstones` was this command's name before `erasures`; it still works.
   const command = typed === "tombstones" ? "erasures" : typed;
   if (command === undefined || command === "--help" || command === "help") {
     io.out(topHelp());
@@ -5856,9 +4762,6 @@ export async function run(
     io.out(options.version ?? VERSION);
     return 0;
   }
-  // Per-command help, answered HERE rather than in each cmd: the top-level help promises it for
-  // every command, and one gate keeps a new command from forgetting to make good on that. It lands
-  // before any parsing, so `--help` is never mistaken for a flag hungry for a value.
   if (isCommand(command) && rest.some((arg) => arg === "--help" || arg === "-h")) {
     io.out(helpFor(command));
     return 0;
@@ -5920,14 +4823,10 @@ export async function run(
     }
   } catch (err) {
     io.err(`loam: ${err instanceof Error ? err.message : String(err)}`);
-    // A malformed invocation is 2, like every hand-written refusal above; 1 stays what it always
-    // meant — something went wrong inside.
     return err instanceof UsageError ? 2 : 1;
   }
 }
 
-// The real process entry: wire stdout/stderr and exit with the code. (serve blocks, so a
-// ServerHandle return here means detach was set — not reachable from the bin path.)
 export async function main(argv: readonly string[]): Promise<void> {
   const result = await run(argv, {
     out: (s) => process.stdout.write(`${s}\n`),

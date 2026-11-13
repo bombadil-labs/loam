@@ -1,9 +1,3 @@
-// `loam user create <name>` refuses while held claims would pass to a new person given the entity
-// `user:<name>` (refactor/audit/user-identity.md). The existing check (the account's own record,
-// roles and root) is unchanged and railed elsewhere; these rails pin what it ADDS: a grant naming the
-// entity, a membership naming the user, and recovery evidence at the entity. Each refusal writes
-// nothing; a similar but different name is not caught.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -40,7 +34,6 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-// Append operator-signed claims to the store, and return what each became.
 async function plant(build: (op: string, t: number) => Claims[]): Promise<string[]> {
   const seed = readSeed(home);
   const op = authorForSeed(seed);

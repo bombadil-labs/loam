@@ -1,15 +1,5 @@
-// The book's figures. Each is a function returning plain data — `{w, h, alt, nodes, edges, extra?}` —
-// so `test/site/capabilities.test.ts` can check every edge names a node that exists without a
-// browser anywhere near it. `figures.mjs` turns one of these into SVG.
-//
-// Five of these are the concept deck's own pictures (`demos/tutorial/intro.html`), carried over
-// deliberately: a reader who arrived from the deck should recognise the shapes before they read a
-// word. The rest are new, and follow the same grammar — an edge runs from the delta that authored
-// the pointer to the thing pointed at, and it grips each end at a named port.
-
 import { alice, bob, dead, el, entityHue, faint, ink } from "./figures.mjs";
 
-/** Prior facts stay on the page, dimmed to memory: the ground is append-only, and it should look it. */
 const DIM = 0.35;
 
 const label = (svg, n, text, dy = -34, fill = entityHue) =>
@@ -40,7 +30,6 @@ const note = (svg, x, y, text) =>
   );
 
 export const FIGURES = {
-  /** One claim, alone. The smallest true picture of the system. */
   claim: () => ({
     w: 660,
     h: 360,
@@ -64,7 +53,6 @@ export const FIGURES = {
     ],
   }),
 
-  /** Two people who never met, landing on one id. Nobody created the object. */
   meeting: () => ({
     w: 880,
     h: 380,
@@ -101,7 +89,6 @@ export const FIGURES = {
     ],
   }),
 
-  /** The same two deltas, pegged from the object instead. Nothing new was said. */
   lifted: () => ({
     w: 860,
     h: 420,
@@ -143,7 +130,6 @@ export const FIGURES = {
     extra: (svg, N) => label(svg, N.e, 'id: "olive-oil"', -38),
   }),
 
-  /** The fold. The delta layer is gone and each property points straight at its answer. */
   folded: () => ({
     w: 760,
     h: 400,
@@ -180,7 +166,6 @@ export const FIGURES = {
     },
   }),
 
-  /** Two honest answers from one record. The disagreement is preserved, not settled. */
   twoReadings: () => ({
     w: 880,
     h: 430,
@@ -272,7 +257,6 @@ export const FIGURES = {
     },
   }),
 
-  /** A delta about a delta. Nothing was edited and nothing was deleted. */
   struck: () => ({
     w: 740,
     h: 330,
@@ -326,7 +310,6 @@ export const FIGURES = {
     },
   }),
 
-  /** Standing, and what revocation does to everything downstream of it. */
   standing: () => ({
     w: 800,
     h: 400,
@@ -376,7 +359,6 @@ export const FIGURES = {
     },
   }),
 
-  /** What is left after a lawful forgetting: a signed hole, and nothing to read. */
   forgotten: () => ({
     w: 740,
     h: 300,
@@ -413,7 +395,6 @@ export const FIGURES = {
     },
   }),
 
-  /** The one-way glass, and the single deliberate crossing. */
   oneWayGlass: () => ({
     w: 820,
     h: 340,
@@ -465,7 +446,6 @@ export const FIGURES = {
     },
   }),
 
-  /** Two grounds, one wire. No consensus and no platform in the middle. */
   twoGrounds: () => ({
     w: 860,
     h: 340,

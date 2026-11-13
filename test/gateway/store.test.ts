@@ -1,8 +1,3 @@
-// The store: one per tree of containers, holding the links between them, each container's table of
-// children, and the per-channel commit order (refactor/audit/step6-container-split.md). A container
-// asks the store for its parent, its root and its children; it never walks another container's
-// members. What container code may use of a child is the Peer type, which the compiler holds.
-
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { describe, expect, it, vi } from "vitest";
 import { containerClaims } from "../../src/gateway/container-law.js";
@@ -25,8 +20,7 @@ describe("the store of a container tree", () => {
     expect(gw.store.rootOf(q)).toBe(gw);
     expect(gw.store.verifiedRootOf(q)).toBe(gw);
     expect(gw.store.holds(gw, p)).toBe(true);
-    expect(gw.store.holds(gw, q)).toBe(false); // q is p's, not gw's
-    // A link the parent no longer holds breaks the verified chain; the unverified one still climbs.
+    expect(gw.store.holds(gw, q)).toBe(false);
     gw.quarantinePools.delete(p);
     expect(gw.store.verifiedRootOf(q)).toBeUndefined();
     expect(gw.store.rootOf(q)).toBe(gw);
@@ -50,10 +44,10 @@ describe("the store of a container tree", () => {
     const second = gw.store.commit(p, "a", () => Promise.resolve(void order.push("a2")));
     const other = gw.store.commit(p, "b", () => Promise.resolve(void order.push("b1")));
     await other;
-    expect(order).toEqual(["b1"]); // "b" did not wait behind "a"
+    expect(order).toEqual(["b1"]);
     release();
     await Promise.all([first, second]);
-    expect(order).toEqual(["b1", "a1", "a2"]); // p's "a" waited for gw's "a": one queue per root
+    expect(order).toEqual(["b1", "a1", "a2"]);
     await gw.close();
   });
 
@@ -63,10 +57,9 @@ describe("the store of a container tree", () => {
     const p = (await gw.openQuarantine()).gateway;
     const q = (await p.openQuarantine()).gateway;
     expect(gw.quarantinePools).toBe(gw.store.tableOf(gw).pools);
-    expect(p.quarantinePools).toBe(gw.store.tableOf(p).pools); // p's table is in the tree's store
+    expect(p.quarantinePools).toBe(gw.store.tableOf(p).pools);
     expect([...gw.store.pools(gw)]).toEqual([p]);
     expect([...gw.store.pools(p)]).toEqual([q]);
-    // Another tree has another store, and none of this one's children.
     expect(other.store).not.toBe(gw.store);
     expect([...other.store.pools(other)]).toEqual([]);
     expect(gw.store.hasPool(gw, p)).toBe(true);
@@ -91,7 +84,7 @@ describe("the store of a container tree", () => {
     const gw = await host();
     const p = (await gw.openQuarantine()).gateway;
     const q = (await p.openQuarantine()).gateway;
-    expect(gw.store.authorityOf(gw)).toBeUndefined(); // a root answers for itself; nothing above it
+    expect(gw.store.authorityOf(gw)).toBeUndefined();
     expect(gw.store.authorityOf(p)).toBe(gw);
     expect(gw.store.authorityOf(q)).toBe(gw);
     gw.quarantinePools.delete(p);
@@ -109,10 +102,9 @@ describe("the store of a container tree", () => {
     const q = (await p.openQuarantine()).gateway;
     expect(gw.store.chainAbove(q)).toEqual([p, gw]);
     expect(gw.store.chainAbove(gw)).toEqual([]);
-    gw.quarantinePools.delete(p); // gw no longer holds p: the walk stops below gw
+    gw.quarantinePools.delete(p);
     expect(gw.store.chainAbove(q)).toEqual([p]);
     gw.quarantinePools.add(p);
-    // A loop (gw attached below q): each container is visited once, and the walk ends.
     gw.store.attach(gw, q);
     q.quarantinePools.add(gw);
     expect(gw.store.chainAbove(q)).toEqual([p, gw, q]);
@@ -127,7 +119,7 @@ describe("the store of a container tree", () => {
     const record = { ...handle, trust: "curated", posture: "separate" } as const;
     gw.store.setChannel(gw, "channel:x", record as never);
     expect(gw.store.channels(gw).get("channel:x")?.gateway).toBe(handle.gateway);
-    expect(gw.channelPools.get("channel:x")).toBe(record); // the facade reads the same table
+    expect(gw.channelPools.get("channel:x")).toBe(record);
     gw.store.dropChannel(gw, "channel:x");
     expect(gw.store.channels(gw).size).toBe(0);
     await gw.close();

@@ -1,25 +1,3 @@
-// §36 phase 8 — a session signs as its user (T129). Criteria (a)–(j) of
-// .adlc/specs/36-08-a-session-signs-as-its-user.md, transcribed.
-//
-// EVERY AUTHORSHIP ASSERTION READS THE STORE'S OWN DELTAS, not a rendered view: a view resolves
-// values and says nothing about who signed them, so a view-level check would agree with both
-// versions of this change (the plan's §2.2 lesson). The mutations go through `graphql`, which is
-// the door that SIGNS — `append` carries pre-signed deltas and would prove nothing about the
-// identity a token names.
-//
-// What this file deliberately does NOT assert: the login DELAY (phase 9) and the erasure
-// disclosure (phase 10).
-//
-// FOUR RAILS ARE GREEN BEFORE THE BUILD, and a reader auditing this file should be able to count
-// them here rather than discover them: (d) the operator doors stay open — the narrowing this
-// phase must not cause; (j) no signing key reaches a response; (k) the constitutional doors keep
-// signing as the store; (h) the delta shape is unchanged. Each pins something the change must NOT
-// break, so none of them can go red merely for the change being absent — and (h) and (j) each
-// carry an assertion that DOES move with the change ((h) compares the two authors; the seed-bytes
-// half of (j) lives in (g2), on the refusal branch where a seed is actually in scope). Their
-// positive controls are (a)–(c), which prove the feature exists at all. An earlier header named
-// only two of the four, which a P5 lens correctly called honest-looking over a weaker set.
-
 import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -58,8 +36,8 @@ afterEach(async () => {
 
 interface Person {
   readonly name: string;
-  readonly seed?: string; // absent = an operator-role user with no seed on this box
-  readonly grant?: boolean; // default true: assign-role operator mints a write grant
+  readonly seed?: string;
+  readonly grant?: boolean;
 }
 
 async function authorshipServer(
@@ -94,8 +72,6 @@ async function authorshipServer(
     if (person.seed !== undefined) {
       writeUserSeed(home, person.name, person.seed);
       if (person.grant !== false) {
-        // What `loam user assign-role --role=operator` lands beside the role claim: write
-        // standing for that user's OWN key.
         const grant = signClaims(
           grantClaims(STORE_ENTITY, authorForSeed(person.seed), "write", OPERATOR, ts++),
           OPERATOR_SEED,
@@ -164,7 +140,6 @@ const mint = (
     body: new URLSearchParams({ form_token: session.sessionToken }).toString(),
   });
 
-/** Sign in, mint, and hand back the bearer token — the whole browser path in one call. */
 async function tokenFor(base: string, user: string): Promise<string> {
   const session = await signIn(base, user);
   const res = await mint(base, session);
@@ -172,7 +147,6 @@ async function tokenFor(base: string, user: string): Promise<string> {
   return ((await res.json()) as { token: string }).token;
 }
 
-/** A mutation the DOOR signs — the only path whose author this phase decides. */
 const mutate = (base: string, token: string, height: number): Promise<Response> =>
   fetch(`${base}/default/graphql`, {
     method: "POST",
@@ -182,13 +156,6 @@ const mutate = (base: string, token: string, height: number): Promise<Response> 
     }),
   });
 
-/**
- * Every delta in the store that set `height` to this value — read at the DELTA level.
- *
- * A door-signed mutation lands as `subject` (the entity, carrying the FIELD as its context) plus
- * `value` (the primitive). Matching both halves is what makes this specific: matching the value
- * alone would collect any field that happened to hold the same number.
- */
 const heightDeltas = (gateway: Gateway, height: number): Delta[] =>
   [...gateway.reactor.snapshot()].filter(
     (d: Delta) =>
@@ -204,7 +171,6 @@ const authorsOfHeight = (gateway: Gateway, height: number): string[] =>
   heightDeltas(gateway, height).map((d) => d.claims.author);
 
 const PICK = { pick: { order: { byTimestamp: "desc" } } };
-/** The JSON profile a registration door takes — the shape test/server/http.test.ts uses. */
 const registration = (name: string): string =>
   JSON.stringify({
     hyperschema: {
@@ -257,8 +223,6 @@ describe("§36 phase 8 — a session signs as its user", () => {
     expect((await mutate(base, "op-token", 64)).status).toBe(200);
     expect(authorsOfHeight(gateway, 64)).toEqual([OPERATOR]);
 
-    // And in the same store, the session's write is the user's — so the difference is about
-    // SESSIONS, not about the store's own identity having moved.
     expect((await mutate(base, await tokenFor(base, "ada"), 65)).status).toBe(200);
     expect(authorsOfHeight(gateway, 65)).toEqual([ADA]);
   });
@@ -276,11 +240,8 @@ describe("§36 phase 8 — a session signs as its user", () => {
       headers: { "content-type": "application/json", authorization: "Bearer op-token" },
       body: registration("Sapling"),
     });
-    // ABSOLUTES, not just a relation: two identical FAILURES would satisfy an equality check
-    // (the plan's own warning). A real registration must land through the session token.
     expect(asSession.status).toBe(200);
     expect(asOperator.status).toBe(200);
-    // Both really registered — a shared failure could not produce two different names.
     expect(((await asSession.json()) as { registered: string }).registered).toBe("Seedling");
     expect(((await asOperator.json()) as { registered: string }).registered).toBe("Sapling");
   });
@@ -290,50 +251,36 @@ describe("§36 phase 8 — a session signs as its user", () => {
       { name: "ada", seed: ADA_SEED },
       { name: "ben", seed: BEN_SEED },
     ]);
-    // Strike ADA's write standing; her ROLE claim stands, so she can still log in.
     await gateway.append([
       signClaims(makeNegationClaims(OPERATOR, 9900, grantIds["ada"]!), OPERATOR_SEED),
     ]);
 
-    const adaToken = await tokenFor(base, "ada"); // she authenticates, and mints
-    // The GraphQL door answers a structured refusal at 200 rather than an HTTP status — so the
-    // rail reads the body and, more importantly, the STORE: nothing may have landed.
+    const adaToken = await tokenFor(base, "ada");
     const refused = await mutate(base, adaToken, 66);
     expect(((await refused.json()) as { errors: string[] }).errors.join(" ")).toMatch(
       /not permitted/,
     );
-    expect(authorsOfHeight(gateway, 66)).toEqual([]); // nothing landed
+    expect(authorsOfHeight(gateway, 66)).toEqual([]);
 
-    // Two-sided: BEN, whose grant survives, still writes — so the refusal is about the GRANT,
-    // not about the door being shut.
     expect((await mutate(base, await tokenFor(base, "ben"), 67)).status).toBe(200);
     expect(authorsOfHeight(gateway, 67)).toEqual([BEN]);
   });
 
   it("(f) an operator-role user with no seed on this box fails CLOSED, by name", async () => {
-    const { base, gateway, home } = await authorshipServer([{ name: "ada" }]); // no seed written
+    const { base, gateway, home } = await authorshipServer([{ name: "ada" }]);
     const session = await signIn(base, "ada");
     const refused = await mint(base, session);
     expect(refused.status).toBe(409);
     const body = await refused.text();
     expect(body).toContain("ada");
-    // The cure must be a command that works in THIS state. `assign-role` alone refuses a role
-    // already held — and this 409 is only reachable for a user who holds it — so the message
-    // must name the pair (a P5 lens caught it sending the operator to a guaranteed no-op).
     expect(body).toMatch(/remove-role/);
     expect(body).toMatch(/assign-role/);
-    expect(body).not.toContain(home); // no path reaches the caller
+    expect(body).not.toContain(home);
 
-    // Nothing was minted, and no fallback wrote anything. The store-level check that would
-    // catch a fallback directly is out of reach in this fixture — ada's seed never reaches this
-    // process, so no delta here could carry her author under ANY implementation, and a fallback
-    // would sign as the operator, which every fixture delta already does (a P5 lens caught the
-    // earlier assertion being a tautology). What IS reachable: the refusal handed back no token,
-    // so nothing can write at all.
     expect(Object.keys(JSON.parse(body) as Record<string, unknown>)).toEqual(["errors"]);
     const snapshot = [...gateway.reactor.snapshot()].length;
-    expect((await mint(base, session)).status).toBe(409); // still refused, still no token
-    expect([...gateway.reactor.snapshot()].length).toBe(snapshot); // and nothing landed
+    expect((await mint(base, session)).status).toBe(409);
+    expect([...gateway.reactor.snapshot()].length).toBe(snapshot);
   });
 
   it("(g) an unreadable seed fails the same way, detail to the operator only", async () => {
@@ -342,10 +289,10 @@ describe("§36 phase 8 — a session signs as its user", () => {
       onFault: (m) => faults.push(m),
     });
     const session = await signIn(base, "ada");
-    expect((await mint(base, session)).status).toBe(200); // positive control
+    expect((await mint(base, session)).status).toBe(200);
 
     unlinkSync(userSeedPath(home, "ada"));
-    mkdirSync(userSeedPath(home, "ada")); // present but unreadable
+    mkdirSync(userSeedPath(home, "ada"));
     const refused = await mint(base, session);
     expect(refused.status).toBe(409);
     expect(await refused.text()).not.toContain(home);
@@ -353,14 +300,6 @@ describe("§36 phase 8 — a session signs as its user", () => {
   });
 
   it("(g2) a seed that is present but NOT A KEY fails closed too — the third state", async () => {
-    // readUserSeed answers a two-state question (absent / unreadable); a seed file has a third
-    // state, and a premortem caught it failing OPEN: a crashed write leaves a zero-byte file,
-    // which reads as "present" and mints {actor: ""} — not nullish, so nothing falls back and
-    // the failure surfaces as an opaque error at the first write instead of a refusal here.
-    // One junk value is deliberately SECRET-SHAPED (64 chars, wrong alphabet): if the refusal
-    // branch ever printed the file's bytes, only a value that looks like a key would prove it.
-    // (j) can only watch the success path, where no seed is in scope — a P5 lens showed its
-    // fault-channel half passing on an empty array.
     for (const junk of ["", "   \n", "not-a-key", "ad".repeat(16), "zz".repeat(32)]) {
       const faults: string[] = [];
       const { base, home } = await authorshipServer([{ name: "ada", seed: ADA_SEED }], {
@@ -374,11 +313,6 @@ describe("§36 phase 8 — a session signs as its user", () => {
       expect(refused.status, JSON.stringify(junk)).toBe(409);
       const body = await refused.text();
       expect(body).not.toContain(home);
-      // The seed's own BYTES never travel either — not to the caller, not to the operator
-      // channel. (j) can only watch the success path, where no seed is in scope; this refusal
-      // branch is the one place the seed's neighbourhood is formatted into text, so a mutant
-      // appending it here is caught here (a P5 lens's finding). The junk values are known
-      // strings, which is what makes the assertion cheap and real.
       if (junk.trim() !== "") {
         expect(body).not.toContain(junk);
         expect(faults.join("\n")).not.toContain(junk);
@@ -388,10 +322,6 @@ describe("§36 phase 8 — a session signs as its user", () => {
   });
 
   it("(k) the constitutional doors still sign as the STORE — a deliberate, railed limit", async () => {
-    // `register` (and the renderer's pen, and artifact) publish LAW, and publishRegistration
-    // refuses any author but the store's own. So a session token opens those doors — (d) — while
-    // what they write still carries the store's name. A premortem found the headline overclaiming
-    // here; the limit is real and stated in §36.8 rather than discovered later as a bug.
     const { base, gateway } = await authorshipServer([{ name: "ada", seed: ADA_SEED }]);
     const token = await tokenFor(base, "ada");
     const before = [...gateway.reactor.snapshot()].length;
@@ -403,15 +333,11 @@ describe("§36 phase 8 — a session signs as its user", () => {
     expect(res.status).toBe(200);
     const added = [...gateway.reactor.snapshot()].slice(before);
     expect(added.length).toBeGreaterThan(0);
-    // Every delta the door published is the STORE's, not Ada's.
     for (const delta of added) expect(delta.claims.author).toBe(OPERATOR);
     expect(added.map((d) => d.claims.author)).not.toContain(ADA);
   });
 
   it("(m) every signing door agrees on the name", async () => {
-    // The seam is contextFor, shared by graphql, rest and mcp — a door-specific implementation
-    // would give one person two names depending on which door they used. `loam_mutate` is the
-    // MCP write tool (`loam_query` is the read door and refuses a mutation by name).
     const { base, gateway } = await authorshipServer([{ name: "ada", seed: ADA_SEED }]);
     const token = await tokenFor(base, "ada");
     expect((await mutate(base, token, 73)).status).toBe(200);
@@ -433,28 +359,10 @@ describe("§36 phase 8 — a session signs as its user", () => {
       }),
     });
     expect(mcp.status).toBe(200);
-    // The write really landed through that door — no vacuous branch — and it carries Ada's name.
     expect(authorsOfHeight(gateway, 74)).toEqual([ADA]);
-
-    // THE REST DOOR IS A NAMED GAP, not a silent one. It reaches the same seam by a different
-    // expression — `contextFor(identity)?.actor`, passed positionally rather than as a context
-    // object (src/server/http.ts) — so it is the door most likely to drift: a mutant passing
-    // `undefined` there would let rest write as the store while graphql and mcp carried the
-    // user's name, one person with two names, and nothing in this file would go red.
-    //
-    // It is not railed here because the REST door addresses a schema by VERSION ALIAS, which
-    // only a delta-borne registration mints; this fixture registers in-process, so `/rest/v1/
-    // Plant` answers "no version v1 of Plant survives" and a rail written against it would be
-    // asserting on a 404. Closing it wants a fixture that registers through the door and then
-    // writes the registered field — worth doing, and worth doing deliberately rather than
-    // wedged into this test. A P5 lens found the earlier version of this comment claiming three
-    // doors while exercising two.
   });
 
   it("(l) two users writing the identical claim produce two distinct deltas", async () => {
-    // The author is part of a delta's content address (H4), so identical claims from two people
-    // no longer collide into one delta. The SHAPE is unchanged and no migration is owed — but
-    // the address necessarily moves, and that is a railed fact rather than a surprise.
     const { base, gateway } = await authorshipServer([
       { name: "ada", seed: ADA_SEED },
       { name: "ben", seed: BEN_SEED },
@@ -480,20 +388,16 @@ describe("§36 phase 8 — a session signs as its user", () => {
         fields: Object.keys(delta.claims).sort(),
       };
     };
-    // Same roles, same target kinds, same claim fields — AND the authors genuinely differ, which
-    // is what makes "the author's value is the only difference" a claim rather than a hope. A P5
-    // lens caught this asserting the shape alone: green with the feature deleted.
     expect(shapeOf(69)).toEqual(shapeOf(68));
     expect(authorsOfHeight(gateway, 68)).toEqual([OPERATOR]);
     expect(authorsOfHeight(gateway, 69)).toEqual([ADA]);
   });
 
   it("(i) the seed is read at MINT time, not at login", async () => {
-    const { base, gateway, home } = await authorshipServer([{ name: "ada" }]); // starts seedless
-    const session = await signIn(base, "ada"); // logs in BEFORE any seed exists
+    const { base, gateway, home } = await authorshipServer([{ name: "ada" }]);
+    const session = await signIn(base, "ada");
     expect((await mint(base, session)).status).toBe(409);
 
-    // Written after sign-in: the NEXT mint picks it up, and the write carries that author.
     writeUserSeed(home, "ada", ADA_SEED);
     await gateway.append([
       signClaims(grantClaims(STORE_ENTITY, ADA, "write", OPERATOR, 9500), OPERATOR_SEED),
@@ -504,8 +408,6 @@ describe("§36 phase 8 — a session signs as its user", () => {
     expect((await mutate(base, token, 70)).status).toBe(200);
     expect(authorsOfHeight(gateway, 70)).toEqual([ADA]);
 
-    // Deleted after a successful mint: the NEXT mint fails closed, while the token already
-    // issued keeps working until its own window ends.
     unlinkSync(userSeedPath(home, "ada"));
     expect((await mint(base, session)).status).toBe(409);
     expect((await mutate(base, token, 71)).status).toBe(200);

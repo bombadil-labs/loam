@@ -1,8 +1,3 @@
-// Records Loam's four answers to "whose strike binds" side by side, over one corpus of strike
-// chains: `lawfulNegated`, `dataStruck`, `honoredStrikeOn` and `survivalOver`. Step 4 of the plan
-// names suppression trust; this recording shows where the four readers agree today and where they
-// differ. Scope: raw ingest, forward and reverse order only.
-
 import { describe, it } from "vitest";
 import type { Claims, Delta } from "@bombadil/rhizomatic";
 import { dataStruck, grantClaims } from "../../src/gateway/accounts.js";
@@ -36,13 +31,11 @@ const writerGrant = signed(
   "op→writer:write",
 );
 
-// One claim per striker, so each reader's verdict on each striker is visible.
 const byOperator = claim("writer", 10, "claim/struck-by-operator");
 const byAdmin = claim("writer", 11, "claim/struck-by-admin");
 const byWriter = claim("writer", 12, "claim/struck-by-its-own-author");
 const byStranger = claim("writer", 13, "claim/struck-by-stranger");
 const byOtherWriter = claim("operator", 14, "claim/by-operator-struck-by-writer");
-// Chains: a strike struck by its own author, and one struck by a stranger.
 const revived = claim("writer", 15, "claim/strike-then-counterstrike");
 const twice = claim("writer", 16, "claim/two-strikes-one-struck");
 const plain = claim("writer", 17, "claim/never-struck");
@@ -98,8 +91,6 @@ const CORPUS: readonly Delta[] = [
   ownCounter,
 ];
 
-// The same corpus after the operator revokes the writer's grant: the trust set changes, so the
-// verdicts on the writer's strikes may change.
 const revokeWriter = signed(
   strike(writerGrant, "operator", 40).claims,
   "operator",
@@ -128,7 +119,6 @@ describe("recordings: suppression, four readers side by side", () => {
               lawfulNegated: lawful(d.id),
               dataStruck: struck(d.id),
               honoredStrikeOn: honoredStrikeOn(r, Date.now(), d.id, op),
-              // survivalOver answers "does it survive"; its inverse reads like the others.
               struckUnderSelfAuthor: !selfOnly(d.id),
             },
           ]),

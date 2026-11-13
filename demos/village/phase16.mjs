@@ -1,10 +1,3 @@
-// Phase 16 (demo item 7) — GROWN LIVE: a whole new sovereign store joins the confluence with
-// one command, no restart of anything. This phase drives grow.mjs exactly as the demo does —
-// as a child process, from the outside — then confirms the three things the demo claims: the
-// grown store answers its own schema immediately, it has told the confluence where to find it
-// (homes/peers.json), and one pull lands its facts in the almanac's ground. Joining the
-// village is running a command, not editing the village.
-
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { trustClaims } from "../../dist/index.js";
@@ -25,9 +18,6 @@ const PORT = 4407;
 const BASE = `http://127.0.0.1:${PORT}/${NAME}`;
 const GROW = join(HOMES, "..", "grow.mjs");
 
-// The grown store's schema + first facts live under homes/ — disposable, like everything the
-// village grows. A grove of trees: a shape no founder store speaks, so what lands in the
-// almanac is unmistakably the newcomer's.
 const schemaPath = join(HOMES, "phasegrove-schema.json");
 const claimsPath = join(HOMES, "phasegrove-facts.json");
 writeFileSync(
@@ -67,9 +57,6 @@ writeFileSync(
   ]),
 );
 
-// Spawn grow.mjs as the demo would, and resolve once it announces itself ready ("grows.").
-// A failed boot (a port already held, a bad schema) rejects with what the child said, so the
-// phase fails loud instead of hanging.
 function growChild() {
   const child = spawn(
     process.execPath,
@@ -108,8 +95,6 @@ const growGql = async (query) => {
 let almanac, grown;
 try {
   almanac = await openStore("almanac");
-  // The almanac states its own posture — an aggregator by choice — so the newcomer's honest
-  // deltas cross (the shared home may carry a rostered declaration from a prior run's drama).
   await almanac.gateway.append([
     signClaims(trustClaims("open", [], almanac.operator, Date.now()), almanac.seed),
   ]);
@@ -117,8 +102,6 @@ try {
   grown = growChild();
   await grown.ready;
 
-  // 16.1 — the grown store answers its OWN schema, immediately, over its own operator token —
-  // registered on the running surface with no restart of anything.
   const oak = await growGql(`{ grove(entity: "grove:oak") { species age note } }`);
   check(
     "16.1",
@@ -129,14 +112,11 @@ try {
     JSON.stringify(oak.body?.data?.grove?.species),
   );
 
-  // 16.2 — the newcomer has told the confluence where to find it: an entry in homes/peers.json,
-  // which the living village's pulse re-reads every beat.
   const { readFileSync } = await import("node:fs");
   let peers = [];
   try {
     peers = JSON.parse(readFileSync(join(HOMES, "peers.json"), "utf8"));
   } catch {
-    // no peers.json yet — the check below will fail honestly
   }
   const entry = peers.find((p) => p.base === BASE);
   check(
@@ -146,8 +126,6 @@ try {
     JSON.stringify(entry),
   );
 
-  // 16.3 — one pull, and the newcomer's facts are in the almanac's ground: federation, the
-  // same union that carries every store. A shape no founder speaks, unmistakably the grove's.
   const report = await pullFrom(almanac.gateway, BASE, `op-${NAME}`);
   const landed = [...almanac.gateway.reactor.snapshot()].some((d) =>
     d.claims.pointers.some(
@@ -162,7 +140,7 @@ try {
   );
 } finally {
   grown?.child.kill();
-  await sleep(300); // let the port settle before the process exits
+  await sleep(300);
   await almanac?.close().catch(() => {});
 }
 summary("phase 16 — grown live");

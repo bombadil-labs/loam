@@ -1,8 +1,3 @@
-// What one container asks of another (ruling 11, ruling 13). A container holds a child only as a
-// Peer, and a Peer has no key: the child performs a signed act itself, with its own governing key,
-// or with a key the caller holds for itself. The type rail fails the typecheck if a key-bearing
-// member returns to Peer; the cases pin who signs and where each act lands.
-
 import { authorForSeed } from "@bombadil/rhizomatic";
 import { describe, expect, it } from "vitest";
 import { grantClaims } from "../../src/gateway/accounts.js";
@@ -25,13 +20,13 @@ const tree = async (): Promise<{ host: Gateway; pool: Gateway }> => {
 describe("operations a container performs when another asks", () => {
   it("a Peer carries no key and no way to sign in the child's name", () => {
     const reach = (p: Peer): unknown[] => [
-      // @ts-expect-error a Peer has no signer: no container signs in another's name
+      // @ts-expect-error
       p.signer,
-      // @ts-expect-error a Peer has no stamp: the child stamps its own acts
+      // @ts-expect-error
       p.stamp,
-      // @ts-expect-error a Peer has no def: a read of what it serves goes through `registered`
+      // @ts-expect-error
       p.def,
-      // @ts-expect-error a Peer has no backend: another container asks `probe`, and never purges
+      // @ts-expect-error
       p.backend,
     ];
     expect(typeof reach).toBe("function");
@@ -46,7 +41,7 @@ describe("operations a container performs when another asks", () => {
     const strikes = pool.reactor.negationsOf(fact.id).map((id) => pool.reactor.get(id)!);
     expect(strikes.map((d) => d.claims.author)).toEqual([pool.operatorAuthor]);
     expect(pool.operatorAuthor).not.toBe(host.operatorAuthor);
-    expect(host.reactor.negationsOf(fact.id)).toEqual([]); // the host holds no strike of its own
+    expect(host.reactor.negationsOf(fact.id)).toEqual([]);
     await host.close();
   });
 
@@ -55,7 +50,6 @@ describe("operations a container performs when another asks", () => {
     const a = observed(FERN, "height", 1, 1000, SEED);
     const b = observed(FERN, "height", 2, 1001, SEED);
     expect((await pool.federate([a, b], { admit: () => true })).accepted).toBe(2);
-    // The pool's own door decides who may write there: its key grants the actor, as a bind does.
     const law = pool.signer!;
     await pool.append([
       law.sign(grantClaims(STORE_ENTITY, ACTOR.author, "write", law.author, 900)),
@@ -65,7 +59,6 @@ describe("operations a container performs when another asks", () => {
       pool.reactor.negationsOf(d.id).map((id) => pool.reactor.get(id)!),
     );
     expect(strikes.map((d) => d.claims.author)).toEqual([ACTOR.author, ACTOR.author]);
-    // One stamp for the batch: one time, two deltas (they point at different targets).
     expect(new Set(strikes.map((d) => d.claims.timestamp)).size).toBe(1);
     expect(new Set(strikes.map((d) => d.id)).size).toBe(2);
     await host.close();
@@ -83,7 +76,7 @@ describe("operations a container performs when another asks", () => {
     expect(host.reactor.get(grant!.id)).toBeUndefined();
     const revs = pool.revocations([grant!.id]);
     expect(revs.map((d) => d.claims.author)).toEqual([pool.operatorAuthor]);
-    expect(pool.reactor.get(revs[0]!.id)).toBeUndefined(); // returned, not admitted
+    expect(pool.reactor.get(revs[0]!.id)).toBeUndefined();
     await host.close();
   });
 

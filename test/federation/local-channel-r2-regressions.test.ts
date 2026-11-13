@@ -54,7 +54,6 @@ describe("T288 R2 regression controls", () => {
           ),
         );
         expect(declarations).toHaveLength(1);
-        // Legacy retry may return or refuse, but cannot manufacture protected authority.
         await gw.openChannel(opts).catch(() => undefined);
         expect(localChannelEvidence(gw, name).state).not.toBe("open");
         expect(
@@ -116,7 +115,6 @@ describe("T288 R2 regression controls", () => {
         },
         SEED,
       );
-      // Trusted corrupted restore, deliberately outside guarded federation.
       await plant(gw.backend, [unsupported]);
       gw.reactor.ingest(unsupported);
       expect(localChannelEvidence(gw, ch.name)).toEqual({

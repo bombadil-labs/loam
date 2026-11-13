@@ -1,17 +1,3 @@
-// A sync that accepts nothing must not re-check the signature of every delta it already holds.
-//
-// Every standing channel polls, and a pull-based peer re-offers its whole log each time. The
-// receive path reads the pool's receipts several times per sync and meets every re-offered delta
-// as a duplicate. Before the verdict memo, each of those reads ran an ed25519 check per held
-// delta: a quiet poll of 300 deltas cost ~2.3 s of CPU and grew with the pool, forever.
-//
-// The rail COUNTS signature checks rather than timing the sync, so a loaded machine cannot flip
-// it. It is two-sided: the quiet sync is cheap, and a re-offer that is NOT byte-identical to what
-// the pool holds is still checked and still refused.
-//
-// Not proven here: the memo inside the substrate's own reactor, which Loam does not route through
-// this counter. What is counted is every verifyDelta call Loam's own code makes.
-
 import { describe, expect, it, vi } from "vitest";
 import type { Delta } from "@bombadil/rhizomatic";
 
@@ -63,21 +49,16 @@ describe("a no-op sync does not re-verify what the pool holds", () => {
       const pool = channel.pool.gateway!;
 
       const first = await channel.sync();
-      expect(first.accepted).toBeGreaterThanOrEqual(N); // the premise: the pool now holds N
+      expect(first.accepted).toBeGreaterThanOrEqual(N);
       for (const d of planted) expect(pool.reactor.get(d.id)).toBeDefined();
 
       for (const round of [1, 2, 3]) {
         counter.calls = 0;
         const quiet = await channel.sync();
         expect(quiet.accepted, `round ${round}`).toBe(0);
-        // Unmemoized, this sync made ~5 checks per held delta (623 at N = 120): the duplicate
-        // offer, its held twin, and every receipt read. Memoized it makes none. The bound
-        // fails on any path that checks per held delta, and leaves room for a few local events.
         expect(counter.calls, `round ${round}`).toBeLessThan(N / 4);
       }
 
-      // OBJECT LEVEL: the quiet syncs changed nothing a reader sees — every planted delta is still
-      // in the receiver's gather for the container.
       const gathered = new Set(me.containerScope({ containers: ["friends"] }).map((d) => d.id));
       for (const d of planted) expect(gathered.has(d.id)).toBe(true);
     } finally {
@@ -86,17 +67,14 @@ describe("a no-op sync does not re-verify what the pool holds", () => {
     }
   }, 60_000);
 
-  // Passes without the memo too. It fails if the held-delta shortcut drops its signature guard or
-  // its recompute guard: the memo must never answer for bytes it did not verify.
   it("still checks and refuses a re-offer that differs from the held bytes", async () => {
     const me = await store(ME_SEED);
     try {
       const d = observed(FERN, "height", 7, 1000, ALICE_SEED);
       const landed = await me.federate([d]);
       expect(landed.accepted).toBe(1);
-      await me.federate([d]); // warm: the held twin is now memoized as verified
+      await me.federate([d]);
 
-      // Same id, forged signature: not wire-identical to what is held, so the memo cannot answer.
       const flipped = d.sig!.slice(0, -1) + (d.sig!.endsWith("0") ? "1" : "0");
       const forged = { ...d, sig: flipped };
       counter.calls = 0;
@@ -106,7 +84,6 @@ describe("a no-op sync does not re-verify what the pool holds", () => {
       expect(counter.calls).toBeGreaterThan(0);
       expect(me.reactor.get(d.id)!.sig).toBe(d.sig);
 
-      // Same id and signature, rewritten claims: the claims do not recompute to the id.
       const [subject, value] = d.claims.pointers;
       const rewritten = {
         ...d,
@@ -128,13 +105,12 @@ describe("a no-op sync does not re-verify what the pool holds", () => {
     expect(sameVerifiedDelta(d, d)).toBe(true);
     counter.calls = 0;
     expect(sameVerifiedDelta(d, d)).toBe(true);
-    expect(counter.calls).toBe(0); // the memo answered
+    expect(counter.calls).toBe(0);
     const sig = d.sig!;
     (d as { sig?: string }).sig = sig.slice(0, -1) + (sig.endsWith("0") ? "1" : "0");
     expect(sameVerifiedDelta(d, d)).toBe(false);
     expect(counter.calls).toBe(1);
 
-    // The same for the claims: id and signature untouched, the signed value rewritten in place.
     const e = observed(FERN, "height", 10, 1000, ALICE_SEED);
     expect(sameVerifiedDelta(e, e)).toBe(true);
     const value = e.claims.pointers[1]!;

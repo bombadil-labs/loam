@@ -1,4 +1,3 @@
-# The green gate, enforced on both grounds Loam must grow in: linux and windows.
 name: ci
 
 on:
@@ -16,17 +15,6 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
-      # THE SUITE'S SCRATCH HOMES MUST LIVE ON THE RUNNER'S TEMP DISK. Every CLI rail builds its sqlite
-      # homes under `os.tmpdir()`, which on a windows runner is `%TEMP%` on C: — the OS disk, and NOT
-      # the `$RUNNER_TEMP` (D:) the step below excludes. Measured on windows-latest, one sqlite
-      # open/write/checkpoint/close: 73 ms on C: vs 3.4 ms on D: alone; with four writers at once (a
-      # loaded suite), p95 1.4-2.8 s and max 6.7 s on C: vs max 0.25 s on D:. better-sqlite3 is
-      # synchronous, so each of those seconds blocks the test's event loop: CLI rails overran the 20 s
-      # clock (user-roles, install-by-federation-cli, federate-list-orphan), and a stall past five
-      # seconds let an in-process server reap a keep-alive socket under drop-cli's next fetch
-      # (`federate: fetch failed`). D: is fast with or without the Defender exclusion; the disk is
-      # the cause. Not best-effort: if this does not hold, the suite is not running on the ground the
-      # thresholds were set on.
       - name: put the suite's temp dir on the runner's temp disk (windows)
         if: runner.os == 'Windows'
         shell: bash
@@ -35,17 +23,6 @@ jobs:
           mkdir -p "$dir"
           echo "TEMP=$dir" >> "$GITHUB_ENV"
           echo "TMP=$dir" >> "$GITHUB_ENV"
-      # Defender's real-time scan taxes every file CREATION in the kernel, where no concurrency
-      # helps — the byte-heavy suites (archive: one file per delta; sqlite: WAL churn) pay it per
-      # file. Excluding the workspace and $RUNNER_TEMP (where the step above puts the suite's temp
-      # dir) is the standard runner treatment; measured need: archive.test.ts at 12-14s on windows vs
-      # 0.7s on linux, timing out under load (T155).
-      # BEST EFFORT, and the try/catch is the point: this step buys SPEED, never correctness, so it
-      # must not be able to fail the build. It did once — `Add-MpPreference` answered
-      # `HRESULT 0x80041013` on a runner whose Defender service would not take the call, and a bare
-      # `run:` turned an optimization into a red gate on a pull request that changed one JSON file.
-      # A warning keeps the loss visible (the suite simply pays the scan tax) without pretending
-      # nothing happened.
       - name: exempt the workspace from Defender's per-file scan (windows, best effort)
         if: runner.os == 'Windows'
         shell: powershell
@@ -67,6 +44,4 @@ jobs:
       - name: format + lint + typecheck + tests
         run: npm run check
         env:
-          # fs.promises rides libuv's threadpool, default 4 threads — half the archive write
-          # pool's width. Sixteen lets the pooled flushes (T155) actually overlap.
           UV_THREADPOOL_SIZE: "16"

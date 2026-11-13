@@ -1,19 +1,3 @@
-// §37 phase 14 — the consent page (T135). Criteria (1)–(7) of
-// .adlc/specs/37-14-the-consent-page.md, transcribed. `GET /oauth/authorize` renders a consent page
-// behind a phase-5 session; its approval POST mints ONE authorization code — no seed, no token, no
-// grant. Redemption is phase 15.
-//
-// The session half is the REAL login doors' machinery (a `serve` with `users`), reused through the
-// SessionGate — so criterion 1 (a real phase-5 session) and criterion 5 (a real phase-6 form token)
-// exercise the enforcing code, not a fake. Clients are registered by writing `oauth.json` directly:
-// the register door is phase 13's rail, and a deterministic fixture keeps these rails about the
-// consent page alone.
-//
-// What this file deliberately does NOT assert, and which rail closes each gap:
-//   - Redemption of a code, and its single-use/expiry ENFORCEMENT — phase 15 (T136). This phase only
-//     mints; criterion 6 rails the recorded deadline, not a check that reads it.
-//   - The register door's own validation (name, redirect origin allowlist) — phase 13's file.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -38,8 +22,6 @@ const OPERATOR = authorForSeed(OPERATOR_SEED);
 const CHEAP: ScryptParams = { N: 1024, r: 8, p: 1, keylen: 32 };
 const PASSWORD = "correct horse";
 
-// The one origin this store permits a redirect at, and the one client it holds. A different path, an
-// added query and another port on this origin are each the criterion-2 negatives.
 const ALLOW_ORIGIN = "https://app.example";
 const REDIRECT = "https://app.example/cb";
 const CLIENT_ID = "connector-fixed-0001";
@@ -62,7 +44,7 @@ const clientRecord = (over: Partial<OAuthClient> = {}): OAuthClient => ({
 });
 
 async function consentServer(opts: {
-  client?: OAuthClient | undefined; // undefined → no client registered
+  client?: OAuthClient | undefined;
   monotonicNow?: () => number;
 }): Promise<{ base: string; home: string; handle: ServerHandle }> {
   const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
@@ -101,7 +83,6 @@ const SAME_ORIGIN = { "sec-fetch-site": "same-origin" } as const;
 const fieldOf = (html: string, name: string): string | undefined =>
   new RegExp(`name="${name}" value="([^"]*)"`).exec(html)?.[1];
 
-/** Sign in as myk over the REAL login doors; returns the session cookie value. */
 async function signIn(base: string): Promise<string> {
   const form = await fetch(`${base}/login`, { redirect: "manual" });
   const nonceCookie = cookiesOf(form).find((c) => c.startsWith(`${PRESESSION_COOKIE}=`))!;
@@ -146,7 +127,6 @@ async function postApprove(
   });
 }
 
-/** Sign in, GET the consent page for the fixture client, and return the session + the page's hidden fields. */
 async function readied(
   base: string,
   query: Record<string, string> = { client_id: CLIENT_ID, redirect_uri: REDIRECT, state: "st-42" },
@@ -176,7 +156,6 @@ describe("§37 phase 14 — the consent page", () => {
   it("(1) sits behind a phase-5 session: no session shows the login form and mints nothing", async () => {
     const { base, home } = await consentServer({ client: clientRecord() });
 
-    // No session cookie: the login form, 200, and no code written.
     const anon = await getAuthorize(base, { client_id: CLIENT_ID, redirect_uri: REDIRECT });
     expect(anon.status).toBe(200);
     const anonBody = await anon.text();
@@ -184,7 +163,6 @@ describe("§37 phase 14 — the consent page", () => {
     expect(anonBody).not.toContain("Approve a connector?");
     expect(codeCount(home)).toBe(0);
 
-    // Positive control: a real session reaches the consent page instead.
     const sessionId = await signIn(base);
     const withSession = await getAuthorize(
       base,
@@ -209,11 +187,8 @@ describe("§37 phase 14 — the consent page", () => {
     const isConsent = async (res: Response): Promise<boolean> =>
       res.status === 200 && (await res.text()).includes("Approve a connector?");
 
-    // Positive control: the EXACT registered uri is accepted — without it the three negatives could
-    // pass on any refusal (plan §2.2).
     expect(await isConsent(await get(REDIRECT))).toBe(true);
 
-    // Three negatives: a different path, an added query, and another port. Each refused, none the page.
     for (const bad of [
       "https://app.example/other",
       `${REDIRECT}?a=1`,
@@ -224,7 +199,6 @@ describe("§37 phase 14 — the consent page", () => {
       expect(res.status).toBe(400);
     }
 
-    // And an unknown client_id, exact uri or not, is refused the same way.
     const unknown = await getAuthorize(
       base,
       { client_id: "connector-nope", redirect_uri: REDIRECT },
@@ -239,15 +213,12 @@ describe("§37 phase 14 — the consent page", () => {
     const sessionId = await signIn(base);
 
     const refusals = [
-      // no session
       await getAuthorize(base, { client_id: CLIENT_ID, redirect_uri: REDIRECT }),
-      // bad redirect_uri, behind a session
       await getAuthorize(
         base,
         { client_id: CLIENT_ID, redirect_uri: "https://app.example/evil" },
         { cookie: `${SESSION_COOKIE}=${sessionId}` },
       ),
-      // cross-site POST (foreign Origin)
       await postApprove(
         base,
         sessionId,
@@ -260,8 +231,6 @@ describe("§37 phase 14 — the consent page", () => {
     }
     expect(codeCount(home)).toBe(0);
 
-    // Positive control: a granted approval DOES set a Location, and only to the REGISTERED uri — so
-    // "no Location on refusals" is not vacuously true of a door that never redirects at all.
     const r = await readied(base);
     const ok = await postApprove(base, r.sessionId, {
       client_id: r.clientId,
@@ -286,11 +255,9 @@ describe("§37 phase 14 — the consent page", () => {
       CSP.replace("form-action 'self'", `form-action 'self' ${ALLOW_ORIGIN}`),
     );
     const body = await res.text();
-    // The name is escaped, never live markup.
     expect(body).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
     expect(body).not.toContain("<script>alert(1)</script>");
     expect(body).not.toContain("<script");
-    // The REGISTERED uri is shown.
     expect(body).toContain(REDIRECT);
   });
 
@@ -298,7 +265,6 @@ describe("§37 phase 14 — the consent page", () => {
     const { base, home } = await consentServer({ client: clientRecord() });
     const r = await readied(base);
 
-    // Foreign Origin: refused, no code.
     const foreign = await postApprove(
       base,
       r.sessionId,
@@ -308,7 +274,6 @@ describe("§37 phase 14 — the consent page", () => {
     expect(foreign.status).toBe(403);
     expect(codeCount(home)).toBe(0);
 
-    // Same-origin but a forged form token: refused, no code.
     const forged = await postApprove(base, r.sessionId, {
       client_id: r.clientId,
       redirect_uri: r.redirectUri,
@@ -317,7 +282,6 @@ describe("§37 phase 14 — the consent page", () => {
     expect(forged.status).toBe(403);
     expect(codeCount(home)).toBe(0);
 
-    // Positive control: a valid same-origin approval with the session's own form token mints ONE code.
     const ok = await postApprove(base, r.sessionId, {
       client_id: r.clientId,
       redirect_uri: r.redirectUri,
@@ -338,8 +302,8 @@ describe("§37 phase 14 — the consent page", () => {
     });
     expect(ok.status).toBe(302);
     const file = readOAuthFile(home);
-    expect((file.codes ?? []).length).toBe(1); // the code is there
-    expect(file.grants).toEqual([]); // and nothing else moved
+    expect((file.codes ?? []).length).toBe(1);
+    expect(file.grants).toEqual([]);
     expect(file.tokens).toEqual([]);
   });
 
@@ -350,8 +314,6 @@ describe("§37 phase 14 — the consent page", () => {
       monotonicNow: () => clock,
     });
 
-    // Mint at clock=1000: the deadline is 1000+TTL, computed from the INJECTED clock — a door reading
-    // Date.now() would record ~1.7e12 and fail this equality.
     clock = 1000;
     const first = await readied(base);
     const ok1 = await postApprove(base, first.sessionId, {
@@ -367,9 +329,6 @@ describe("§37 phase 14 — the consent page", () => {
     expect(code1.redirectUri).toBe(REDIRECT);
     expect(code1.expiresAt).toBe(1000 + CODE_TTL_MS);
 
-    // Step the clock BACKWARD and mint again: the new code's deadline anchors to its own (earlier)
-    // mint moment, so it is SMALLER — a backstep never extends a code — and the first code's recorded
-    // deadline does not move.
     clock = 500;
     const second = await readied(base);
     const ok2 = await postApprove(base, second.sessionId, {
@@ -382,7 +341,7 @@ describe("§37 phase 14 — the consent page", () => {
     expect(codes).toHaveLength(2);
     const stillFirst = codes.find((c) => c.digest === code1.digest)!;
     const code2 = codes.find((c) => c.digest !== code1.digest)!;
-    expect(stillFirst.expiresAt).toBe(1000 + CODE_TTL_MS); // unmoved
+    expect(stillFirst.expiresAt).toBe(1000 + CODE_TTL_MS);
     expect(code2.expiresAt).toBe(500 + CODE_TTL_MS);
     expect(code2.expiresAt).toBeLessThan(stillFirst.expiresAt);
   });

@@ -1,8 +1,3 @@
-// A claim becomes valid, or stops being valid, at a moment it names, with nothing written at that
-// moment. The gateway arms a timer for the next such boundary after every ingest and at open. Each
-// case moves a faked clock past the boundary with no later write, and reads a live subscription,
-// which follows the maintained view. Every case names a bystander that must stay.
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
@@ -102,15 +97,9 @@ describe("a validity boundary moves the live view with no write", () => {
   });
 });
 
-// A registration is a claim too. One outside its interval binds nothing, and one whose interval
-// starts or ends while the gateway runs is bound or unbound at that moment, with no write. Each case
-// names a bystander registration that stays served. Deliberately not asserted: definition deltas
-// (the hyperschema and schema entities) with their own intervals. Loam writes none.
 describe("a registration binds over its own interval", () => {
   const SHRUB = { ...PLANT, name: "Shrub" };
 
-  /** A genesis with Plant and Shrub, Shrub's registration claim re-signed with `interval`. With
-   * `hold`, that claim is left out of the store and returned for the caller to write later. */
   const shrubStore = async (
     interval: { validFrom?: number; validUntil?: number },
     hold = false,
@@ -165,7 +154,7 @@ describe("a registration binds over its own interval", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(names(gw)).toContain("Plant");
     expect(names(gw)).not.toContain("Shrub");
-    expect(await shrubQuery()).toBeDefined(); // the served surface no longer has the field
+    expect(await shrubQuery()).toBeDefined();
     expect(await plantQuery()).toBeUndefined();
     await gw.close();
   });
@@ -202,7 +191,6 @@ describe("a registration binds over its own interval", () => {
       await gw.close();
     },
   );
-  // Arrival order is free: the negation of a registration may land before the registration.
   it.each([
     ["the registration, then its negation", false],
     ["the negation, then its registration", true],
@@ -216,10 +204,10 @@ describe("a registration binds over its own interval", () => {
       OP_SEED,
     );
     await gw.append(negationFirst ? [negation, timed] : [timed, negation]);
-    gw.replayRegistrations(); // a raw append binds nothing until a replay
+    gw.replayRegistrations();
     expect(names(gw)).toEqual(expect.arrayContaining(["Plant", "Shrub"]));
 
-    await vi.advanceTimersByTimeAsync(1_000); // no write at T
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(names(gw)).toContain("Plant");
     expect(names(gw)).not.toContain("Shrub");
     await gw.close();
