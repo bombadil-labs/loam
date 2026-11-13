@@ -98,7 +98,7 @@ Side interfaces a driver may also implement (VERIFIED):
 
 | Interface | Where | Methods | Calls outside `src/store` |
 |---|---|---|---|
-| `JournalBackend` | `src/store/peer-image.ts:11-25` | `journalStore`, `journalPeers`, `journalRowIds`, `holdsAnyRow`, `discardJournals`, `setAside`, `keepsJournals` | `journalStore` 5 (`gateway.ts:705,716,841`; `container.ts:739`; `cli.ts:1194`), `journalPeers` 2, `holdsAnyRow` 1, `discardJournals` 1 |
+| `JournalBackend` | `src/store/peer-image.ts:11-25` | `journalStore`, `journalPeers`, `journalRowIds`, `holdsAnyRow`, `discardJournals`, `setAside`, `keepsJournals` | `journalStore` 5 (`gateway.ts:705,716,841`; `container.ts:739`; `cli.ts:1194`), `journalPeers` 3 (`cli.ts:1184`; `container.ts:617`; `gateway.ts:695`), `setAside` 1 (`gateway.ts:729`), `journalRowIds` 1 (`gateway.ts:733`), `holdsAnyRow` 1, `discardJournals` 1 |
 | `RepairableBackend` | `src/store/quarantine.ts:115-140` | `quarantine`, `discardRow`, `restoreQuarantined` | `quarantine` 11, `discardRow` 2 |
 | `HoldsPoolKeys` | `src/store/peer-image.ts:40-45` | `poolKeys` | 1 |
 
@@ -216,7 +216,7 @@ Side interfaces a driver may also implement (VERIFIED):
 | 626 | `attachPersistence` | feed | Raw subscription: write-through and `publicOpen` invalidation. The write-through dies; the invalidation follows the feed. (1 sites) | VERIFIED |
 | 634 | `attachPersistence` | write | Write-through `backend.append`. The store append is the write; this queue dies. (1 sites) | VERIFIED |
 | 642 | `attachPersistence` | indexed | `get` of the emitted id after a conflict catch-up. (1 sites) | VERIFIED |
-| 686-744 | `open` | dies | Boot replay: read every row, ingest every row, count rows outside the journal. (5 sites) | VERIFIED |
+| 686-744 | `open` | dies | Boot replay: read every row, ingest every row, count rows outside the journal. (5 sites: lines 695, 723, 729, 733, 744; lines 705, 716 and 721 are counted in the side-interface and `revision` tables) | VERIFIED |
 | 752,758 | `open` | admin | `quarantine()` at open: count unreadable rows, and refuse an unreadable operator marker. Becomes the integrity-fault report (gap G6). (2 sites) | VERIFIED |
 | 781-799 | `open` | write | The incarnation marker at open. Becomes one `append`. (3 sites) | VERIFIED |
 | 824 | `durableCurrent` | feed | `durableCurrent`: compares the SQLite `data_version` to notice another writer. Becomes a revision compare. (1 sites) | VERIFIED |
