@@ -5,7 +5,7 @@
 
 ## How to use this file
 
-This file lives at `docs/project-context.md`. In this repository the operating rules are `CLAUDE.md`, and current work lives in `.adlc/tickets/` and `.adlc/specs/`; read `AGENTS.md` and `PLAN.md` below as those two. The repository's current code, tests, ticket shards, and git history remain the source of truth for implementation state.
+This file lives at `docs/project-context.md`. In this repository the operating rules are `CLAUDE.md` and `refactor/README.md`, and current work is the refactor (`refactor/`); `.adlc/` is suspended. Where this file says `AGENTS.md`, read `CLAUDE.md`; where it says `PLAN.md`, read `refactor/PLAN.md`. The repository's current code, tests, ticket shards, and git history remain the source of truth for implementation state.
 
 This document records the architectural direction reached in discussion. If the repository has advanced or contradicts this snapshot, the coding agent must identify the discrepancy before changing behavior.
 
