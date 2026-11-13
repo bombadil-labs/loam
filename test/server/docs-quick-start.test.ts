@@ -1,14 +1,3 @@
-// T250 — the quick-start joins the manual (working criteria a–c). The second loam_docs topic
-// rides the T247 machinery unchanged; these rails live in their own file because the T247 rail is
-// frozen. They assert: the listing carries the new topic with its summary; the served bytes are
-// the real docs/quick-start.md and cover the four movements (install, init, funnel, connector);
-// the resource serves the same bytes; and the build's new topic-character guard refuses a
-// filename that would mint a topic outside [a-z0-9-]+ — T247's named latent case, closed at the
-// second doc exactly as owed.
-//
-// Deliberately not re-asserted here: everything the frozen T247 rail already pins (tool shape,
-// bearer parity, unknown-topic refusal, the register-door pointer, --check drift).
-
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -18,7 +7,7 @@ import { Gateway } from "../../src/gateway/gateway.js";
 import { serve, type ServerHandle } from "../../src/server/http.js";
 import { MemoryBackend } from "../../src/store/memory.js";
 
-vi.setConfig({ testTimeout: 20_000 }); // a real listening server, one child process
+vi.setConfig({ testTimeout: 20_000 });
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -60,21 +49,18 @@ describe("T250 (a) — the quick-start is listed and served", () => {
     expect(listing.isError).not.toBe(true);
     const text = listing.content[0]!.text;
     expect(text).toContain("quick-start");
-    expect(text).toContain("the guided init"); // the summary rides the listing
-    expect(text).not.toContain("npm i -g"); // the listing is not the doc
+    expect(text).toContain("the guided init");
+    expect(text).not.toContain("npm i -g");
 
     const doc = await call({ topic: "quick-start" });
     expect(doc.isError).not.toBe(true);
     const md = doc.content[0]!.text;
-    // The four movements, by their load-bearing commands — hand-written expectations.
     expect(md).toContain("npm i -g @bombadil/loam");
     expect(md).toContain("loam init --home");
     expect(md).toContain("tailscale funnel");
     expect(md).toContain("/default/mcp");
-    // The two connector-critical serve flags a reader cannot guess.
     expect(md).toContain("--public-url");
     expect(md).toContain("--oauth-allow-redirect https://claude.ai");
-    // And the token wall, quoted from the code it transcribes.
     expect(md).toContain("an unlockable door is a wall");
   });
 });
@@ -99,7 +85,6 @@ describe("T250 (b) — the topic-character guard, red at the second doc as owed"
     } finally {
       rmSync(bad, { force: true });
     }
-    // Two-sided: with the stray gone, the real docs tree checks byte-identical.
     const ok = execFileSync(
       process.execPath,
       [join(root, "scripts", "build-docs.mjs"), "--check"],

@@ -1,7 +1,3 @@
-// M5 slice 4 rails: the portable door judges law as native law does, a slate that lands while a
-// read is in flight refuses that read, and an as-of read cuts its scoped operands at the cut.
-// Each case compares the portable answer with the native answer on the same ground and time.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -45,7 +41,6 @@ async function bedStore(routes: Route[]): Promise<Gateway> {
   return gw;
 }
 
-/** The published act that carries the Plant reading's definition. */
 function plantReadingAct(gw: Gateway): Delta {
   const act = gw.reactor
     .byTarget("schema:Plant")
@@ -96,8 +91,6 @@ describe("M5 law selection matches native law", () => {
     await gw.close();
   });
 
-  // Native law evaluates every strike in the chain at `now`, so a strike outside its own window
-  // binds nothing yet, or nothing any longer.
   it("an operator strike that holds only in the future retires nothing now", async () => {
     const routes: Route[] = [];
     const gw = await bedStore(routes);
@@ -130,7 +123,6 @@ describe("M5 law selection matches native law", () => {
     const withdrawal = strike(KEEPER_SEED, now, plantReadingAct(gw).id);
     await gw.append([withdrawal]);
     await gw.append([strike(KEEPER_SEED, now, withdrawal.id, { validFrom: now + 60_000 })]);
-    // The withdrawal stands, so the Plant law is retired on both routes and neither read is portable.
     expect(classifyPortableRead(gw, "Plant", FERN, gw.now())).toEqual({
       route: "native",
       reason: "unpublished-law",
@@ -159,7 +151,6 @@ describe("M5 read closure lands in flight", () => {
     const route = classifyPortableRead(gw, "Plant", FERN, now);
     expect(route.route).toBe("portable");
     if (route.route !== "portable") return;
-    // The slate points outside the read's scope. Only the read closure moves S(scope).
     await standSlate(gw, { members: [member], closes: ["read"] });
     const answer = await runPortableRead(route.signer, route.prepared);
     expect(answer).toMatchObject({ status: "refused", stage: "gather", code: "source-changed" });
@@ -174,7 +165,6 @@ describe("M5 as-of reads cut their scoped operands", () => {
   it("a fact said after the cut is absent even when it holds before the cut", async () => {
     const native = await slateStore(false),
       portable = await slateStore(true);
-    // Said at 1800, holding since 0: an as-of read at 1500 has not heard it yet.
     const late = observed(FERN, "height", 77, { timestamp: 1800, validFrom: 0 }, OP_SEED);
     const early = observed(FERN, "height", 30, 1000, OP_SEED);
     for (const gw of [native, portable]) await gw.append([early, late]);

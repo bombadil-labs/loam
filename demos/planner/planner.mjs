@@ -1,12 +1,3 @@
-// PLANNER — the second real Loam app, run end to end (ticket T23). Things go in my planner; a
-// plan carries a guest list; my plans federate. Two sovereign stores — Priya hosts, Sam is
-// invited — and the RSVP is Sam's OWN SIGNED CLAIM, made in Sam's own store and pulled back:
-// nobody can answer for anyone else, and nobody wrote an authorization system.
-//
-// The finale is the promise Larder's README made: with BOTH bundles installed in Priya's store,
-// "do we have enough beer for the BBQ?" is answered by reading the plan's guest list beside
-// Larder's Pantry lens — two apps, one ground, ZERO integration code.
-
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -94,7 +85,6 @@ try {
   priya = await openMember("priya", 4511);
   sam = await openMember("sam", 4512);
 
-  // INSTALL — the Planner bundle on both stores.
   await installBundle(
     priya,
     "planner",
@@ -115,7 +105,6 @@ try {
     true,
   );
 
-  // PRIYA PLANS the BBQ — title, time, place, and a guest list of entity refs.
   const when = Date.now() + 2 * 24 * 3600 * 1000;
   await q(
     priya.gateway,
@@ -137,7 +126,6 @@ try {
     `guests: ${(plan.data?.plan?.guest ?? []).join(", ")}`,
   );
 
-  // SAM IS INVITED — pulls Priya's plans into his own store; his planner now shows the BBQ.
   await pullFrom(sam.gateway, priya.base, "op-priya");
   const samsBook = await q(sam.gateway, `{ planner(entity: "planner:mine") { plan } }`);
   check(
@@ -146,8 +134,6 @@ try {
     (samsBook.data?.planner?.plan ?? []).some((p) => p?.title === "Saturday BBQ"),
   );
 
-  // SAM RSVPS FROM HIS OWN STORE — his claim, his signature. Priya pulls the answer back, and
-  // the resolver renders WHO said yes from cryptographic authorship, not from anything typed.
   await q(sam.gateway, `mutation { rsvp(plan: "plan:bbq", answer: "yes") { delta } }`);
   await pullFrom(priya.gateway, sam.base, "op-sam");
   const rsvps = await q(priya.gateway, `{ plan(entity: "plan:bbq") { rsvp } }`);
@@ -160,7 +146,6 @@ try {
     `rsvps: ${JSON.stringify(rsvpList)}`,
   );
 
-  // THE AGENDA SERVES ANONYMOUSLY — the planner UI from the store itself.
   const agenda = await priya.gateway.serveRoute("planner", "planner:mine", "public");
   check(
     "plan.5",
@@ -169,7 +154,6 @@ try {
     `render: ${agenda.status}`,
   );
 
-  // A GUEST WITH JUST THE LINK can answer — the plan page's form is a pen-signed write.
   const tapped = await priya.gateway.writeRoute("plan", "plan:bbq", { rsvp: "yes" }, "public");
   check(
     "plan.6",
@@ -178,8 +162,6 @@ try {
     `writeRoute: ${tapped.status}`,
   );
 
-  // THE PROMISE KEPT — Larder's bundle joins Priya's store, beer goes in the pantry, and the
-  // BBQ question is answered across two apps with ZERO integration code: one ground, two lenses.
   await installBundle(
     priya,
     "larder",

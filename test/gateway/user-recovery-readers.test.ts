@@ -1,9 +1,3 @@
-// The readers of a user recovery (refactor/audit/user-recovery.md), with the records written by
-// hand; `loam user recover` (3e-2) writes the same shapes. Asked of every reader that must agree:
-// the indexed root reader (`userRootAt`), the View reader (`rootOf`), the raw reader
-// (`userRootsRaw`), the door (`holdsGrant`), the governed mask (`dataStruck`), and ownership
-// (`keysEverOf`). A bystander user with a literal grant rides every case.
-
 import { afterEach, describe, expect, it } from "vitest";
 import { appendWithHostCut } from "../helpers/recovery-cut.js";
 import {
@@ -76,8 +70,6 @@ afterEach(async () => {
   for (const gw of open.splice(0)) await gw.close();
 });
 
-// ada, root K1 (via user-named grants), and bea, a bystander with a literal grant on key B. K1 also
-// holds a literal write grant, which a recovery must neutralize without striking it.
 async function world(backend: StoreBackend = new MemoryBackend()): Promise<Gateway> {
   const gw = await Gateway.boot(
     backend,
@@ -101,7 +93,6 @@ async function world(backend: StoreBackend = new MemoryBackend()): Promise<Gatew
   return gw;
 }
 
-// A recovery as the command writes it: the record, its lineage claim, and the new root claim.
 async function recover(
   gw: Gateway,
   spec: { previous?: string; root: string; supersedes?: string; retired: string[] },
@@ -123,7 +114,6 @@ async function recover(
 const readers = (gw: Gateway, at?: number) => {
   const now = at ?? gw.validityNow();
   return {
-    // The erased-but-held set the Gateway itself reads with, as the door does.
     index: userRootAt(
       gw.reactor,
       now,
@@ -146,7 +136,7 @@ describe("E3: the head's root is the only eligible root", () => {
     expect(readers(gw)).toEqual({ index: K2, view: K2, raw: [K2] });
     expect(writes(gw, K2)).toBe(true);
     expect(writes(gw, K1)).toBe(false);
-    expect(writes(gw, B)).toBe(true); // bystander
+    expect(writes(gw, B)).toBe(true);
   });
 
   it("a LATER operator K1 root claim does not win, in either reader", async () => {
@@ -239,7 +229,6 @@ describe("E2: ownership needs the operator record AND the new root's binding", (
     const byB = observed(FERN, "tag", "bea", 27, B_SEED);
     await gw.append([byK1, byB]);
     await recover(gw, { previous: K1, root: K2, retired: [K1] }, 30);
-    // the record alone is not ownership
     expect([...keysEverOf(gw.reactor, gw.validityNow(), { root: K2 }, OP)]).toEqual([K2]);
     await gw.append([binding(K2_SEED, K1, 32)]);
     expect([...keysEverOf(gw.reactor, gw.validityNow(), { root: K2 }, OP)].sort()).toEqual(
@@ -248,7 +237,6 @@ describe("E2: ownership needs the operator record AND the new root's binding", (
     await gw.gqlHooks().clear("Plant", FERN, ["tag"], K2_SEED);
     expect(gw.reactor.negationsOf(byK1.id).length).toBeGreaterThan(0);
     expect(gw.reactor.negationsOf(byB.id)).toEqual([]);
-    // Mallory binds bea's key: no operator record names that pair, so it is not Mallory's own.
     await gw.append([binding(M_SEED, B, 40)]);
     expect([...keysEverOf(gw.reactor, gw.validityNow(), { root: M }, OP)]).toEqual([M]);
     await gw.gqlHooks().clear("Plant", FERN, ["tag"], M_SEED);
@@ -347,7 +335,6 @@ describe("E5: a broken recovery history fails closed, and quarantines every key 
       const byK1 = observed(FERN, "height", 1, 26, K1_SEED);
       const byB = observed(FERN, "height", 2, 27, B_SEED);
       await gw.append([byK1, byB]);
-      // K1's literal grant, struck then counter-struck: it stands again as a grant.
       const k1Grant = op(grantClaims(STORE_ENTITY, K1, "write", OP, 28));
       const strikeIt = op(makeNegationClaims(OP, 29, k1Grant.id));
       await gw.append([k1Grant, strikeIt, op(makeNegationClaims(OP, 29, strikeIt.id))]);
@@ -356,10 +343,8 @@ describe("E5: a broken recovery history fails closed, and quarantines every key 
       expect(readers(gw).view).toBeUndefined();
       expect(readers(gw).raw).toEqual([]);
       expect([...keysEverOf(gw.reactor, gw.validityNow(), { root: K2 }, OP)]).toEqual([K2]);
-      // door: K1 refused; the bystander writes
       expect(writes(gw, K1)).toBe(false);
       expect(writes(gw, B)).toBe(true);
-      // governed mask: K1's strike does not bind; the bystander's does
       const target1 = observed(FERN, "height", 3, 50, B_SEED);
       const target2 = observed(FERN, "height", 4, 51, B_SEED);
       await gw.append([target1, target2]);
@@ -386,7 +371,6 @@ describe("E5: a broken recovery history fails closed, and quarantines every key 
   });
 });
 
-// The operator's K1 root claim, which a recovery strikes for good (the command does; here, by hand).
 const k1RootClaim = (gw: Gateway): Delta =>
   [...gw.reactor.byTarget("user:ada")]
     .map((id) => gw.reactor.get(id)!)
@@ -407,13 +391,12 @@ describe("the shapes a door refuses are refused, and no reader disagrees about t
     const unindexed = op({ ...full, pointers: full.pointers.filter((p) => p.role !== "index") });
     await expect(gw.append([unindexed])).rejects.toThrow(/filed exactly once at its user and once/);
     expect(gw.reactor.ingest(unindexed).status).toBe("accepted");
-    // No reader sees a chain: the root is K1's plain claim, and K1 stands everywhere alike.
     expect(readers(gw)).toEqual({ index: K1, view: K1, raw: [K1] });
     expect(writes(gw, K1)).toBe(true);
   });
 
   it("an unsigned binding-shaped row does not make K1 K2's own", async () => {
-    const gw = await world(unjournaled(new MemoryBackend())); // a journaled host refuses the row
+    const gw = await world(unjournaled(new MemoryBackend()));
     await recover(gw, { previous: K1, root: K2, retired: [K1] }, 30);
     const signed = binding(K2_SEED, K1, 32);
     const unsigned = makeDelta(binding(K2_SEED, K1, 33).claims);
@@ -456,7 +439,6 @@ describe("evidence the readers must not take at face value", () => {
   });
 
   it("an unsigned recovery record and lineage claim, ingested raw, change no standing", async () => {
-    // A journaled host refuses these rows at admission; an unjournaled ground holds them.
     const gw = await world(unjournaled(new MemoryBackend()));
     const record = makeDelta(
       recoveryClaims({ name: "ada", attempt: "u", previous: K1, root: K2, retired: [K1] }, OP, 30),
@@ -531,10 +513,8 @@ describe("a record the store has erased is not a predecessor, even while its byt
   it("an erased-but-held predecessor: the successor is refused, and the honest state stands", async () => {
     const gw = await world();
     const { record } = await recover(gw, { previous: K1, root: K2, retired: [K1] }, 30);
-    // The erasure record lands while R0's bytes stay held (a purge not yet done).
     expect(gw.reactor.ingest(op(eraseClaims(record.id, OP, OP, 35))).status).toBe("accepted");
     expect(gw.reactor.get(record.id)).toBeDefined();
-    // Honest state: the head is gone and its lineage stands, so the history is broken.
     const before = readers(gw);
     expect(before).toEqual({ index: undefined, view: undefined, raw: [] });
     await expect(gw.append([successorOf(record)])).rejects.toThrow(/supersedes a record/);
@@ -558,7 +538,6 @@ describe("a record the store has erased is not a predecessor, even while its byt
     const successor = successorOf(record);
     await gw.federate([erasure, successor]);
     expect(gw.reactor.get(successor.id)).toBeUndefined();
-    // The erasure of the current head breaks the history on purpose; that is the stated outcome.
     expect(readers(gw).index).toBeUndefined();
     expect(writes(gw, B)).toBe(true);
   });
@@ -612,7 +591,6 @@ describe("E11: a pool reads its host's recovery evidence", () => {
     const pool = await Gateway.open(new MemoryBackend(), { seed: OP_SEED });
     open.push(pool);
     await pool.append([op(grantClaims(STORE_ENTITY, K1, "write", OP, 40))]);
-    // no host yet: the pool's own ground holds no recovery
     expect([...keysEverOf(pool.reactor, pool.validityNow(), { root: K2 }, OP)]).toEqual([K2]);
     expect(holdsGrant(pool.reactor, pool.validityNow(), STORE_ENTITY, K1, "write", OP)).toBe(true);
     pool.readUsersFrom(host);

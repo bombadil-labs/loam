@@ -1,11 +1,3 @@
-// T98's contract: `--store` and `--archive` resolve the way their help text says — a relative
-// value names a place INSIDE THE HOME, an absolute value is used as-is, and the config path keeps
-// its long-standing home-relative rule. Both levels are railed here: the resolvers themselves
-// (unit), and a real `serve --archive` run from a foreign working directory (object), whose
-// negative half — NOTHING minted in the CWD — is the assertion that failed before the fix: a
-// relative `--archive` used to mint an erasure-bearing vault beside whoever ran it, silently,
-// while the vault the help text promised was never opened.
-
 import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
@@ -35,7 +27,6 @@ describe("storePath and archivePath resolve overrides against the home", () => {
   });
 
   it("a --store override never opens config.json (a home with none still resolves)", () => {
-    // `home` has no config.json at all; only the no-override path may read it.
     expect(storePath(home, "s.sqlite")).toBe(join(home, "s.sqlite"));
   });
 
@@ -106,7 +97,6 @@ describe("serve --archive <relative>, run from a foreign working directory", () 
     if (typeof handle === "number") throw new Error(`serve failed: ${err.join("\n")}`);
     await handle.close();
 
-    // The documented half: the vault is under the home, holding the genesis deltas.
     const vault = join(home, "vault");
     expect(existsSync(vault)).toBe(true);
     const cold = (readdirSync(vault, { recursive: true }) as string[]).filter((f) =>
@@ -114,11 +104,8 @@ describe("serve --archive <relative>, run from a foreign working directory", () 
     );
     expect(cold.length).toBeGreaterThan(0);
 
-    // The negative half — the one that fails on the pre-fix code: the old CWD-relative
-    // resolution is redirected, not silently accepted. The scratch CWD stays empty.
     expect(readdirSync(scratch)).toEqual([]);
 
-    // And serve's own announcement names the home's vault, so the operator reads the truth.
     expect(out.join("\n")).toContain(`archive ${vault}`);
   });
 

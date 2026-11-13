@@ -1,8 +1,3 @@
-// Renderer law read under several governors (a pool's own key, then the host it selects for
-// renderers). Each binding is struck only under its own author's strikes or the holding ground's
-// (ruling 11): a host strike never retires the pool's own binding, and the pool's own strike
-// retires the host's copy in the pool's reading.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, Reactor, signClaims } from "@bombadil/rhizomatic";
 import type { LensName } from "../../src/gateway/registration.js";
@@ -38,8 +33,8 @@ describe("renderer strikes under several governors", () => {
     r.ingest(seeded);
     expect(routes(r)).toEqual(["own", "seeded"]);
     r.ingest(strike(own.id, HOST_SEED, 200));
-    expect(routes(r)).toEqual(["own", "seeded"]); // the host does not act in the pool
+    expect(routes(r)).toEqual(["own", "seeded"]);
     r.ingest(strike(seeded.id, POOL_SEED, 201));
-    expect(routes(r)).toEqual(["own"]); // the pool governs the copies it holds
+    expect(routes(r)).toEqual(["own"]);
   });
 });

@@ -1,28 +1,3 @@
-// `loam user recover <name>` (step 5, PR 3e-2; the design is refactor/audit/user-recovery.md). The
-// operator moves a user to a new key. The readers (3e-1) do the enforcing: once the recovery record
-// lands, the old key holds no standing anywhere the host's users are read. This command writes that
-// evidence in the one order that can be resumed or rolled back honestly, and says which it did.
-//
-// The order, and why:
-//   1. Every refusal before anything is written, so a refusal leaves no journal and no file moved.
-//   2. The JOURNAL first, durable, naming the attempt. A crash after this point is always resumable.
-//   3. The old seed archived (never deleted), the new seed written.
-//   4. The cuts (recovery-history.md): one in every declared inbox pool, each journaled before it
-//      is written. From its cut on, a pool pauses the old key. A pool that is not attached refuses
-//      the recovery in step 1, because it could not be cut.
-//   5. Two operator appends. First the host's own cut and the cut manifest (every cut that landed).
-//      Then the record, its lineage, the new root claim, and strikes of the old key's standing in
-//      the host. One append's arrivals are simultaneous, so the manifest needs its own. The door
-//      admits the record only if a held manifest names a live cut in this store and in every
-//      declared pool, so a pool declared since step 1 refuses the commit. From here the fence holds
-//      everywhere.
-//   6. The outcomes: `committed` beside every cut once the record landed, `aborted` once it provably
-//      did not. An abort lands before the key files roll back, so no pool stays paused unjournaled.
-//   7. After an append error, READ before undoing: the append may have committed. A read that
-//      cannot tell leaves everything in place and reports "pending".
-//   8. Pool strikes (hygiene), then the new key's binding. Each step is journaled; the journal is
-//      removed only when all are done.
-
 import { randomBytes } from "node:crypto";
 import {
   closeSync,
@@ -88,15 +63,10 @@ export interface RecoverOptions {
   readonly replaceSeed: boolean;
   readonly storePath: string;
   readonly io: RecoverIO;
-  /** Opens the store's backend. The CLI passes its sqlite opener; a test passes a faulty one. */
   readonly openBackend: (path: string) => StoreBackend;
-  /** Opens an inbox pool's backend, so the pools this store holds are attached and reachable. */
   readonly channelBackend?: (pool: string) => StoreBackend;
-  /** Discard a landed attempt whose new key file is lost, and recover again to a fresh key. */
   readonly abandonAttempt?: boolean;
-  /** Test seam: called once the journal is durable and before any seed file moves. */
   readonly afterJournal?: () => void;
-  /** Test seam: called once every pool is cut and before the host commit. */
   readonly afterCuts?: (gw: Gateway) => void | Promise<void>;
 }
 
@@ -108,20 +78,15 @@ interface Journal {
   readonly archive?: string;
   readonly pools: readonly string[];
   readonly bound: boolean;
-  /** Every key the chain has retired, as of this attempt: whose inbox standing still needs striking. */
   readonly retired: readonly string[];
-  /** The journal of a landed attempt this one abandons, restored if this one never commits. */
   readonly predecessor?: Journal;
-  /** Every cut signed for this attempt, by pool (`HOST` for the host's own), before it is written. */
   readonly cuts?: Readonly<Record<string, readonly string[]>>;
 }
 
-/** The journal's key for the host's own cut. */
 const HOST = "";
 
 const journalPath = (home: string, name: string): string => `${userSeedPath(home, name)}.recovery`;
 
-// Write `data` to a NEW file (`wx`, 0600), fsync it, then fsync its directory.
 function writeDurable(path: string, data: string): void {
   const fd = openSync(path, "wx", 0o600);
   try {
@@ -142,14 +107,10 @@ function syncDir(path: string): void {
       closeSync(fd);
     }
   } catch (err) {
-    // Windows cannot open a directory for fsync; there the rename is its own commit. Anywhere else
-    // a failed directory sync is a real fault, and the caller must stop before moving a key file.
     if (process.platform !== "win32") throw err;
   }
 }
 
-// Write a key file durably and never over an existing one: the bytes fsynced under a temp name,
-// linked into place (which refuses an existing target), the temp removed, the directory fsynced.
 function writeSeedDurable(path: string, seed: string, attempt: string): void {
   const temp = `${path}.${attempt}.tmp`;
   rmSync(temp, { force: true });
@@ -159,8 +120,6 @@ function writeSeedDurable(path: string, seed: string, attempt: string): void {
   syncDir(path);
 }
 
-// Replace the journal with a new state: write beside it, then rename over it (atomic), so a crash
-// leaves either the old journal or the new one, never none.
 function updateJournal(home: string, name: string, j: Journal): void {
   const path = journalPath(home, name);
   const temp = `${path}.next`;
@@ -176,16 +135,12 @@ function readJournal(home: string, name: string): Journal | undefined {
   return JSON.parse(readFileSync(path, "utf8")) as Journal;
 }
 
-// Move `from` to `to` without ever overwriting `to`: link (which refuses an existing target), then
-// unlink. The inode, and so the 0600 mode, is unchanged.
 function moveNoClobber(from: string, to: string): void {
   linkSync(from, to);
   unlinkSync(from);
   syncDir(to);
 }
 
-// Is `id` struck for good by the operator at `now`: a strike already in force, with no end, itself
-// unstruck? A strike that starts later is not yet one.
 function struckForGood(
   reactor: Ground,
   operator: string,
@@ -193,7 +148,6 @@ function struckForGood(
   now: number,
   erased: ReadonlySet<string>,
 ): boolean {
-  // Only a strike the readers honor counts: verified, and not erased in THIS ground.
   return reactor.negationsOf(id).some((n) => {
     const neg = reactor.get(n);
     return (
@@ -208,9 +162,6 @@ function struckForGood(
   });
 }
 
-// What `key` holds in `reactor` that a recovery strikes: every grant naming it, filed at any
-// entity, and every delegation it signed. The fence already denies it standing; these strikes keep
-// the record honest. Recovery is rare, so this walks the whole log rather than one index.
 function standingOf(reactor: Reactor, key: string): string[] {
   const out: string[] = [];
   for (const d of reactor.arrivalLog()) {
@@ -228,7 +179,6 @@ function standingOf(reactor: Reactor, key: string): string[] {
   return out;
 }
 
-// Every held operator root claim for `name` that names a key other than `keep`.
 function otherRootClaims(reactor: Ground, operator: string, name: string, keep: string): string[] {
   const entity = userEntity(name);
   const out: string[] = [];
@@ -249,9 +199,6 @@ function otherRootClaims(reactor: Ground, operator: string, name: string, keep: 
   return out;
 }
 
-// Strikes for good, valid from now: the stamp's ordering timestamp may run ahead of the clock, and
-// is never a validity time.
-// Strikes are the ground's own law: signed by its own signer, read with its own key.
 const strikes = (gw: Gateway, ids: readonly string[]): Delta[] => {
   const law = gw.signer!;
   return [...new Set(ids)]
@@ -262,8 +209,6 @@ const strikes = (gw: Gateway, ids: readonly string[]): Delta[] => {
           law.author,
           id,
           gw.validityNow(),
-          // The ground's own withheld set (its erased-but-held deltas among them): an inbox's
-          // erasures are its own, not its host's.
           readClosedIds(gw, gw.validityNow()),
         ),
     )
@@ -288,8 +233,6 @@ function bindingClaims(root: string, key: string, t: number): Claims {
   };
 }
 
-// A cut for `ground`: this store's incarnation, the recovery, and the key it retires. A cut is the
-// ground's own law, signed by its own signer.
 function signCut(ground: Gateway, spec: { attempt: string; recovery: string; key: string }): Delta {
   const law = ground.signer!;
   const store = incarnationId(ground.reactor, law.author, refusedIds(ground.reactor, law.author));
@@ -299,15 +242,9 @@ function signCut(ground: Gateway, spec: { attempt: string; recovery: string; key
   );
 }
 
-// The attached gateway of pool `name` (a connection inbox or a channel pool), or undefined. The CLI is
-// a facade over the store, so it reads a pool as its gateway.
 const poolGateway = (gw: Gateway, name: string): Gateway | undefined =>
   gw.connectionInboxes.get(name)?.gateway ?? gw.channelPools.get(name)?.gateway;
 
-// Settle every cut of this attempt that a store holds: write `outcome` beside a cut with none, and
-// report a cut whose outcome says otherwise as a conflict, never as settled. A committed attempt must
-// then read committed in every store it cut. Returns what is not settled, so the caller reports it
-// and keeps the journal.
 async function settleCuts(gw: Gateway, j: Journal, outcome: Outcome): Promise<string[]> {
   const pending: string[] = [];
   for (const [pool, ids] of Object.entries(j.cuts ?? {})) {
@@ -317,7 +254,6 @@ async function settleCuts(gw: Gateway, j: Journal, outcome: Outcome): Promise<st
       pending.push(`the ${outcome} outcome in ${where} (not attached)`);
       continue;
     }
-    // Outcomes are the ground's own law, like its cuts.
     const law = ground.signer!;
     const operator = law.author;
     const erased = refusedIds(ground.reactor, operator);
@@ -366,14 +302,10 @@ async function boot(o: RecoverOptions, seed: string): Promise<Gateway> {
   });
 }
 
-/** Run `loam user recover`. Returns the process exit code. */
 export async function recoverUser(o: RecoverOptions): Promise<number> {
   return recover(o, undefined);
 }
 
-// `superseding` is the journal of a landed attempt being abandoned. It stays in place until this
-// attempt's journal atomically replaces it, so a refusal or a crash before then leaves it as the
-// account of the unfinished work; the retired set it carries is swept again by this attempt.
 async function recover(o: RecoverOptions, superseding: Journal | undefined): Promise<number> {
   const { home, name, io } = o;
   const refuse = (line: string, code = 2) => {
@@ -395,7 +327,6 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
   if (journal !== undefined && superseding === undefined)
     return resume(o, opSeed, operator, journal);
 
-  // 1. Refusals, before anything is written.
   const seedRead = readUserSeed(home, name);
   if (seedRead.kind === "unreadable") {
     return refuse(
@@ -423,9 +354,6 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
           `cannot say which one it follows. Erase the wrong record first. Nothing was written.`,
       );
     }
-    // 2. The standing preflight: once the new key is the root, a grant naming the user must give it
-    // write NOW. Asked through the door's own reading of effective grants (validity, strikes, the
-    // issuer chain), not by finding a row.
     const standing = grantsNaming(gw.reactor, now, userEntity(name), operator).some(
       (g) => g.verb === "write" || g.verb === "admin",
     );
@@ -436,8 +364,6 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
       );
     }
     const previous = userRootAt(gw.reactor, now, operator, name, users.erased());
-    // The roster: every declared inbox pool is cut before the host commits, so each must be
-    // reachable now. A first root retires no key and cuts nothing.
     const roster =
       previous === undefined ? [] : declaredInboxes(readContainerTable(gw.reactor, now, operator));
     const unreachable = roster.filter((pool) => poolGateway(gw, pool) === undefined);
@@ -454,8 +380,6 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
     const retired = new Set(chain.kind === "chain" ? chain.retired : []);
     if (previous !== undefined) retired.add(previous);
     retired.delete(root);
-    // Every signed claim takes its validity from the stamp's `validFrom` (now) and only its
-    // ordering from `timestamp`, which may run ahead of the clock (#600).
     const record = signClaims(
       withStamp(gw.stamp(operator), (t) =>
         recoveryClaims(
@@ -476,7 +400,6 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
     const archive =
       seedRead.kind === "present" ? `${userSeedPath(home, name)}.replaced-${attempt}` : undefined;
 
-    // 3. The journal first, durable.
     const next = JSON.stringify({
       attempt,
       ...(previous === undefined ? {} : { previous }),
@@ -491,7 +414,6 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
     } satisfies Journal);
     if (superseding === undefined) writeDurable(journalPath(home, name), next);
     else {
-      // Replace the abandoned attempt's journal atomically: before the rename it still stands.
       const temp = `${journalPath(home, name)}.next`;
       rmSync(temp, { force: true });
       writeDurable(temp, next);
@@ -500,12 +422,8 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
     }
     o.afterJournal?.();
     if (archive !== undefined) moveNoClobber(userSeedPath(home, name), archive);
-    // The new key file is durable BEFORE the record commits: a record naming a key whose secret a
-    // crash lost would leave the user with a root no one holds.
     writeSeedDurable(userSeedPath(home, name), newSeed, attempt);
 
-    // 4. The cuts. Each is journaled before it is written, so a crash can never leave a pool paused
-    // by a cut the rerun does not know to settle.
     let j = readJournal(home, name)!;
     const cut = (ground: Gateway, pool: string): Delta => {
       const d = signCut(ground, { attempt, recovery: record.id, key: previous! });
@@ -526,7 +444,6 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
       await o.afterCuts?.(gw);
     }
 
-    // 5. The barrier append (the host's cut and the manifest), then the record's.
     const lineage = signClaims(
       withStamp(gw.stamp(operator), (t) =>
         lineageClaims({ name, recovery: record.id, root, retired: [...retired] }, operator, t),
@@ -542,8 +459,6 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
       ...[...retired].flatMap((key) => standingOf(gw.reactor, key)),
     ]);
     try {
-      // The manifest names every cut this attempt landed, the host's included. The door admits the
-      // record only behind a manifest it already holds.
       const barrier: Delta[] = [];
       if (previous !== undefined) {
         const hostCut = cut(gw, HOST);
@@ -562,13 +477,10 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
           ),
         );
       }
-      // One transfer's arrivals are simultaneous (SPEC-6 §3): the cuts and the manifest land in
-      // their own append, before the record's.
       if (barrier.length > 0) await gw.append(barrier);
       await gw.append([record, lineage, rootClaim, ...struck]);
     } catch (err) {
       await gw.close().catch(() => {});
-      // 7. Read before undoing.
       return afterAppendError(o, opSeed, err);
     }
   } finally {
@@ -577,8 +489,6 @@ async function recover(o: RecoverOptions, superseding: Journal | undefined): Pro
   return resume(o, opSeed, operator, readJournal(home, name)!);
 }
 
-// The append failed. Did it commit? Read the store again; only a successful read that finds no
-// record proves it did not.
 async function afterAppendError(
   o: RecoverOptions,
   opSeed: string,
@@ -590,8 +500,6 @@ async function afterAppendError(
   try {
     const gw = await boot(o, opSeed);
     try {
-      // The bytes decide whether the append committed; erased-but-held still committed, and resume
-      // reports what the readers make of it.
       committed = gw.reactor.get(journal.record) !== undefined;
       if (!committed) pending = await settleCuts(gw, journal, "aborted");
     } finally {
@@ -615,8 +523,6 @@ async function afterAppendError(
   return 1;
 }
 
-// An attempt that did not land, with cuts it could not yet abort: those pools still pause the old
-// key. Nothing rolls back until they are settled, and the journal stays as the account of them.
 function abortPending(o: RecoverOptions, cause: unknown, pending: readonly string[]): number {
   o.io.err(
     `user recover: the recovery of ${o.name} did not land (${cause instanceof Error ? cause.message : String(cause)}). ` +
@@ -626,7 +532,6 @@ function abortPending(o: RecoverOptions, cause: unknown, pending: readonly strin
   return 1;
 }
 
-// Undo an attempt that provably did not land: the new seed goes, the archived one returns.
 function rollback(o: RecoverOptions, j: Journal): void {
   const path = userSeedPath(o.home, o.name);
   const current = readUserSeed(o.home, o.name);
@@ -634,13 +539,10 @@ function rollback(o: RecoverOptions, j: Journal): void {
     rmSync(path, { force: true });
   if (j.archive !== undefined && existsSync(j.archive) && !existsSync(path))
     moveNoClobber(j.archive, path);
-  // An abandoning attempt that never landed hands the journal back to the attempt it abandoned,
-  // whose work is still pending.
   if (j.predecessor !== undefined) updateJournal(o.home, o.name, j.predecessor);
   else rmSync(journalPath(o.home, o.name), { force: true });
 }
 
-// Finish an attempt from its journal: decide whether it landed, then the pools and the binding.
 async function resume(
   o: RecoverOptions,
   opSeed: string,
@@ -660,16 +562,12 @@ async function resume(
   }
   try {
     const held = gw.reactor.get(j.record) !== undefined;
-    // An admitted erasure drops its target from the reading, so "it landed" is also asked of the
-    // journal's arrival history, which keeps erased ids.
     const landed =
       held || (gw.peer?.journal.snapshot().base.arrivals.some((a) => a.id === j.record) ?? false);
     const recordErased =
       userGroundOf(gw.reactor).erased().has(j.record) ||
       readErasures(gw.reactor, gw.validityNow(), operator).has(j.record);
     if (landed && recordErased) {
-      // It landed, and the operator has since erased it: the readers no longer see this recovery.
-      // Nothing here is rolled back, and nothing is reported as done.
       io.err(
         `user recover: ${name}'s recovery record ${j.record} landed and was then erased, so it is ` +
           `not in force. This attempt cannot finish. The journal is kept at ${journalPath(home, name)} ` +
@@ -689,8 +587,6 @@ async function resume(
     }
     const seedRead = readUserSeed(home, name);
     if (seedRead.kind !== "present" || authorForSeed(seedRead.seed) !== j.root) {
-      // The record names a key whose secret is not here. If it is truly lost, the remedy is a new
-      // recovery that supersedes this one, to a fresh key.
       if (o.abandonAttempt) {
         io.out(
           `user recover: the key ${j.root} named by the last recovery is abandoned; recovering ` +
@@ -708,12 +604,8 @@ async function resume(
       return 1;
     }
     let journal = j;
-    // The outcomes: the record landed, so every cut of this attempt is committed.
     const pending: string[] = await settleCuts(gw, j, "committed");
-    // 8. Pools: strike the old key's standing in each attached inbox; name the ones not attached.
     if (j.retired.length > 0) {
-      // An inbox the store declares but has not attached cannot be reached; the fence already
-      // refuses the old key there, and this recovery stays pending until it is struck.
       const table = readContainerTable(gw.reactor, gw.validityNow(), operator);
       for (const [pool, rec] of table.containers) {
         if (rec.inboxOf === undefined || table.detached.has(pool)) continue;
@@ -739,8 +631,6 @@ async function resume(
         }
       }
     }
-    // The binding, signed by the new key. An earlier run may have landed it and then failed to say
-    // so; a binding already held is not signed again.
     if (
       !journal.bound &&
       j.previous !== undefined &&
@@ -763,7 +653,6 @@ async function resume(
         pending.push(`the binding (${err instanceof Error ? err.message : String(err)})`);
       }
     }
-    // Report completion only if the readers agree: the chain's head names this attempt's key.
     const erased = userGroundOf(gw.reactor).erased();
     const chain = recoveryChain(gw.reactor, operator, name, erased);
     const current = userRootAt(gw.reactor, gw.validityNow(), operator, name, erased);
@@ -780,8 +669,6 @@ async function resume(
       ...(j.previous === undefined ? [] : [`${j.previous} is retired: it holds no standing here.`]),
       ...(j.archive === undefined ? [] : [`the old key file is kept at ${j.archive}.`]),
       `connections do not carry over: ${name} re-authorizes the ones to keep.`,
-      // A pool declared while this ran (by another writer) has no cut. It shows none of the old
-      // key's earlier writes, and a cut written now would come too late to draw the line honestly.
       ...(j.previous === undefined || j.cuts === undefined
         ? []
         : declaredInboxes(readContainerTable(gw.reactor, gw.validityNow(), operator))

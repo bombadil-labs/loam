@@ -1,17 +1,3 @@
-// THE "REPAIRED" REPORT SAYS EVERYTHING THE RUN DID — §23.3 pens, hazard H7 at the CLI layer.
-//
-// `loam pen create` has three outcomes, and two of them can strike a previous key's standing:
-// re-key (seed file gone) and REPAIR (seed file present, its author without a grant). The repair
-// arm reaches the same stale-record loop — a hand-replaced seed file leaves the OLD author's pen
-// record and grants in the ground, and the run strikes them all — but its report used to name only
-// the grant it added. A run that revokes a key must say so whichever arm it took; a report that is
-// true and materially incomplete about a revocation is H7's shape.
-//
-// Two-sided on purpose: the strike line appears when a key was struck, and does NOT appear on the
-// ordinary grant-only repair — a fix that sprayed revocation text over every repair would trade an
-// incomplete report for a false one. (T102's frozen rail, test/cli/pen.test.ts, pins the grant-only
-// arm's opening line; this file owns the hand-replaced-seed state it never stages.)
-
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -44,9 +30,6 @@ describe("loam pen create — the repaired arm's report", () => {
     await run(["pen", "create", "guest-pen", "--home", home], io());
     const oldAuthor = authorForSeed(readFileSync(penSeedPath(home, "guest-pen"), "utf8").trim());
 
-    // The state the frozen rail never stages: the file is hand-replaced with a fresh key while
-    // the ground still holds the old author's record and grant. The new file's author has no
-    // standing, so the run takes the REPAIRED arm — and the stale-record loop strikes the old key.
     const replacement = "7a".repeat(32);
     writePenSeed(home, "guest-pen", replacement);
     out.length = 0;
@@ -55,15 +38,13 @@ describe("loam pen create — the repaired arm's report", () => {
     expect(code).toBe(0);
     const printed = out.join("\n");
     expect(printed).toContain("repaired pen guest-pen");
-    // The report names the struck key and the count, same voice as the re-keyed arm.
     expect(printed).toContain(`the previous key ${oldAuthor}: its`);
     expect(printed).toMatch(/grants? (is|are) negated and no longer bind/);
-    expect(printed).not.toContain(replacement); // the secret still never prints
+    expect(printed).not.toContain(replacement);
   });
 
   it("a grant-only repair does NOT claim a negation it never made", async () => {
     await run(["init", "--home", home], io());
-    // Custody present, authorization missing, and NO prior record to strike.
     writePenSeed(home, "hand-pen", "5c".repeat(32));
     out.length = 0;
 
@@ -82,16 +63,12 @@ describe("loam register --help — the shelf's federation warning", () => {
     const code = await run(["register", "--help"], io());
     expect(code).toBe(0);
     const printed = [...out, ...err].join("\n");
-    // The old sentence generalized latest-wins over every prop; tags, attending and follows are
-    // `all` policies a later claim cannot displace. The help must name both behaviours.
     expect(printed).toContain("Single-value props are latest-wins");
     expect(printed).toContain("tags, attending, follows");
     expect(printed).not.toMatch(/Props are latest-wins/);
   });
 });
 
-// A short-lived read-only Gateway over the store the CLI just wrote — never held open across a
-// `run()` call (the store is single-writer).
 async function ground(): Promise<Gateway> {
   return Gateway.boot(
     new SqliteBackend(storePath(home)),
@@ -101,15 +78,12 @@ async function ground(): Promise<Gateway> {
 
 describe("loam pen create — the promises beyond the report text", () => {
   it("the seed never enters the ground, on any arm — mint, hand-replace, repair", async () => {
-    // The report's own sentence ("it never enters the ground") gets the house-standard rail the
-    // operator keys already have: search every arrived delta for the seed hex. Custody is the
-    // FILE's job; the ground holds only the derived author.
     await run(["init", "--home", home], io());
     await run(["pen", "create", "guest-pen", "--home", home], io());
     const minted = readFileSync(penSeedPath(home, "guest-pen"), "utf8").trim();
     const replacement = "7a".repeat(32);
     writePenSeed(home, "guest-pen", replacement);
-    await run(["pen", "create", "guest-pen", "--home", home], io()); // the repaired arm, strikes included
+    await run(["pen", "create", "guest-pen", "--home", home], io());
     const gw = await ground();
     try {
       for (const seed of [minted, replacement]) {
@@ -122,10 +96,6 @@ describe("loam pen create — the promises beyond the report text", () => {
   });
 
   it("a negated key loses EVERY verb it held, not only write", async () => {
-    // The strike loop reads standing with the verb deliberately omitted — a key being replaced
-    // because it leaked must not keep signing anything at all. Every other rail stages a single
-    // write grant, where a verb-narrowed strike is indistinguishable; this one hands the old
-    // author an admin grant too, and demands both fall.
     await run(["init", "--home", home], io());
     await run(["pen", "create", "guest-pen", "--home", home], io());
     const oldSeed = readFileSync(penSeedPath(home, "guest-pen"), "utf8").trim();
@@ -149,7 +119,6 @@ describe("loam pen create — the promises beyond the report text", () => {
     expect(code).toBe(0);
     expect(out.join("\n")).toContain("2 grants are negated and no longer bind");
 
-    // Object level: no surviving grant of ANY verb names the old author.
     const gw = await ground();
     try {
       const surviving = [...gw.reactor.snapshot()].filter((d) => {

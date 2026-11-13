@@ -1,23 +1,3 @@
-// The tutorial page (§48) — the theater over `player.mjs` (the engine) and `lessons.mjs` (the
-// arc). Zero framework on purpose: the STORE is the state and this file is a subscriber. Every
-// green mark, every banked step, every quiz result and every checkpoint row is recomputed from
-// the student's own claims on each render, so nothing here can drift from what they actually did.
-//
-// THREE RULES THIS FILE KEEPS, each of them load-bearing:
-//
-//   ONE PENDING STEP. A lesson renders the steps already banked, then exactly one live button.
-//   The next step does not run until the student asks for it, which is the whole reason the
-//   rewrite exists — the old page played a lesson as one motion and its middle was never seen.
-//
-//   NO NATIVE DIALOGS. Reverting and starting over are destructive, so they ask first — but they
-//   ask IN THE PAGE. `window.confirm` blocks the page's own script until a human answers, which
-//   no CDP-driven rail can do, so a native dialog is a destructive path that can never be tested.
-//
-//   REVERT RELOADS. Re-seeding the store's rows under a live page would leave this module's
-//   captured gateway, the View pane's subscription, and every open pane rendering a future that
-//   no longer exists. `location.reload()` makes "the panes re-render from the restored ground"
-//   true by construction rather than by care.
-
 import * as loam from "@bombadil/loam/browser";
 import { EditorView, basicSetup } from "codemirror";
 import { graphql as graphqlLang, updateSchema } from "cm6-graphql";
@@ -43,16 +23,12 @@ import { isReadOnlyDocument, renderGround, renderViews } from "./instruments.mjs
 
 const $ = (sel) => document.querySelector(sel);
 
-// A boot that throws must SAY so. A page stuck on "booting…" is indistinguishable from a slow
-// one — for a reader and for a rail alike — so the failure is recorded where both can find it.
 window.addEventListener("error", (e) => {
   window.__tutorialError = String(e.message);
 });
 window.addEventListener("unhandledrejection", (e) => {
   window.__tutorialError = String(e.reason?.message ?? e.reason);
 });
-
-// ---- boot ------------------------------------------------------------------------------------
 
 const storage = window.localStorage;
 const { gateway, seed, author } = await bootTutorialStore(loam, storage);
@@ -69,16 +45,7 @@ const ctx = {
 const arc = buildArc(loam);
 const lessonOf = (id) => arc.find((l) => l.id === id) ?? arc[0];
 
-// Pins live OUTSIDE the store's delta namespace: the backend owns every `loam:tutorial:<id>` key
-// and reads what it finds there as a delta. Dots, not colons — this cannot collide.
-//
-// DECLARED BEFORE ITS READER, and that is not style: `loadPins` runs while the `ui` literal
-// below is being built, so a key declared after it would still be in its dead zone — and the
-// catch here, which exists for a corrupt VALUE, would swallow that as an empty Map and lose
-// every pin the student saved, silently.
 const PINS_KEY = "loam.tutorial.ui.pins";
-// A revert reloads the page, so anything it needs to TELL the student has to outlive the
-// reload. Dots, not colons, for the same reason as the pins: this is not a delta.
 const REVERT_NOTE_KEY = "loam.tutorial.ui.revert-note";
 function loadPins() {
   try {
@@ -88,21 +55,19 @@ function loadPins() {
       raw.filter((e) => Array.isArray(e) && typeof e[0] === "string" && typeof e[1] === "string"),
     );
   } catch {
-    return new Map(); // disposable UI memory: a corrupt value must never kill the boot
+    return new Map();
   }
 }
 
-// The page's own memory — panes, drawers, and questions in flight. Never progress: that lives
-// in the store, and every render reads it back from there.
 const ui = {
   lesson: arc[0].id,
-  refusal: null, // something was asked and could not be done — the student must read it
-  workDone: null, // a step whose work landed while its page observable refused
-  notice: null, // something happened that they should know about, which is not a failure
+  refusal: null,
+  workDone: null,
+  notice: null,
   askRevert: null,
   askStartOver: false,
-  quizDismissed: new Set(), // cards closed in this session
-  quizTouched: new Set(), // cards answered in this session — a finished card stays up until then
+  quizDismissed: new Set(),
+  quizTouched: new Set(),
   highlightStep: null,
   drawerOpen: false,
   sdl: "",
@@ -119,9 +84,6 @@ const groundState = {
   highlight: null,
 };
 
-// One action at a time, in a chain the page can be ASKED about. Every button goes through this,
-// so a rail (and a curious console) can await exactly the work a click started, and a thrown
-// error becomes a refusal the student can read instead of a silence.
 let inFlight = Promise.resolve();
 const act = (fn) => {
   inFlight = inFlight
@@ -134,15 +96,6 @@ const act = (fn) => {
   return inFlight;
 };
 
-/**
- * A step's PAGE observable, asked of the real DOM — never of the step's own prose.
- *
- * IT ASKS WHAT THE PAGE HOLDS, NOT WHAT IS ON SCREEN. The panes are tabs and an inactive one is
- * `display: none`, so a step's evidence often lands in a pane the student is about to open; a
- * visibility test would refuse those steps and push the arc into driving the tabs for them.
- * What this catches is a pane that never rendered the thing at all, which is the failure that
- * matters — and it is why the copy tells the student which pane to look in.
- */
 const seePage = (want) => {
   if (want === undefined || want === null) return true;
   const el = document.querySelector(want.selector);
@@ -150,8 +103,6 @@ const seePage = (want) => {
   return want.contains === undefined ? true : el.textContent.includes(want.contains);
 };
 
-// The console door for the curious — the copy invites it, so it is really there. The rails use
-// the same door: there is no test-only surface on this page.
 window.loam = loam;
 window.store = gateway;
 window.tutorial = {
@@ -161,8 +112,6 @@ window.tutorial = {
   idle: () => inFlight,
   bankedSteps: () => [...readProgress(ctx).steps],
   skipped: () => [...readProgress(ctx).skipped],
-  // Re-read everything from the store. The panes are readings, so anything that lands by
-  // another door — this console, a federation pull — becomes visible by asking again.
   refresh: () => act(() => rerender()),
   introspectionQuery: () => getIntrospectionQuery(),
   lensNames: () => gateway.registrationVersions().map((v) => v.hyperschema.name),
@@ -170,8 +119,6 @@ window.tutorial = {
 };
 
 $("#author-chip").textContent = author;
-
-// ---- the lesson pane ---------------------------------------------------------------------------
 
 const pendingStepOf = (lesson, progress) =>
   lesson.steps.find((s) => !progress.steps.has(s.id)) ?? null;
@@ -205,7 +152,7 @@ function renderLesson(progress) {
     const banked = progress.steps.has(step.id);
     if (!banked && step !== pending) {
       waiting += 1;
-      continue; // one pending step at a time: what comes after is not shown as a control
+      continue;
     }
     const row = document.createElement("div");
     row.className = `step${ui.highlightStep === step.id ? " highlight" : ""}`;
@@ -222,7 +169,6 @@ function renderLesson(progress) {
     head.append(mark, label);
     row.appendChild(head);
 
-    // The three sentences, always in this order: what we have, what we want, how we get there.
     for (const [attr, prefix, text] of [
       ["data-have", "what we have", step.have],
       ["data-want", "what we want", step.want],
@@ -290,7 +236,6 @@ async function goToLesson(id) {
   await rerender();
 }
 
-/** Run the one live step: do the work, then bank it only if both observables hold. */
 async function runPendingStep() {
   const lesson = lessonOf(ui.lesson);
   const step = pendingStepOf(lesson, readProgress(ctx));
@@ -301,15 +246,10 @@ async function runPendingStep() {
 
   const outcome = await completeStep(loam, ctx, lesson, step, {
     seePage,
-    // This step's work already landed once and only the page refused it — read again, do not
-    // write again.
     workAlreadyDone: ui.workDone === step.id,
-    // Between the work and the page predicate the panes must catch up — the predicate asks what
-    // the student can SEE, and an unrendered change is not yet seen. The sweep runs here too:
-    // an erasure's reach into the checkpoints is part of what the step's page observable names.
     afterRun: async () => {
       await refreshDrawer(before, step.id);
-      await rerender(); // the render sweeps and reports; there is no latch to set
+      await rerender();
     },
   });
   if (!outcome.ok) {
@@ -319,8 +259,6 @@ async function runPendingStep() {
     return;
   }
   ui.workDone = null;
-  // The boundary: a green lesson freezes its store for the revert rail. A refusal here is the
-  // student's to read — the lesson still stands; only the undo into this moment is missing.
   if (await lesson.check(ctx)) {
     const taken = await bankCheckpoint(loam, ctx, lesson.id, {
       label: `lesson ${lesson.id}, step ${step.id}`,
@@ -330,9 +268,6 @@ async function runPendingStep() {
   await rerender();
 }
 
-// ---- the progress rail --------------------------------------------------------------------------
-
-/** A quiz claim names its question by key (`<quiz>#<n>`); look the sentence back up in the arc. */
 function askOf(key) {
   const cut = key.lastIndexOf("#");
   if (cut === -1) return undefined;
@@ -402,18 +337,12 @@ function renderRail(progress) {
       row.className = "rail-quiz";
       row.dataset.quizResult = question;
       row.dataset.correct = String(result.correct);
-      // The claim names the question by key; a person deserves the question itself.
       row.textContent = `${askOf(question) ?? question} — ${result.correct ? "right" : "not this time"}`;
       rail.appendChild(row);
     }
   }
 }
 
-/**
- * The in-page confirmation. It is a control, not a dialog: the page keeps running, the student
- * can read what is about to happen, and a rail can answer it — none of which is true of
- * `window.confirm`, which is why the page never calls one.
- */
 function confirmBox(what, lesson) {
   const box = document.createElement("div");
   box.className = "confirm";
@@ -444,22 +373,15 @@ function confirmBox(what, lesson) {
 }
 
 async function doRevert(lesson) {
-  // The erased ids ride along as PROOF rather than an assumption that some earlier sweep
-  // cleaned this blob: a revert is the one motion that writes old bytes back, and it must not
-  // be the way a forgotten record comes home.
   const erasedIds = [...loam.readErasures(gateway.reactor, gateway.validityNow(), author)];
   const restored = restoreCheckpoint(storage, lesson, { erasedIds });
   ui.askRevert = null;
   if (!restored.ok) {
-    // A refused revert still leaves the store holding rows this attempt put back, so the page
-    // must not go on rendering the ground it remembers. Reload with the message in hand: what
-    // is on screen and what is in the store have to be the same thing.
     storage.setItem(REVERT_NOTE_KEY, JSON.stringify({ tone: "bad", text: restored.message }));
     window.location.reload();
     return;
   }
   const said = [];
-  // Say it out loud rather than quietly restoring less, or more, than the student asked for.
   if (restored.refused.length > 0) {
     said.push(
       `${restored.refused.length} record(s) this checkpoint held were erased since, and were not brought back.`,
@@ -472,11 +394,9 @@ async function doRevert(lesson) {
     );
   }
   if (said.length > 0) {
-    // A NOTICE, not a refusal: the revert did what was asked, and this is what it could not
-    // take back. The two read differently on the page, and a student deserves the difference.
     storage.setItem(REVERT_NOTE_KEY, JSON.stringify({ tone: "note", text: said.join(" ") }));
   }
-  window.location.reload(); // the panes re-render from the restored ground, by construction
+  window.location.reload();
 }
 
 async function doStartOver() {
@@ -484,12 +404,10 @@ async function doStartOver() {
   for (const key of Object.keys(storage)) {
     if (key.startsWith(STORE_PREFIX) || key === SEED_KEY) storage.removeItem(key);
   }
-  clearCheckpoints(storage); // an undo into a store that no longer exists is a lie
+  clearCheckpoints(storage);
   storage.removeItem(PINS_KEY);
   window.location.reload();
 }
-
-// ---- the quiz ------------------------------------------------------------------------------------
 
 function quizOnOffer(lesson, progress) {
   const quiz = lesson.quiz;
@@ -497,10 +415,6 @@ function quizOnOffer(lesson, progress) {
   if (!lessonIsGreen(lesson, progress)) return null;
   if (progress.skipped.has(quiz.id)) return null;
   if (ui.quizDismissed.has(quiz.id)) return null;
-  // A CARD ALREADY FINISHED IS NOT ON OFFER. The dismissal set is this session's memory and
-  // dies with the tab, so without the store's own answer a completed quiz would be dealt out
-  // again on every reload. It stays up in the session it was answered IN — that is when the
-  // student is reading their verdicts and reaching for "done".
   const answered = quiz.questions.every((_, i) => progress.quiz.has(`${quiz.id}#${i}`));
   if (answered && !ui.quizTouched.has(quiz.id)) return null;
   return quiz;
@@ -573,9 +487,6 @@ function renderQuiz(progress) {
   skip.textContent = answered ? "done" : "skip this quiz";
   skip.onclick = () =>
     act(async () => {
-      // A skip is only a skip. Recording one for a card the student ANSWERED would put a claim
-      // about them in their own store that is simply untrue — the ledger is theirs, and it is
-      // the same ledger the arc teaches them to trust.
       if (!answered) await skipQuiz(loam, ctx, quiz);
       ui.quizDismissed.add(quiz.id);
       await rerender();
@@ -583,8 +494,6 @@ function renderQuiz(progress) {
   card.appendChild(skip);
   holder.appendChild(card);
 }
-
-// ---- the glossary ---------------------------------------------------------------------------------
 
 function renderGlossary() {
   const holder = $("#glossary-entries");
@@ -607,8 +516,6 @@ function renderGlossary() {
     where.className = "link";
     where.dataset.where = entry.term;
     where.textContent = "where does this live?";
-    // The reveal, made operable: this entry is a claim in the student's own ground, and the
-    // control walks them to the exact row rather than asserting it.
     where.onclick = () =>
       act(async () => {
         groundState.showTutorial = true;
@@ -621,30 +528,9 @@ function renderGlossary() {
   }
 }
 
-// ---- the sweep notice ------------------------------------------------------------------------------
-
-/**
- * The sweep, run and reported IN THE RENDER — never latched into a field.
- *
- * It is a reading of two durable things: the erasures the store holds, and the checkpoint
- * blobs beside it. Enforcing while reading is the point — the invariant is that no blob may
- * hold forgotten bytes, and asking on every render is the strongest form of it. It is also
- * idempotent, so a second pass destroys nothing and says so.
- *
- * A LATCH WOULD BREAK THE RULE THIS PAGE NOW LIVES BY (see lessons.mjs): a field set once at
- * the moment of the erasure makes the notice an EVENT, so the step observing it could not be
- * satisfied after a reload — on the one lesson whose act cannot be repeated. Read from the
- * store and the answer is the same in every session.
- */
 function sweepNow() {
   const dead = [...loam.readErasures(gateway.reactor, gateway.validityNow(), author)];
   if (dead.length === 0) return null;
-  // ENFORCE FIRST — idempotent, so a second pass finds nothing and that is the point. After it
-  // runs, "destroyed just now" is empty BY CONSTRUCTION, which is exactly why the report cannot
-  // be built from it: a reader arriving one render later, or after a reload, would be told the
-  // opposite of what happened. So what the notice names is durable and asked of the store:
-  //   GONE — a boundary the student's own claims say has a checkpoint, with no blob behind it.
-  //   KEPT — a blob that is still there, proven to hold none of the forgotten bytes.
   const kept = sweepCheckpoints(storage, dead).kept;
   const blobs = new Set(checkpointLessons(storage));
   const gone = readProgress(ctx).checkpoints.filter((lesson) => !blobs.has(lesson));
@@ -660,9 +546,6 @@ function renderSweep() {
   notice.id = "sweep-notice";
   notice.dataset.erased = sweep.erased.join(" ");
   const head = document.createElement("h3");
-  // THE HEADING STATES WHICH THING HAPPENED. "Reached" is a claim about destruction, and a
-  // notice that led with it and then said nothing was destroyed would contradict itself two
-  // lines later — in the lesson whose whole subject is a ledger you can trust.
   head.textContent =
     sweep.gone.length === 0
       ? "the forgetting checked your checkpoints"
@@ -684,9 +567,6 @@ function renderSweep() {
     const row = document.createElement("div");
     row.className = "swept";
     row.dataset.swept = String(lesson);
-    // What is TRUE is that the checkpoint is not there and cannot be returned to. Saying "this
-    // erasure destroyed it" would be a guess: a refused quota or a cleared origin takes a blob
-    // the same way, and the page cannot tell those apart after the fact.
     row.textContent = `gone — no checkpoint remains for lesson ${lesson}, so you cannot go back to that moment`;
     notice.appendChild(row);
   }
@@ -700,11 +580,6 @@ function renderSweep() {
   holder.appendChild(notice);
 }
 
-// ---- the introspection drawer -------------------------------------------------------------------
-
-// The drawer answers "is that really what happened?" with the store's own two answers: the
-// shape it can be asked about right now, and the records the last step actually moved. Both
-// come from the live gateway on every render — there is no fixture behind this pane.
 async function refreshDrawer(before, stepId) {
   const now = gateway.offeredDeltas();
   const nowIds = new Set(now.map((d) => d.id));
@@ -744,15 +619,11 @@ function renderDrawer() {
   for (const id of ui.lastStep.removed) {
     const row = document.createElement("div");
     row.className = "drawer-delta gone";
-    // NOT `data-delta-id`: these bytes are no longer in the ground, and a marker that says
-    // "here is a record" must never point at one the store no longer holds.
     row.dataset.goneId = id;
     row.textContent = `− ${id} (gone from the ground)`;
     holder.appendChild(row);
   }
 }
-
-// ---- the panes ------------------------------------------------------------------------------------
 
 async function renderView() {
   await renderViews($("#view-cards"), ctx, ui);
@@ -772,8 +643,6 @@ function showPane(name) {
   }
 }
 
-// ---- the editor: hints from the LIVE schema, re-derived as the store evolves ---------------
-
 async function introspect(asStranger) {
   try {
     const q = getIntrospectionQuery();
@@ -781,15 +650,10 @@ async function introspect(asStranger) {
     if (res.data == null) return null;
     return buildClientSchema(res.data);
   } catch {
-    return null; // no surface yet — the pane says which lesson grows one
+    return null;
   }
 }
 
-/**
- * A read of whatever this store can currently answer — derived from ITS OWN registrations, so
- * the page never has to know what the arc is about. The editor opens on it, and the View pane's
- * subscription follows the same lens; an arc that renames every entity changes neither.
- */
 function firstReadable() {
   for (const version of gateway.registrationVersions()) {
     const root = version.roots[0];
@@ -812,11 +676,6 @@ const editor = new EditorView({
   parent: $("#gql-editor"),
 });
 
-/**
- * When the store grows its first lens, the console stops apologizing and offers a real question.
- * Only ever while the editor still holds the placeholder EXACTLY — a student's own draft is
- * theirs, and a pane that rewrote what someone was typing would be worse than an empty one.
- */
 function offerFirstQuestion() {
   if (editor.state.doc.toString() !== NO_LENS_YET) return;
   const readable = firstReadable();
@@ -826,9 +685,6 @@ function offerFirstQuestion() {
   });
 }
 
-// A call token keeps racing introspections honest: only the LATEST request may install its
-// schema, so a fast toggle mid-render cannot leave the stranger's schema under the operator's
-// caption.
 let introspectionTurn = 0;
 async function refreshEditorSchema() {
   offerFirstQuestion();
@@ -858,11 +714,8 @@ $("#gql-run").onclick = () =>
     } catch (err) {
       text = String(err.message ?? err);
     }
-    // A run may have been a WRITE — the console speaks to the same door — so every pane has to
-    // show it rather than wait for the next click. The render sweeps as it reports, so an
-    // erasure ordered from this console reaches the checkpoints in the same breath.
     await rerender();
-    $("#gql-out").textContent = text; // after the rerender, so the answer survives it
+    $("#gql-out").textContent = text;
   });
 
 $("#gql-stranger").onchange = () => act(() => refreshEditorSchema());
@@ -915,11 +768,6 @@ $("#export").onclick = () =>
     a.download = "my-store.json";
     a.click();
     URL.revokeObjectURL(a.href);
-    // The file carries the SEED — say so, every time. It is what makes the export the same
-    // store on the other machine, and it is also the student's key: this page's data is
-    // disposable, and real data keeps its seed in its owner's own custody. The file also
-    // carries the tutorial's own records — the progress and the answers — because they are
-    // ordinary claims in this store, which is the lesson and is also worth stating.
     ui.notice =
       "the file carries your key ON PURPOSE — it is what makes this the SAME store when you " +
       "pull it, and it is why tutorial data is disposable data. Your progress and your answers " +
@@ -927,13 +775,9 @@ $("#export").onclick = () =>
     await rerender();
   });
 
-// The View pane is a real SUBSCRIPTION where one exists; before any registration, or after a
-// reseat, it simply re-attaches.
 async function watchStore() {
   for (;;) {
     try {
-      // Whatever this store can answer, asked of the store itself — an evolution or a whole new
-      // arc changes the question, and the pane follows without a line changing here.
       const readable = firstReadable();
       if (readable !== null && readable.props.length > 0) {
         const sub = await gateway.subscribe(
@@ -945,14 +789,10 @@ async function watchStore() {
           await renderView();
         }
       }
-    } catch {
-      /* no surface yet */
-    }
+    } catch {}
     await new Promise((r) => setTimeout(r, 800));
   }
 }
-
-// ---- the loop --------------------------------------------------------------------------------
 
 async function rerender() {
   const progress = readProgress(ctx);
@@ -971,8 +811,6 @@ async function rerender() {
 }
 
 ui.lesson = resumeState(arc, readProgress(ctx)).lessonId;
-// A message a revert left for the student, read once and taken off the shelf. A note that
-// cannot be read is dropped rather than shown as itself — this shelf holds only its own writes.
 const parked = storage.getItem(REVERT_NOTE_KEY);
 if (parked !== null) {
   storage.removeItem(REVERT_NOTE_KEY);
@@ -982,9 +820,7 @@ if (parked !== null) {
       if (tone === "bad") ui.refusal = text;
       else ui.notice = text;
     }
-  } catch {
-    /* not ours to show */
-  }
+  } catch {}
 }
 await enterLesson(loam, ctx, lessonOf(ui.lesson));
 await refreshSdl();

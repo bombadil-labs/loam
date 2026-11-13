@@ -1,51 +1,3 @@
-// The admin page (SPEC §40, phases A1–A5) — the door, the read surface, the container lifecycle,
-// the schema panel, the promotion/federation panels, and the connections panel. `GET /admin`
-// renders the signed-in user's container subtree with the declare form, the connections panel, and
-// the registered lenses; `GET /admin/container` renders one container's members with their promote
-// forms, its lifecycle forms, and the federate-in form; `GET /admin/view` resolves a container's
-// gather through a registered lens; and the POSTs are `create-root`, `declare`, `detach`,
-// `reattach`, the two-step `drop` → `drop-confirm`, `register`, `promote`, `federate`, and the
-// two-step `revoke` → `revoke-confirm`.
-//
-// THE CONNECTIONS PANEL reads the subtree's inbox pools from the live container table and joins
-// them, when the server has a connector flow, with `oauth.json` — client name, generation, live
-// tokens, phase 15's own read. Revoke is two-sided by §39.3c and it says so: the connection's NEXT
-// write refuses, everything it already wrote keeps its author and stays in its inbox while leaving
-// the container's view, and any sibling connection is untouched. Where the row is a connector's, the revoke drives phase 15's
-// `revokeConnector` FIRST (the generation bump is what kills a live bearer) and then strikes the
-// inbox grant; a failure between the two is reported as exactly the half that happened.
-//
-// PROMOTION DRIVES `gw.promote` (T33's promote-outputs), never a reimplementation: the page's own
-// gate is only the subtree and "is this delta in the container's gather"; every refusal about the
-// delta itself — law-shapes, withdrawn outputs, dangling cites — is promote's, surfaced in its own
-// words. FEDERATE-IN lands a PASTED offer (the body of `GET /federate`) and adds no authorship:
-// each delta crosses by its own signature, through the container's own door — a separate
-// container's pool, or the primary for a shared one, whose membership then decides the gather. The
-// page is paste-only by design; the network leg of a pull belongs to `loam pull`, not to a door
-// that would otherwise fetch caller-named URLs from inside the store's own host.
-//
-// THE LIFECYCLE ACTS ONLY WHERE IT CAN TELL THE TRUTH. A shared container is all at-rest law, so
-// every act on it is a delta: detach lands the record, reattach negates it, drop strikes the
-// declaration (the deltas it gathered remain — the confirm page says so). A separate container's
-// bytes live in its own store, and this door holds a byte-verified handle ONLY for connection
-// inboxes (`gw.connectionInboxes`); everywhere else it refuses rather than pretends — a detached
-// pool cannot drop (its bytes are not here to verify), a browser form cannot hand back a pool's
-// own backend to reattach it, and a pool attached by the embedding program is that program's to
-// close. Drop is TWO steps: the first POST renders a confirm page naming exactly what is and is
-// not forgotten, minting a single-use confirm token; only the token's return performs it.
-//
-// THE SUBTREE IS THE WHOLE CONTRACT. A user's world is the container named exactly after them,
-// plus every descendant by `parent` edge, plus each reachable container's inbox pools (§39). The
-// walk runs at the door, on the LIVE table, for every request — scope is enforced here, never
-// merely drawn on the page — and a name outside the subtree gets ONE uniform refusal whether the
-// container is another user's or nobody's: existence is confirmed neither way.
-//
-// Same defence posture as consent (§37.4): the session is read with `peek` on GETs (refused
-// traffic never slides a window), the POST sits behind the phase-6 provenance + form-token pair,
-// the no-script CSP rides every response, every echoed name is escaped, no refusal writes a
-// `Location`, and no body names a home path, a seed filename, or a flag — local detail goes to
-// `onFault`, the operator's own channel.
-
 import { randomBytes } from "node:crypto";
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import { CACHE_NO_STORE } from "./respond.js";
@@ -112,15 +64,11 @@ import {
 import { withStamp } from "../gateway/stamp.js";
 import { membershipForValidation } from "../gateway/member-of.js";
 
-const MAX_BODY = 8 * 1024; // tokens, a name, a membership Term; nothing here needs more
-// A registration carries a hyperschema body and a resolution schema — real JSON, not a name.
+const MAX_BODY = 8 * 1024;
 const REGISTER_MAX_BODY = 64 * 1024;
 
-/** How many pending drop confirmations this door remembers. Oldest-out; each is single-use. */
 const CONFIRM_CAP = 64;
 
-// A negation of one delta — the strike a reattach or a shared drop appends. Existing vocabulary
-// (the same shape container.ts's retractionOf builds), never a new delta shape.
 const negationOf = (targetId: string, author: string, timestamp: number): Claims => ({
   timestamp,
   validFrom: timestamp,
@@ -129,19 +77,11 @@ const negationOf = (targetId: string, author: string, timestamp: number): Claims
 });
 
 export interface AdminDoorOptions {
-  /** The session machinery this page sits behind — the login doors' own, reused whole. */
   readonly gate: SessionGate;
-  /** The home the users' signing seeds live in — the login doors' own. */
   readonly home: string;
-  /** The users mount's live gateway, re-asked per request: erase re-seats it, a mount can vanish. */
   readonly ground: () => Gateway | undefined;
-  /** Where a local fault goes. The CALLER never sees it — it may name the home's path. */
   readonly onFault?: (message: string) => void;
-  /**
-   * The connector flow's home (`oauth.json` lives there), when the server has one. Absent, the
-   * connections panel still exists — it lists the subtree's inbox pools from the container table
-   * alone, and says the store has no connector flow configured.
-   */
+
   readonly connectors?: { readonly home: string };
 }
 
@@ -149,8 +89,6 @@ export interface AdminDoor {
   owns(pathname: string): boolean;
   handle(pathname: string, req: IncomingMessage, res: ServerResponse): Promise<void>;
 }
-
-// The subtree walk lives in subtree.ts (§58: the consent page asks the same question).
 
 export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
   const gate = options.gate;
@@ -161,19 +99,12 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
       "content-type": "text/html; charset=utf-8",
       "content-security-policy": CSP,
       "cache-control": CACHE_NO_STORE,
-      // Never no-referrer on a form-hosting page — it nulls the form POST's Origin and
-      // fromThisPage refuses null (T143). same-origin sends nothing cross-origin.
       "referrer-policy": "same-origin",
       ...(cookie === undefined ? {} : { "set-cookie": cookie }),
     });
     res.end(body);
   };
 
-  // Every refusal is a page with no `Location`, and none reflects caller text — a name the caller
-  // typed never rides back into the DOM; only names read from the table are rendered, escaped.
-  // The two links are T146's repair: a refusal page was a dead end, and the Back button was the
-  // only way off it. One refusal body per cause still holds — the links are the same on every
-  // refusal, so they distinguish nothing.
   const refuse = (res: ServerResponse, status: number, message: string): void =>
     htmlOut(
       res,
@@ -186,8 +117,6 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
       ),
     );
 
-  // ONE body for a foreign name and an absent one: a 403 that varied would confirm which
-  // containers exist to a user who may not see them.
   const notYours = (res: ServerResponse): void =>
     refuse(res, 403, "That container is not yours to see.");
 
@@ -195,8 +124,6 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     req: IncomingMessage,
     res: ServerResponse,
   ): { user: string; formToken: string } | undefined => {
-    // READ, don't slide: rendering a page for a GET that may be a cross-site top-level nav must
-    // not extend the session's idle window — the same choice the consent page makes.
     const session = gate.peek(req);
     if (session !== undefined) return session;
     const form = gate.loginForm(req);
@@ -204,11 +131,6 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     return undefined;
   };
 
-  // T153 slice 3b: the federation/connector group lives in admin-federation.ts — the connections
-  // panel, federate-in, and the revoke pair. It is constructed below, once the door helpers it
-  // shares exist; the page factory reaches it lazily, at render time.
-  // T153 slice 3a: the page renderers live in admin-pages.ts; home and onFault ride in, and the
-  // connections panel is injected from the federation group.
   const pages = adminPages({
     home: options.home,
     onFault,
@@ -229,22 +151,13 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
       htmlOut(res, 200, pages.createOfferPage(session.user, session.formToken));
       return;
     }
-    // The orphaned-channels block is store-wide, so it asks for the OPERATOR role — the same read the
-    // register door makes, from the GROUND where roles live (a session carries a name, never a
-    // privilege). A non-operator sees nothing there: the orphans are outside every subtree (T218).
     const isOperator = rolesOf(gw.reactor, gw.operatorAuthor, gw.validityNow(), session.user).has(
       "operator",
     );
-    // §49: which keys speak for this user is the DOOR's answer — the ground holds no canonical
-    // user-to-key binding (T137's arc), so the accepted set is the user's own seed on this host
-    // plus the operator. A user whose seed is absent still gets the page; their looked-moments
-    // simply read as never.
     const seed = readUserSeed(options.home, session.user);
     const accept = new Set<string>();
     if (gw.operatorAuthor !== undefined) accept.add(gw.operatorAuthor);
     if (seed.kind === "present") {
-      // The user's own root. A delegate writes only in its inbox pool, never in this ground (the
-      // root store declares no delegation scope), so no other key speaks for the user here.
       accept.add(authorForSeed(seed.seed));
     }
     const attention = {
@@ -258,9 +171,6 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     );
   };
 
-  // §49: record that the session user looked at a container, NOW, in the user's own voice —
-  // never the operator's, because attention is a person's. One standing row per (user,
-  // container), superseded in place; the page reads quiet immediately after.
   const postLooked = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const gated = await postGate(req, res);
     if (gated === undefined) return;
@@ -285,8 +195,6 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     const author = authorForSeed(seed.seed);
     await gw.append([
       signClaims(
-        // The look's moment is its own ordering time, so every claim this gateway stamps after it
-        // sorts after it.
         withStamp(gw.stamp(author), (t) => lookedClaims(gated.user, name, t, author, t)),
         seed.seed,
       ),
@@ -294,9 +202,6 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     seeOther(res);
   };
 
-  // §49: the quiet mark is the OPERATOR's standing record — a preference of the reading, never
-  // a storage state. The role is read fresh from the ground; a session carries a name, never a
-  // privilege.
   const postQuiet = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const gated = await postGate(req, res);
     if (gated === undefined) return;
@@ -318,11 +223,6 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     seeOther(res);
   };
 
-  // THE FIVE CONTROLS, SAVED. A leeway is a declaration on the container, so saving one is a
-  // re-declaration: the record it stands on, carried forward whole, with the new leeway written
-  // over the old. The one rule is weighed by the append itself, so a leeway that does not fit the
-  // terms above it is refused there and the person reads the refusal that names the ceiling —
-  // this page never decides what fits.
   const postLeeway = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const gated = await postGate(req, res);
     if (gated === undefined) return;
@@ -331,12 +231,6 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     const target = targetOf(gw, gated.user, gated.fields, res);
     if (target === undefined) return;
     const rec = target.rec;
-    // A POOL'S LEEWAY IS NOT THE PERSON'S TO SET HERE. An inbox or a channel pool takes what the
-    // container it was opened into allows, and a person's reach DOES join those edges — so this
-    // door is reachable for a pool and must say no. It said yes, and re-declared the pool without
-    // the pointer to its host, which severed it from that container for good: its members stopped
-    // composing there, and the severed name left the person's reach, so no door could reach it
-    // again to put it back.
     if (rec.inboxOf !== undefined) {
       refuse(
         res,
@@ -351,9 +245,6 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
       trust: rec.trust,
       posture: rec.posture,
       ...(rec.parent === undefined ? {} : { parent: rec.parent }),
-      // No `inboxOf` here, and that is not an omission: the refusal above is the safeguard, and a
-      // carry beside it would be a line no case can reach — read as a second guard, killed by no
-      // mutation, and left standing as the only one if the refusal is ever relaxed.
       ...(rec.membership === undefined ? {} : { membership: rec.membership }),
       ...(rec.membershipAt === undefined ? {} : { membershipAt: rec.membershipAt }),
       ...(rec.version === undefined ? {} : { version: rec.version }),
@@ -380,8 +271,6 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     }
     const name = new URL(req.url ?? "", "http://loam.invalid").searchParams.get("name") ?? "";
     const table = gw.containers();
-    // The door's gate: re-derived from the live table, every request. Outside — foreign or
-    // absent alike — is one uniform refusal.
     if (!subtreeOf(table, session.user).has(name)) {
       notYours(res);
       return;
@@ -393,14 +282,6 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     );
   };
 
-  // --- the resolved view (phase A3) --------------------------------------------------------------
-
-  // Resolve one entity of one lens over exactly a container's gather: federate the gather into a
-  // scratch store, register the lens there, and ask GraphQL — the same read any door serves,
-  // scoped to this one container. The scratch is CLOSED on every path. "Reads nothing" is measured
-  // at the EVIDENCE, not the value: the resolved node's hyperview hash is compared against the
-  // same lens over an empty ground, so a schema whose defaults synthesize values (absentAs) cannot
-  // make an unread container look read.
   const resolveThrough = async (
     regs: readonly Registration[],
     reg: Registration,
@@ -409,9 +290,6 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
   ): Promise<{ view: Record<string, unknown>; empty: boolean }> => {
     const dest = await Gateway.open(new MemoryBackend(), {});
     try {
-      // Install every registered lens in fixpoint rounds (a lens's expand may read a sibling),
-      // exactly as replay installs them: the chosen lens takes the entity as its root; the rest
-      // bind rootless, present only so references resolve. One that never binds is left out.
       let pending = regs.map((r) => ({ r, roots: r === reg ? [entity] : [] }));
       for (;;) {
         const next: typeof pending = [];
@@ -430,7 +308,6 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
       }
       const field = queryFieldFor(lensOf(reg));
       const q = `query($e: ID!) { ${field}(entity: $e) { _hviewHex _view } }`;
-      // The baseline FIRST, before any evidence lands: what this lens gathers of nothing.
       const blank = await dest.query(q, { e: entity });
       await dest.federate(members, { admit: () => true });
       const read = await dest.query(q, { e: entity });
@@ -463,8 +340,6 @@ export function makeAdminDoor(options: AdminDoorOptions): AdminDoor {
     const lens = url.searchParams.get("lens") ?? "";
     const entity = url.searchParams.get("entity") ?? "";
     const table = gw.containers();
-    // The door's gate, on the CONTAINER the read would gather: outside the subtree — foreign or
-    // absent alike — is one uniform refusal.
     if (!subtreeOf(table, session.user).has(container)) {
       notYours(res);
       return;
@@ -497,7 +372,6 @@ ${back}`,
     }
     const regs = readRegistrations(gw.reactor, gw.validityNow(), gw.operatorAuthor);
     if (lens === "") {
-      // The lens picker: honestly cheap — every registered lens, as a link into this same page.
       const choices =
         regs.length === 0
           ? `<p>No lens is registered on this store yet, so there is nothing to read through.
@@ -565,12 +439,6 @@ this lens does not gather; the lens may read ground this container does not hold
     htmlOut(res, 200, page("a resolved view", `${head}\n${bodyHtml}\n${back}`));
   };
 
-  // --- the lifecycle POSTs (phase A2) ------------------------------------------------------------
-
-  // The phase-6 provenance + form-token pair, shared by every POST on this door. Returns the
-  // parsed fields and the session, or undefined after writing the refusal. Order is load-bearing:
-  // provenance first (draining the body so a refusal leaves no bytes on a keep-alive socket),
-  // then the session, then the token.
   const postGate = async (
     req: IncomingMessage,
     res: ServerResponse,
@@ -594,7 +462,6 @@ this lens does not gather; the lens may read ground this container does not hold
     return { fields, user: session.user, formToken: session.formToken };
   };
 
-  // The ground, provably able to sign: every lifecycle act is operator law over the live gateway.
   const signerGround = (res: ServerResponse): Gateway | undefined => {
     const gw = options.ground();
     if (gw === undefined) {
@@ -608,8 +475,6 @@ this lens does not gather; the lens may read ground this container does not hold
     return gw;
   };
 
-  // The subtree gate on a write path: the target must lie inside the session user's own subtree,
-  // re-derived from the live table. Outside — foreign or absent alike — is one uniform refusal.
   const targetOf = (
     gw: Gateway,
     user: string,
@@ -625,7 +490,6 @@ this lens does not gather; the lens may read ground this container does not hold
     return { table, name, rec: table.containers.get(name)! };
   };
 
-  // The one redirect shape this door writes, always at its own path — never off-origin.
   const seeOther = (res: ServerResponse): void => {
     res.writeHead(303, {
       location: ADMIN_PATH,
@@ -647,8 +511,6 @@ this lens does not gather; the lens may read ground this container does not hold
       notYours(res);
       return;
     }
-    // The child's name is subtree-shaped by construction: namespaced under the session user, so
-    // it can never shadow another user's name or a system name. The typed name is never echoed.
     const name = (gated.fields.get("name") ?? "").trim();
     if (!name.startsWith(`${gated.user}:`) || name.length <= gated.user.length + 1) {
       refuse(
@@ -678,7 +540,6 @@ this lens does not gather; the lens may read ground this container does not hold
       );
       return;
     }
-    // The defect is named; the defective bytes are never echoed back into the DOM.
     let membership: unknown;
     if (membershipRaw.length > 0) {
       try {
@@ -755,8 +616,6 @@ this lens does not gather; the lens may read ground this container does not hold
     if (rec.posture === "separate") {
       const pool = gw.attachedContainers.get(name);
       if (pool !== undefined && gw.quarantinePools.has(pool)) {
-        // The program that attached this pool holds its only handle; closing its store from here
-        // would strand that handle open over vanished bytes.
         refuse(
           res,
           409,
@@ -765,8 +624,6 @@ this lens does not gather; the lens may read ground this container does not hold
         );
         return;
       }
-      // Unattached and active: the at-rest record is the whole act — it covers the store the
-      // erasure guard would otherwise name as a fault.
     }
     try {
       await gw.append([
@@ -799,8 +656,6 @@ this lens does not gather; the lens may read ground this container does not hold
       return;
     }
     if (rec.posture === "separate") {
-      // Honest scope: reattaching a separate pool needs its own backend, which a browser form
-      // cannot supply. The page says so and points at the machine that holds the store.
       refuse(
         res,
         409,
@@ -809,7 +664,6 @@ this lens does not gather; the lens may read ground this container does not hold
       );
       return;
     }
-    // ONE batch: the listing never half-clears (H4) — every surviving record negates together.
     try {
       await gw.append(
         records.map((r) =>
@@ -827,8 +681,6 @@ this lens does not gather; the lens may read ground this container does not hold
     seeOther(res);
   };
 
-  // What a drop of this container would truthfully be — resolved fresh at BOTH steps, because the
-  // state can move between the confirm page and its return.
   type DropPlan =
     | { readonly act: "negation" }
     | { readonly act: "inbox"; readonly handle: Container }
@@ -861,10 +713,6 @@ this lens does not gather; the lens may read ground this container does not hold
           "Nothing was forgotten.",
       };
     }
-    // A CHANNEL's pool severs through the channel's own act, never a bare pool drop: `dropChannel`
-    // takes the law the channel blessed down beside the bytes and refuses rather than reporting a
-    // purge it cannot prove (§46). It is the act `loam federate drop` runs, and the staged sever
-    // an agent hands a person (`loam_federate_drop`) completes here.
     const channelPool = gw.channelPools.get(name);
     if (channelPool !== undefined) return { act: "channel", handle: channelPool };
     const handle = gw.connectionInboxes.get(name);
@@ -881,9 +729,6 @@ this lens does not gather; the lens may read ground this container does not hold
     return { act: "inbox", handle };
   };
 
-  // Pending confirmations: single-use, bound to (user, name), oldest-out at the cap. An act
-  // performs only when the token this door minted comes back from its own confirm page. Drop and
-  // revoke keep SEPARATE stores, so a token minted to confirm one act can never authorize the other.
   const mintConfirm = (
     store: Map<string, { user: string; name: string }>,
     user: string,
@@ -898,9 +743,6 @@ this lens does not gather; the lens may read ground this container does not hold
   };
   const confirmTokens = new Map<string, { user: string; name: string }>();
 
-  // The federation/connector group (T153 slice 3b) — the connections panel, federate-in, and the
-  // revoke pair, sharing this door's gate helpers. Its revoke-confirm store lives inside it,
-  // separate from drop's `confirmTokens` by construction.
   const fed = adminFederation({
     ...(options.connectors === undefined ? {} : { connectors: options.connectors }),
     home: options.home,
@@ -929,7 +771,6 @@ this lens does not gather; the lens may read ground this container does not hold
       refuse(res, plan.status, plan.message);
       return;
     }
-    // What will be forgotten, counted where a read can truthfully count it.
     let count: number | undefined;
     try {
       count =
@@ -967,7 +808,7 @@ this lens does not gather; the lens may read ground this container does not hold
       refuse(res, 403, "This drop was not confirmed from its own page, so nothing was forgotten.");
       return;
     }
-    confirmTokens.delete(presented); // single-use, consumed before the act
+    confirmTokens.delete(presented);
     const plan = planDrop(gw, table, name, rec);
     if (plan.act === "refuse") {
       refuse(res, plan.status, plan.message);
@@ -1000,10 +841,6 @@ this lens does not gather; the lens may read ground this container does not hold
           `the admin page's sever of "${name}" refused: ` +
             `${err instanceof Error ? err.message : String(err)}`,
         );
-        // The sever throws from more than one place, and some of them fire AFTER the pool was
-        // purged and verified — so this sentence claims neither that the bytes remain nor that
-        // they are gone. What was verified gone is gone; what could not be struck still stands;
-        // the server log names which (the detail can name paths, so it never reaches the page).
         refuse(
           res,
           503,
@@ -1016,7 +853,6 @@ this lens does not gather; the lens may read ground this container does not hold
       seeOther(res);
       return;
     }
-    // Shared: the drop is striking every surviving declaration — the deltas it gathered remain.
     try {
       const ids = survivingDeclarationIds(gw.reactor, gw.validityNow(), gw.operatorAuthor!, name);
       await gw.append(
@@ -1052,21 +888,11 @@ this lens does not gather; the lens may read ground this container does not hold
       );
       return;
     }
-    // The root gathers what its owner AUTHORED, so the membership Term needs the user's own
-    // public key. An ACTOR created at the CLI has none (`user create` mints keys only with
-    // --operator — T124's pinned design), and no command provisions one later — so a tenant who
-    // can already log in would dead-end here. The door PROVISIONS instead (Myk, 2026-08-02: tenant
-    // actor users act through their own containers): mint the key, write it 0600 beside the
-    // others, and trust it with a WRITE grant, all before the declaration. A seed file that
-    // EXISTS but cannot be used still fails closed — overwriting a key file because it read
-    // wrong would destroy a credential this door cannot prove dead.
     const key = await ensureUserKey(gw, options.home, user, (m) => onFault(`the admin page ${m}`));
     if ("refusal" in key) {
       refuse(res, key.refusal.status, key.refusal.message);
       return;
     }
-    // Operator law: the declaration is signed by the store, once the door has proven the target
-    // is the session user's own name — which it is by construction here.
     const declined = await declareOwned(gw, user, { user, seed: key.userSeed }, undefined, (m) =>
       onFault(`the admin page ${m}`),
     );
@@ -1077,15 +903,6 @@ this lens does not gather; the lens may read ground this container does not hold
     seeOther(res);
   };
 
-  // Register a lens through the browser (§40 criterion 8): the SAME body `loam register` and
-  // `POST /:mount/register` take, parsed by the same parser, landed by the same publish.
-  //
-  // REGISTRATION IS CONSTITUTIONAL AND STORE-WIDE, so this door asks for the OPERATOR role — the
-  // one operation here that is not bounded by a subtree. A lens is not per-user: publishing under
-  // a live name EVOLVES it for every reader and every mount, so a tenant session reaching this
-  // would hold store-wide power the sibling doors already refuse it (`POST /:mount/register` and
-  // the `loam_register` tool both require an operator). The role is read from the GROUND, which is
-  // where roles live — a session carries a name, never a privilege.
   const postRegister = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const gated = await postGate(req, res, REGISTER_MAX_BODY);
     if (gated === undefined) return;
@@ -1101,7 +918,6 @@ this lens does not gather; the lens may read ground this container does not hold
       return;
     }
     const raw = (gated.fields.get("registration") ?? "").trim();
-    // The defect is named; the defective bytes are never echoed back into the DOM.
     if (raw.length === 0) {
       refuse(res, 400, "The registration is empty, so nothing was registered.");
       return;
@@ -1117,8 +933,6 @@ this lens does not gather; the lens may read ground this container does not hold
     try {
       input = parseRegistrationInput(body);
     } catch (err) {
-      // The parser names the defective FIELD in plain English, and its message can quote a name
-      // the caller typed — so it is escaped before it rides into the DOM. No path, no flag.
       const detail = err instanceof Error ? err.message : String(err);
       refuse(res, 400, `${escapeHtml(detail)} — so nothing was registered.`);
       return;
@@ -1150,16 +964,10 @@ this lens does not gather; the lens may read ground this container does not hold
     seeOther(res);
   };
 
-  // Promote a container's output into the primary ground (§40 criterion 10) — the page drives
-  // `gw.promote` (T33's promote-outputs) and never re-decides its law. The page's own gate is
-  // narrow: the subtree, then "is this delta in the container's gather" — asked of the gather so a
-  // delta id outside it is refused without confirming whether it exists anywhere else. The source
-  // handed to promote is the attached store that actually HOLDS the output: the container's own
-  // pool, or an inbox pool composing into its gather (§39).
   const postPromote = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const gated = await postGate(req, res);
     if (gated === undefined) return;
-    const gw = signerGround(res); // an adoption is the operator's own claim — the store must sign
+    const gw = signerGround(res);
     if (gw === undefined) return;
     const target = targetOf(gw, gated.user, gated.fields, res);
     if (target === undefined) return;
@@ -1186,7 +994,6 @@ this lens does not gather; the lens may read ground this container does not hold
       );
       return;
     }
-    // The typed id is never echoed: only an id proven to be IN the gather rides back into the DOM.
     const deltaId = gated.fields.get("delta") ?? "";
     if (!gather.some((d) => d.id === deltaId)) {
       refuse(
@@ -1206,8 +1013,6 @@ this lens does not gather; the lens may read ground this container does not hold
       );
       return;
     }
-    // In the gather, not in the primary: it is held by an attached store — the container's own
-    // pool, or an inbox pool bound to it.
     let source: Gateway | undefined;
     let from = name;
     const holders = [
@@ -1245,8 +1050,6 @@ this lens does not gather; the lens may read ground this container does not hold
       promoted = (await gw.promote(source, deltaId, { from })).promoted;
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
-      // Promote's own refusals are the product — its words, escaped, ride to the caller. Anything
-      // else is a fault this page does not explain.
       if (/^(promotion refused:|promotion would dangle:|nothing to promote:)/.test(detail)) {
         refuse(res, 409, `${escapeHtml(detail)} Nothing was promoted.`);
         return;
@@ -1259,7 +1062,6 @@ this lens does not gather; the lens may read ground this container does not hold
       );
       return;
     }
-    // Promote's own terms: a re-spoken claim in the primary, and a provenance record beside it.
     htmlOut(
       res,
       200,
@@ -1339,8 +1141,6 @@ forever; the value now survives even if its container is dropped.</p>
         }
         getDashboard(req, res);
       } catch (err) {
-        // A fault nobody anticipated must not escape to the server's generic 500, whose message
-        // can carry the home's absolute path. It says no rather than why, and writes no Location.
         onFault(
           `the admin page failed answering ${pathname}: ` +
             `${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,

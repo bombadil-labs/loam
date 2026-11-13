@@ -1,10 +1,3 @@
-// Each new pool under its own key (refactor/audit/step6-pool-keys.md). The host records the pool's
-// key id BEFORE the key is used: a pool the host names with a key must have that key. A pool it
-// never named, over a store that holds rows, is an older pool and is refused (ruling 10). A missing
-// key file or a missing journal is never read as "older pool".
-//
-// Browser-safe: no node imports. A file-backed store keeps its pools' keys itself (`poolKeys()`).
-
 import type { Claims, Delta } from "@bombadil/rhizomatic";
 
 export const POOL_KEYS_ENTITY = "loam:poolkeys";
@@ -14,7 +7,6 @@ import type { PoolKeySource } from "../store/peer-image.js";
 import type { Ground } from "./ground.js";
 export type { PoolKeySource } from "../store/peer-image.js";
 
-/** A key source that lives only as long as the process (a memory store, and tests). */
 export function memoryPoolKeys(): PoolKeySource {
   const seeds = new Map<string, string>();
   return {
@@ -55,7 +47,6 @@ const field = (d: Delta, role: string): string | undefined => {
     : undefined;
 };
 
-/** The key the host recorded for `pool`: its operator's earliest record, or undefined. */
 export function recordedPoolKey(
   reactor: Ground,
   operator: string | undefined,
@@ -71,7 +62,6 @@ export function recordedPoolKey(
   return first === undefined ? undefined : field(first, "key");
 }
 
-// One in-memory source per store object, so a reboot over the same store finds its pools' keys.
 const memoryByStore = new WeakMap<object, PoolKeySource>();
 export function memoryPoolKeysFor(store: object): PoolKeySource {
   let keys = memoryByStore.get(store);
@@ -79,5 +69,4 @@ export function memoryPoolKeysFor(store: object): PoolKeySource {
   return keys;
 }
 
-/** A pool the host recorded under its own key, whose key this opener cannot load. */
 export class PoolKeyMissing extends Error {}

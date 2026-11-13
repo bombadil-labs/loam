@@ -1,5 +1,3 @@
-// The gateway suite's shared world: the Plant schema, its policy, and a small settled garden.
-
 import {
   authorForSeed,
   signClaims,
@@ -34,20 +32,10 @@ export const PLANT_POLICY: Schema = {
   default: pickLatest,
 };
 
-// The SAME resolution program, but NAMED "Plant" — a reading a Bed's `expand … reading: "Plant"`
-// can resolve its children through (issue #23). Kept separate from the anonymous PLANT_POLICY on
-// purpose: PLANT_POLICY is reused under other hyperschemas (Ledger, Plant2) whose lens name must
-// stay their own; a schema's name IS its lens name, so naming the shared one would collide them.
 export const PLANT_READING: Schema = { ...PLANT_POLICY, name: "Plant" };
 
-// The Plant schema's full field list. Under immutable-by-default (SPEC §14/§21) a registration must
-// name its writable fields explicitly; this is "everything writable," the pre-flip surface.
 export const PLANT_WRITABLE: readonly string[] = ["height", "tag", "watered", "readings"];
 
-// A governed gateway's constitution under the authors-not-owners model: the garden fixture's
-// two authors hold write STANDING on the store — signed by whatever operator the suite runs
-// under. (The membership stays as vocabulary: the fern still belongs to the garden community,
-// but authorize never asks.)
 export function governedBootstrap(operatorSeed: string): Delta[] {
   const operator = authorForSeed(operatorSeed);
   return [
@@ -57,8 +45,6 @@ export function governedBootstrap(operatorSeed: string): Delta[] {
   ];
 }
 
-// Two readings whose VALUES (7, 9) differ from their COUNT (2): an assertion on the count can
-// never be satisfied by a picked value.
 export const garden = [
   observed(FERN, "height", 30, 1000, GARDENER_SEED),
   observed(FERN, "height", 34, 2000, SURVEYOR_SEED),

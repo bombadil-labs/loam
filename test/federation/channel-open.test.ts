@@ -1,12 +1,3 @@
-// §46 criteria 1 and 15 — a federation channel lands a peer's deltas in a NESTED POOL inside the
-// receiving container, and the receiver's PRIMARY GROUND holds none of them.
-//
-// Both levels, because either alone misses the bug this design exists to prevent. The delta level
-// asks where the bytes actually went; the object level asks what a reader of the receiving container
-// resolves. A pool that gathered correctly while quietly mixing the peer's deltas into the primary
-// ground would pass an object-level check and make `drop` a filtered delete forever after (§27's
-// drop is a physical purge, and it can only stay one if the bytes were never mixed).
-
 import { describe, expect, it } from "vitest";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -31,7 +22,6 @@ describe("§46 — a channel receives into a nested pool", () => {
       const claim = observed(FERN, "height", 62, 1000, GARDENER_SEED);
       await alice.append([claim]);
 
-      // Bob names ONE receiving container and points a channel at alice.
       const channel = await bob.openChannel({
         into: "friends",
         prefix: "alice",
@@ -40,11 +30,6 @@ describe("§46 — a channel receives into a nested pool", () => {
       const report = await channel.sync();
       expect(report.accepted).toBeGreaterThan(0);
 
-      // OBJECT LEVEL: a reader of the receiving container sees THE PEER'S CLAIM. Held in a const
-      // rather than read back as `arrivalLog()[0]` — Gateway.boot appends genesis first, so index 0
-      // is alice's operator marker. A channel that crossed constitutional deltas and dropped every
-      // data delta passed the old assertion, and passed `accepted > 0` alongside it (H10: the
-      // expectation was derived from the subject).
       const gathered = bob.containerScope({ containers: ["friends"] });
       expect(gathered.some((d) => d.id === claim.id)).toBe(true);
     } finally {
@@ -66,10 +51,8 @@ describe("§46 — a channel receives into a nested pool", () => {
       });
       await channel.sync();
 
-      // DELTA LEVEL: the bytes are in the pool, not in bob's own ground.
       const primary = bob.reactor.arrivalLog().map((d) => d.id);
       expect(primary).not.toContain(mine.id);
-      // Two-sided: bob's own ground is not empty either — the channel did not swallow his store.
       expect(primary.length).toBeGreaterThan(0);
     } finally {
       await alice.close();

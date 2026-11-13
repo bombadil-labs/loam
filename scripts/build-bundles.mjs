@@ -1,13 +1,3 @@
-// Build the browser-safe artifacts: `dist/client/index.js` (`@bombadil/loam/client`, SPEC §12)
-// and `dist/browser/index.js` (`@bombadil/loam/browser`, SPEC §15) — each one self-contained
-// ESM file, rhizomatic's crypto inlined, ZERO `node:` specifiers, the substrate's node-only
-// peer transport aliased to a throwing stub. Runs after tsc in `npm run build`, overwriting
-// tsc's module-by-module emit for these entries (the .d.ts beside each stays tsc's).
-// test/client/bundle.test.ts and test/browser/bundle.test.ts hold the line.
-//
-// Usage: node scripts/build-bundles.mjs [client|browser ...] — no args builds both. The test
-// suites each build only their own entry, so parallel vitest workers never race on one file.
-
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";

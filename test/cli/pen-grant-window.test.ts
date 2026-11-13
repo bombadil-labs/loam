@@ -1,14 +1,3 @@
-// `pen create`'s refusal for a provisioned pen says whether the pen's author HOLDS a write grant.
-// That is the door's question, so the sentence must follow the door: a grant outside its own
-// validity window is not held, even when the operator never struck it.
-//
-// Rails: an expired grant and a not-yet-valid grant are NOT reported as held; a live grant IS
-// (the control). All three refuse with exit 2 and write nothing — the refusal's decision reads
-// what the operator has not struck, and this file does not change that. Both levels: the DELTA
-// level counts the operator's write grants for the author before and after; the OBJECT level is
-// the door's own `holdsGrant` answer, asserted beside each sentence so a fixture that the door
-// happened to honour could not pass the "not held" rails.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -52,7 +41,6 @@ async function withGateway<T>(fn: (gw: Gateway, operator: string) => T | Promise
   }
 }
 
-// Plant the pen's seed file and ONE operator-signed write grant with the given window.
 async function provision(window: { validFrom: number; validUntil?: number }): Promise<void> {
   await run(["init", "--home", home], io());
   writePenSeed(home, "timed-pen", PEN_SEED);
@@ -65,7 +53,6 @@ async function provision(window: { validFrom: number; validUntil?: number }): Pr
   });
 }
 
-// Delta level: the operator's write grants for the pen author, and the door's answer now.
 const standing = () =>
   withGateway((gw, operator) => ({
     grants: [...gw.reactor.snapshot()].filter(
@@ -100,7 +87,7 @@ describe("pen create reports a write grant as held only when the door holds it",
     expect(said).toContain("already provisioned");
     expect(said).not.toContain("holds a write grant");
     expect(said).toContain("the door does not honour that grant now");
-    expect(await standing()).toEqual({ grants: 1, held: false }); // nothing was written
+    expect(await standing()).toEqual({ grants: 1, held: false });
   });
 
   it("a NOT-YET-VALID grant is not reported as held", async () => {

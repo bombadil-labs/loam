@@ -1,7 +1,3 @@
-// The byte-door over real HTTP (SPEC §23.7): GET /:mount/bytes/<ref>?from=<lens>/<entity> returns the
-// raw bytes with the BytesView's own mime — on the full door under the token's read discipline, and on
-// the anonymous door only for a publicly-declared lens. GET-only; a malformed probe refuses uniformly.
-
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   authorForSeed,

@@ -1,13 +1,3 @@
-// §27.6 membership rails (ticket T15) — membership is a QUERY, first-class: a rhizomatic Term →
-// dset, static (`select`) or live (`watch`), and the quarantine's seeding edge generalized to a
-// membership Term with the old `admit` predicate as its degenerate case (§24.10: same knob,
-// generalized, no new mechanism). The composability 0.6.0 bought is proven where it matters — a
-// NESTED difference evaluating through the seeding edge and live-following the ground.
-//
-// Written BEFORE the build (P3): every rail here failed on the pre-T15 code (no select, no watch,
-// no membership knob) except the reused §24.8 erasure law, which must hold against a Term-seeded
-// pool exactly as it held against a predicate-seeded one.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, evalTerm, parseTerm, type Policy, type Schema } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
@@ -39,7 +29,6 @@ const boot = async (): Promise<Gateway> =>
     }),
   );
 
-// The operator's own domain claims — the select() every rail below carves from.
 const OPERATOR_CLAIMS = {
   op: "select",
   pred: { match: { field: "author", cmp: "eq", const: OP } },
@@ -74,12 +63,9 @@ describe("§27.6 select — evaluate a membership Term over this store's ground,
 
   it("a non-dset Term is refused loudly at the door", async () => {
     const gw = await boot();
-    // Both refusal voices are the door's: a term that cannot even evaluate rootless (a group needs
-    // an ambient root) is refused by the evaluator itself; one that evaluates to a non-dset sort
-    // is refused by select's own check. Either way: loud, and nothing lands.
     const grouping = { op: "group", key: "byTargetContext", in: "input" };
     expect(() => gw.select(grouping)).toThrow();
-    const masked = { op: "mask", policy: "drop", in: "input" }; // evaluates fine — and IS a dset
+    const masked = { op: "mask", policy: "drop", in: "input" };
     expect(() => gw.select(masked)).not.toThrow();
     await gw.close();
   });
@@ -112,8 +98,8 @@ describe("§24.10 the seeding edge takes a membership Term (admit is the degener
     await gw.append([mine]);
     await gw.federate([theirs]);
     const q = await gw.openQuarantine({ membership: OPERATOR_CLAIMS });
-    expect(holds(q.gateway, mine.id)).toBe(true); // a member
-    expect(holds(q.gateway, theirs.id)).toBe(false); // not selected — never seen
+    expect(holds(q.gateway, mine.id)).toBe(true);
+    expect(holds(q.gateway, theirs.id)).toBe(false);
     await q.drop();
     await gw.close();
   });
@@ -149,9 +135,6 @@ describe("§24.10 the seeding edge takes a membership Term (admit is the degener
     const opHeight = observed(FERN, "height", 30, 1000, OP_SEED);
     const opMessage = observed(FERN, "message", "mine", 1100, OP_SEED);
     await gw.append([opHeight, opMessage]);
-    // The scope the depth-1 idiom could never say: the operator's claims MINUS (the operator's
-    // claims MINUS the heights) — i.e. exactly the operator's heights, said the long way round,
-    // difference against difference.
     const scope = {
       op: "difference",
       of: OPERATOR_CLAIMS,
@@ -161,11 +144,10 @@ describe("§24.10 the seeding edge takes a membership Term (admit is the degener
     expect(holds(q.gateway, opHeight.id)).toBe(true);
     expect(holds(q.gateway, opMessage.id)).toBe(false);
 
-    // Live-follow: a new height lands in the primary; the pulse carries it through the SAME scope.
     const later = observed(FERN, "height", 44, 2000, OP_SEED);
     await gw.append([later]);
     await q.reseed();
-    expect(holds(q.gateway, later.id)).toBe(true); // the composed scope followed the ground
+    expect(holds(q.gateway, later.id)).toBe(true);
     const noise = observed(FERN, "message", "still not in scope", 2100, OP_SEED);
     await gw.append([noise]);
     await q.reseed();

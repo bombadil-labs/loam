@@ -1,14 +1,3 @@
-// A resolver sees what its own gather gathered (SPEC §22.8, ticket T31). When a gather `expand`s a
-// role, the child's whole hview is already sitting on the bucket entry — so the bucket entry's VALUE
-// is the child's resolved view, not a bare entity id. That is what makes "given what I have, what can
-// I make?" a read rather than a derived fact: a recipe expands its ingredients, and a resolver over
-// that bucket can weigh each one's stock.
-//
-// The second rail is the load-bearing one. A recipe's ingredient bucket is the LINK deltas, and those
-// do not change when the flour does. So the memo key must reach THROUGH the expansion into the child's
-// ground — otherwise the answer goes stale exactly when it matters ("yes, make pasta" over flour that
-// is gone), breaking §22.5's promise that the memo invalidates precisely when the ground does.
-
 import { describe, expect, it } from "vitest";
 import {
   authorForSeed,
@@ -37,7 +26,6 @@ const GATHER = {
   },
 };
 
-// A resolver that can only work if it can SEE each ingredient's stock.
 const MAKEABLE = {
   ingredient: {
     code:
@@ -127,7 +115,6 @@ const pasta = async (gw: Gateway): Promise<unknown> => {
 describe("a resolver sees its own gather's expansions (T31)", () => {
   it("a bucket entry for an expanded pointer IS the child's resolved view, not its id", async () => {
     const gw = await kitchen();
-    // Before T31 this resolver could only see ["item:flour","item:egg"] and could not weigh anything.
     expect(await pasta(gw)).toBe("MISSING: egg");
     await gw.close();
   });
@@ -136,13 +123,9 @@ describe("a resolver sees its own gather's expansions (T31)", () => {
     const gw = await kitchen();
     expect(await pasta(gw)).toBe("MISSING: egg");
 
-    // Buy eggs. This touches the ITEM's ground — the recipe's own ingredient bucket (the link
-    // deltas) is untouched, so a memo keyed only on that bucket would still say MISSING and the
-    // pantry would lie about the pantry.
     await gw.append([prop("item:egg", "have", "have", 6, 40)]);
     expect(await pasta(gw)).toBe("MAKEABLE");
 
-    // ...and back again when the eggs are used up: invalidation is not a one-way ratchet.
     await gw.append([prop("item:egg", "have", "have", 0, 50)]);
     expect(await pasta(gw)).toBe("MISSING: egg");
     await gw.close();
@@ -157,18 +140,8 @@ describe("a resolver sees its own gather's expansions (T31)", () => {
   });
 
   it("a resolver sees exactly what the Policy sees — the gather's mask decides, not the resolver", async () => {
-    // SPEC §22.9. A Policy SELECTS; a resolver only re-represents the survivors. `bucketOf` used to
-    // drop negated entries on its own, which was the resolver layer performing a selection nobody
-    // declared — and it diverged from `applyPolicy`, which is handed every entry. The gather's `mask`
-    // is the declared knob: under `drop` a retracted delta never reaches the hview (so nothing
-    // changes), and under `annotate` it arrives flagged and the RESOLVER decides.
     const gw = await Gateway.open(new MemoryBackend(), { seed: SEED });
     await gw.append([signClaims(operatorMarkerClaims(OP), SEED)]);
-    // NOTE the shape: the annotate mask feeds the group DIRECTLY, with no `select` between them.
-    // rhizomatic drops the annotate tag channel through select/union (E14), so a select-in-the-middle
-    // gather computes the negation flags and then discards them; `group` threads them into entries
-    // (E7), and files by target context relative to the root, which is the scoping the select would
-    // otherwise have provided.
     const ANNOTATED = {
       op: "group",
       key: "byTargetContext",
@@ -183,8 +156,6 @@ describe("a resolver sees its own gather's expansions (T31)", () => {
       undefined,
       ["note"],
       {
-        // Counts what it is given, and says how much of it was retracted — impossible to write at all
-        // if the bucket had already made the choice.
         note: {
           code: "export default (b) => `${b.length} seen, ${b.filter((e) => e.negated).length} retracted`;",
           rung: "a" as const,
@@ -216,21 +187,12 @@ describe("a resolver sees its own gather's expansions (T31)", () => {
       ).ledger.note;
     expect(await read()).toBe("2 seen, 0 retracted");
 
-    // Retract one. Under an annotate mask it STAYS in the hview, flagged — and the resolver, which is
-    // handed what the Policy is handed, can now see and report it.
     await gw.append([signClaims(makeNegationClaims(OP, 99, first.id), SEED)]);
     expect(await read()).toBe("2 seen, 1 retracted");
     await gw.close();
   });
 
   it("a parent recomputes when its CHILD's ground changes, under an annotate child gather too", async () => {
-    // The child half of the dependency walk (§22.8): a parent resolver reads its expanded children,
-    // so the parent's memo key must move when the CHILD's ground moves. Covered here with an annotate
-    // child gather, which the §22.8 rail does not exercise.
-    //
-    // Honest about its limit: this does NOT discriminate whether the walk records the child's
-    // retraction FLAG, and no test can — applyPolicy ignores the flag, so a retraction cannot change
-    // a child's resolved view under annotate, and under drop the entry leaves the hview entirely.
     const gw = await Gateway.open(new MemoryBackend(), { seed: SEED });
     await gw.append([signClaims(operatorMarkerClaims(OP), SEED)]);
     const ANNOTATED = {
@@ -238,7 +200,6 @@ describe("a resolver sees its own gather's expansions (T31)", () => {
       key: "byTargetContext",
       in: { op: "mask", policy: "annotate", in: "input" },
     };
-    // The CHILD gathers under annotate, so its retracted notes stay visible-but-flagged.
     await gw.publishRegistration(
       { name: "NoteH", alg: 1, body: parseTerm(ANNOTATED) },
       parseSchema({ name: "Note", props: { body: ALL }, default: PICK }),
@@ -248,7 +209,6 @@ describe("a resolver sees its own gather's expansions (T31)", () => {
       undefined,
       ["body"],
     );
-    // The PARENT expands notes and counts, from the children, how many survive.
     await gw.publishRegistration(
       {
         name: "PageH",
@@ -311,13 +271,9 @@ describe("a resolver sees its own gather's expansions (T31)", () => {
         .page.note;
     expect(await count()).toBe("2");
 
-    // A retraction inside the child leaves the child's VIEW unchanged under annotate (the Policy
-    // does not consult the flag), so the parent's answer must not move either. Pinned so the
-    // no-op stays a no-op rather than drifting into a spurious recompute.
     await gw.append([signClaims(makeNegationClaims(OP, 99, first.id), SEED)]);
     expect(await count()).toBe("2");
 
-    // The load-bearing half: the child's ground GROWS, and the parent must recompute.
     await gw.append([body(13, "three")]);
     expect(await count()).toBe("3");
     await gw.close();

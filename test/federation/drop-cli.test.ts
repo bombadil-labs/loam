@@ -1,18 +1,3 @@
-// §46 / T192 — severing a channel THROUGH THE CLI, on a sqlite-backed pool, from a process that did
-// not open it.
-//
-// This is the rail whose absence let four defects live. Every other drop rail drives `openChannel`
-// in-process over MemoryBackend with no channelBackend: the live-channel map is always populated, so
-// the re-open path is never taken; the pool has no file, so "purged at the bytes" is trivially true;
-// and there is no process boundary, so the attach state that breaks the CLI never arises.
-//
-// What it pins:
-//  1. `federate drop --yes` SUCCEEDS on a booted store. It could not — `resumeChannels` fills
-//     attachedContainers but not federationChannels, so the re-open threw "already attached".
-//  2. The bytes are gone at the FILE, not merely absent from a gather.
-//  3. The channel record goes with them, so `federate list` cannot contradict the drop.
-//  4. A named bystander channel survives, at its own file. Two-sided, as every erasure rail here is.
-
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,7 +19,6 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-/** A peer store with one stock shape and one note, served on an ephemeral port. */
 async function peer(name: string, title: string) {
   const home = join(root, name);
   expect(await run(["init", "--home", home], io())).toBe(0);
@@ -45,11 +29,6 @@ async function peer(name: string, title: string) {
     { detach: true },
   );
   if (typeof handle === "number") throw new Error("serve should return a running handle");
-  // `connection: close`: this request must not leave a pooled socket behind. The CLI's next pull
-  // from the same peer would reuse it, and this server runs on the test's own event loop, so a
-  // stall of more than five seconds (Node's keep-alive window) lets the server reap the socket
-  // before the client's pool notices: the pull is written to a closed socket and fails as
-  // `fetch failed` (ECONNRESET). That was this rail's Windows flake.
   const res = await fetch(`${handle.url}/default/graphql`, {
     method: "POST",
     headers: {
@@ -70,15 +49,11 @@ const poolFiles = (home: string): string[] =>
     ? readdirSync(join(home, "channels")).filter((f) => f.endsWith(".sqlite"))
     : [];
 
-// EVERY file, not just the .sqlite: sqlite runs in WAL mode, so a recent write lives in the -wal
-// sidecar until a checkpoint. A byte probe that reads only the main file reports "gone" for data
-// that is merely un-checkpointed — the exact false negative an erasure rail must not make.
 const poolBytes = (home: string): Buffer[] =>
   existsSync(join(home, "channels"))
     ? readdirSync(join(home, "channels")).map((f) => readFileSync(join(home, "channels", f)))
     : [];
 
-/** Does any pool file under this home still contain these bytes? Byte level, not gather level. */
 const anyFileHolds = (home: string, needle: string): boolean =>
   poolBytes(home).some((b) => b.includes(needle));
 
@@ -120,13 +95,10 @@ describe("§46 — severing a channel through the CLI", () => {
       await bob.stop();
     }
 
-    // Both peers' bytes are on disk, in their own files — the premise the drop must respect.
     expect(poolFiles(me).length).toBe(2);
     expect(anyFileHolds(me, "alice-only-marker")).toBe(true);
     expect(anyFileHolds(me, "bob-only-marker")).toBe(true);
 
-    // A FRESH invocation: nothing from the opens is in memory. This is the state the CLI drop
-    // could not survive.
     out.length = 0;
     err.length = 0;
     const dropped = await run(
@@ -135,12 +107,9 @@ describe("§46 — severing a channel through the CLI", () => {
     );
     expect(dropped, said()).toBe(0);
 
-    // GONE at the bytes...
     expect(anyFileHolds(me, "alice-only-marker")).toBe(false);
-    // ...and the bystander is untouched, also at the bytes.
     expect(anyFileHolds(me, "bob-only-marker")).toBe(true);
 
-    // The record went with it: one command must not contradict the next.
     out.length = 0;
     err.length = 0;
     expect(await run(["federate", "list", "--home", me], io())).toBe(0);

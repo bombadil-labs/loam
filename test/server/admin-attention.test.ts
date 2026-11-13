@@ -1,16 +1,3 @@
-// SPEC §49 criterion (c) — the dashboard leads with attention (T212; the working spec at
-// .adlc/specs/49-legibility.md, settled 2026-08-28). The page a PERSON reads: the first screen
-// is the since-last-looked summary, the container tree demoted beneath it; a quiet container
-// collapses to one line; a trust claim renders LOUD. The marks are written through the REAL
-// forms — the looked-mark in the session user's own voice, the quiet-mark in the operator's —
-// never by hand-appending what the door would have signed (T143's lesson: drive the surface).
-//
-// Both levels: the ground holds the row the form wrote, authored by the right key; the page
-// answers from it. Admin-page-only in v1 (settled question 2); the CLI reads the same reading
-// later.
-//
-// Erasure standing rule: every store here is this file's own memory/mkdtemp fixture.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -49,7 +36,6 @@ afterEach(async () => {
   while (homes.length > 0) rmSync(homes.pop()!, { recursive: true, force: true });
 });
 
-/** opal (operator) and nina (actor), each with a root; `opal:notes` nested under opal. */
 async function seeded(): Promise<Gateway> {
   const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
   let ts = 9001;
@@ -132,7 +118,6 @@ const post = (
     body: new URLSearchParams(fields).toString(),
   });
 
-/** One ordinary data claim by opal into her root's membership. */
 const opalNote = (t: number) =>
   signClaims(
     {
@@ -160,7 +145,6 @@ describe("§49(c) — the first screen is the summary; the tree is beneath it", 
     expect(attentionAt, "the attention section is missing").toBeGreaterThan(-1);
     expect(treeAt).toBeGreaterThan(-1);
     expect(attentionAt, "the tree renders before the attention summary").toBeLessThan(treeAt);
-    // The count is there; the body is not (counted, never listed).
     expect(html).toContain("data-attention-total");
     expect(html).not.toContain("written at 20000");
   });
@@ -168,10 +152,6 @@ describe("§49(c) — the first screen is the summary; the tree is beneath it", 
   it("a trust claim renders LOUD; marking read in the user's own voice quiets the count", async () => {
     const gateway = await seeded();
     await gateway.append([opalNote(20_000)]);
-    // A trust-CLASS claim since the look, landing in opal's own membership: an opal-authored
-    // claim wearing the role vocabulary. It binds nothing (only the operator's law binds — and
-    // T137's open arc is why nothing refuses it at the door), which is exactly why it must read
-    // LOUD: an inert trust-shaped claim in your container is someone trying.
     await gateway.append([
       signClaims(
         {
@@ -194,12 +174,10 @@ describe("§49(c) — the first screen is the summary; the tree is beneath it", 
     const before = await textOf(base, session);
     expect(before, "no loud marker for a trust claim").toContain("attention-loud");
 
-    // Mark opal's root read through the REAL form.
     const token = formTokenOf(before);
     const res = await post(base, "/admin/looked", session, { form_token: token, name: "opal" });
     expect(res.status).toBe(303);
 
-    // Delta level: the looked-row exists and is authored by OPAL'S key, not the operator's.
     const looked = [...gateway.reactor.snapshot()].filter((d) =>
       d.claims.pointers.some(
         (p) => p.target.kind === "entity" && p.target.entity.context === CTX_LOOKED,
@@ -208,7 +186,6 @@ describe("§49(c) — the first screen is the summary; the tree is beneath it", 
     expect(looked.length).toBe(1);
     expect(looked[0]!.claims.author).toBe(KEYS.opal);
 
-    // Object level: the page now reads quiet for that container.
     const after = await textOf(base, session);
     expect(after).toContain('data-attention-total="0"');
   });
@@ -244,7 +221,6 @@ describe("§49(c)+(d) — quiet collapses on the page, and only the operator's m
     });
     expect(res.status).toBe(303);
 
-    // Delta level: one operator-authored quiet row.
     const rows = [...gateway.reactor.snapshot()].filter((d) =>
       d.claims.pointers.some(
         (p) => p.target.kind === "entity" && p.target.entity.context === CTX_QUIET,
@@ -253,7 +229,6 @@ describe("§49(c)+(d) — quiet collapses on the page, and only the operator's m
     expect(rows.length).toBe(1);
     expect(rows[0]!.claims.author).toBe(OPERATOR);
 
-    // Object level: the quiet container collapses to one line without counts.
     const quieted = await textOf(base, session);
     expect(quieted).toContain('data-quiet="opal:notes"');
     expect(quieted).not.toContain('data-attention-container="opal:notes"');

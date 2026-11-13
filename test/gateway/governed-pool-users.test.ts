@@ -1,12 +1,3 @@
-// A ground that reads its users from a HOST (a container pool) must follow the host's users: its
-// governed views trust the root a user-named grant resolves to, and that root lives in claims its
-// own reactor never holds. Asked through the stream door and the point door of the pool itself, at
-// the three moments the root can move without anything arriving in the pool: the pool starts
-// reading the host, the host re-points the user, and a root claim's window opens in the host.
-//
-// The pool here is a Gateway wired to its host with `readUsersFrom`, as container.ts wires every
-// pool it opens; the container machinery itself is not what these rails ask about.
-
 import { afterEach, describe, expect, it } from "vitest";
 import {
   authorForSeed,
@@ -60,8 +51,6 @@ async function governed(): Promise<Gateway> {
   return gw;
 }
 
-// A host holding ada's user record (root K1), and a pool whose grants name ada. In the pool, the
-// gardener wrote 30 then 34, and K2 struck 34: inert while ada's root is K1, binding once it is K2.
 async function world(
   t0: number,
 ): Promise<{ host: Gateway; pool: Gateway; later: Delta; struck: Delta }> {
@@ -86,7 +75,6 @@ const heightOf = async (gw: Gateway): Promise<unknown> =>
     }
   ).guarded.height;
 
-// The next frame, or "no frame" — awaited, never raced against a tick.
 async function nextFrame(stream: AsyncGenerator<unknown>, ms: number): Promise<unknown> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<string>((resolve) => {
@@ -106,12 +94,9 @@ describe("R5: a pool follows its host's users", () => {
     const host = await governed();
     await host.append([op(userClaims("ada", OP, t0)), op(rootClaims("ada", K2, OP, t0))]);
     const { pool, later, struck } = await world(t0);
-    // The pool's own ground holds no users, so K2's strike is inert: 34 is served.
     expect(await heightOf(pool)).toBe(34);
     pool.readUsersFrom(host);
-    // Nothing arrived in the pool; its views re-read ada's root (K2) from the host.
     expect(await heightOf(pool)).toBe(30);
-    // delta level: the value and its strike are both held in the pool; only the reading moved
     expect(pool.reactor.get(later.id)).toBeDefined();
     expect(pool.reactor.negationsOf(later.id)).toEqual([struck.id]);
   });
@@ -131,7 +116,6 @@ describe("R5: a pool follows its host's users", () => {
   it("a closed pool leaves its host's dependents", async () => {
     const t0 = Date.now() - 10_000;
     const { host, pool } = await world(t0);
-    // The host keeps one watcher per watching pool; closing the pool releases its watcher.
     const watchers = (host as unknown as { userWatchers: Set<() => void> }).userWatchers;
     const before = watchers.size;
     pool.readUsersFrom(host);
@@ -230,7 +214,6 @@ describe("R6: a root claim's window opens with nothing written", () => {
     const t0 = Date.now() - 10_000;
     const { host, pool } = await world(t0);
     pool.readUsersFrom(host);
-    // The same shape in the host itself.
     const hostLater = observed(FERN, "height", 34, t0 + 2, GARDENER_SEED);
     await host.append([
       op(grantClaims(STORE_ENTITY, GARDENER, "write", OP, t0)),
@@ -246,8 +229,6 @@ describe("R6: a root claim's window opens with nothing written", () => {
     );
     expect(await nextFrame(poolStream, 2_000)).toBe(34);
     expect(await nextFrame(hostStream, 2_000)).toBe(34);
-    // Signed now, valid from a moment ahead: until then ada's root stays K1. The window is wide so
-    // a loaded machine still reads before it opens; the "before" check is skipped if it did not.
     const opens = Date.now() + 2_500;
     await host.append([op({ ...rootClaims("ada", K2, OP, Date.now()), validFrom: opens })]);
     const before = await heightOf(pool);

@@ -1,67 +1,3 @@
-// T289 (spec 64): a live channel opening cannot be erased until its pool is dropped. The refusal
-// names the pool and the road. A dropped incarnation's erase takes its receipts and close with it,
-// receipts and close first and the opening last. Every purging case names a live bystander at the
-// bytes. All destructive fixtures are this file's own MemoryBackend instances.
-//
-// RAILS-RED on the T288 tip (4e3b8b52), this file copied in: 5 red, 0 green. REVERT PROBES on this
-// tree, one guard deleted per probe, measured across the eight local-channel suites (118 cases):
-//   a live opening's erase proceeds                                → 4 red
-//   the pool under the name counts whatever its declaration        → 1 red
-//   a dropped incarnation's erase leaves its receipts and close    → 5 red
-//   a surviving declaration does not make the opening live         → 3 red
-//   a stale handle is not re-registered on drop re-run             → 1 red
-// Measured again after review round 1 (120 cases across the nine suites):
-//   an erased member is skipped whether or not it is settled     → 1 red
-//   the struck-declaration byte check through the store is gone     → 1 red
-// After review round 3 (123 cases): an orphaned attached pool cannot be dropped → 2 red.
-// After review round 4 (124 cases): a pool under another declaration is always another
-// incarnation → 1 red; the drop road ignores an orphan after a restart → 1 red.
-// After review rounds 5 and 6 (126 cases): a later incarnation's unnamed bytes do not keep an
-// earlier opening live → 1 red; an unparseable event of this channel does not fail closed →
-// 1 red. Round 5's open-time refusal was withdrawn in round 6: a separate pool is seeded from
-// the root, so it refused every fresh open over a root that held a stranger's record.
-// After review round 7 (128 cases): bytes the root also holds count against an earlier opening
-// → 1 red; the orphan question fails closed on ANY channel's unreadable event → 1 red.
-// After review rounds 8 and 9 (130 cases): a boot-skipped pool's in-process drop attaches the pool
-// without registering it → 1 red; the no-handle road names a re-declaration while a declaration
-// stands → 1 red; a one-delta store reads as empty (`> 1`) → 1 red.
-// After review round 10 (133 cases): a hand-attached container under the name is invisible to the
-// probe → 1 red; the standing-declaration text names a drop that purges a live incarnation → 1
-// red; the struck-declaration text names a re-declaration that the drop then refuses → 1 red.
-// After review round 11 (133 cases): the struck-declaration text names a fresh open while the
-// status still stands, where an open resumes and needs the declaration → 1 red; the drop road on
-// a later incarnation's unnamed bytes did not say it severs the standing incarnation → 1 red.
-// After review round 12 (134 cases): a name whose status was struck by hand is sent to a drop
-// that calls it severed → 1 red; a dropped pool's stale handle reads as a pool that holds bytes →
-// 1 red; the hand-attached road's drop() left a name with stamps and no declaration → 1 red.
-// After review round 13 (135 cases): the drop calls a name severed while its declaration stands
-// → 1 red; a container attached by hand is not seen while the declaration stands → 1 red.
-// After review round 14 (136 cases): the drop purged any hand-declared container under a name
-// this store never had as a channel, minting a store by name → 1 red; the round-13 case is
-// two-sided now (a sibling opened before the strike keeps its bytes).
-// After review round 15 (137 cases): a declaration by hand under a name that once was a channel
-// passed the gate, and the drop purged a store the factory minted, not the hand container's → 1
-// red. The gate now asks whether a channel opening names the standing declaration.
-// After review round 16 (138 cases): with status and declaration both struck by hand in this
-// process, the drop said "nothing left to remove" while the attached pool held bytes → 1 red.
-// After review round 18 (a reviewer's finding, 140 cases): the pool's emptiness was a READ of one
-// tier, so a mirror that kept a byte after the primary's purge let the opening go → 1 red; a store
-// with no whole-store byte probe read as empty → 1 red; the drop reported such a store clean →
-// 1 red (same case).
-// After review round 21 (the reviewer's second finding): the later-incarnation road read only the
-// later pool's reactor, so a reopen then an erase let the earlier opening go while the mirror
-// held its byte → 1 red (the mirror case, extended).
-// After review round 23 (the reviewer's third finding): a receipt erased by hand took its ids out
-// of the probe, and the earlier opening went while the mirror held the byte → 1 red (the mirror
-// case, extended); a later incarnation over a store with no inventory read as accounted → 1 red.
-// RAILS-RED on 4e3b8b52, the whole file as of round 23: 22 red, 3 green (round 18: 21 red, 3 green). The green cases: "an
-// event this reader cannot parse makes the orphan question fail closed" (the base's drop also
-// throws on an unreadable history), the never-a-channel case and the once-a-channel hand
-// declaration case (the base refused both by status alone, which the round-13 widening had
-// loosened). Each green case's own guard is measured by a revert probe above, not by the base.
-// The struck-declaration case measures both halves of the byte side: the attached pool, and the
-// store reopened by name with no handle in memory (the fixture keeps one store per name, as the
-// CLI's sqlite file does).
 import { afterEach, describe, expect, it } from "vitest";
 import {
   authorForSeed,
@@ -95,15 +31,12 @@ const homes: Gateway[] = [];
 afterEach(async () => {
   for (const gw of homes.splice(0)) await gw.close();
 });
-// A view of a store with no inventory and no whole-store byte probe: "empty" cannot be proven
-// through it. It keeps the store's journal, so a pool under its own key still opens over it.
 const BLIND = new Set(["ids", "holdsAny", "heldAmong"]);
 function blindView<B extends StoreBackend>(store: B): B {
   return new Proxy(store, {
     get(target, prop) {
       if (typeof prop === "string" && BLIND.has(prop)) return undefined;
-      if (prop === "holdsAnyRow") return () => Promise.resolve(true); // unprovable reads as held
-      // The journal machinery still lists the rows beside its own journal.
+      if (prop === "holdsAnyRow") return () => Promise.resolve(true);
       if (prop === "journalRowIds") return () => (target as unknown as MemoryBackend).ids();
       const value: unknown = Reflect.get(target, prop, target);
       return typeof value === "function"
@@ -116,8 +49,6 @@ class FaultBackend extends MemoryBackend {
   failPurgeAfter = Number.POSITIVE_INFINITY;
   purges = 0;
   failNextRetraction = false;
-  // THE FILE: one byte store per name, shared by every handle over it, the way a sqlite file is.
-  // A handle seeds itself from the file, and every append or purge through it changes the file.
   constructor(private readonly file: Delta[] = []) {
     super();
     if (file.length > 0) void MemoryBackend.prototype.append.call(this, [...file]);
@@ -135,7 +66,6 @@ class FaultBackend extends MemoryBackend {
     for (const d of batch) if (!this.file.some((f) => f.id === d.id)) this.file.push(d);
     return n;
   }
-  // A peer writes through its journal, so the retraction fault and the file reach that path too.
   #journal: DurableOrdinaryJournalStore | undefined;
   override journalStore(): DurableOrdinaryJournalStore {
     const inner = super.journalStore();
@@ -181,8 +111,6 @@ class FaultBackend extends MemoryBackend {
     return n;
   }
 }
-// THE HOST'S FILE: one store, journal included, that outlives each gateway over it, the way a
-// sqlite file outlives a process. A restart boots a new gateway over the same store.
 class HostFile extends FaultBackend {
   override async close(): Promise<void> {}
 }
@@ -192,14 +120,9 @@ class PoolFile extends FaultBackend {
 async function home() {
   const primary = new HostFile();
   const files = new Map<string, Delta[]>();
-  // Names whose NEXT store open fails once: a pool a boot cannot read is left unattached.
   const failAttach = new Set<string>();
-  // Names whose store is a MIRROR pair: the primary is the file above, the mirror its own file.
   const mirrors = new Map<string, Delta[]>();
-  // Names whose store offers no whole-store byte probe.
   const blind = new Set<string>();
-  // One store per name, journal included, that outlives every handle over it: a pool reopened
-  // by name finds its own journal, the way a sqlite file does.
   const disks = new Map<string, PoolFile>();
   const storeFor = (name: string): StoreBackend => {
     const file = files.get(name) ?? [];
@@ -222,8 +145,6 @@ async function home() {
   );
   homes.push(gw);
   const holds = (name: string, id: string) => (files.get(name) ?? []).some((d) => d.id === id);
-  // A RESTART: close this process's gateway and boot another over the same primary and the same
-  // files. Boot re-attaches every declared pool under its current declaration.
   const restart = async () => {
     await gw.close();
     homes.splice(homes.indexOf(gw), 1);
@@ -240,7 +161,6 @@ async function home() {
     homes.push(again);
     return again;
   };
-  // Remove rows from a pool's file by hand, around every door.
   const cut = (name: string, ids: Iterable<string>) => disks.get(name)!.purge(ids);
   return { gw, primary, holds, restart, failAttach, files, mirrors, blind, cut, disks };
 }
@@ -259,7 +179,6 @@ async function channel(gw: Gateway, prefix = "peer") {
   });
   return { ch, ...feed, pool: gatewayOf(ch.pool) };
 }
-// The operator's status stamps of one channel, by id: what a strike by hand negates.
 const statusIds = (gw: Gateway, name: string) =>
   [...gw.reactor.snapshot()]
     .filter(
@@ -315,12 +234,10 @@ describe("spec 64: a live opening cannot be erased", () => {
     expect(refusal).toContain("its pool's declaration still stands");
     expect(refusal).toContain(`Drop the channel first (dropChannel "${ch.name}")`);
     expect(refusal).toContain("read or extracted until then");
-    // Delta level: nothing was written anywhere.
     expect(bytes(gw)).toEqual(before.root);
     expect(bytes(pool)).toEqual(before.pool);
     expect(bytes(siblingPool)).toEqual(before.sibling);
     expect(markers(gw, ch.name)).toEqual([]);
-    // Object level: the channel is untouched. It receives, reads, and drops.
     offering.push(fact(3));
     await ch.sync();
     expect(
@@ -350,8 +267,6 @@ describe("spec 64: a live opening cannot be erased", () => {
     expect(attached).toContain("its pool is still attached and holds bytes");
     expect(gw.reactor.get(opening.id)).toBeDefined();
     expect(pool.reactor.get(fact(1).id)).toBeDefined();
-    // Cross-process: no handle in memory, the store on disk still holds the bytes. The three maps
-    // are what another process would not have; the pool object itself is this process's.
     gw.federationChannels.delete(ch.name);
     gw.channelPools.delete(ch.name);
     gw.attachedContainers.delete(ch.name);
@@ -361,7 +276,6 @@ describe("spec 64: a live opening cannot be erased", () => {
       "its pool's store still holds bytes although its declaration was negated",
     );
     expect(gw.reactor.get(opening.id)).toBeDefined();
-    // ONE byte is enough. The seed never leaves a store this small; a hand-written one can be.
     const file = files.get(ch.name)!;
     await cut(
       ch.name,
@@ -370,8 +284,6 @@ describe("spec 64: a live opening cannot be erased", () => {
     expect(file).toHaveLength(1);
     const oneByte = await gw.erase(opening.id).catch((e: Error) => e.message);
     expect(oneByte).toContain("still holds bytes although its declaration was negated");
-    // With the status standing, an open would RESUME and needs the declaration: the road is a
-    // declaration by hand, then the drop. The fresh-open road belongs to the status-struck state.
     expect(oneByte).toContain("re-declare the name by hand, then drop the channel");
     expect(gw.reactor.get(opening.id)).toBeDefined();
     await expect(gw.dropChannel(ch.name)).rejects.toThrow(/no surviving declaration/);
@@ -427,7 +339,7 @@ describe("spec 64: a live opening cannot be erased", () => {
     await gw.dropChannel(ch.name);
     expect(survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, ch.name)).toEqual([]);
     expect(holds(ch.name, fact(1).id)).toBe(false);
-    expect(events(gw, ch.name, "close")).toEqual([]); // nothing was open, so nothing is closed
+    expect(events(gw, ch.name, "close")).toEqual([]);
     await gw.erase(opening.id);
     expect(gw.reactor.get(opening.id)).toBeUndefined();
   });
@@ -437,7 +349,6 @@ describe("spec 64: a live opening cannot be erased", () => {
     a.offering.push(fact(1));
     await a.ch.sync();
     const opening = opened(first.gw, a.ch.name).opening;
-    // Strike the declaration AND the status records by hand, no drop: the store keeps its bytes.
     const struck = [
       ...survivingDeclarationIds(first.gw.reactor, first.gw.validityNow(), OP, a.ch.name),
       ...[...first.gw.reactor.snapshot()]
@@ -460,9 +371,6 @@ describe("spec 64: a live opening cannot be erased", () => {
       ]);
     const gw = await first.restart();
     expect(first.holds(a.ch.name, fact(1).id)).toBe(true);
-    // The fresh open attaches over the leftover store: the name keys the file. The new
-    // incarnation's receipts name only what it received, so the old bytes are still the old
-    // opening's, and its erase refuses until the incarnation holding them is dropped.
     const feed = peer();
     const fresh = await gw.openChannel({
       into: "friends",
@@ -502,8 +410,6 @@ describe("spec 64: a live opening cannot be erased", () => {
         SEED,
       ),
     ]);
-    // Plant, through the host's peer journal and around the door, an open literal this parser
-    // cannot read: it lacks the parent-container pointer. Then restart, so boot reads it as history.
     const held = first.gw.reactor.get(opening.id)!;
     const unreadable = signClaims(
       {
@@ -538,7 +444,6 @@ describe("spec 64: a live opening cannot be erased", () => {
     });
     feed.offering.push(fact(2));
     await again.sync();
-    // The seed copied the stranger's byte into the new pool; no receipt names it; the root holds it.
     expect(gatewayOf(again.pool).reactor.get(stranger.id)).toBeDefined();
     await gw.erase(first.id);
     expect(gw.reactor.get(first.id)).toBeUndefined();
@@ -589,7 +494,6 @@ describe("spec 64: a live opening cannot be erased", () => {
     expect(gw.reactor.get(opening.id)).toBeUndefined();
   });
   it("both orphan states read the same after a restart: the erase refuses or the drop works, never a strand", async () => {
-    // Struck and replaced by hand, then a restart that re-attaches under the new declaration.
     const first = await home();
     const a = await channel(first.gw);
     a.offering.push(fact(1));
@@ -621,7 +525,6 @@ describe("spec 64: a live opening cannot be erased", () => {
     ]);
     const gw = await first.restart();
     expect(gw.channelPools.get(a.ch.name)).toBeDefined();
-    // The erase must not strand the bytes: the attached pool is no other incarnation's.
     await expect(gw.erase(aOpening.id)).rejects.toThrow(/no opening names is attached/);
     expect(first.holds(a.ch.name, fact(1).id)).toBe(true);
     await gw.dropChannel(a.ch.name);
@@ -629,7 +532,6 @@ describe("spec 64: a live opening cannot be erased", () => {
     expect(survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, a.ch.name)).toEqual([]);
     await gw.erase(aOpening.id);
     expect(gw.reactor.get(aOpening.id)).toBeUndefined();
-    // A second declaration by hand, then a restart.
     const second = await home();
     const b = await channel(second.gw);
     b.offering.push(fact(2));
@@ -670,16 +572,13 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     const siblingReceipt = events(gw, sibling.name, "received")[0]!;
     await gw.dropChannel(ch.name);
     const close = events(gw, ch.name, "close")[0]!;
-    // The receipt and the close purge first; the opening's own purge is the third and fails.
     primary.purges = 0;
     primary.failPurgeAfter = 2;
     await expect(gw.erase(opening.id)).rejects.toThrow();
     expect(gw.reactor.get(receipt.id)).toBeUndefined();
     expect(gw.reactor.get(close.id)).toBeUndefined();
-    // The opening's order is admitted, so the reading drops it; its bytes stay held and owed.
     expect(gw.reactor.get(opening.id)).toBeUndefined();
     expect(await primary.holds(opening.id)).toBe(true);
-    // The history is still readable: the opening resolves, so no receipt names a hole.
     expect(localChannelEvidence(gw, ch.name)).not.toEqual({
       state: "unavailable",
       reason: "missing referenced opening",
@@ -688,7 +587,6 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
       state: "unavailable",
       reason: "invalid local event history",
     });
-    // The re-run finishes: the settled members are skipped, the opening goes last.
     primary.failPurgeAfter = Number.POSITIVE_INFINITY;
     const report = await gw.erase(opening.id);
     expect(report.erased).toBe(opening.id);
@@ -701,7 +599,6 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
       state: "unavailable",
       reason: "erased opening",
     });
-    // Bystanders at the bytes: the sibling's lineage and the root's status stamps.
     expect(gw.reactor.get(siblingReceipt.id)).toBeDefined();
     expect(await primary.holds(siblingReceipt.id)).toBe(true);
     expect(gw.reactor.get(opening.statusAtOpen)).toBeDefined();
@@ -716,8 +613,6 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     const receipt = events(gw, ch.name, "received")[0]!;
     await gw.dropChannel(ch.name);
     const close = events(gw, ch.name, "close")[0]!;
-    // The FIRST member purge fails, whichever member sorts first: its erasure lands, its bytes
-    // stay held, and the other member is untouched.
     primary.purges = 0;
     primary.failPurgeAfter = 0;
     await expect(gw.erase(opening.id)).rejects.toThrow(/STILL HELD/);
@@ -725,10 +620,8 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     const held = [receipt, close].filter((m) => dead.has(m.id));
     expect(held).toHaveLength(1);
     expect(await primary.holds(held[0]!.id)).toBe(true);
-    // Its order is admitted, so the reading drops it while its bytes stay held.
     expect(gw.reactor.get(held[0]!.id)).toBeUndefined();
     expect(gw.reactor.get(opening.id)).toBeDefined();
-    // The re-run erases that member again, anchoring on its erasure, then finishes.
     primary.failPurgeAfter = Number.POSITIVE_INFINITY;
     const report = await gw.erase(opening.id);
     expect(report.erased).toBe(opening.id);
@@ -783,8 +676,6 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     });
     feed.offering.push(fact(2));
     await again.sync();
-    // The pool's store is unreadable at boot, then readable again: the later declaration stands
-    // on the record and no handle is in memory. The §11 sweep refuses before the liveness probe.
     first.failAttach.add(ch.name);
     const gw = await first.restart();
     expect(gw.channelPools.get(ch.name)).toBeUndefined();
@@ -793,8 +684,6 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     );
     expect(gw.reactor.get(earlier.id)).toBeDefined();
     expect(first.holds(ch.name, fact(2).id)).toBe(true);
-    // The drop in this process attaches the pool, registers it for its own lifecycle read, and
-    // purges it. The earlier opening's erase then proceeds.
     await gw.dropChannel(ch.name);
     expect(first.holds(ch.name, fact(2).id)).toBe(false);
     await gw.erase(earlier.id);
@@ -858,15 +747,12 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     feed.offering.push(fact(2));
     await again.sync();
     await again.pool.detach("kept for extraction");
-    // The two maps still hold the detached handle in this process; a boot over a store this
-    // process cannot read has neither. That is the state this case models.
     gw.federationChannels.delete(ch.name);
     gw.channelPools.delete(ch.name);
     const refusal = await gw.erase(earlier.id).catch((e: Error) => e.message);
     expect(refusal).toContain("attach it first");
     expect(refusal).not.toContain("dropChannel");
     expect(gw.reactor.get(earlier.id)).toBeDefined();
-    // The road: the open resumes the standing incarnation; its bytes are its own; the erase proceeds.
     await gw.openChannel(opts);
     await gw.erase(earlier.id);
     expect(gw.reactor.get(earlier.id)).toBeUndefined();
@@ -909,8 +795,6 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     const refusal = await gw.erase(opening.id).catch((e: Error) => e.message);
     expect(refusal).toContain("detach() it, then drop the channel (dropChannel), then erase again");
     expect(gw.reactor.get(opening.id)).toBeDefined();
-    // The road, run to its end: the name is severed on the record, not left with stamps and no
-    // declaration (a container drop() alone leaves that, and every boot then fails to attach it).
     await hand.detach("kept for extraction");
     await gw.dropChannel(ch.name);
     expect(holds(ch.name, fact(1).id)).toBe(false);
@@ -924,7 +808,6 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     offering.push(fact(1));
     await ch.sync();
     const opening = opened(gw, ch.name).opening;
-    // A live bystander opened BEFORE the strike and the drop.
     const { ch: sibling, offering: siblingOffering } = await channel(gw, "peer0");
     siblingOffering.push(fact(9));
     await sibling.sync();
@@ -947,7 +830,6 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     expect(gw.federationChannels.get(ch.name)).toBeUndefined();
     await gw.erase(opening.id);
     expect(gw.reactor.get(opening.id)).toBeUndefined();
-    // The name is whole again: a fresh open records a new incarnation and receives.
     const feed = peer();
     const again = await gw.openChannel({
       into: "friends",
@@ -958,8 +840,6 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     feed.offering.push(fact(2));
     await again.sync();
     expect(opened(gw, ch.name).received.map((d) => d.id)).toEqual([fact(2).id]);
-    // A dropped handle in the map reads as no pool: the drop through the handle strikes the
-    // declaration and purges, and the erase then proceeds past the stale entry.
     const { ch: other, offering: otherOffering } = await channel(gw, "peer2");
     otherOffering.push(fact(3));
     await other.sync();
@@ -996,7 +876,6 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     await ch.sync();
     await gw.dropChannel(ch.name);
     const factoryOpens = files.size;
-    // A separate container by hand with ITS OWN store, first attached, then detached to keep.
     await gw.append([
       signClaims(
         withStamp(gw.stamp(OP), (t) =>
@@ -1019,7 +898,6 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     expect(own.some((d) => d.id === fact(7).id)).toBe(true);
     expect(survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, ch.name)).toHaveLength(1);
     expect(files.size).toBe(factoryOpens);
-    // A SHARED container by hand under the name: no pool exists to purge, so no purge is reported.
     for (const id of survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, ch.name))
       await gw.append([
         signClaims(
@@ -1073,8 +951,6 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     expect(refusal).toContain("a pool is still attached here under that name and holds bytes");
     expect(refusal).not.toContain("nothing left to remove");
     expect(first.holds(ch.name, fact(1).id)).toBe(true);
-    // The road: restart (boot attaches by status, so nothing attaches), open again under the
-    // name (which attaches the leftover store), drop, erase.
     const gw = await first.restart();
     expect(gw.channelPools.get(ch.name)).toBeUndefined();
     const feed = peer();
@@ -1106,7 +982,6 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
           SEED,
         ),
       ]);
-    // The primary purged, the mirror did not: the read path shows nothing, the bytes remain.
     const file = first.files.get(ch.name)!;
     first.mirrors.set(ch.name, [...file]);
     await first.cut(
@@ -1121,9 +996,6 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     );
     expect(gw.reactor.get(opening.id)).toBeDefined();
     expect(first.mirrors.get(ch.name)!.some((d) => d.id === fact(1).id)).toBe(true);
-    // The road: a fresh open attaches the pair. The drop cannot name the mirror's byte from any
-    // read, so it refuses rather than report clean; a heal replants it into the primary; the
-    // drop then purges both tiers and the erase proceeds.
     const feed = peer();
     await gw.openChannel({
       into: "friends",
@@ -1131,16 +1003,9 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
       from: "https://peer.example/peer",
       source: feed.source,
     });
-    // Reopened, the later incarnation's reactor shows the seed and its own receipts only; the
-    // earlier opening's receipts name the mirror's byte, and the store is asked at the bytes.
     const reopened = await gw.erase(opening.id).catch((e: Error) => e.message);
-    // Three bytes: the peer's, and the earlier pool's own two markers (its opening marker and its
-    // incarnation marker), which the mirror also kept and the later pool cannot resolve.
-    // Unresolvable is unaccounted, so all count until a heal.
     expect(reopened).toMatch(/holds 3 byte\(s\) that no receipt of that incarnation names/);
     expect(gw.reactor.get(opening.id)).toBeDefined();
-    // Erasing the earlier receipt by hand forgets the attribution, not the byte: the store's
-    // inventory still accounts for it, and the opening's erase still refuses.
     await gw.erase(receipt.id);
     expect(gw.reactor.get(receipt.id)).toBeUndefined();
     expect(first.mirrors.get(ch.name)!.some((d) => d.id === fact(1).id)).toBe(true);
@@ -1156,8 +1021,6 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
       new FaultBackend(first.mirrors.get(ch.name)),
     ).heal();
     expect(file.some((d) => d.id === fact(1).id)).toBe(true);
-    // A handle reads its store once at open (the store contract), so the healed primary is seen
-    // by the next boot, which attaches the pool by its fresh status.
     const gw2 = await first.restart();
     await gw2.dropChannel(ch.name);
     expect(file.some((d) => d.id === fact(1).id)).toBe(false);
@@ -1185,7 +1048,6 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     const refusal = await first.gw.erase(earlier.id).catch((e: Error) => e.message);
     expect(refusal).toContain("cannot be listed on every tier (the store offers no inventory)");
     expect(first.gw.reactor.get(earlier.id)).toBeDefined();
-    // Bystander: the later incarnation keeps receiving.
     feed.offering.push(fact(3));
     await again.sync();
     expect(
@@ -1220,8 +1082,6 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
       /still holds bytes although its declaration was negated/,
     );
     expect(gw.reactor.get(opening.id)).toBeDefined();
-    // With the probe back, the store still answers "held": its rows are cut, but the pool's own
-    // journal still carries them. The road the refusal names: open again, drop, then erase.
     first.blind.delete(ch.name);
     await expect(gw.erase(opening.id)).rejects.toThrow(/open the channel again under this name/);
     const feed = peer();
@@ -1300,14 +1160,11 @@ describe("spec 64: after the drop, the erase takes the incarnation's lineage", (
     const opening = opened(gw, ch.name).opening;
     expect(holds(ch.name, fact(1).id)).toBe(true);
     primary.failNextRetraction = true;
-    // The purge ran and the store closed; only the strike failed, so the declaration stands.
     await expect(gw.dropChannel(ch.name)).rejects.toThrow(
       /discarded .* at the bytes .* could not be negated/,
     );
     expect(holds(ch.name, fact(1).id)).toBe(false);
     expect(survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, ch.name)).not.toEqual([]);
-    // Still live: the declaration stands over a store the sweep cannot reach, so the erase refuses
-    // up front (§27.7's completeness guard) and removes nothing.
     const refusal = await gw.erase(opening.id).catch((e: Error) => e.message);
     expect(refusal).toMatch(/refused/);
     expect(refusal).toContain(ch.name);

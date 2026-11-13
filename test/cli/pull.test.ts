@@ -1,10 +1,3 @@
-// SPEC §15, continuity: `loam pull <url|file>` — one command, one door, two sources. A live
-// peer or a frozen offer, both through Gateway.federate: trust-admission, no standing needed,
-// erasures still bar the door. Then the fork the operator decides: under the SAME operator
-// seed the imported law BINDS (the CLI store IS the browser store — the operator marker is the
-// same delta by content address); under a foreign seed the deltas cross and the law stays
-// inert, exactly as §5/§7/§14 promise.
-
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,9 +14,9 @@ import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 import { FERN, GARDENER, GARDENER_SEED, observed } from "../spike/garden.js";
 
-vi.setConfig({ testTimeout: 20_000 }); // real sqlite homes and a real HTTP server ride here
+vi.setConfig({ testTimeout: 20_000 });
 
-const TAB_SEED = "7a".repeat(32); // the browser store's operator — the seed that walks out
+const TAB_SEED = "7a".repeat(32);
 const TAB_OPERATOR = authorForSeed(TAB_SEED);
 
 let dir: string;
@@ -40,8 +33,6 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-// The store born in a tab: governed, registered, lived-in — then frozen to a file. The
-// gardener holds a REAL grant here, so the law that must bind on arrival has teeth to show.
 async function tabExport(): Promise<{ file: string; hex: string }> {
   const tab = await Gateway.boot(
     new MemoryBackend(),
@@ -72,15 +63,12 @@ describe("loam pull <file>: the store walks out of the browser", () => {
     expect(code).toBe(0);
     expect(out.join("\n")).toMatch(/\d+ accepted/);
 
-    // The store answers through the IMPORTED registration — no register() ran here, ever.
     const cli = await Gateway.open(new SqliteBackend(storePath(home)), { seed: TAB_SEED });
     const answer = await cli.query(`{ plant(entity: "${FERN}") { height _hex } }`);
     const view = answer.data as { plant: { height: number; _hex: string } };
     expect(view.plant.height).toBe(62);
-    // The round trip proves identity: the same view, hash for hash — this IS the tab's store.
     expect(view.plant._hex).toBe(hex);
 
-    // And the imported GRANTS gate: the gardener (granted in the tab) writes; a stranger cannot.
     const allowed = await cli.query(
       `mutation { plant(entity: "${FERN}", height: 63) { height } }`,
       undefined,
@@ -99,12 +87,11 @@ describe("loam pull <file>: the store walks out of the browser", () => {
   it("foreign operator: the deltas cross, the law stays inert", async () => {
     const { file } = await tabExport();
     const home = join(dir, "home");
-    await run(["init", "--home", home], io()); // a minted seed — NOT the tab's
+    await run(["init", "--home", home], io());
     const code = await run(["pull", file, "--home", home], io());
     expect(code).toBe(0);
-    expect(out.join("\n")).toMatch(/[1-9]\d* accepted/); // the testimony arrived whole
+    expect(out.join("\n")).toMatch(/[1-9]\d* accepted/);
 
-    // Under HER operator, the foreign registration reshapes nothing: no surface at all.
     const { readSeed } = await import("../../src/cli/config.js");
     const hers = await Gateway.open(new SqliteBackend(storePath(home)), {
       seed: readSeed(home),
@@ -122,7 +109,6 @@ describe("loam pull <file>: the store walks out of the browser", () => {
   it("an erased id is refused at the door — even from a file", async () => {
     const home = join(dir, "home");
     await run(["init", "--home", home, "--seed", TAB_SEED], io());
-    // The operator lands a fact, then unsays it.
     const fact = observed(FERN, "height", 30, 1000, TAB_SEED);
     const own = await Gateway.boot(
       new SqliteBackend(storePath(home)),
@@ -131,7 +117,6 @@ describe("loam pull <file>: the store walks out of the browser", () => {
     await own.append([fact]);
     await own.erase(fact.id, { reason: "unsaid" });
     await own.close();
-    // A frozen offer arrives carrying the erased delta — the door remembers the hole.
     const carrier = await Gateway.open(new MemoryBackend(), { seed: TAB_SEED });
     await carrier.append([fact]);
     const file = join(dir, "carrier.json");
@@ -143,7 +128,7 @@ describe("loam pull <file>: the store walks out of the browser", () => {
     const backend = new SqliteBackend(storePath(home));
     const held = (await backend.deltasSince(new Set())).map((d) => d.id);
     await backend.close();
-    expect(held).not.toContain(fact.id); // erased stays erased; re-pulling is not negation
+    expect(held).not.toContain(fact.id);
   });
 
   it("refuses what is not an offer, without wrecking anything", async () => {
@@ -152,7 +137,7 @@ describe("loam pull <file>: the store walks out of the browser", () => {
     const file = join(dir, "not-an-offer.json");
     writeFileSync(file, `{"surprise": true}`);
     const code = await run(["pull", file, "--home", home], io());
-    expect(code).toBe(2); // a malformed offer is a usage-class refusal, distinct from read failure
+    expect(code).toBe(2);
     expect(err.join("\n")).toMatch(/deltas/);
   });
 
@@ -177,27 +162,25 @@ describe("loam pull <file>: the store walks out of the browser", () => {
 
     out.length = 0;
     const code = await run(["pull", file, "--home", home], io());
-    expect(code).toBe(0); // refusal at the door is a report, not a crash
+    expect(code).toBe(0);
     expect(out.join("\n")).toMatch(/\b0 accepted/);
     expect(out.join("\n")).toMatch(/[1-9]\d* refused/);
   });
 
   it("an uninitialized home mints its own operator — and says what that means for the law", async () => {
     const { file } = await tabExport();
-    const home = join(dir, "fresh"); // no `loam init` ever ran here
+    const home = join(dir, "fresh");
     const code = await run(["pull", file, "--home", home], io());
     expect(code).toBe(0);
     const printed = out.join("\n");
-    expect(printed).toMatch(/initialized/); // initHome-on-the-fly, like serve
-    expect(printed).toMatch(/[1-9]\d* accepted/); // the deltas crossed
-    // The fork stated plainly: a just-minted operator means the offer's law is foreign here.
+    expect(printed).toMatch(/initialized/);
+    expect(printed).toMatch(/[1-9]\d* accepted/);
     expect(printed).toMatch(/loam init --seed/);
   });
 });
 
 describe("loam pull <url>: a live peer through the same door", () => {
   it("pulls a served store and re-pulling accepts nothing new — union is union", async () => {
-    // The source: a served home with a fact in it.
     const srcHome = join(dir, "src");
     await run(["init", "--home", srcHome, "--seed", TAB_SEED], io());
     const src = await Gateway.boot(
@@ -226,9 +209,8 @@ describe("loam pull <url>: a live peer through the same door", () => {
         io(),
       );
       expect(second).toBe(0);
-      expect(out.join("\n")).toMatch(/\b0 accepted/); // idempotent: double delivery is harmless
+      expect(out.join("\n")).toMatch(/\b0 accepted/);
 
-      // The token may ride the environment instead of the flag (containers pass it that way).
       const envHome = join(dir, "env-dest");
       await run(["init", "--home", envHome], io());
       process.env["LOAM_TOKEN"] = "tok";
@@ -252,8 +234,6 @@ describe("loam pull <url>: a live peer through the same door", () => {
   });
 
   it("a down peer names the address, the cause, and the cure — not a bare fetch failed", async () => {
-    // A bound-then-closed loopback port is a near-certain ECONNREFUSED (the theoretical
-    // race — another listener taking it in the window — fails LOUD, never false-green).
     const { createServer } = await import("node:http");
     const server = createServer();
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));

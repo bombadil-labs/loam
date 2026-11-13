@@ -1,6 +1,3 @@
-// M5 schedules on the portable door: a source change in flight, validity crossed by explicit time,
-// and capacity at the input boundary. Each case reads both routes and names which route ran.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -47,8 +44,6 @@ async function store(portableReads: boolean, routes?: Route[], facts: Delta[] = 
   return gw;
 }
 
-// A moss height that holds only inside [validFrom, validUntil). Timestamp and validity are
-// independent: it was said in the past and holds in the future.
 const MOSS = "plant:moss";
 const mossHeight = (value: number, timestamp: number, from: number, until?: number): Delta =>
   signClaims(
@@ -65,8 +60,6 @@ const mossHeight = (value: number, timestamp: number, from: number, until?: numb
     GARDENER_SEED,
   );
 
-// The external SQLite half of schedule 5 (another handle deletes or replaces a row) is in
-// m5-portable-read.test.ts. This half moves the source through the gateway itself.
 describe("M5 schedule 5: a source change in flight refuses, the next read sees it", () => {
   it("a prepared read whose source moved before dispatch refuses visibly, once", async () => {
     const gw = await store(true);
@@ -74,11 +67,9 @@ describe("M5 schedule 5: a source change in flight refuses, the next read sees i
     const route = classifyPortableRead(gw, "Plant", FERN, now);
     expect(route.route).toBe("portable");
     if (route.route !== "portable") return;
-    // The source moves after the read was frozen and before it runs.
     await gw.append([observed(FERN, "height", 99, now - 1, GARDENER_SEED)]);
     const answer = await runPortableRead(route.signer, route.prepared);
     expect(answer).toMatchObject({ status: "refused", stage: "gather", code: "source-changed" });
-    // The next read takes a new basis and sees the new fact, on the portable route.
     const res = await gw.query(`{ plant(entity: "${FERN}") { height } }`);
     expect(res.errors).toBeUndefined();
     expect(res.data).toEqual({ plant: { height: 99 } });
@@ -91,7 +82,6 @@ describe("M5 schedule 6: explicit time crosses validity without ingest", () => {
     const routes: Route[] = [];
     const native = await store(false),
       portable = await store(true, routes);
-    // Moss is not a registered root, so the native read evaluates cold at each explicit time.
     const base = Math.max(native.now(), portable.now());
     const facts = [
       mossHeight(10, base - 2, base - 2),
@@ -115,8 +105,6 @@ describe("M5 schedule 6: explicit time crosses validity without ingest", () => {
 });
 
 describe("M5 schedule 8: input capacity is decided before dispatch", () => {
-  // The limit counts the snapshot's appearances. A scoped capture holds only S(scope), so the
-  // limit follows the read's footprint and never the size of the store (SPEC-17 P7).
   const prepared = (gw: Gateway, now: number) => {
     const c = classifyPortableRead(gw, "Plant", FERN, now);
     if (c.route !== "portable") throw Error(`expected a portable route, got ${c.reason}`);
@@ -136,7 +124,6 @@ describe("M5 schedule 8: input capacity is decided before dispatch", () => {
     const before = prepared(gw, now).source.revision;
     await gw.append(unrelated(5000));
     expect(gw.reactor.size).toBeGreaterThan(5000);
-    // The same scope, the same members, the same revision.
     expect(prepared(gw, now).source.revision).toBe(before);
     const read = await gw.readNode("Plant", FERN, undefined, now);
     expect(routes.at(-1)).toEqual({ lens: "Plant", entity: FERN, route: "portable" });
@@ -148,7 +135,6 @@ describe("M5 schedule 8: input capacity is decided before dispatch", () => {
     const routes: Route[] = [];
     const gw = await store(true, routes);
     const now = gw.now();
-    // Facts outside the scope: a whole-store capture would cross the limit before the scope does.
     await gw.append(unrelated(16));
     const fill = (from: number, count: number) =>
       Array.from({ length: count }, (_, n) =>
@@ -183,7 +169,6 @@ describe("M5 schedule 9: concurrent preparations keep their own basis", () => {
     await gw.append([mossHeight(10, gw.now() - 1, gw.now() - 1)]);
     const now = gw.now();
     const stale = classifyPortableRead(gw, "Plant", FERN, now);
-    // The source moves; the moss read is prepared after it, on the new basis.
     await gw.append([observed(FERN, "height", 77, now - 1, GARDENER_SEED)]);
     const later = gw.now();
     const fresh = classifyPortableRead(gw, "Plant", MOSS, later);
@@ -220,7 +205,6 @@ describe("M5 schedules 2 and 7: a durable store reopens and reads from its publi
     await first.gw.close();
     await first.backend.close();
 
-    // A fresh process: no native registration or cache survives; law is refolded from the journal.
     const routes: Route[] = [];
     const second = await open(routes);
     const now = second.gw.now();
@@ -393,7 +377,6 @@ describe("M5 schedule 7: an unavailable source refuses", () => {
       stage: "gather",
       code: "source-unavailable",
     });
-    // The same prepared read with its source readable completes: the refusal is the source's.
     expect(await runPortableRead(route.signer, route.prepared)).toMatchObject({
       status: "completed",
     });

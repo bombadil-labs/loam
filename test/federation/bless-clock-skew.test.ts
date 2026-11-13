@@ -1,7 +1,3 @@
-// Law from a peer whose clock runs ahead of ours starts later than our present. The sync parks it
-// and says when it starts; the first sync after that moment binds it. Both steps are asserted, so
-// a park that never recovers, or a reason that hides the start, both fail here.
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -43,11 +39,11 @@ describe("blessing law from a peer whose clock runs ahead", () => {
       /alice:Plant: a schema definition for hyperschema:Plant first survives at/,
     );
     const start = Number(/first survives at (\d+)/.exec(early.parked[0]!)?.[1]);
-    expect(start).toBeGreaterThanOrEqual(T + SKEW); // the peer's clock, not ours
+    expect(start).toBeGreaterThanOrEqual(T + SKEW);
     expect(start).toBeLessThan(T + SKEW + 1_000);
     const readsAt = Number(/this store reads at (\d+)/.exec(early.parked[0]!)?.[1]);
     expect(readsAt).toBeGreaterThanOrEqual(T);
-    expect(readsAt).toBeLessThan(start); // the read time comes before the definition's start
+    expect(readsAt).toBeLessThan(start);
     expect(early.parked[0]).not.toMatch(/no surviving schema definition/);
 
     vi.setSystemTime(T + SKEW + 1_000);

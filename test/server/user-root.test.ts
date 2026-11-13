@@ -1,11 +1,3 @@
-// The user record names the user's current root key (README ruling 5). Every road that mints a user
-// a key writes the pointer beside the grant: `ensureUserKey`, `loam user create --operator`,
-// and `loam user assign-role --role=operator`. Each case asks two levels: the delta the ground holds
-// (an operator-signed `loam.root` claim naming the key) and what `rootOf` resolves.
-//
-// Nothing reads `rootOf` for standing yet; step 5 PR 3d does. Erasure stays with every store here
-// in its own temp dir or in memory.
-
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -84,7 +76,7 @@ describe("rootOf reads the operator's latest pointer", () => {
     expect(at(gw, "ada")).toBeUndefined();
     await gw.append([signClaims(rootClaims("ada", K1, OP, 20), OP_SEED)]);
     expect(at(gw, "ada")).toBe(K1);
-    expect(at(gw, "bea")).toBeUndefined(); // a user with no record has no root
+    expect(at(gw, "bea")).toBeUndefined();
     await gw.close();
   });
 
@@ -101,7 +93,7 @@ describe("rootOf reads the operator's latest pointer", () => {
     const gw = await store();
     await gw.append([signClaims(rootClaims("ada", K1, OP, 20), OP_SEED)]);
     const forged = signClaims(rootClaims("ada", WRITER, WRITER, 30), WRITER_SEED);
-    await gw.append([forged]); // the door admits it as ordinary data
+    await gw.append([forged]);
     expect(gw.reactor.get(forged.id)).toBeDefined();
     expect(at(gw, "ada")).toBe(K1);
     await gw.close();
@@ -135,7 +127,6 @@ describe("every road that mints a user a key names it as their root", () => {
     expect(more).toEqual([]);
     expect(record!.claims.author).toBe(OP);
     expect(at(gw, "ada")).toBe(key);
-    // A second call finds the seed present and writes nothing more.
     await ensureUserKey(gw, home, "ada", () => undefined);
     expect(rootRecords(gw.reactor, "ada")).toHaveLength(1);
     await gw.close();
@@ -196,7 +187,6 @@ describe("every road that mints a user a key names it as their root", () => {
     await withGround(async (gw) => {
       const op = gw.operator!;
       await gw.append([
-        // Ordered ahead of the wall clock, valid from now: the shape the store's own stamp makes.
         signClaims(
           { ...rootClaims("ada", K1, op, Date.now() + 1_000_000_000), validFrom: Date.now() },
           readSeed(home),
@@ -228,7 +218,7 @@ describe("every road that mints a user a key names it as their root", () => {
       await gw.append([signClaims(makeNegationClaims(op, Date.now(), record.id), readSeed(home))]);
     });
     rmSync(join(home, "credentials.json"), { force: true });
-    rmSync(userSeedPath(home, "ada"), { force: true }); // even with the old key file gone
+    rmSync(userSeedPath(home, "ada"), { force: true });
     const size = await withGround((gw) => gw.reactor.size);
     said.length = 0;
     expect(await run(["user", "create", "ada", "--home", home], io(), password)).toBe(2);
@@ -253,7 +243,7 @@ describe("every road that mints a user a key names it as their root", () => {
     async () => {
       expect(await run(["init", "--home", home], io())).toBe(0);
       expect(await run(["user", "create", "ada", "--home", home], io(), password)).toBe(0);
-      mkdirSync(userSeedPath(home, "ada")); // the seed write fails: a directory stands there
+      mkdirSync(userSeedPath(home, "ada"));
       expect(
         await run(["user", "assign-role", "ada", "--role=operator", "--home", home], io()),
       ).toBe(1);
@@ -271,9 +261,7 @@ describe("every road that mints a user a key names it as their root", () => {
       const ids = [...gw.reactor.byTarget("user:ada")].filter(
         (id) => gw.reactor.get(id)?.claims.author === op,
       );
-      expect(ids.length).toBeGreaterThanOrEqual(3); // record, role, root
-      // Everything that would pass to a new person goes, the admin grant naming user:ada included:
-      // left standing, it would bind for whoever next holds the entity.
+      expect(ids.length).toBeGreaterThanOrEqual(3);
       const grants = [...gw.reactor.snapshot()]
         .filter((d) =>
           d.claims.pointers.some(

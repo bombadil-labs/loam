@@ -1,29 +1,3 @@
-// SPEC §17/§21 — THE STORE HAS TWO NAME DERIVATIONS AND THEY DIFFER BY ONE CHARACTER.
-//
-// `buildGqlSchema` mangles store-native names into GraphQL-legal ones twice over, and the two are not
-// interchangeable:
-//
-//   `legalNameFor(s)`  — sanitize only. The VIEW TYPE's name, every PROP FIELD, and — the one that
-//                        surprises — every per-prop MUTATION ARGUMENT. `Height` stays `Height`.
-//   `queryFieldFor(s)` — the same, then initial-lowercased. The QUERY-ROOT and MUTATION-ROOT field of a
-//                        lens. Lens `Plant` is served at field `plant`.
-//
-// WHY THEY ARE EXPORTED. Anything that COMPOSES a document from store-native names needs both, and needs
-// to know which goes where. Neither is derivable by eye: `Plant` is the view type's name and `plant` is
-// the field's, so a caller carrying one function for both sites spells one of them wrong — and only for
-// names whose initial is an uppercase ASCII letter, which is exactly the population a lowercase-only
-// fixture cannot see. A caller with only the lowercasing one gets the ARGUMENT wrong, which is the
-// quietest possible failure: the read path names no prop, so reads keep working and only writes die.
-//
-// WHY THESE RAILS EXECUTE. Comparing a derivation against a re-implementation of itself proves nothing —
-// and neither does asserting against a stub, which echoes back whatever name it was handed and agrees
-// with any spelling. So every document below is executed against the schema the gateway ACTUALLY built,
-// and the wrong spelling is asserted refused by that same schema, so no rail here can pass by everything
-// working.
-//
-// WHAT IS DELIBERATELY NOT ASSERTED: which of the two a given CALLER should use. That is each caller's
-// own rail. This file pins what the STORE does, so a caller has something true to be checked against.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Policy, type Schema } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
@@ -54,8 +28,6 @@ describe("§21: the two derivations, as pure functions", () => {
   });
 
   it("sanitize illegal characters the same way, and only then lowercase", () => {
-    // The order matters: sanitizing first can PRODUCE a leading underscore, which must not then be
-    // lowercased into something else, and a leading digit must be escaped before the initial is judged.
     expect(legalNameFor("a-b c")).toBe("a_b_c");
     expect(queryFieldFor("a-b c")).toBe("a_b_c");
     expect(legalNameFor("9lives")).toBe("_9lives");
@@ -72,10 +44,6 @@ describe("§21: the two derivations, as pure functions", () => {
   });
 });
 
-// A reading whose writable prop's initial is an UPPERCASE letter — the only population in which the
-// two derivations disagree, and therefore the only fixture that can see a caller using the wrong one.
-// `Height` and not `height`: the lowercased spelling must have no argument to land on, or the mistake
-// would be masked by the very prop it mis-spells into.
 const CAPITAL_PROPS: Schema = {
   ...PLANT_POLICY,
   props: new Map<string, Policy>(
@@ -104,8 +72,6 @@ describe("§21: the QUERY root is `queryFieldFor`, executed against the live sch
     );
     expect(served.errors, JSON.stringify(served.errors)).toBeUndefined();
     expect(JSON.stringify(served.data)).toContain("42");
-    // The other spelling — the view type's name — is refused, which is what makes the rail above a
-    // measurement rather than a coincidence.
     const wrong = await gw.query(
       `query { ${legalNameFor("Plant")}(entity: ${JSON.stringify(FERN)}) { _entity } }`,
     );
@@ -115,7 +81,6 @@ describe("§21: the QUERY root is `queryFieldFor`, executed against the live sch
 
   it("names the VIEW TYPE with `legalNameFor` — visible in a type error", async () => {
     const gw = await boot(PLANT_POLICY, ["height"]);
-    // Asking for a field the view type does not have makes the schema say the type's own name back.
     const out = await gw.query(`query { ${queryFieldFor("Plant")}(entity: "x") { _nope } }`);
     expect(out.errors?.join(" ")).toContain(`${legalNameFor("Plant")}View`);
     await gw.close();
@@ -124,7 +89,6 @@ describe("§21: the QUERY root is `queryFieldFor`, executed against the live sch
 
 describe("§21: the MUTATION root is `queryFieldFor` and its ARGUMENTS are `legalNameFor`", () => {
   it("accepts a capital-initial prop as a capital-initial ARGUMENT", async () => {
-    // The asymmetry, stated as a measurement: the field is lowercased and the argument is not.
     const gw = await boot(CAPITAL_PROPS, ["Height"]);
     const doc =
       `mutation { ${queryFieldFor("Plant")}(entity: ${JSON.stringify(FERN)}, ` +
@@ -136,8 +100,6 @@ describe("§21: the MUTATION root is `queryFieldFor` and its ARGUMENTS are `lega
   });
 
   it("and REFUSES the lowercased argument — the mistake a single derivation makes", async () => {
-    // This is the whole point of exporting both. A caller carrying only `queryFieldFor` writes
-    // `height:` here and every write dies with `Unknown argument`, while its reads keep working.
     const gw = await boot(CAPITAL_PROPS, ["Height"]);
     const out = await gw.query(
       `mutation { ${queryFieldFor("Plant")}(entity: ${JSON.stringify(FERN)}, ` +
@@ -149,9 +111,6 @@ describe("§21: the MUTATION root is `queryFieldFor` and its ARGUMENTS are `lega
   });
 
   it("a lowercase-initial prop is the SAME either way, which is why a fixture must carry a capital", async () => {
-    // Named because it is the reason this file exists: over `height` the two derivations agree, so a
-    // suite whose every writable prop is lowercase-initial cannot tell a correct caller from a broken
-    // one. `test/gateway/fixtures.ts`'s PLANT_WRITABLE is entirely lowercase-initial.
     const gw = await boot(PLANT_POLICY, ["height"]);
     expect(legalNameFor("height")).toBe(queryFieldFor("height"));
     for (const spelling of [legalNameFor("height"), queryFieldFor("height")]) {
@@ -166,9 +125,6 @@ describe("§21: the MUTATION root is `queryFieldFor` and its ARGUMENTS are `lega
 
 describe("§21.7: the derivation keys on the LENS name, never the hyperschema's", () => {
   it("a reading named apart from its hyperschema is served at the READING's field", async () => {
-    // One hyperschema (`Plant`), one reading (`PlantDesc`). The two names no longer coincide, so a
-    // derivation applied to the wrong one answers a field the schema never built — and every artifact
-    // or client that composes a document from a lens name inherits this.
     const gw = await Gateway.boot(
       new MemoryBackend(),
       assembleGenesis({
@@ -193,7 +149,6 @@ describe("§21.7: the derivation keys on the LENS name, never the hyperschema's"
       `query { ${queryFieldFor("PlantDesc")}(entity: ${JSON.stringify(FERN)}) { _entity _hex } }`,
     );
     expect(served.errors, JSON.stringify(served.errors)).toBeUndefined();
-    // The PROGRAM name is not a field. `Plant` shares the hyperschema and is not what is served.
     const byProgram = await gw.query(
       `query { ${queryFieldFor("Plant")}(entity: ${JSON.stringify(FERN)}) { _entity } }`,
     );
@@ -202,5 +157,4 @@ describe("§21.7: the derivation keys on the LENS name, never the hyperschema's"
   });
 });
 
-// The signing helper is the fixture's; this file only ever needs it to exist.
 void signClaims;

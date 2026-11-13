@@ -1,19 +1,3 @@
-// §37 phase 13/15 — connector registration (T134). Criteria (1)–(8) of
-// .adlc/specs/37-13-connector-registration.md, transcribed against a live serve() with the
-// connector-registration door configured.
-//
-// THIS PHASE MINTS NOTHING — no code, no token, no seed — so there is no authorize or token door to
-// drive. Criterion (5)'s pin reads ONE source, a grant record in oauth.json, and the door that
-// produces one does not exist until phase 15. So the "an approved client survives a flood" rail
-// writes the grant DIRECTLY with phase 11's writeOAuthFile (a valid grant: a fresh 32-byte seed and
-// the actor its own seed derives), exactly as the working spec's criterion (5) requires.
-//
-// What this file deliberately does NOT assert, and which rail closes each gap:
-//   - No authorize/consent/token behavior — phases 14 and 15 own those doors and their rail files.
-//   - The OPT-IN negative (publicUrl set, connectors absent → /oauth/register is an ordinary 401)
-//     is phase 12's own rail, oauth-discovery.test.ts criterion (n). This file rails the other side:
-//     connectors configured → the door answers.
-
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { statSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -32,7 +16,7 @@ import {
   type OAuthGrant,
 } from "../../src/server/oauth-file.js";
 
-vi.setConfig({ testTimeout: 20000 }); // real listening servers
+vi.setConfig({ testTimeout: 20000 });
 
 const OP_SEED = "3d".repeat(32);
 const PUBLIC_URL = "https://loam.example:8443";
@@ -65,7 +49,7 @@ const bootGateway = async (): Promise<Gateway> => {
 interface ServeOpts {
   readonly allowRedirectOrigins?: readonly string[];
   readonly maxClients?: number;
-  readonly publicUrl?: string | null; // null = deliberately omit, for the boot-refusal rail
+  readonly publicUrl?: string | null;
   readonly faults?: string[];
 }
 
@@ -75,8 +59,6 @@ interface Served {
   close(): Promise<void>;
 }
 
-// A live serve() with the registration door configured. Each call boots its own gateway so a
-// close() in one test cannot strand another.
 const serveOAuth = async (home: string, opts: ServeOpts = {}): Promise<Served> => {
   const gw = await bootGateway();
   const publicUrl = opts.publicUrl === null ? undefined : (opts.publicUrl ?? PUBLIC_URL);
@@ -141,9 +123,6 @@ const register = async (
 
 const heldIds = (home: string): string[] => readOAuthFile(home).clients.map((c) => c.clientId);
 
-// The fixture that phase 15's token door will one day be — a valid grant, written straight into
-// oauth.json with phase 11's own writer. `writeOAuthFile` validates actor === authorForSeed(seed),
-// so a malformed grant fails the setup VISIBLY rather than pinning nothing in silence.
 const plantGrant = (home: string, clientId: string): void => {
   const actorSeed = randomBytes(32).toString("hex");
   const grant: OAuthGrant = {
@@ -163,13 +142,11 @@ describe("T134 — (1) registration is fenced by a configured allowlist and need
   it("answers a client_id with no session, and holds a public client at rest", async () => {
     const home = makeHome();
     const served = await serveOAuth(home);
-    // No cookie anywhere: claude.ai registers before any human is present.
     const res = await register(served.base, { name: "Claude" });
     expect(res.status).toBe(201);
     expect(res.clientId).not.toBe("");
     expect(res.body["client_name"]).toBe("Claude");
     expect(res.body["redirect_uris"]).toEqual([CLAUDE_REDIRECT]);
-    // A public client: this door mints no secret, so there is none to leak or rotate.
     expect(res.body["token_endpoint_auth_method"]).toBe("none");
     expect(res.body["client_secret"]).toBeUndefined();
 
@@ -179,8 +156,6 @@ describe("T134 — (1) registration is fenced by a configured allowlist and need
   });
 
   it("an EMPTY allowlist refuses every registration, and says why", async () => {
-    // The default posture for a store whose operator named no origin: §37 is off, loudly, rather
-    // than open. A door that registered anybody while nothing was configured is the hole.
     const home = makeHome();
     const served = await serveOAuth(home, { allowRedirectOrigins: [] });
     const res = await register(served.base);
@@ -194,9 +169,9 @@ describe("T134 — (1) registration is fenced by a configured allowlist and need
     const served = await serveOAuth(home);
     for (const body of [
       {},
-      { client_name: "Claude" }, // no redirect_uris
+      { client_name: "Claude" },
       { client_name: "Claude", redirect_uris: [] },
-      { client_name: "Claude", redirect_uris: CLAUDE_REDIRECT }, // a string, not an array
+      { client_name: "Claude", redirect_uris: CLAUDE_REDIRECT },
       { client_name: 7, redirect_uris: [CLAUDE_REDIRECT] },
       { client_name: "Claude", redirect_uris: [CLAUDE_REDIRECT, 7] },
       [],
@@ -210,9 +185,6 @@ describe("T134 — (1) registration is fenced by a configured allowlist and need
   });
 
   it("more redirect_uris than the door holds is refused; exactly the bound is admitted", async () => {
-    // The array-length bound (MAX_URIS). A registration is a handful of callbacks; a caller sending
-    // hundreds is padding the stored record, not describing a client. The positive control sits one
-    // below the bound so the rail pins the exact edge rather than "some large number".
     const home = makeHome();
     const served = await serveOAuth(home);
     const uri = (i: number): string => `${CLAUDE_ORIGIN}/cb${i}`;
@@ -225,8 +197,6 @@ describe("T134 — (1) registration is fenced by a configured allowlist and need
   });
 
   it("a single redirect_uri longer than the door holds is refused (MAX_URI edge)", async () => {
-    // The per-uri length bound. An otherwise valid allowlisted uri padded past the cap is refused;
-    // one at the cap is admitted, so the rail pins the exact edge.
     const home = makeHome();
     const served = await serveOAuth(home);
     const pad = (n: number): string => `${CLAUDE_ORIGIN}/${"a".repeat(n)}`;
@@ -257,20 +227,13 @@ describe("T134 — (2) a redirect_uri outside the allowlist is refused AT REGIST
     });
     expect(evil.status).toBe(400);
     expect(evil.body["error"]).toBe("invalid_redirect_uri");
-    // A refusal that still recorded the client would leave the attacker an id.
     expect(readOAuthFile(home).clients).toEqual([]);
-    // This door is unauthenticated and answers with a wildcard CORS origin, so an off-origin
-    // refusal must not hand an anonymous caller the operator's whole trust list or the config flag.
-    // The positive control is the EMPTY-allowlist test below, which DOES name the flag on purpose —
-    // so this negative is the redaction working, not an unrelated 400.
     const wire = JSON.stringify(evil.body);
-    expect(wire).not.toContain(OTHER_ORIGIN); // the other allowlisted origin, not echoed
+    expect(wire).not.toContain(OTHER_ORIGIN);
     expect(wire).not.toContain("--oauth-allow-redirect");
   });
 
   it("ALL the redirect uris must pass, not just the first", async () => {
-    // One honest uri carrying a hostile sibling: whichever authorize later accepts, the client holds
-    // both. A loop that returns on the first match admits this.
     const home = makeHome();
     const served = await serveOAuth(home);
     const mixed = await register(served.base, {
@@ -283,17 +246,14 @@ describe("T134 — (2) a redirect_uri outside the allowlist is refused AT REGIST
   it("an allowlisted ORIGIN admits any path at that origin, and no other origin", async () => {
     const home = makeHome();
     const served = await serveOAuth(home);
-    // Positive control: a deep path at an allowlisted origin registers.
     const ok = await register(served.base, { redirectUris: [`${OTHER_ORIGIN}/some/deep/path`] });
     expect(ok.status).toBe(201);
-    // A suffix match, a subdomain, a differing scheme and a differing port are each a different
-    // origin — the classic ways this fence fails open.
     for (const near of [
       `${CLAUDE_ORIGIN}.attacker.example/cb`,
       "https://evil-claude.ai/cb",
       "https://claude.ai.attacker.example/cb",
-      "http://claude.ai/cb", // scheme is part of an origin
-      "https://claude.ai:8443/cb", // so is the port
+      "http://claude.ai/cb",
+      "https://claude.ai:8443/cb",
     ]) {
       const res = await register(served.base, { redirectUris: [near] });
       expect(res.status, `${near} was admitted`).toBe(400);
@@ -325,24 +285,20 @@ describe("T134 — (3) control bytes are refused in EVERY operator-facing field"
     for (const hostile of [
       "Claude\n    client   connector-forged",
       "Claude\r\nEvil",
-      "Claude\u001b[2K\rEvil", // ANSI escape
-      "Claude\u0000", // NUL
-      "Claude\u2028Evil", // line separator
-      "Claude\u009b2K", // a C1 control byte
-      "Claude\tEvil", // tab
+      "Claude\u001b[2K\rEvil",
+      "Claude\u0000",
+      "Claude\u2028Evil",
+      "Claude\u009b2K",
+      "Claude\tEvil",
     ]) {
       const res = await register(served.base, { name: hostile });
       expect(res.status, `${JSON.stringify(hostile)} was admitted`).toBe(400);
     }
     expect(readOAuthFile(home).clients).toEqual([]);
-    // Positive control: punctuation and non-ASCII letters are fine — the rule is control bytes.
     expect((await register(served.base, { name: "Claude — Myk's connector ✨" })).status).toBe(201);
   });
 
   it("a redirect_uri carrying a control byte is refused, at the door and in the file", async () => {
-    // `new URL()` STRIPS tab, LF and CR while parsing, so a hostile uri parses clean, passes the
-    // origin and percent checks, and keeps its raw bytes in the stored string — where a future
-    // `loam grant list` prints them and forges a row. The client_name's rule must cover its sibling.
     const home = makeHome();
     const served = await serveOAuth(home);
     for (const hostile of [
@@ -369,10 +325,6 @@ describe("T134 — (4) the cap EVICTS, it does not refuse", () => {
   });
 
   it("at the cap the OLDEST never-approved registration is evicted, not the newest refused", async () => {
-    // A plain refusal at the cap is a lockout — this door takes no credential, so a stranger could
-    // fill it forever. The flood must evict its OWN earlier entries and the newcomer always gets in.
-    // A real delay between the three keeps registeredAt (a wall clock) distinct, so "oldest" is
-    // unambiguous.
     const home = makeHome();
     const served = await serveOAuth(home, { maxClients: 2 });
     const first = await register(served.base, { name: "oldest" });
@@ -392,21 +344,16 @@ describe("T134 — (5) an approved client is never evicted; an unpinned one stil
     const home = makeHome();
     const served = await serveOAuth(home, { maxClients: 2 });
     const keeper = await register(served.base, { name: "Claude" });
-    // The operator approved keeper: a grant record now pins it. Written directly (phase 11's format),
-    // because the door that mints one is phase 15.
     plantGrant(home, keeper.clientId);
     expect(readOAuthFile(home).grants.map((g) => g.clientId)).toEqual([keeper.clientId]);
-    await register(served.base, { name: "filler" }); // fills the table to its cap
+    await register(served.base, { name: "filler" });
 
     for (let i = 0; i < 6; i += 1) await register(served.base);
-    // Object level: keeper is still in the file. Delta level: its grant is untouched.
     expect(heldIds(home)).toContain(keeper.clientId);
     expect(readOAuthFile(home).grants.map((g) => g.clientId)).toEqual([keeper.clientId]);
   });
 
   it("a client with NO grant is still evictable — the pin is not a blanket", async () => {
-    // The other side. A pin that protected every registered client would be the lockout eviction
-    // exists to prevent, so the rail above must not pass by pinning everything.
     const home = makeHome();
     const served = await serveOAuth(home, { maxClients: 2 });
     const stranger = await register(served.base, { name: "no grant" });
@@ -416,8 +363,6 @@ describe("T134 — (5) an approved client is never evicted; an unpinned one stil
   });
 
   it("when every slot is pinned by a grant, a full house refuses rather than evicting", async () => {
-    // maxClients is ONE so the single slot is an approved connector's. A flood then finds nothing
-    // evictable and refuses — the approval is never displaced.
     const home = makeHome();
     const served = await serveOAuth(home, { maxClients: 1 });
     const keeper = await register(served.base, { name: "Claude" });
@@ -439,9 +384,6 @@ describe("T134 — (6) a registration survives a restart", () => {
     expect(first.status).toBe(201);
     await served.close();
 
-    // A NEW server over the SAME home. A second registration must read the existing record rather
-    // than start from empty — so BOTH clients are on disk afterward. If the restart lost the first,
-    // or the new server clobbered it, only one id survives and this fails.
     const restarted = await serveOAuth(home);
     const second = await register(restarted.base, { name: "second" });
     expect(second.status).toBe(201);
@@ -456,7 +398,6 @@ describe("T134 — (6) a registration survives a restart", () => {
     const served = await serveOAuth(home);
     await register(served.base);
     const mode = statSync(oauthPath(home)).mode & 0o777;
-    // Windows does not honour POSIX modes; there the assertion is vacuous and says so.
     if (process.platform !== "win32") expect(mode).toBe(0o600);
     expect(readOAuthFile(home).version).toBe(1);
   });
@@ -467,19 +408,14 @@ describe("T134 — (7) a file fault answers a fixed string to the caller, the de
     const home = makeHome();
     const faults: string[] = [];
     const served = await serveOAuth(home, { faults });
-    // Make the file unreadable. readOAuthFile throws OAuthFileUnreadable; the door must answer a
-    // constant string rather than the fault detail.
     writeFileSync(oauthPath(home), "{ this is not json");
     const res = await register(served.base);
     expect(res.status).toBe(503);
     expect(res.body["error"]).toBe("temporarily_unavailable");
     const wire = JSON.stringify(res.body);
-    // The caller learns nothing about the home. Negative assertions, each with a positive control.
     expect(wire).not.toContain(home);
     expect(wire).not.toContain("oauth.json");
     expect(wire).not.toContain("--oauth-allow-redirect");
-    // Positive control: the detail DID reach the operator's channel, and it names the path — so the
-    // 503 above is the redaction working, not an unrelated refusal that happens to omit the path.
     expect(faults.some((m) => m.includes(oauthPath(home)))).toBe(true);
   });
 });
@@ -487,13 +423,11 @@ describe("T134 — (7) a file fault answers a fixed string to the caller, the de
 describe("T134 — (8) the allowlist is boot-validated, and registration needs a public url", () => {
   it("serve refuses a malformed allowlist origin at boot", async () => {
     const home = makeHome();
-    // A default-port spelling that url.origin would silently drop and never match; a path; a
-    // non-https non-loopback origin. Each is a startup error, not a silent all-refuse.
     for (const origin of [
       "https://claude.ai:443",
       "https://claude.ai/cb",
       "http://claude.ai",
-      "not a url at all", // unparseable: the defect must be reported, not swallowed as valid
+      "not a url at all",
     ]) {
       await expect(
         serveOAuth(home, { allowRedirectOrigins: [origin] }),

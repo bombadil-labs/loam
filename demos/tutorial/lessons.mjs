@@ -1,58 +1,3 @@
-// The tutorial's ARC (§48), UI-free: the lessons as data. The page and the headless CI suite
-// drive exactly this module, so a lesson whose `run` stops doing its work fails in CI by name.
-//
-// THIS IS "A STORE OF YOUR OWN" — fifteen lessons in five acts, the arc the workshop settled.
-// The student is `you`; the other voice is Rae, whose film opinions are wrong. The spine is the
-// VIEWING — a date, a film, a rating — because a rewatch is a second true thing rather than a
-// contradiction, and that is the whole shape of this database in one domestic fact.
-//
-// A LESSON'S SHAPE:
-//   { id, role, title, copy, terms: [{term, meaning}], quiz?, steps: [...], check(ctx) }
-// and a STEP's:
-//   { id, label, have, want, how, run(ctx), observe: { page: {selector, contains?}, store(ctx) } }
-//
-// `have` / `want` / `how` are the three sentences every step shows: what we have, what we want,
-// how we get there. `observe` is what makes a step CHECKABLE: the page predicate and the store
-// predicate must BOTH hold after `run`, so a step that quietly stops working is refused rather
-// than banked. Prose is never compared to the DOM it produced.
-//
-// ROLES are the browser suite's targeting contract. `test/browser/tutorial.test.ts` freezes at
-// its landing and finds the mechanics it exercises by role, never by lesson number or title:
-//   "opening"         — the arc's FIRST lesson; boot has already happened
-//   "reveal"          — plants a glossary term from inside a STEP, not from the lesson's `terms`
-//                       (those are planted on entry); the payoff needs the student to act
-//   "erasure-finale"  — erases a record that landed AFTER at least one checkpoint boundary, so
-//                       one blob is holding those bytes when the sweep runs and an EARLIER blob
-//                       is not. Rae writes the condemned note in lesson 13; lesson 14 erases it,
-//                       so twelve boundaries predate it and one holds it.
-//
-// THE SATISFIABILITY RULE, which governs every `observe.page` and is mechanically checked
-// (`test/site/arc.test.ts`, "every step's page observable roots at an element the SHELL
-// declares"): a step's selector must root at an element declared in `index.html` whose content
-// renders FROM THE STORE. Two halves:
-//
-//   (a) STATE, NOT EVENT. `seePage` must hold in every store state where the step's store
-//       predicate holds — including after a bare reload, and when `run` finds its work already
-//       done. An observable true only in the instant after its own run is a TRAP on any
-//       irreversible step: the act cannot be repeated, so the step can never be completed.
-//   (b) NO ui.* DEPENDENCE. No selector may name an element that exists only while some page
-//       field is set. The tell is a selector absent from `index.html`.
-//
-// THREE MORE RULES THE FROZEN SUITE PINS:
-//   - The finale must be FULLY PASSABLE with every checkpoint blob deleted. So no finale step
-//     may observe the revert rail SHRINKING — there may be nothing to shrink. The sweep notice
-//     is the witness, and it speaks for every forgetting, destroyed or not.
-//   - ONE PRESS PER FINALE STEP. A two-stage act belongs to two steps.
-//   - Two copy pins are frozen: a finished quiz card's button says "done", and a sweep that
-//     found nothing says "there was nothing to destroy".
-//
-// AND ONE CLOCK. Every claim this arc writes is hand-signed at `ctx.ts()`, made valid no later
-// than now (`stampOf`, `heldNow`). The mutation door is
-// registered and the console invites the student through it, but no lesson writes that way:
-// `gateway.nextTimestamp()` and `ctx.ts()` are two monotonic counters, and interleaving them
-// would leave "whose word is latest" decided by a millisecond race — which is a coin flip on
-// every latest-wins read in Act III, and a flake in every rail that asserts one.
-
 import {
   CKPT_PREFIX,
   STORE_PREFIX,
@@ -65,8 +10,6 @@ import {
   sweepCheckpoints,
 } from "./player.mjs";
 
-// ---- the domain: one film diary ---------------------------------------------------------------
-
 export const DIARY = "diary:mine";
 export const VIEWING = "viewing:arrival";
 export const TENET = "viewing:tenet";
@@ -74,15 +17,10 @@ export const MOVIE_NIGHT = "viewing:paddington-2";
 export const CHASE = "viewing:fast-and-furious";
 export const RAE = "person:rae";
 
-// Stage keys. Rae is a character, so Rae's key lives here in the open — in a real store you
-// would never hold anyone else's, and the arc says so out loud when it hands Rae the first one.
-// Two of them, because lesson 13 gives Rae a fresh one and the old one has to stay refused.
 const RAE_FIRST_SEED = "a7".repeat(32);
 const RAE_SECOND_SEED = "b3".repeat(32);
-// The person who sends you a file claiming to be Rae. Nobody you know.
 const STRANGER_SEED = "5c".repeat(32);
 
-// The words the arc writes, kept here so a rail can ask about the exact bytes.
 const DIARY_TITLE = "A film diary of my own";
 const FIRST_NOTE = "made me cry on a Tuesday";
 const REGRET = "understood it completely";
@@ -92,23 +30,15 @@ const FORGED_LINE = "actually i loved it — rae";
 const MOVIE_NIGHT_NOTE = "we watched it three times and nobody apologised";
 const PRIVATE_LINE =
   "jamie texted me tonight: \"i can't do this on my own any more. please don't tell anyone.\"";
-// The shortest fragment of it that could only have come from those bytes — what a rail asks for
-// when it wants to know whether the words survived somewhere they should not.
 const PRIVATE_FRAGMENT = "jamie texted me";
 const LAST_LINE =
   "four films, two of us, one thing forgotten on purpose — and every line of the rest still mine";
 const STRANGER_NOTE = "a perfect film, no notes";
 const ERASURE_REASON = "a third person's words, never mine to keep";
 
-// The store's own vocabulary for a forgetting, restated here so a lesson can ask about a receipt
-// without importing the gateway's internals into a page module.
 const ERASURE_ENTITY = "loam:erasure";
 const ERASURE_CONTEXT = "loam.erasure";
 
-// ---- the reading programs ---------------------------------------------------------------------
-
-// Everything pointing at the root, bucketed by the context each pointer named. Struck records
-// drop. This is the plain description: it hears every hand that ever wrote here.
 const OPEN_GATHER = {
   op: "group",
   key: "byTargetContext",
@@ -119,15 +49,6 @@ const OPEN_GATHER = {
   },
 };
 
-// The same program, narrowed to the hands this reading agrees to hear. This is where "whose
-// word counts" actually lives — in the reading, not in the store, and never in a platform.
-//
-// TWO NARROWINGS, NOT ONE, and the second is the one that is easy to forget. The `select`
-// decides whose CLAIMS this reading admits. The `mask` decides whose TAKING-BACK it honours, and
-// it runs FIRST, over the whole ground — so a plain "drop" mask would let any stranger who can
-// get a record in here strike the student's own rating and watch it vanish from their private
-// shelf. A shelf that names whose word it hears and then obeys a stranger's retraction is not
-// narrowed at all; it just looks it. Both halves take the same set of hands.
 const heardFrom = (authors) => ({
   op: "group",
   key: "byTargetContext",
@@ -149,16 +70,12 @@ const heardFrom = (authors) => ({
 
 const PICK = { pick: { order: { byTimestamp: "desc" } } };
 const ALL = { all: { order: { byTimestamp: "asc" } } };
-// Your hand first, then whoever else spoke last. `byAuthorRank` puts you at the front of the
-// queue; the timestamp settles everyone behind you.
 const MINE_FIRST = (me) => ({
   pick: { order: { chain: [{ byAuthorRank: [me] }, { byTimestamp: "desc" }] } },
 });
 
 const VIEWING_PROPS = { date: ALL, film: PICK, rating: PICK, note: ALL };
 const GUEST_PROPS = { ...VIEWING_PROPS, guests: ALL };
-
-// ---- the delta grammar the arc writes in -------------------------------------------------------
 
 const entity = (role, id, context) => ({
   role,
@@ -169,7 +86,6 @@ const prim = (value) => ({ role: "value", target: { kind: "primitive", value } }
 const say = (loam, ctx, pointers) =>
   loam.signClaims({ ...stampOf(ctx), author: ctx.author, pointers }, ctx.seed);
 
-/** The same claim, in someone else's hand — signed by their key, refused if it is not theirs. */
 const sayAs = (loam, ctx, seed, pointers) =>
   loam.signClaims(
     {
@@ -180,7 +96,6 @@ const sayAs = (loam, ctx, seed, pointers) =>
     seed,
   );
 
-/** One line of a viewing: the entity, the field, the words. */
 const field = (loam, ctx, id, name, value) =>
   say(loam, ctx, [entity("subject", id, name), prim(value)]);
 const fieldAs = (loam, ctx, seed, id, name, value) =>
@@ -202,26 +117,13 @@ const holds = (d, value) =>
 const mineAt = (ctx, id, context) =>
   ground(ctx).some((d) => d.claims.author === ctx.author && pointsAt(id, context)(d));
 
-/** Every record in the ground that files at (id, context) and carries this exact value. */
 const rowsSaying = (ctx, id, context, value) =>
   ground(ctx).filter((d) => pointsAt(id, context)(d) && holds(d, value));
 
-/** Does any record anywhere in the ground carry these words? */
 const anywhere = (ctx, value) => ground(ctx).some((d) => holds(d, value));
 
-/**
- * The words as a STORED ROW spells them. Rows are `JSON.stringify` of the wire delta, so a
- * needle taken from the source will not be found in the haystack the moment it contains a quote
- * or a backslash — silently, which is the worst way for a byte-level guard to be wrong. Escaping
- * the needle the same way the row was escaped is the whole fix.
- */
 export const asStored = (words) => JSON.stringify(words).slice(1, -1);
 
-/**
- * The id a stored row's own bytes CLAIM to be — "" if it will not say. The sweep asks this as
- * well as asking the key, because a row filed under a name that is not its own is exactly the
- * shape a byte-level guard misses: the key looks innocent and the bytes are anything at all.
- */
 export function claimedIdOf(row) {
   try {
     const parsed = JSON.parse(row);
@@ -231,15 +133,6 @@ export function claimedIdOf(row) {
   }
 }
 
-/**
- * Do these words appear in any ROW this browser has written under the store's prefix — not in a
- * reading of the ground, in the stored text itself? A reading is what a reader is SERVED; this is
- * what the machine still HOLDS, and the erasure's promise is about the second one.
- *
- * It scopes to this origin's own prefix, which is the whole of what a page can ask about. Step
- * 13.4 asserts it finds the words while they are there, so a false answer here is evidence
- * rather than a needle that never matched.
- */
 function wordsInStorage(ctx, words) {
   const needle = asStored(words);
   for (let i = 0; i < ctx.storage.length; i++) {
@@ -257,11 +150,10 @@ async function view(ctx, query) {
     const res = await ctx.gateway.query(query);
     return res.errors === undefined ? (res.data ?? {}) : {};
   } catch {
-    return {}; // no surface yet — a shape-shaped observable is simply not-yet-true
+    return {};
   }
 }
 
-/** One reading's answer for one entity, or `{}` when this store cannot answer yet. */
 const read = async (ctx, lens, id, extra = "") => {
   const fields = `${extra} date film rating note`;
   const answer = await view(ctx, `{ ${lens}(entity: "${id}") { ${fields} } }`);
@@ -282,7 +174,6 @@ const lensExists = (ctx, name) =>
 const versionsOf = (ctx, name) =>
   ctx.gateway.registrationVersions().filter((v) => v.hyperschema.name === name);
 
-/** Hand the student a file. Guarded: the headless suite has no document, and needs none. */
 function offerDownload(name, text) {
   if (typeof document === "undefined" || typeof URL === "undefined") return;
   if (typeof URL.createObjectURL !== "function") return;
@@ -293,13 +184,6 @@ function offerDownload(name, text) {
   URL.revokeObjectURL(link.href);
 }
 
-// ---- boot: the student's store ------------------------------------------------------------------
-
-// The LocalStorageBackend owns every `loam:tutorial:<id>` key and reads what it finds there as a
-// delta. A key under that prefix whose suffix is not a delta id was written by someone else, so
-// it is purged before the backend reads: the driver quarantines such rows rather than bricking,
-// and healing them here keeps the pane honest about what the store holds. This is also why the
-// checkpoints live under their OWN prefix (`loam:tutorial-ckpt:`) — they would be swept away here.
 function healStrayKeys(storage) {
   const strays = [];
   for (let i = 0; i < storage.length; i++) {
@@ -310,8 +194,6 @@ function healStrayKeys(storage) {
   for (const k of strays) storage.removeItem(k);
 }
 
-// First visit mints a seed and boots from genesis; every later visit reopens the same store from
-// the same origin. The seed lives at its own key — it never rides an export of deltas.
 export async function bootTutorialStore(loam, storage) {
   healStrayKeys(storage);
   let seed = storage.getItem(SEED_KEY);
@@ -327,47 +209,21 @@ export async function bootTutorialStore(loam, storage) {
   return { gateway, seed, author: loam.authorForSeed(seed) };
 }
 
-// The file a student walks out with: the exact bytes `/federate` would serve, plus the identity
-// that makes it THE SAME store on arrival. The seed rides on purpose — disposable tutorial data.
 export function buildExport(loam, ctx) {
   const offer = JSON.parse(loam.exportOffer(ctx.gateway));
   return JSON.stringify({ version: 1, operator: ctx.author, seed: ctx.seed, deltas: offer.deltas });
 }
 
-/**
- * Open the exported file the way another machine would: a fresh store under the same key, then
- * every record poured in through the ordinary door. Nothing is copied by hand and nothing is
- * trusted because it came from here — the law rides in the file and binds on arrival.
- *
- * The caller closes it. It is a real store, and lesson 15 asks it real questions.
- */
 async function openTheCopy(loam, ctx, text) {
   const copy = await loam.Gateway.boot(
     new loam.MemoryBackend(),
     loam.assembleGenesis({ operatorSeed: ctx.seed }),
   );
   await copy.federate(loam.parseOffer(text));
-  // POUR IN, THEN READ THE LAW — the same two motions as `loam pull` followed by opening the
-  // store on the other machine. Federation lands records; it does not go looking for law among
-  // them, so the surface is built by the read that follows. That the description travels with
-  // the diary is exactly what lesson 15 is proving, and it is why this line is here.
   copy.replayRegistrations();
   return copy;
 }
 
-// ---- the glossary, in the order the arc earns it ------------------------------------------------
-
-/**
- * THE TERMS MANIFEST — twenty-one words, in the order a student meets them. Nothing here is
- * decoration: `test/site/arc.test.ts` reads this list, checks it against the arc script's own
- * ordered twenty-one, and then scans every sentence of lesson copy for a word used before the
- * lesson that introduces it. A term with no entry here cannot be introduced at all.
- *
- * `lesson` is where the word is planted. `step` marks the one word a STEP plants rather than the
- * lesson's arrival — the reveal's payoff, which has to be earned. `forms` are the shapes the scan
- * hunts for; they are written out rather than stemmed, because "viewing" is this arc's whole
- * subject and is not an inflection of "view".
- */
 export const TERMS = [
   {
     term: "store",
@@ -510,8 +366,6 @@ const termsEntering = (lesson) =>
 
 const meaningOf = (term) => TERMS.find((t) => t.term === term).meaning;
 
-// ---- the arc -------------------------------------------------------------------------------------
-
 export function buildArc(loam) {
   const RAE_FIRST = loam.authorForSeed(RAE_FIRST_SEED);
   const RAE_SECOND = loam.authorForSeed(RAE_SECOND_SEED);
@@ -535,19 +389,11 @@ export function buildArc(loam) {
       ctx.author,
     );
 
-  /** The record filed at (id, context) carrying these words — or undefined if it is not here. */
   const rowSaying = (ctx, id, context, value) => rowsSaying(ctx, id, context, value)[0];
 
-  /**
-   * The moment lesson 6 reads the diary as of: when the last of lesson 3's lines landed, which
-   * is the last instant at which everything in the diary was still your first word about it.
-   * Taken from the STRUCK Tenet note's own timestamp — it is still in the ground, which is
-   * exactly why that evening is readable at all.
-   */
   const firstEvening = (ctx) => rowSaying(ctx, TENET, "note", REGRET)?.claims.timestamp;
 
   return [
-    // ============================ ACT I — a place of your own ============================
     {
       id: 1,
       role: "opening",
@@ -565,8 +411,6 @@ proves it.`,
           have: "A store with exactly one record in it, made before you got here.",
           want: "To read the record that names your key as the one this store obeys.",
           how: "Press the button, then open the Ground pane and read the top row.",
-          // A LOOK step: boot did the work, and the observable is already true. The arc needs
-          // these; the red probe skips them, because there is nothing to neutralise.
           run: async () => {},
           observe: {
             page: { selector: "#ground-rows", contains: "loam.operator" },
@@ -599,8 +443,6 @@ proves it.`,
           observe: {
             page: { selector: "#author-chip", contains: "ed25519:" },
             store: async (ctx) => {
-              // `every` over an empty set is true, so the row has to be FOUND before its author
-              // is asked about — otherwise "no such record" reads as "the record is yours".
               const written = rowsSaying(ctx, DIARY, "name", DIARY_TITLE);
               return (
                 loam.authorForSeed(ctx.seed) === ctx.author &&
@@ -620,9 +462,6 @@ proves it.`,
             offerDownload("my-key.json", JSON.stringify({ seed: ctx.seed, operator: ctx.author }));
           },
           observe: {
-            // The closing sentence of this lesson, as a question the store can answer: the
-            // secret is in the file and in this browser, and in NO record. Look at the ground
-            // all day; your diary is in there and your key is not.
             page: { selector: "#ground-rows", contains: DIARY },
             store: async (ctx) => !anywhere(ctx, ctx.seed) && mineAt(ctx, DIARY, "name"),
           },
@@ -731,8 +570,6 @@ from the claims at the time you ask — which is why nothing here has to be kept
           },
           observe: {
             page: { selector: "#view-cards", contains: "Arrival" },
-            // OBJECT LEVEL: what a reader gets back through the lens, not merely what is in the
-            // ground. The two can disagree, and that disagreement is usually the bug.
             store: async (ctx) => (await read(ctx, "viewing", VIEWING)).rating === 9,
           },
         },
@@ -783,7 +620,6 @@ from the claims at the time you ask — which is why nothing here has to be kept
       },
     },
 
-    // ============================ ACT II — changing your mind ============================
     {
       id: 4,
       role: "rewatch",
@@ -818,7 +654,6 @@ else lets you.`,
               return (
                 now.rating === 7 &&
                 list(now.date).includes("14 May") &&
-                // DELTA LEVEL, the other half: the 9 is still lying there, untouched.
                 rowsSaying(ctx, VIEWING, "rating", 9).length === 1
               );
             },
@@ -892,12 +727,8 @@ act is going to send you a bill for it.`,
               const note = rowSaying(ctx, TENET, "note", REGRET);
               const now = await read(ctx, "viewing", TENET);
               return (
-                // OBJECT LEVEL: no reader repeats it any more — and the SAME answer still says
-                // 6, because `!includes` is satisfied by a lens that answers nothing at all.
                 now.rating === 6 &&
                 !list(now.note).includes(REGRET) &&
-                // ...and DELTA LEVEL: the record it struck is still lying in the ground, and the
-                // strike itself names it. Removal and retraction are different acts.
                 note !== undefined &&
                 ctx.gateway.reactor.negationsOf(note.id).length >= 1
               );
@@ -989,8 +820,6 @@ to read.`,
             await view(ctx, `{ viewing(entity: "${VIEWING}", asOf: ${at}) { rating } }`);
           },
           observe: {
-            // The struck claim is STILL IN THE GROUND. That is not a detail; it is the only
-            // reason that evening can be read at all.
             page: { selector: "#ground-rows", contains: REGRET },
             store: async (ctx) => {
               const at = firstEvening(ctx);
@@ -999,11 +828,9 @@ to read.`,
               const tenetThen = await readAsOf(ctx, "viewing", TENET, at);
               const now = await read(ctx, "viewing", VIEWING);
               return (
-                // that evening: the 9 stands and the Tenet note is live...
                 then.rating === 9 &&
                 !list(then.note).includes(SECOND_THOUGHT) &&
                 list(tenetThen.note).includes(REGRET) &&
-                // ...and it is a READING of the past, not a move into it: now is still now.
                 now.rating === 7
               );
             },
@@ -1024,7 +851,6 @@ to read.`,
               return (
                 now.rating === 7 &&
                 list(now.note).includes(SECOND_THOUGHT) &&
-                // the positive twin: this answer is a real one, and it still says 6
                 tenetNow.rating === 6 &&
                 !list(tenetNow.note).includes(REGRET)
               );
@@ -1041,7 +867,6 @@ to read.`,
       },
     },
 
-    // ============================ ACT III — other voices ============================
     {
       id: 7,
       role: "second-hand",
@@ -1095,8 +920,6 @@ Rae is a character. You would never hold anybody else's.)`,
           how: "Press the button. The store says no. Look in the Ground pane: the line is not there.",
           run: async (ctx) => {
             try {
-              // Your seed, Rae's name on the front. The mark will not check out, and the door
-              // will not take it — which is the only reason "Rae said this" means anything.
               await ctx.gateway.append([
                 loam.signClaims(
                   {
@@ -1107,17 +930,12 @@ Rae is a character. You would never hold anybody else's.)`,
                   ctx.seed,
                 ),
               ]);
-            } catch {
-              /* the refusal is the lesson; the observable below is what proves it */
-            }
+            } catch {}
           },
           observe: {
             page: { selector: "#ground-rows", contains: RAE_FIRST.slice(0, 18) },
             store: async (ctx) =>
-              // Nothing landed...
               !anywhere(ctx, FORGED_LINE) &&
-              // ...and the real Rae's real line is untouched, which is the other half: a door
-              // that refused everything would pass the first test and fail the diary.
               list((await read(ctx, "viewing", VIEWING)).note).includes(RAE_VERDICT),
           },
         },
@@ -1229,7 +1047,6 @@ them.`,
                 list(house.rating).join(",") === "9,7,4" &&
                 (await read(ctx, "myDiary", VIEWING)).rating === 7 &&
                 (await read(ctx, "viewing", VIEWING)).rating === 4 &&
-                // one set of records underneath all three answers
                 ground(ctx).filter(pointsAt(VIEWING, "rating")).length === 3
               );
             },
@@ -1322,12 +1139,7 @@ most worth checking rather than believing.`,
               if (first === undefined) return false;
               const asItWas = ctx.gateway.resolvePinned(first, MOVIE_NIGHT).view;
               return (
-                // The first version has no rule for guests — it was written before the word...
                 !first.schema.props.has("guests") &&
-                // ...and it reads the entry anyway, film and rating intact. What it is NOT
-                // asserted to do is hide the guest: a reading with no rule for a field falls
-                // back to its default one, so the value is still in there. The promise being
-                // kept is "the old reading still works", never "the old reading is blind".
                 asItWas.film === "Paddington 2" &&
                 asItWas.rating === 10
               );
@@ -1435,17 +1247,7 @@ themselves, which is why nothing in here ever had to be given a number.`,
               const progress = readProgress(ctx);
               return (
                 entries.length >= 16 &&
-                // AT THE BYTES, which is the reveal's actual claim. `readGlossary` is derived
-                // from `offeredDeltas()`, so checking its entries against `offeredDeltas()`
-                // compares the code with itself and can never fail. The rows are a different
-                // level: every word in that pane is a record this browser wrote down.
                 entries.every((e) => ctx.storage.getItem(STORE_PREFIX + e.deltaId) !== null) &&
-                // EXACT, and both numbers are the same fact. The twenty-five steps of lessons
-                // 1-10 plus 11.1 make 26; this step's own banking makes 27, and the predicate is
-                // asked on both sides of it. Steps bank in order, one at a time, and the rail
-                // refuses a lesson the student has not reached, so no other count is reachable —
-                // which is why this is not a floor. A floor lets a step quietly stop banking and
-                // still read as a full journey.
                 (progress.steps.size === 26 || progress.steps.size === 27) &&
                 progress.entered.length >= 11
               );
@@ -1458,7 +1260,6 @@ themselves, which is why nothing in here ever had to be given a number.`,
         readGlossary(ctx).every((e) => ctx.storage.getItem(STORE_PREFIX + e.deltaId) !== null),
     },
 
-    // ============================ ACT IV — who gets in ============================
     {
       id: 12,
       role: "stranger",
@@ -1478,7 +1279,6 @@ in each reading the whole time, waiting for you to notice.`,
           want: "It in the store where you can see it, and out of every answer that matters.",
           how: "Press the button. A new row appears wearing a name you do not recognise.",
           run: async (ctx) => {
-            // A real file, in the shape any Loam store serves: signed records and nothing else.
             const file = JSON.stringify({
               deltas: [
                 fieldAs(loam, ctx, STRANGER_SEED, TENET, "rating", 10),
@@ -1495,20 +1295,13 @@ in each reading the whole time, waiting for you to notice.`,
               const mine = await read(ctx, "myDiary", TENET);
               const plain = await read(ctx, "viewing", TENET);
               return (
-                // It LANDED, under the stranger's own key — the store does not burn mail...
                 landed.length === 1 &&
                 landed[0].claims.author === STRANGER &&
-                // ...and neither shelf hears it. The NOTE is what proves that, not the rating:
-                // both shelves put your own hand first anyway, so a shelf that had quietly
-                // stopped narrowing would still answer 6 and this would notice nothing. The
-                // note field keeps everything it hears, so a leak has nowhere to hide.
                 house.rating.includes(6) &&
                 !list(house.rating).includes(10) &&
                 !list(house.note).includes(STRANGER_NOTE) &&
                 mine.rating === 6 &&
                 !list(mine.note).includes(STRANGER_NOTE) &&
-                // ...while the plain description from lesson two hears everyone, and believed
-                // it — note and all.
                 plain.rating === 10 &&
                 list(plain.note).includes(STRANGER_NOTE)
               );
@@ -1536,13 +1329,10 @@ in each reading the whole time, waiting for you to notice.`,
               return (
                 list(house.rating).includes(10) &&
                 list(house.note).includes(STRANGER_NOTE) &&
-                // ...and it did not lose your own word to make room for theirs
                 list(house.rating).includes(6) &&
-                // and it wears the key that really wrote it — never Rae's name
                 forged !== undefined &&
                 forged.claims.author === STRANGER &&
                 forged.claims.author !== RAE_FIRST &&
-                // your own shelf is untouched by the invitation
                 (await read(ctx, "myDiary", VIEWING)).rating === 7
               );
             },
@@ -1644,17 +1434,11 @@ change it twice in a minute without losing a single line of anything.`,
             store: async (ctx) => {
               const binge = await read(ctx, "viewing", CHASE);
               return (
-                // the key is refused from here on...
                 !canWrite(ctx, RAE_FIRST) &&
-                // ...and every line it ever wrote is still here, still saying who wrote it, at
-                // the delta...
                 ground(ctx).filter(
                   (d) => d.claims.author === RAE_FIRST && pointsAt(CHASE, "date")(d),
                 ).length === 14 &&
                 rowsSaying(ctx, VIEWING, "rating", 4).some((d) => d.claims.author === RAE_FIRST) &&
-                // ...AND at the reading, which is the half that would go quiet first if losing
-                // standing ever un-said what a key had already written. The copy and the quiz
-                // both promise this; the delta level alone cannot keep the promise.
                 binge.film === "Fast & Furious" &&
                 list(binge.date).length === 14 &&
                 (await read(ctx, "viewing", VIEWING)).rating === 4
@@ -1683,8 +1467,6 @@ change it twice in a minute without losing a single line of anything.`,
           want: "Their two lines about that evening. One of them is about Jamie.",
           how: "Press the button, then read both new lines on Paddington 2. Read the first one twice.",
           run: async (ctx) => {
-            // Two lines, in this order on purpose: the second one's timestamp is what lesson 14
-            // pins its as-of read to, so the past it reads is a past that CONTAINED the first.
             await ctx.gateway.append([
               fieldAs(loam, ctx, RAE_SECOND_SEED, MOVIE_NIGHT, "note", PRIVATE_LINE),
               fieldAs(loam, ctx, RAE_SECOND_SEED, MOVIE_NIGHT, "note", MOVIE_NIGHT_NOTE),
@@ -1697,11 +1479,6 @@ change it twice in a minute without losing a single line of anything.`,
               return (
                 night.includes(PRIVATE_LINE) &&
                 night.includes(MOVIE_NIGHT_NOTE) &&
-                // AND THE SCANNER CAN SEE THEM IN THE ROWS. Lesson 14 proves those words are in
-                // no row afterwards; that proof is worth nothing unless the same scanner, with
-                // the same needle, finds them HERE — where they certainly are. A needle escaped
-                // the wrong way reads "clean" on an empty store and on a full one alike, so this
-                // is the assertion that makes the later absence mean something.
                 wordsInStorage(ctx, PRIVATE_LINE)
               );
             },
@@ -1715,7 +1492,6 @@ change it twice in a minute without losing a single line of anything.`,
         anywhere(ctx, MOVIE_NIGHT_NOTE),
     },
 
-    // ============================ ACT V — leaving, and forgetting ============================
     {
       id: 14,
       role: "erasure-finale",
@@ -1780,24 +1556,14 @@ not a right to be forgotten, and Jamie is owed the real one.`,
             await ctx.gateway.erase(line.id, { reason: ERASURE_REASON });
           },
           observe: {
-            // The HOLDER, which index.html declares — never the notice rendered inside it. An
-            // observable rooted at a conjured element is satisfiable only while something
-            // conjures it, and this act cannot be repeated.
             page: { selector: "#sweep-holder", contains: "checkpoint" },
             store: async (ctx) => {
               const night = list((await read(ctx, "viewing", MOVIE_NIGHT)).note);
               return (
-                // gone from what any reader is served...
                 !anywhere(ctx, PRIVATE_LINE) &&
-                // ...AND from the rows this browser wrote, asked at the level the rows are
-                // spelled at. Step 13.4 proved this same scanner finds these same words when
-                // they are there, so the false here is a fact rather than a needle that never
-                // matched anything.
                 !wordsInStorage(ctx, PRIVATE_LINE) &&
                 loam.readErasures(ctx.gateway.reactor, ctx.gateway.validityNow(), ctx.author)
                   .size >= 1 &&
-                // ...and the diary is whole around the hole: the line beside it survived, and so
-                // did everything else. A door that removed too much would pass the first test.
                 night.includes(MOVIE_NIGHT_NOTE) &&
                 (await read(ctx, "viewing", VIEWING)).rating === 4
               );
@@ -1817,10 +1583,7 @@ not a right to be forgotten, and Jamie is owed the real one.`,
               const receipts = ground(ctx).filter(pointsAt(ERASURE_ENTITY, ERASURE_CONTEXT));
               return (
                 receipts.length >= 1 &&
-                // EVERY one says WHY — `some` would let a reasonless receipt ride along beside
-                // a good one and still call the ledger honest.
                 receipts.every((d) => holds(d, ERASURE_REASON)) &&
-                // ...and it cannot say WHAT, because it never kept the words. At the bytes.
                 receipts.every((d) => !JSON.stringify(d).includes(PRIVATE_FRAGMENT)) &&
                 receipts.every((d) => d.claims.author === ctx.author)
               );
@@ -1840,23 +1603,6 @@ not a right to be forgotten, and Jamie is owed the real one.`,
           },
           observe: {
             page: { selector: "#sweep-holder", contains: "checkpoint" },
-            // ONE-SIDED ON PURPOSE, and this is the one place that is right. The frozen browser
-            // suite requires this lesson to be passable with every checkpoint blob deleted, so
-            // "a bystander survived" cannot be a condition of finishing — a student whose quota
-            // refused every checkpoint would be stranded on the last lesson forever. The other
-            // side, that the sweep spares what it must, is asserted in `test/site/arc.test.ts`,
-            // which owns the fixture and can guarantee a bystander exists to be spared.
-            //
-            // A blob is condemned for HOLDING the record, never for MENTIONING it: the receipt
-            // names the id it forgot, and every checkpoint taken after the erasure carries that
-            // receipt. Asking "does this blob mention the id" would destroy those too — which is
-            // over-purging, in the one direction whose mistakes cannot be undone.
-            //
-            // AND IT WALKS THE KEYS, not a list of lesson numbers derived from them. The sweep
-            // reads every key under the prefix verbatim, for the reason `player.mjs` states: a
-            // suffix that does not round-trip through `Number` would be skipped, leaving a blob
-            // with the record in it while the report said none had. A verdict that re-derived
-            // the numbers would be blind to exactly the blob the sweep exists to catch.
             store: async (ctx) => {
               const dead = loam.readErasures(
                 ctx.gateway.reactor,
@@ -1875,20 +1621,13 @@ not a right to be forgotten, and Jamie is owed the real one.`,
                 } catch {
                   blob = null;
                 }
-                // A blob that will not read cannot be shown to be clean, and the sweep destroys
-                // exactly those. One still lying here means the sweep did not run.
                 if (blob === null || typeof blob.rows !== "object" || blob.rows === null) {
                   return false;
                 }
                 for (const [rowKey, row] of Object.entries(blob.rows)) {
-                  // The two questions the sweep itself asks: the key that FILES the row, and the
-                  // id the row's own bytes CLAIM — the second catches a misfiled row.
                   if (dead.has(rowKey.slice(STORE_PREFIX.length))) return false;
                   if (typeof row !== "string") continue;
                   if (dead.has(claimedIdOf(row))) return false;
-                  // ...and the words themselves, escaped the way a stored row escapes them. The
-                  // raw sentence is never found in a row: the row is JSON, and the quotes in it
-                  // are backslashed. A needle taken from the source is a guard that never fires.
                   if (row.includes(words)) return false;
                 }
               }
@@ -1915,11 +1654,8 @@ not a right to be forgotten, and Jamie is owed the real one.`,
               );
               const then = answer.viewing ?? {};
               return (
-                // that evening still reads...
                 list(then.note).includes(MOVIE_NIGHT_NOTE) &&
-                // ...without what has since been forgotten, no matter how far back you point...
                 !list(then.note).includes(PRIVATE_LINE) &&
-                // ...and it SAYS there is a hole rather than pretending to be complete.
                 list(then._forgotten).length >= 1
               );
             },
@@ -1961,10 +1697,6 @@ the way it started, with the key in your hand and one more thing to write down.`
             store: async (ctx) => {
               const copy = await openTheCopy(loam, ctx, buildExport(loam, ctx));
               try {
-                // TWO ENTITIES, and the second is the one that matters. Arrival is a plain
-                // pile of ratings; Tenet carries a strike of your own AND a stranger's
-                // federated claim, so it is the entity where a seeding edge that dropped a
-                // retraction would show up — as a copy serving a taken-back note as live.
                 for (const entity of [VIEWING, TENET]) {
                   const here = await ctx.gateway.query(
                     `{ viewing(entity: "${entity}") { _hex rating } }`,
@@ -1975,7 +1707,6 @@ the way it started, with the key in your hand and one more thing to write down.`
                   const mine = here.data?.viewing;
                   const theirs = there.data?.viewing;
                   if (typeof mine?._hex !== "string" || mine._hex.length === 0) return false;
-                  // the same answer, character for character — the law travelled with the records
                   if (mine._hex !== theirs?._hex) return false;
                 }
                 return true;
@@ -1996,7 +1727,6 @@ the way it started, with the key in your hand and one more thing to write down.`
             page: { selector: "#ground-rows", contains: "loam.erasure" },
             store: async (ctx) => {
               const text = buildExport(loam, ctx);
-              // AT THE BYTES OF THE FILE, before anything opens it: the words are not in there.
               if (text.includes(PRIVATE_FRAGMENT)) return false;
               const copy = await openTheCopy(loam, ctx, text);
               try {
@@ -2008,10 +1738,8 @@ the way it started, with the key in your hand and one more thing to write down.`
                   .offeredDeltas()
                   .filter(pointsAt(ERASURE_ENTITY, ERASURE_CONTEXT));
                 return (
-                  // the forgetting travelled...
                   !notes.includes(PRIVATE_LINE) &&
                   receipts.length >= 1 &&
-                  // ...and so did the diary around it
                   notes.includes(MOVIE_NIGHT_NOTE) &&
                   night.data?.viewing?.film === "Paddington 2"
                 );

@@ -1,13 +1,3 @@
-// CLI reports say only what happened. Each case pins one door that used to report a success it
-// had not achieved, and each pairs the refusal with a control where the same verb still succeeds,
-// so a refusal on every input would fail here too.
-//
-// A "running server" is a serving record naming this very process over the same store — the shape
-// `loam serve` writes. It is the probe these verbs read; the server's own behaviour (it keeps
-// pulling a channel dropped behind its back) is not driven here.
-//
-// Erasure standing rule: every store here is this file's own mkdtemp fixture.
-
 import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -50,7 +40,6 @@ const pretendServing = (): void =>
   );
 const stopServing = (): void => rmSync(join(home, "serving.json"), { force: true });
 
-/** One channel into "peers", opened the way the CLI's own boot would read it back. */
 async function withChannel(): Promise<string> {
   const gateway = await Gateway.boot(
     new SqliteBackend(storePath(home)),
@@ -66,7 +55,6 @@ async function withChannel(): Promise<string> {
   return channel.name;
 }
 
-/** What a fresh `federate list` says about one channel, or "" when it lists no such channel. */
 async function listed(name: string): Promise<string> {
   const said: string[] = [];
   expect(
@@ -75,8 +63,6 @@ async function listed(name: string): Promise<string> {
   return said.find((s) => s.startsWith(name)) ?? "";
 }
 
-// Damage one stored row so boot sets it aside: other well-formed claims no longer recompute to
-// the row's own id.
 async function storeWithOneDamagedRow(): Promise<void> {
   const seed = readSeed(home);
   const gateway = await Gateway.boot(
@@ -108,11 +94,9 @@ describe("federate drop and set refuse while a server holds the channel", () => 
     expect(said).toContain("Stop the server first");
     expect(said).toContain("/admin/container?name=");
     expect(out.join("\n")).not.toContain("purged");
-    // The store level: the channel was not severed.
     stopServing();
     expect(await listed(name)).not.toBe("");
 
-    // Control: the same verb, with no server, severs it.
     out.length = 0;
     expect(await run(["federate", "drop", "--channel", name, "--yes", "--home", home], io())).toBe(
       0,

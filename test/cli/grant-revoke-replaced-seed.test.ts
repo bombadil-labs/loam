@@ -1,11 +1,3 @@
-// `loam grant revoke` after the person's seed was replaced. What lets the connection write is a
-// delegation the OLD seed signed, and only its signer or the pool's own key can strike it, so a
-// revoke in the person's current voice does not bind. The command strikes in the pool's own voice
-// instead. Asked at both levels: the pool no longer lets the key write, and the report names
-// the inbox it struck and exits 0.
-//
-// Erasure standing rule: every store here is this file's own mkdtemp fixture.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -95,7 +87,7 @@ async function poolLetsWrite(inbox: string): Promise<boolean> {
 describe("grant revoke after the person's seed was replaced", () => {
   it("strikes in the operator's voice, and the connection no longer writes", async () => {
     const inbox = await bindWithOldSeed("ada:journal");
-    writeUserSeed(home, "ada", NEW_SEED); // the seed is replaced; no re-bind follows
+    writeUserSeed(home, "ada", NEW_SEED);
     writeOAuthFile(home, {
       ...EMPTY_OAUTH,
       clients: [
@@ -120,7 +112,7 @@ describe("grant revoke after the person's seed was replaced", () => {
         },
       ],
     });
-    expect(await poolLetsWrite(inbox)).toBe(true); // the fixture really is live
+    expect(await poolLetsWrite(inbox)).toBe(true);
 
     expect(await run(["grant", "revoke", CLIENT, "--home", home], io()), printed()).toBe(0);
     expect(await poolLetsWrite(inbox)).toBe(false);

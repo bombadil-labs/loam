@@ -1,10 +1,3 @@
-// Write-enabled renderers, headless granted-author path — SPEC §23.3. A rendered route can WRITE, not just
-// read: a form POSTs, and the STORE signs the resulting delta as the renderer's PEN — a granted-author
-// identity whose seed is provisioned in config, never the caller's token. Provenance shows the mediating
-// code; revocation strikes the pen's grant. The two keys of §6: provisioning the seed is custody, the grant
-// is authorization — a provisioned-but-ungranted pen writes nothing, and no anonymous write happens unless
-// the operator BOTH declared the lens public AND provisioned+granted a pen (§12).
-
 import { describe, expect, it } from "vitest";
 import {
   authorForSeed,
@@ -24,16 +17,14 @@ import { FERN } from "../spike/garden.js";
 
 const OP_SEED = "0e".repeat(32);
 const OP = authorForSeed(OP_SEED);
-const PEN_SEED = "9e".repeat(32); // the guestbook pen — provisioned AND granted
+const PEN_SEED = "9e".repeat(32);
 const PEN = authorForSeed(PEN_SEED);
-const UNGRANTED_SEED = "77".repeat(32); // provisioned, but never granted write standing
+const UNGRANTED_SEED = "77".repeat(32);
 
 const pick: Policy = { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } };
 const GUESTBOOK: Schema = { props: new Map<string, Policy>([["message", pick]]), default: pick };
 const CARD = 'export default (n) => `<p>${n.view.message ?? ""}</p>`;';
 
-// A store where PEN and UNGRANTED are provisioned (their seeds in config), but only PEN holds a write
-// grant. The Plant lens allows `message` writes (registration writable).
 const boot = (): Promise<Gateway> =>
   Gateway.boot(
     new MemoryBackend(),
@@ -49,7 +40,6 @@ const boot = (): Promise<Gateway> =>
 
 const staged = async (): Promise<Gateway> => {
   const gw = await boot();
-  // A writing renderer: writable=[message], pen=guest-pen (provisioned + granted).
   await gw.publishRenderer({
     route: "guestbook",
     schema: "Plant",
@@ -58,14 +48,12 @@ const staged = async (): Promise<Gateway> => {
     writable: ["message"],
     pen: "guest-pen",
   });
-  // A read-only renderer (no pen/writable).
   await gw.publishRenderer({
     route: "readonly",
     schema: "Plant",
     consumes: ["message"],
     bundle: CARD,
   });
-  // A renderer whose pen is provisioned but NOT granted write standing.
   await gw.publishRenderer({
     route: "ungranted",
     schema: "Plant",
@@ -74,7 +62,6 @@ const staged = async (): Promise<Gateway> => {
     writable: ["message"],
     pen: "ungranted-pen",
   });
-  // A public renderer whose pen name is NOT provisioned at all.
   await gw.publishRenderer({
     route: "unprov",
     schema: "Plant",
@@ -102,9 +89,9 @@ describe("§23.3: a form write is signed as the renderer's pen, gated by its gra
     const gw = await staged();
     const out = await gw.writeRoute("guestbook", FERN, { message: "hello town" }, "full");
     expect(out.status).toBe(200);
-    expect(out.body).toContain("hello town"); // the route re-rendered with the new fact
+    expect(out.body).toContain("hello town");
     const landed = messageDeltaFor(gw, "hello town");
-    expect(landed?.claims.author).toBe(PEN); // the pen signed it — provenance shows the mediating code
+    expect(landed?.claims.author).toBe(PEN);
     expect(landed?.claims.author).not.toBe(OP);
     await gw.close();
   });
@@ -127,8 +114,8 @@ describe("§23.3: a form write is signed as the renderer's pen, gated by its gra
   it("a provisioned-but-UNGRANTED pen writes nothing — provisioning is not authorization (rail d)", async () => {
     const gw = await staged();
     const out = await gw.writeRoute("ungranted", FERN, { message: "sneaky" }, "full");
-    expect(out.status).toBe(403); // append→authorize refuses: the pen holds no write grant
-    expect(messageDeltaFor(gw, "sneaky")).toBeUndefined(); // nothing landed
+    expect(out.status).toBe(403);
+    expect(messageDeltaFor(gw, "sneaky")).toBeUndefined();
     await gw.close();
   });
 
@@ -137,7 +124,6 @@ describe("§23.3: a form write is signed as the renderer's pen, gated by its gra
     expect((await gw.writeRoute("guestbook", FERN, { message: "before" }, "full")).status).toBe(
       200,
     );
-    // Strike the pen's write grant.
     const grant = [...gw.reactor.snapshot()].find(
       (d) =>
         d.claims.author === OP &&
@@ -146,10 +132,8 @@ describe("§23.3: a form write is signed as the renderer's pen, gated by its gra
     await gw.append([
       signClaims(makeNegationClaims(OP, 9_500_000, grant!.id, "revoke the pen"), OP_SEED),
     ]);
-    // Future writes are refused...
     expect((await gw.writeRoute("guestbook", FERN, { message: "after" }, "full")).status).toBe(403);
     expect(messageDeltaFor(gw, "after")).toBeUndefined();
-    // ...but the earlier write is still on the record, still attributed to the pen.
     expect(messageDeltaFor(gw, "before")?.claims.author).toBe(PEN);
     await gw.close();
   });
@@ -158,21 +142,20 @@ describe("§23.3: a form write is signed as the renderer's pen, gated by its gra
 describe("§23.3 + §12: anonymous form writes need the operator's full setup", () => {
   it("an anonymous POST to a public renderer with NO provisioned pen is refused (rail f)", async () => {
     const gw = await staged();
-    await gw.append([signClaims(publicClaims(["Plant"], OP, 2000), OP_SEED)]); // declare the lens public
+    await gw.append([signClaims(publicClaims(["Plant"], OP, 2000), OP_SEED)]);
     const out = await gw.writeRoute("unprov", FERN, { message: "x" }, "public");
-    expect(out.status).toBe(403); // the pen name is not provisioned → nothing to sign with
+    expect(out.status).toBe(403);
     await gw.close();
   });
 
   it("an anonymous POST succeeds ONLY when the operator declared public AND provisioned+granted the pen", async () => {
     const gw = await staged();
-    // Before declaring public: the stranger's door does not even see the route.
     expect((await gw.writeRoute("guestbook", FERN, { message: "anon" }, "public")).status).toBe(
       404,
     );
     await gw.append([signClaims(publicClaims(["Plant"], OP, 2000), OP_SEED)]);
     const out = await gw.writeRoute("guestbook", FERN, { message: "anon" }, "public");
-    expect(out.status).toBe(200); // now the full operator setup is present, so the mediated write lands
+    expect(out.status).toBe(200);
     expect(messageDeltaFor(gw, "anon")?.claims.author).toBe(PEN);
     await gw.close();
   });

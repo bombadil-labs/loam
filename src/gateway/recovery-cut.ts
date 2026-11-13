@@ -1,24 +1,3 @@
-// A recovered user's history, cut per store (refactor/audit/recovery-history.md; ruling 8, M1).
-//
-// K1 may be stolen, and a thief can sign any timestamp, so "before the recovery" is each store's own
-// fact: where in ITS arrival order the recovery happened. Three kinds of operator-signed record carry
-// that fact, all filed at `loam:recoveries`:
-//   - an INCARNATION marker: which incarnation of this store it is. A store writes its own before it
-//     admits anything else; the active one is the lowest-arrival marker held, so a replayed older
-//     marker never displaces it.
-//   - a CUT: where in this store's arrival order a recovery begins, naming the incarnation, the
-//     recovery record and the retired key. Its own arrival is the line: what the key signed and this
-//     store admitted before the cut is history. It counts only in the incarnation it names.
-//   - an OUTCOME: the cut's terminal state, committed or aborted.
-//   - a MANIFEST, on the host beside the recovery record and ahead of it: every cut of the attempt.
-//     A pool cannot order itself against the host, so a cut commits only if a manifest that arrived
-//     before its record names it. A cut written later, by any process, is in no such manifest.
-// A cut with no outcome is COMMITTED if the host holds its recovery record, else PREPARED: the store
-// pauses the retired key and shows no history for it. That fails closed.
-//
-// "Operator" here means the governing key of the peer that holds this store (user-identity.md).
-// Today inbox pools share the host's key; after step 6 each pool signs its own.
-
 import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
 import { RECOVERIES, userGroundOf, usersGovernor, verified } from "./user-root.js";
 import type { Ground } from "./ground.js";
@@ -45,7 +24,6 @@ const claims = (
   pointers: [filed(context), ...pointers],
 });
 
-/** A fresh incarnation id: random, so a re-created store never shares one. */
 export const mintIncarnation = (): string =>
   [...globalThis.crypto.getRandomValues(new Uint8Array(16))]
     .map((b) => b.toString(16).padStart(2, "0"))
@@ -90,22 +68,16 @@ export type Outcome = "committed" | "aborted";
 export const outcomeClaims = (cut: string, outcome: Outcome, operator: string, t: number): Claims =>
   claims(CTX_CUT_OUTCOME, [prim("cut", cut), prim("outcome", outcome)], operator, t);
 
-/**
- * Is `d` one of this module's store-local records (an incarnation marker, a cut, an outcome)? Each is
- * a fact about one store; a copy anywhere else is testimony, so none is offered to a peer.
- */
 export function isStoreLocal(d: Delta): boolean {
   return [CTX_INCARNATION, CTX_CUT, CTX_CUT_OUTCOME, CTX_CUT_MANIFEST].some((c) => inContext(d, c));
 }
 
-// The one primitive value `role` carries, or undefined.
 function field(d: Delta, role: string): string | undefined {
   const ps = d.claims.pointers.filter((p) => p.role === role);
   if (ps.length !== 1) return undefined;
   const t = ps[0]!.target;
   return t.kind === "primitive" && typeof t.value === "string" ? t.value : undefined;
 }
-// Every primitive value `role` carries.
 const fields = (d: Delta, role: string): string[] =>
   d.claims.pointers.flatMap((p) =>
     p.role === role && p.target.kind === "primitive" && typeof p.target.value === "string"
@@ -120,10 +92,6 @@ const inContext = (d: Delta, context: string): boolean =>
       p.target.entity.context === context,
   );
 
-// Every verified operator record of `context` held here and not erased. Negations and validity are
-// not asked: these are durable facts about this store, and the erase door keeps them. An erased
-// record is gone to every reader at once, though its bytes wait for the purge. `erased` is this
-// store's refused set (erase.ts `refusedIds`), passed in because erase.ts imports this module.
 function held(
   reactor: Ground,
   operator: string,
@@ -139,7 +107,6 @@ function held(
   return out;
 }
 
-// A delta's position in this store's arrival log, kept incrementally per reactor.
 const positions = new WeakMap<Reactor, { n: number; at: Map<string, number> }>();
 export function arrivalIndex(reactor: Reactor, id: string): number | undefined {
   const log = reactor.arrivalLog();
@@ -152,7 +119,6 @@ export function arrivalIndex(reactor: Reactor, id: string): number | undefined {
   return cache.at.get(id);
 }
 
-/** This store's active incarnation: the lowest-arrival verified operator marker it holds. */
 export function activeIncarnation(
   reactor: Reactor,
   operator: string | undefined,
@@ -168,7 +134,6 @@ export function activeIncarnation(
   return best?.d;
 }
 
-/** This store's incarnation id: what a cut written here names as its `store`. */
 export function incarnationId(
   reactor: Reactor,
   operator: string | undefined,
@@ -178,7 +143,6 @@ export function incarnationId(
   return d === undefined ? undefined : field(d, "incarnation");
 }
 
-/** The outcomes held here for `cut`, as written (none, one, or contradictory). */
 export function outcomesOf(
   reactor: Ground,
   operator: string,
@@ -192,11 +156,6 @@ export function outcomesOf(
   );
 }
 
-/**
- * Does this store hold a live cut for `recovery` retiring `key`: one naming this incarnation,
- * and not aborted? What a retiring recovery needs in every store before it
- * commits.
- */
 export function holdsLiveCut(
   reactor: Reactor,
   operator: string,
@@ -211,7 +170,6 @@ export function holdsLiveCut(
 
 export type CutState = "prepared" | "committed" | "aborted";
 
-/** The state of `cut` in its store: its outcome if one stands, else whether the host committed. */
 export function cutState(
   reactor: Reactor,
   operator: string,
@@ -222,11 +180,9 @@ export function cutState(
   for (const o of held(reactor, operator, CTX_CUT_OUTCOME, erased)) {
     if (field(o, "cut") === cut.id) outcomes.add(field(o, "outcome") ?? "");
   }
-  if (outcomes.size > 1) return "prepared"; // contradictory outcomes: fail closed
+  if (outcomes.size > 1) return "prepared";
   const [only] = outcomes;
   if (only === "aborted") return only;
-  // A cut that arrived after its record, in the store that holds both, came too late to draw the
-  // line: whatever the key wrote between them would count. It never commits, whatever an outcome says.
   const recovery = field(cut, "recovery");
   const users = userGroundOf(reactor);
   const record = recovery === undefined ? undefined : users.reactor.get(recovery);
@@ -237,15 +193,11 @@ export function cutState(
   if (recovery === undefined || !manifested(reactor, operator, cut.id, recovery)) return "prepared";
   if (only === "committed") return only;
   if (only !== undefined) return "prepared";
-  // No outcome yet: committed only if the host holds the recovery record, verified and unerased.
   return record !== undefined && verified(record) && !users.erased().has(record.id)
     ? "committed"
     : "prepared";
 }
 
-// Is `cut` named by a manifest for `recovery` that qualifies: operator-signed, verified, held and
-// unerased in the ground this store reads users from, and, while the record is held there, arrived
-// before it. Arrival order is durable, so a manifest written after the record never qualifies.
 function manifested(reactor: Reactor, operator: string, cut: string, recovery: string): boolean {
   const users = userGroundOf(reactor);
   const erased = users.erased();
@@ -257,7 +209,6 @@ function manifested(reactor: Reactor, operator: string, cut: string, recovery: s
   for (const id of users.reactor.byTarget(RECOVERIES)) {
     if (erased.has(id)) continue;
     const m = users.reactor.get(id);
-    // The manifest is the host's law, beside the record: the user ground's governor signed it.
     if (m === undefined || m.claims.author !== usersGovernor(users, operator) || !verified(m)) {
       continue;
     }
@@ -274,12 +225,10 @@ export interface Cut {
   readonly delta: Delta;
   readonly recovery: string;
   readonly key: string;
-  /** Its own place in this store's arrival log: the line history stops at. */
   readonly index: number;
   readonly state: CutState;
 }
 
-/** The cuts that count in THIS store: those naming its active incarnation, with their state. */
 export function cutsHere(
   reactor: Reactor,
   operator: string | undefined,
@@ -304,7 +253,6 @@ export function cutsHere(
   return out;
 }
 
-/** The keys a PREPARED cut pauses here: the door refuses what they sign until an outcome lands. */
 export function pausedKeys(
   reactor: Reactor,
   operator: string | undefined,
@@ -317,11 +265,6 @@ export function pausedKeys(
   );
 }
 
-/**
- * The deltas `key` signed in this store before `recovery` retired it: those that arrived before the
- * committed cut. Empty when no committed cut for that recovery and key counts here, and when any
- * cut for them is still prepared. Several committed cuts give the earliest.
- */
 export function historyBefore(
   reactor: Reactor,
   operator: string | undefined,
@@ -342,12 +285,6 @@ export function historyBefore(
   return out;
 }
 
-/**
- * Why erasing `target` is refused, or undefined. The active incarnation marker, a PREPARED cut, a cut
- * or outcome whose partner stands (unless the partner is erased in the same batch), and a manifest
- * naming a cut that stands here are kept: each is a durable fact the history reader or the pause
- * depends on.
- */
 export function cutErasureDefect(
   reactor: Reactor,
   operator: string | undefined,
@@ -362,7 +299,6 @@ export function cutErasureDefect(
       : undefined;
   }
   if (inContext(target, CTX_CUT)) {
-    // A cut naming another incarnation counts for nothing here, so nothing here depends on it.
     const here = activeIncarnation(reactor, operator, erased);
     if (here === undefined || field(target, "store") !== field(here, "incarnation"))
       return undefined;
@@ -396,11 +332,6 @@ export function cutErasureDefect(
   return undefined;
 }
 
-/**
- * The live cuts this store holds for `recovery` retiring `key`: naming this incarnation and not
- * aborted, whether held or FRESH in `batch`. A cut in the batch that is already held is judged as
- * held.
- */
 export function liveCutIds(
   reactor: Reactor,
   operator: string,
@@ -424,15 +355,8 @@ export function liveCutIds(
   ]);
 }
 
-/** Is `d` a cut manifest? It is store-local: only this store's own append writes one. */
 export const isCutManifest = (d: Delta): boolean => inContext(d, CTX_CUT_MANIFEST);
 
-/**
- * The manifests a retiring `record` may commit behind: operator manifests for it, HELD before this
- * append. The arrivals of one transfer are simultaneous (SPEC-6 §3), so a manifest in the record's
- * own append does not count. Each entry is the set of cut ids one manifest names; any one that
- * covers every store qualifies, so an earlier, narrower manifest cannot block a later, complete one.
- */
 export function manifestsFor(
   reactor: Ground,
   operator: string,
@@ -444,11 +368,6 @@ export function manifestsFor(
     .map((m) => new Set(fields(m, "cut")));
 }
 
-/**
- * Why `batch` is refused for a manifest in it, or undefined. A manifest may name only cuts already
- * held (here, or in an attached pool: `heldElsewhere`) or in its own append, so it can never bind a
- * cut that arrives after it. Its record comes in a later append.
- */
 export function manifestDefect(
   reactor: Ground,
   operator: string | undefined,
@@ -473,11 +392,6 @@ export function manifestDefect(
   return undefined;
 }
 
-/**
- * Why `batch` is refused for a cut in it, or undefined. A cut for this store must arrive before its
- * recovery record: a cut written once the record is held here, or in the ground this store reads
- * users from, would count what the retired key wrote in between.
- */
 export function lateCutDefect(
   reactor: Reactor,
   operator: string | undefined,
@@ -498,7 +412,6 @@ export function lateCutDefect(
   return undefined;
 }
 
-/** Is `d` a cut naming this store's incarnation? Only this store's own append may write one. */
 export function cutForHere(
   reactor: Reactor,
   operator: string | undefined,

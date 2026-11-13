@@ -1,33 +1,14 @@
-// THE FIVE CONTROLS, IN WORDS (SPEC §58 position 4). The copy is part of the spec, because it is
-// the promise: every switch carries, on the page and in plain words, what it gives and what it
-// risks, and the reader should have no question about either.
-//
-// ONE SOURCE, TWO PAGES. The consent page sets these when a container is created; the container's
-// admin page changes them later, with the same five lines. A person meets the same sentences in
-// both places or the second place is a different promise — so both render from here, and a rail
-// compares this file against the spec's own words.
-//
-// The sentences are the spec's, whitespace apart. Nothing here is shortened for a narrow screen:
-// a risk that does not fit is still the risk.
-
 import type { EnvelopeSize } from "./leeway.js";
 
-/** One control: the name a person reads, what it gives, and what it costs them. */
 export interface LeewayControl {
-  /** The form field, and the id its label and description hang off. */
   readonly field: string;
-  /** The name on the page. */
   readonly label: string;
-  /** What turning it on gives. */
   readonly capability: string;
-  /** What turning it on risks, in the same breath. */
   readonly risk: string;
 }
 
-/** The three switches a leeway carries as plain booleans. */
 export type SwitchField = "receive" | "offer" | "publish";
 
-/** The three switches, in the order the spec writes them. */
 export const SWITCH_CONTROLS: readonly (LeewayControl & { readonly field: SwitchField })[] = [
   {
     field: "receive",
@@ -60,7 +41,6 @@ export const SWITCH_CONTROLS: readonly (LeewayControl & { readonly field: Switch
   },
 ] as const;
 
-/** Delegate is not a switch but the terms below; its own control still reads like one. */
 export const DELEGATE_CONTROL: LeewayControl = {
   field: "delegate",
   label: "Delegate",
@@ -74,7 +54,6 @@ export const DELEGATE_CONTROL: LeewayControl = {
     "container, and are revoked when the agent is — but until then, what they write is real.",
 };
 
-/** The envelope is a ceiling, chosen by size rather than switched on. */
 export const ENVELOPE_CONTROL: LeewayControl = {
   field: "envelope",
   label: "Envelope",
@@ -86,7 +65,6 @@ export const ENVELOPE_CONTROL: LeewayControl = {
     "the store stops it. It never grants reach.",
 };
 
-/** All five, in the order a person meets them. */
 export const LEEWAY_CONTROLS: readonly LeewayControl[] = [
   ...SWITCH_CONTROLS,
   DELEGATE_CONTROL,
@@ -95,10 +73,6 @@ export const LEEWAY_CONTROLS: readonly LeewayControl[] = [
 
 export const ENVELOPE_SIZES: readonly EnvelopeSize[] = ["small", "medium", "large"] as const;
 
-/**
- * The sentence above the five, wherever they are shown. A leeway is a declaration on the
- * container, so this page is where it changes, and the change is a delta the next request obeys.
- */
 export const LEEWAY_LEDE =
   "Every switch starts off — the private journal is the default. A leeway is a declaration on " +
   "this container, so changing it later is a delta the next request obeys.";

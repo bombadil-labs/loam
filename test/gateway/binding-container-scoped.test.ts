@@ -1,15 +1,3 @@
-// §47 criteria 6 and 7 — A BINDING BELONGS TO THE CONTAINER IT WAS BLESSED INTO.
-//
-// §46's channels blessed a peer's law into the RECEIVER's primary ground while the peer's data
-// lived in a pool — backwards from §28, where effectiveness is a property of a container. T189
-// scoped the READS to the pool and left the binding store-wide, and that seam is where a whole
-// review's worth of defects fell through (T199's severed-lens fallback most of all).
-//
-// Now the blessing lands in the pool's own ground. The surface still serves the lens — replay
-// AGGREGATES each attached channel pool's blessed bindings under the channel's prefix — but the
-// bytes live where the peer's data lives, so dropping the channel takes the law with the data and
-// the whole retire-on-drop question (T199) dissolves, exactly as Myk predicted it should.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -35,7 +23,6 @@ describe("§47 — a channel's blessing lives in the channel's pool", () => {
       const report = await ch.sync();
       expect(report.bound).toContain("alice:Plant");
 
-      // DELTA LEVEL, both sides. The binding deltas are in the POOL, signed by its own key...
       const pool = ch.pool.gateway!;
       const inPool = [...pool.reactor.snapshot()].some(
         (d) =>
@@ -44,7 +31,6 @@ describe("§47 — a channel's blessing lives in the channel's pool", () => {
           ) && d.claims.author === pool.operatorAuthor,
       );
       expect(inPool).toBe(true);
-      // ...and the ROOT ground holds no registration binding for the channel's name.
       const inRoot = [...me.reactor.snapshot()].some((d) =>
         d.claims.pointers.some(
           (p) =>
@@ -55,7 +41,6 @@ describe("§47 — a channel's blessing lives in the channel's pool", () => {
       );
       expect(inRoot).toBe(false);
 
-      // OBJECT LEVEL: the surface still serves the lens, aggregated from the pool.
       expect(me.def("alice:Plant")).toBeDefined();
     } finally {
       await alice.close();
@@ -81,9 +66,7 @@ describe("§47 — a channel's blessing lives in the channel's pool", () => {
 
       await me.dropChannel(one.name);
 
-      // GONE from the surface with no fail-closed guard needed — the binding went with the pool.
       expect(() => me.def("alice:Plant")).toThrow();
-      // Two-sided at the door: the bystander's lens still SERVES a real read.
       await bob.append([observed(FERN, "height", 5, 9000, "b0".repeat(32))]);
       await two.sync();
       const read = await me.query(`{ bob_Sprout(entity: "${FERN}") { height } }`);
@@ -97,9 +80,6 @@ describe("§47 — a channel's blessing lives in the channel's pool", () => {
   });
 
   it("the aggregated lens survives a REBOOT — pools attach, then the surface folds them in", async () => {
-    // Boot order is load-bearing: replay runs before resumeChannels, so without a second fold the
-    // rebooted surface would lack every channel lens until the next sync — a store that "kept the
-    // data and lost the law" on every restart.
     const home = mkdtempSync(join(tmpdir(), "loam-agg-"));
     const alice = await S("a1".repeat(32));
     try {

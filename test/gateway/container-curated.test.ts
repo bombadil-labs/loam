@@ -1,10 +1,3 @@
-// T32 — the curated/property scope is zero-copy and flippably excluded (criteria 4 and 6).
-// Property = a query over shared ground: pointer arrangement, zero copies. Exclusion is a CLAIM
-// and re-inclusion is its lawful negation — no member delta is ever re-signed by either
-// direction, which is why the property model costs nothing (member ids are pinned across the
-// round-trip). And a property container never copies: opening and reading one adds ZERO deltas
-// to any backend — the dual of container-wall's real-bytes assertion.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -78,7 +71,6 @@ describe("T32 criteria 4 & 6 — property is flippable exclusion at zero churn",
     expect(before).toContain(m1.id);
     const groundBefore = (await backend.deltasSince(new Set())).length;
 
-    // EXCLUDE: one claim lands; the members leave the scoped read; nothing re-signs.
     const exclusion = signClaims(exclusionClaims("container:m", OP, 8100), OP_SEED);
     await gw.append([exclusion]);
     const excluded = gw
@@ -88,15 +80,13 @@ describe("T32 criteria 4 & 6 — property is flippable exclusion at zero churn",
     expect(excluded).toContain(h1.id);
     expect(excluded).not.toContain(m1.id);
 
-    // RE-INCLUDE: negating the exclusion claim — authorship never changed, so nothing re-signs.
     await gw.append([retraction(exclusion.id, OP, OP_SEED, 8200)]);
     const after = gw
       .containerScope({ containers: ["container:h", "container:m"] })
       .map((d) => d.id)
       .sort();
-    expect(after).toEqual(before); // IDENTICAL ids across the round-trip — zero churn
+    expect(after).toEqual(before);
 
-    // The ground never moved beyond the exclusion claims themselves: one exclusion + one negation.
     const groundAfter = (await backend.deltasSince(new Set())).length;
     expect(groundAfter).toBe(groundBefore + 2);
     await gw.close();
@@ -136,13 +126,13 @@ describe("T32 criteria 4 & 6 — property is flippable exclusion at zero churn",
     const c = await gw.openContainer({ name: "container:h" });
     expect(c.posture).toBe("shared");
     expect(c.trust).toBe("curated");
-    expect(c.gateway).toBeUndefined(); // no second backend EXISTS for it
+    expect(c.gateway).toBeUndefined();
     expect(c.members().map((d) => d.id)).toContain(h1.id);
     expect(gw.containerScope({ containers: ["container:h"] }).map((d) => d.id)).toContain(h1.id);
 
     await gw.flush();
     const groundAfter = (await backend.deltasSince(new Set())).map((d) => d.id).sort();
-    expect(groundAfter).toEqual(groundBefore); // pointer arrangement, zero copies
+    expect(groundAfter).toEqual(groundBefore);
     await gw.close();
   });
 });

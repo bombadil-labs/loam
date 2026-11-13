@@ -1,48 +1,3 @@
-// T263 — THE ROSTER'S STAGED ACTS (SPEC §58 position 3): `sever` and `promote-stage`.
-//
-// Both verbs answer the same way and for the same reason: an agent NOMINATES and a person DECIDES.
-// Neither moves a byte. `sever` purges a peer's pool, and `promote` re-signs a claim under the
-// store's own name in canonical history, where erasure is the only way back out — so both hand
-// back a preview and a link, and the act itself happens behind a session gate a connector token
-// can never obtain. MCP callers are a TokenIdentity; the admin door sits behind SessionGate. They
-// are different authentication paths, not one path with a flag.
-//
-// `sever` is `loam_federate_drop` under the roster's name: ONE ROAD, TWO NAMES, so the two cannot
-// answer one caller differently. That is the same shape `receive` takes, and the same reason.
-//
-// THE PROPERTY THAT MATTERS MOST IS A NEGATIVE ONE, so every case asserts it at the bytes: after
-// the call, the channel still stands, the pool's deltas are all still there, and the store's own
-// ground holds nothing new. A staged act that quietly acted would be the worst defect this file
-// could miss, and `isError: false` alone cannot see it.
-//
-// NOT HERE, and said so: `bless-renderer` is the roster's sixth verb and decides a new capability,
-// so it ships in its own change. The admin page's own promote and drop roads are railed where they
-// live (admin-promote.test.ts, admin-channel-drop.test.ts); this file pins only that the roster
-// hands a person to them without doing their work.
-//
-// RAILS-RED on origin/main, this file copied in: 6 red, 0 green — 6 cases. No control.
-//
-// One case was green on the base at first, and the reason is worth keeping. A store without these
-// tools answers "unknown tool", which is an error like any other — so a case asserting only that a
-// refusal HAPPENED passed where the feature did not exist. It now matches the verb's own sentence.
-//
-// REVERT PROBES, MEASURED against this file as it stands — 8 cases.
-//   sever is not routed to the staged road          → 2 red, 6 green
-//   sever stages an unnamed channel                 → 1 red, 7 green
-//   promote-stage does not ask the gather           → 1 red, 7 green
-//   promote-stage skips the primary-ground gate     → 1 red, 7 green
-//   promote-stage admits an unbound caller          → 1 red, 7 green
-//   the preview names only the other channels       → 1 red, 7 green
-//   the roster block swallows the staged verbs      → 1 red, 7 green (and 1 red in container-tools)
-//   the promote fault is echoed to the caller       → 0 red, 8 green
-//   a description promises an expiry it lacks       → 1 red, 7 green
-//
-// THE LAST PROBE IS GREEN, AND THAT IS THE HONEST RECORD. `containerScope` throws only when a
-// SEPARATE container in the gather is not attached, and this fixture has no detached pool to
-// build one with. The guard maps that throw onto a fixed sentence and logs the detail, because
-// the raw refusal names the container it could not attach — which can be a sibling pool the
-// caller never opened. It is written down rather than deleted.
-
 import { describe, expect, it } from "vitest";
 import { signClaims } from "@bombadil/rhizomatic";
 import { readContainerTable } from "../../src/gateway/container-law.js";
@@ -149,7 +104,6 @@ async function callTool(
   return { text: body.result?.content?.[0]?.text ?? "", isError: body.result?.isError === true };
 }
 
-/** A store with a bound connection, an open leeway, and one live channel into the container. */
 async function withChannel(): Promise<{
   base: string;
   gateway: Gateway;
@@ -173,7 +127,6 @@ async function withChannel(): Promise<{
   return { base, gateway, ada, channel, poolSize: [...pool.reactor.snapshot()].length };
 }
 
-/** One tool's declaration, as the door advertises it. */
 async function toolNamed(
   base: string,
   want: string,
@@ -195,10 +148,6 @@ async function toolNamed(
 
 describe("§58 — the roster stages, and a person decides", () => {
   it("sever wants the channel by name, and stages nothing without one", async () => {
-    // `channelStatus(undefined)` returns EVERY channel, so an omitted argument used to stage the
-    // FIRST one the caller could reach — handing back a ready confirm link and a `--yes` command
-    // line for a channel nobody chose. It purges nothing by itself, and it is still the one
-    // artifact of this road that leads to a real deletion.
     const { base, gateway, ada, channel } = await withChannel();
     for (const args of [{}, { channel: 7 }, { channel: ["x"] }, { channel: null }]) {
       const r = await callTool(base, ada, "loam_container_sever", args);
@@ -225,10 +174,6 @@ describe("§58 — the roster stages, and a person decides", () => {
     expect(said.channel).toBe(channel);
     expect(said.purgedNothing, "it says so plainly").toBe(true);
     expect(said.confirmAt, "and hands a person the page").toContain("/admin/container");
-    // AND THE DESCRIPTION PROMISES ONLY WHAT THE REPLY CARRIES. Both names of this act once said
-    // they return an expiry, and a staged id; there is neither. A tool description is read by a
-    // machine that will plan around it, so an overclaim there is the same defect as an overclaim
-    // in the preview — which is what this whole file is about.
     for (const verb of ["loam_container_sever", "loam_federate_drop"]) {
       const described = await toolNamed(base, verb);
       expect(described, `${verb} is offered`).toBeDefined();
@@ -236,12 +181,8 @@ describe("§58 — the roster stages, and a person decides", () => {
       expect(described!.description, `${verb} promises no staged id`).not.toMatch(/staged id/);
     }
     expect(said.wouldPurge.join(" "), "naming what would go").toContain(channel);
-    // TWO-SIDED, LIKE EVERY OTHER PREVIEW OF A REMOVAL. `wouldSurvive` listing only the OTHER
-    // channels is an empty array on a store with one, under a field name that reads as a claim
-    // that nothing survives. The container the channel receives into does.
     expect(said.wouldSurvive.join(" "), "and naming what stays").toContain("ada:journal");
 
-    // AT THE BYTES, which is the only assertion that can see a staged act that acted.
     expect(
       gateway.channelStatus().some((c) => c.name === channel),
       "the channel stands",
@@ -260,7 +201,6 @@ describe("§58 — the roster stages, and a person decides", () => {
     expect(underRoster.isError).toBe(underFederate.isError);
     expect(underRoster.text, "word for word").toBe(underFederate.text);
 
-    // And a channel this container did not open is refused under BOTH names, the same way.
     const foreign = "channel:bea:notes:someone";
     const rosterNo = await callTool(base, ada, "loam_container_sever", { channel: foreign });
     const federateNo = await callTool(base, ada, "loam_federate_drop", { channel: foreign });
@@ -287,7 +227,6 @@ describe("§58 — the roster stages, and a person decides", () => {
     expect(said.delta).toBe(mine!.id);
     expect(said.movedNothing, "it says so plainly").toBe(true);
     expect(said.confirmAt).toContain("/admin/container");
-    // AT THE BYTES: the store's own ground is exactly as large as it was.
     expect([...gateway.reactor.snapshot()].length, "nothing was adopted").toBe(before);
     await closePeers();
     await closeAll();
@@ -295,16 +234,9 @@ describe("§58 — the roster stages, and a person decides", () => {
 
   it("promote-stage asks the gather, and names nothing outside it", async () => {
     const { base, gateway, ada } = await withChannel();
-    // A delta that EXISTS and is NOT in this container's gather: bea's own container holds it.
-    // The refusal must not confirm that it exists anywhere — the same no-oracle rule the admin
-    // page's promote gate keeps. An invented id would be answered the same way, which is the
-    // point: the two must be indistinguishable.
     await connect(base, "bea", "notes");
     const before = [...gateway.reactor.snapshot()].length;
     const beaHeld = gateway.containerScope({ containers: ["bea:notes"] })[0];
-    // ASSERTED, NOT ASSUMED. Guarding the comparison behind `if (beaHeld)` would let the whole
-    // point of this case vanish the day the fixture stops yielding one — which is the shape this
-    // case was rewritten to repair.
     expect(beaHeld, "premise: bea's container holds something").toBeDefined();
     expect(
       gateway.containerScope({ containers: ["ada:journal"] }).some((d) => d.id === beaHeld!.id),
@@ -327,10 +259,6 @@ describe("§58 — the roster stages, and a person decides", () => {
   });
 
   it("promote-stage refuses a delta the primary ground already holds", async () => {
-    // THE SECOND GATE THE PAGE ASKS. A delta already in the primary has nothing left to move, and
-    // the page renders no control for it — so staging one hands a person a link to a button that
-    // is not there, over a preview naming something that can never be adopted. A preview must be
-    // true of what a completion would do.
     const { base, gateway, ada } = await withChannel();
     const primary = gateway
       .containerScope({ containers: ["ada:journal"] })
@@ -351,9 +279,6 @@ describe("§58 — the roster stages, and a person decides", () => {
       delta: "0".repeat(64),
     });
     expect(refused.isError, refused.text).toBe(true);
-    // THE VERB'S OWN REFUSAL, not a door that never heard of it. A store without this tool answers
-    // "unknown tool", which is also an error and would satisfy a looser assertion — so the case
-    // would pass on a base where the feature does not exist at all.
     expect(refused.text, "and it names the road a person takes").toMatch(
       /A person promotes from the container's own page/,
     );
@@ -375,7 +300,6 @@ describe("§58 — the roster stages, and a person decides", () => {
     for (const verb of ["loam_container_sever", "loam_container_promote_stage"]) {
       const found = tools.find((t) => t.name === verb);
       expect(found, `${verb} is offered`).toBeDefined();
-      // A shell reads readOnlyHint as a licence to cache and REPLAY. Both of these stage an act.
       expect(found!.annotations?.["readOnlyHint"], `${verb} is not a read`).toBe(false);
     }
     await closePeers();

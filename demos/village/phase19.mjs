@@ -1,11 +1,3 @@
-// Phase 19 — TWO DOORS, ONE TRUTH (SPEC §17, PRs #60/#61). The almanac has answered GraphQL
-// since the founding; today it answers REST from the same registrations, and the village
-// checks the doors against each other the way §17 demands: one ground, one registration, the
-// same view — _hex for _hex. Then the versioning law, lived: a lens evolves (v2 minted, v1
-// still answerable, the two resolving the same ground differently), the operator withdraws
-// v1 (410 Gone by its true name — on the operator's door; anonymously every unknown hash is
-// the same 404, because history is not anonymous).
-
 import { authorForSeed, parseSchema, parseTerm, signClaims } from "@bombadil/rhizomatic";
 import { makeNegationClaims } from "@bombadil/rhizomatic";
 import { publicClaims } from "../../dist/index.js";
@@ -42,10 +34,6 @@ try {
     return res.json();
   };
 
-  // The phase's own lens, so the act owns its versioning story end to end. The stage is
-  // cleared first — the almanac's home persists between runs, and a re-run must start from
-  // its own opening line: the operator strikes every surviving Fieldnote version (withdrawal
-  // is the same instrument the finale demonstrates; idempotence by law, not by luck).
   for (const stale of almanac.gateway
     .registrationVersions()
     .filter((v) => v.hyperschema.name === "Fieldnote")) {
@@ -79,7 +67,6 @@ try {
     ),
   ]);
 
-  // 19.1 — the OpenAPI document is a real, live description of this store's lenses
   const specRes = await rest("/openapi.json", opToken("almanac"));
   const spec = await specRes.json();
   const paths = Object.keys(spec.paths ?? {});
@@ -90,7 +77,6 @@ try {
     `${paths.length} paths`,
   );
 
-  // 19.2 — agreement: the same view through both doors, _hex for _hex
   const viaGql = await gql(`{ fieldnote(entity: "note:almanac-day") { text _hex } }`, opToken("almanac"));
   const viaRest = await (
     await rest(`/rest/v1/Fieldnote/${encodeURIComponent("note:almanac-day")}`, opToken("almanac"))
@@ -102,7 +88,6 @@ try {
     `${String(viaRest._hex).slice(0, 14)}…`,
   );
 
-  // 19.3 — the versioning law, lived: evolve (v2 minted, v1 answerable, resolutions diverge)
   await almanac.gateway.publishRegistration(
     FIELDNOTE,
     parseSchema({
@@ -111,8 +96,6 @@ try {
     }),
     ["note:almanac-day"],
   );
-  // Give the lenses something to disagree about: one tags fact — v2 declares tags as ALL (a
-  // list); v1 never named it, so its DEFAULT answers a scalar. Same ground, two resolutions.
   await almanac.gateway.append([
     signClaims(
       {
@@ -143,7 +126,6 @@ try {
     `v1 ${String(v1._hex).slice(0, 10)}… ≠ v2 ${String(v2._hex).slice(0, 10)}…`,
   );
 
-  // 19.4 — withdrawal: struck by its true name; 410 on the operator's door, 404 to strangers
   const v1Hash = versions[0].deltaId;
   await almanac.gateway.append([
     signClaims(makeNegationClaims(operator, Date.now(), v1Hash, "phase 19 retires v1"), almanac.seed),
@@ -152,7 +134,6 @@ try {
     `/rest/@${v1Hash}/Fieldnote/${encodeURIComponent("note:almanac-day")}`,
     opToken("almanac"),
   );
-  // The stranger's window: declare Fieldnote public, then probe the withdrawn hash tokenless.
   await almanac.gateway.append([
     signClaims(publicClaims(["Fieldnote"], operator, Date.now()), almanac.seed),
   ]);

@@ -1,9 +1,3 @@
-// Step 14's contract: divergent dialects are normalized, never mutated. A foreign app says
-// "watched a film with someone" in its own shape; a TRANSLATION spec (data, operator-blessed)
-// recognizes it and emits the local dialect's rendering — a new delta, signed by the
-// translator, CITING its source. The originals are immortal; re-runs translate nothing twice
-// (content addressing); a spec from a stranger binds nothing.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
@@ -22,7 +16,6 @@ const CINELOG_SEED = "ab".repeat(32);
 const CINELOG = authorForSeed(CINELOG_SEED);
 const MALLORY_SEED = "ee".repeat(32);
 
-// The cinelog dialect: a stranger's app records "viewer watched film on date" its own way.
 const cinelogEntry = (viewer: string, film: string, date: string, ts: number): Delta =>
   signClaims(
     {
@@ -41,7 +34,6 @@ const cinelogEntry = (viewer: string, film: string, date: string, ts: number): D
     CINELOG_SEED,
   );
 
-// The village's rendering of the same idea: attendance the Dossier-style gathers can see.
 const CINELOG_SPEC = {
   recognize: {
     and: [
@@ -59,9 +51,6 @@ const CINELOG_SPEC = {
   },
 };
 
-// Every rendering in the store that cites `sourceId` under the reserved `translates` role — the
-// only edge that carries a foreign claim into the living dialect, and so the narrowing boundary
-// hazard H1 asks about here.
 const renderingsOf = (gateway: Gateway, sourceId: string): string[] =>
   [...gateway.reactor.snapshot()]
     .filter((d) =>
@@ -83,7 +72,6 @@ async function normalizedWorld(): Promise<Gateway> {
       OPERATOR_SEED,
     ),
   ]);
-  // the local dialect's lens: a person's attendances
   gateway.register(
     { ...PLANT, name: "Attendance" },
     {
@@ -101,13 +89,13 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
   it("a cinelog entry is rendered into the village dialect, cited, and the lens lights up", async () => {
     const gateway = await normalizedWorld();
     const foreign = cinelogEntry("person:wren", "film:stalker", "2026-07-08", 5000);
-    await gateway.federate([foreign]); // open door: the stranger's dialect arrives
+    await gateway.federate([foreign]);
 
     const before = await gateway.query(`{ attendance(entity: "person:wren") { events_attended } }`);
     expect(
       (before.data as { attendance: { events_attended: unknown[] | null } }).attendance
         .events_attended ?? [],
-    ).toEqual([]); // the foreign shape is invisible to the local lens
+    ).toEqual([]);
 
     const report = await translate(gateway, { seed: TRANSLATOR_SEED });
     expect(report).toEqual({ emitted: 1, matched: 1, unbound: 0, refused: 0 });
@@ -119,11 +107,10 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
     )!;
     expect(emission).toBeDefined();
     const cite = emission.claims.pointers.find((p) => p.role === "translates")!;
-    expect(cite.target.kind === "delta" && cite.target.deltaRef.delta).toBe(foreign.id); // provenance
+    expect(cite.target.kind === "delta" && cite.target.deltaRef.delta).toBe(foreign.id);
     const origin = emission.claims.pointers.find((p) => p.role === "origin")!;
     expect(origin.target.kind === "primitive" && origin.target.value).toBe("cinelog");
 
-    // the local lens now sees the stranger-recorded fact — and the original is still there
     const after = await gateway.query(`{ attendance(entity: "person:wren") { events_attended } }`);
     expect(JSON.stringify(after.data)).toContain("film:stalker");
     expect([...gateway.reactor.snapshot()].some((d) => d.id === foreign.id)).toBe(true);
@@ -135,14 +122,13 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
     await gateway.federate([cinelogEntry("person:wren", "film:stalker", "2026-07-08", 5000)]);
     expect((await translate(gateway, { seed: TRANSLATOR_SEED })).emitted).toBe(1);
     const second = await translate(gateway, { seed: TRANSLATOR_SEED });
-    expect(second.matched).toBe(1); // the recognizer still matches...
-    expect(second.emitted).toBe(0); // ...and union swallows the identical emission whole
+    expect(second.matched).toBe(1);
+    expect(second.emitted).toBe(0);
     await gateway.close();
   });
 
   it("translations are terminal: an emission is never itself translated", async () => {
     const gateway = await normalizedWorld();
-    // a second spec that would match the EMISSIONS (role "guest") — a chain in waiting
     await gateway.append([
       signClaims(
         translationClaims(
@@ -157,18 +143,17 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
     ]);
     await gateway.federate([cinelogEntry("person:wren", "film:stalker", "2026-07-08", 5000)]);
     await translate(gateway, { seed: TRANSLATOR_SEED });
-    const after = await translate(gateway, { seed: TRANSLATOR_SEED }); // and again
+    const after = await translate(gateway, { seed: TRANSLATOR_SEED });
     expect(after.emitted).toBe(0);
     const echoes = [...gateway.reactor.snapshot()].filter((d) =>
       d.claims.pointers.some((p) => p.role === "echo"),
     );
-    expect(echoes).toHaveLength(0); // the chain never started
+    expect(echoes).toHaveLength(0);
     await gateway.close();
   });
 
   it("a stranger's spec binds nothing; a recognizer miss emits nothing", async () => {
     const gateway = await normalizedWorld();
-    // Mallory federates her own spec (would translate ANYTHING into her echo)
     await gateway.federate(
       [
         signClaims(
@@ -188,7 +173,6 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
       readTranslations(gateway.reactor, gateway.validityNow(), OPERATOR).map((t) => t.name),
     ).toEqual(["cinelog"]);
 
-    // and an unrelated delta is untouched by the lawful spec
     await gateway.append([
       signClaims(
         {
@@ -208,7 +192,7 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
     ]);
     await gateway.federate([cinelogEntry("person:wren", "film:stalker", "2026-07-08", 5000)]);
     const report = await translate(gateway, { seed: TRANSLATOR_SEED });
-    expect(report.matched).toBe(1); // only the cinelog entry — never the yield claim
+    expect(report.matched).toBe(1);
     const smears = [...gateway.reactor.snapshot()].filter((d) =>
       d.claims.pointers.some((p) => p.role === "smear"),
     );
@@ -218,8 +202,6 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
 
   it("a recognizer evalPred cannot run is refused at publish and skipped at read", async () => {
     const gateway = await normalizedWorld();
-    // inView, aliased, holes, {var:"root"}: parsePred accepts them all; a bare evalPred
-    // throws on each — one such spec would kill every future pass. Refused structurally.
     expect(() =>
       translationClaims(
         "reflective",
@@ -238,7 +220,6 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
         9,
       ),
     ).toThrow(/runnable/);
-    // hand-planted past the guard: read-side defense drops it, the pass survives
     await gateway.append([
       signClaims(
         {
@@ -292,28 +273,16 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
       signClaims(makeNegationClaims(OPERATOR, 6000, foreign.id), OPERATOR_SEED),
     ]);
     const report = await translate(gateway, { seed: TRANSLATOR_SEED });
-    expect(report).toEqual({ emitted: 0, matched: 0, unbound: 0, refused: 0 }); // retired facts stay retired
-    // The report is the pass's own account of itself; ask the store as well. The first line is a
-    // FIXTURE check, not a check on `translate` — `isSuppressed` is author-blind, so it says only
-    // that a negation is present, and the negation here is the operator's on purpose (`dataStruck`,
-    // which the pass actually consults, would ignore a stranger's). The second is DELTA level: no
-    // rendering of the struck source exists at all.
+    expect(report).toEqual({ emitted: 0, matched: 0, unbound: 0, refused: 0 });
     expect(isSuppressed(gateway, foreign.id)).toBe(true);
     expect(renderingsOf(gateway, foreign.id)).toEqual([]);
-    // ...and OBJECT level, through the Attendance Schema: the lens stays dark. The first test in
-    // this file lights the same lens up on the same fixture minus the strike, so this is a real
-    // difference and not an empty view that was always empty.
     const view = await gateway.query(`{ attendance(entity: "person:wren") { events_attended } }`);
-    expect(view.errors).toBeUndefined(); // a failed query has no `data` and would pass vacuously
+    expect(view.errors).toBeUndefined();
     expect(JSON.stringify(view.data)).not.toContain("film:stalker");
     await gateway.close();
   });
 
   it("...and a struck source suppresses only ITS OWN rendering — a live neighbour still renders", async () => {
-    // The two-sided half of the rail above. `emitted: 0` is also what a translate pass that had
-    // stopped working entirely would report, so a struck source must be shown to cost exactly one
-    // rendering and no more. Both entries belong to the SAME person, so one reading of one lens
-    // carries both sides.
     const gateway = await normalizedWorld();
     const struck = cinelogEntry("person:wren", "film:stalker", "2026-07-08", 5000);
     const live = cinelogEntry("person:wren", "film:solaris", "2026-07-09", 5001);
@@ -326,22 +295,15 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
     const report = await translate(gateway, { seed: TRANSLATOR_SEED });
     expect(report).toEqual({ emitted: 1, matched: 1, unbound: 0, refused: 0 });
 
-    // Delta level: exactly one rendering, and it cites the surviving source.
     expect(renderingsOf(gateway, struck.id)).toEqual([]);
     expect(renderingsOf(gateway, live.id)).toHaveLength(1);
 
-    // Object level, in one query: what a reader RESOLVES through the Attendance Schema. The
-    // surviving film is in the view and the struck one is not. A pass that ignored the strike puts
-    // stalker back; a pass that over-suppressed loses solaris. Only the correct one gives both.
     const read = await gateway.query(`{ attendance(entity: "person:wren") { events_attended } }`);
     expect(read.errors).toBeUndefined();
     const view = JSON.stringify(read.data);
     expect(view).toContain("film:solaris");
     expect(view).not.toContain("film:stalker");
 
-    // NOT asserted here: suppression of a rendering whose source is struck AFTER it was emitted.
-    // That is `translate`'s reconciliation stage, which this single-pass fixture never reaches —
-    // test/federation/translate-suppression.test.ts drives it, at both levels.
     await gateway.close();
   });
 
@@ -362,7 +324,7 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
             target: { kind: "entity", entity: { id: "person:wren", context: "watch_history" } },
           },
           {
-            role: "viewer", // TWO viewers: the template's single hole is ambiguous
+            role: "viewer",
             target: { kind: "entity", entity: { id: "person:miles", context: "watch_history" } },
           },
           { role: "on", target: { kind: "primitive", value: "2026-07-09" } },
@@ -372,7 +334,7 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
     );
     await gateway.federate([shared]);
     const report = await translate(gateway, { seed: TRANSLATOR_SEED });
-    expect(report).toEqual({ emitted: 0, matched: 1, unbound: 1, refused: 0 }); // recognized, refused whole
+    expect(report).toEqual({ emitted: 0, matched: 1, unbound: 1, refused: 0 });
     await gateway.close();
   });
 
@@ -381,7 +343,6 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
     await gateway.federate([cinelogEntry("person:wren", "film:stalker", "2026-07-08", 5000)]);
     await translate(gateway, { seed: TRANSLATOR_SEED });
 
-    // the operator republishes the spec at the same entity — richer rendering
     await gateway.append([
       signClaims(
         translationClaims(
@@ -397,11 +358,11 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
       ),
     ]);
     const report = await translate(gateway, { seed: TRANSLATOR_SEED });
-    expect(report.emitted).toBe(1); // the new rendering lands beside the old
+    expect(report.emitted).toBe(1);
     const renderings = [...gateway.reactor.snapshot()].filter((d) =>
       d.claims.pointers.some((p) => p.role === "translates"),
     );
-    expect(renderings).toHaveLength(2); // both stand — a better spec later is another pass
+    expect(renderings).toHaveLength(2);
     await gateway.close();
   });
 
@@ -414,7 +375,6 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
         author: CINELOG,
         pointers: [
           ...cinelogEntry("person:wren", "film:stalker", "2026-07-08", 5000).claims.pointers,
-          // the decorative self-exemption: translates pointing at any delta id
           {
             role: "translates",
             target: { kind: "delta", deltaRef: { delta: `1e20${"77".repeat(32)}` } },
@@ -425,7 +385,6 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
     );
     await gateway.federate([evasive]);
     const report = await translate(gateway, { seed: TRANSLATOR_SEED });
-    // terminal means terminal: shape, not authorship — the reserved role opts the source out
     expect(report).toEqual({ emitted: 0, matched: 0, unbound: 0, refused: 0 });
     await gateway.close();
   });
@@ -453,9 +412,9 @@ describe("normalization: foreign dialects become more deltas, never mutations", 
 
     await gateway.federate([cinelogEntry("person:miles", "film:mirror", "2026-07-09", 8000)]);
     const report = await translate(gateway, { seed: TRANSLATOR_SEED });
-    expect(report.matched).toBe(0); // the retired spec recognizes nothing new
+    expect(report.matched).toBe(0);
     const emissions = [...gateway.reactor.snapshot()].filter((d) => d.claims.author === TRANSLATOR);
-    expect(emissions).toHaveLength(1); // the earlier rendering stands — nothing is deleted
+    expect(emissions).toHaveLength(1);
     await gateway.close();
   });
 });

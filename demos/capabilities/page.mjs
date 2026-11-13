@@ -1,16 +1,9 @@
-// The book's renderer. It holds no content: every sentence, claim, term, and figure name comes
-// from `chapters.mjs`, which `test/site/capabilities.test.ts` imports too. The page and that test
-// share one book — that identity is the anti-rot guarantee, the same one `test/site/arc.test.ts`
-// makes for the tutorial.
-
 import { CHAPTERS, TERMS, termIndex } from "./chapters.mjs";
 import { FIGURES } from "./figure-set.mjs";
 import { draw } from "./figures.mjs";
 
 const terms = termIndex();
 
-/** Where a word lives, in one line a reader can act on. This is the honesty knob Myk asked for:
- *  a term is either a name the code really uses, or ours for the purpose of explaining. */
 function provenance(where) {
   if (where.kind === "export") return `real name — exported as \`${where.name}\``;
   if (where.kind === "internal") return `real name in the code — ${where.at}`;
@@ -34,7 +27,6 @@ function showCard(button, entry) {
   card.append(word, gloss, where);
   card.classList.add("on");
   card.setAttribute("aria-hidden", "false");
-  // Measure after content lands, then keep the card on screen at either edge.
   const box = card.getBoundingClientRect();
   const left = Math.min(Math.max(12, r.left), window.innerWidth - box.width - 12);
   const above = r.top > box.height + 16;
@@ -47,14 +39,6 @@ function hideCard() {
   card.setAttribute("aria-hidden", "true");
 }
 
-/**
- * The book's inline vocabulary: `` `code` ``, `**strong**`, `*emphasis*`, and `[[term]]`.
- *
- * Every span is BUILT as an element with `textContent`, never assembled into `innerHTML` — the
- * content module is prose written by hand, and a renderer that parses its own source into markup is
- * one typo away from executing it. The rail asserts the same four markers are balanced, so an
- * unclosed one is a red test rather than a literal asterisk on the page.
- */
 function inline(parent, text) {
   for (const bit of text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g)) {
     if (!bit) continue;
@@ -76,7 +60,6 @@ function inline(parent, text) {
   }
 }
 
-/** Prose carries `[[term]]` markers. Everything else is inserted as text, never as markup. */
 function prose(text) {
   const p = document.createElement("p");
   for (const piece of text.split(/(\[\[[^\]]+\]\])/g)) {
@@ -92,7 +75,6 @@ function prose(text) {
     button.className = "term";
     button.textContent = shown || word;
     if (!entry) {
-      // A missing gloss is a rail failure, not a page failure — render the word and move on.
       p.append(document.createTextNode(shown || word));
       continue;
     }
@@ -129,11 +111,7 @@ function claimList(claims) {
     if (c.door) chip("door", `${c.door}()`);
     chip("spec", c.spec);
     li.append(says, receipt);
-    // The gap is the whole point of allowing an unproven promise: a reader who is told a sentence
-    // has no test behind it deserves the reason in the same breath. Enforcing the field and then
-    // rendering it to nobody would be the admission going into a drawer.
     if (c.gap) {
-      // Through `prose`, not `inline`: a gap is a paragraph like any other and marks up terms.
       const why = prose(c.gap);
       why.className = "gap";
       li.append(why);
@@ -222,8 +200,6 @@ for (const ch of CHAPTERS) {
   toc.append(li);
 }
 
-// The stamp counts what the book is accountable for, from the book itself — a number nobody has to
-// remember to update.
 const claims = CHAPTERS.flatMap((c) => c.body.filter((b) => b.kind === "claims")).flatMap(
   (b) => b.claims,
 );
@@ -232,8 +208,6 @@ document.getElementById("stamp").textContent =
   `${CHAPTERS.length} chapters · ${claims.length} promises · ${proved} of them with a test that ` +
   `fails if they stop being true · ${TERMS.length} terms defined`;
 
-// Highlight the chapter you are reading. IntersectionObserver rather than a scroll handler, so a
-// long read does not pay for the rail on every frame.
 const links = new Map(CHAPTERS.map((ch) => [ch.slug, toc.querySelector(`a[href="#${ch.slug}"]`)]));
 const seen = new Set();
 const mark = () => {

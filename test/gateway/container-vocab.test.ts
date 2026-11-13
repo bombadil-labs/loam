@@ -1,11 +1,3 @@
-// T32 — the container vocabulary mint (criteria 2 and 17). Two rails share this file because they
-// are two faces of one promise: the vocabulary collides with nothing that exists (prefix rail +
-// malformation refusals at the door), and nothing that is not the operator's can move it (a
-// federated stranger's declaration, exclusion, or detach record lands as DATA and binds NOTHING —
-// asserted at both levels: the delta is in the ground, and the table, the scope, and the detached
-// listing are unmoved). What this file deliberately does not assert: resolution semantics
-// (container-declare), scope algebra (container-scope), the tree (container-tree).
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Claims } from "@bombadil/rhizomatic";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -52,8 +44,6 @@ const HEIGHTS = {
   in: "input",
 };
 
-// A raw declaration the builders would refuse to build — the door must see what any client can
-// hand it, not only what our own claim builder emits.
 const rawDeclaration = (container: string, pointers: Claims["pointers"], ts: number): Claims => ({
   timestamp: ts,
   validFrom: ts,
@@ -83,8 +73,6 @@ describe("T32 criterion 2 — the mint collides with nothing", () => {
       expect(ctx.startsWith("loam.container")).toBe(true);
     }
     expect(new Set(CONTAINER_CONTEXTS).size).toBe(3);
-    // The reserved vocabulary that predates the mint — none of it may share the prefix, so
-    // shape-detection (the §20 corollary) can never confuse an old delta for a container claim.
     const reserved = [
       CTX_OPERATOR,
       CTX_GRANTS,
@@ -124,8 +112,6 @@ describe("T32 criterion 2 — the mint collides with nothing", () => {
   it("a declaration missing posture refuses, naming the §28.4 recommendation (separate)", async () => {
     const gw = await boot();
     const claims = rawDeclaration("container:no-posture", [prim("trust", "curated")], 5002);
-    // The default lives in the MESSAGE and never in silent vocabulary semantics: the refusal
-    // recommends "separate" rather than allocating one nobody asked for.
     await expect(gw.append([signClaims(claims, OP_SEED)])).rejects.toThrow(/posture.*separate/s);
     await gw.close();
   });
@@ -154,9 +140,6 @@ describe("T32 criterion 2 — the mint collides with nothing", () => {
       5004,
     );
     await expect(gw.append([signClaims(claims, OP_SEED)])).rejects.toThrow(/membership/);
-    // The same shape on a WALL is lawful — a seeded arena needs no scope Term (the quarantine's
-    // own shape); without this leg the rail above could pass on a validator that rejects every
-    // membership-less declaration regardless of posture.
     const wall = rawDeclaration(
       "container:bare-wall",
       [prim("trust", "curated"), prim("posture", "separate")],
@@ -216,21 +199,17 @@ describe("T32 criterion 17 — a stranger's container claims are inert", () => {
     });
     expect(report.accepted).toBe(3);
 
-    // Delta level: all three sit in the ground — federation is union, the data landed.
     expect(gw.reactor.get(foreignDeclaration.id)).toBeDefined();
     expect(gw.reactor.get(foreignExclusion.id)).toBeDefined();
     expect(gw.reactor.get(foreignDetach.id)).toBeDefined();
 
-    // Object level: the table, the scope, and the detached listing are UNMOVED. A stranger holds
-    // no denial-of-visibility primitive over the operator's scoped reads, and cannot pollute the
-    // repair listing.
     const table = gw.containers();
     expect(table.containers.has("container:theirs")).toBe(false);
     expect(table.containers.has("container:mine")).toBe(true);
     expect(table.excluded.has("container:mine")).toBe(false);
     expect(table.detached.has("container:mine")).toBe(false);
     const scoped = gw.containerScope({ containers: ["container:mine"] }).map((d) => d.id);
-    expect(scoped).toContain(h.id); // neither the foreign exclusion nor the detach subtracted it
+    expect(scoped).toContain(h.id);
     await gw.close();
   });
 });

@@ -1,9 +1,3 @@
-// `Gateway.freeze` refuses a Term that selects erased content, rather than leaving it out: a
-// version is a permanent name, and a silent omission would change what it names. The erasure run
-// re-freezes through `freezeMembers` directly, so this never blocks a cut; the slate tests cover
-// that path. Each case checks the bytes are still held, so the refusal is about the erasure, not
-// about absence, and a bystander Term still freezes.
-
 import { describe, expect, it } from "vitest";
 import { makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
 import { eraseClaims } from "../../src/gateway/erase-law.js";
@@ -23,7 +17,7 @@ describe("freeze refuses erased content", () => {
     const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
     await gw.append([claim, bystander]);
     const before = gw.freeze(frozenMembershipTerm([claim.id]));
-    expect(before.members.map((d) => d.id)).toContain(claim.id); // control: the Term selects it
+    expect(before.members.map((d) => d.id)).toContain(claim.id);
 
     await gw.append([signClaims(eraseClaims(claim.id, op, op, 2000), OP_SEED)]);
     expect(gw.reactor.get(claim.id)).toBeDefined();

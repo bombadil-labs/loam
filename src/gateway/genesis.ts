@@ -1,10 +1,3 @@
-// Genesis: the bootstrap delta-set every store is born from. It is nothing exotic — just the
-// deltas that make a fresh store already governed and already registered: the operator's
-// registrations, the first tenancies and grants, any function definitions. Because every delta
-// is content-addressed and signed by the operator, booting the same genesis twice is idempotent
-// (the second boot's deltas are the first's, by id) and authorized (the operator needs no
-// grant). A store's shape is thus reproducible from a single seed value.
-
 import {
   authorForSeed,
   publishHyperSchemaClaims,
@@ -22,8 +15,6 @@ import {
 export interface GenesisSpec {
   readonly operatorSeed: string;
   readonly registrations?: readonly Registration[];
-  // Constitutional claims (memberships, grants) and anything else the operator plants at birth,
-  // each already authored by the operator. Signed as the operator here.
   readonly grants?: readonly Claims[];
   readonly extra?: readonly Claims[];
 }
@@ -36,14 +27,10 @@ export interface Genesis {
 export const STORE_ENTITY = "loam:store";
 export const CTX_OPERATOR = "loam.operator";
 
-// The genesis marker: an operator-signed delta recording who governs this store, filed at the
-// store entity. It makes every booted store non-empty from birth (a store always knows its own
-// operator), is idempotent (content-addressed — the same operator mints the same marker), and
-// is auditable like anything else.
 export function operatorMarkerClaims(operator: string): Claims {
   return {
     timestamp: 0,
-    validFrom: 0, // fixed, so the marker is the same delta on every boot
+    validFrom: 0,
     author: operator,
     pointers: [
       {
@@ -55,24 +42,14 @@ export function operatorMarkerClaims(operator: string): Claims {
   };
 }
 
-// Assemble the genesis: every claim signed by the operator, so the whole bundle is authorized
-// when it lands (the operator roots the capability chain). Always leads with the operator marker.
 export function assembleGenesis(spec: GenesisSpec): Genesis {
   const seed = spec.operatorSeed;
   const operator = authorForSeed(seed);
   const deltas: Delta[] = [signClaims(operatorMarkerClaims(operator), seed)];
   let clock = 1;
-  // Two registrations over one hyperschema ENTITY that resolve to the same lens name can never both
-  // bind — replay keys latest-per-lens, so one silently wins by array order (H6 at the mint site).
-  // Refuse the spec rather than serve a policy the operator's ordering, not their intent, selected.
   const seenLens = new Set<string>();
   for (const reg of spec.registrations ?? []) {
-    // The LENS name, exactly as the live mint paths derive it (`schema.name ?? hyperschema.name`,
-    // honouring an explicit `lensName`). Passing the PROGRAM name here is what collapsed siblings.
     const lensName = reg.lensName ?? reg.schema.name ?? reg.hyperschema.name;
-    // Key on NUL, the separator the reader's latest-per-lens dedup uses — NUL is the one character
-    // both mint paths forbid in a name, so (entity, lens) joins unambiguously. A space could let two
-    // distinct pairs collide into a false refusal.
     const key = [schemaEntityFor(reg.hyperschema, reg.entity), lensName].join("\u0000");
     if (seenLens.has(key)) {
       throw new Error(
@@ -82,13 +59,6 @@ export function assembleGenesis(spec: GenesisSpec): Genesis {
       );
     }
     seenLens.add(key);
-    // Loud at the mint, exactly as publishRegistration is: a mutations payload that cannot be read
-    // faithfully refuses HERE, with its defect named, while the operator is present to fix it.
-    // Minted malformed, the binding would shed its templates on every replay instead — and before
-    // T96, took `writable` down with it, booting the store immutable-by-default against the
-    // operator's own declaration. Validation only: the AUTHOR'S bytes are what the binding
-    // carries (below), because serializing the parsed form would move the delta's content
-    // address (H4) and hand every existing well-formed store a duplicate binding on its next boot.
     if (reg.mutations !== undefined) {
       try {
         parseClaimTemplates(reg.mutations);
@@ -100,11 +70,6 @@ export function assembleGenesis(spec: GenesisSpec): Genesis {
         );
       }
     }
-    // Four deltas per registration (SPEC §21): the hyperschema DEFINITION, the LIVING resolution
-    // Schema entity, its frozen VersionedSchema SNAPSHOT, and the BINDING that references all three.
-    // Deterministic timestamps keep boot idempotent. The binding carries its `writable` list through
-    // — under immutable-by-default (§14) a genesis registration that dropped it would open a store
-    // nothing could write.
     const entity = schemaEntityFor(reg.hyperschema, reg.entity);
     deltas.push(
       signClaims(publishHyperSchemaClaims(reg.hyperschema, entity, operator, clock++), seed),

@@ -1,14 +1,3 @@
-/** Internal experimental receiving reference projection (T281/T282), not a package API.
- * The caller supplies authenticated destination authority and explicitly separated source
- * scopes. Source IDs are boundary assertions, not facts inferred from signer identity.
- * No ingestion adapter, signer, ambient ground, dependency interpreter or persistent cache.
- * Decision wire profile is intentionally experimental: one exact context pointer plus JSON.
- * Bindings select one source lineage/reading; a decision counts only inside its own validity
- * window at `now`, and until the receiver lawfully negates it.
- * Multiple surviving bindings for a relationship refuse, rather than guessing chronology.
- * All input is verified before projection. This bounded in-memory proof is not a
- * production-scale implementation; even unrelated malformed input refuses the batch.
- */
 import { Reactor, computeId, governedDeltas, verifyDelta, type Delta } from "@bombadil/rhizomatic";
 import { lensOf, readRegistrations, type Registration } from "./registration.js";
 import { negatedAt } from "./negation.js";
@@ -19,7 +8,6 @@ interface Input {
   readonly destination: string;
   readonly decisions: readonly Delta[];
   readonly sources: readonly { readonly id: string; readonly deltas: readonly Delta[] }[];
-  /** The instant validity is read at. A projection never reads a clock. */
   readonly now: number;
 }
 interface Decision {
@@ -49,8 +37,7 @@ export interface LiveReceivingResult {
   readonly source?: string;
   readonly destination?: string;
   readonly reading?: string;
-  /** Law candidate only, NOT ready-to-serve: callers must withhold the named
-   * resolver fields (or reject this candidate), never silently serve policy fallback. */
+
   readonly registration?: Registration;
   readonly withheldResolvers?: boolean;
   readonly withheldResolverFields?: readonly string[];
@@ -72,11 +59,7 @@ function parse(d: Delta): Decision | undefined {
     typeof payload.target.value !== "string"
   )
     throw new Error("decision envelope");
-  // With exactly these two roles and a primitive payload, earlier context
-  // discovery can only have matched the entity marker.
   const value: unknown = JSON.parse(payload.target.value);
-  // Exact kind/key validation below rejects JSON scalars and arrays; null throws
-  // on property access and the projection catches it as invalid-input.
   const v = value as Record<string, unknown>;
   const keys =
     v.kind === "binding"
@@ -115,8 +98,6 @@ function reactor(ds: readonly Delta[]): Reactor {
   }
   return r;
 }
-// Dependencies need a source-relative effective-adoption registry. Until it exists,
-// reject every program carrying an expansion, fixpoint or embedded resolution.
 function dependencies(value: unknown): boolean {
   if (value === null || typeof value !== "object") return false;
   if ("kind" in value && ["expand", "fix", "resolve"].includes(String(value.kind))) return true;
@@ -134,10 +115,7 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
     }
     const negated = negatedAt(policy, input.now, input.receiver);
     const decisions: Decision[] = [];
-    // The governed read: only the receiver's own decisions, valid at `now`. Stranger claims are
-    // verified but never acquire recipient policy authority.
     for (const d of governedDeltas(policy.snapshot(), input.now, new Set([input.receiver]))) {
-      // A lawfully struck delta is not live input, however malformed; only survivors are parsed.
       if (negated(d.id)) continue;
       const decision = parse(d);
       if (decision !== undefined) decisions.push({ ...decision, id: d.id });
@@ -148,13 +126,7 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
       group.push(d);
       groups.set(d.relationship, group);
     }
-    // A pause pins ONE of the receiver's live bindings, named by id under its own relationship and
-    // reading. A pause on a binding the receiver lawfully struck, or on one outside its own window,
-    // is inert. Every other pause is a decision the projection cannot honour, and it is refused
-    // rather than ignored: the relationship it claims, and the relationship of any binding it names,
-    // both refuse. A claimed relationship with no binding still earns its own refusal row.
     const bindings = decisions.filter((b) => b.kind === "binding");
-    // A binding outside its own validity window is not live at `now`, like a struck one.
     const lapsed = (d: Delta): boolean =>
       input.now < d.claims.validFrom ||
       (d.claims.validUntil !== undefined && input.now >= d.claims.validUntil);
@@ -191,8 +163,6 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
         results.push({ relationship, destination: input.destination, status: "conflict" });
         continue;
       }
-      // The curse key is (relationship, served reading). A curse under a sibling reading is not a
-      // ban on this one: it constrains nothing here and is honoured by leaving this reading alone.
       if (
         decisions.some(
           (c) => c.kind === "curse" && c.relationship === relationship && c.reading === d.reading,
@@ -212,8 +182,6 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
       }
       let selected: Registration;
       let operand = source;
-      // Only pauses that name THIS binding under its own relationship and reading reach here; a
-      // pause pins a live binding, so one on a one-time binding is refused as well.
       const pauses = decisions.filter((p) => p.kind === "pause" && p.bindingId === d.id);
       if (stray.has(relationship) || (d.mode !== "live" && pauses.length > 0)) {
         results.push({ ...base, status: "invalid-selection" });
@@ -230,8 +198,6 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
         results.push({ ...base, status: "invalid-selection" });
         continue;
       }
-      // Equivalent pauses are idempotent by normalized selection; incompatible surviving
-      // decisions require explicit recipient negation rather than a timestamp guess.
       const pauseKeys = new Set(
         pauses.map((p) => {
           const value = p.selection;
@@ -280,8 +246,6 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
         }
         selected = rows[0]!;
       }
-      // The legacy reader drops malformed resolver envelopes. That tolerance must
-      // not turn withheld code into an apparently equivalent policy-only field.
       const bindingPointers = operand.get(selected.boundId!)!.claims.pointers;
       const rootsPointers = bindingPointers.filter((p) => p.role === "roots");
       if (
@@ -300,8 +264,6 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
         results.push({ ...base, status: "unsupported" });
         continue;
       }
-      // The legacy parser uses a plain object: special own keys such as __proto__
-      // can vanish. Refuse any lossy translation of signed override field names.
       if (resolverPointers.length === 1) {
         const target = resolverPointers[0]!.target;
         if (target.kind !== "primitive" || typeof target.value !== "string") {
@@ -319,7 +281,6 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
         results.push({ ...base, status: "unsupported" });
         continue;
       }
-      // Return only declarative reading metadata: no executable resolver or write capability.
       const registration: Registration = {
         hyperschema: selected.hyperschema,
         schema: selected.schema,
@@ -339,16 +300,12 @@ export function projectLiveReceiving(input: Input): LiveReceivingResult[] {
         withheldResolverFields: Object.keys(selected.resolvers ?? {}).sort(),
       });
     }
-    // A refused pause is never silent: a stray relationship that produced no row above, because it
-    // has no binding or none for this destination, earns its own refusal row. Where the loop already
-    // refused the relationship for an earlier reason, that refusal is the one reported.
     for (const relationship of [...stray].sort())
       if (!results.some((r) => r.relationship === relationship))
         results.push({ relationship, destination: input.destination, status: "invalid-selection" });
     results.sort((a, b) =>
       a.relationship! < b.relationship! ? -1 : a.relationship! > b.relationship! ? 1 : 0,
     );
-    // A receiving name cannot silently choose between independent relationships.
     return results.map((r) =>
       r.status === "selected" &&
       results.some(

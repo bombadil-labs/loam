@@ -1,26 +1,3 @@
-// A law reader that knows the entity it wants reads that entity's target index and the negation
-// chains of what is filed there (`lawfulScopeAt`), never a walk of the store (H8). The readers:
-// the three registration readers' definition loads, the incumbent probe a blessing asks, the trial
-// a definition publish proves against, and the definition pin of a receiving snapshot.
-//
-// COST cases count every reactor access. A reader that is one index read opens no whole-store door
-// (`snapshot`, `arrivalLog`) and makes the same accesses with 0 and with 1000 unrelated facts. The
-// registration readers still walk the store ONCE each, to find their candidates: bindings have no
-// anchor to read. Their cases bound that at one walk and hold every other access fixed. The
-// receiving snapshot reads a private reactor, so its case counts walks on every reactor and
-// compares them with the candidates walk alone.
-//
-// ANSWER cases hold the result fixed at two levels: what the reader returns, and what the read
-// doors serve (`resolvedNode`, `resolvePinned`, the version and withdrawn lists). Each is a
-// CONTROL: it passes over a whole-store walk too, because the scope must select exactly what the
-// walk selected. The EQUIVALENCE case compares the two operands directly.
-//
-// A blessing (`adoptLaw`) walks the store for other reasons, so its case bounds the walks and holds
-// the other accesses fixed, as the registration cases do. The REFUSAL cases hold the scope to its
-// index: an id an index names and the ground does not hold refuses the read.
-//
-// Not covered here: the receiving snapshot's answers are held in receive-snapshot.test.ts.
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   HYPER_SCHEMA_SCHEMA,
@@ -68,10 +45,8 @@ const SEED = "c4".repeat(32);
 const OP = authorForSeed(SEED);
 const UNRELATED = 1000;
 const PLANT_ENTITY = "hyperschema:Plant";
-const FAR = 9e15; // a signed time above anything a gateway issues here
+const FAR = 9e15;
 
-// The garden holds heights 30 (said at 1000) and 34 (said at 2000). PLANT_POLICY picks the latest
-// (34) and OLDEST picks the first (30), so a served height names the Schema that resolved it.
 const OLDEST: Schema = {
   ...PLANT_POLICY,
   props: new Map([
@@ -83,7 +58,6 @@ const WEED: HyperSchema = { ...PLANT, name: "Weed" };
 const SHIPPER_SEED = "5d".repeat(32);
 const SHIPPER = authorForSeed(SHIPPER_SEED);
 const POST: HyperSchema = { ...PLANT, name: "Post" };
-// A second gather body: the same members, bucketed by role.
 const OTHER_BODY = parseTerm({
   op: "group",
   key: "byRole",
@@ -94,8 +68,6 @@ const OTHER_BODY = parseTerm({
   },
 });
 
-// The wall clock is held still. A gateway stamps `validFrom` from it and reads validity at it, so a
-// host clock that steps back between a write and a read would make the write not yet valid.
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
 });
@@ -106,7 +78,6 @@ afterEach(async () => {
   for (const gw of homes.splice(0)) await gw.close();
 });
 
-// A governed store that serves Plant under PLANT_POLICY, with the garden in it.
 async function home(): Promise<Gateway> {
   const gw = await Gateway.boot(
     new MemoryBackend(),
@@ -134,7 +105,6 @@ const bystanders = (gw: Gateway, count: number) =>
           observed(`plant:other-${n}`, "height", n, 1000 + n, GARDENER_SEED),
         ),
       );
-// A definition of `schema` at `entity`, stamped by the store's clock and valid from now.
 const defined = (gw: Gateway, schema: HyperSchema, entity: string, seed = SEED): Delta =>
   signClaims(
     withStamp(gw.stamp(authorForSeed(seed)), (t) =>
@@ -142,7 +112,6 @@ const defined = (gw: Gateway, schema: HyperSchema, entity: string, seed = SEED):
     ),
     seed,
   );
-// The operator's or the gardener's negation of `id`, appended through the door.
 async function strike(gw: Gateway, id: string, seed = SEED, timestamp = FAR): Promise<Delta> {
   const now = gw.validityNow();
   const negation = signClaims(
@@ -153,7 +122,6 @@ async function strike(gw: Gateway, id: string, seed = SEED, timestamp = FAR): Pr
   gw.replayRegistrations();
   return negation;
 }
-// The operator's definitions filed at `entity`, as the index holds them, oldest first.
 const filedAt = (gw: Gateway, entity: string): Delta[] =>
   gw.reactor
     .byTarget(entity)
@@ -170,8 +138,6 @@ const filedAt = (gw: Gateway, entity: string): Delta[] =>
     )
     .sort((a, b) => a.claims.timestamp - b.claims.timestamp);
 
-// A module a shipper offers: one program named `name` at `entity`, read as the lens `name`, frozen
-// from a container of the store. `gw.adoptLaw(version, name)` blesses it into the root.
 let modules = 0;
 async function moduleAt(gw: Gateway, entity: string, name: string): Promise<ModuleVersion> {
   const container = `container:module-${modules++}`;
@@ -249,7 +215,6 @@ async function accesses(gw: Gateway, read: () => unknown): Promise<Accesses> {
   vi.restoreAllMocks();
   return counts as Accesses;
 }
-// The read's cost on a store with no unrelated facts and on one with UNRELATED of them.
 async function costOf(
   prepare: (gw: Gateway) => Promise<() => unknown>,
 ): Promise<{ small: Accesses; large: Accesses }> {
@@ -268,7 +233,6 @@ describe("COST: a definition read by name opens no whole-store door", () => {
     const cost = await costOf(async (gw) => {
       await evolve(gw);
       await strike(gw, filedAt(gw, PLANT_ENTITY)[0]!.id);
-      // Two definitions, the two bindings that point at the program, and the strike.
       return () =>
         expect(lawfulScopeAt(gw.reactor, gw.validityNow(), PLANT_ENTITY, OP).size).toBe(5);
     });
@@ -285,16 +249,11 @@ describe("COST: a definition read by name opens no whole-store door", () => {
         expect((await gw.loadHyperSchema([definition], "hyperschema:Weed")).name).toBe("Weed"),
       );
     });
-    // The append that lands the definition reads the arrival log by reference, the same number of
-    // times at either size. The proof before it is the read this case bounds.
     expect(cost.small.snapshot).toBe(0);
     expect(cost.small.byTarget).toBeGreaterThan(0);
     expect(cost.large).toEqual(cost.small);
   }, 120_000);
 
-  // A blessing walks the store eleven times for other reasons: the publish it rides, the surface
-  // refold and the adoption records. The incumbent probe adds none. The bound may fall as those
-  // move to an index; it must not rise.
   it("adoptLaw asks for the incumbent with no walk of its own, and no more with 1000 unrelated facts", async () => {
     const out: Accesses[] = [];
     for (const count of [0, UNRELATED]) {
@@ -313,8 +272,6 @@ describe("COST: a definition read by name opens no whole-store door", () => {
     expect(out[1]).toEqual(out[0]);
   }, 120_000);
 
-  // Each registration reader walks the store once for its candidates. The loads beside that walk
-  // are index reads, so one walk is the bound and nothing else grows.
   const readers: [string, (gw: Gateway) => unknown][] = [
     ["readRegistrations", (gw) => expect(registered(gw)).toHaveLength(1)],
     ["readRegistrationVersions", (gw) => expect(versions(gw)).toHaveLength(2)],
@@ -389,7 +346,6 @@ describe("COST: a definition read by name opens no whole-store door", () => {
 });
 
 describe("EQUIVALENCE: the scope and the whole lawful set give one answer", () => {
-  // Every bucket of the gathered hview, as delta ids.
   const gathered = (operand: ReturnType<typeof lawfulSnapshot>, at: number, entity: string) => {
     const rows = evalTerm(HYPER_SCHEMA_SCHEMA.body, operand, at, entity);
     if (rows.sort !== "hview") throw new Error("expected an hview");
@@ -417,16 +373,13 @@ describe("EQUIVALENCE: the scope and the whole lawful set give one answer", () =
     await evolve(gw);
     const snapshotEntity = versionedSchemaEntityFor("Plant", OLDEST);
     const [first, second, third] = filedAt(gw, PLANT_ENTITY);
-    // first: struck, and the strike stands. second: struck, the strike struck, so it lives.
     await strike(gw, first!.id);
     const revived = await strike(gw, second!.id);
     await strike(gw, revived.id);
-    // A stranger's strike of a standing strike, and of a live definition: neither is law.
     for (const d of filedAt(gw, snapshotEntity)) {
       await strike(gw, (await strike(gw, d.id)).id, GARDENER_SEED);
     }
     await strike(gw, second!.id, GARDENER_SEED);
-    // The read time is fixed ahead, so a validity interval can end or start exactly on it.
     const at = gw.validityNow() + 1e6;
     const weedAt = (timestamp: number, validFrom: number, validUntil?: number) =>
       signClaims(
@@ -439,20 +392,14 @@ describe("EQUIVALENCE: the scope and the whole lawful set give one answer", () =
       );
     const startsNow = weedAt(FAR + 2, at);
     const endsNow = weedAt(FAR + 3, 1, at);
-    // One delta that strikes the third definition and the strike of the first. The first lives
-    // again; the third does not.
     const double = sign(
       negatesAll(OP, SEED, FAR + 4, third!.id, gw.reactor.negationsOf(first!.id)[0]!),
     );
-    // The operator's strikes of `startsNow`: one not yet valid, one lapsed, one that ends exactly
-    // at the read time. None holds, so `startsNow` lives.
     const idle = [
       { ...negatesAll(OP, SEED, FAR + 5, startsNow.id), validFrom: at + 1 },
       { ...negatesAll(OP, SEED, FAR + 6, startsNow.id), validUntil: 2 },
       { ...negatesAll(OP, SEED, FAR + 7, startsNow.id), validUntil: at },
     ].map(sign);
-    // A strike that also points at the entity: it strikes the second definition and is itself a
-    // member of the gather.
     const pointed = negatesAll(OP, SEED, FAR + 8, second!.id);
     const pointing = sign({
       ...pointed,
@@ -465,9 +412,7 @@ describe("EQUIVALENCE: the scope and the whole lawful set give one answer", () =
       ] as never,
     });
     await gw.append([
-      // A stranger's newer definition at the operator's entity.
       signClaims(publishHyperSchemaClaims(WEED, PLANT_ENTITY, GARDENER, FAR), GARDENER_SEED),
-      // The operator's own: not yet valid, lapsed, starting at the read time, ending at it.
       weedAt(FAR, at + 1e9),
       weedAt(FAR + 1, 1, 2),
       startsNow,
@@ -483,13 +428,10 @@ describe("EQUIVALENCE: the scope and the whole lawful set give one answer", () =
       expect(gathered(scope, at, entity), entity).toEqual(gathered(whole, at, entity));
       for (const d of scope) expect(whole.has(d.id), d.id).toBe(true);
     }
-    // The fixture is forceful. The first definition lives again, the second and third are struck,
-    // the one that starts at the read time lives, the one that ends at it does not.
     expect(definitionsOf(whole, at, PLANT_ENTITY).sort()).toEqual([first!.id, startsNow.id].sort());
     expect(whole.has(endsNow.id)).toBe(false);
     expect(gathered(whole, at, PLANT_ENTITY).map(([prop]) => prop)).toContain("note");
     expect(definitionsOf(whole, at, snapshotEntity)).toEqual([]);
-    // Ungoverned, every author's deltas are law, and the scope follows.
     const open = lawfulSnapshot(gw.reactor, at);
     for (const entity of entities) {
       expect(gathered(lawfulScopeAt(gw.reactor, at, entity), at, entity), entity).toEqual(
@@ -513,7 +455,6 @@ describe("EQUIVALENCE: the scope and the whole lawful set give one answer", () =
     ) as [Delta, Delta, Delta, Delta, Delta, Delta];
     const strikeOfRevived = sign(negatesAll(OP, SEED, FAR + 10, revived.id));
     const ofHeld = sign(negatesAll(OP, SEED, FAR + 20, held.id));
-    // Held before any batch arrives: strikes of deltas the ground does not hold yet.
     await gw.append([
       held,
       sign(negatesAll(OP, SEED, FAR + 11, struck.id)),
@@ -584,7 +525,6 @@ describe("REFUSAL: a ground that disagrees with its own index is not read", () =
     expect(() => lawfulScopeAt(struck, 100, "hyperschema:Weed", OP)).toThrow(
       /refusing to read law/,
     );
-    // The same for a strike of a delta the caller names.
     expect(() =>
       lawfulScopeAt(
         ground({ negationsOf: (id) => (id === "batch" ? ["gone"] : []) }),
@@ -603,7 +543,6 @@ describe("REFUSAL: a ground that disagrees with its own index is not read", () =
     const now = gw.validityNow();
     const get = gw.reactor.get.bind(gw.reactor);
     const readers = [readRegistrations, readRegistrationVersions, readWithdrawnRegistrations];
-    // A bystander store with nothing lost reads without a refusal.
     await evolve(gw);
     for (const read of readers) expect(() => read(gw.reactor, now + 1e6, OP)).not.toThrow();
     vi.spyOn(gw.reactor, "get").mockImplementation((id) => (id === lost ? undefined : get(id)));
@@ -631,14 +570,11 @@ describe("ANSWER (controls: these pass over a whole-store walk too)", () => {
     const frozen = filedAt(gw, versionedSchemaEntityFor("Plant", OLDEST));
     expect(frozen).toHaveLength(1);
     const negation = await strike(gw, frozen[0]!.id);
-    // Delta level: the strike is held against the definition, and the definition is still held.
     expect(gw.reactor.negationsOf(frozen[0]!.id)).toEqual([negation.id]);
     expect(gw.reactor.get(frozen[0]!.id)).toBeDefined();
-    // The latest binding names a Schema that no longer loads, so the lens binds nothing.
     expect(registered(gw)).toEqual([]);
     expect(versions(gw).map((v) => oldestFirst(v.schema))).toEqual(["desc"]);
     expect(() => gw.resolvedNode("Plant", FERN)).toThrow();
-    // The bystander version still answers at its own door.
     expect(gw.resolvePinned(versions(gw)[0]!, FERN).view["height"]).toBe(34);
 
     await strike(gw, negation.id);
@@ -656,7 +592,6 @@ describe("ANSWER (controls: these pass over a whole-store walk too)", () => {
 
     const [first, second] = filedAt(gw, PLANT_ENTITY);
     await strike(gw, first!.id);
-    // One definition of two survives: the bystander keeps the lens served and the name nameable.
     expect(gw.withdrawnRegistrations()).toEqual([{ deltaId: latest, lensName: "Plant" }]);
     expect(servedHeight(gw)).toBe(34);
     await strike(gw, second!.id);
@@ -687,17 +622,13 @@ describe("ANSWER (controls: these pass over a whole-store walk too)", () => {
       await strike(gw, d.id, GARDENER_SEED);
     }
     gw.replayRegistrations();
-    // Delta level: the store holds the stranger's records at the same entities.
     expect(gw.reactor.byTarget(PLANT_ENTITY)).toContain(theirs[0]!.id);
     expect(gw.reactor.byTarget(snapshotEntity)).toContain(theirs[1]!.id);
     expect(gw.reactor.negationsOf(filedAt(gw, snapshotEntity)[0]!.id)).toHaveLength(1);
-    // Reader and door: the operator's program and the operator's Schema, as before.
     expect(registered(gw).map((r) => [r.hyperschema.name, oldestFirst(r.schema)])).toEqual([
       ["Plant", "asc"],
     ]);
     expect(servedHeight(gw)).toBe(30);
-    // Read with no governor, the same deltas are everyone's law: the newest definition wins and
-    // each strike counts.
     expect(readRegistrations(gw.reactor, gw.validityNow())).toEqual([]);
   });
 
@@ -727,7 +658,6 @@ describe("ANSWER (controls: these pass over a whole-store walk too)", () => {
       /no surviving schema definition/,
     );
     expect(gw.reactor.get(definition.id)).toBeUndefined();
-    // The bystander, with no strike held, proves and lands.
     expect((await gw.loadHyperSchema([bystander], "hyperschema:Moss")).name).toBe("Weed");
     expect(gw.reactor.get(bystander.id)).toBeDefined();
   });
@@ -739,7 +669,6 @@ describe("ANSWER (controls: these pass over a whole-store walk too)", () => {
     ) as [Delta, Delta];
     const forged = await strike(gw, theirs.id, GARDENER_SEED);
     await strike(gw, ours.id);
-    // Delta level: the stranger's strike is held against the definition before it arrives.
     expect(gw.reactor.negationsOf(theirs.id)).toEqual([forged.id]);
     expect((await gw.loadHyperSchema([theirs], "hyperschema:Weed")).name).toBe("Weed");
     expect(gw.reactor.get(theirs.id)).toBeDefined();
@@ -754,7 +683,6 @@ describe("ANSWER (controls: these pass over a whole-store walk too)", () => {
     const theirs = defined(gw, { ...POST, body: OTHER_BODY }, "hyperschema:Post", GARDENER_SEED);
     const ours = defined(gw, { ...POST, name: "Moss", body: OTHER_BODY }, "hyperschema:Moss");
     await gw.append([theirs, ours]);
-    // Delta level: both rival bodies are held at the entities the two modules name.
     expect(gw.reactor.byTarget("hyperschema:Post")).toEqual([theirs.id]);
     expect(gw.reactor.byTarget("hyperschema:Moss")).toEqual([ours.id]);
 

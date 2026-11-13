@@ -1,17 +1,6 @@
-// The tutorial's instruments (SPEC §19): the panes as tools, not exhibits. This module owns
-// the Ground renderer (a real delta reader: kind badges, one-line summaries, expand to wire
-// JSON), the View browser (query-fed, seeded with the Schemas meta-view), and the delta
-// classifier both stand on. Everything store-derived renders as TEXT, never markup — the
-// hostile-claim lesson is exactly why. The GraphQL editor lives in app.mjs (it needs the
-// page's CodeMirror wiring); the classifier lives here because it is pure and CI can pin it.
-
 import { parse } from "graphql";
 import { isOnlyTutorial } from "./player.mjs";
 
-// Only READS may re-run themselves. A pinned mutation would be executed on every render —
-// and a mutation that touches a subscribed view triggers a render, which is a self-
-// sustaining write loop wearing a bookmark's clothes. Refused at pin time and at render
-// time both; an unparseable document is refused too (never auto-run what you cannot read).
 export function isReadOnlyDocument(source) {
   try {
     return parse(source).definitions.every(
@@ -22,10 +11,6 @@ export function isReadOnlyDocument(source) {
   }
 }
 
-// ---- the classifier ----------------------------------------------------------------------------
-
-// What kind of record is this? Kinds are recognized by the constitutional contexts and
-// pointer shapes Loam itself uses — the same grammar the gateway's readers trust.
 export function classifyDelta(delta, selfAuthor) {
   const pointers = delta.claims.pointers;
   const hasEntityCtx = (ctx) =>
@@ -38,8 +23,6 @@ export function classifyDelta(delta, selfAuthor) {
   let note;
   if (hasEntityCtx("loam.operator")) {
     kind = "constitution";
-    // A FOREIGN constitutional record is data, not law — lesson 9's thesis must hold on
-    // the very row that shows it.
     note = foreign
       ? "another store's founding record — it arrived as data and binds nothing here"
       : "the store's founding record: it names the operator — the one key whose word is law here";
@@ -69,8 +52,6 @@ export function classifyDelta(delta, selfAuthor) {
       ? "another store's trust posture — your door keeps its own"
       : "a trust posture: who the federation door admits";
   } else if (hasEntityCtx("loam.grants")) {
-    // The SAME grammar the gateway's reader keys on (accounts.ts CTX_GRANTS) — a pointer
-    // that merely mentions loam:store under some other context is a fact, not standing.
     kind = "grant";
     note = foreign
       ? "standing granted in another store — it gates nothing here"
@@ -82,17 +63,6 @@ export function classifyDelta(delta, selfAuthor) {
     kind = "negation";
     note = "a taking-back: it negates another record by id, and stays on the record itself";
   } else if (isOnlyTutorial(delta)) {
-    // The tutorial's OWN bookkeeping — progress, quiz answers, glossary entries. It is data like
-    // everything else and it is signed like everything else, which is the reveal; but badging it
-    // "fact" would bury the student's own records under the record of their reading, in the very
-    // pane a lesson tells them to watch. Named, so the Ground pane can hold it back by default.
-    //
-    // LAST, and ONLY-tutorial. This kind is the only one that can HIDE a row, and a delta can
-    // carry a tutorial pointer alongside anything else — so it is claimed here only when the
-    // delta is nothing but the tutorial's vocabulary. That is the same predicate the progress
-    // reading uses, so the badge, the filter and the reading cannot disagree; a hybrid is an
-    // ordinary claim, badged `fact`, and stays on screen. The classifier's own list of
-    // constitutional contexts is not the guard — there are more of them than it names.
     kind = "tutorial";
     note = foreign
       ? "another store's tutorial record — it arrived as data and moves nothing here"
@@ -102,15 +72,12 @@ export function classifyDelta(delta, selfAuthor) {
   return { kind, foreign, note };
 }
 
-// One pointer, one phrase — the summary line's vocabulary.
 export function summarizePointer(p) {
   if (p.target.kind === "entity")
     return `${p.role} → ${p.target.entity.id} #${p.target.entity.context}`;
   if (p.target.kind === "delta") return `${p.role} → ∂${p.target.deltaRef.delta.slice(0, 10)}…`;
   return `${p.role} = ${JSON.stringify(p.target.value)}`;
 }
-
-// ---- the Ground pane ---------------------------------------------------------------------------
 
 const BADGE_LABELS = {
   tutorial: "tutorial",
@@ -126,30 +93,9 @@ const BADGE_LABELS = {
   derived: "derived",
 };
 
-// Render the ground newest-first: badge, author, one-line summary; click a row for the full
-// wire JSON. `seenIds` lets arrivals highlight once; `expanded` keeps open rows open across
-// re-renders (the set is the caller's — UI state, not store state).
-//
-// THE FILTER. `state.showTutorial` is off by default and the tutorial's OWN records are held
-// back — a lesson that says "watch the Ground" must not be drowned out by the record of the
-// student reading it. Held back, never dropped: the count says how many, the toggle shows them,
-// and the glossary's "where does this live?" control turns it on to point at one. Only the
-// student's own tutorial records are hidden; a FOREIGN claim wearing the tutorial's vocabulary
-// arrived as data and is shown, because hiding it would let a packet write into a blind spot.
-// `state.highlight` marks one row by id — the target of that control.
 export function renderGround(holder, deltas, selfAuthor, toWire, state) {
   holder.textContent = "";
   const classified = [...deltas].map((d) => ({ d, c: classifyDelta(d, selfAuthor) }));
-  // WHAT MAY BE HIDDEN IS EXACTLY WHAT PROGRESS COUNTS — `isOnlyTutorial`, the same predicate
-  // the reading uses, so no record can fall between the two rules and be both uncounted and
-  // unseen. A delta that is the tutorial's vocabulary AND something else is still badged
-  // `tutorial`, and it stays on screen.
-  //
-  // SIGNED and self-authored too, because `claims.author` is a plain field and an UNSIGNED row
-  // is admitted to the ground (the driver quarantines a signature that fails, not one that is
-  // missing). Without that test, a row nobody signed could name the student as its author and
-  // land in the one place the pane does not look. A writer who has read the seed can sign as
-  // them and is not stopped by this; nothing at this layer could.
   const hidden =
     state.showTutorial === true
       ? []
@@ -221,15 +167,9 @@ export function renderGround(holder, deltas, selfAuthor, toWire, state) {
   }
 }
 
-// ---- the View browser --------------------------------------------------------------------------
-
-// The pane is a browser over QUERIES: the seeded Schemas meta-view (registrations read as
-// data — present from lesson 1, so schemas-are-data is visible before it is said), one live
-// view per registered schema root, and whatever queries the learner pinned from the editor.
 export async function renderViews(holder, ctx, ui) {
   holder.textContent = "";
 
-  // -- Schemas: the meta-view --------------------------------------------------------------
   const meta = document.createElement("div");
   meta.className = "card";
   const metaTitle = document.createElement("h3");
@@ -258,7 +198,6 @@ export async function renderViews(holder, ctx, ui) {
   }
   holder.appendChild(meta);
 
-  // -- one live view per schema root ---------------------------------------------------------
   const latest = new Map();
   for (const v of versions) latest.set(v.hyperschema.name, v);
   for (const [name, v] of latest) {
@@ -273,7 +212,6 @@ export async function renderViews(holder, ctx, ui) {
     }
   }
 
-  // -- the learner's pinned queries ----------------------------------------------------------
   for (const [label, query] of ui.savedQueries) {
     await renderQueryCard(holder, ctx, `📌 ${label}`, query, () => {
       ui.savedQueries.delete(label);

@@ -1,11 +1,3 @@
-// A store with no slate record answers from the target index at SLATE_ENTITY, with no pass over the
-// whole store, on every read and every write (H8). A probe through `reactor.snapshot()` copied and
-// walked the whole store each time. Deliberately not asserted: a store that holds slates. Past the
-// probe, a cold container table or a membership evaluation can still take a snapshot.
-//
-// Slate records have their own entity, so the probe also does not walk the erasure orders: a store
-// that has erased a dozen facts probes exactly as much as a store that has erased none.
-
 import { describe, expect, it, vi } from "vitest";
 import { authorForSeed } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
@@ -41,7 +33,6 @@ describe("reading slates in a store with none takes no snapshot of the store", (
     );
     expect(snapshot).not.toHaveBeenCalled();
 
-    // The same through the served path: a query and a mutation read slates on the way.
     await gw.query(`{ plant(entity: "${FERN}") { height } }`);
     await gw.query(`mutation { plant(entity: "${FERN}", height: 31) { height } }`);
     const fromSlates = snapshot.mock.calls.length;

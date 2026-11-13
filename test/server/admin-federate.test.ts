@@ -1,8 +1,3 @@
-// T150 item 5 — the admin federate-in result page counts an IN-PASTE duplicate as a repeat,
-// never as "already held": held by the store is not the same fact as repeated in your paste.
-// The frozen admin rails (T141) live in admin-*.test.ts; this file is the new-rail home the
-// ticket requires.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -51,7 +46,6 @@ const note = (text: string, seed: string, timestamp: number): ReturnType<typeof 
     seed,
   );
 
-/** A governed store with one user (ada) and one shared container gathering ada's own deltas. */
 async function federateServer(): Promise<{
   base: string;
   gateway: Gateway;
@@ -117,11 +111,6 @@ const offer = (deltas: ReturnType<typeof note>[]): string =>
 
 describe("the admin federate-in result counts repeats honestly", () => {
   it("an oversized federate paste IS refused — by the form gate, never the transport (T153)", async () => {
-    // T153 moved the body readers into src/server/body.ts. The lenient reader's contract is
-    // `undefined` past the cap, so the FORM speaks its own refusal (the token check fails on an
-    // empty field map) instead of the transport's 413 — this rails that boundary through a REAL
-    // admin door, past a real 1 MiB cap, with a real session and token. A consolidation that
-    // re-wired the federate door to the strict reader would turn this 403 into a 413 and go red.
     const { base } = await federateServer();
     const session = await signIn(base, "ada");
     const detail = await fetch(`${base}/admin/container?name=ada`, {
@@ -173,7 +162,6 @@ describe("the admin federate-in result counts repeats honestly", () => {
     });
     expect(res.status).toBe(200);
     const page = await res.text();
-    // 3 offered, 1 of them a repeat; 1 landed newly; the remaining 1 is held by the store — not 2.
     expect(page).toMatch(/Of 3 offered deltas \(1 of them repeats in the paste\)/);
 
     expect(page).toMatch(/1 landed newly/);
@@ -184,9 +172,6 @@ describe("the admin federate-in result counts repeats honestly", () => {
   it("a refused delta offered twice is two refusals and one repeat — held survives", async () => {
     const { base, held } = await federateServer();
     const session = await signIn(base, "ada");
-    // A delta the container's membership does not select is refused at the door; offered twice it
-    // is refused twice (the door counts per offer, deliberately), and the store-held delta must
-    // still be reported — the naive offered-accepted-rejected remainder would have erased it.
     const foreign = note("not ada's", "ff".repeat(32), 9600);
     const detail = await fetch(`${base}/admin/container?name=ada`, {
       headers: { cookie: `${SESSION_COOKIE}=${session}` },
@@ -241,7 +226,6 @@ describe("the admin federate-in result counts repeats honestly", () => {
     });
     expect(res.status).toBe(200);
     const page = await res.text();
-    // 4 offered, 1 repeat (the refused delta's second copy); 2 refused; BOTH held deltas reported.
     expect(page).toMatch(/Of 4 offered deltas \(1 of them repeats in the paste\)/);
     expect(page).toMatch(/2 were refused at the door/);
     expect(page).toMatch(/2 were already held/);

@@ -1,5 +1,3 @@
-// Phase 3 — Many schemas, one ground: several lenses over the same entities, moved by one write.
-
 import {
   appendAs,
   check,
@@ -18,9 +16,6 @@ try {
   stores.almanac = await openStore("almanac");
   const { commons, almanac } = stores;
 
-  // 3.1 — Dossier and Presence: same body, two policies, one root. person:zephyr is a local
-  // test entity (untenanted on the almanac → the operator's own to write; also NOT in the
-  // registered roots, so this exercises the lazy-materialization path).
   await gql(
     almanac.base,
     opToken("almanac"),
@@ -46,7 +41,6 @@ try {
     `dossier=${JSON.stringify(dv)} presence=${JSON.stringify(pv)}`,
   );
 
-  // 3.2 — one write moves BOTH views, and they stay mutually consistent
   await gql(
     almanac.base,
     opToken("almanac"),
@@ -73,7 +67,6 @@ try {
     `name=${d2?.name}`,
   );
 
-  // 3.3 / 3.4 — on the commons: Person and Circle subscribers over the SAME entity, one edge
   const personStream = await sseOpen(
     commons.base,
     tok("wren", "commons"),

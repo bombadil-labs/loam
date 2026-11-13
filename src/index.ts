@@ -1,6 +1,3 @@
-// Loam grows from here. The substrate is @bombadil/rhizomatic (frozen, normative); what this
-// package exports is the wrapper planted above it, step by step.
-
 export {
   TENANT,
   TENANT_POLICY,
@@ -14,9 +11,6 @@ export {
   tenantSchemaFor,
 } from "./gateway/accounts.js";
 export { type Verb } from "./gateway/grants-law.js";
-// The gather, named: the hyperschema body every plain entity wants, and the edge-field shape over
-// it. Public because the alternative is what the tree did for a year — retype a five-level Term
-// literal per schema, in two dialects, and hope the copies stay the same program.
 export {
   entityGatherBody,
   entityGatherJson,
@@ -26,11 +20,6 @@ export {
   type GatherMask,
   type GatherSpec,
 } from "./gateway/gather.js";
-// The stock shelf: ordinary shapes, shipped as registration data, so a first store needs no
-// hand-written gather term. `loam register --stock <name>` is the CLI's reading of these; an
-// embedder can hand one to the same registration door a file goes through — CLONE IT FIRST, as the
-// CLI does. The shelf is frozen through, and a door that ever normalized its input in place would
-// otherwise throw on a shape it was handed rather than given.
 export { STOCK_SCHEMAS, stockNames, stockSchema, type StockSchema } from "./stock/index.js";
 export {
   Gateway,
@@ -52,10 +41,6 @@ export {
 export { pullFrom, type PullOptions, type PullReport } from "./federation/pull.js";
 export { exportOffer, parseOffer } from "./federation/offer.js";
 export { toWire, fromWire, type WireDelta } from "./federation/wire.js";
-// The health DOOR is `Gateway.health()` (SPEC §11, T70); `StoreHealth` and its component shapes
-// (`ErasureHealth` here, `SlateHealth` / `NegatedHealth` in the slate block below) are what a
-// caller needs to READ what it answers. The bodies computing them (`healthImpl`, `slateHealth`,
-// `negatedHealth`) take a `Gateway` seam and stay out.
 export { sealCommitment, type ErasureHealth, type StoreHealth } from "./gateway/erase.js";
 export {
   CTX_ERASE,
@@ -75,13 +60,6 @@ export {
   type TrustMode,
   type TrustPolicy,
 } from "./gateway/trust.js";
-// The slate DOORS are `Gateway.cut` / `.slates` / `.receipt` / `.graveyards` (SPEC §29); what
-// follows is what a caller needs to DESCRIBE, SIGN, and READ what those doors answer — the
-// vocabulary and claim builders that stand a slate, and every shape the reports are made of.
-// The `*Impl` bodies and the closure wiring (`egressWithheld`, `readClosedIds`, `slateRefusal`,
-// `slateHealth`, …) take a `Gateway` because ingest, reads, and erase share one implementation —
-// publishing any of them would freeze a seam as API, so none appears here however public the
-// compiler thinks it is.
 export {
   RECEIPT_FIELDS,
   SLATE_CONTEXTS,
@@ -121,12 +99,6 @@ export {
   type SlateClosure,
 } from "./gateway/slate-law.js";
 export { CTX_SLATE, slatePointer } from "./gateway/slate-vocab.js";
-// The DOOR and its vocabulary, never the plumbing behind it. `Gateway.openContainer` /
-// `.containers` / `.adoptLaw` / `.blessAll` / `.lawFrom` are the reachable surface (SPEC §27); what
-// follows is what a caller needs to DESCRIBE, SIGN, and READ what those doors answer. A `*Impl`
-// body takes a `Gateway` because two modules in this package share one implementation, and
-// `withLivingNames` writes an `@internal` seam field — publishing either would freeze a seam as
-// API, so neither appears here however public the compiler thinks it is.
 export { type Container, type ContainerOptions } from "./gateway/container.js";
 export {
   CONTAINER_CONTEXTS,

@@ -1,12 +1,3 @@
-// The census ratchet: coupling counts that may only fall.
-// - Every count must equal `ratchet.json`. A count that falls fails too, until `--write` locks
-//   the gain in.
-// - Against a base, every count and every baseline value must be at or below the base branch's
-//   `ratchet.json`, so a pull request cannot raise the baseline to let a count rise. The base is
-//   `--base <ref>`, or on a CI pull request the branch in `GITHUB_BASE_REF`, fetched here. In CI a
-//   base that cannot be fetched fails the check.
-// Usage: node refactor/tools/ratchet.mjs [--write] [--base <git ref>]
-
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -50,8 +41,6 @@ if (!args.includes("--base") && ciBase) {
   }
 }
 if (baseRef !== undefined) {
-  // An unreadable base fails. Only a base commit that genuinely lacks the file passes, because
-  // that is the change that introduces the baseline.
   let base;
   let commit;
   try {

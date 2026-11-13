@@ -1,8 +1,3 @@
-// Phase 9 (PR #19) — THE GAUNTLET: a fifth store speaking an alien dialect federates into the
-// open almanac; a translation spec renders it into the village's tongue with provenance;
-// Wren's dossier gains a screening RECORDED BY A STRANGER'S APP; the roster flips mid-run and
-// the pulse obeys; flips back and the backlog normalizes.
-
 import { signClaims } from "@bombadil/rhizomatic";
 import { translate, translationClaims, trustClaims } from "../../dist/index.js";
 import {
@@ -18,7 +13,6 @@ import {
   summary,
 } from "./harness.mjs";
 
-// The cinelog dialect: sasha's app says "viewer watched film on date" its own way.
 const cinelogEntry = (viewer, film, date, ts) => ({
   timestamp: ts, validFrom: ts,
   author: AUTHORS.sasha,
@@ -29,7 +23,6 @@ const cinelogEntry = (viewer, film, date, ts) => ({
   ],
 });
 
-// The village's rendering: attendance the Dossier already gathers.
 const CINELOG_SPEC = {
   recognize: {
     and: [
@@ -53,7 +46,6 @@ try {
   stores.almanac = await openStore("almanac");
   const { cinelog, almanac } = stores;
 
-  // 9.1 — the stranger's store lives its own life in its own tongue
   await constitute(cinelog, ["sasha"], 3_000_000);
   await appendAs(cinelog.gateway, "sasha", [
     cinelogEntry("person:wren", "film:stalker", "2026-07-08", Date.now()),
@@ -65,7 +57,6 @@ try {
     [...cinelog.gateway.reactor.snapshot()].some((d) => d.claims.author === AUTHORS.sasha),
   );
 
-  // 9.2 — the OPEN almanac pulls the stranger whole; the spec is published as data
   const pulled = await pullFrom(almanac.gateway, cinelog.base, opToken("cinelog"));
   await almanac.gateway.append([
     signClaims(
@@ -83,7 +74,6 @@ try {
     `pulled ${pulled.accepted}`,
   );
 
-  // 9.3 — TRANSLATE: the stranger's record becomes the village's, cited, and the dossier sees
   const report = await translate(almanac.gateway, { seed: almanac.seed });
   const after = await gql(almanac.base, opToken("almanac"),
     `{ dossier(entity: "person:wren") { attended _view } }`);
@@ -95,7 +85,6 @@ try {
     `emitted ${report.emitted}; attended=${JSON.stringify(after.body?.data?.dossier?.attended)}`,
   );
 
-  // 9.4 — the roster flips mid-run: the pulse obeys; flips back: the backlog crosses
   await almanac.gateway.append([
     signClaims(
       trustClaims("roster", [AUTHORS.wren, AUTHORS.miles, AUTHORS.odile, AUTHORS.petra],

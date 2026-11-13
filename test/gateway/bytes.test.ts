@@ -1,12 +1,3 @@
-// Bytes in views + the byte-door — SPEC §23.7. A schema that gathers a `bytes` Target resolves that
-// field to a BytesView ({ mime, value: Uint8Array }); raw bytes are not JSON, so a bytes value crossing
-// a door becomes the self-describing envelope { mime, ref, base64url? } — `ref` always (the content
-// address), `base64url` only when small (the inline rung). The raw bytes ride the byte-door,
-// `GET /:mount/bytes/<ref>?from=<lens>/<entity>`, served by PROOF OF READ: the door re-resolves the
-// named lens under its own discipline and serves the bytes only if that view actually contains them.
-// These suites prove the envelope (inline threshold, ref equality), the door (proof-of-read, uniform
-// 404, §11 erasure by construction), the two doors' discipline, and the type-level advertising.
-
 import { describe, expect, it } from "vitest";
 import {
   authorForSeed,
@@ -37,8 +28,6 @@ const OP = authorForSeed(OP_SEED);
 
 const pickLatest: Policy = { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } };
 
-// A Profile-shaped reading over the Plant gather: `avatar` is a plain bytes leaf (value-level, no
-// resolver); `icon` carries a resolver DECLARED `bytes` (type-level advertising, §22.6 + §23.7).
 const PROFILE_SCHEMA: Schema = {
   props: new Map<string, Policy>([
     ["avatar", pickLatest],
@@ -46,17 +35,13 @@ const PROFILE_SCHEMA: Schema = {
   ]),
   default: pickLatest,
 };
-// The icon resolver returns the picked bytes leaf unchanged — its job is only to DECLARE the field bytes
-// so the doors advertise it (BytesValue / format: binary), not to transform the value.
 const ICON_RESOLVER: ResolverSpecs = parseResolvers({
   icon: { rung: "a", type: "bytes", code: "export default (bucket) => bucket[0]?.value;" },
 });
 
-const SMALL = new Uint8Array([0x89, 0x50, 0x4e, 0x47]); // 4 bytes — inlines
-const BIG = new Uint8Array(INLINE_MAX + 1).fill(7); // one past the threshold — ref-only
+const SMALL = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+const BIG = new Uint8Array(INLINE_MAX + 1).fill(7);
 
-// A bytes fact: filed under `field` (the target context), its value a raw-bytes target. Mirrors the
-// garden's `observed`, but the value pointer carries bytes instead of a primitive.
 const bytesFact = (
   entity: string,
   field: string,
@@ -93,8 +78,6 @@ const boot = (resolvers?: ResolverSpecs): Promise<Gateway> =>
       ],
     }),
   );
-
-// --- the envelope ---------------------------------------------------------------------------------
 
 describe("§23.7 the envelope: a bytes leaf becomes { mime, ref, base64url? }", () => {
   it("inlines a small value as base64url, and b64uDecode round-trips it", () => {
@@ -137,8 +120,6 @@ describe("§23.7 the envelope: a bytes leaf becomes { mime, ref, base64url? }", 
   });
 });
 
-// --- the door: proof of read ----------------------------------------------------------------------
-
 describe("§23.7 the byte-door: proof of read, uniform 404, erasure by construction", () => {
   it("serves the raw bytes (200 + the BytesView's mime) for a ref the resolved view contains (rail b)", async () => {
     const gw = await boot();
@@ -175,18 +156,13 @@ describe("§23.7 the byte-door: proof of read, uniform 404, erasure by construct
     const gw = await boot();
     await gw.append([bytesFact(FERN, "avatar", "image/png", SMALL, 1000)]);
     const ref = contentAddress(SMALL);
-    // Before declaration: the stranger's door sees no lens at all → 404.
     expect(gw.serveBytes(ref, L("Plant"), FERN, "public").status).toBe(404);
-    // The full door serves it regardless (a token may read a registered lens).
     expect(gw.serveBytes(ref, L("Plant"), FERN, "full").status).toBe(200);
-    // After the operator declares Plant public: the anonymous door serves it too.
     await gw.append([signClaims(publicClaims(["Plant"], OP, 2000), OP_SEED)]);
     expect(gw.serveBytes(ref, L("Plant"), FERN, "public").status).toBe(200);
     await gw.close();
   });
 });
-
-// --- the doors advertise bytes --------------------------------------------------------------------
 
 describe("§23.7 typing: a `bytes` field is advertised at the doors (rail e)", () => {
   it("the gql door serializes a bytes field to the envelope and types it BytesValue", async () => {
@@ -198,7 +174,6 @@ describe("§23.7 typing: a `bytes` field is advertised at the doors (rail e)", (
     ).plant.icon;
     expect(icon.mime).toBe("image/svg+xml");
     expect(icon.ref).toBe(contentAddress(SMALL));
-    // The schema advertises the field's type as BytesValue (a §22.6 declared output type, §23.7).
     const t = await gw.query(`{ __type(name: "PlantView") { fields { name type { name } } } }`);
     const fields = (t.data as { __type: { fields: { name: string; type: { name: string } }[] } })
       .__type.fields;

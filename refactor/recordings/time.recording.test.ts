@@ -1,8 +1,3 @@
-// Records Loam's time-dependent decisions before step 3 changes the time model: a latest-wins
-// tie, a deadline boundary, and the author timestamp across a process restart.
-// Scope: `readLookedImpl` runs over a reactor built by raw ingest; the restart case boots real
-// gateways over one memory backend with a pinned clock.
-
 import { afterEach, describe, it, vi } from "vitest";
 import { signClaims, type Delta } from "@bombadil/rhizomatic";
 import { lookedClaims, readLookedImpl } from "../../src/gateway/attention.js";
@@ -21,8 +16,6 @@ afterEach(() => {
 
 describe("recordings: time", () => {
   it("a latest-wins tie on equal timestamps, in both ingest orders", async () => {
-    // Two looked-markers for one key at the same timestamp. `latestByKey` keeps the first it sees
-    // in the reactor's by-target index, so the winner is the same in both ingest orders.
     const a = signed(lookedClaims("ada", "home", 111, KEY.operator, 50), "operator", "looked/111");
     const b = signed(lookedClaims("ada", "home", 222, KEY.operator, 50), "operator", "looked/222");
     const later = signed(
@@ -50,8 +43,6 @@ describe("recordings: time", () => {
   });
 
   it("the channel status reader on a timestamp tie, in both ingest orders", async () => {
-    // Two records for one channel at the same timestamp. The reader walks `snapshot()`, which
-    // iterates in arrival order, and keeps the first record on a tie.
     const status = (receiving: boolean) => ({
       name: "garden",
       into: "home",
@@ -109,8 +100,6 @@ describe("recordings: time", () => {
       "operator",
       "slate/one",
     );
-    // The container must be declared, or the reader skips the slate. Its frozen Term is never
-    // published, so the slate reads as unresolved; the deadline boundary does not depend on it.
     const container = signed(
       containerClaims(
         {
@@ -142,7 +131,6 @@ describe("recordings: time", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const backend = new MemoryBackend();
     const genesis = assembleGenesis({ operatorSeed: SEEDS.operator, registrations: [] });
-    // Each stamp is written, so the restarted process has the store's history to read.
     const write = async (gw: Gateway): Promise<number> => {
       const s = gw.stamp();
       const claims = {
@@ -156,7 +144,7 @@ describe("recordings: time", () => {
     vi.setSystemTime(10_000);
     const first = await Gateway.boot(backend, genesis);
     const before = [await write(first), await write(first), await write(first)];
-    vi.setSystemTime(5_000); // the host clock steps back before the process restarts
+    vi.setSystemTime(5_000);
     const second = await Gateway.open(backend, { seed: SEEDS.operator });
     const after = [await write(second), await write(second)];
     await record("time.restart", { before, after, afterSortsBeforeBefore: after[0]! < before[2]! });

@@ -1,11 +1,3 @@
-// §46 criterion 9 — one receiving container, many channels. Fan-in is free because `containerScope`
-// LOOPS over every active pool marking the parent (container.ts), rather than looking one up.
-//
-// The prefixes are what keep two peers' identically-named law apart, and they are the receiver's
-// choice on both sides — so a peer cannot shadow another peer by naming its law the same thing.
-// That is the property this rail exists to pin: alice and bob both publish `Plant`, and both are
-// reachable, under names the receiver assigned.
-
 import { describe, expect, it } from "vitest";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -27,11 +19,6 @@ describe("§46 — two channels into one receiving container", () => {
     const bob = await store("b0".repeat(32));
     const me = await store("cc".repeat(32));
     try {
-      // DISTINCT law per peer, which is what this rail is about: two channels serving side by side
-      // under receiver-assigned prefixes. Two peers with byte-IDENTICAL law is a different case and
-      // a currently-broken one — the second name is never created (T198) — so it is asserted in
-      // name-parked.test.ts against the `witnessed` report rather than smuggled in here, where it
-      // would look like a fan-in failure.
       await alice.publishRegistration(PLANT, PLANT_POLICY, [FERN]);
       await bob.publishRegistration({ name: "Sprout", alg: 1, body: PLANT.body }, PLANT_POLICY, [
         FERN,
@@ -44,7 +31,6 @@ describe("§46 — two channels into one receiving container", () => {
 
       expect(rOne.bound).toContain("alice:Plant");
       expect(rTwo.bound).toContain("bob:Sprout");
-      // Neither parked: identical law under distinct receiver-assigned names is not a collision.
       expect(rTwo.parked).toEqual([]);
     } finally {
       await alice.close();
@@ -70,7 +56,6 @@ describe("§46 — two channels into one receiving container", () => {
       const gathered = me.containerScope({ containers: ["friends"] }).map((d) => d.id);
       const inAlice = alice.reactor.arrivalLog().some((d) => gathered.includes(d.id));
       const inBob = bob.reactor.arrivalLog().some((d) => gathered.includes(d.id));
-      // Two-sided across peers: one pool gathering is not evidence that both do.
       expect(inAlice).toBe(true);
       expect(inBob).toBe(true);
     } finally {

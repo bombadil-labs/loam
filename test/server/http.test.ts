@@ -1,14 +1,6 @@
-// Step 6's contract: the gateway, served. One node:http server; bearer tokens map onto step 5's
-// actor-per-request seam (transport adds authentication, never new authority); mounts isolate
-// stores; GraphQL over POST, subscriptions over SSE, and a minimal MCP surface over JSON-RPC.
-// Everything here talks to a real listening server with a real fetch — no shortcuts through
-// in-process calls.
-
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 
-// Real listening server + SSE; a generous hang-guard so machine load can't blow the default
-// per-test timeout. Only ever matters when something is genuinely stuck.
 vi.setConfig({ testTimeout: 20_000 });
 import { grantClaims } from "../../src/gateway/accounts.js";
 import { STORE_ENTITY } from "../../src/gateway/genesis.js";
@@ -20,7 +12,7 @@ import { toWire } from "../../src/federation/wire.js";
 import { PLANT, PLANT_POLICY, PLANT_WRITABLE, garden } from "./../gateway/fixtures.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
-const ALICE_SEED = "a1".repeat(32); // the gardener
+const ALICE_SEED = "a1".repeat(32);
 const MALLORY_SEED = "e4".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
 
@@ -106,7 +98,6 @@ describe("HTTP: the gateway behind a bearer token", () => {
     );
     const deniedBody = (await denied.json()) as { errors: string[] };
     expect(deniedBody.errors.join(" ")).toMatch(/not permitted/);
-    // and the refusal actually refused: the value is not mallory's 99
     const after = await gql("garden", "alice-token", `{ plant(entity: "${FERN}") { height } }`);
     expect(
       ((await after.json()) as { data: { plant: { height: number } } }).data.plant.height,
@@ -115,10 +106,8 @@ describe("HTTP: the gateway behind a bearer token", () => {
 
   it("an unknown mount is 404 — but only to the authenticated; prototype keys are not mounts", async () => {
     expect((await gql("orchard", "alice-token", `{ __typename }`)).status).toBe(404);
-    // a prototype-member name resolves no phantom gateway
     expect((await gql("__proto__", "alice-token", `{ __typename }`)).status).toBe(404);
     expect((await gql("constructor", "alice-token", `{ __typename }`)).status).toBe(404);
-    // and an unauthenticated caller cannot tell a real mount from a missing one: both 401
     const realNoToken = await gql("garden", undefined, `{ __typename }`);
     const fakeNoToken = await gql("orchard", undefined, `{ __typename }`);
     expect(realNoToken.status).toBe(401);
@@ -126,7 +115,6 @@ describe("HTTP: the gateway behind a bearer token", () => {
   });
 
   it("mounts are separate worlds", async () => {
-    // the meadow has no fern claims: its plant view is silent about the garden's data
     const meadow = await gql("meadow", "op-token", `{ plant(entity: "${FERN}") { height } }`);
     const body = (await meadow.json()) as { data: { plant: { height: number | null } } };
     expect(body.data.plant.height).toBeNull();
@@ -143,11 +131,6 @@ describe("HTTP: the gateway behind a bearer token", () => {
   });
 
   it("an oversized REST body answers 413 in the transport's own words (T153 body.ts)", async () => {
-    // The T153 consolidation moved readBodyStrict and BodyTooLarge into src/server/body.ts.
-    // This rails the 413 BODY TEXT through a REAL REST door — the string comes from the shared
-    // class, never from a door-hardcoded copy — so a future merge that drops the class's message
-    // (a P5 lens caught exactly that in this PR) goes red here. The status-only GraphQL rail
-    // above cannot see it: that door hardcodes its own text.
     const huge = "x".repeat(6 * 1024 * 1024);
     const res = await fetch(`${base}/garden/rest`, {
       method: "POST",
@@ -203,7 +186,7 @@ describe("HTTP: the gateway behind a bearer token", () => {
     expect(patch.plant.height).toBe(51);
     expect(patch.plant._fromHex).not.toBeNull();
 
-    await reader.cancel(); // the client hangs up; the server lets go
+    await reader.cancel();
   });
 
   it("subscribe with a junk token is 401 before any stream opens", async () => {
@@ -279,7 +262,6 @@ describe("MCP: the same gateway as JSON-RPC tools", () => {
     };
     expect(deniedBody.result.isError).toBe(true);
     expect(deniedBody.result.content[0]!.text).toMatch(/not permitted/);
-    // the denial refused: mallory's 7 did not land
     const check = await rpc("alice-token", {
       method: "tools/call",
       params: {
@@ -309,8 +291,6 @@ describe("MCP: the same gateway as JSON-RPC tools", () => {
   });
 });
 
-// The non-custodial door: a client signs its own deltas and presents them; the token merely
-// authenticates transport — each delta is authorized by its own verified author's standing.
 describe("POST /:mount/append", () => {
   const post = (deltas: unknown[]) =>
     fetch(`${base}/garden/append`, {
@@ -320,7 +300,6 @@ describe("POST /:mount/append", () => {
     });
 
   it("a pre-signed delta lands under its own author, whatever token carried it", async () => {
-    // signed by ALICE (who holds standing) — carried over MALLORY's token
     const delta = observed(FERN, "note", "self-signed, hand-carried", Date.now(), ALICE_SEED);
     const res = await post([toWire(delta)]);
     expect(res.status).toBe(200);
@@ -359,9 +338,6 @@ describe("POST /:mount/append", () => {
   });
 });
 
-// The turnkey path: a served store gains its first (or next) schema with nothing but curl.
-// Registration is constitutional, so the gate is the operator token — authentication is not
-// authorization here any more than anywhere else.
 describe("POST /:mount/register: the schema-schema mutation mechanism, served", () => {
   const PICK = { pick: { order: { byTimestamp: "desc" } } };
   const rockBody = {
@@ -396,7 +372,6 @@ describe("POST /:mount/register: the schema-schema mutation mechanism, served", 
     expect(body.registered).toBe("Rock");
     expect(body.entity).toBe("hyperschema:Rock");
 
-    // write and read through the brand-new surface — no restart, no library
     const write = await gql(
       "meadow",
       "op-token",
@@ -404,7 +379,6 @@ describe("POST /:mount/register: the schema-schema mutation mechanism, served", 
     );
     const written = (await write.json()) as { data: { rock: { color: string } } };
     expect(written.data.rock.color).toBe("basalt");
-    // and the pre-existing manual registration (Plant) still serves beside it
     const both = await gql("meadow", "op-token", `{ plant(entity: "plant:moss") { _hex } }`);
     expect(((await both.json()) as { errors?: string[] }).errors).toBeUndefined();
   });
@@ -456,11 +430,6 @@ describe("POST /:mount/register: the schema-schema mutation mechanism, served", 
       (await listed.json()) as { result: { tools: Array<{ name: string; description: string }> } }
     ).result.tools;
     expect(tools.map((t) => t.name)).toContain("loam_register");
-    // The description is the door's own teaching (T241): it names the grant path a scoped
-    // connection would use, and it no longer claims the operator is the only standing. The
-    // REFUSAL string stays terse by design — register-verb.test.ts freezes it byte-for-byte so
-    // a denied probe cannot learn whether grants exist here; the description is where the
-    // recipe lives, because a client reads it BEFORE calling.
     const registerTool = tools.find((t) => t.name === "loam_register");
     expect(registerTool?.description).toContain("--verb=register");
     expect(registerTool?.description).toContain("--prefix=");

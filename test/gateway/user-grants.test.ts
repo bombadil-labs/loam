@@ -1,10 +1,3 @@
-// A grant may name a Loam USER (`user:<name>`) rather than a key; the door resolves it to the
-// user's current root at read time (step 5, PLAN). Asked at two levels: the resolution itself
-// (`userRootAt`, the door's indexed reader, held equal to `rootOf`, the View reader) and the door
-// (an append signed by a key is admitted or refused; `holdsGrant` and the grant readers).
-//
-// Nothing writes user-named grants yet (step 5 PR 3d-ii does); every one here is hand-appended.
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   authorForSeed,
@@ -55,7 +48,6 @@ async function store(): Promise<Gateway> {
 }
 
 const op = (claims: Parameters<typeof signClaims>[0]) => signClaims(claims, OP_SEED);
-/** A pool's own law, signed by the pool's key. */
 const law = (pool: Gateway, claims: Claims): Delta => pool.signer!.sign(claims);
 const both = (gw: Gateway, name: string) => {
   const now = gw.validityNow();
@@ -76,24 +68,24 @@ describe("the door's indexed root reader agrees with the View reader", () => {
     const gw = await store();
     const seen: unknown[] = [];
     const look = () => seen.push(both(gw, "ada"));
-    look(); // nothing
+    look();
     await gw.append([op(rootClaims("ada", K1, OP, 10))]);
-    look(); // a root with no user record
+    look();
     const record = op(userClaims("ada", OP, 11));
     await gw.append([record]);
-    look(); // K1
+    look();
     const second = op(rootClaims("ada", K2, OP, 12));
     await gw.append([second]);
-    look(); // K2
+    look();
     await gw.append([op(makeNegationClaims(OP, 13, second.id))]);
-    look(); // back to K1
+    look();
     await gw.append([signClaims(grantClaims(STORE_ENTITY, X, "write", OP, 14), OP_SEED)]);
     await gw.append([signClaims(rootClaims("ada", X, X, 15), X_SEED)]);
-    look(); // a writer's forged root: still K1
+    look();
     await gw.append([op(rootClaims("ada", "user:ada", OP, 16))]);
-    look(); // latest names no key: none
+    look();
     await gw.append([op(makeNegationClaims(OP, 17, record.id))]);
-    look(); // record struck: none
+    look();
     for (const s of seen) {
       const { index, view } = s as { index: unknown; view: unknown };
       expect(index).toBe(view);
@@ -151,7 +143,6 @@ describe("erasure, and claim shapes, as the View reader sees them", () => {
     await gw.append([op(userClaims("ada", OP, 10)), op(rootClaims("ada", K1, OP, 11))]);
     const second = op(rootClaims("ada", K2, OP, 12));
     await gw.append([second]);
-    // Stand in for a purge that has not finished: the ground still holds the claim.
     const reactor = gw.reactor;
     declareUserGround(reactor, () => ({ reactor, erased: () => new Set([second.id]) }));
     expect(subjectKeyAt(reactor, gw.validityNow(), OP, "user:ada")).toBe(K1);
@@ -160,7 +151,6 @@ describe("erasure, and claim shapes, as the View reader sees them", () => {
 
   it("the gateway hides a root claim erased but not yet purged, as the View does", async () => {
     const gw = await adaWithTwoRoots();
-    // An erasure record lands while the claim's bytes stay held: the state a purge fault leaves.
     const [, second] = rootsOf(gw);
     expect(gw.reactor.ingest(op(eraseClaims(second!.id, OP, OP, 30))).status).toBe("accepted");
     expect(gw.reactor.get(second!.id)).toBeDefined();
@@ -227,7 +217,7 @@ describe("a grant that names a user stands for the user's current root", () => {
     expect(await door(gw, observed(FERN, "height", 2, 101, X_SEED))).toBe("refused");
     const now = gw.validityNow();
     expect(grantsHeldBy(gw.reactor, now, K1, OP).map((g) => g.verb)).toEqual(["write"]);
-    expect(grantsNaming(gw.reactor, now, K1, OP)).toEqual([]); // selection stays literal
+    expect(grantsNaming(gw.reactor, now, K1, OP)).toEqual([]);
     expect(grantsNaming(gw.reactor, now, "user:ada", OP).map((g) => g.verb)).toEqual(["write"]);
     await gw.close();
   });
@@ -245,7 +235,7 @@ describe("a grant that names a user stands for the user's current root", () => {
     const gw = await store();
     await gw.append([op(grantClaims(STORE_ENTITY, "user:ada", "write", OP, 12))]);
     expect(await door(gw, observed(FERN, "height", 5, 104, K1_SEED))).toBe("refused");
-    await gw.append([op(rootClaims("ada", K1, OP, 13))]); // a root, but no user record
+    await gw.append([op(rootClaims("ada", K1, OP, 13))]);
     expect(await door(gw, observed(FERN, "height", 6, 105, K1_SEED))).toBe("refused");
     await gw.close();
   });
@@ -307,14 +297,10 @@ describe("a pool reads its host's users", () => {
       ownerSeed: K1_SEED,
     });
     const pool = conn.gateway!;
-    // The pool's owner grant now names the user, not the key.
     await pool.append([
       law(pool, grantClaims(STORE_ENTITY, "user:ada", "admin", pool.operatorAuthor!, 20)),
     ]);
     expect(await door(pool, observed(FERN, "height", 9, 108, CONN_SEED))).toBe("admitted");
-    // Re-pointing ada at the HOST reaches the pool: K1's delegation no longer carries standing
-    // through the user-named grant. (The key-literal owner grant bind wrote is struck first, so
-    // only the user-named grant is left to consult.)
     const literal = [...pool.reactor.snapshot()].find(
       (d) =>
         d.claims.author === pool.operatorAuthor &&
@@ -326,7 +312,6 @@ describe("a pool reads its host's users", () => {
     expect(await door(pool, observed(FERN, "height", 10, 109, CONN_SEED))).toBe("admitted");
     await gw.append([op(rootClaims("ada", K2, OP, 22))]);
     expect(await door(pool, observed(FERN, "height", 11, 110, CONN_SEED))).toBe("refused");
-    // Control: a delegation from ada's NEW root lets the connection write again.
     await pool.append([
       signClaims(delegationClaims(K2, CONN, inboxName("home:ada", CONN), 23), K2_SEED),
     ]);
@@ -377,7 +362,7 @@ describe("a pool reads its host's users", () => {
     )!;
     await pool.append([law(pool, makeNegationClaims(pool.operatorAuthor!, 21, literal.id))]);
     await gw.bindConnection({ container: "home:ada", connectionKey: CONN, ownerSeed: K1_SEED });
-    expect(pool.reactor.negationsOf(named.id)).toEqual([]); // the owner's own grant is kept
+    expect(pool.reactor.negationsOf(named.id)).toEqual([]);
     expect(await door(pool, observed(FERN, "height", 13, 112, CONN_SEED))).toBe("admitted");
     await gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED });
     expect(await door(pool, observed(FERN, "height", 14, 113, CONN_SEED))).toBe("refused");
@@ -432,8 +417,6 @@ describe("a pool reads its host's users", () => {
       signClaims(delegationClaims(K2, CONN, inboxName("home:ada", CONN), 22), K2_SEED),
     ]);
     expect(await door(pool, observed(FERN, "height", 15, 114, CONN_SEED))).toBe("admitted");
-    // K1's old delegation could revive if ada's root ever went back to K1; a re-bind by ada's
-    // current key strikes it for good, as recovery does.
     await gw.bindConnection({ container: "home:ada", connectionKey: CONN, ownerSeed: K2_SEED });
     await gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K2_SEED });
     expect(await door(pool, observed(FERN, "height", 16, 115, CONN_SEED))).toBe("refused");
@@ -478,7 +461,6 @@ describe("a pool reads its host's users", () => {
       grantClaims(STORE_ENTITY, "user:ada", "admin", pool.operatorAuthor!, T0 + 10),
     );
     await pool.append([named]);
-    // Ada's record is struck until T0+1000: for now her root cannot be read.
     vi.setSystemTime(T0 + 20);
     await gw.append([
       signClaims({ ...makeNegationClaims(OP, T0 + 20, record.id), validUntil: T0 + 1000 }, OP_SEED),
@@ -488,8 +470,6 @@ describe("a pool reads its host's users", () => {
     await expect(
       gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED }),
     ).rejects.toThrow(/cannot be read now/);
-    // Striking the owner grant itself for a while does not let revoke claim success: it stands
-    // again when the strike lapses.
     await pool.append([
       law(pool, {
         ...makeNegationClaims(pool.operatorAuthor!, T0 + 21, named.id),
@@ -531,8 +511,6 @@ describe("a pool reads its host's users", () => {
       ownerSeed: K1_SEED,
     });
     const pool = conn.gateway!;
-    // The connection may write, so its grant-shaped deltas land; they bind nothing. It even names
-    // itself admin first, to vouch for its own grant — the chain still reaches no operator.
     expect(
       await door(pool, signClaims(grantClaims(STORE_ENTITY, CONN, "admin", CONN, 29), CONN_SEED)),
     ).toBe("admitted");
@@ -544,8 +522,6 @@ describe("a pool reads its host's users", () => {
         ),
       ).toBe("admitted");
     }
-    // An owner-side grant for a ghost the operator struck for good stays dead, even when the
-    // connection counter-strikes that strike.
     const ghost = law(
       pool,
       grantClaims(STORE_ENTITY, "user:ghost", "admin", pool.operatorAuthor!, 31),
@@ -589,7 +565,6 @@ describe("a pool reads its host's users", () => {
       ownerSeed: K1_SEED,
     });
     const pool = conn.gateway!;
-    // The owner (not the operator) names bob admin; bob has no readable root here.
     await pool.append([
       signClaims(grantClaims(STORE_ENTITY, "user:bob", "admin", K1, 40), K1_SEED),
     ]);
@@ -642,7 +617,6 @@ describe("a pool reads its host's users", () => {
     );
     const strike = law(pool, makeNegationClaims(pool.operatorAuthor!, T0 + 12, ghost.id));
     await pool.append([k3Admin, ghost, strike]);
-    // K2, holding admin, undoes the operator's strike; then K2's own admin is struck for a while.
     await pool.append([signClaims(makeNegationClaims(K2, T0 + 13, strike.id), K2_SEED)]);
     await pool.append([
       law(pool, {
@@ -692,7 +666,6 @@ describe("a pool reads its host's users", () => {
     });
     const pool = conn.gateway!;
     vi.setSystemTime(T0 + 100);
-    // K2 is admin here only as user x, through two grants.
     const g1 = law(
       pool,
       grantClaims(STORE_ENTITY, "user:x", "admin", pool.operatorAuthor!, T0 + 10),
@@ -702,14 +675,12 @@ describe("a pool reads its host's users", () => {
       grantClaims(STORE_ENTITY, "user:x", "admin", pool.operatorAuthor!, T0 + 11),
     );
     await pool.append([g1, g2]);
-    // The operator strikes each for good; K2, still admin through the other, undoes each strike.
     const s1 = law(pool, makeNegationClaims(pool.operatorAuthor!, T0 + 12, g1.id));
     await pool.append([s1]);
     await pool.append([signClaims(makeNegationClaims(K2, T0 + 13, s1.id), K2_SEED)]);
     const s2 = law(pool, makeNegationClaims(pool.operatorAuthor!, T0 + 14, g2.id));
     await pool.append([s2]);
     await pool.append([signClaims(makeNegationClaims(K2, T0 + 15, s2.id), K2_SEED)]);
-    // Now x cannot be read for a while.
     await gw.append([
       signClaims(
         { ...makeNegationClaims(OP, T0 + 16, xRecord.id), validUntil: T0 + 10_000 },
@@ -851,7 +822,6 @@ describe("a pool reads its host's users", () => {
 
     async function futureRoot(T0: number) {
       const { gw, conn, pool } = await inbox(T0);
-      // A user-named owner grant, and K2 with write standing that pre-signs a delegation.
       await pool.append([
         law(pool, grantClaims(STORE_ENTITY, "user:ada", "admin", pool.operatorAuthor!, T0 + 10)),
         law(pool, grantClaims(STORE_ENTITY, K2, "write", pool.operatorAuthor!, T0 + 11)),
@@ -859,7 +829,6 @@ describe("a pool reads its host's users", () => {
       await pool.append([
         signClaims(delegationClaims(K2, CONN, inboxName("home:ada", CONN), T0 + 12), K2_SEED),
       ]);
-      // The host already holds ada's re-point to K2, valid only later.
       await gw.append([op({ ...rootClaims("ada", K2, OP, T0 + 13), validFrom: T0 + 10_000 })]);
       return { gw, conn, pool };
     }
@@ -871,7 +840,7 @@ describe("a pool reads its host's users", () => {
       await expect(
         gw.revokeConnection({ inbox: conn, connectionKey: CONN, ownerSeed: K1_SEED }),
       ).rejects.toThrow(/may later hold/);
-      expect(pool.reactor.size).toBe(before); // nothing was struck
+      expect(pool.reactor.size).toBe(before);
       await gw.close();
     });
 
@@ -883,7 +852,6 @@ describe("a pool reads its host's users", () => {
         .find((d) => d.claims.validFrom === T0 + 10_000)!;
       await gw.append([op(makeNegationClaims(OP, T0 + 20, later.id))]);
       await pool.append([
-        // K2's literal write grant is not admin; only the user-named grant could have carried it.
         law(
           pool,
           makeNegationClaims(

@@ -1,10 +1,3 @@
-// A membership that names a user (`loam.memberOf`, step 5 PR 3f): PRESENT authority only. It selects
-// what the user's current root, and the keys that root delegates to for exactly the named scope,
-// wrote; never a key a recovery retired. Asked at the delta level (what `select` returns) and live
-// (what a `watch` pushes when the host's users move). What an earlier key wrote before a recovery
-// is NOT a member yet: that is ruling 8's M1, and its cross-store cut is an open decision. The
-// "known gap" cases below pin today's answer so the change is visible when it comes.
-
 import { afterEach, describe, expect, it } from "vitest";
 import { appendWithHostCut } from "../helpers/recovery-cut.js";
 import {
@@ -72,7 +65,6 @@ async function store(): Promise<Gateway> {
   return gw;
 }
 
-// ada (root K1) and bea (key B), both with write standing; each has written one value.
 async function world(): Promise<{ gw: Gateway; byK1: Delta; byB: Delta }> {
   const gw = await store();
   await gw.append([
@@ -191,7 +183,6 @@ describe("present authority: the current root", () => {
     await gw.append([byK2]);
     const m = members(gw);
     expect(m.has(byK2.id)).toBe(true);
-    // KNOWN GAP (ruling 8, M1): K1 wrote this before the recovery. History is not in this node yet.
     expect(m.has(byK1.id)).toBe(false);
     expect(m.has(byB.id)).toBe(false);
   });
@@ -199,7 +190,7 @@ describe("present authority: the current root", () => {
   it("a NEW K1-signed value arriving after recovery is not a member", async () => {
     const { gw } = await world();
     await recoverToK2(gw, 30);
-    const late = observed(FERN, "height", 9, 25, K1_SEED); // backdated
+    const late = observed(FERN, "height", 9, 25, K1_SEED);
     await gw.federate([late]);
     expect(members(gw).has(late.id)).toBe(false);
   });
@@ -236,7 +227,6 @@ describe("present authority: delegates for exactly the scope", () => {
     await p.federate([byD, byConn]);
     let m = new Set(p.select(writtenByUser("ada", SCOPE)).map((d) => d.id));
     expect([m.has(byD.id), m.has(byConn.id)]).toEqual([true, false]);
-    // After recovery K1 is retired, and so is what it delegated: D's write is no longer a member.
     await recoverToK2(host, 50);
     m = new Set(p.select(writtenByUser("ada", SCOPE)).map((d) => d.id));
     expect(m.has(byD.id)).toBe(false);

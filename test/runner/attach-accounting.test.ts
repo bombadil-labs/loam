@@ -1,18 +1,3 @@
-// T60 defect 2 — attach's lists are a real partition. installed + skipped read as covering every
-// binding the store holds, but readBindingDefinitions dropped malformed candidates BEFORE attach
-// saw them (a mistyped role, an unparseable emit), so a typo'd definition appeared in NEITHER
-// list and a deploy check of "skipped is empty" passed while it sat inert (H7). A definition that
-// a LATER definition of the same name replaced vanished the same way. Now every considered delta
-// is installed, skipped, superseded, or NAMED in malformed — and the fixtures carry a re-blessed
-// binding, because a fixture with one delta per name cannot tell a real partition from arithmetic
-// that happens to agree.
-// Two-sided, both levels: the drops are named with their reason AND stay in the store (dropped
-// from the run, never from the ground); the well-formed bystanders still install or skip.
-// GAP, named rather than implied: Runner.attach has no operator-facing caller in src/ — no CLI
-// command and no server path reads these lists — so this rail asserts the library return value
-// and never a door. The rail that would close it is a `loam` subcommand that prints the
-// accounting; that command does not exist yet, and this file does not pretend to cover one.
-
 import { describe, expect, it } from "vitest";
 import type { Claims } from "@bombadil/rhizomatic";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
@@ -41,8 +26,6 @@ const spec = (name: string, fnId: string) => ({
   emit: "supersede" as const,
 });
 
-// A definition whose emit is the classic hand-planted typo: a string that is neither
-// "append"/"supersede" nor JSON. bindingDefinitionClaims carries it through verbatim.
 const typoEmit = (): Claims =>
   bindingDefinitionClaims(
     { ...spec("binding:typo", "fn:typo"), emit: "supercede" as unknown as "supersede" },
@@ -50,7 +33,6 @@ const typoEmit = (): Claims =>
     2,
   );
 
-// A definition whose budget role carries a string — the type-gate drop.
 const stringBudget = (): Claims => {
   const claims = bindingDefinitionClaims(spec("binding:overdrawn", "fn:overdrawn"), RUNNER, 3);
   return {
@@ -63,9 +45,6 @@ const stringBudget = (): Claims => {
   };
 };
 
-// Five binding deltas over four names. `binding:good` is defined TWICE — the ordinary re-blessed
-// recipe — so the count below can tell a real partition from a fixture where every name happens
-// to hold exactly one delta and the arithmetic agrees by accident.
 async function storeWithFive(): Promise<{
   gateway: Gateway;
   typoId: string;
@@ -106,20 +85,14 @@ describe("attach accounts for every binding delta in the ground", () => {
       seed: RUNNER_SEED,
       implementations: { "fn:good": () => [] },
     });
-    // The bystanders: the LATEST definition installs, an orphan waits — neither is accused. The
-    // stale implementation is not installed, so the replacement really took.
     expect(runner.installed).toEqual(["binding:good"]);
     expect(runner.skipped).toEqual(["binding:orphan"]);
-    // The replaced definition is named as replaced — not as damage, and not as nothing.
     expect(runner.superseded).toEqual([{ deltaId: oldGoodId, name: "binding:good" }]);
-    // The damage is NAMED — delta id and a reason a human can act on.
     expect(runner.malformed).toHaveLength(2);
     const byId = new Map(runner.malformed.map((m) => [m.deltaId, m.reason]));
     expect(byId.get(typoId)).toMatch(/emit is neither "append"\/"supersede" nor JSON/);
     expect(byId.get(budgetId)).toMatch(/budget \(a number\)/);
     expect(byId.has(typoId) && byId.has(budgetId)).toBe(true);
-    // Object level: the four lists together cover every binding delta the store holds. The
-    // fixture defines one name twice, so this cannot pass on names-equal-deltas arithmetic.
     expect(bindingDeltas(gateway)).toHaveLength(5);
     expect(
       runner.installed.length +
@@ -130,10 +103,6 @@ describe("attach accounts for every binding delta in the ground", () => {
     await gateway.close();
   });
 
-  // The order deltas ARRIVE in decides which of the two report sites fires: the loser can be
-  // seen after the winner (report this delta) or before it (report the one it displaces). Both
-  // are ordinary — a federated pull replays in no particular order — and a fixture that only
-  // ever appends oldest-first leaves the other site free to be deleted with the rail still green.
   it("either arrival order reports the replaced definition, and a timestamp tie is broken by id", async () => {
     const newer = signClaims(
       bindingDefinitionClaims(spec("binding:good", "fn:good"), RUNNER, 5),
@@ -158,7 +127,6 @@ describe("attach accounts for every binding delta in the ground", () => {
       expect(runner.superseded).toEqual([{ deltaId: older.id, name: "binding:good" }]);
       await gw.close();
     }
-    // A timestamp tie falls to the higher delta id — the loser is still named, never dropped.
     const tieA = signClaims(
       bindingDefinitionClaims(spec("binding:good", "fn:a"), RUNNER, 7),
       RUNNER_SEED,
@@ -167,10 +135,6 @@ describe("attach accounts for every binding delta in the ground", () => {
       bindingDefinitionClaims(spec("binding:good", "fn:b"), RUNNER, 7),
       RUNNER_SEED,
     );
-    // Looped for the same reason as above, and a sharper one: with a single arrival order, an
-    // implementation that ignored the id tiebreak entirely would still name the second-appended
-    // delta the loser, and whether that matches depends on how two content hashes happen to
-    // fall. Under BOTH orders the loser is the lower id, and only a real tiebreak gives that.
     const lowerId = tieA.id < tieB.id ? tieA : tieB;
     for (const arrival of [
       [tieA, tieB],
@@ -181,15 +145,13 @@ describe("attach accounts for every binding delta in the ground", () => {
       await gw.append(arrival);
       const runner = Runner.attach(gw, { seed: RUNNER_SEED, implementations: {} });
       expect(runner.superseded).toEqual([{ deltaId: lowerId.id, name: "binding:good" }]);
-      expect(runner.skipped).toEqual(["binding:good"]); // one law, counted once
+      expect(runner.skipped).toEqual(["binding:good"]);
       await gw.close();
     }
   });
 
   it("delta level: a malformed definition is dropped from the RUN, never from the store", async () => {
     const { gateway, typoId, budgetId } = await storeWithFive();
-    // A real implementation map, so "dropped from the RUN" is an assertion rather than a
-    // foregone conclusion: fn:typo and fn:overdrawn are ON HAND and still install nothing.
     const runner = Runner.attach(gateway, {
       seed: RUNNER_SEED,
       implementations: { "fn:good": () => [], "fn:typo": () => [], "fn:overdrawn": () => [] },
@@ -197,7 +159,6 @@ describe("attach accounts for every binding delta in the ground", () => {
     expect(runner.installed).toEqual(["binding:good"]);
     expect(runner.installed).not.toContain("binding:typo");
     expect(runner.installed).not.toContain("binding:overdrawn");
-    // Never from the ground: the deltas the run refused are still in the store, unstruck.
     const ids = new Set([...gateway.reactor.snapshot()].map((d) => d.id));
     expect(ids.has(typoId)).toBe(true);
     expect(ids.has(budgetId)).toBe(true);
@@ -217,8 +178,6 @@ describe("attach accounts for every binding delta in the ground", () => {
     expect(replaced).toEqual([{ deltaId: oldGoodId, name: "binding:good" }]);
     await gateway.close();
 
-    // The other side: a store holding one well-formed definition per name accuses nothing and
-    // reports no replacement. Both lists must be able to be EMPTY, or neither means anything.
     const clean = await Gateway.open(new MemoryBackend());
     clean.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     await clean.append([

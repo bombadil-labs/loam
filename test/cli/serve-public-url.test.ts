@@ -1,16 +1,10 @@
-// T133 — `loam serve --public-url`: opens §37 discovery (the two well-known documents, and the
-// MCP door's WWW-Authenticate challenge) when configured, and refuses a malformed one at boot
-// rather than silently guessing an address from the request. `test/server/oauth-discovery.test.ts`
-// proves the DOOR behavior directly against `serve()`; this file proves the CLI actually threads
-// the flag there, mirroring `serve-host.test.ts`'s precedent for a plumbing-only flag.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { run } from "../../src/cli/cli.js";
 
-vi.setConfig({ testTimeout: 20_000 }); // real listening servers
+vi.setConfig({ testTimeout: 20_000 });
 
 let home: string;
 const out: string[] = [];
@@ -23,11 +17,6 @@ beforeEach(() => {
   err.length = 0;
 });
 afterEach(() => {
-  // This rmSync is a RAIL, not just hygiene: a refused serve must release the store it already
-  // opened, and on Windows a leaked sqlite handle turns this removal into EPERM. POSIX cannot see
-  // the leak (unlink succeeds past an open handle), so windows-latest CI is the only place this
-  // asserts. Do not wrap it in try/catch or move the home somewhere shared — either change
-  // silently deletes the only red the refusal path has.
   rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -57,7 +46,7 @@ describe("T133 — loam serve --public-url", () => {
     const mcp = await fetch(`${server.url}/default/mcp`, { method: "POST" });
     expect(mcp.status).toBe(401);
     expect(mcp.headers.get("www-authenticate")).toBeNull();
-    expect(resource.status).toBe(mcp.status); // the well-known path is just another unmounted name
+    expect(resource.status).toBe(mcp.status);
     await server.close();
   });
 

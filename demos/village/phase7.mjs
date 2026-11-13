@@ -1,6 +1,3 @@
-// Phase 7 — The adversarial sweep, ecosystem standing: Mallory tries everything; the village
-// holds. Then the final reconciliation.
-
 import {
   publishSchemaClaims,
   makeNegationClaims,
@@ -22,9 +19,6 @@ import {
 } from "./harness.mjs";
 
 const stores = {};
-// Mallory's rival READING of the dossier — a real resolution Schema (0.3.0's L5 realignment:
-// `publishSchemaClaims` takes a Schema, props as a Map), oldest-wins so that if it ever BOUND,
-// wren's dossier would visibly reshape and 7.2's _hex assertion would catch it.
 const rivalReading = parseSchema({
   name: "Dossier",
   alg: 1,
@@ -45,7 +39,6 @@ try {
   for (const name of ["commons", "reel", "hive", "almanac"]) stores[name] = await openStore(name);
   const { commons, reel, hive, almanac } = stores;
 
-  // 7.1 — the self-signed admin grant, federated into every store
   const now = Date.now();
   let allInert = true;
   const details = [];
@@ -88,7 +81,6 @@ try {
     `admitted ${details.join(" ")}; both writes still refused`,
   );
 
-  // 7.2 — a foreign definition at the almanac's OWN schema entity, newer than the real one
   const dossierHexBefore = (
     await gql(almanac.base, opToken("almanac"), `{ dossier(entity: "person:wren") { _hex } }`)
   ).body?.data?.dossier?._hex;
@@ -99,7 +91,7 @@ try {
   await almanac.gateway.federate([rivalDef]);
   await almanac.gateway.flush();
   await stores.almanac.close();
-  stores.almanac = await openStore("almanac"); // the definitive test: a full replay
+  stores.almanac = await openStore("almanac");
   const dossierHexAfter = (
     await gql(
       stores.almanac.base,
@@ -114,7 +106,6 @@ try {
     `${dossierHexBefore?.slice(0, 24)}… held`,
   );
 
-  // 7.3 — a foreign negation of the commons' own Person definition
   const personDef = findDefinition(commons.gateway, "hyperschema:Person");
   const rivalNegation = signClaims(
     makeNegationClaims(AUTHORS.mallory, now + 10_000_001, personDef.id),
@@ -136,7 +127,6 @@ try {
     JSON.stringify(wrenStill.body?.data?.person),
   );
 
-  // 7.4 — a broken schema refused at the served door, and nothing persists
   const before = [...hive.gateway.reactor.snapshot()].length;
   const broken = await registerHttp(hive.base, opToken("hive"), {
     hyperschema: { name: "Broken", alg: 1, body: { op: "mask", policy: "drop", in: "input" } },
@@ -153,7 +143,6 @@ try {
     `${broken.status}: ${(broken.body?.errors ?? []).join(" ").slice(0, 80)}`,
   );
 
-  // 7.5 — final reconciliation: pull once more, then subsets + spot-checks + the record
   const { pullFrom } = await import("./harness.mjs");
   await pullFrom(stores.almanac.gateway, stores.commons.base, opToken("commons"));
   await pullFrom(stores.almanac.gateway, reel.base, opToken("reel"));

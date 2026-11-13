@@ -1,16 +1,3 @@
-// A GRANT INTO A SERVED HOME SAYS SO. `loam grant` (mint and revoke) appends ground deltas
-// through its own sqlite handle, like `pull`/`register`/`pen`. A `loam serve` holding the same
-// store reads the grant on its next request, but what it loaded at boot waits for a restart, and
-// the warning names the server that is running.
-//
-// Same discipline as the frozen T103(a) rail (serve-staleness-warning.test.ts, which these cases
-// deliberately do not touch): the warning is stderr prose, never a refusal — the grant still lands,
-// exit 0. Two-sided both ways: the warning fires beside a live-pid serving record AND the two
-// earned silences stay silent (no record at all; a provably dead pid).
-//
-// Deliberately not asserted here: the record-present-but-unreadable branch (no portable fixture —
-// see the T103(a) header). That a live server sees a new grant is client-mint.test.ts's (a2).
-
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,7 +7,7 @@ import { authorForSeed } from "@bombadil/rhizomatic";
 import { run } from "../../src/cli/cli.js";
 import { storePath } from "../../src/cli/config.js";
 
-vi.setConfig({ testTimeout: 20_000 }); // real sqlite homes
+vi.setConfig({ testTimeout: 20_000 });
 
 const WARNING = /waits for a restart/;
 const CLIENT = "connector-00000000000000000000000000000001";
@@ -35,8 +22,6 @@ const quiet = () => {
   err.length = 0;
 };
 
-// A connector with an acting identity, as the token exchange would have left it — the only shape
-// `grant` will name. The loader verifies the actor derives from its own seed, so the pair is real.
 const ACTOR_SEED = "ab".repeat(32);
 const oauthFixture = () =>
   JSON.stringify({
@@ -62,7 +47,6 @@ const oauthFixture = () =>
     tokens: [],
   });
 
-// A pid that is provably dead: a child that has already exited by the time spawnSync returns.
 const deadPid = (): number => {
   const child = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
   return child.pid ?? 999999;
@@ -93,7 +77,7 @@ afterEach(() => {
 
 describe("T243 — grant warns beside a live server, and only there", () => {
   it("mint under a live-pid serving record: the grant lands AND the warning fires", async () => {
-    serving(process.pid); // this test process is provably alive
+    serving(process.pid);
     expect(await mint()).toBe(0);
     expect(out.join("\n")).toContain(`granted ${CLIENT} register standing`);
     expect(err.join("\n")).toMatch(WARNING);

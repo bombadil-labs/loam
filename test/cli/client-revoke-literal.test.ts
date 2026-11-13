@@ -1,8 +1,3 @@
-// `loam client revoke K` strikes the grants that name K LITERALLY, never a grant that names a user
-// whose root happens to be K. The user's own standing belongs to the user, and a client revoke must
-// not reach it. Asked at the delta (which grants are struck) and the door (which standing survives),
-// and on the ledger screen (the rows the operator reads).
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -57,7 +52,6 @@ describe("client revoke is literal: a user whose root is the client's key keeps 
     const seed = readSeed(home);
     const operator = authorForSeed(seed);
 
-    // una is a user whose root is kay's key, holding a write grant by name.
     let gw = await ground(home);
     await gw.append([
       signClaims(userClaims("una", operator, 10), seed),
@@ -75,10 +69,8 @@ describe("client revoke is literal: a user whose root is the client's key keeps 
     expect(await run(["client", "revoke", "kay", "--home", home], io)).toBe(0);
 
     gw = await ground(home);
-    // delta: every literal grant is struck; the user-named one is not
     for (const id of literal) expect(gw.reactor.negationsOf(id).length).toBeGreaterThan(0);
     expect(gw.reactor.negationsOf(named[0]!)).toEqual([]);
-    // door: kay still writes, as una's root, through una's grant
     expect(holdsGrant(gw.reactor, gw.validityNow(), STORE_ENTITY, kay, "write", operator)).toBe(
       true,
     );

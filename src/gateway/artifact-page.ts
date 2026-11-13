@@ -1,59 +1,10 @@
-// The emitted artifact page (SPEC §30): one file, everything inlined, no external host referenced
-// anywhere. Two halves live here — the HTML skeleton and the SHELL, the client host adapter that holds
-// the coordinates, talks to the viewer's own connector, and mounts the bundle in a confined realm.
-//
-// WHAT THE PAGE NAMES, and what it deliberately does not. It names a connector DISPLAY NAME, a tool name
-// or two, a lens name, an entity, and the `consumes` list. It does not name a host, an origin, a mount, a
-// token, a seed, or a single byte of view data — the data path is `window.claude.mcp`, the connector holds
-// the URL and the credential, and the page holds coordinates. So the same bytes read whichever store the
-// connector points at.
-//
-// DOM ORDER IS LOAD-BEARING, twice. The host's writer-identity statement and the shell's status line
-// render OUTSIDE and AFTER the mount point, so whatever a §23.3-compliant renderer says about its own pen
-// — and it must say something, which is why the page cannot be required to omit the pen NAME — the host
-// gets the last sentence and the viewer reads the host's.
-//
-// THE SHELL IS THE ONLY HOLDER OF AN MCP HANDLE, which is what makes the confinement assertable at all:
-// traffic can be counted at one seam. It is also the MEDIATOR — it intercepts `data-loam-read` gestures on
-// the markup the bundle returned, composes one uncached `loam_query`, folds the answer into `node.reads`,
-// and re-renders. It adjudicates nothing: the read boundary is the schema the viewer installed and the
-// mount their connector points at, and a page-side allow-list would constrain the APP while claiming to
-// constrain the viewer.
-
 import { realmProgram } from "./artifact-realm.js";
 import type { RendererBinding } from "./renderers.js";
 
-// The connector display-name ceiling. Not a security bound — a decidable one, so an unusable name refuses
-// at pack time rather than emitting a page that can never connect to anything.
 export const MAX_CONNECTOR_NAME = 128;
 
-// The ceiling on the page's SPAWN wait: worker thread start plus the blob: module import, measured from
-// `new Worker` to the realm's `live` signal. Sized to a contended device rather than to a bundle —
-// measured spawn on a 16-core box was 4 ms idle, 91 ms at load ~150 and 803 ms worst at load ~550, so
-// 10 s is roughly twelve times the worst observed rather than a guess. It is a CONSTANT and not an
-// operator option, unlike the server host's: the server's spawn ceiling bounds how long one anonymous
-// caller may hold a `maxPublicRenders` slot, and this clock holds nothing but the viewer's own tab.
 export const ARTIFACT_SPAWN_TIMEOUT_MS = 10_000;
 
-// A GraphQL-legal name from a store-native one — the SAME mangling `legal()` runs in gql.ts, which is
-// where the store-side truth lives. It is duplicated here because the shell is a standalone page that
-// cannot import from the gateway, and `test/gateway/artifact-reads.test.ts` pins the two to agree.
-// THE STORE HAS TWO MANGLINGS AND THEY DIFFER BY ONE CHARACTER, so the page carries two. Mirrors
-// `legalNameFor` and `queryFieldFor` in gql.ts exactly, and the split is the whole point:
-//
-//   `legalName(s)`  — GraphQL-legal only. The VIEW TYPE, every PROP FIELD, and every per-prop MUTATION
-//                     ARGUMENT (`gql.ts` builds those with `legal(prop)`). `Height` stays `Height`.
-//   `rootField(s)`  — the same, then initial-lowercased. The QUERY-ROOT and MUTATION-ROOT field of a
-//                     lens. Lens `Plant` is served at field `plant`.
-//
-// A page carrying only one of them spells one of the two sites wrong for exactly the names whose
-// initial is an uppercase ASCII letter — and only the WRITE site, since a read names no prop. The
-// failure looks like nothing: the page paints correctly and every form is quietly dead.
-//
-// Duplicated here because the shell is a standalone page that cannot import from the gateway;
-// `test/gateway/artifact-reads.test.ts` pins BOTH against the REAL GraphQL schema, and executes the
-// page's own composed query AND its own composed mutation against the live door — a stub that echoes
-// the document back agrees with either spelling, which is how this survived a green suite once.
 const LEGAL_JS = `function legalName(s) {
     var cleaned = String(s).replace(/[^_A-Za-z0-9]/g, "_");
     return /^[A-Za-z_]/.test(cleaned) ? cleaned : "_" + cleaned;
@@ -62,17 +13,6 @@ const LEGAL_JS = `function legalName(s) {
     return legalName(s).replace(/^[A-Z]/, function (c) { return c.toLowerCase(); });
   }`;
 
-// The confined realm's whole program. It runs in a Worker global scope — no `window`, no `document`, and
-// therefore no `window.claude`: absent by CONSTRUCTION rather than filtered, which is the difference
-// between a boundary and a scrub.
-//
-// Its protocol is `render-worker.ts`'s, message for message: `{ bundle, node }` in, `{ kind: "ok", html }`
-// / `{ kind: "notHtml" }` / `{ kind: "fault" }` back, so a fault folds to a clean refusal leaking nothing
-// of the bundle's internals. The extra `{ kind: "live" }` is the second clock's start gun (T73): a slow
-// spawn under a loaded tab must not charge startup against the render's budget.
-
-// The coordinates the page holds. Everything here is pack-time text from the store that packed the page;
-// nothing is view data (criterion 3 asserts that at the bytes).
 export interface ArtifactCoordinates {
   readonly server: string;
   readonly route: string;
@@ -80,11 +20,7 @@ export interface ArtifactCoordinates {
   readonly entity: string;
   readonly consumes: readonly string[];
   readonly manifest: readonly string[];
-  // The `writable` set the operator was ACKNOWLEDGED for — a receipt of a human decision, not a
-  // boundary (the viewer could always send the document themselves). What it buys: widening the
-  // schema's `writable` in a v2 registration does not widen an already-emitted page.
   readonly writable: readonly string[];
-  // Text a viewer READS, never a target the page requests — the one place a store address appears.
   readonly storeAddress: string;
   readonly refetchInterval: number;
   readonly renderTimeoutMs: number;
@@ -94,16 +30,11 @@ export interface ArtifactCoordinates {
 const escapeHtml = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-// JSON destined for a `<script type="application/json">` body. `<` is escaped to its JSON unicode form so
-// no payload can spell a closing tag, and the bytes still `JSON.parse` back byte-identical — which is what
-// lets criterion 1 recover the bundle and content-address it equal to the binding's.
 const inlineJson = (value: unknown): string =>
   JSON.stringify(value)
     .replace(/</g, "\\u003c")
     .replace(/\u2028/g, "\\u2028")
     .replace(/\u2029/g, "\\u2029");
-// The shell: the client HOST ADAPTER. Deliberately one function of its coordinates, in plain ES5-shaped
-// JS, with no build step of its own — the page is what was audited.
 function shellSource(): string {
   return `(function () {
   "use strict";
@@ -584,9 +515,6 @@ function shellSource(): string {
 })();`;
 }
 
-// The whole page. `capability` is the DERIVED statement (Recommendation 17) — it renders above the
-// onboarding copy, because the page is inert until a connector exists, so "connect your store" IS the
-// acceptance gesture and the statement sits in front of it.
 export function artifactPage(args: {
   readonly coordinates: ArtifactCoordinates;
   readonly binding: RendererBinding;
@@ -634,8 +562,6 @@ identity it writes under, this is the sentence that is true here.</p>
 `;
 }
 
-// Recover the bundle source a page carries — the inverse of the emission, used by the rail that asserts
-// the recovered bytes content-address EQUAL to the binding's (§23.1's attestation held across the seam).
 export function bundleFromPage(page: string): string | undefined {
   const m = /<script type="application\/json" id="loam-bundle">([\s\S]*?)<\/script>/.exec(page);
   if (m === null) return undefined;
@@ -647,8 +573,6 @@ export function bundleFromPage(page: string): string | undefined {
   }
 }
 
-// The coordinates a page carries — the same inverse, for a rail that reads them and for a harness that
-// drives the page against a different store.
 export function coordinatesFromPage(page: string): ArtifactCoordinates | undefined {
   const m = /<script type="application\/json" id="loam-coordinates">([\s\S]*?)<\/script>/.exec(
     page,

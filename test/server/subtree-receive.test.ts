@@ -1,51 +1,3 @@
-// T263 — RECEIVE WITHIN THE SUBTREE (SPEC §58 position 2: "receive is a channel into a descendant
-// of C from a source offered to this connection"; position 4: the container's `receive` switch).
-//
-// Bound to `ada:journal` with no grant, a connection opens a channel INTO its own subtree — the
-// container itself or a descendant — and only where the container's leeway says receive is on.
-// It is refused a channel into a sibling, into a name that merely shares the letters, into its
-// parent, and under a prefix outside its fence; each refusal names the rule, not a grant. What
-// arrives serves the connection and nobody else: the channel is recorded as opened by the
-// container, its law folds into that container's surface (Myk's ruling, 2026-09-03), and the root
-// surface never carries it. The plain `federate` grant road is untouched.
-//
-// "Offered" today means the peer hands its door token; the container-scoped offer token is T264.
-//
-// Railed at BOTH LEVELS: the channel RECORD (its `into` and `openedBy`) and what each door SERVES.
-//
-// NOT HERE, and said so: a renderer or resolver arriving on the channel — the walls slice; and
-// the pool's bytes surviving a reboot, which is the backend's promise (§46) — this file pins that
-// the RECORD survives with its opener and the root fold reads it.
-//
-// RAILS-RED on origin/main, this file copied in: 9 red, 1 green — 10 cases. The green is the
-// CONTROL: the plain `federate` grant road, which this slice neither widens nor narrows.
-//
-// REVERT PROBES, MEASURED against this file as it stands — 10 cases. Re-measure when you add one.
-//   the root fold keeps a connection's channel             → 2 red, 8 green
-//   the bound fold drops the channel's rows                 → 3 red, 7 green
-//   no subtree fence on `into`                              → 1 red, 9 green
-//   no fence on the prefix                                  → 2 red, 8 green
-//   the prefix fenced to the binding, not the target        → 1 red, 9 green
-//   no leeway walk (receive always on)                      → 2 red, 8 green
-//   the walk stops at a container that declared no leeway   → 1 red, 9 green
-//   status and sever admit by the fence, not the opener     → 1 red, 9 green
-//   status and sever admit by edge reach, not the opener    → 1 red, 9 green
-//   the stamps carry no opener                              → 4 red, 6 green
-//   the bound fold admits a foreign opener                  → 2 red, 8 green
-//   no parent edge for a name a connection declares         → 2 red, 8 green
-//   only the target is declared, not the middles            → 1 red, 9 green
-//   the middles walk re-declares declared ancestors         → 1 red, 9 green
-//   the listing road drops a declared sealed pointer        → 1 red, 9 green
-//   the listing road carries a pointer onto a silent one    → 1 red, 9 green
-// Five of these were green until the rails were sharpened: the subtree fence, until the refusal
-// cases carried a prefix INSIDE the fence (an outside prefix was refused for the prefix); the
-// opener, until a PERSON-opened channel inside the subtree joined the sever case; edge reach,
-// until that channel's target was declared UNDER the container; and the listing road, until the
-// case moved the listing's membership so the road re-declared at all — and re-declared the
-// SILENT container too, or its half proved only that a first declaration carries no pointer.
-// The parent-edge and middles probes need the object level: introspection sees a field, only a
-// read sees a row.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
@@ -74,7 +26,6 @@ const HOLDER_TOKEN = "holder-token";
 const RECEIVES: Leeway = { ...SEALED_LEEWAY, receive: true };
 
 const peers: ServerHandle[] = [];
-/** A second store with one lens and one row, served with an operator door token — the "offer". */
 async function peerStore(): Promise<string> {
   const peer = await Gateway.boot(
     new MemoryBackend(),
@@ -98,11 +49,6 @@ const closePeers = async (): Promise<void> => {
   while (peers.length > 0) await new Promise<void>((r) => peers.pop()!.server.close(() => r()));
 };
 
-/**
- * Declare a container's leeway as the operator — the road the admin page takes. A standing
- * container is re-declared with its own record and the leeway added, so nothing else moves; a
- * new one is declared under `parent`.
- */
 const declare = (
   gw: Gateway,
   container: string,
@@ -173,7 +119,6 @@ const receive = (
   prefix = `${into}:peer`,
 ) => callTool(base, bearer, "loam_federate_connect", { from, into, prefix, token: PEER_TOKEN });
 
-/** The query fields a bearer is served — the object level. */
 async function fieldsOf(base: string, bearer: string | undefined): Promise<string[]> {
   const res = await fetch(`${base}/default/graphql`, {
     method: "POST",
@@ -206,16 +151,13 @@ describe("§58 — receive within the subtree", () => {
     const peer = await peerStore();
     const r = await receive(base, ada, "ada:journal:inbox", peer);
     expect(r.isError, r.text).toBe(false);
-    // The record: into the descendant, opened by the container — the delta level.
     const channel = gateway.channelStatus().find((c) => c.into === "ada:journal:inbox");
     expect(channel?.openedBy).toBe("ada:journal");
     expect(channel?.prefix).toBe("ada:journal:inbox:peer");
-    // What it serves: the peer's lens under the prefix, to the connection and to nobody else.
     expect(await servesPeer(base, ada, "ada:journal:inbox:peer")).toBe(true);
     expect(await servesPeer(base, "op-token", "ada:journal:inbox:peer"), "the root surface").toBe(
       false,
     );
-    // Two-sided across containers too: a connection bound elsewhere is served nothing of it.
     const bea = await connect(base, "bea", "notes");
     expect(await servesPeer(base, bea, "ada:journal:inbox:peer"), "a sibling's surface").toBe(
       false,
@@ -233,8 +175,6 @@ describe("§58 — receive within the subtree", () => {
     await declare(gateway, "ada:journal", RECEIVES);
     const peer = await peerStore();
     for (const into of ["ada:agent1", "ada:journalx:inbox", "ada", "friends"]) {
-      // The prefix is INSIDE the fence here, so only the container rule can refuse — a prefix
-      // outside it would be refused for the prefix, and the container fence would go unpinned.
       const r = await receive(base, ada, into, peer, "ada:journal:peer");
       expect(r.isError, `into ${into}`).toBe(true);
       expect(r.text, `into ${into}`).toMatch(RULE);
@@ -262,15 +202,12 @@ describe("§58 — receive within the subtree", () => {
     expect(own.isError).toBe(true);
     expect(own.text).toMatch(/receive/);
     await declare(gateway, "ada:journal:annex", RECEIVES, "ada:journal");
-    // The prefix is fenced to the TARGET: the annex receives, but not under the parent's names,
-    // whose receive switch is off.
     const underParent = await receive(base, ada, "ada:journal:annex", peer, "ada:journal:peer");
     expect(underParent.isError).toBe(true);
     expect(underParent.text).toMatch(/outside ada:journal:annex:/);
     const annex = await receive(base, ada, "ada:journal:annex", peer);
     expect(annex.isError, annex.text).toBe(false);
     expect(gateway.channelStatus().map((c) => c.into)).toEqual(["ada:journal:annex"]);
-    // A leeway change is a delta the next request obeys.
     await declare(gateway, "ada:journal", RECEIVES);
     const later = await receive(base, ada, "ada:journal:inbox", peer);
     expect(later.isError, later.text).toBe(false);
@@ -279,9 +216,6 @@ describe("§58 — receive within the subtree", () => {
   });
 
   it("what arrives ANSWERS through the connection: the peer's row resolves, and nowhere else", async () => {
-    // Introspection sees a field; only a read sees a row. A descendant the connection names is
-    // declared under its path parent, so the bound read scope reaches the pool — law that is
-    // served and answers nothing is the T189 shape.
     const { base, gateway } = await connectionServer();
     const ada = await connect(base, "ada", "journal");
     await declare(gateway, "ada:journal", RECEIVES);
@@ -314,12 +248,10 @@ describe("§58 — receive within the subtree", () => {
         : (body.data?.ada_journal_inbox_peer_Plant?.height ?? null);
     };
     await gateway.append([observed(FERN, "height", 999, gateway.stamp(), OPERATOR_SEED)]);
-    expect(await height(ada)).toBe(11); // the valid bound source never switches to private primary
+    expect(await height(ada)).toBe(11);
     expect(await height("op-token")).toBe("unserved");
     const bea = await connect(base, "bea", "notes");
     expect(await height(bea)).toBe("unserved");
-    // The binding's authorized channel has a colon-bearing parent AND prefix. Its current law
-    // still routes a specific refusal after malformed prefix, before a bound actor signs.
     const status = gateway.channelStatus().find((c) => c.openedBy === "ada:journal")!;
     const claims = withStamp(gateway.stamp(), (stamp) =>
       channelRecordClaims(status, OPERATOR, stamp),
@@ -355,9 +287,6 @@ describe("§58 — receive within the subtree", () => {
   });
 
   it("a target two levels down is reached: the undeclared middle is declared under its parent too", async () => {
-    // One level down the parent edge lands on a declared container. Two levels down it landed
-    // on a name nothing declared, and reach — walked by declared edges — stopped at the top:
-    // the peer's lens was served and answered null, one level lower than before.
     const { base, gateway } = await connectionServer();
     const ada = await connect(base, "ada", "journal");
     await declare(gateway, "ada:journal", RECEIVES);
@@ -385,10 +314,6 @@ describe("§58 — receive within the subtree", () => {
   });
 
   it("a middle a receive brought into being is a pure namespace: the next receive under it inherits", async () => {
-    // The first receive declared `ada:journal:a` with no leeway. Read as SEALED and stopped at,
-    // it refused the next receive under it — and a second peer into the same target — while a
-    // fresh middle beside it was admitted. A container that declared no leeway inherits; the
-    // ancestor's own declaration is untouched by the receive that passed through.
     const { base, gateway } = await connectionServer();
     const ada = await connect(base, "ada", "journal");
     await declare(gateway, "ada:journal", RECEIVES);
@@ -401,7 +326,6 @@ describe("§58 — receive within the subtree", () => {
     expect(under.isError, under.text).toBe(false);
     const again = await receive(base, ada, "ada:journal:a:b", peer, "ada:journal:a:b:peer2");
     expect(again.isError, again.text).toBe(false);
-    // A leeway change on the ancestor is a delta the next request obeys, through the middle.
     await declare(gateway, "ada:journal", SEALED_LEEWAY);
     const sealed = await receive(base, ada, "ada:journal:a:d", peer);
     expect(sealed.isError).toBe(true);
@@ -411,16 +335,10 @@ describe("§58 — receive within the subtree", () => {
   });
 
   it("a road that re-declares a standing container carries the leeway it found: sealed stays sealed, silent stays silent", async () => {
-    // Latest wins per declaration. The listing road re-declares a program's listing container on
-    // every publish; it once omitted a sealed pointer on the premise that sealed and absent read
-    // the same. On a road that walks the tree they do not: a container that sealed itself would
-    // have been reopened, and one that never spoke would have been sealed by a stray pointer.
     const { gateway } = await connectionServer();
     const listing = (program: string): string => `container:hyperschema:${program}`;
-    // The listing road declares a program's listing container when its page is first read, and
-    // re-declares it on every later read.
     await gateway.list("Plant", { limit: 1 });
-    await declare(gateway, listing("Plant"), SEALED_LEEWAY); // sealed explicitly, copying its record
+    await declare(gateway, listing("Plant"), SEALED_LEEWAY);
     const before = readContainerTable(
       gateway.reactor,
       gateway.validityNow(),
@@ -430,16 +348,12 @@ describe("§58 — receive within the subtree", () => {
     await gateway.publishRegistration({ ...PLANT, name: "Bed" }, { ...PLANT_POLICY, name: "Bed" }, [
       FERN,
     ]);
-    // The road re-declares only when the listing's membership moves, and the membership is the
-    // schema's props: evolve Plant with one more.
     await gateway.publishRegistration(
       PLANT,
       { ...PLANT_POLICY, props: new Map([...PLANT_POLICY.props, ["girth", PLANT_POLICY.default]]) },
       [FERN],
     );
     await gateway.list("Plant", { limit: 1 });
-    // Bed is re-declared too, or its half of this case proves only that a FIRST declaration
-    // carries no pointer — a road that carried one onto every re-declaration passed it.
     await gateway.list("Bed", { limit: 1 });
     await gateway.publishRegistration(
       { ...PLANT, name: "Bed" },
@@ -465,8 +379,6 @@ describe("§58 — receive within the subtree", () => {
   });
 
   it("a plain `federate` grant holder is unchanged, and cannot receive into a container it was not granted", async () => {
-    // CONTROL: the grant road. Red on neither side of this slice; it pins that the slice did not
-    // widen or narrow the older door.
     const { base, gateway } = await connectionServer({
       tokens: { [HOLDER_TOKEN]: { actor: HOLDER_SEED } },
     });
@@ -489,9 +401,6 @@ describe("§58 — receive within the subtree", () => {
   });
 
   it("the record survives a reboot with its opener, and the root fold still leaves it out", async () => {
-    // The pool's bytes surviving a reboot is the backend's promise (§46, railed on file-backed
-    // homes); a memory backend keeps none. What THIS slice adds is on the RECORD: `openedBy` is
-    // read back by the booted store, and the root fold reads it to leave the channel out.
     const primary = new MemoryBackend();
     const { base, gateway } = await connectionServer({ primary });
     const ada = await connect(base, "ada", "journal");
@@ -521,9 +430,6 @@ describe("§58 — receive within the subtree", () => {
     const mine = await callTool(base, ada, "loam_federate_status", {});
     expect(mine.isError, mine.text).toBe(false);
     expect(mine.text).toMatch(/ada:journal:inbox/);
-    // A channel the PERSON opened into the same subtree is not the connection's to see or sever:
-    // the opener decides, not the fence and not reach — the target is declared UNDER the
-    // container first, so an admission by edge reach would let it through.
     await declare(gateway, "ada:journal:other", SEALED_LEEWAY, "ada:journal");
     await gateway.openChannel({
       into: "ada:journal:other",

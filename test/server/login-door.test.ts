@@ -1,20 +1,3 @@
-// §36 phase 5 — the login door (T126). Criteria (a)–(s) of
-// .adlc/specs/36-05-the-login-door.md, transcribed. The CLI criteria (m) and (t) live in
-// test/cli/serve-login.test.ts, which this phase also owns.
-//
-// What this file deliberately does NOT assert, and which rail closes each gap:
-//   - No same-origin or form-token refusal — phase 6 (test/server/login-csrf.test.ts) owns the
-//     enforcement transition; every POST here sends the token it was issued so that transition
-//     cannot need to edit this file.
-//   - No timing assertion anywhere — a timing rail is a flake by construction; the decoy hash's
-//     intent is prose in the working spec, and the deterministic half (status/body identity) is
-//     criterion (g).
-//   - No /session/token — phase 7's file owns the bearer bridge.
-//
-// (i) is green even before the doors exist — it asserts an IDENTITY (users configured changes
-// no pre-§36 byte), so a deleted feature satisfies it vacuously. Its positive control is the
-// rest of this file: (a)–(s) prove the doors exist and act, (i) proves what they must not touch.
-
 import { request } from "node:http";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -40,12 +23,11 @@ import {
   SESSION_COOKIE,
 } from "../../src/server/session.js";
 
-vi.setConfig({ testTimeout: 20000 }); // real listening servers, and (q) holds a real scrypt
+vi.setConfig({ testTimeout: 20000 });
 
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
 
-// Cheap on purpose: these rails prove door behavior, not derivation cost. (q) overrides per-entry.
 const CHEAP: ScryptParams = { N: 1024, r: 8, p: 1, keylen: 32 };
 const PASSWORD = "correct horse";
 
@@ -57,13 +39,9 @@ afterEach(async () => {
 });
 
 interface StoreShape {
-  /** Users to place in the ground, with the roles each holds. */
   readonly ground?: Record<string, readonly ("operator" | "actor")[]>;
-  /** Credential entries to write, name → password. */
   readonly passwords?: Record<string, string>;
-  /** Per-entry scrypt override (default CHEAP). */
   readonly scryptFor?: Record<string, ScryptParams>;
-  /** Open the gateway without a seed — the ground then cannot name its operator. */
   readonly seedless?: boolean;
 }
 
@@ -121,10 +99,8 @@ async function loginServer(
   return { base: handle.url, handle, gateway, home, roleDeltaIds };
 }
 
-/** Every Set-Cookie header on a response, verbatim. */
 const cookiesOf = (res: Response): string[] => res.headers.getSetCookie();
 
-/** The value a Set-Cookie header assigns, for presenting back. */
 const valueOf = (header: string): string => {
   const eq = header.indexOf("=");
   return header.slice(eq + 1, header.indexOf(";"));
@@ -134,10 +110,6 @@ async function getLogin(base: string, headers: Record<string, string> = {}): Pro
   return fetch(`${base}/login`, { headers, redirect: "manual" });
 }
 
-// EVERY POST IN THIS FILE SENDS A SAME-ORIGIN SIGNAL, and every login POST a valid nonce+token
-// pair, whether or not phase 5 checks them — the plan's clause: phase 6 turns absence and forgery
-// into refusals "without touching one assertion here." A rail that leaned on phase 5's
-// ignore-behavior would be the frozen assertion phase 6 has to break.
 const SAME_ORIGIN = { "sec-fetch-site": "same-origin" } as const;
 
 async function postLogin(
@@ -152,7 +124,6 @@ async function postLogin(
   });
 }
 
-/** A fresh stateless pre-session: the nonce cookie to present and the token that matches it. */
 async function formPair(base: string): Promise<{ token: string; nonceCookie: string }> {
   const form = await getLogin(base);
   const nonceCookie = cookiesOf(form).find((c) => c.startsWith(`${PRESESSION_COOKIE}=`));
@@ -162,7 +133,6 @@ async function formPair(base: string): Promise<{ token: string; nonceCookie: str
   return { token: token!, nonceCookie: `${PRESESSION_COOKIE}=${valueOf(nonceCookie!)}` };
 }
 
-/** POST a credential with a fresh, valid nonce+token pair — the shape a real browser sends. */
 async function attemptLogin(base: string, user: string, password: string): Promise<Response> {
   const pair = await formPair(base);
   return postLogin(
@@ -172,7 +142,6 @@ async function attemptLogin(base: string, user: string, password: string): Promi
   );
 }
 
-/** GET the form, then POST the credential with the token and nonce the form issued. */
 async function signIn(
   base: string,
   user: string,
@@ -185,8 +154,6 @@ async function signIn(
     { cookie: pair.nonceCookie },
   );
   const sessionCookie = cookiesOf(res).find((c) => c.startsWith(`${SESSION_COOKIE}=`));
-  // The token handed back is the SESSION's own (parsed from the signed-in page), not the spent
-  // pre-session one — it is what the session's later POSTs (logout) must present under phase 6.
   const body = await res.clone().text();
   const sessionToken = /name="form_token" value="([^"]+)"/.exec(body)?.[1];
   return {
@@ -196,7 +163,6 @@ async function signIn(
   };
 }
 
-/** POST /logout as the store's own page would: session cookie, its form token, same-origin. */
 async function postLogout(base: string, sessionId: string, formToken: string): Promise<Response> {
   return fetch(`${base}/logout`, {
     method: "POST",
@@ -220,16 +186,9 @@ describe("§36 phase 5 — the login door", () => {
     const token = /name="form_token" value="([^"]+)"/.exec(html)?.[1];
     expect(token).toBeTruthy();
 
-    // With the token: the signed-in page.
     const withToken = await signIn(base, "myk", PASSWORD);
     expect(withToken.res.status).toBe(200);
     expect(await withToken.res.text()).toContain("Signed in");
-
-    // NO assertion about a token-less POST, deliberately: phase 5 ignores absence, but railing
-    // that behavior here would freeze the exact assertion phase 6 exists to flip — the plan's
-    // phase-5 clause is "every rail in this file sends a valid token, so phase 6 can turn
-    // absence into a refusal without touching one assertion here." The transition itself is
-    // phase 6's criterion 0, railed in its own file.
   });
 
   it("(b) the pre-session has its own cookie, and a nonce write cannot orphan a session", async () => {
@@ -242,13 +201,10 @@ describe("§36 phase 5 — the login door", () => {
     const { sessionId } = await signIn(base, "myk", PASSWORD);
     expect(sessionId).not.toBe("");
 
-    // A live session presented: the signed-in page, and NO Set-Cookie at all.
     const signedIn = await getLogin(base, { cookie: `${SESSION_COOKIE}=${sessionId}` });
     expect(await signedIn.text()).toContain("Signed in");
     expect(cookiesOf(signedIn)).toEqual([]);
 
-    // A cross-site-shaped GET without the session cookie (SameSite=Lax withholds it): the form,
-    // and only the pre-session cookie — then the session, presented again, is still alive.
     const crossSite = await getLogin(base, { "sec-fetch-site": "cross-site" });
     const crossCookies = cookiesOf(crossSite);
     expect(crossCookies.some((c) => c.startsWith(`${PRESESSION_COOKIE}=`))).toBe(true);
@@ -275,7 +231,6 @@ describe("§36 phase 5 — the login door", () => {
       ).toBe(true);
       expect(header).not.toContain("Domain");
     }
-    // The two clears on logout carry Max-Age=0 after the same literal.
     const out = await postLogout(base, sessionId, formToken);
     const clears = cookiesOf(out);
     expect(clears.length).toBe(2);
@@ -290,14 +245,11 @@ describe("§36 phase 5 — the login door", () => {
       "x-forwarded-proto": "https",
       "x-forwarded-host": "evil.example",
     });
-    // Positive control first: the baseline DID set a cookie.
     expect(cookiesOf(plain).length).toBeGreaterThan(0);
-    // The nonce VALUE is random per anonymous GET; the attributes must match byte for byte.
     const shapeOf = (headers: string[]): string[] =>
       headers.map((h) => h.replace(/=[^;]*/, "=<nonce>"));
     expect(shapeOf(cookiesOf(forwarded))).toEqual(shapeOf(cookiesOf(plain)));
 
-    // The raw-Host leg needs node:http — WHATWG fetch refuses to forge Host (T133's precedent).
     const u = new URL(base);
     const rawSetCookie = await new Promise<string[]>((resolve, reject) => {
       const req = request(
@@ -327,7 +279,6 @@ describe("§36 phase 5 — the login door", () => {
     expect(preClears.length).toBe(1);
     expect(preClears[0]).toContain("Max-Age=0");
 
-    // Two cookies of one name is an ambiguity, not a session.
     const doubled = await getLogin(base, {
       cookie: `${SESSION_COOKIE}=${sessionId}; ${SESSION_COOKIE}=${sessionId}`,
     });
@@ -341,7 +292,6 @@ describe("§36 phase 5 — the login door", () => {
     const first = await signIn(base, "myk", PASSWORD);
     expect(first.sessionId).not.toBe("");
 
-    // Sign in again PRESENTING the live session: the signed-in page's own form token rides.
     const page = await getLogin(base, { cookie: `${SESSION_COOKIE}=${first.sessionId}` });
     const token = /name="form_token" value="([^"]+)"/.exec(await page.text())?.[1];
     expect(token).toBeTruthy();
@@ -355,9 +305,6 @@ describe("§36 phase 5 — the login door", () => {
     expect(second).toBeDefined();
     expect(valueOf(second!)).not.toBe(first.sessionId);
 
-    // The old id is dead — session fixation dies at login — and the NEW id genuinely lives: a
-    // rotation that mints-and-loses its row would pass the two assertions above (a P5 lens's
-    // finding), so the second id is presented and must open the page.
     const stale = await getLogin(base, { cookie: `${SESSION_COOKIE}=${first.sessionId}` });
     expect(await stale.text()).not.toContain("Signed in");
     const fresh = await getLogin(base, { cookie: `${SESSION_COOKIE}=${valueOf(second!)}` });
@@ -382,7 +329,6 @@ describe("§36 phase 5 — the login door", () => {
     expect(bodies[1]).toBe(bodies[0]);
     expect(bodies[2]).toBe(bodies[0]);
 
-    // Positive control: the same helper carries a correct login to 200.
     const good = await attempt("myk", PASSWORD);
     expect(good.status).toBe(200);
   });
@@ -439,7 +385,6 @@ describe("§36 phase 5 — the login door", () => {
       expect(a.status).toBe(b.status);
       expect(await a.text()).toBe(await b.text());
     }
-    // On the users-less server, /login answers exactly what any unresolvable name answers.
     const login = await fetch(`${bare.url}/login`);
     const other = await fetch(`${bare.url}/zzz`);
     expect(login.status).toBe(other.status);
@@ -513,7 +458,6 @@ describe("§36 phase 5 — the login door", () => {
     });
     const { sessionId } = await signIn(base, "myk", PASSWORD);
 
-    // Inside the window, activity slides it: touch at 900, then the window reaches 1900.
     clock = 900;
     expect(
       await (await getLogin(base, { cookie: `${SESSION_COOKIE}=${sessionId}` })).text(),
@@ -523,11 +467,6 @@ describe("§36 phase 5 — the login door", () => {
       await (await getLogin(base, { cookie: `${SESSION_COOKIE}=${sessionId}` })).text(),
     ).toContain("Signed in");
 
-    // Past the slid window: the form, asserted as NOT the signed-in page — both pages carry a
-    // form_token (the signed-in page's logout form has one), so `toContain("form_token")` here
-    // was a rail a hand-mutant survived: it agreed with both outcomes (plan §2.2). And after the
-    // clock steps BACK below the old expiry, still the form — the row was deleted on discovery,
-    // not merely reported absent.
     clock = 3000;
     const lapsed = await (
       await getLogin(base, { cookie: `${SESSION_COOKIE}=${sessionId}` })
@@ -552,19 +491,12 @@ describe("§36 phase 5 — the login door", () => {
     const first = await signIn(base, "myk", PASSWORD);
     expect(first.res.status).toBe(200);
 
-    // The table is full: a second correct login refuses, and the FIRST session still lives —
-    // an evicting implementation would answer 200 here. This login PRESENTS NO SESSION, so it
-    // cannot reach the drop-versus-cap ordering in `open`: a caller presenting a live session is
-    // always discounted a seat, so no 503 can co-occur with one. Only a unit rail pins that.
     const second = await attemptLogin(base, "myk", PASSWORD);
     expect(second.status).toBe(503);
     expect(
       await (await getLogin(base, { cookie: `${SESSION_COOKIE}=${first.sessionId}` })).text(),
     ).toContain("Signed in");
 
-    // At the cap, a re-login PRESENTING the live session still succeeds: it replaces its own
-    // seat, so the displaced row is discounted from the cap rather than double-counted. It rides
-    // the SESSION's own form token — what the signed-in page's form would send.
     const replaced = await postLogin(
       base,
       new URLSearchParams({
@@ -579,15 +511,12 @@ describe("§36 phase 5 — the login door", () => {
     expect(replacedCookie).toBeDefined();
     expect(valueOf(replacedCookie!)).not.toBe(first.sessionId);
 
-    // Let the seat lapse: the sweep on open reclaims it and the login succeeds.
     clock = 5000;
     const third = await signIn(base, "myk", PASSWORD);
     expect(third.res.status).toBe(200);
   });
 
   it("(q) the hash cap refuses the surplus with no hash spent, and recovers", async () => {
-    // The most expensive credential the file itself admits (readCredentials bounds N·r and
-    // N·r·p) holds the one hash slot for hundreds of milliseconds on any current machine.
     const SLOW: ScryptParams = { N: 65536, r: 8, p: 2, keylen: 32 };
     const { base } = await loginServer(
       {
@@ -597,8 +526,6 @@ describe("§36 phase 5 — the login door", () => {
       },
       { maxConcurrentHashes: 1 },
     );
-    // One stateless pair serves every POST here — reusable by design, and reused so the probe
-    // loop pays no per-probe page load.
     const pair = await formPair(base);
     const withPair = (user: string, password: string): Promise<Response> =>
       postLogin(base, new URLSearchParams({ form_token: pair.token, user, password }).toString(), {
@@ -609,9 +536,6 @@ describe("§36 phase 5 — the login door", () => {
       slowSettled = true;
       return res;
     });
-    // Probe until the cap refuses or the window closes — no fixed sleep, no timing assumption.
-    // The in-flight witness (plan §2.4): if the slow hash settled before any probe met the cap,
-    // this fixture proved nothing and must SAY so rather than pass.
     let sawBusy: Response | undefined;
     while (sawBusy === undefined && !slowSettled) {
       const probe = await withPair("myk", PASSWORD);
@@ -620,7 +544,6 @@ describe("§36 phase 5 — the login door", () => {
     expect(sawBusy, "the slow hash settled before any probe met the cap").toBeDefined();
     expect((await sawBusy!.text()).toLowerCase()).toContain("busy");
 
-    // Drained, the same correct password is admitted.
     expect((await slowLogin).status).toBe(200);
     const recovered = await withPair("myk", PASSWORD);
     expect(recovered.status).toBe(200);
@@ -632,13 +555,11 @@ describe("§36 phase 5 — the login door", () => {
       ground: { myk: ["operator"] },
       passwords: { myk: tricky },
     });
-    // The literal bytes a browser sends for that password: + stays encoded, space becomes +,
-    // ö becomes UTF-8 percent-escapes. The valid pair rides along, as every POST here does.
     const pair = await formPair(base);
     const wire = `form_token=${encodeURIComponent(pair.token)}&user=myk&password=${encodeURIComponent(
       tricky,
     ).replace(/%20/g, "+")}`;
-    expect(wire).toContain("+"); // the fixture really does exercise the ambiguity
+    expect(wire).toContain("+");
     const good = await postLogin(base, wire, { cookie: pair.nonceCookie });
     expect(good.status).toBe(200);
 
@@ -655,7 +576,6 @@ describe("§36 phase 5 — the login door", () => {
   });
 
   it("(s) cannot-decide is not gone: seedless ground and vanished mount answer 503; a struck role drops", async () => {
-    // A ground that cannot name its operator: 503, never the uniform 401.
     const seedless = await loginServer({
       seedless: true,
       ground: {},
@@ -664,9 +584,6 @@ describe("§36 phase 5 — the login door", () => {
     const refused = await attemptLogin(seedless.base, "myk", PASSWORD);
     expect(refused.status).toBe(503);
 
-    // A vanished mount: 503 with the session intact; the mount's return revives the page. The
-    // doors read a DYNAMIC mount here because a static one refuses removal — boot's word is not
-    // revocable at runtime, and this fixture needs a ground that can genuinely go away.
     const { gateway: dynGateway } = await userGateway({ ground: { myk: ["operator"] } });
     const dynHome = await makeHome({ passwords: { myk: PASSWORD } });
     const dynHandle = await serve({
@@ -687,11 +604,8 @@ describe("§36 phase 5 — the login door", () => {
     const after = await getLogin(dynHandle.url, { cookie: `${SESSION_COOKIE}=${sessionId}` });
     expect(await after.text()).toContain("Signed in");
 
-    // Two-sided: the ground ANSWERS and the roles are struck — the session drops.
     const struck = await loginServer();
     const live = await signIn(struck.base, "myk", PASSWORD);
-    // Positive control INSIDE this fixture: the login genuinely worked here, or the two negative
-    // assertions below pass vacuously on a login that never opened (a P5 lens's finding).
     expect(live.sessionId).not.toBe("");
     expect(struck.roleDeltaIds.length).toBeGreaterThan(0);
     for (const id of struck.roleDeltaIds) {
@@ -707,10 +621,6 @@ describe("§36 phase 5 — the login door", () => {
   });
 
   it("(u) the decoy machinery is not deletable whole: parameter borrowing, disagreement, and its one warning", async () => {
-    // Pure functions, unit-railed here because the phase-1 rail file is frozen on the base and
-    // these arrived with this phase. A P5 lens showed all three could be replaced by constants
-    // under a green bar; these assertions are what a `return fallback` / `return false` now dies
-    // on.
     const cheapEntry = await hashPassword("x", CHEAP);
     const dearEntry = await hashPassword("y", { ...CHEAP, N: 2048 });
     const uniform = {
@@ -720,18 +630,12 @@ describe("§36 phase 5 — the login door", () => {
     const mixed = { version: 1 as const, users: { a: cheapEntry, b: dearEntry } };
     const empty = { version: 1 as const, users: {} };
     const FALLBACK: ScryptParams = { N: 4096, r: 8, p: 1, keylen: 32 };
-    // Borrowing: a populated file's own (first-sorted) entry, never the door's fallback.
     expect(decoyParamsFor(uniform, FALLBACK)).toEqual(CHEAP);
     expect(decoyParamsFor(empty, FALLBACK)).toEqual(FALLBACK);
-    // Disagreement: both answers, so a constant in either direction dies.
     expect(paramsDisagree(uniform)).toBe(false);
     expect(paramsDisagree(mixed)).toBe(true);
-    // The decoy spends and never matches.
     expect(await spendDecoyHash("anything", CHEAP)).toBe(false);
 
-    // The door says the disagreement ONCE PER TRANSITION on the operator channel — not per
-    // attempt (a stranger-fillable log), and not only at boot (the file mutates under a running
-    // server, and a boot-only check leaves the operator untold until restart).
     const faults: string[] = [];
     const { base, home } = await loginServer(
       { ground: { myk: ["operator"] }, passwords: { myk: PASSWORD } },
@@ -750,9 +654,6 @@ describe("§36 phase 5 — the login door", () => {
       { ground: { myk: ["operator"] }, passwords: { myk: PASSWORD } },
       { onFault: (m: string) => faults.push(m) },
     );
-    // Break the credential file where the per-attempt read will find it: a directory where the
-    // file should be is a real read fault, never "empty". The pair is taken first — the form is
-    // stateless and owes the credential file nothing.
     const pair = await formPair(base);
     rmSync(join(home, "credentials.json"));
     mkdirSync(join(home, "credentials.json"));
@@ -763,7 +664,6 @@ describe("§36 phase 5 — the login door", () => {
     );
     expect(refused.status).toBe(503);
     const body = await refused.text();
-    // The caller's copy names no path — the home's absolute path stays on the operator channel.
     expect(body).not.toContain(home);
     expect(body).not.toContain("credentials.json");
     expect(faults.some((m) => m.includes(home))).toBe(true);

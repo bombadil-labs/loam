@@ -1,15 +1,3 @@
-// The read side (ticket T19: the Gateway's resolution and subscription bodies, in their own module).
-// Reading is the whole point of the lens ladder: GATHER the hyperview (warm materialization when one
-// watches, batch eval otherwise, the honest as-of path when T is named), RESOLVE it through the
-// Schema, apply the lens's §22 resolvers as the final step, and ANNOTATE an as-of node with the §26
-// erasure marks. The live seam rides the same machinery: a watch captures its shape at subscribe
-// time and streams patches whose hex chain is as real as any query's.
-//
-// These are the implementations behind `Gateway.resolvePinned` / `query`'s resolution / the private
-// watchEntity/subscribeVia hooks — thin delegating methods on the class, bodies here. They reach the
-// gateway only through its declared internals seam (the `@internal` members on the class — see the
-// seam note in gateway.ts).
-
 import type { Peer } from "./peer.js";
 import { parse, subscribe, type ExecutionResult, type GraphQLSchema } from "graphql";
 import {
@@ -29,9 +17,6 @@ import {
   type View,
 } from "@bombadil/rhizomatic";
 import { Channel, streamAfter } from "./channel.js";
-// NOT `./channel.js` above it — that is the gateway's own Channel. The federation module is where a
-// channel POOL's naming lives. Binding folds and readers share the exact parent-based prefix
-// recovery; no first-colon split can identify a source.
 import { channelBindingPrefix } from "../federation/channel.js";
 import { erasedInScope, forgottenSince } from "./erase.js";
 import { readGround } from "./slate.js";
@@ -46,13 +31,6 @@ import { userGroundOf } from "./user-root.js";
 
 const toError = (err: unknown): Error => (err instanceof Error ? err : new Error(String(err)));
 
-// `hex`/`hviewHex` are DIGESTS of the canonical bytes (SPEC §17, T107): `contentAddress` over the
-// CBOR canonical form — the same fixed-width multihash form as a delta id. Digest equality ⇔ byte
-// equality, so every equality consumer keeps its semantics, while the field stops growing with the
-// answer (`_hviewHex` used to serialize the whole gathered bucket into the response) and stops
-// re-disclosing the view's values legibly. These three helpers are the ONLY producers; every door
-// (`_hex`, `_hviewHex`, `_fromHex`, REST, the renderer floor) carries them downstream. The hex
-// round-trip is because rhizomatic (frozen) exposes the canonical form only hex-encoded.
 const bytesOf = (hex: string): Uint8Array => {
   const out = new Uint8Array(hex.length >> 1);
   for (let i = 0; i < out.length; i += 1) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
@@ -61,26 +39,11 @@ const bytesOf = (hex: string): Uint8Array => {
 const viewDigest = (v: View): string => contentAddress(bytesOf(viewCanonicalHex(v)));
 const hviewDigest = (h: HView): string => contentAddress(bytesOf(hviewCanonicalHex(h)));
 
-// The resolvers a named READING carries (SPEC §22.7, ticket T26) — for decorating expanded children
-// through their own reading's resolvers. A reading's name IS its lens name, so this is the live
-// binding whose lens matches. Children resolve through the LIVE reading even under a pinned parent:
-// a version pins the lens the door asked for, not the whole world's readings.
 const readingResolversOf = (gw: Gateway, binding?: ConnectionBinding) => {
   const registered = binding === undefined ? gw.registered : gw.boundSurface(binding).registered;
   return (name: string): ResolverSpecs | undefined => byLens(registered, name)?.resolvers;
 };
 
-// Ride the erasure annotation on an as-of node, beside the view (like `_hex`), never inside the
-// resolved data. A present read (no `asOf`) carries neither pin nor mark.
-//
-// AS-OF IS THE SITE THAT WOULD HAVE BEEN MISSED (SPEC §29.3): §26 reconstructs the surviving ground
-// at a moment T, and a moment BEFORE a slate would happily serve the condemned delta — so the
-// narrowing is applied AFTER the reconstruction, and the temporal door confesses a slate-suppression
-// count in the same register `forgottenSince` already uses. Absent when nothing is suppressed, so a
-// read over a store with no slate is byte-identical to what §26 always answered.
-// The count is REQUIRED, with no default. A default of 0 would read "assume nothing was suppressed",
-// which is the fail-open direction on a confession — the same reason `now` is required on the read
-// seam it is computed from.
 export function annotateImpl(
   gw: Gateway,
   node: ResolvedNode,
@@ -96,15 +59,6 @@ export function annotateImpl(
   };
 }
 
-// Gather the HView for (schema, entity): the live materialization when one is watching —
-// registered root or lazy — and batch evaluation otherwise (the spike proved them identical).
-// An `asOf` read (SPEC §26) can use NEITHER warm path — the materialization IS the present by
-// construction — so it takes the one honest path: evaluate the same body over the ground as it
-// stood at T (groundAsOf). Same gather, a narrower ground; nothing about resolution is time-cased.
-// Every governed read runs the LOWERED program (governed-trust.ts): the signed body with its trust
-// predicate resolved to explicit keys over the same input, so a grant naming a user trusts that
-// user's root. The users are this gateway's (a pool reads its host's); an as-of read passes `cut`,
-// and reads them as they stood then.
 function evalGoverned(
   gw: Gateway,
   body: Term,
@@ -125,20 +79,11 @@ function evalGoverned(
   return evalTerm(program.term, input, now, entity, program.registry);
 }
 
-// THE PRIMARY GROUND IS A SELECTION, NOT A COPY (SPEC-17 P7). Read closure and an as-of cut each
-// decide one delta at a time, so a read evaluates over the reactor's indexes and touches only its own
-// scope: the root, every expanded child, and their negation chains. Materializing the narrowed ground
-// first would cost the whole store on every read. An as-of read keeps both §26 rules: a delta counts
-// when its own timestamp is `≤ asOf`, so a retraction not yet spoken leaves its fact standing.
 function primaryAdmits(closed: ReadonlySet<string>, asOf?: number): Admits | undefined {
   if (asOf === undefined) return closed.size === 0 ? undefined : (d) => !closed.has(d.id);
   return (d) => d.claims.timestamp <= asOf && !closed.has(d.id);
 }
 
-// A governed gather over this store's primary ground at `at`. The lowering reads only the grants, so
-// it takes the grant scope under the same selection; the gather then reads its own scope. A program
-// the anchor check cannot scope (an aliased role, an unpinned reflection) still reads the whole
-// selected ground: that is a named P7 gap, not a mode.
 function evalPrimary(
   gw: Gateway,
   body: Term,
@@ -173,10 +118,6 @@ function evalPrimary(
 const NO_GROUND = new DeltaSet();
 const NO_IDS: ReadonlySet<string> = new Set();
 
-// READ CLOSURE IS A GATHER-LEVEL NARROWING, and this is one of its five named sites (SPEC §29.3).
-// The `now` is REQUIRED here, not optional: a lapse computed at the door means every door that
-// honours `read` needs the moment, and an optional one defaulting to anything at all would serve a
-// condemned member past a lapsed deadline and look healthy doing it.
 export function gatherImpl(
   gw: Gateway,
   name: string,
@@ -187,13 +128,6 @@ export function gatherImpl(
 ): HView {
   requireMoment(now, `gather ${name}`);
 
-  // A BOUND CONNECTION READS ITS OWN SCOPE (SPEC §58): the container its consent named, with the
-  // inbox pools composed into it — never the primary's materialization, which is maintained over
-  // the whole ground and would answer with everything the store holds. It runs before every other
-  // branch for the reason the channel branch does: a materialization keyed by program name is not
-  // the connection's to read. A root channel row inherited into this surface is outside its scope
-  // and refuses. A channel candidate admitted by this container's own bound fold keeps the
-  // authorized bound ground; its source is checked before any fallback.
   if (binding !== undefined) {
     const source = channelAssociation(gw, name, binding);
     if (source !== undefined && !source.scoped) {
@@ -203,9 +137,6 @@ export function gatherImpl(
       );
     }
     assertChannelSourceLegible(gw, name, binding);
-    // The lens and the registry are the CONTAINER'S (§58 position 2): a lens that lives only in
-    // one of its pools resolves here and nowhere else, and an `expand` inside it finds its
-    // sibling readings in the same fold rather than in the root's.
     const surface = gw.boundSurface(binding);
     const result = evalGoverned(
       gw,
@@ -222,21 +153,6 @@ export function gatherImpl(
 
   const closed = readClosedIds(gw, now);
 
-  // A lens that arrived through a federation channel resolves over THAT CHANNEL'S POOL, not over
-  // this store's primary ground — the peer's deltas live in the pool by design (§46), so a lens
-  // gathering the primary ground binds correctly and then answers null (T189, measured).
-  //
-  // THIS RUNS BEFORE THE WARM BRANCH, and that ordering is the bug this cost. Materializations are
-  // keyed by the hyperschema's PROGRAM name (§21.7), so a peer's `Plant` and a local `Plant` share
-  // one — the warm lookup returned a view computed over the primary ground and the scoped path was
-  // never reached. A channel lens must never read a materialization it does not own.
-  //
-  // The current binding names its exact channel origin. Local law stays on this store's ground;
-  // namespace resemblance alone never supplies a source. No new vocabulary.
-  // Deliberately the POOL and not the receiving container — two channels into one container resolve
-  // over their OWN pools, or one peer's claims would answer another peer's lens. Every other lens is
-  // untouched, which is the decision Myk settled: a container shows its own contents, and descent is
-  // explicit (T190).
   const scoped = channelGroundFor(gw, name, now, asOf);
   if (scoped !== undefined) {
     const result = evalGoverned(
@@ -254,26 +170,13 @@ export function gatherImpl(
 
   if (asOf !== undefined) {
     const def = gw.def(name);
-    // An as-of read reconstructs the past on both axes: what had been said by `asOf`, and what
-    // held at `asOf`.
     const result = evalPrimary(gw, def.hyperschema.body, asOf, entity, gw.registry, closed, asOf);
     if (result.sort !== "hview") {
       throw new Error(`schema ${name} does not evaluate to a hyperview`);
     }
     return result.hview;
   }
-  // THE WARM BRANCH IS DEMOTED while a read-closing slate stands, and this is the site that defeats
-  // the naive "resolve against `snapshot ∖ readClosed`" reading outright: a materialization is
-  // maintained INCREMENTALLY from ingest events, so it is not an operand set anything can subtract
-  // from, and a read-closed member would keep being served through the default path for every
-  // registered root. So while `readGround` differs from the snapshot the gather ignores the
-  // materialization and takes the cold branch over the narrowed ground. The cost is that reads lose
-  // their warm path for the life of the slate — a bounded, visible price a compliance window can
-  // pay. A RE-SEAT IS NOT THE FIX and must not be mistaken for one: `reseat()` replays the backend
-  // into a fresh reactor, so the rebuilt materialization holds the members again.
   if (closed.size === 0) {
-    // Sibling lenses share ONE materialization per PROGRAM (§21.7): the mat is keyed by the
-    // hyperschema's name, while `name` here is the LENS the door asked for.
     const program = gw.def(name).hyperschema.name;
     const live =
       gw.reactor.materializedView(gw.matName(program), entity) ??
@@ -293,21 +196,11 @@ export function gatherImpl(
   return result.hview;
 }
 
-/**
- * The ground a channel-bound lens resolves over, or undefined for an ordinary lens.
- *
- * Read closure still applies: a read-closed delta must not reappear through a channel's pool, so the
- * narrowed set is subtracted here exactly as the primary path narrows its own.
- */
-// The binding owns its source. A known local binding never becomes a channel merely because
-// its name resembles a prefix; an aggregate binding names the exact child, including colon names.
 function channelAssociation(gw: Gateway, lens: string, binding?: ConnectionBinding) {
   const rows = binding === undefined ? gw.registered : gw.boundSurface(binding).registered;
   const bound = byLens(rows, lens);
   if (bound !== undefined) {
     if (bound.channel === undefined) return undefined;
-    // Bound.channel also records inbox origin in the bound fold. The attached source table,
-    // not its string name, distinguishes the peer roles.
     if (gw.store.inboxes(gw).has(bound.channel)) {
       if (gw.store.channels(gw).has(bound.channel)) {
         throw new Error(`${lens} has an ambiguous attached peer source`);
@@ -342,8 +235,6 @@ function channelAssociation(gw: Gateway, lens: string, binding?: ConnectionBindi
   return { name: first.status.name, scoped: false };
 }
 
-// Only an unbound/root channel operand is incompatible with borrowing an owner's inbox.
-// A channel candidate accepted by the bound fold executes its authorized container composition.
 export function channelUsesUnboundGround(
   gw: Gateway,
   lens: string,
@@ -374,8 +265,6 @@ function channelSource(gw: Gateway, lens: string, binding?: ConnectionBinding) {
   return channel;
 }
 
-// Source legibility is checked before a named operation can sign or declare listing law.
-// This is the same refusal as gathering, not a new admission or channel authority policy.
 export function assertChannelSourceLegible(
   gw: Gateway,
   lens: string,
@@ -396,19 +285,6 @@ function channelGroundFor(
   const channel = channelSource(gw, lens);
   if (channel === undefined) return undefined;
   const closed = readClosedIds(gw, now);
-  // A time pin rides the READ (§26), so it must reach the pool as well — a scoped lens that
-  // silently ignored `asOf` would answer the present while the caller believes it answered the past.
-  //
-  // AND THE RECEIVER'S OWN STRIKES APPLY. containerScope closes negations over whoever CONTRIBUTED
-  // deltas, and requesting one pool makes that pool the only ground — so a strike living HERE was
-  // left behind and the reader saw a retracted claim as live (H1, the store lying upward). Reachable
-  // whenever a receiver both channels a peer and federates with them directly: the retraction lands
-  // in this ground while the channel is frozen or has not polled.
-  //
-  // `struck` rather than `negationsOf(...).length > 0`: a struck strike stops binding, and its
-  // target revives. Presence is not survival.
-  // A pool can hold an erasure this store has not seen, and this store can refuse an id only a pool
-  // holds, so the erasures are read over the whole composed scope.
   const scope = gw.servingScope(now, {
     containers: [channel.name],
     ...(asOf === undefined ? {} : { asOf }),
@@ -424,14 +300,6 @@ function channelGroundFor(
   return DeltaSet.from(deltas);
 }
 
-/**
- * The ground a BOUND CONNECTION resolves over (SPEC §58): `connectionScope` at the bound container —
- * its own members, its subtree's, and every inbox pool composed into it — narrowed by read closure
- * and by this store's own surviving strikes, exactly as the channel path narrows a pool (H1: a
- * strike living in the primary must bind on a claim that lives in a pool). A time pin rides the
- * read here too. `connectionScope` refuses an undeclared container or an unattached pool: a scope
- * must never resolve as if a container were empty (H9).
- */
 export function boundGroundFor(
   gw: Gateway,
   binding: ConnectionBinding,
@@ -455,18 +323,6 @@ export function boundGroundFor(
   );
 }
 
-/**
- * Is `id` negated, by the substrate's own recursive definition? A strike binds unless it is itself
- * struck — and THAT strike binds unless it is struck, all the way down (rhizomatic's
- * `computeNegated`; Loam's `struck` agrees). A one-link test is right for two links and wrong for
- * four: with d struck by n1, n1 by n2 and n2 by n3, n1 binds again and d must stay suppressed, but
- * one link sees `negationsOf(n1)` non-empty and revives d. `seen` closes the walk over a cycle,
- * which binds nothing.
- */
-// A strike counts only while it is valid at `now`, the time the read resolves validity at (the
-// pin when there is one). The substrate's `negationPredicate` cannot ask
-// this: the id is often held only in a pool, and that reader answers false for a target this
-// reactor does not hold.
 const negatedInGround = (
   gw: Gateway,
   now: number,
@@ -486,20 +342,6 @@ const negatedInGround = (
   });
 };
 
-/**
- * The gather a §14 RETRACTION reads, over the UNNARROWED ground (SPEC §29.3's invariant list).
- *
- * Read closure is a property of doors serving READINGS. A retraction is a WRITE that must see what it
- * is retracting, and narrowing it turns a caller's own strike into a SILENT NO-OP: the member is
- * absent from the hview, so it is never a target, no negation is ever signed, and the door answers 200
- * with the field reading absent — which is exactly what read closure was already showing. Un-slate (or
- * let the slate go unresolved) and the claim returns LIVE and UN-RETRACTED at every door, including the
- * anonymous one. H1 crossed with H7, and reachable with no `read` ever declared, because a lapsed
- * deadline adds it (§29.4).
- *
- * It discloses nothing: the negations only ever target the caller's OWN claims, which the caller wrote,
- * and the node returned afterwards goes back through the ordinary narrowed read.
- */
 export function gatherForRetractionImpl(
   gw: Gateway,
   name: string,
@@ -533,9 +375,6 @@ export function gatherForRetractionImpl(
     if (result.sort !== "hview") throw new Error(`schema ${name} does not evaluate to a hyperview`);
     return result.hview;
   }
-  // A bound connection's own claims live in its pool, so its retraction gathers ITS scope — the
-  // whole of it, unnarrowed by read closure, for the same reason as the primary path — through
-  // its container's registry, where a lens that lives only in a pool is known.
   const result =
     binding === undefined
       ? evalPrimary(gw, def.hyperschema.body, gw.validityNow(now), entity, gw.registry, NO_IDS)
@@ -551,11 +390,6 @@ export function gatherForRetractionImpl(
   return result.hview;
 }
 
-/**
- * `gatherForRetraction` over one inbox pool's OWN ground, for an owner's fan-out: every claim the
- * pool holds, whoever its author stands for now. The parent's scope composes a pool by present
- * authority, so a revoked or expired connection's claims are absent there, yet still hers to clear.
- */
 export function gatherPoolForRetraction(
   gw: Gateway,
   name: string,
@@ -582,10 +416,6 @@ export function gatherPoolForRetraction(
   return result.hview;
 }
 
-// Resolve (schema, entity) to its node: gather, resolve through the Schema, decorate expanded children
-// through their OWN readings (§22.7), then apply THIS lens's §22 resolvers as the final step — the
-// Policy computes the value, the child decoration fills in nested views, and a resolver the lens
-// declares on a field has the last word over both. Finally, annotate an as-of read.
 export function resolvedNodeImpl(
   gw: Gateway,
   name: string,
@@ -594,7 +424,7 @@ export function resolvedNodeImpl(
   asOf?: number,
   binding?: ConnectionBinding,
 ): ResolvedNode {
-  const def = gw.def(name, binding); // a bound connection's lens may live only in its container's fold
+  const def = gw.def(name, binding);
   const hview = gatherImpl(gw, name, entity, now, asOf, binding);
   return finishNodeImpl(
     gw,
@@ -608,9 +438,6 @@ export function resolvedNodeImpl(
   );
 }
 
-// The application-owned tail of every read, whichever route gathered and resolved it: decorate
-// expanded children through their own readings, apply this lens's resolvers, then annotate an as-of
-// read. `hex` is the digest of the FINAL view, after resolvers, on both routes.
 export function finishNodeImpl(
   gw: Gateway,
   name: string,
@@ -643,31 +470,6 @@ export function finishNodeImpl(
   );
 }
 
-// Pinned resolution (the body of `Gateway.resolvePinned`, SPEC §17 versioning): answer under an
-// ARBITRARY registration — an old version's policy over TODAY's ground — through the same gather the
-// live lens uses when no materialization is warm (reactor.eval). The _hex of a pinned view is as
-// real as the live one's: same ground, an older lens, an honest content address. Cross-schema refs
-// resolve via the live registry (a version pins the named lens, not the whole world's).
-//
-// The two pins are orthogonal (SPEC §26): with an `asOf`, this becomes an OLD lens over an OLD
-// ground — full time travel — resolving the pinned body against the ground as it stood at T
-// (the same gather the live as-of read uses, only the schema is pinned rather than the latest).
-
-/**
- * Is this lens served from a federation channel's pool?
- *
- * A channel lens is scoped in `gatherImpl` and NOWHERE ELSE. Two sibling doors resolve their own
- * ground — the pinned §17 ladder and the live subscription — and both would answer a channel lens
- * from the RECEIVER's ground through the PEER's gather body. Measured, before this guard existed:
- *
- *   query      { alice_Plant(entity: FERN) { height } }  ->  11   (alice's, correct)
- *   subscription { alice_Plant(entity: FERN) { height } } -> 999  (the receiver's own claim)
- *
- * With the lens declared public that is an operator's private data streamed to a stranger. So these
- * doors REFUSE a channel lens rather than serve it from the wrong ground: a refusal is always
- * available, and a disclosure is not recoverable. T193 carries the real fix, which is a per-pool
- * materialization rather than one keyed by the program name.
- */
 export function channelLens(gw: Gateway, lens: string, binding?: ConnectionBinding): boolean {
   return channelAssociation(gw, lens, binding) !== undefined;
 }
@@ -688,12 +490,7 @@ export function resolvePinnedImpl(
         `over your deltas. Read it through the ordinary query door, which scopes correctly (T193).`,
     );
   }
-  // An OLD LENS OVER TODAY'S GROUND IS STILL A READ DOOR (SPEC §29.3): the live branch takes the
-  // same `readGround` substitution the cold gather takes, and the as-of branch narrows after the
-  // reconstruction. A pinned version freezes the lens, never the store's obligations.
   const closed = readClosedIds(gw, now);
-  // A bound connection's pinned read takes the same scoped ground its live read takes (§58): an
-  // old lens over the connection's scope, never over the store's own ground.
   const result =
     binding !== undefined
       ? evalGoverned(
@@ -717,8 +514,6 @@ export function resolvePinnedImpl(
   if (result.sort !== "hview") {
     throw new Error(`schema ${reg.hyperschema.name} does not evaluate to a hyperview`);
   }
-  // The pinned version's OWN resolvers apply (SPEC §22) — a version freezes its resolver with its
-  // schema, so an old lens keeps computing exactly as it did. Pre-loaded across all versions at bind.
   const view = applyResolvers(
     reg.resolvers,
     decorateChildren(
@@ -746,20 +541,6 @@ export function resolvePinnedImpl(
   );
 }
 
-// A dynamic view of (schema, entity) — the body of the private `Gateway.watchEntity` hook: an
-// initial snapshot, then a patch per relevant change. Built on a Channel, so leaving the stream
-// (return/throw) detaches immediately — even while the reader is parked waiting for an event that
-// never comes. A slow reader coalesces: at most one pending patch, its hex chain and changed-set
-// kept honest by the merge. A sink that cannot re-resolve fails ITS OWN stream and detaches — it
-// never aborts the fan-out or the writer whose ingest triggered it. A change that leaves the
-// resolved view identical (same hex) is no patch at all.
-//
-// The stream CAPTURES its shape at subscribe time — the policy and the materialization it
-// was born watching. An evolution rebinds the query surface, but this stream keeps resolving
-// the shape it promised its reader (triggered by, and reading from, the same superseded
-// materialization) until the reader resubscribes. Trigger and resolution must agree: the
-// current def would re-resolve through the NEW materialization while the OLD one decides
-// when to fire — silently missing what only the new shape gathers.
 export function watchEntityImpl(
   gw: Gateway,
   name: string,
@@ -784,14 +565,6 @@ export function watchEntityImpl(
   }
   const matName = gw.matFor(name, entity, door);
   const resolveCaptured = (): ResolvedNode => {
-    // A LIVE SUBSCRIPTION IS A READ DOOR (SPEC §29.3), and here the materialization keeps its real
-    // job and loses the other one: THE MAT IS THE TRIGGER; `readGround` IS THE RESOLUTION. A stream
-    // resolves off its captured materialization, so without this every already-open subscription
-    // keeps pushing patches computed from a set nothing narrowed. A SUPERSET trigger is safe — a
-    // change to a read-closed member fires, the narrowed re-resolve yields the same hex, and the
-    // `node.hex === lastHex` check below swallows it as silence rather than a no-op patch. A subset
-    // trigger would not be, which is what this file's "trigger and resolution must agree" note is
-    // about: it warns against a NARROWER trigger, not a wider one.
     const now = nowAt();
     const closed = readClosedIds(gw, now);
     const hview =
@@ -811,8 +584,6 @@ export function watchEntityImpl(
     if (hview === undefined) {
       throw new Error(`the materialization backing this stream is gone — resubscribe`);
     }
-    // Resolvers apply on the stream too (SPEC §22), so a live frame reads exactly as a query does —
-    // including the child-reading resolvers on expanded children (§22.7).
     const view = applyResolvers(
       bound.resolvers,
       decorateChildren(
@@ -849,11 +620,11 @@ export function watchEntityImpl(
     if (c.root !== entity) return;
     try {
       const node = resolveCaptured();
-      if (node.hex === lastHex) return; // the view did not move: silence, not a no-op patch
+      if (node.hex === lastHex) return;
       channel.push({ ...node, fromHex: lastHex, changed: [...c.changedProps] });
       lastHex = node.hex;
     } catch (err) {
-      channel.fail(toError(err)); // onClose detaches this sink; others are untouched
+      channel.fail(toError(err));
     }
   };
   const channel = new Channel<PatchNode>(
@@ -863,7 +634,7 @@ export function watchEntityImpl(
     },
     (pending, incoming) =>
       pending.fromHex === null && pending.changed === null
-        ? { ...incoming, fromHex: null, changed: null } // still the snapshot — just a newer one
+        ? { ...incoming, fromHex: null, changed: null }
         : {
             ...incoming,
             fromHex: pending.fromHex,
@@ -879,9 +650,6 @@ export function watchEntityImpl(
   return channel;
 }
 
-// Run a GraphQL subscription over a given schema (the body of the private `Gateway.subscribeVia`):
-// an async stream of data payloads. Errors inside the stream surface as thrown errors; returning
-// the iterator ends the underlying watch.
 export async function subscribeViaImpl(
   schema: GraphQLSchema,
   source: string,
@@ -897,8 +665,6 @@ export async function subscribeViaImpl(
       `subscription failed: ${(result.errors ?? []).map((e) => e.message).join("; ") || "unknown"}`,
     );
   }
-  // A pass-through, not a generator: return() must reach the source immediately, even while
-  // a read is parked (a suspended generator would hold the return until the next event).
   const upstream = result as AsyncGenerator<ExecutionResult, void, unknown>;
   const mapped: AsyncGenerator<Record<string, unknown>, void, unknown> = {
     async next() {

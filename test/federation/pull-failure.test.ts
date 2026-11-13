@@ -1,8 +1,3 @@
-// T149 item 1 — a failed pull names the peer, what fetch saw, and the cure. The bare error
-// ("fetch failed") named nothing; the operator typed the address, so the refusal says it back.
-// Cause classes are asserted through the injectable fetch seam (no network dependence), and the
-// live refused case through a real closed port.
-
 import { createServer } from "node:http";
 import { describe, expect, it } from "vitest";
 import { pullFrom } from "../../src/federation/pull.js";
@@ -21,8 +16,6 @@ async function local(): Promise<Gateway> {
 
 describe("a failed pull says what happened", () => {
   it("a refused connection names the peer address, the cause, and the cure", async () => {
-    // Bind then close: on loopback the freed port is a near-certain ECONNREFUSED (the
-    // theoretical race — another listener taking it in the window — fails LOUD, never false-green).
     const server = createServer();
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     const { port } = server.address() as { port: number };
@@ -67,7 +60,6 @@ describe("a failed pull says what happened", () => {
   });
 
   it("a peer that dies MID-OFFER is named too — the reset class, not a bare failure", async () => {
-    // The connect edge is the easy one; the reset lands after the response starts, in boundedText.
     const gw = await local();
     const dying = (): Promise<Response> =>
       Promise.resolve(

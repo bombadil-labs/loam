@@ -1,8 +1,3 @@
-// Where the defensive prose sits: each subsystem's share of comment characters, and its hazard
-// (H1, H2, ...) and ticket (T1, T2, ...) citations, raw and per 1,000 code lines. Hazards are
-// defined in src/gateway/SUBSTRATE-HAZARDS.md.
-// Usage: node refactor/tools/hazards.mjs [dir=src]
-
 import {
   classify,
   commentBlocks,

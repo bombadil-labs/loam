@@ -1,11 +1,3 @@
-// The revision of a ground: a process-local number that rises whenever what the ground holds, or
-// which erasure orders bind on it, has moved. It never falls, and two different held sets or pin
-// sets of one ground never share a value. A cache keyed on it needs neither the reactor object nor
-// its size to know that it is stale.
-//
-// It is held beside the reactor because law readers receive a reactor and nothing else. Nothing is
-// persisted: a new process starts again at zero, with empty caches.
-
 import type { Reactor } from "@bombadil/rhizomatic";
 
 interface Clock {
@@ -15,9 +7,6 @@ interface Clock {
 
 const clocks = new WeakMap<Reactor, Clock>();
 
-// The delta set only grows, so its size moves exactly when its members do. Every read settles
-// first, so no reader is ever handed an old revision over a moved set, whatever order the
-// reactor's subscribers run in. One batch moves the size once, so it is counted once.
 function settled(reactor: Reactor): Clock {
   let clock = clocks.get(reactor);
   if (clock === undefined) {
@@ -30,21 +19,14 @@ function settled(reactor: Reactor): Clock {
   return clock;
 }
 
-/** The ground's revision now. The first read of a ground starts its count. */
 export function groundRevision(reactor: Reactor): number {
   return settled(reactor).revision;
 }
 
-/** A change no ingest carries (new erasure pins): the revision rises by one. */
 export function raiseGroundRevision(reactor: Reactor): void {
   settled(reactor).revision += 1;
 }
 
-/**
- * `to` replaces `from` as one ground's reactor. Its revision becomes one above the larger of the
- * last `from` had and any `to` already had, so an answer cached for `to` before this call can
- * never match afterwards.
- */
 export function continueGroundRevision(from: Reactor, to: Reactor): void {
   const next = Math.max(settled(from).revision, settled(to).revision) + 1;
   clocks.set(to, { revision: next, size: to.size });

@@ -1,7 +1,3 @@
-// The signing seam (step 5 PR 3j). A signer signs in one key's voice and refuses claims naming any
-// other author. A gateway's signer is its governing key; an ungoverned gateway has none, and the
-// acts that need one refuse as before.
-
 import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed, verifyDelta, type Claims } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
@@ -87,7 +83,6 @@ describe("a pool's own law is signed and authored by the pool's key", () => {
         ),
       )!;
     expect(grant.claims.author).toBe(authorForSeed(POOL_SEED));
-    // The inbox's declaration is the host's law.
     const declaration = gw.reactor
       .arrivalLog()
       .find((d) => d.claims.pointers.some((p) => p.role === "inboxOf"))!;
@@ -134,7 +129,6 @@ describe("a pool's own law is signed and authored by the pool's key", () => {
     const w = observed(FERN, "height", 1, pool.stamp(authorForSeed(connSeed)).timestamp, connSeed);
     await pool.append([w]);
     expect(pool.reactor.get(w.id)).toBeDefined();
-    // The pool's governed mask names the owner as a striker by its user-named grant, raw and at now.
     const { governedStrikers } = await import("../../src/gateway/governed-trust.js");
     const { userGroundOf } = await import("../../src/gateway/user-root.js");
     const { DeltaSet } = await import("@bombadil/rhizomatic");

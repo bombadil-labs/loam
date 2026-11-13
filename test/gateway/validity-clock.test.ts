@@ -1,11 +1,3 @@
-// The store's read time is the wall clock. A claim's `timestamp` orders it among its author's
-// claims; it never moves the moment a validity read looks at. Each case asserts both levels: the
-// times on the signed delta, and what a query reads. Each case also names a bystander: a claim that
-// ends soon must still be read, and a claim that starts soon must not be read yet.
-//
-// Not covered here: a peer's far-future timestamp arriving through a channel. That path lands
-// through the same ingest, and `noteAuthorTime` is the one place it touches the clocks.
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
@@ -32,7 +24,6 @@ const genesis = () =>
     ],
   });
 
-// One operator-signed claim on the fern, with every time chosen by the caller.
 const claim = (
   context: string,
   value: string | number,
@@ -57,7 +48,6 @@ const mutate = async (gw: Gateway, height: number): Promise<void> => {
   const res = await gw.query(`mutation { plant(entity: "${FERN}", height: ${height}) { height } }`);
   expect(res.errors).toBeUndefined();
 };
-// The height deltas this gateway holds, newest signed time last.
 const heights = (gw: Gateway): Delta[] =>
   [...gw.reactor.snapshot()]
     .filter((d) =>
@@ -69,7 +59,6 @@ const heights = (gw: Gateway): Delta[] =>
 const valueOf = (d: Delta): unknown =>
   d.claims.pointers.find((p) => p.role === "value" && p.target.kind === "primitive")?.target;
 
-// The two bystanders: one ends ten minutes after T0, one starts ten minutes after T0.
 const bystanders = (): Delta[] => [
   claim("tag", "ends-soon", { timestamp: T0, validFrom: T0, validUntil: T0 + TEN_MIN }),
   claim("tag", "starts-soon", { timestamp: T0, validFrom: T0 + TEN_MIN }),
@@ -94,7 +83,6 @@ describe("a signed future timestamp does not move the store's read time", () => 
     expect(gw.validityNow()).toBe(T0);
     expect((await read(gw)).tag).toEqual(["ends-soon"]);
 
-    // A second process over the same store: it reads the held future timestamp at open.
     const reopened = await Gateway.open(backend, { seed: OP_SEED });
     expect(reopened.validityNow()).toBe(T0);
     expect((await read(reopened)).tag).toEqual(["ends-soon"]);
@@ -117,7 +105,6 @@ describe("a signed future timestamp does not move the store's read time", () => 
 
     expect(gw.validityNow()).toBe(T0);
     expect(await read(gw)).toEqual({ height: 49, tag: ["ends-at-10"] });
-    // The writes still sort in the order they were made.
     const held = heights(gw);
     expect(held).toHaveLength(50);
     expect(held.map((d) => valueOf(d))).toEqual(
@@ -138,17 +125,14 @@ describe("the author's claims still sort in the order they were made", () => {
     ]);
     await mutate(gw, 7);
 
-    // Delta level: the write's two times.
     const written = heights(gw).at(-1)!;
     expect(valueOf(written)).toEqual({ kind: "primitive", value: 7 });
     expect(written.claims.timestamp).toBeGreaterThan(T0 + HOUR);
     expect(written.claims.validFrom).toBe(T0);
-    // The next stamp for the same author sorts after that write, and is valid now.
     const next = gw.stamp();
     expect(next.timestamp).toBeGreaterThan(written.claims.timestamp);
     expect(next.validFrom).toBe(T0);
 
-    // Object level: the write wins its pick and is read at once, beside the bystanders.
     expect(await read(gw)).toEqual({ height: 7, tag: ["ends-soon"] });
     await gw.close();
   });
@@ -161,7 +145,7 @@ describe("the author's claims still sort in the order they were made", () => {
     await mutate(first, 1);
     const before = heights(first).at(-1)!;
 
-    vi.setSystemTime(T0); // the host clock steps back before the process restarts
+    vi.setSystemTime(T0);
     const second = await Gateway.open(backend, { seed: OP_SEED });
     await mutate(second, 2);
     const after = heights(second).at(-1)!;
@@ -170,7 +154,6 @@ describe("the author's claims still sort in the order they were made", () => {
     expect(after.claims.validFrom).toBe(T0);
     expect((await read(second)).height).toBe(2);
 
-    // Once the wall clock passes the old write, both are valid, and the order decides.
     vi.setSystemTime(T0 + 11_000);
     expect((await read(second)).height).toBe(2);
     await second.close();
@@ -202,11 +185,6 @@ describe("the author's claims still sort in the order they were made", () => {
   });
 });
 
-// The inbox's seeding cut is a signed time taken from the operator's ordering clock. A key's own
-// held claims never raise it: if they did, a key that once signed a far-future claim would stop
-// seeding what it writes after the binding. Deliberately not asserted: the pre-binding future claim
-// itself, whose timestamp is past the cut and so seeds. A cut on arrival would close that;
-// `refactor/PLAN.md` step 6 names it.
 describe("a connection's inbox cut does not follow the key's held timestamps", () => {
   it("a root claim the key writes after binding seeds its inbox, though it holds one an hour ahead", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -268,10 +246,10 @@ describe("a connection's inbox cut does not follow the key's held timestamps", (
     const binding = { container: "home:ada", inbox };
 
     vi.setSystemTime(T0 + 5);
-    const fresh = observed(FERN, "height", 12, T0 + 5, CONN_SEED); // written in the parent
+    const fresh = observed(FERN, "height", 12, T0 + 5, CONN_SEED);
     await gw.append([fresh]);
-    await gw.connectionInboxes.get(inbox)!.reseed(); // seeding runs at open and on a re-pulse
-    expect(gw.poolForBinding(binding).reactor.get(fresh.id)).toBeDefined(); // seeded, at the bytes
+    await gw.connectionInboxes.get(inbox)!.reseed();
+    expect(gw.poolForBinding(binding).reactor.get(fresh.id)).toBeDefined();
     expect(boundGroundFor(gw, binding, gw.validityNow()).has(fresh.id)).toBe(true);
     await gw.close();
   });
@@ -300,8 +278,8 @@ describe("one author's ordering floor does not lift another's", () => {
 
     const a = gw.stamp(A);
     const b = gw.stamp(B);
-    expect(a.timestamp).toBeGreaterThan(T0 + HOUR); // A stays above its own held claim
-    expect(b.timestamp).toBeLessThan(T0 + 1_000); // B follows the clock, not A's floor
+    expect(a.timestamp).toBeGreaterThan(T0 + HOUR);
+    expect(b.timestamp).toBeLessThan(T0 + 1_000);
     expect([a.validFrom, b.validFrom]).toEqual([T0, T0]);
     await gw.close();
   });
@@ -328,10 +306,10 @@ describe("strict order ends cleanly at the top of the safe range", () => {
 
     const first = gw.stamp(A);
     const second = gw.stamp(A);
-    expect(first.timestamp).toBe(Number.MAX_SAFE_INTEGER); // still above the held claim
-    expect(second.timestamp).not.toBe(first.timestamp); // never the same stamp twice
+    expect(first.timestamp).toBe(Number.MAX_SAFE_INTEGER);
+    expect(second.timestamp).not.toBe(first.timestamp);
     expect(Number.isSafeInteger(second.timestamp)).toBe(true);
-    expect(second.timestamp).toBeLessThan(first.timestamp); // strict order has ended, as documented
+    expect(second.timestamp).toBeLessThan(first.timestamp);
     await gw.close();
   });
 });

@@ -1,5 +1,3 @@
-// Phase 0 — Groundwork: homes, operators, first registrations through all three surfaces.
-
 import { execFileSync } from "node:child_process";
 import { existsSync, join } from "./harness.mjs";
 import {
@@ -21,7 +19,6 @@ import { initHome } from "../../dist/index.js";
 
 const stores = {};
 try {
-  // 0.1 — dist present, schemas generated
   check(
     "0.1",
     "dist built and schema files present",
@@ -29,7 +26,6 @@ try {
   );
   execFileSync("node", [join(ROOT, "gen-schemas.mjs")], { stdio: "inherit" });
 
-  // 0.2 — one home per store, every operator DISTINCT (shared seeds would federate law)
   for (const name of Object.keys(STORES)) initHome(homeOf(name));
   const operators = Object.keys(STORES).map((n) => operatorOf(n));
   check(
@@ -39,7 +35,6 @@ try {
     operators.map((o) => o.slice(0, 20)).join(" "),
   );
 
-  // 0.3 — Person registered on commons via the CLI, BEFORE any serve (single-writer rule)
   const bin = join(ROOT, "..", "..", "dist", "cli", "bin.js");
   const regOut = execFileSync(
     "node",
@@ -63,7 +58,6 @@ try {
     `${count} deltas`,
   );
 
-  // 0.4 — all four serve; a junk token is 401 everywhere
   for (const name of Object.keys(STORES)) stores[name] = await openStore(name);
   let junk401 = true;
   for (const s of Object.values(stores)) {
@@ -72,7 +66,6 @@ try {
   }
   check("0.4", "all four stores serve; junk token is 401 on every mount", junk401);
 
-  // 0.5 — the remaining schemas, through the remaining surfaces, each answering immediately
   const viaHttp = async (store, file) => {
     const r = await registerHttp(stores[store].base, opToken(store), loadSpec(file));
     if (r.status !== 200)
@@ -88,7 +81,6 @@ try {
   await viaHttp("almanac", "presence.json");
   await viaHttp("almanac", "trusted-dossier.json");
   await viaHttp("almanac", "almanac-person.json");
-  // hive goes through MCP — the third surface
   for (const file of ["colony.json", "gathering.json"]) {
     const r = await mcp(stores.hive.base, opToken("hive"), "tools/call", {
       name: "loam_register",

@@ -1,7 +1,3 @@
-// When no schema definition holds at the read time, the explanation names the first later moment
-// one holds, or says none ever does. A negation that starts later leaves the definition live until
-// then, so the first moment is the definition's own start, not "never".
-
 import { describe, expect, it } from "vitest";
 import {
   authorForSeed,

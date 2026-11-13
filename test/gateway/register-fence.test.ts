@@ -1,14 +1,3 @@
-// T174 — the `register` verb and its prefix fence, at the DELTA level.
-//
-// This file asserts the vocabulary and the fence predicate directly: what a register grant looks
-// like in the bytes, what `constitutionalDefect` refuses, and exactly which names a prefix admits.
-// `test/server/register-verb.test.ts` asks the OBJECT-level question — what a door serves and what
-// it refuses — because a correct predicate wired to the wrong door is the failure this level cannot
-// see. Neither file is sufficient alone.
-//
-// The expected admit/refuse table is written out by hand below rather than derived from
-// `fenceAdmits`, so a fence that stopped fencing cannot rewrite its own expectations (H10).
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, makeDelta, signClaims } from "@bombadil/rhizomatic";
 import {
@@ -31,26 +20,24 @@ const WRITER_SEED = "77".repeat(32);
 const WRITER = authorForSeed(WRITER_SEED);
 
 describe("T174 — the fence is a literal code-unit prefix on the hyperschema name", () => {
-  // The hand-written table. Each row is a decision, not a derivation: the prefix, the proposed
-  // name, and whether the fence lets it through. Read it as the specification of `fenceAdmits`.
   const ADMITTED: readonly (readonly [string, string])[] = [
     ["thread:", "thread:groove"],
     ["thread:", "thread:groove:2"],
-    ["thread:", "thread:"], // the bare prefix is inside its own fence
-    ["thread:", "thread:x@y"], // `@` is not special to the fence; the derived ids stay prefixed
-    ["thread", "thread:groove"], // a prefix need not end at a separator
-    ["t", "thread:groove"], // ONE character is a prefix: the floor is non-empty, not some length
+    ["thread:", "thread:"],
+    ["thread:", "thread:x@y"],
+    ["thread", "thread:groove"],
+    ["t", "thread:groove"],
   ];
   const REFUSED: readonly (readonly [string, string])[] = [
-    ["thread:", "note:anything"], // a different scope
-    ["thread:", "Groove"], // root — no namespace at all
-    ["thread:", "x-thread:foo"], // the prefix appears LATER: not a prefix
-    ["thread:", " thread:foo"], // leading space
-    ["thread:", "thread"], // shorter than the prefix
-    ["thread:", "Thread:foo"], // ASCII case is significant
-    ["thread:", "thread%3Afoo"], // percent-encoding is not decoded — this is a different name
-    ["thread:", "thread:foo".replace(":", "：")], // fullwidth colon is a different code point
-    ["", "anything"], // an empty prefix fences nothing, so it admits nothing
+    ["thread:", "note:anything"],
+    ["thread:", "Groove"],
+    ["thread:", "x-thread:foo"],
+    ["thread:", " thread:foo"],
+    ["thread:", "thread"],
+    ["thread:", "Thread:foo"],
+    ["thread:", "thread%3Afoo"],
+    ["thread:", "thread:foo".replace(":", "：")],
+    ["", "anything"],
     ["", ""],
   ];
 
@@ -80,9 +67,6 @@ describe("T174 — a register grant is malformed law without exactly one non-emp
   });
 
   it("register with NO prefix is REFUSED, not read as unrestricted", () => {
-    // Fail closed at the mint. The alternative — treating a prefixless register grant as
-    // meaningless — leaves a grant-shaped delta sitting in the audit that a later reader could
-    // just as easily read as root authority. Malformed law is refused for everyone.
     const defect = constitutionalDefect(grant("register"));
     expect(defect).toBeDefined();
     expect(defect).toContain("prefix");
@@ -168,7 +152,6 @@ describe("T174 — register standing, read from the ground", () => {
 
     await gw.append([signClaims(revocationClaims(held.id, OPERATOR, 200), OPERATOR_SEED)]);
     expect(registerPrefixesOf(gw.reactor, gw.validityNow(), CONNECTOR, OPERATOR)).toEqual([]);
-    // Two-sided: the strike took its target and nothing else.
     expect(registerPrefixesOf(gw.reactor, gw.validityNow(), BYSTANDER, OPERATOR)).toEqual([
       "note:",
     ]);
@@ -176,10 +159,6 @@ describe("T174 — register standing, read from the ground", () => {
   });
 
   it("A GRANT IS EFFECTIVE ONLY IF ITS AUTHORITY CHAIN ROOTS IN THE OPERATOR", async () => {
-    // A mere WRITER may sign a grant-shaped delta — pointing is free, and the door accepts the
-    // append because the author holds write standing. It must bind nothing: register standing a
-    // writer minted for themselves would be self-appointment. Two-sided against the next case,
-    // which is the same act by an author the operator actually made an admin.
     const gw = await open();
     await gw.append([
       signClaims(grantClaims(STORE_ENTITY, WRITER, "write", OPERATOR, 100), OPERATOR_SEED),
@@ -195,10 +174,6 @@ describe("T174 — register standing, read from the ground", () => {
   });
 
   it("AND NEITHER DOES AN ADMIN'S — register standing is the operator's alone to mint", async () => {
-    // `write` and `admin` are delegable down the admin chain, as they always have been. `register`
-    // is not. An admin could otherwise sign itself register with a one-character prefix, and since
-    // the publish carries no request context the store signs the result with the OPERATOR'S seed —
-    // the operator's own constitutional schemas superseded under the operator's key.
     const gw = await open();
     await gw.append([
       signClaims(grantClaims(STORE_ENTITY, WRITER, "admin", OPERATOR, 100), OPERATOR_SEED),
@@ -210,8 +185,6 @@ describe("T174 — register standing, read from the ground", () => {
       ),
     ]);
     expect(registerPrefixesOf(gw.reactor, gw.validityNow(), CONNECTOR, OPERATOR)).toEqual([]);
-    // TWO-SIDED: the admin chain still carries `write`, so this is a narrowing of one verb rather
-    // than a change to how grants are honoured.
     expect(grantsHeldBy(gw.reactor, gw.validityNow(), CONNECTOR, OPERATOR)).toEqual([]);
     await gw.append([
       signClaims(grantClaims(STORE_ENTITY, CONNECTOR, "write", WRITER, 102), WRITER_SEED),

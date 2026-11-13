@@ -1,10 +1,3 @@
-// The brief: a BoardItem's expandable long form — the open questions and the recommendation.
-// Asserted at both levels. Delta/door level: a claimed `brief` resolves through the BoardItem
-// reading and rides the Board expand into items[]. Object level: the rendered page carries it
-// inside a <details> block, paragraph-split on blank lines, escaped; a card with no brief
-// renders no <details> at all. Out of scope here (owned by board-render.test.ts): section
-// membership, the public declaration, H1 strikes.
-
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { signClaims } from "@bombadil/rhizomatic";
@@ -25,8 +18,6 @@ vi.setConfig({ testTimeout: 20_000 });
 
 const BUNDLE = readFileSync(new URL("../../demos/board/renderer.mjs", import.meta.url), "utf8");
 
-// The trailing space pins the per-paragraph trim; the four-newline gap pins the "2 or more"
-// split (a `\n{2}` split would mint an empty paragraph).
 const BRIEF =
   "The question: does the door refuse in one shape or two? \n\n\n\n" +
   "Recommendation: keep two shapes. Each shape protects one boundary.";
@@ -64,7 +55,6 @@ afterAll(async () => {
 const page = () =>
   fetch(`${world.base}/${MOUNT}/app/${BOARD_ROUTE}/${BOARD_ENTITY}`).then((r) => r.text());
 
-// The card's HTML: from its data-title marker to the next card or section end.
 function card(html: string, title: string): string {
   const marker = `data-title="${title}"`;
   const start = html.indexOf(marker);
@@ -95,7 +85,6 @@ describe("the brief resolves through the doors (delta/door level)", () => {
     const items = (res.json.data as { board: { items: Array<Record<string, unknown>> } }).board
       .items;
     expect(items.find((x) => x["title"] === "the briefed item")?.["brief"]).toBe(BRIEF);
-    // The negative establishes its own subject: an absent item would also answer no brief.
     const terse = items.find((x) => x["title"] === "the terse item");
     expect(terse).toBeDefined();
     expect(terse?.["brief"]).toBeUndefined();
@@ -112,7 +101,6 @@ describe("the page renders the brief as an expandable block (object level)", () 
       "<p>Recommendation: keep two shapes. Each shape protects one boundary.</p>",
     );
     expect(briefed).not.toContain("<p></p>");
-    // The negative establishes its own subject: an unrendered card would also hold no <details>.
     const terse = card(html, "the terse item");
     expect(terse).toContain("note · waiting-myk");
     expect(terse).not.toContain("<details");

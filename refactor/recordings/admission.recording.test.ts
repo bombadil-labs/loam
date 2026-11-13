@@ -1,11 +1,3 @@
-// Records Loam's grant, trust and admission decisions over one fixed corpus. A change in any
-// decision shows as a diff in `out/`. Re-record on purpose with `npx vitest run refactor -u`.
-//
-// Scope: the readers run over reactors built by RAW ingest, so no Loam door runs; malformed and
-// unauthorized grants sit in the ground on purpose. `admission.ingest` records the substrate's
-// verdict on each delta. This file is not an oracle for what a door admits: that needs a trace
-// through the gateway. Order dependence is checked for two permutations only, forward and reverse.
-
 import { describe, it } from "vitest";
 import type { Claims, Delta } from "@bombadil/rhizomatic";
 import {
@@ -48,8 +40,6 @@ const data = (by: Who, t: number): Claims => ({
   pointers: [{ role: "note", target: { kind: "entity", entity: { id: "note:1", context: "n" } } }],
 });
 
-// The grant world: a two-link admin chain, a self-appointed admin, an admin cycle, an
-// admin-minted register grant, malformed grants, and strikes with and without standing.
 const adminGrant = grant("operator", "admin", "admin", 10, "op→admin:admin");
 const subGrant = grant("admin", "subadmin", "admin", 11, "admin→subadmin:admin");
 const writerGrant = grant("subadmin", "writer", "write", 12, "subadmin→writer:write");

@@ -1,12 +1,3 @@
-// Phase 15 (Unit 3c) — MULTIPLAYER IS FEDERATION: two villagers, two DIFFERENT stores, no
-// game-server authority. Ana writes on the almanac; Ben writes on the commons; one pulse and
-// the union renders the same, byte for byte, to any reader through the open door. Then the
-// sock-knocker: she takes the village home — a fresh store, HER OWN operator, one pull — and
-// the paradigm keeps its word twice: the whole ground arrives, and the village's law binds
-// NOTHING on her machine. She writes her own lens, and the village answers through it, with
-// her in it. Sovereignty both ways: the almanac's open-door declaration sits in her ground as
-// data, and her door stays closed until SHE says otherwise.
-
 import {
   Gateway,
   MemoryBackend,
@@ -49,14 +40,9 @@ try {
   await constitute(commons, ["wren", "miles", "odile", "petra"], 1_000_000);
   await almanac.gateway.append([
     signClaims(publicClaims(["Dossier"], almanac.operator, ts), almanac.seed),
-    // The living village's forgery arc may have left the almanac ROSTERED (trust is data and
-    // the door obeys whatever declaration survives) — this phase states its own posture: an
-    // aggregator by choice, so a stranger's honest deltas can cross from the commons.
     signClaims(trustClaims("open", [], almanac.operator, ts + 1), almanac.seed),
   ]);
 
-  // Ana joins the almanac through the gate's steps; Ben holds standing on the COMMONS — two
-  // writers, two sovereign stores, no shared authority anywhere.
   const anaSeed = mintSeed();
   const benSeed = mintSeed();
   const ana = `person:ana-${ts % 100000}`;
@@ -66,7 +52,6 @@ try {
   const anaClient = loamClient({ url: almanac.base, token: tok("gate", "almanac"), seed: anaSeed });
   const benClient = loamClient({ url: commons.base, token: tok("gate", "commons"), seed: benSeed });
 
-  // 15.1 — interleaved writes on different stores; one pulse; one union
   await anaClient.claim([
     { role: "subject", at: ana, context: "bio" },
     { role: "value", value: "came in from the almanac side" },
@@ -90,7 +75,6 @@ try {
       JSON.stringify(anaRead.body?.data?.dossier?.circle ?? []).includes(ben),
   );
 
-  // 15.2 — two independent readers agree byte for byte: the content address IS the agreement
   const q = `{ a: dossier(entity: "${ana}") { _hex } b: dossier(entity: "${ben}") { _hex } }`;
   const readerX = await loamClient({ url: almanac.base }).query(q);
   const readerY = await loamClient({ url: almanac.base }).query(q);
@@ -102,9 +86,6 @@ try {
       typeof readerX.data?.a?._hex === "string",
   );
 
-  // 15.3 — THE TAKE-HOME, part one: a fresh store, HER OWN operator, one pull. The whole
-  // ground arrives; the village's law does not bind — her store has no surface until she
-  // gives it one. (In the demo the operator hands her the pull token: his village, his key.)
   const herSeed = mintSeed();
   laptop = await Gateway.open(new MemoryBackend(), { seed: herSeed });
   const pulled = await pullFrom(laptop, almanac.base, opToken("almanac"));
@@ -121,8 +102,6 @@ try {
     `${pulled.accepted} deltas accepted`,
   );
 
-  // 15.4 — part two: she writes her own lens, and the village answers through it — with her
-  // in it (Ana is hers now too; the ground never belonged to the store it crossed from)
   const spec = JSON.parse(readFileSync(join(SCHEMAS, "dossier.json"), "utf8"));
   laptop.register(
     { name: spec.hyperschema.name, alg: spec.hyperschema.alg ?? 1, body: parseTerm(spec.hyperschema.body) },
@@ -138,9 +117,6 @@ try {
     /almanac side/.test(String(hers.data?.a?.bio)) && typeof hers.data?.w?._hex === "string",
   );
 
-  // 15.5 — sovereignty both ways: the almanac's open-door declaration RODE THE PULL and sits
-  // in her ground as data — and her door is still closed, because on her store that voice is
-  // foreign. Nothing is public until SHE declares it.
   const declarationPresent = [...laptop.reactor.snapshot()].some((d) =>
     d.claims.pointers.some(
       (p) => p.target.kind === "entity" && p.target.entity.id === "loam:public",

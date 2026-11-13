@@ -1,8 +1,3 @@
-// Provisioned containers name their user (step 5, 3g). Delta level: the declaration's membership is
-// `loam.memberOf` for a user the store resolves by name, and the key form for one it cannot. Object
-// level: the home gathers what the user writes, and after a recovery it gathers the new key's writes
-// and the old key's earlier ones, never the old key's later ones.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -155,7 +150,6 @@ describe("provisioned containers name their user", () => {
         "refusal",
       );
     });
-    // A name whose only root claim is not yet valid.
     const bea = "be".repeat(32);
     writeUserSeed(home, "bea", bea);
     await ground(async (gw) => {
@@ -174,7 +168,7 @@ describe("provisioned containers name their user", () => {
   it("a user the store cannot resolve by name keeps the key form, which still gathers their writes", async () => {
     expect(await run(["init", "--home", home], io)).toBe(0);
     const seed = "cc".repeat(32);
-    writeUserSeed(home, "cal", seed); // a key file, and no user record
+    writeUserSeed(home, "cal", seed);
     expect(await declareHome("cal")).toEqual(authoredBy(authorForSeed(seed)));
   });
 });

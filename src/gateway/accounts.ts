@@ -1,16 +1,3 @@
-// Accounts & capabilities: no ambient authority, anywhere — and no OWNERSHIP of ids, anywhere
-// (revised 2026-07-09, "authors, not owners"). Entities are unowned: pointer resolution is
-// string matching, a delta is an assertion from a perspective, and anyone with standing may
-// point at anything. What the gateway enforces is the AUTHOR'S STANDING ON THIS INSTANCE — a
-// publishing relationship, one surviving operator-rooted `write` grant at the store entity —
-// never the tenancy of whatever the delta touches. Whether anyone LISTENS to a claim is the
-// reader's business: lenses, author ranks, admission predicates, operator-filtered
-// constitutional reads. Revocation is negation; audit is a query; the POLICY is entirely data.
-//
-// Tenant vocabulary (`loam.tenant` / `loam.members` / `loam.grants`) survives as data for
-// author-communities and read lenses — memberships still resolve (tenantOf), grants still
-// chain — but `authorize` consults exactly one thing: standing at `loam:store`.
-
 import {
   type Claims,
   type Delta,
@@ -40,50 +27,10 @@ export const CTX_TENANT = "loam.tenant";
 export const CTX_MEMBERS = "loam.members";
 export const VERBS: ReadonlySet<string> = new Set<Verb>(["write", "admin", "register", "federate"]);
 
-// THE FENCE (T174). A register grant carries a prefix, and this is the whole of what "inside the
-// prefix" means — read it before changing anything downstream of it, because an escape from here is
-// an unauthorized registration.
-//
-// The rule: `name` is admitted iff `prefix` is a NON-EMPTY LITERAL prefix of it, compared code unit
-// by code unit, on the strings exactly as they arrived.
-//
-//  - LITERAL, never a pattern and never a namespace-aware match. `thread:` admits `thread:groove`
-//    and `thread:groove:2`; it refuses `x-thread:foo`, where the prefix appears LATER and so is not
-//    a prefix at all. It also admits `threadbare` — a prefix need not stop at a separator, because
-//    inventing a separator here would mean two definitions of a namespace boundary (this one and
-//    the store's, which has none) and the two would drift.
-//  - THE BARE PREFIX IS INSIDE ITS OWN FENCE. `thread:` admits the name `thread:`. Refusing it would
-//    be an arbitrary hole in a range that is otherwise contiguous.
-//  - AN EMPTY PREFIX ADMITS NOTHING. `"".startsWith` is true of every string, so a naive check would
-//    turn a prefixless grant into ROOT authority — the single most expensive way to get this wrong.
-//    `constitutionalDefect` already refuses to let such a grant exist; this refuses to honour one
-//    that somehow does. Two independent fail-closed points, on purpose.
-//  - NO NORMALIZATION, NO DECODING, NO CASE FOLDING. `Thread:foo`, `thread%3Afoo`, and `thread：foo`
-//    (fullwidth colon) are three DIFFERENT names, and none of them is inside `thread:`. This is not
-//    laxity: every ENTITY ID the store derives from the name is that same literal string, so any
-//    folding here would compare a folded form against an unfolded key and could admit a name whose
-//    deltas land outside the fence. The comparison and the derivation must run on one string.
-//
-// AND THE FENCE'S DISJOINTNESS DOES NOT CARRY TO THE GRAPHQL FIELD NAMESPACE. Read the bullet above
-// precisely — it is true of entity ids and FALSE of the served field. `legalNameFor` (gql.ts) maps
-// every `[^_A-Za-z0-9]` to `_` and `queryFieldFor` lowercases an initial capital, so the mapping is
-// MANY-TO-ONE: `x:Foo` and `x_Foo` are disjoint entity namespaces that both serve at the field
-// `x_Foo`. Two prefixes an operator believes are separate can therefore collide at the surface. That
-// fails CLOSED — `buildGqlSchema` refuses the second publisher, whoever it is, the operator
-// included — so the reachable harm is SQUATTING rather than capture. It is written here because the
-// next author to extend this fence will otherwise read the bullet above as covering the field too.
-//
-// This predicate fences ONE name. A registration carries THREE independently-chosen names — the
-// program, the reading, and an optional explicit entity — and each reaches a different part of the
-// store, so the door applies this to each of them rather than to one. `registerFenceAdmits` in
-// src/server/http.ts is where that composition lives, and it says which name reaches what.
 export function fenceAdmits(prefix: string, name: string): boolean {
   return prefix.length > 0 && name.startsWith(prefix);
 }
 
-// --- the claims vocabulary ----------------------------------------------------------------------
-
-// E belongs to T: filed at the tenant (its member roll) and at the entity (its allegiance).
 export function membershipClaims(
   tenant: string,
   entity: string,
@@ -101,10 +48,6 @@ export function membershipClaims(
   };
 }
 
-// `subject` may `verb` within `tenant`: the capability itself, as one signed delta. A `register`
-// grant carries a FOURTH pointer, `prefix` — the entity namespace it may shape and no other. The
-// scope rides the grant rather than a table beside it, so revoking the grant revokes the scope in
-// the same strike and there is no second place for the two to disagree.
 export function grantClaims(
   tenant: string,
   subject: string,
@@ -128,7 +71,6 @@ export function grantClaims(
   };
 }
 
-// Revocation is negation — the grant delta is struck, and resolution forgets it.
 export function revocationClaims(grantDeltaId: string, author: string, timestamp: number): Claims {
   return {
     timestamp,
@@ -138,55 +80,12 @@ export function revocationClaims(grantDeltaId: string, author: string, timestamp
   };
 }
 
-// --- the audit surface ----------------------------------------------------------------------------
-
-// A tenant, gathered: its grants, its members, anything filed at it. This UNGOVERNED form
-// masks with `drop` — every negation present binds. A governed store should audit through
-// `tenantSchemaFor(operator)` below, whose mask honors only lawful strikes.
 export const TENANT: HyperSchema = { name: "Tenant", alg: 1, body: entityGatherBody() };
 
-// --- governed read lenses (rhizomatic 0.2.0: trust masks + inView) --------------------------------
-//
-// Under open writes, `mask drop` honors every negation present — a federated stranger's strike
-// becomes a heckler's veto. These lenses honor only LAWFUL strikers: the operator, plus the
-// authors the operator's surviving grants name (the community the door admitted). The trusted
-// set is an `inView` — a view over the same delta-set, always current: mint a grant and its
-// grantee's strikes bind on the next read; revoke it and they stop. The sets reach ONE LINK
-// from the operator: subjects of grants the OPERATOR authored, surviving the OPERATOR's own
-// strikes (stratification bans inView inside the sub-term — the chain cannot recurse here).
-// Stated plainly: standing minted by an ADMIN binds enforcement but never enters these sets;
-// and an admin's revocation — honored by the door, and by these lenses' OUTER masks — does
-// not by itself remove the revoked author from a trusted set (only the operator's strike
-// does). grantHeld keeps the full recursion; the chain's second link is exactly where lens
-// and door can disagree.
-//
-// NAMED GAP: the wide set matches any grant the operator minted, so a `register` grantee is in it.
-// That is inert today — a register grant confers no write standing, so `authorize` refuses every
-// delta such an author signs, and a striker with no deltas strikes nothing. It stops being inert if
-// a federated pull ever admits deltas authored by that key. Closing it means narrowing this term,
-// which moves the bytes of an exported gather body; the rail that would close it asserts a register
-// grantee's ingested strike is inert in a governed read.
-// The canonical gather with a TRUST-AWARE negation mask: data negations bind only from the
-// operator and the operator's grantees. A federated stranger's strike is inert here — the
-// heckler's veto ends where this body begins.
 export function governedGatherBody(operator: string): Term {
   return entityGatherBody({ mask: { trust: lawfulStrikersJson(operator, false) } });
 }
 
-// Is `id` struck AS DATA — the question a governed READER answers, which is not the question
-// `lawfulNegated` answers. That one counts a negation only from the OPERATOR: right for LAW (a
-// grantee's strike must not retire the operator's schema) and wrong for data, where the governed
-// gather honors the wider community — the operator plus any author their surviving grants name. Any
-// operation that FILTERS data by survival wants this one; anything resolving the constitution wants
-// the other. The strikers are `governedStrikers` (governed-trust.ts), the same set every governed
-// read lowers its mask to, so this filter and the gather cannot drift. Ungoverned, every negation
-// binds.
-//
-// Absence is not suppression: an id the store does not hold answers FALSE — it is not something
-// this can say has been struck. Callers weighing a purged source (§11) must ask erasure, not this.
-// Build it once per pass and reuse the closure; it clears its memo after an accepted ingest.
-//
-// A strike counts only while it is valid at `now`; the target's own validity is not asked.
 export function dataStruck(
   reactor: Reactor,
   now: number,
@@ -196,7 +95,6 @@ export function dataStruck(
   return (id) => witnesses(id).length > 0;
 }
 
-/** The strikes that hold on `id` as data at `now`: the witness form of `dataStruck`. */
 export function dataStrikeWitnesses(
   reactor: Reactor,
   now: number,
@@ -207,9 +105,6 @@ export function dataStrikeWitnesses(
   return reactor.negationWitnesses(now, (n) => strikers.has(n.claims.author));
 }
 
-// The governed audit schema: like TENANT, but negations bind only from the operator and the
-// operator's ADMIN grantees — the same standing `standsFor` demands — so what the audit shows
-// agrees with what enforcement honors (to the chain's first link).
 export function tenantSchemaFor(operator: string): HyperSchema {
   return {
     name: "Tenant",
@@ -223,7 +118,6 @@ export const TENANT_POLICY: Schema = {
   default: { kind: "all", order: { kind: "byTimestamp", dir: "asc" } },
 };
 
-/** Is `id` struck at `now` by a negation the constitution honours (the door's own reading)? */
 export function struckAt(reactor: Reactor, now: number, id: string, operator?: string): boolean {
   return struck({ reactor, now, operator }, id, new Set());
 }
@@ -236,8 +130,6 @@ function tenantOfWith(ctx: Ctx, entity: string, visited: ReadonlySet<string>): s
     );
     if (member?.target.kind !== "entity") continue;
     const tenant = member.target.entity.id;
-    // A membership is effective only if its author had the standing to make it: admin on the
-    // entity's then-current tenant AND on the receiving one (first adoption is operator-only).
     if (ctx.operator !== undefined && d.claims.author !== ctx.operator) {
       const branch = new Set(visited).add(d.id);
       const current = tenantOfWith(ctx, entity, branch);
@@ -261,7 +153,6 @@ function tenantOfWith(ctx: Ctx, entity: string, visited: ReadonlySet<string>): s
   return winner?.tenant;
 }
 
-// The tenant `entity` currently belongs to — the latest effective membership claim wins.
 export function tenantOf(
   reactor: Reactor,
   now: number,
@@ -271,29 +162,18 @@ export function tenantOf(
   return tenantOfWith({ reactor, now, operator }, entity, new Set());
 }
 
-// One grant `author` currently holds at the store entity, as an operator reads it.
 export interface HeldGrant {
   readonly id: string;
   readonly verb: Verb;
-  /** Present on a `register` grant and on no other: the namespace it may shape. */
   readonly prefix?: string;
 }
 
-// Every EFFECTIVE surviving grant `author` holds at the store entity, as the registration door
-// reads it. It equals `grantsNaming` today only because it delegates to it; once a subject can name
-// a user, this resolves it and the ledger's literal rows may differ. "Effective" is the same
-// discipline `grantHeld` runs: in a governed store a
-// grant binds only if the operator signed it or an effective admin did, and only if it survives
-// strikes that themselves had standing. A revocation therefore removes a row here on the very next
-// read, with nothing to invalidate.
 export function grantsHeldBy(
   reactor: Reactor,
   now: number,
   author: string,
   operator?: string,
 ): HeldGrant[] {
-  // The STANDING question: what may `author` do. A subject that names a user counts for the
-  // user's current root; `grantsNaming` never resolves one.
   return effectiveGrants(
     reactor,
     now,
@@ -302,11 +182,6 @@ export function grantsHeldBy(
   ).map(withoutSubject);
 }
 
-/**
- * The effective surviving grants whose subject is literally `subject`: the SELECTION question, for
- * what to list or strike. It never resolves a subject to the keys that act for it, so striking a
- * connection key's grants can never reach its user's own.
- */
 export function grantsNaming(
   reactor: Reactor,
   now: number,
@@ -333,7 +208,7 @@ function effectiveGrants(
   const ctx: Ctx = { reactor, now, operator };
   const out: (HeldGrant & { readonly subject: string })[] = [];
   for (const d of survivingAt(ctx, STORE_ENTITY, CTX_GRANTS, new Set())) {
-    if (constitutionalDefect(d) !== undefined) continue; // malformed law binds nothing
+    if (constitutionalDefect(d) !== undefined) continue;
     let subject: string | undefined;
     let verb: string | undefined;
     let prefix: string | undefined;
@@ -347,12 +222,6 @@ function effectiveGrants(
       continue;
     }
     if (operator !== undefined && d.claims.author !== operator) {
-      // ONLY THE OPERATOR MINTS REGISTER STANDING. `write` and `admin` are delegable through the
-      // admin chain, as they always have been. `register` is not, and the asymmetry is deliberate:
-      // an admin could otherwise sign itself `register` with a one-character prefix, and since the
-      // publish carries no request context the store would sign the result WITH THE OPERATOR'S OWN
-      // SEED — the operator's constitutional schemas superseded under the operator's key. Nobody
-      // decided to delegate that, so it is not delegated.
       if (verb === "register") continue;
       const branch = new Set([d.id]);
       if (!grantHeld(ctx, STORE_ENTITY, d.claims.author, "admin", branch)) continue;
@@ -367,7 +236,6 @@ function effectiveGrants(
   return out;
 }
 
-/** Every effective surviving grant at the store entity, whatever it names, with its subject. */
 export function effectiveGrantsAt(
   reactor: Reactor,
   now: number,
@@ -376,18 +244,6 @@ export function effectiveGrantsAt(
   return effectiveGrants(reactor, now, operator, () => true);
 }
 
-// The namespaces `author` may register inside, right now. Empty means no register standing at all,
-// which is the door's cue to answer the ordinary authority refusal — a caller with an empty list
-// and a caller with no token learn exactly the same thing.
-/**
- * The containers this author may federate on, by an effective surviving grant.
- *
- * The scope rides the same `prefix` slot T174's register verb uses, because a grant already carries
- * one scoping string and a second would be a parallel vocabulary for the same idea. What differs is
- * the COMPARISON: a register prefix is a literal prefix of an entity name, while a federate scope is
- * a container name matched WHOLE. A channel lives in exactly one container, so prefix-matching here
- * would silently admit `friends-archive` to a grant that said `friends`.
- */
 export function federateContainersOf(
   reactor: Reactor,
   now: number,
@@ -414,7 +270,6 @@ export function registerPrefixesOf(
   return [...seen];
 }
 
-// Does `author` hold `verb` (admin covers write) on `tenant`, by an effective surviving grant?
 export function holdsGrant(
   reactor: Reactor,
   now: number,
@@ -426,17 +281,6 @@ export function holdsGrant(
   return grantHeld({ reactor, now, operator }, tenant, author, verb, new Set());
 }
 
-// --- enforcement: the one question the gateway asks -----------------------------------------------
-//
-// Standing: may this author publish through this instance at all? One surviving,
-// operator-rooted `write` grant at the store entity answers it — for every delta the author
-// signs, whatever it points at. Pointing is free; ids are unowned; the fences are the
-// reader's. (`admin` covers `write` and additionally mints grants and retires constitution.)
-
-// A constitutional delta must be exactly what its context claims: a grant carries a tenant, a
-// string subject, and a known verb; a membership carries one member roll and one allegiance.
-// Anything else would sit in the audit looking like law while binding nothing — refused, for
-// everyone, the operator included.
 export function constitutionalDefect(delta: Delta): string | undefined {
   const ptrs = delta.claims.pointers;
   const grants = ptrs.filter(
@@ -454,9 +298,6 @@ export function constitutionalDefect(delta: Delta): string | undefined {
     if (grants.length !== 1 || members.length + allegiances.length > 0) {
       return "a grant names exactly one tenant and nothing else constitutional";
     }
-    // Exactly ONE subject and ONE verb: duplicates would read differently in enforcement
-    // (last wins), validation (first checked), and the inView lenses (any match) — a delta
-    // that means three things in three places is malformed law, whoever signed it.
     const subjects = ptrs.filter((p) => p.role === "subject");
     const verbs = ptrs.filter((p) => p.role === "verb");
     const prefixes = ptrs.filter((p) => p.role === "prefix");
@@ -476,14 +317,6 @@ export function constitutionalDefect(delta: Delta): string | undefined {
     ) {
       return 'a grant carries exactly one verb: "write", "admin", "register" or "federate"';
     }
-    // The scope is part of the verb's meaning, so it is checked as law rather than at the door.
-    // A register grant with no prefix is REFUSED rather than read as meaningless: a grant-shaped
-    // delta that binds nothing sits in the audit looking like authority, and the next reader is
-    // as free to read a missing fence as "unrestricted" as to read it as "nothing".
-    // Two verbs are SCOPED, and a scoped grant with no scope is REFUSED rather than read as
-    // meaningless: a grant-shaped delta that binds nothing sits in the audit looking like authority,
-    // and the next reader is as free to read a missing fence as "unrestricted" as to read it as
-    // "nothing". `register` names an entity namespace; `federate` (T188) names a container.
     if (verbTarget.value === "register" || verbTarget.value === "federate") {
       const prefix = prefixes[0]?.target;
       if (
@@ -509,16 +342,12 @@ export function constitutionalDefect(delta: Delta): string | undefined {
   return undefined;
 }
 
-// The verdict. Malformed law is refused for everyone (a grant-shaped delta that could never
-// bind would sit in the audit lying); past that, the operator needs no grant, an ungoverned
-// store welcomes any verified author, and everyone else holds standing — or is refused.
 export function authorize(
   reactor: Reactor,
   now: number,
   delta: Delta,
   operator: string | undefined,
   batch: readonly Delta[] = [],
-  /** The roots whose grant chains give standing here: a pool's own key, then selected hosts. */
   grantRoots: readonly string[] | undefined = undefined,
 ): { ok: true } | { ok: false; refusal: string } {
   const defect =
@@ -538,8 +367,7 @@ export function authorize(
     });
   if (defect !== undefined) {
     return { ok: false, refusal: `delta ${delta.id} is malformed law: ${defect}` };
-  } // A key a PREPARED recovery cut pauses writes nothing here until the cut has an outcome
-  // (recovery-history.md), so nothing it signs can slip between the cut and the host commit.
+  }
   if (pausedKeys(reactor, operator, refusedIds(reactor, operator)).has(delta.claims.author)) {
     return {
       ok: false,
@@ -551,12 +379,7 @@ export function authorize(
 
   const author = delta.claims.author;
   if (operator === undefined || author === operator) return { ok: true };
-  // An erasure order from a governor this ground pins, naming this ground as its receiver, takes
-  // its authority from the pin (SPEC-6 §3), not from a write grant. eraseDefect checked it above.
   if (isErasure(delta.claims) && orderBinds(delta, reactor, operator)) return { ok: true };
-  // Each root's chain is judged whole, under that root's strikes; a link under one root never
-  // extends a chain rooted at another. Only this ground's own key stands by itself: a selected
-  // host has no general authority here, only the grants its chain issued.
   for (const root of grantRoots ?? [operator]) {
     if (grantHeld({ reactor, now, operator: root }, STORE_ENTITY, author, "write", new Set())) {
       return { ok: true };

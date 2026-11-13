@@ -1,10 +1,3 @@
-// T32 — the two trust axes are independent, both ways (criterion 10). The knob's `trust` role is
-// the EFFECTIVENESS axis (whose trust domain the content belongs to — posture lawfulness, where
-// bytes are paid); the `loam:trust` declaration filed AT the container entity (§28.6, DECIDED) is
-// the ADMISSION axis (who may federate INTO it). Admission resolves from the subject declaration
-// and NEVER from the knob; posture legality gates on the knob and NEVER on the roster. Each axis
-// is driven here with the other held fixed.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Claims } from "@bombadil/rhizomatic";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -29,8 +22,6 @@ const boot = (): Promise<Gateway> =>
     }),
   );
 
-// A trust declaration whose SUBJECT is the container entity — the existing loam:trust shape,
-// §28.6's mechanism: the root needs no migration, the entity just gains a subject.
 const trustAt = (
   subject: string,
   mode: "open" | "roster" | "closed",
@@ -67,8 +58,6 @@ describe("T32 criterion 10 — admission and effectiveness are independent axes"
     const atContainer = containerAdmission(gw.reactor, gw.validityNow(), OP, "container:w");
     expect(atContainer.mode).toBe("roster");
     expect(atContainer.roster.has(GARDENER)).toBe(true);
-    // The root's policy is untouched: no declaration at loam:trust itself survives, so the store
-    // stays open — a container's roster is not the store's.
     expect(readTrustPolicy(gw.reactor, gw.validityNow(), OP).mode).toBe("open");
     await gw.close();
   });
@@ -83,7 +72,6 @@ describe("T32 criterion 10 — admission and effectiveness are independent axes"
 
     await gw.append([signClaims(trustAt("container:w", "closed", [], 26_200), OP_SEED)]);
     expect(containerAdmission(gw.reactor, gw.validityNow(), OP, "container:w").mode).toBe("closed");
-    // Effectiveness held fixed: trust and posture exactly as declared, the whole time.
     const after = gw.containers().containers.get("container:w");
     expect(after?.trust).toBe(before?.trust);
     expect(after?.posture).toBe(before?.posture);
@@ -93,10 +81,6 @@ describe("T32 criterion 10 — admission and effectiveness are independent axes"
   });
 
   it("a closed roster does not touch the copy rule: the wall still opens and still pays copies", async () => {
-    // The behavioral half of "posture legality and the copy rule unmoved" (P5 fold): the
-    // table-field comparison above cannot go red on its own, so drive the open itself under the
-    // tightest possible admission and watch the bytes land anyway — admission governs who may
-    // federate INTO the container, never whether the operator's own attach seeds it.
     const gw = await boot();
     const h = observed(FERN, "height", 30, 1000, OP_SEED);
     await gw.append([h]);
@@ -119,7 +103,7 @@ describe("T32 criterion 10 — admission and effectiveness are independent axes"
     const wallStore = new MemoryBackend();
     const c = await gw.openContainer({ name: "container:shut", backend: wallStore });
     expect(c.posture).toBe("separate");
-    expect(await wallStore.holds(h.id)).toBe(true); // copies paid — the roster never read
+    expect(await wallStore.holds(h.id)).toBe(true);
     await c.drop();
     await gw.close();
   });

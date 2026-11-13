@@ -1,8 +1,3 @@
-// What each function reaches outside itself. Copies the tree to a temp dir, marks every candidate
-// function "use hermetic" there, and runs hermetic/sealed over the copy. Each free variable is an
-// import, a module-level binding, or a global. The repo itself is never modified.
-// Usage: node refactor/tools/ambient-reach.mjs [dir=src]
-
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -16,7 +11,7 @@ const AMBIENT =
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ambient-reach-"));
 try {
   fs.cpSync(dir, tmp, { recursive: true });
-  const names = new Map(); // copied file -> { imports, decls, rel }
+  const names = new Map();
   for (const rel of sourceFiles(dir)) {
     const copy = path.join(tmp, path.relative(dir, rel));
     const parsed = parse(copy);
@@ -56,8 +51,8 @@ try {
 
   const results = await lintHermetic(tmp, ["**/*.ts"], { "hermetic/sealed": "error" });
   const kinds = { import: 0, module: 0, global: 0 };
-  const globals = new Map(); // global name -> Set of "file:function"
-  const reach = new Map(); // "file:function" -> Set of kinds or "global:Name"
+  const globals = new Map();
+  const reach = new Map();
   for (const r of results) {
     const info = names.get(path.resolve(r.filePath));
     if (!info) continue;

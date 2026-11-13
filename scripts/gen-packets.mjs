@@ -1,14 +1,3 @@
-// Generate the tutorial's bundled data packets (SPEC §16): `demos/tutorial/packets/circle.json` — a
-// whole foreign store (the circle: Alice, Bob, Carol, their names and friendships, signed
-// under the circle's OWN operator, its own registrations riding along so the learner can see
-// foreign law stay inert) — and `demos/tutorial/packets/adversary.json` — one forged claim against the
-// learner's film, really signed by the adversary's key, because "anyone may write" is true
-// and the reader's trust policy is the only defense that exists.
-//
-// DETERMINISTIC: fixed seeds, fixed timestamps. The packets are committed data; re-running
-// this script is byte-identical (verified by `--check`, which diffs without writing — CI
-// material). Runs against dist/ (build first), like every script here.
-
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,17 +8,13 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(root, "demos", "tutorial", "packets");
 const checkMode = process.argv.includes("--check");
 
-// The circle's operator and the adversary: fixed identities, tutorial-only, never secret.
 const CIRCLE_SEED = "c1".repeat(32);
 const CIRCLE_OP = authorForSeed(CIRCLE_SEED);
 const ADVERSARY_SEED = "ad".repeat(32);
 const ADVERSARY = authorForSeed(ADVERSARY_SEED);
-// A stranger's app that logs films in a dialect the learner's schemas can't read (lesson 13).
 const DIALECT_SEED = "d1".repeat(32);
 const DIALECT = authorForSeed(DIALECT_SEED);
 
-// Fixed clock: every delta's timestamp is BASE + a small offset. Content addresses depend on
-// these — change one and the packets change identity, which is the point of the --check gate.
 const BASE = 1_752_000_000_000;
 
 const GATHER = {
@@ -81,7 +66,7 @@ async function buildCircle() {
               op: "expand",
               role: { exact: "friend" },
               schema: "Person",
-              reading: "Person", // issue #23: friends resolve through the Person reading
+              reading: "Person",
               in: GATHER,
             }),
           },
@@ -95,8 +80,6 @@ async function buildCircle() {
     say(1, [entity("subject", "person:alice", "name"), value("Alice Song")]),
     say(2, [entity("subject", "person:bob", "name"), value("Bob Ferris")]),
     say(3, [entity("subject", "person:carol", "name"), value("Carol Note")]),
-    // Friendship is one claim with two filings: it lands in the subject's `follows` bucket
-    // AND carries the `friend` role the Friends lens expands through.
     say(4, [
       entity("subject", "person:alice", "follows"),
       entity("friend", "person:bob", "circle"),
@@ -116,12 +99,10 @@ async function buildCircle() {
 }
 
 function buildAdversary() {
-  // A real signature on a real delta — the forgery is in the CLAIM, not the crypto. The
-  // timestamp is far in the future, so a pick-latest policy falls for it every time.
   const forged = signClaims(
     {
       timestamp: BASE + 500_000_000_000,
-      validFrom: BASE, // valid now: only the creation time lies
+      validFrom: BASE,
       author: ADVERSARY,
       pointers: [
         entity("subject", "film:arrival", "title"),
@@ -134,8 +115,6 @@ function buildAdversary() {
 }
 
 function buildDialect() {
-  // A real signed record in an alien dialect: `film_watched` where the learner says a screening,
-  // `on` where they say a date. It gathers on nothing here until a translation teaches its shape.
   const logged = signClaims(
     {
       timestamp: BASE + 42,
@@ -143,7 +122,6 @@ function buildDialect() {
       author: DIALECT,
       pointers: [
         entity("film_watched", "film:arrival", "elsewhere"),
-        // the dialect says `on` where the learner says a date — the role a translation reads
         {
           role: "on",
           target: { kind: "primitive", value: "watched on a rainy Tuesday, logged in Reelboxd" },

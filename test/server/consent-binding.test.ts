@@ -1,26 +1,3 @@
-// §58 S1a (T262, criterion a): the consent page binds a connection to ONE container under the
-// person's home, chosen or created on the page, and provisions the home and the target in one
-// act. Two levels are never bindable: the store root and the user's home container — and no
-// pool, a connection's or a channel's, chosen or created into. The approval's code record
-// carries the binding — user and container — so the token exchange (S1b) binds the connection
-// where the person said, never store-wide.
-//
-// Two shapes of "no binding" are told apart on purpose: the page's own form always carries the
-// two fields, so a blank choice refuses in words; a POST carrying NEITHER field (a hand-built
-// one) mints a code with no container and provisions nothing. The exchange does not read the
-// binding yet, so that code still redeems as before — this file pins that shape and names it.
-//
-// What this file deliberately does NOT assert, and where each gap closes:
-//   - The exchange's side — the per-(client, user) key, the inbox pool, the absent store-wide
-//     grant, the refusal of an unbound code — has no rail yet; the exchange's own slice of §58
-//     brings it, and turns the no-fields case below into a refusal.
-//   - The consent page's pre-§58 behaviour (redirect fence, form token, PKCE, the code's shape) —
-//     the frozen phase-14 rail (`oauth-consent.test.ts`), which this change leaves byte-identical.
-//   - The browser walk of story 1 (criterion 12) has no rail yet; `door-smoke.test.ts` story 2
-//     names a container on the real page, and the full walk lands with the exchange's slice.
-//
-// Erasure standing rule: every store here is this file's own mkdtemp/memory fixture.
-
 import { seedSigner } from "../../src/gateway/signer.js";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -51,7 +28,6 @@ const PASSWORD = "correct horse";
 const ALLOW_ORIGIN = "https://app.example";
 const REDIRECT = "https://app.example/cb";
 const CLIENT_ID = "connector-fixed-0001";
-// A valid S256 challenge for the fixture — the exchange is not driven here, only the mint.
 const CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
 
 const homes: string[] = [];
@@ -62,9 +38,7 @@ afterEach(async () => {
     const home = homes.pop()!;
     try {
       chmodSync(home, 0o700);
-    } catch {
-      /* already writable, or gone */
-    }
+    } catch {}
     rmSync(home, { recursive: true, force: true });
   }
 });
@@ -75,12 +49,6 @@ const authoredBy = (key: string): unknown => ({
   in: "input",
 });
 
-/**
- * A served store with one login user, ada, who has NO containers and NO signing seed yet. The
- * connectors' home and the users' home are DISTINCT directories on purpose: a seed provisioned
- * into the wrong one would split a person into two keys, and one shared directory could never
- * show it.
- */
 async function bareUserServer(onFault?: (message: string) => void): Promise<{
   base: string;
   usersHome: string;
@@ -148,7 +116,6 @@ async function consentPage(base: string, sessionId: string): Promise<string> {
   return res.text();
 }
 
-/** POST the approval with the page's own fields plus `extra` — the binding, or nothing at all. */
 async function approve(
   base: string,
   sessionId: string,
@@ -186,21 +153,15 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     const ada = await signIn(base, "ada", PASSWORD);
     const html = await consentPage(base, ada);
 
-    // The page asks, in words, where this connection lives — and on day one it has nothing to
-    // list yet, so it offers to create.
     expect(html).toContain("Bind this connection to");
     expect(html).toContain('name="bind_new"');
     expect(existsSync(userSeedPath(usersHome, "ada"))).toBe(false);
     expect(gateway.containers().containers.has("ada")).toBe(false);
 
-    // A posted `user` field changes nothing: the binding's user is the SESSION's, only.
     const res = await approve(base, ada, html, { bind_new: "journal", user: "bea" });
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toContain(REDIRECT);
 
-    // One act, three facts: the home is declared, the seed is minted — in the USERS' home, not
-    // the connectors' — and the target is declared under the home, exactly as the admin page's
-    // create-root would have done.
     const table = gateway.containers().containers;
     expect(table.has("ada")).toBe(true);
     expect(table.has("ada:journal")).toBe(true);
@@ -209,14 +170,10 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     expect(existsSync(userSeedPath(usersHome, "ada"))).toBe(true);
     expect(existsSync(userSeedPath(connectorsHome, "ada"))).toBe(false);
 
-    // The code carries the binding: whose act, and where the connection will live. The minted
-    // seed is in neither the record nor the page.
     const codes = readOAuthFile(connectorsHome).codes ?? [];
     expect(codes).toHaveLength(1);
     expect(codes[0]).toMatchObject({ clientId: CLIENT_ID, user: "ada", container: "ada:journal" });
     const seed = readFileSync(userSeedPath(usersHome, "ada"), "utf8").trim();
-    // And WHOSE: each container names ada, whose root is now the minted key, and gathers what that
-    // key writes. The key holds the store-wide write grant — the standing create-root gives.
     const mintedKey = authorForSeed(seed);
     expect(table.get("ada")!.membership).toEqual(writtenByUser("ada", "ada"));
     expect(table.get("ada:journal")!.membership).toEqual(writtenByUser("ada", "ada:journal"));
@@ -241,12 +198,6 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
 
   it("lists the containers already under the person's home and binds an existing one", async () => {
     const { base, connectorsHome, gateway, op } = await bareUserServer();
-    // Two containers are declared BEFORE the home stands. A grandchild, whose parent does not
-    // stand either: the table meets it ahead of both in arrival order, so only a walk that runs
-    // to a fixpoint reaches it, through the child the same walk adds. And a child of the home
-    // itself, whose name ends in a space — the store's own name, offered and compared as-is. The
-    // reach is the whole subtree, at any depth below the home — and nothing at all while the home
-    // does not stand, even for a child that names it.
     let ts = 9300;
     await op(
       containerClaims(
@@ -279,14 +230,6 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     expect(first).not.toContain("ada:journal:2025");
     expect(first).not.toContain('value="ada:notes "');
     expect((await approve(base, ada, first, { bind_new: "journal" })).status).toBe(302);
-    // Beside the journal: a pool receiving into it, never offered. Its name is ONE level below
-    // the home on purpose — a machine-minted pool (`inbox:…`, `channel:…`) carries at least two
-    // colons and no leaf can spell it, so the create path's pool arm guards hand-declared law
-    // only, and this is that law, declared by hand. A second pool carries BOTH edges — a parent
-    // and an inboxOf — so what makes a pool is the inboxOf edge alone, not the absence of a
-    // parent. And a bystander that shares the pools' posture but not their edge — `separate`,
-    // no `inboxOf` — so what is refused is the pool, for being a pool, and not every separate
-    // container.
     await op(
       containerClaims(
         {
@@ -339,8 +282,6 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     expect(adaNames(gateway)).toEqual(standing);
 
     const second = await consentPage(base, ada);
-    // The existing containers are offered by name, the grandchild and the separate bystander
-    // among them; the home itself and the pool are not.
     expect(second).toContain('value="ada:journal"');
     expect(second).toContain('value="ada:journal:2025"');
     expect(second).toContain('value="ada:notes "');
@@ -353,29 +294,20 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     const codes = readOAuthFile(connectorsHome).codes ?? [];
     expect(codes).toHaveLength(2);
     expect(codes[1]).toMatchObject({ user: "ada", container: "ada:journal" });
-    // No second declaration — at the bytes: the ground holds exactly as many deltas after a
-    // repeat CREATE of the same leaf as before it, because a standing name in reach binds the
-    // existing container rather than redeclaring it. (A redeclaration with the same parent and
-    // membership would leave the name set and the resolved table unchanged; only the count sees.)
     const deltas = async (): Promise<number> =>
       (await gateway.backend.deltasSince(new Set())).length;
     const before = await deltas();
     expect((await approve(base, ada, second, { bind_new: "journal" })).status).toBe(302);
     expect(await deltas()).toBe(before);
     expect(adaNames(gateway)).toEqual(standing);
-    // The name with the space binds exactly as listed — untrimmed — and so does the grandchild.
     expect((await approve(base, ada, second, { bind: "ada:notes " })).status).toBe(302);
     expect(readOAuthFile(connectorsHome).codes?.at(-1)).toMatchObject({ container: "ada:notes " });
     expect((await approve(base, ada, second, { bind: "ada:journal:2025" })).status).toBe(302);
     expect(readOAuthFile(connectorsHome).codes?.at(-1)).toMatchObject({
       container: "ada:journal:2025",
     });
-    // The separate bystander binds: posture is not what makes a pool.
     expect((await approve(base, ada, second, { bind: "ada:vault" })).status).toBe(302);
     expect(readOAuthFile(connectorsHome).codes?.at(-1)).toMatchObject({ container: "ada:vault" });
-    // With the home standing, the home and the pool are still refused, each by its own reason —
-    // a pool inside the reach hides nothing from its owner, so it is not "not yours" — whether
-    // the pool is chosen or "created" into; and none of it mints or declares.
     const home = await approve(base, ada, second, { bind: "ada" });
     expect(home.status).toBe(400);
     expect(await home.text()).toContain("Your home container is never bound");
@@ -404,7 +336,6 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
       expect(res.status, JSON.stringify(binding)).toBe(400);
       expect(await res.text()).toMatch(/never bound|one level below|under your name/i);
     }
-    // Two-sided: nothing was minted and nothing was declared for a refused binding.
     expect(readOAuthFile(connectorsHome).codes ?? []).toHaveLength(0);
     expect(gateway.containers().containers.has("ada")).toBe(false);
     expect(existsSync(userSeedPath(usersHome, "ada"))).toBe(false);
@@ -412,9 +343,6 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
 
   it("refuses a binding outside the person's reach with the uniform not-yours answer, real or not", async () => {
     const { base, connectorsHome, gateway, op } = await bareUserServer();
-    // bea's home and child REALLY exist; zed's do not. ada must be told the same thing about
-    // both — existence is confirmed neither way — and the same for a create that lands on a
-    // container standing outside her reach (a receiver declared with no parent).
     let ts = 9100;
     await op(userClaims("bea", OPERATOR, ts++));
     await op(
@@ -437,7 +365,6 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
         ts++,
       ),
     );
-    // `ada:journal` already stands, declared by nobody's page: no parent, outside ada's reach.
     await op(
       containerClaims(
         {
@@ -450,8 +377,6 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
         ts++,
       ),
     );
-    // ada's own home and one child stand too, so the reach is walked for real — bea's child is
-    // refused by the walk, not by ada having no home.
     await op(
       containerClaims(
         { container: "ada", trust: "curated", posture: "shared", membership: authoredBy(OPERATOR) },
@@ -501,8 +426,6 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
       expect(res.status, leaf).toBe(400);
     }
     expect(readOAuthFile(connectorsHome).codes ?? []).toHaveLength(0);
-    // The boundaries themselves: 63 is the longest leaf a path carries and 1 the shortest, both
-    // are created, and a leaf may begin with any digit.
     const longest = "x".repeat(63);
     expect((await approve(base, ada, html, { bind_new: longest })).status).toBe(302);
     expect(readOAuthFile(connectorsHome).codes?.[0]).toMatchObject({ container: `ada:${longest}` });
@@ -513,8 +436,6 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
   });
 
   it("the record refuses an empty binding name and carries a one-character one", () => {
-    // The parser's own fence, at the bytes: a code whose container is "" cannot be read, and one
-    // whose container is a single character reads back exactly.
     const home = mkdtempSync(join(tmpdir(), "loam-s1a-record-"));
     homes.push(home);
     const code = {
@@ -548,9 +469,6 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
         ts++,
       ),
     );
-    // Declaration is looser than the binding: a control character is declarable today — a C0
-    // one and a C1 one (NEL) alike. The fence is the connector record's own predicate, so no
-    // name the page offers can be one the store then refuses to write.
     const odds = ["ada:x\u0001y", "ada:no\u0085tes"];
     for (const odd of odds) {
       await op(
@@ -581,11 +499,6 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
   });
 
   it("a POST carrying no binding fields mints an unbound code the exchange still redeems as before", async () => {
-    // Not this page's form — the page always sends both fields — so only a hand-built POST lands
-    // here. The code carries the user and no container, and the store is untouched. THIS IS AN
-    // OPEN WINDOW, pinned so it is seen: the exchange does not read the binding yet, and this
-    // code redeems to the store-wide grant it always did. The exchange's slice turns this case
-    // into a refusal.
     const { base, usersHome, connectorsHome, gateway } = await bareUserServer();
     const ada = await signIn(base, "ada", PASSWORD);
     const html = await consentPage(base, ada);
@@ -608,16 +521,14 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
       );
       const ada = await signIn(base, "ada", PASSWORD);
       const html = await consentPage(base, ada);
-      chmodSync(usersHome, 0o500); // the seed file cannot be written
+      chmodSync(usersHome, 0o500);
       const res = await approve(base, ada, html, { bind_new: "journal" });
       expect(res.status).toBe(503);
       const text = await res.text();
       expect(text).toContain("could not be provisioned");
       chmodSync(usersHome, 0o700);
-      // The fault reached the operator, naming the person; the person's page names no path.
       expect(faults.join("\n")).toContain("could not provision a signing key for ada");
       expect(text).not.toContain(usersHome);
-      // Nothing partial: no code, no home, no target, no seed.
       expect(readOAuthFile(connectorsHome).codes ?? []).toHaveLength(0);
       expect(adaNames(gateway)).toEqual([]);
       expect(existsSync(userSeedPath(usersHome, "ada"))).toBe(false);
@@ -625,9 +536,6 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
   );
 
   it("a seed whose grant could not land is taken back, so a retry mints afresh", async () => {
-    // The provisioning act alone, against a ground whose first append fails: the seed file this
-    // act wrote is removed and the refusal says so — otherwise the next attempt would read a
-    // "present" seed that never earned its grant, and keep it forever. The retry succeeds.
     const home = mkdtempSync(join(tmpdir(), "loam-s1a-grant-"));
     homes.push(home);
     const faults: string[] = [];
@@ -636,7 +544,6 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
       options: { seed: OPERATOR_SEED },
       signer: seedSigner(OPERATOR_SEED),
       operatorAuthor: OPERATOR,
-      // Provisioning reads the ground to decide what its grant names: here, no user record.
       reactor: new Reactor(),
       validityNow: () => 1,
       nextTimestamp: () => 1,
@@ -654,8 +561,6 @@ describe("§58 S1a (a) — the consent page binds a container under the person's
     expect(existsSync(userSeedPath(home, "ada"))).toBe(true);
     expect(faults).toHaveLength(1);
 
-    // A ground that cannot sign — no seed, or no operator author — refuses before anything is
-    // written: no seed file, no fault (there is nothing to repair), and the sentence says why.
     for (const half of [
       { options: {}, signer: undefined, operatorAuthor: OPERATOR },
       {

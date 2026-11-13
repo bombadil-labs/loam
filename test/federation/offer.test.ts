@@ -1,9 +1,3 @@
-// The frozen offer (SPEC §15, continuity): an export is a federation offer with the clock
-// stopped — `{ deltas: WireDelta[] }`, BYTE-IDENTICAL to what `GET /federate` serves, ids and
-// signatures intact — so migration never launders provenance. exportOffer is the writing half;
-// parseOffer is the reading half; and the served door is the reference implementation both are
-// held against.
-
 import { describe, expect, it, vi } from "vitest";
 import { exportOffer, parseOffer } from "../../src/federation/offer.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -12,7 +6,7 @@ import { MemoryBackend } from "../../src/store/memory.js";
 import { serve } from "../../src/server/http.js";
 import { FERN, observed } from "../spike/garden.js";
 
-vi.setConfig({ testTimeout: 20_000 }); // one real HTTP server rides this suite
+vi.setConfig({ testTimeout: 20_000 });
 
 const OPERATOR_SEED = "0e".repeat(32);
 
@@ -54,8 +48,6 @@ describe("exportOffer: the store walks out as bytes", () => {
   });
 
   it("an offered lens shapes the export exactly as it shapes the door", async () => {
-    // The export is offeredDeltas() frozen — so a store that keeps its grumbles home keeps
-    // them out of the file too, with no second mechanism to drift.
     const { parseTerm } = await import("@bombadil/rhizomatic");
     const lens = parseTerm({
       op: "select",
@@ -82,7 +74,7 @@ describe("exportOffer: the store walks out as bytes", () => {
     const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
     await gateway.append([observed(FERN, "height", 30, 1000, OPERATOR_SEED)]);
     const tampered = exportOffer(gateway).replace('"height"', '"weight"');
-    expect(() => parseOffer(tampered)).toThrow(/does not recompute/); // a forgery cannot survive the crossing
+    expect(() => parseOffer(tampered)).toThrow(/does not recompute/);
     await gateway.close();
   });
 });

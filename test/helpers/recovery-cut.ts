@@ -1,9 +1,3 @@
-// The host cut and cut manifest a retiring recovery record needs at the append door
-// (recovery-history.md), as `loam user recover` writes them: per retiring record in `batch`, its cut
-// and a manifest naming it, in their OWN append before the batch's (one append's arrivals are
-// simultaneous, SPEC-6 §3). It covers the host only: a store with declared pools also needs a cut
-// in each, which the command writes and a rail must write too.
-
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { refusedIds } from "../../src/gateway/erase-law.js";
 import type { Gateway } from "../../src/gateway/gateway.js";
@@ -36,7 +30,6 @@ export function hostCutFor(gw: Gateway, seed: string, batch: readonly Delta[]): 
   ];
 }
 
-/** Append the barrier for `batch`, then `batch` itself, as two transfers. */
 export async function appendWithHostCut(
   gw: Gateway,
   seed: string,

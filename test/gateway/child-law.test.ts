@@ -1,8 +1,3 @@
-// A child ground's law policy (step 6, refactor/audit/step6-pool-keys.md, stage 1b). The pool key
-// still equals the host key in production, so these rails set a DIFFERENT host key by hand: they
-// prove the rule, not today's wiring. What they do not cover: grants at a container mount (the
-// http standing checks), which the mount rails exercise with equal keys.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
@@ -41,7 +36,6 @@ const byPeer = (n: number): Delta =>
     PEER_SEED,
   );
 
-// A pool-shaped ground: governed by POOL, with HOST as its seeded host.
 async function child(): Promise<Gateway> {
   const gw = await Gateway.boot(new MemoryBackend(), assembleGenesis({ operatorSeed: POOL_SEED }));
   gw.childLaw = seededLaw([HOST]);
@@ -53,7 +47,7 @@ describe("lawAuthors and localAuthors", () => {
     expect(lawAuthors(POOL, seededLaw([HOST]), "trust")).toEqual([POOL, HOST]);
     expect(lawAuthors(POOL, inboxLaw([HOST]), "trust")).toEqual([POOL]);
     expect(lawAuthors(POOL, undefined, "grants")).toEqual([POOL]);
-    expect(lawAuthors(HOST, seededLaw([HOST]), "grants")).toEqual([HOST]); // equal keys: one
+    expect(lawAuthors(HOST, seededLaw([HOST]), "grants")).toEqual([HOST]);
     expect(localAuthors(POOL, inboxLaw([HOST]))).toEqual([POOL, HOST]);
   });
 });
@@ -65,7 +59,7 @@ describe("a child's trust policy: its own first, a selected host copy only where
       admit: () => true,
     });
     const admit = gw.admitFor();
-    expect(admit(byPeer(1))).toBe(false); // a stranger is outside the host's roster
+    expect(admit(byPeer(1))).toBe(false);
     expect(admit(signClaims({ ...byPeer(2).claims, author: HOST }, HOST_SEED))).toBe(true);
     await gw.close();
   });
@@ -86,7 +80,7 @@ describe("a child's trust policy: its own first, a selected host copy only where
     await gw.federate([signClaims(trustClaims("closed", [], HOST, 6_000), HOST_SEED)], {
       admit: () => true,
     });
-    expect(gw.admitFor()(byPeer(4))).toBe(true); // the child's own default: open
+    expect(gw.admitFor()(byPeer(4))).toBe(true);
     await gw.close();
   });
 
@@ -103,13 +97,12 @@ describe("a child's trust policy: its own first, a selected host copy only where
   it("a nested pool keeps its root host's seeded law through the host chain", async () => {
     const gw = await child();
     const MIDDLE = authorForSeed("4d".repeat(32));
-    // opened by a pool (MIDDLE) that itself was opened by HOST: the chain is [MIDDLE, HOST]
     gw.childLaw = seededLaw(hostChain(MIDDLE, seededLaw([HOST])));
     expect(gw.lawAuthors("trust")).toEqual([POOL, MIDDLE, HOST]);
     await gw.federate([signClaims(trustClaims("closed", [], HOST, 6_000), HOST_SEED)], {
       admit: () => true,
     });
-    expect(gw.admitFor()(byPeer(7))).toBe(false); // the root host's copy governs
+    expect(gw.admitFor()(byPeer(7))).toBe(false);
     await gw.close();
   });
 });
@@ -138,7 +131,7 @@ describe("stage 1b-ii: standing and registrations read own and selected host law
     const gw = await child();
     await gw.federate([hostGrant], { admit: () => true });
     await gw.append([signClaims(makeNegationClaims(POOL, 7_100, hostGrant.id), POOL_SEED)]);
-    await gw.append([byWriter(12)]); // the pool's strike does not end a host-rooted grant
+    await gw.append([byWriter(12)]);
     await gw.federate([signClaims(makeNegationClaims(HOST, 7_200, hostGrant.id), HOST_SEED)], {
       admit: () => true,
     });
@@ -189,7 +182,7 @@ describe("stage 1b-ii: standing and registrations read own and selected host law
       "hyperschema:Two",
     );
     const lenses = () => gw.registered.map((r) => r.lensName ?? r.hyperschema.name);
-    expect(lenses()).not.toContain("Shared"); // withheld under the child's own `conflicts`
+    expect(lenses()).not.toContain("Shared");
     const hostShared = assembleGenesis({
       operatorSeed: HOST_SEED,
       registrations: [{ hyperschema: PLANT, schema: named("Shared"), roots: [FERN] }],

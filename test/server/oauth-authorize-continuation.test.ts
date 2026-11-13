@@ -1,43 +1,3 @@
-// T148 item 1 — the dropped continuation. An unauthenticated `GET /oauth/authorize` renders the
-// login form, and before this ticket a successful sign-in landed on the plain "Signed in." page:
-// the authorize request (client_id, redirect_uri, state, code_challenge) was gone, no consent page
-// was ever rendered, no code was ever minted, and the connector received nothing.
-//
-// THE STORY RAIL IS THE POINT (a). It drives the whole act with real requests against a real
-// server, following each response by hand the way a browser does: authorize → login form → sign in
-// → consent page → approve → the redirect carrying a code. Nothing is hand-built. No fixture
-// composes a continuation for the door; every value comes off the previous response's bytes.
-//
-// THE SECOND HALF IS THE FENCE (c). A continuation is a QUERY, never a destination: the login door
-// re-attaches allowlisted authorize parameters to this store's OWN path literal. An open redirect
-// here would be a credential-phishing gift — a victim signs in to a real Loam store and is bounced
-// to an attacker's page — so each named shape is asserted separately, not as one class.
-//
-// THE FENCE IS ON THE DESTINATION, NOT ON OWNERSHIP, and (d) is written to say only that. `continue`
-// is an ordinary caller-controlled body field: a browser may put anything in it, and the answer
-// follows the field it SUBMITTED. What no caller can do is aim another browser's sign-in, because
-// the form token is an HMAC over that browser's own pre-session nonce.
-//
-// AND `POST /login` READS `continue` FROM ANY BODY. `GET /login` renders no such field, so an
-// ordinary sign-in never carries one — but a hand-built ordinary login may, and it draws the same
-// 303. That widens nothing: the destination is still this store's consent page, which re-runs the
-// exact-match fence and still demands an explicit approval before any code is minted.
-//
-// What this file deliberately does NOT assert, and which rail closes each gap:
-//   - The consent page's own criteria (the striker warning, the exact-match fence's full negative
-//     set, the code record's shape) — test/server/oauth-consent.test.ts (T135), frozen.
-//   - `authorizeRequestDefect`'s full table — test/server/oauth-authorize-validation.test.ts and
-//     test/server/oauth-pkce-method.test.ts (T167). (e1) asserts one thing about it and no more:
-//     a defect carried THROUGH the continuation is refused on arrival, so resumption cannot smuggle
-//     a request past a gate the direct path applies. (e2) is a weaker sibling — it fixes the consent
-//     door's form-token refusal for a session that ARRIVED by resumption, which is a property of the
-//     door rather than of the resume.
-//   - Redemption of the minted code — phase 15's file.
-//   - The EXACT byte at which an outsized continuation stops being read. (g) proves the ceiling
-//     refuses AND that a within-ceiling query still passes; nothing depends on the precise number,
-//     so no rail pins it. (g) drives the GET side deliberately: on the POST side the ceiling is
-//     unreachable, because session.ts's 8 KiB body cap refuses a longer body first.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -62,7 +22,6 @@ const ALLOW_ORIGIN = "https://app.example";
 const REDIRECT = "https://app.example/cb";
 const CLIENT_ID = "connector-fixed-0001";
 
-// A real PKCE challenge: 43 characters of the unreserved set, as RFC 7636 requires.
 const CHALLENGE = "a".repeat(43);
 
 const homes: string[] = [];
@@ -104,7 +63,6 @@ async function authorizeServer(): Promise<{ base: string; home: string }> {
   return { base: handle.url, home };
 }
 
-/** The authorize query a well-formed connector sends. */
 const authorizeQuery = (over: Record<string, string> = {}): string =>
   new URLSearchParams({
     response_type: "code",
@@ -116,18 +74,12 @@ const authorizeQuery = (over: Record<string, string> = {}): string =>
     ...over,
   }).toString();
 
-/** A browser's own headers on a form navigation — what the login door reads to frame a refusal. */
 const BROWSER = {
   "content-type": "application/x-www-form-urlencoded",
   accept: "text/html,application/xhtml+xml",
   ...SAME_ORIGIN,
 } as const;
 
-/**
- * A hidden field's value as a BROWSER would read it — the attribute is HTML-escaped on the page, so
- * the entities are decoded here. Submitting the escaped text instead would test a caller no browser
- * can be, and would hide a continuation that never survives its own round trip.
- */
 const hiddenOf = (html: string, name: string): string | undefined => {
   const raw = new RegExp(`name="${name}" value="([^"]*)"`).exec(html)?.[1];
   return raw
@@ -138,11 +90,6 @@ const hiddenOf = (html: string, name: string): string | undefined => {
     .replaceAll("&amp;", "&");
 };
 
-/**
- * The login form a person is shown when an authorize request finds no session — the FIRST leg of the
- * story, returned whole so each later leg reads its values off these bytes rather than composing
- * them.
- */
 async function authorizeAsStranger(
   base: string,
   query: string,
@@ -159,7 +106,6 @@ async function authorizeAsStranger(
   };
 }
 
-/** POST the login form's own fields back, carrying whatever continuation it rendered. */
 async function submitLogin(
   base: string,
   fields: { formToken: string; nonce: string; continuation?: string | undefined },
@@ -184,7 +130,6 @@ describe("the authorize door's continuation (T148 item 1)", () => {
     const { base } = await authorizeServer();
     const query = authorizeQuery();
 
-    // Leg 1 — the connector sends a person here, and this store has never seen them.
     const form = await authorizeAsStranger(base, query);
     expect(form.status).toBe(200);
     expect(form.html).toContain("Sign in.");
@@ -194,7 +139,6 @@ describe("the authorize door's continuation (T148 item 1)", () => {
       "the login form rendered on the authorize path carries no continuation",
     ).toBeDefined();
 
-    // Leg 2 — the password is correct, and the answer must SEND THEM BACK, not congratulate them.
     const signedIn = await submitLogin(base, {
       formToken: formTokenOf(form.html),
       nonce: form.nonce,
@@ -204,13 +148,11 @@ describe("the authorize door's continuation (T148 item 1)", () => {
     const location = signedIn.headers.get("location") ?? "";
     expect(location.startsWith(`${AUTHORIZE_PATH}?`)).toBe(true);
     const session = valueOf(cookiesOf(signedIn).find((c) => c.startsWith(`${SESSION_COOKIE}=`))!);
-    // Every authorize parameter the connector sent survives the round trip.
     const resumed = new URLSearchParams(location.slice(location.indexOf("?") + 1));
     for (const [name, value] of new URLSearchParams(query)) {
       expect(resumed.get(name), `the resumed query dropped ${name}`).toBe(value);
     }
 
-    // Leg 3 — following it lands on the CONSENT page, not /admin and not a success page.
     const consent = await fetch(`${base}${location}`, {
       redirect: "manual",
       headers: { accept: "text/html", cookie: `${SESSION_COOKIE}=${session}` },
@@ -220,7 +162,6 @@ describe("the authorize door's continuation (T148 item 1)", () => {
     expect(consentHtml).toContain("Approve a connector?");
     expect(consentHtml).not.toContain("Signed in.");
 
-    // Leg 4 — approving mints a code, and the redirect carries it to the registered address.
     const approve = await fetch(`${base}${AUTHORIZE_PATH}`, {
       method: "POST",
       redirect: "manual",
@@ -245,7 +186,6 @@ describe("the authorize door's continuation (T148 item 1)", () => {
     const { base } = await authorizeServer();
     const form = await fetch(`${base}/login`, { redirect: "manual" });
     const html = await form.text();
-    // The ordinary form carries NO continuation to round-trip — the field is the authorize path's.
     expect(hiddenOf(html, "continue")).toBeUndefined();
 
     const nonce = valueOf(cookiesOf(form).find((c) => c.startsWith(`${PRESESSION_COOKIE}=`))!);
@@ -258,8 +198,6 @@ describe("the authorize door's continuation (T148 item 1)", () => {
     expect(cookiesOf(res).some((c) => c.startsWith(`${SESSION_COOKIE}=`))).toBe(true);
   });
 
-  // THE FENCE. Each shape is asserted on its own: a continuation may reach this store's own
-  // authorize path and nowhere else, whatever text a caller puts in the field.
   const FOREIGN: readonly (readonly [string, string])[] = [
     ["another origin", "https://evil.example/steal"],
     ["scheme-relative", "//evil.example"],
@@ -283,9 +221,6 @@ describe("the authorize door's continuation (T148 item 1)", () => {
         continuation: hostile,
       });
       const location = res.headers.get("location");
-      // THE POSITIVE CONTROL. A "must not follow" assertion is green when nothing follows
-      // anything, so this same door is asked to follow a WELL-FORMED continuation in the same
-      // test: delete the feature and the fence goes red instead of passing vacuously (H10).
       const control = await fetch(`${base}/login`, { redirect: "manual" });
       const controlHtml = await control.text();
       const followed = await submitLogin(base, {
@@ -294,18 +229,10 @@ describe("the authorize door's continuation (T148 item 1)", () => {
         continuation: authorizeQuery(),
       });
       expect(followed.headers.get("location")).toContain(AUTHORIZE_PATH);
-      // Either the door refused the continuation outright (no Location at all), or it resumed —
-      // and a resume is ALWAYS this store's own authorize path, resolved against a foreign base to
-      // prove it cannot be read as an absolute or scheme-relative url.
       if (location !== null) {
-        // Resolved against a FOREIGN base, so an absolute or scheme-relative continuation would
-        // show as a different origin here rather than hiding behind this server's own address.
         expect(new URL(location, "https://store.example").origin).toBe("https://store.example");
         expect(new URL(location, "https://store.example").pathname).toBe(AUTHORIZE_PATH);
-        // Hostile text that survives inside a PARAMETER VALUE is encoded, never structural: no raw
-        // delimiter, no CR or LF, so it can neither escape the query nor split the header.
         expect(location.slice(AUTHORIZE_PATH.length + 1)).not.toMatch(/[\r\n?#/]/);
-        // And following it lands on this store's own refusal, never a redirect onward.
         const session = valueOf(cookiesOf(res).find((c) => c.startsWith(`${SESSION_COOKIE}=`))!);
         const resumed = await fetch(`${base}${location}`, {
           redirect: "manual",
@@ -313,9 +240,6 @@ describe("the authorize door's continuation (T148 item 1)", () => {
         });
         expect(resumed.headers.get("location")).toBeNull();
       } else {
-        // The other branch is not "nothing happened": the door still signed the person in, and it
-        // still answered the page it answers when no continuation survives. Without this, a shape
-        // that provoked a 500 or a blank body would pass by taking this branch.
         expect(res.status).toBe(200);
         expect(await res.text()).toContain("Signed in.");
       }
@@ -346,18 +270,13 @@ describe("the authorize door's continuation (T148 item 1)", () => {
 
   it("(d) the pre-session fence stops a continuation stapled onto another browser's sign-in", async () => {
     const { base } = await authorizeServer();
-    // Browser A opens the ordinary login form and holds its own pre-session nonce.
     const a = await fetch(`${base}/login`, { redirect: "manual" });
     const aHtml = await a.text();
     const aNonce = valueOf(cookiesOf(a).find((c) => c.startsWith(`${PRESESSION_COOKIE}=`))!);
-    // Browser B opens the authorize path and holds a DIFFERENT one, with a continuation.
     const b = await authorizeAsStranger(base, authorizeQuery());
     const bContinuation = hiddenOf(b.html, "continue");
     expect(bContinuation).toBeDefined();
 
-    // B's form and A's cookie do not go together. The refusal is the PRE-SESSION FENCE, which
-    // predates this ticket: the form token is an HMAC over the nonce cookie the browser presents.
-    // The continuation rides along and changes nothing, which is the point being asserted.
     const crossed = await submitLogin(base, {
       formToken: formTokenOf(b.html),
       nonce: aNonce,
@@ -367,9 +286,6 @@ describe("the authorize door's continuation (T148 item 1)", () => {
     expect(crossed.headers.get("location")).toBeNull();
     expect(cookiesOf(crossed).some((c) => c.startsWith(`${SESSION_COOKIE}=`))).toBe(false);
 
-    // AND THE HONEST OTHER HALF: with its OWN token and its OWN nonce, a browser lands wherever the
-    // field it SUBMITTED says. Nothing binds a continuation to the request that rendered it — the
-    // fence is on the destination, and a substituted query still resolves to this store's own path.
     const substituted = authorizeQuery({ state: "a-different-state" });
     const b2 = await authorizeAsStranger(base, authorizeQuery());
     const own = await submitLogin(base, {
@@ -384,7 +300,6 @@ describe("the authorize door's continuation (T148 item 1)", () => {
       "a-different-state",
     );
 
-    // And A's own sign-in still lands where an ordinary sign-in lands.
     const ordinary = await submitLogin(base, { formToken: formTokenOf(aHtml), nonce: aNonce });
     expect(ordinary.status).toBe(200);
     expect(ordinary.headers.get("location")).toBeNull();
@@ -393,22 +308,16 @@ describe("the authorize door's continuation (T148 item 1)", () => {
 
   it("(g) an outsized authorize query earns no continuation, and a normal one does", async () => {
     const { base } = await authorizeServer();
-    // Far past the ceiling continuation.ts holds. The form still renders — a person may always
-    // sign in — but it carries nothing, so the door never resumes a query it refused to read.
     const outsized = await authorizeAsStranger(base, authorizeQuery({ state: "x".repeat(9000) }));
     expect(outsized.status).toBe(200);
     expect(outsized.html).toContain("Sign in.");
     expect(hiddenOf(outsized.html, "continue")).toBeUndefined();
-    // THE POSITIVE CONTROL, on the same door: absence has to be the CEILING's doing rather than the
-    // feature's absence. A query under the ceiling, differing only in the length of one value,
-    // renders the field.
     const within = await authorizeAsStranger(base, authorizeQuery({ state: "x".repeat(100) }));
     expect(hiddenOf(within.html, "continue")).toBeDefined();
   });
 
   it("(e1) a resumed consent still refuses a PKCE method this store cannot verify (T167)", async () => {
     const { base } = await authorizeServer();
-    // The doomed request: a challenge with no method, which RFC 7636 reads as `plain`.
     const query = authorizeQuery({ code_challenge_method: "" });
     const form = await authorizeAsStranger(base, query);
     const res = await submitLogin(base, {

@@ -1,9 +1,3 @@
-// SPEC §11's contract: erasure. The store remembers THAT it forgot — who asked, when, which
-// id — never what. Authority is verified while the evidence exists (the erasure's spoken-by
-// is checked against the live target at the door); the bytes are purged from the ground; the
-// gateway re-seats on what remains; and the door refuses the id's return until the erasure
-// is lawfully struck. Degrees of forgetting compose from erase + append — never mutation.
-
 import { describe, expect, it } from "vitest";
 import {
   authorForSeed,
@@ -31,7 +25,6 @@ const OP_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OP_SEED);
 const SURVEYOR = authorForSeed(SURVEYOR_SEED);
 
-// A governed plant store where the gardener holds standing and one height is on record.
 async function grove(): Promise<{ gateway: Gateway; backend: MemoryBackend; fact: Delta }> {
   const backend = new MemoryBackend();
   const gateway = await Gateway.open(backend, { seed: OP_SEED });
@@ -52,10 +45,7 @@ const heights = (gateway: Gateway): readonly unknown[] =>
 describe("erasures are law: validated at the door while the evidence exists", () => {
   it("an erasure lying about spoken-by is refused while the target is present", async () => {
     const { gateway, fact } = await grove();
-    const lying = signClaims(
-      eraseClaims(fact.id, OPERATOR /* not the gardener */, OPERATOR, 2000),
-      OP_SEED,
-    );
+    const lying = signClaims(eraseClaims(fact.id, OPERATOR, OPERATOR, 2000), OP_SEED);
     await expect(gateway.append([lying])).rejects.toThrow(/spoken-by/);
     await gateway.close();
   });
@@ -65,7 +55,6 @@ describe("erasures are law: validated at the door while the evidence exists", ()
     await gateway.append([
       signClaims(grantClaims(STORE_ENTITY, SURVEYOR, "write", OPERATOR, 3), OP_SEED),
     ]);
-    // write standing lets SURVEYOR publish; it does NOT let them order a record removed
     const overreach = signClaims(eraseClaims(fact.id, GARDENER, SURVEYOR, 2000), SURVEYOR_SEED);
     await expect(gateway.append([overreach])).rejects.toThrow(/operator/);
     await gateway.close();
@@ -95,31 +84,25 @@ describe("erasures are law: validated at the door while the evidence exists", ()
 describe("Gateway.erase: the manifest, the purge, the re-seat, the hole", () => {
   it("erases the bytes everywhere, keeps the signed hole, and the view thins", async () => {
     const { gateway, backend, fact } = await grove();
-    // a negation citing the fact — the manifest must name it
     const strike = signClaims(makeNegationClaims(OPERATOR, 1500, fact.id), OP_SEED);
     await gateway.append([strike]);
-    expect(heights(gateway).length).toBe(0); // struck, but the bytes still exist
+    expect(heights(gateway).length).toBe(0);
 
     const report = await gateway.erase(fact.id, { reason: "unsaid by request" });
     expect(report.citations).toContain(strike.id);
-    // the bytes are gone from the ground…
     const ground = await backend.deltasSince(new Set());
     expect(ground.some((d) => d.id === fact.id)).toBe(false);
-    // …the reactor was re-seated without them…
     expect(gateway.reactor.get(fact.id)).toBeUndefined();
     expect(heights(gateway).length).toBe(0);
-    // …and the erasure is ground: who asked, which id — never what
     expect(readErasures(gateway.reactor, gateway.validityNow(), OPERATOR).has(fact.id)).toBe(true);
     await gateway.close();
   });
 
   it("only the operator may order erasure — even the record's own author cannot", async () => {
     const { gateway, fact } = await grove();
-    // a hand-built self-erasure by the record's OWN author is refused at the door
     const selfTomb = signClaims(eraseClaims(fact.id, GARDENER, GARDENER, 2000), GARDENER_SEED);
     await expect(gateway.append([selfTomb])).rejects.toThrow(/operator/);
     expect(readErasures(gateway.reactor, gateway.validityNow(), OPERATOR).has(fact.id)).toBe(false);
-    // the operator honors the request and erases; that binds
     await gateway.erase(fact.id, { reason: "honoring a subject's request" });
     expect(readErasures(gateway.reactor, gateway.validityNow(), OPERATOR).has(fact.id)).toBe(true);
     await gateway.close();
@@ -129,7 +112,7 @@ describe("Gateway.erase: the manifest, the purge, the re-seat, the hole", () => 
     const { gateway, fact } = await grove();
     await gateway.erase(fact.id);
     await expect(gateway.append([fact])).rejects.toThrow(/was erased/);
-    const report = await gateway.federate([fact]); // open trust — but the hole outranks it
+    const report = await gateway.federate([fact]);
     expect(report.accepted).toBe(0);
     expect(report.rejected).toBe(1);
     await gateway.close();
@@ -144,8 +127,8 @@ describe("Gateway.erase: the manifest, the purge, the re-seat, the hole", () => 
       ),
     );
     await gateway.append([signClaims(makeNegationClaims(OPERATOR, 9000, erasure!.id), OP_SEED)]);
-    expect(readErasures(gateway.reactor, gateway.validityNow(), OPERATOR).has(fact.id)).toBe(false); // not standing
-    await expect(gateway.append([fact])).rejects.toThrow(/was erased/); // still refused
+    expect(readErasures(gateway.reactor, gateway.validityNow(), OPERATOR).has(fact.id)).toBe(false);
+    await expect(gateway.append([fact])).rejects.toThrow(/was erased/);
     expect(heights(gateway).length).toBe(0);
     await gateway.close();
   });
@@ -157,7 +140,6 @@ describe("Gateway.erase: the manifest, the purge, the re-seat, the hole", () => 
     await gateway.append([after]);
     expect(heights(gateway).length).toBe(1);
     await gateway.flush();
-    // and the post-erase write reached the ground through the re-attached persistence
     const ground = await backend.deltasSince(new Set());
     expect(ground.some((d) => d.id === after.id)).toBe(true);
     await gateway.close();
@@ -167,12 +149,10 @@ describe("Gateway.erase: the manifest, the purge, the re-seat, the hole", () => 
 describe("degrees of forgetting compose from erase + append", () => {
   it("anonymous reassertion: the fact survives in another voice, with no on-record link", async () => {
     const { gateway, fact } = await grove();
-    // the replacement inherits the timestamp (content, time — same fact) but speaks as the store
     const replacement = signClaims({ ...fact.claims, author: OPERATOR }, OP_SEED);
     await gateway.erase(fact.id);
     await gateway.append([replacement]);
     expect(heights(gateway).length).toBe(1);
-    // no pointer anywhere links the replacement to the erased id (the hash oracle stays cold)
     expect(replacement.claims.pointers.some((p) => p.target.kind === "delta")).toBe(false);
     await gateway.close();
   });
@@ -181,8 +161,8 @@ describe("degrees of forgetting compose from erase + append", () => {
     const salt = "1f".repeat(16);
     const commitment = sealCommitment(salt, GARDENER);
     expect(commitment).toMatch(/^[0-9a-f]{64}$/);
-    expect(sealCommitment(salt, GARDENER)).toBe(commitment); // reveal verifies
-    expect(sealCommitment(salt, OPERATOR)).not.toBe(commitment); // and discriminates
+    expect(sealCommitment(salt, GARDENER)).toBe(commitment);
+    expect(sealCommitment(salt, OPERATOR)).not.toBe(commitment);
   });
 });
 
@@ -190,11 +170,9 @@ describe("erasure is per-instance: each operator governs their own ground", () =
   it("one store's operator erasure does NOT compel a peer; the peer's own operator decides", async () => {
     const { gateway: source, fact } = await grove();
     const peer = await Gateway.open(new MemoryBackend(), { seed: "0f".repeat(32) });
-    await peer.federate([fact]); // the fact crossed before the unsaying (open trust)
+    await peer.federate([fact]);
     expect(peer.reactor.get(fact.id)).toBeDefined();
 
-    // the source operator erases on the source; that erasure is the SOURCE operator's, so it
-    // is refused at the peer's door — a foreign removal-order cannot delete on the peer.
     await source.erase(fact.id);
     const erasure = [...source.reactor.snapshot()].find((d) =>
       d.claims.pointers.some(
@@ -202,14 +180,13 @@ describe("erasure is per-instance: each operator governs their own ground", () =
       ),
     );
     const crossed = await peer.federate([erasure!]);
-    expect(crossed.rejected).toBe(1); // the peer does not honor another operator's order
-    expect(peer.reactor.get(fact.id)).toBeDefined(); // the peer still remembers
+    expect(crossed.rejected).toBe(1);
+    expect(peer.reactor.get(fact.id)).toBeDefined();
 
-    // the peer's OWN operator chooses to honor the request; only that binds on the peer
     await peer.erase(fact.id);
     expect(peer.reactor.get(fact.id)).toBeUndefined();
     const again = await peer.federate([fact]);
-    expect(again.accepted).toBe(0); // ask this store for the id and see what returns
+    expect(again.accepted).toBe(0);
     await source.close();
     await peer.close();
   });
@@ -217,16 +194,13 @@ describe("erasure is per-instance: each operator governs their own ground", () =
 
 describe("the door admits only the operator's removal-orders", () => {
   it("a federated erasure by a non-operator is refused, whatever it claims", async () => {
-    // An erasure arrives by federation authored by SURVEYOR (not this store's operator). It
-    // does not matter what it claims — a removal-order the operator did not sign is refused at
-    // the door and never stored.
     const { gateway, fact } = await grove();
     const lie = signClaims(eraseClaims(fact.id, SURVEYOR, SURVEYOR, 2000), SURVEYOR_SEED);
     const report = await gateway.federate([lie]);
     expect(report.accepted).toBe(0);
     expect(report.rejected).toBe(1);
     expect(readErasures(gateway.reactor, gateway.validityNow(), OPERATOR).has(fact.id)).toBe(false);
-    expect(gateway.reactor.get(fact.id)).toBeDefined(); // the record is untouched
+    expect(gateway.reactor.get(fact.id)).toBeDefined();
     await gateway.close();
   });
 
@@ -241,8 +215,6 @@ describe("the door admits only the operator's removal-orders", () => {
   });
 
   it("a federated erasure delta from anyone but this store's operator is refused", async () => {
-    // Even a truthful self-erasure by the record's own author does not bind here: only THIS
-    // store's operator orders removal, so a federated removal-order is refused at the door.
     const { gateway, fact } = await grove();
     const honest = signClaims(eraseClaims(fact.id, GARDENER, GARDENER, 2000), GARDENER_SEED);
     const report = await gateway.federate([honest]);
@@ -261,18 +233,17 @@ describe("the door admits only the operator's removal-orders", () => {
     ]);
     const dead = readErasures(gateway.reactor, gateway.validityNow(), OPERATOR);
     expect(dead.has(fact.id)).toBe(true);
-    expect(dead.has(ghostId)).toBe(true); // operator pre-emptive refusal is legitimate
+    expect(dead.has(ghostId)).toBe(true);
     await gateway.close();
   });
 });
 
 describe("erasuresIn (pre-boot) matches the running store's verdict", () => {
   it("a lawfully struck erasure is NOT dead pre-boot — heal will not drop the negated record", async () => {
-    // The exact heal-vs-negation interaction SPEC §11 says to pin first.
     const { gateway, fact } = await grove();
-    await gateway.erase(fact.id); // operator erasure
+    await gateway.erase(fact.id);
     const all1 = [...gateway.reactor.snapshot()];
-    expect(erasuresIn(all1, Date.now(), OPERATOR).has(fact.id)).toBe(true); // dead while the erasure stands
+    expect(erasuresIn(all1, Date.now(), OPERATOR).has(fact.id)).toBe(true);
     const erasure = all1.find((d) =>
       d.claims.pointers.some(
         (p) => p.target.kind === "delta" && p.target.deltaRef.delta === fact.id,
@@ -280,7 +251,6 @@ describe("erasuresIn (pre-boot) matches the running store's verdict", () => {
     );
     await gateway.append([signClaims(makeNegationClaims(OPERATOR, 9000, erasure!.id), OP_SEED)]);
     const all2 = [...gateway.reactor.snapshot()];
-    // negated: the pre-boot reader agrees, so a boot heal would carry (not drop) the record
     expect(erasuresIn(all2, Date.now(), OPERATOR).has(fact.id)).toBe(false);
     await gateway.close();
   });
@@ -311,13 +281,9 @@ describe("the erasure log stays append-only", () => {
   });
 });
 
-// §11's promise is about BYTES, and the purge count is the only evidence they went (ticket T55).
 describe("erase refuses to report a completion it cannot evidence", () => {
   it("a backend whose purge removes nothing makes erase throw rather than return erased", async () => {
     const { gateway, backend, fact } = await grove();
-    // A store that accepts writes and silently removes nothing, AND still holds the bytes — the
-    // read-only-mount shape. Both halves matter: a 0 count alone is ambiguous (a completed earlier
-    // attempt returns 0 too), so the verdict is byte-presence and the fixture must supply it.
     backend.purge = () => Promise.resolve(0);
     await expect(gateway.erase(fact.id, { reason: "the subject asked" })).rejects.toThrow(
       /STILL HELD by the store/,
@@ -327,18 +293,8 @@ describe("erase refuses to report a completion it cannot evidence", () => {
 
   it("a retry after a partial purge completes without minting a second erasure", async () => {
     const { gateway, backend, fact } = await grove();
-    // The documented partial-success: sqlite's purge deletes the rows and may still throw when it
-    // cannot truncate the WAL, leaving the caller "a partial erasure to retry, not a failed one to
-    // redo". Modelled as a purge that removes the rows and refuses — AND a `holds` that answers
-    // UNPROVABLE while the debt stands, because that is what the real driver does (the owed-id
-    // set): a double whose purge cries INCOMPLETE while its holds says all-clean is a double that
-    // lies about what it holds, and the retry guard would read the lie as a finished erasure.
     const real = backend.purge.bind(backend);
     const realHolds = backend.holds.bind(backend);
-    // The debt's whole lifecycle, as the real driver keeps it: unprovable from the refused
-    // checkpoint until a later purge's checkpoint SUCCEEDS — which happens DURING the retry, not
-    // before it. The guard must see the debt (that is what lets the retry through); the verdict
-    // after the retry's own purge must see it cleared.
     let debtOwed = false;
     backend.holds = (id) => (debtOwed ? Promise.resolve(true) : realHolds(id));
     backend.purge = async (ids) => {
@@ -355,9 +311,6 @@ describe("erase refuses to report a completion it cannot evidence", () => {
       isErasure(d.claims),
     ).length;
 
-    // The operator re-runs, exactly as the error instructs. The bytes are already gone, so purge
-    // now returns 0 — which must NOT read as failure, and must NOT append a second erasure. Its
-    // checkpoint lands this time, settling the debt mid-call, exactly as sqlite's does.
     backend.purge = async (ids) => {
       const n = await real(ids);
       debtOwed = false;
@@ -374,7 +327,6 @@ describe("erase refuses to report a completion it cannot evidence", () => {
 
   it("the ordinary path still reports the erasure, and the bytes are actually gone", async () => {
     const { gateway, fact } = await grove();
-    // The positive leg: without it, an erase that always threw would satisfy the rail above.
     await expect(gateway.erase(fact.id, { reason: "the subject asked" })).resolves.toMatchObject({
       erased: fact.id,
     });

@@ -1,8 +1,3 @@
-// The HTTP doors read a gateway as a view of its container's journal (ruling 13). Two gateways over
-// one sqlite store: B serves, A writes. The anonymous door's openness check runs before any query,
-// so it must read B's refreshed view, and on a container mount the host's refreshed view too. Both
-// cases go red if the server checks openness against a stale view.
-
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,7 +27,6 @@ afterEach(async () => {
   opened.length = 0;
 });
 
-// A writes and B serves, over the same container.
 const twoViews = async (): Promise<{ a: Gateway; b: Gateway }> => {
   const file = join(mkdtempSync(join(tmpdir(), "loam-views-http-")), "store.sqlite");
   const a = await Gateway.boot(
@@ -104,7 +98,6 @@ describe("the HTTP doors read refreshed views", () => {
     const commons = await b.openContainer({ name: "commons", backend: new MemoryBackend() });
     const ask = await serving(b);
     expect(await ask("/commons/graphql")).toMatch(/^200 .*"height":41/);
-    // The pool keeps its seeded copy of the declaration; the host's live word decides.
     await a.append([signClaims(makeNegationClaims(OP, 10_200, door.id), OP_SEED)]);
     expect(await ask("/commons/graphql")).toBe(await ask("/nowhere/graphql"));
     await commons.drop();

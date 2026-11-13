@@ -1,13 +1,3 @@
-// Promotion — promote-outputs (SPEC §24.3), the first CONTAINER operation of §27: the operator adopts a
-// delta a quarantine produced by RE-SPEAKING its content as their own claim into the primary, carrying
-// `loam.adoption` provenance back to the pool. The value crosses by re-assertion (authored fresh, not
-// federated), so the pool can be dropped wholesale and the adopted value survives in the operator's voice —
-// and its origin is kept FOREVER, which is what makes fork/pull-request native. These suites prove: the
-// adopted value lands and resolves in the primary under the operator; it survives dropping the pool; the
-// provenance trail is readable; and a promotion whose reference would dangle is refused (reference closure).
-// The re-assertion INHERITS the source timestamp (§11 rung 2), so promotion is content-addressed: the
-// idempotence, erasure-holds, and chain-closure suites below all stand on that one property.
-
 import { describe, expect, it } from "vitest";
 import {
   authorForSeed,
@@ -26,13 +16,11 @@ import { FERN } from "../spike/garden.js";
 
 const OP_SEED = "0e".repeat(32);
 const OP = authorForSeed(OP_SEED);
-const GUEST_SEED = "9d".repeat(32); // a stranger whose fact runs in the quarantine
+const GUEST_SEED = "9d".repeat(32);
 const GUEST = authorForSeed(GUEST_SEED);
 const pick: Policy = { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } };
 const SCHEMA: Schema = { props: new Map<string, Policy>([["message", pick]]), default: pick };
 
-// A foreign fact about FERN's `message`, authored by a STRANGER — the kind of output a quarantined app
-// produces: present in the pool, inert (binds nothing, §8), until the operator adopts it.
 const foreignFact = (value: string, ts: number) =>
   signClaims(
     {
@@ -66,17 +54,15 @@ describe("§24.3 promote-outputs — adopt a quarantine's output as the operator
     const primary = await bootPrimary();
     const q = await primary.openQuarantine();
     const fact = foreignFact("the stranger's app said this", 3000);
-    await q.gateway.federate([fact]); // the stranger's output, present in the pool (inert there)
-    expect(await messageOf(primary)).toBeNull(); // the primary has NOT seen it — it's sequestered
+    await q.gateway.federate([fact]);
+    expect(await messageOf(primary)).toBeNull();
 
     const { promoted } = await primary.promote(q.gateway, fact.id, { from: "trial-pool" });
 
-    // The re-signed content now lives in the primary, authored by the OPERATOR (clean — no provenance
-    // pollution), and resolves as itself. The provenance rides a SEPARATE adoption record pointing at it.
     const adopted = primary.reactor.get(promoted);
     expect(adopted?.claims.author).toBe(OP);
-    expect(isAdoption(adopted!.claims)).toBe(false); // the content delta is clean
-    expect(primary.adoptions().some((a) => a.adoptedDelta === promoted)).toBe(true); // the record points at it
+    expect(isAdoption(adopted!.claims)).toBe(false);
+    expect(primary.adoptions().some((a) => a.adoptedDelta === promoted)).toBe(true);
     expect(await messageOf(primary)).toBe("the stranger's app said this");
     await q.drop();
     await primary.close();
@@ -92,9 +78,9 @@ describe("§24.3 promote-outputs — adopt a quarantine's output as the operator
     const trail = primary.adoptions();
     expect(trail).toHaveLength(1);
     expect(trail[0]!.from).toBe("trial-pool");
-    expect(trail[0]!.sourceDelta).toBe(fact.id); // WHAT was adopted
-    expect(trail[0]!.producedBy).toBe(GUEST); // WHO made the output (the granted author it wrote under)
-    expect(trail[0]!.adoptedBy).toBe(OP); // WHO blessed it
+    expect(trail[0]!.sourceDelta).toBe(fact.id);
+    expect(trail[0]!.producedBy).toBe(GUEST);
+    expect(trail[0]!.adoptedBy).toBe(OP);
     await q.drop();
     await primary.close();
   });
@@ -105,15 +91,14 @@ describe("§24.3 promote-outputs — adopt a quarantine's output as the operator
     const fact = foreignFact("this outlives the sandbox", 3200);
     await q.gateway.federate([fact]);
     await primary.promote(q.gateway, fact.id, { from: "trial-pool" });
-    await q.drop(); // discard the whole quarantine
-    expect(await messageOf(primary)).toBe("this outlives the sandbox"); // still standing, in the operator's voice
+    await q.drop();
+    expect(await messageOf(primary)).toBe("this outlives the sandbox");
     await primary.close();
   });
 
   it("refuses a promotion whose reference would DANGLE in the primary (reference closure, §27)", async () => {
     const primary = await bootPrimary();
     const q = await primary.openQuarantine();
-    // A pool delta that cites another delta the primary does not hold — promoting it would dangle.
     const dangling = signClaims(
       {
         timestamp: 3300,
@@ -158,10 +143,7 @@ describe("§24.3 promote-outputs — adopt a quarantine's output as the operator
       GUEST_SEED,
     );
     await q.gateway.federate([factA, factB]);
-    // B before A dangles (A's pool id is unknown here, no adoption bridges it yet)…
     await expect(primary.promote(q.gateway, factB.id)).rejects.toThrow(/dangle/);
-    // …but after adopting A, promoting B succeeds and B's citation is REWRITTEN to A's adopted id —
-    // the trail is the bridge, and no pool id ever appears in the primary's ground.
     const { promoted: adoptedA } = await primary.promote(q.gateway, factA.id);
     const { promoted: adoptedB } = await primary.promote(q.gateway, factB.id);
     const cites = primary.reactor
@@ -180,7 +162,7 @@ describe("§24.3 promote-outputs — adopt a quarantine's output as the operator
     const first = await primary.promote(q.gateway, fact.id, { from: "trial-pool" });
     const second = await primary.promote(q.gateway, fact.id, { from: "trial-pool" });
     expect(second.promoted).toBe(first.promoted);
-    expect(primary.reactor.get(first.promoted)!.claims.timestamp).toBe(3500); // inherited, §11 rung 2
+    expect(primary.reactor.get(first.promoted)!.claims.timestamp).toBe(3500);
     expect(primary.adoptions().filter((a) => a.sourceDelta === fact.id)).toHaveLength(1);
     await q.drop();
     await primary.close();
@@ -193,9 +175,6 @@ describe("§24.3 promote-outputs — adopt a quarantine's output as the operator
     await q.gateway.federate([fact]);
     const { promoted } = await primary.promote(q.gateway, fact.id);
     await primary.erase(promoted, { reason: "the operator un-said it" });
-    // The pool's source delta survives the fan-out (only the adopted id was erased) — and that is not a
-    // door back in: the inherited timestamp makes re-promotion re-mint the SAME id, which the erasure
-    // refuses. Without inheritance a fresh timestamp would mint a fresh id and walk the content past §11.
     await expect(primary.promote(q.gateway, fact.id)).rejects.toThrow(/erased|erasure/);
     await q.drop();
     await primary.close();
@@ -262,16 +241,12 @@ describe("§24.3 promote-outputs adopts FACTS, never LAW — operator authorship
     await q.gateway.federate([fact]);
     await primary.promote(q.gateway, fact.id);
     expect(readAdoptions(primary.reactor, primary.validityNow())).toHaveLength(1);
-    expect(readAdoptions(primary.reactor, primary.validityNow(), GUEST)).toHaveLength(0); // the filter still filters
+    expect(readAdoptions(primary.reactor, primary.validityNow(), GUEST)).toHaveLength(0);
     await q.drop();
     await primary.close();
   });
 });
 
-// A struck adoption record must leave the trail AND let promotion re-establish it (ticket T46). The
-// adoption reader ignored `lawfulNegated`, so a withdrawn provenance record kept appearing in
-// `adoptions()` (the audit trail lied) and `promoteImpl`'s presence short-circuit rode that stale
-// trail — re-promoting a value whose record was struck returned success and landed nothing.
 describe("§24.3/§27 — a STRUCK adoption record leaves the trail and lets promotion re-land", () => {
   const recordFor = (gw: Gateway, promoted: string) =>
     [...gw.reactor.snapshot()].find(
@@ -294,15 +269,14 @@ describe("§24.3/§27 — a STRUCK adoption record leaves the trail and lets pro
     await q.gateway.federate([fact]);
     const { promoted } = await primary.promote(q.gateway, fact.id, { from: "trial-pool" });
     const record = recordFor(primary, promoted)!;
-    expect(primary.adoptions().some((a) => a.adoptedDelta === promoted)).toBe(true); // present first
+    expect(primary.adoptions().some((a) => a.adoptedDelta === promoted)).toBe(true);
 
-    // The operator withdraws the PROVENANCE record (a plain negation), keeping the value.
     await primary.append([
       signClaims(makeNegationClaims(OP, 9_000_000, record.id, "withdraw provenance"), OP_SEED),
     ]);
 
-    expect(primary.adoptions().some((a) => a.adoptedDelta === promoted)).toBe(false); // gone from trail
-    expect(await messageOf(primary)).toBe("adopted, then provenance withdrawn"); // value still stands
+    expect(primary.adoptions().some((a) => a.adoptedDelta === promoted)).toBe(false);
+    expect(await messageOf(primary)).toBe("adopted, then provenance withdrawn");
     await q.drop();
     await primary.close();
   });
@@ -317,13 +291,11 @@ describe("§24.3/§27 — a STRUCK adoption record leaves the trail and lets pro
     await primary.append([
       signClaims(makeNegationClaims(OP, 9_000_000, record.id, "withdraw"), OP_SEED),
     ]);
-    const before = recordCount(primary); // 1 — the struck record still sits in the ground
+    const before = recordCount(primary);
 
     const re = await primary.promote(q.gateway, fact.id, { from: "trial-pool" });
-    // A fresh record must land — before the fix, promote short-circuits on the stale trail and lands
-    // nothing while reporting success.
     expect(recordCount(primary)).toBe(before + 1);
-    expect(primary.adoptions().some((a) => a.adoptedDelta === re.promoted)).toBe(true); // live in trail
+    expect(primary.adoptions().some((a) => a.adoptedDelta === re.promoted)).toBe(true);
     await q.drop();
     await primary.close();
   });
@@ -350,22 +322,16 @@ describe("§24.3/§27 — a STRUCK adoption record leaves the trail and lets pro
     await q.gateway.federate([factA, factB]);
     const { promoted: adoptedA } = await primary.promote(q.gateway, factA.id);
     const recordA = recordFor(primary, adoptedA)!;
-    // Withdraw A's PROVENANCE record (keeping the value) — the §27 review action T46's audit rail
-    // blesses. The reference bridge must NOT be severed: A's counterpart still stands and is citable.
     await primary.append([
       signClaims(makeNegationClaims(OP, 9_000_001, recordA.id, "withdraw A's provenance"), OP_SEED),
     ]);
-    // Before the bridge decoupling this threw "would dangle" — the struck record removed the bridge.
     const { promoted: adoptedB } = await primary.promote(q.gateway, factB.id);
     const cited = primary.reactor.get(adoptedB)!.claims.pointers.find((p) => p.role === "cites")!;
-    expect(cited.target.kind === "delta" && cited.target.deltaRef.delta).toBe(adoptedA); // rewritten
+    expect(cited.target.kind === "delta" && cited.target.deltaRef.delta).toBe(adoptedA);
     await q.drop();
     await primary.close();
   });
   it("STRANGER cannot censor (unit): readAdoptions honors only the record author's own strike", () => {
-    // A governed store's write-standing door refuses a stranger's negation outright, so this scoping
-    // is exercised where it is reachable: readAdoptions as a pure function on a hand-built reactor
-    // holding both the operator's record and a stranger's strike of it.
     const record = signClaims(
       adoptionRecordClaims("adopted-id", "pool", "src-id", GUEST, OP, 1000),
       OP_SEED,
@@ -373,7 +339,6 @@ describe("§24.3/§27 — a STRUCK adoption record leaves the trail and lets pro
     const reactor = new Reactor();
     reactor.ingest(record);
     reactor.ingest(signClaims(makeNegationClaims(GUEST, 2000, record.id, "not yours"), GUEST_SEED));
-    // The stranger's negation is inert — only the record author's own strike negates (H1 doctrine).
     expect(readAdoptions(reactor, Date.now()).some((a) => a.adoptedDelta === "adopted-id")).toBe(
       true,
     );
@@ -384,9 +349,6 @@ describe("§24.3/§27 — a STRUCK adoption record leaves the trail and lets pro
   });
 });
 
-// The adopted claim re-speaks the source, so it is valid over the source's own interval, not from
-// its creation time and never-ending. Asked at both levels: the adopted claim's validity fields, and
-// what the primary resolves.
 describe("promotion keeps the source's validity interval", () => {
   const windowed = (value: string, validFrom: number, validUntil: number) =>
     signClaims(

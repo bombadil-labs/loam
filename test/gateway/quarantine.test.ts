@@ -1,11 +1,3 @@
-// The quarantine pool — SPEC §24, slice 1. A second store over the operator's own ground, seeded ONE-WAY
-// from a primary by federation, where untrusted law may run sequestered. These suites prove the
-// foundation: it is a REAL separate store (drop it, the primary is untouched); the glass is ONE-WAY (a pool
-// write never reaches the primary); the ground LIVE-FOLLOWS (a new primary fact reaches the pool on a
-// pulse); and — the non-negotiable law (§24.8) — an ERASURE in the primary forgets the byte in the pool
-// too, byte-for-byte, with no re-entry and no read scope that resurrects it. A quarantine that could hide a
-// purged byte would be an erasure-evasion channel inside the operator's own walls (§11), and this forbids it.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Policy, type Schema } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
@@ -52,9 +44,9 @@ describe("§24.1/§24.2 the quarantine pool — a separate store, one-way glass"
   it("the pool resolves the primary's LIVING ground; dropping it leaves the primary untouched", async () => {
     const primary = await bootPrimary();
     const q = await primary.openQuarantine();
-    expect(await heightOf(q.gateway)).toBe(42); // a real lens over real ground, not raw deltas
+    expect(await heightOf(q.gateway)).toBe(42);
     await q.drop();
-    expect(await heightOf(primary)).toBe(42); // discard the pool → the primary is unscathed
+    expect(await heightOf(primary)).toBe(42);
     await primary.close();
   });
 
@@ -63,9 +55,9 @@ describe("§24.1/§24.2 the quarantine pool — a separate store, one-way glass"
     const q = await primary.openQuarantine();
     const poolWrite = inPoolVoice(q.gateway, observed(FERN, "height", 999, 5000, OP_SEED));
     await q.gateway.append([poolWrite]);
-    expect(holds(q.gateway, poolWrite.id)).toBe(true); // the pool holds its own write
+    expect(holds(q.gateway, poolWrite.id)).toBe(true);
     expect(await heightOf(q.gateway)).toBe(999);
-    expect(holds(primary, poolWrite.id)).toBe(false); // the primary NEVER sees it — inbound edge only
+    expect(holds(primary, poolWrite.id)).toBe(false);
     expect(await heightOf(primary)).toBe(42);
     await q.drop();
     await primary.close();
@@ -76,9 +68,9 @@ describe("§24.1/§24.2 the quarantine pool — a separate store, one-way glass"
     const q = await primary.openQuarantine();
     const later = observed(FERN, "message", "news", 3000, OP_SEED);
     await primary.append([later]);
-    expect(holds(q.gateway, later.id)).toBe(false); // not yet — the pool has not re-pulsed
-    await q.reseed(); // pulse the one-way inbound edge
-    expect(holds(q.gateway, later.id)).toBe(true); // now the pool sees the live ground
+    expect(holds(q.gateway, later.id)).toBe(false);
+    await q.reseed();
+    expect(holds(q.gateway, later.id)).toBe(true);
     await q.drop();
     await primary.close();
   });
@@ -89,29 +81,23 @@ describe("§24.8 erasure reaches the quarantine — the law, no evasion", () => 
     const primary = await bootPrimary();
     const secret = observed(FERN, "message", "a thing to be forgotten", 2000, OP_SEED);
     await primary.append([secret]);
-    const poolBackend = new MemoryBackend(); // held, so we can prove the BYTE is gone from the pool's store
+    const poolBackend = new MemoryBackend();
     const q = await primary.openQuarantine({ backend: poolBackend });
-    expect(holds(q.gateway, secret.id)).toBe(true); // seeded → the pool holds the secret
+    expect(holds(q.gateway, secret.id)).toBe(true);
 
-    // The operator erases it in the PRIMARY — which fans the erasure OUT to the pool.
     await primary.erase(secret.id, { reason: "the subject asked to be forgotten" });
 
-    // (a) the erasure propagated IN
     expect(
       readErasures(q.gateway.reactor, q.gateway.validityNow(), q.gateway.operatorAuthor).has(
         secret.id,
       ),
     ).toBe(true);
-    // (b) the byte is GONE from the pool — not in its ground, and not in its backend
     expect(holds(q.gateway, secret.id)).toBe(false);
     expect((await poolBackend.deltasSince(new Set())).some((d) => d.id === secret.id)).toBe(false);
-    // (c) re-entry refused: re-federating the secret is rejected (the door remembers the hole)
     const report = await q.gateway.federate([secret]);
     expect(report.accepted).toBe(0);
     expect(holds(q.gateway, secret.id)).toBe(false);
-    // (d) no read scope resurrects it — gone from the pool's ground, so no lens over the pool can show it
     expect([...q.gateway.reactor.snapshot()].every((d) => d.id !== secret.id)).toBe(true);
-    // ...and the primary forgot it too, of course
     expect(holds(primary, secret.id)).toBe(false);
     await q.drop();
     await primary.close();
@@ -123,28 +109,18 @@ describe("§24.8 erasure reaches the quarantine — the law, no evasion", () => 
     await primary.append([fact]);
     const q = await primary.openQuarantine();
     expect(holds(q.gateway, fact.id)).toBe(true);
-    // An erasure signed by a NON-operator: eraseDefect refuses it, so eraseReplica must NOT purge.
-    // The refusal is loud (a hostile direct caller handed over a forgery), but the INVARIANT is the
-    // byte: the forged order leaves it untouched. The fix removed a TRUST filter, never this CHECK.
     const ALT_SEED = "a1".repeat(32);
     const forged = signClaims(
       eraseClaims(fact.id, OP, authorForSeed(ALT_SEED), 3000, "i'll forget this for you"),
       ALT_SEED,
     );
     await expect(q.gateway.eraseReplica(forged, fact.id)).rejects.toThrow(/operator/);
-    expect(holds(q.gateway, fact.id)).toBe(true); // the byte survives — no unauthorized removal
+    expect(holds(q.gateway, fact.id)).toBe(true);
     await q.drop();
     await primary.close();
   });
 
   it("no COMPOSED read scope resurrects a purged byte — primary ⊎ pool holds zero bytes of it (§24.8 assert 4)", async () => {
-    // §23.9's opt-in interop lets a primary-side query deliberately include an active quarantine in its
-    // scope. The widest scope such a read could EVER assemble is the union of both grounds — so this rail
-    // asserts, byte-for-byte, that after an erasure that union contains nothing of the forgotten content:
-    // not the delta id, not the content string, in neither reactor nor either backend's at-rest bytes.
-    // DESIGN RAIL: when the first-class scope surface lands (§23.9 opt-in interop / §27.6's membership
-    // select/watch), re-point this test at it — the assertion must hold through THAT door too. Today it
-    // pins the strongest form available: the bytes exist nowhere, so no scope over these stores can show them.
     const FORGOTTEN = "the-exact-bytes-to-be-forgotten-everywhere";
     const primaryBackend = new MemoryBackend();
     const primary = await Gateway.boot(
@@ -160,15 +136,13 @@ describe("§24.8 erasure reaches the quarantine — the law, no evasion", () => 
     await primary.append([secret]);
     const poolBackend = new MemoryBackend();
     const q = await primary.openQuarantine({ backend: poolBackend });
-    expect(holds(q.gateway, secret.id)).toBe(true); // the pool held the secret before the erasure
+    expect(holds(q.gateway, secret.id)).toBe(true);
 
     await primary.erase(secret.id, { reason: "forgotten everywhere, or nowhere" });
 
-    // The widest composable scope: every surviving delta of BOTH grounds, unioned.
     const composed = [...primary.reactor.snapshot(), ...q.gateway.reactor.snapshot()];
     expect(composed.some((d) => d.id === secret.id)).toBe(false);
     expect(JSON.stringify(composed)).not.toContain(FORGOTTEN);
-    // And at the byte tier: neither backend retains the content at rest.
     for (const backend of [primaryBackend, poolBackend]) {
       const atRest = await backend.deltasSince(new Set());
       expect(atRest.some((d) => d.id === secret.id)).toBe(false);

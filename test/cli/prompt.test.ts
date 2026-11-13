@@ -1,13 +1,7 @@
-// `promptSecret` (§36 phase 3, T124), tested directly against a fake TTY — every other rail in
-// this ticket injects `readSecret` and never exercises this file at all, so without this it would
-// ship with zero coverage of its own echo-off, backspace and cancel handling.
-
 import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { promptSecret } from "../../src/cli/prompt.js";
 
-// Named rather than embedded literally, so a reviewer sees what each byte is (`prompt.ts` mirrors
-// these as its own private constants — this file cannot import them, so the values are repeated).
 const BACKSPACE = String.fromCharCode(0x08);
 const DELETE = String.fromCharCode(0x7f);
 const CTRL_C = String.fromCharCode(0x03);
@@ -60,7 +54,7 @@ describe("promptSecret", () => {
       return true;
     };
     await expect(promptSecret("password: ")).rejects.toThrow(/wants a terminal/);
-    expect(written).toEqual([]); // never even printed the prompt
+    expect(written).toEqual([]);
   });
 
   it("resolves the typed characters on Enter, and turns raw mode back off", async () => {
@@ -70,7 +64,7 @@ describe("promptSecret", () => {
     fake.emit("data", "\r");
     await expect(promise).resolves.toBe("hunter2");
     expect(fake.rawModeCalls).toEqual([true, false]);
-    expect(fake.paused).toBe(true); // finish() pauses the stream
+    expect(fake.paused).toBe(true);
   });
 
   it("a backspace erases exactly the last character, not the whole buffer", async () => {
@@ -83,8 +77,6 @@ describe("promptSecret", () => {
     await expect(promise).resolves.toBe("abd");
   });
 
-  // Both erasers name a DIFFERENT byte a terminal can send for the same key — a rail
-  // exercising only one cannot see a set narrowed to the other.
   it("delete (the second eraser byte) also erases the last character", async () => {
     const fake = useFakeStdin();
     const promise = promptSecret("password: ");

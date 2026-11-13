@@ -1,18 +1,3 @@
-// T143 — the browser smoke rail. Criteria 4–6 of .adlc/specs/36-06-origin-null-repair.md: REAL
-// Chrome, over CDP, completes the three user stories end to end — login and logout, consent
-// approval landing on the registered redirect_uri, and one admin POST whose effect is visible.
-// Every other rail in this suite hand-builds its headers, so no other rail can see what a browser
-// actually sends; this one exists because all of them were green while no human could log in.
-//
-// What this file deliberately does NOT cover, and which rail would close each gap:
-//   - Only Chrome. Browsers that send neither `Origin` nor `Sec-Fetch-Site` on a same-origin form
-//     POST (old Safari shapes) are REFUSED by §36-06's landed decision; widening acceptance would
-//     be a new decision for Myk, not a rail.
-//   - Loopback only. Origin-agreement behind a TLS terminator (--public-url vs the funnel address)
-//     has no rail anywhere; a funnel-fixture story rail is follow-up work (named in the working
-//     spec's gaps).
-//   - Chrome ABSENT is a FAILURE, not a skip — resolveChrome() throws, naming LOAM_CHROME.
-
 import { createServer, type Server } from "node:http";
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -38,7 +23,6 @@ const CHEAP: ScryptParams = { N: 1024, r: 8, p: 1, keylen: 32 };
 const PASSWORD = "correct horse";
 const CLIENT_ID = "connector-fixed-0001";
 
-// A real PKCE S256 challenge — the consent GET refuses a malformed one before any page renders.
 const CODE_CHALLENGE = createHash("sha256")
   .update("a-verifier-of-sufficient-length-43chars-min")
   .digest("base64url");
@@ -49,12 +33,10 @@ let gateway: Gateway;
 let base: string;
 let landing: Server;
 let landingOrigin: string;
-/** Every request the redirect_uri listener received: url + the Referer it arrived with. */
 const landed: { url: string; referer: string | undefined }[] = [];
 const homes: string[] = [];
 
 beforeAll(async () => {
-  // The connector's own site: where the authorize 302 must land Alice's browser.
   landing = createServer((req, res) => {
     landed.push({ url: req.url ?? "", referer: req.headers.referer });
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
@@ -89,9 +71,6 @@ beforeAll(async () => {
   };
   writeOAuthFile(home, { version: 1, clients: [client], grants: [], tokens: [] });
 
-  // The browser sends a REAL Origin, so ownOrigins — derived from publicUrl — must name the
-  // address Chrome actually uses. Reserve a port first; the tiny close-then-reuse race is the
-  // price of agreement, and losing it fails loudly at listen time.
   const probe = createServer();
   await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
   const storePort = (probe.address() as { port: number }).port;
@@ -120,7 +99,6 @@ afterAll(async () => {
 const fill = (tab: Tab, name: string, value: string): Promise<unknown> =>
   tab.eval(`document.querySelector('input[name="${name}"]').value = ${JSON.stringify(value)}`);
 
-/** Submit the page's form whose action matches, and wait for the navigation it causes. */
 const submit = async (tab: Tab, action: string): Promise<void> => {
   const done = tab.loaded(`the navigation after submitting ${action}`);
   await tab.eval(`document.querySelector('form[action="${action}"]').submit()`);
@@ -129,11 +107,6 @@ const submit = async (tab: Tab, action: string): Promise<void> => {
 
 const bodyText = (tab: Tab): Promise<unknown> => tab.eval("document.body.textContent");
 
-/**
- * Drive the real login form as the named user; leaves the tab on the signed-in page. Tabs share
- * the profile's cookie jar, so a prior story's session (even a half-finished one) is signed out
- * first — each story must stand alone.
- */
 async function signIn(tab: Tab, user: string): Promise<void> {
   await tab.navigate(`${base}/login`);
   const alreadyIn = (await tab.eval(
@@ -157,7 +130,7 @@ describe("T143 — the doors, driven by a real browser", () => {
     expect(signedIn).toContain("alice");
     expect(signedIn).toContain("operator");
     const cookies = (await tab.eval("document.cookie")) as string;
-    void cookies; // the session cookie is HttpOnly — its proof is the signed-in page itself
+    void cookies;
     await submit(tab, "/logout");
     expect(await bodyText(tab)).toContain("Signed out.");
     tab.close();
@@ -176,19 +149,13 @@ describe("T143 — the doors, driven by a real browser", () => {
     const authorize = `${base}/oauth/authorize?${query.toString()}`;
     await tab.navigate(authorize);
     expect(await bodyText(tab)).toContain("Approve a connector?");
-    // §58: a connection lives in one container under alice's name, chosen here — she names it.
     await tab.eval('document.getElementById("bind_new").value = "journal"');
     await submit(tab, "/oauth/authorize");
     const where = (await tab.eval("location.href")) as string;
     expect(where.startsWith(`${landingOrigin}/cb`)).toBe(true);
     expect(where).toContain("code=");
     expect(where).toContain("state=st-42");
-    // ...and the store holds what she named: the container stands under her home.
     expect(gateway.containers().containers.get("alice:journal")?.parent).toBe("alice");
-    // Criterion 5's second half: what ARRIVES at the connector carries no authorize URL. A
-    // STORE-origin Referer is at most the bare origin — never a path, never the query that holds
-    // client_id, state and code_challenge. The landing page's own subresource fetches (Chrome
-    // asks for /favicon.ico uninvited) legitimately carry the LANDING's referer; nothing else may.
     expect(landed.length).toBeGreaterThan(0);
     for (const hit of landed) {
       if (hit.referer === undefined) continue;
@@ -211,9 +178,6 @@ describe("T143 — the doors, driven by a real browser", () => {
     await tab.navigate(`${base}/admin`);
     expect(await bodyText(tab)).toContain("ada");
     await submit(tab, "/admin/create-root");
-    // Object level: the page she lands back on no longer offers creation. Delta level: the
-    // gateway itself now holds one more container than before — the effect is in the store,
-    // not merely in the page (both levels, per CLAUDE.md's P3 rule).
     const after = gateway.containers().containers.size;
     expect(after).toBe(before + 1);
     expect(await bodyText(tab)).not.toContain("create");

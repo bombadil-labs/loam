@@ -1,9 +1,4 @@
-// The in-memory driver: a DeltaSet keeping the StoreBackend contract's promises immediately.
-// Nothing survives the process — this is the ephemeral tier for tests, scratch stores, and
-// contract parity.
-
-/* eslint-disable @typescript-eslint/require-await -- the async keyword is load-bearing: it
-   turns every synchronous throw into the rejected promise the seam promises. */
+/* eslint-disable @typescript-eslint/require-await */
 import { DeltaSet, type Delta, type DurableOrdinaryJournalStore } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "./backend.js";
 import { canonicalDelta } from "./canon.js";
@@ -18,8 +13,6 @@ export class MemoryBackend implements StoreBackend {
 
   async append(deltas: Iterable<Delta>): Promise<number> {
     this.assertOpen();
-    // Canonicalize the WHOLE batch before touching the set: one refused delta refuses the lot,
-    // atomically — the same all-or-nothing every driver must keep.
     const batch = [...deltas].map(canonicalDelta);
     let stored = 0;
     for (const d of batch) if (this.set.add(d)) stored += 1;
@@ -35,7 +28,6 @@ export class MemoryBackend implements StoreBackend {
 
   async purge(ids: Iterable<string>): Promise<number> {
     this.assertOpen();
-    // DeltaSet is grow-only by design; forgetting is a rebuild from the survivors.
     const gone = new Set(ids);
     const survivors = new DeltaSet();
     let removed = 0;
@@ -54,23 +46,19 @@ export class MemoryBackend implements StoreBackend {
 
   async revision(): Promise<string> {
     this.assertOpen();
-    // A memory store has one handle, so no other handle's commit can move it.
     return "memory";
   }
 
   async holdsAny(): Promise<boolean> {
     this.assertOpen();
-    // A journal's frames and checkpoint carry whole deltas, so a journal is bytes too.
     return this.set.size > 0 || this.journals.size > 0;
   }
 
-  /** Rows only, journal aside: what a whole-store discard checks before it discards the journal. */
   async holdsAnyRow(): Promise<boolean> {
     this.assertOpen();
     return this.set.size > 0;
   }
 
-  // Discard every peer journal in this store (a whole-store discard, such as a dropped pool).
   async discardJournals(): Promise<void> {
     this.assertOpen();
     this.journals.clear();
@@ -87,9 +75,6 @@ export class MemoryBackend implements StoreBackend {
     this.closed = true;
   }
 
-  // One journal per peer: a head and its committed frames, which never change once written. The
-  // compare, the frame, the head and the rows change with no await between them, so they are one
-  // step for every other caller.
   private journals = new Map<
     string,
     { head: string; frames: Uint8Array[]; checkpoint?: Uint8Array; rebaseDebt: Set<string> }
@@ -150,7 +135,6 @@ export class MemoryBackend implements StoreBackend {
         if (held !== undefined) return { status: "absence-refuted", targetId: held };
         const batch = newlyAdmitted.map(canonicalDelta);
         for (const d of batch) this.set.add(d);
-        // Each erased target's payload sits in its admitting frame until a rebase replaces them.
         for (const d of batch) {
           for (const p of d.claims.pointers) {
             if (p.role === "erases" && p.target.kind === "delta") {
@@ -176,7 +160,6 @@ export class MemoryBackend implements StoreBackend {
         this.assertOpen();
         const j = this.journals.get(peerId);
         if (j === undefined || j.head !== expectedHead) return { status: "conflict" };
-        // The frame that admitted the target holds its payload until a rebase replaces the frames.
         if (this.set.has(targetId) || j.rebaseDebt.has(targetId)) {
           return { status: "absence-refuted", targetId };
         }
@@ -196,7 +179,6 @@ export class MemoryBackend implements StoreBackend {
         for (const d of batch) this.set.add(d);
         const frames = j?.frames ?? [];
         if (frame !== null) frames.push(Uint8Array.from(frame));
-        // Keep the checkpoint a rebase stored: later frames continue from it.
         this.journals.set(peerId, {
           head: nextHead,
           frames,

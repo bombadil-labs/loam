@@ -1,28 +1,3 @@
-// The listing door's MAINTAINED candidate set (ticket T163), railed at both levels and two-sided:
-//
-//   FAST = SLOW — every page the maintained index serves is the page a cold read over the same
-//   ground serves: the projection of `containerScope` on this gateway, AND a FRESH gateway opened
-//   over the same backend (no index at all). The index may only ever be a faster way to the same
-//   answer.
-//
-//   AND THE COST DROPPED — three seams are spied, and a warm page calls neither `reactor.snapshot`
-//   (the copy every O(ground) walk in this codebase pays) nor `containerScope`, and folds each
-//   arrival once (`reactor.negationsOf`, asked once per folded delta, is not asked again on the
-//   next read); the paths that must rebuild (a strike, container law, a trust feeder) call
-//   `containerScope` exactly once. Deterministic — no clock — so it cannot flake under load; the
-//   numbers themselves live in `listing-scale.bench.test.ts` and the ticket's PR.
-//
-//   EVERY PATH THAT CHANGES MEMBERSHIP REACHES THE INDEX (H8's stale-index trap): a plain append,
-//   a strike (H1: the struck member de-lists and a later plain append must not resurrect it), a
-//   revived strike, a strike that arrives BEFORE its target, an operator-authored claim, an
-//   exclusion and its re-inclusion, an evolved lens that narrows the contexts, an erasure that
-//   reseats the reactor. Each is asserted at the delta level (`listingPage`, the id seam) and at
-//   the object level (`gw.list` / the GraphQL door), with a live bystander surviving where a
-//   member drops.
-//
-// Deliberately NOT here: cost 3. A cold `resolvedNode` is still O(ground) per listed entity — the
-// point door's own cost, out of this door's hands; the bench measures it and the ticket names it.
-
 import { describe, expect, it, vi } from "vitest";
 import {
   authorForSeed,
@@ -62,8 +37,6 @@ async function governedGarden(backend = new MemoryBackend()): Promise<Gateway> {
   return gw;
 }
 
-// A fresh gateway over a COPY of the same ground: it holds no index, so its first page is a cold
-// read (a copy rather than the shared backend, so closing the twin does not close the store).
 async function coldTwin(gw: Gateway): Promise<Gateway> {
   const copy = new MemoryBackend();
   await plant(copy, await gw.backend.deltasSince(new Set()), gw.operatorAuthor);
@@ -84,7 +57,6 @@ const door = async (gw: Gateway): Promise<string[]> => {
 const slow = (gw: Gateway): string[] =>
   projectListingEntities(gw.containerScope({ containers: [CONTAINER] }), CONTEXTS);
 
-// Assert the fast page, the served page, the door, the slow projection, and a cold twin agree.
 async function agreeOn(gw: Gateway, expected: string[]): Promise<void> {
   expect(await page(gw)).toEqual(expected);
   expect(slow(gw)).toEqual(expected);
@@ -95,7 +67,6 @@ async function agreeOn(gw: Gateway, expected: string[]): Promise<void> {
   await twin.close();
 }
 
-// The two scans a page must not pay: the snapshot copy and the scope read.
 function scans(gw: Gateway): {
   snapshots: () => number;
   scopes: () => number;
@@ -124,20 +95,17 @@ describe("the maintained candidate set — a warm page does not scan the ground"
       observed(FERN, "height", 30, 1000, GARDENER_SEED),
       observed(MOSS, "tag", "soft", 1100, GARDENER_SEED),
     ]);
-    expect(await page(gw)).toEqual([FERN, MOSS]); // the first read builds the index
+    expect(await page(gw)).toEqual([FERN, MOSS]);
     const s = scans(gw);
     expect(await page(gw)).toEqual([FERN, MOSS]);
     expect(s.snapshots()).toBe(0);
     expect(s.scopes()).toBe(0);
-    // A plain append (a stranger's claim, no strike) reaches the index in O(1): the entity is
-    // listed at once, and still nothing scanned.
     await gw.append([observed(OAK, "height", 900, 1200, GARDENER_SEED)]);
     s.reset();
     expect(await page(gw)).toEqual([FERN, MOSS, OAK]);
     expect(s.snapshots()).toBe(0);
     expect(s.scopes()).toBe(0);
-    expect(s.folds()).toBe(1); // the one arrival, folded once
-    // The high-water mark advanced: the next read folds NOTHING — it does not re-walk the tail.
+    expect(s.folds()).toBe(1);
     s.reset();
     expect(await page(gw)).toEqual([FERN, MOSS, OAK]);
     expect(s.folds()).toBe(0);
@@ -147,8 +115,6 @@ describe("the maintained candidate set — a warm page does not scan the ground"
 
   it("a bulk of plain arrivals folds in one read: no scan, and the page equals a cold twin", async () => {
     const gw = await governedGarden();
-    // Several standing members that INTERLEAVE with the arrivals, so the merge has to shift more
-    // than one of them (a merge that mis-steps over the standing array survives a single member).
     const standing = ["plant:b00150", "plant:b00750", "plant:b01350", MOSS];
     await gw.append(standing.map((n, i) => observed(n, "tag", "soft", 1100 + i, GARDENER_SEED)));
     expect(await page(gw)).toEqual(standing);
@@ -173,7 +139,6 @@ describe("the maintained candidate set — a warm page does not scan the ground"
     expect(cold).toHaveLength(1501);
     expect(await page(gw, { limit: 25, after: "plant:b00140" })).toEqual(cold.slice(140, 165));
     expect(first).toEqual(cold.slice(0, 25));
-    // A page from the middle and the tail, seeking, against the same cold projection.
     expect(await page(gw, { limit: 25, after: cold[750]! })).toEqual(cold.slice(751, 776));
     expect(await page(gw, { limit: 25, after: cold[1490]! })).toEqual(cold.slice(1491));
     await gw.close();
@@ -184,8 +149,6 @@ describe("the maintained candidate set — a warm page does not scan the ground"
     await gw.append([observed(MOSS, "tag", "soft", 1100, GARDENER_SEED)]);
     expect(await page(gw)).toEqual([MOSS]);
     const s = scans(gw);
-    // Two entities in one batch, one sorting BEFORE everything listed so far, and a claim in a
-    // context no lens reads (`note`) for a third entity that must therefore not list.
     await gw.append([
       observed("plant:aaa", "height", 1, 1200, GARDENER_SEED),
       observed(OAK, "height", 900, 1300, GARDENER_SEED),
@@ -194,7 +157,6 @@ describe("the maintained candidate set — a warm page does not scan the ground"
     s.reset();
     expect(await page(gw)).toEqual(["plant:aaa", MOSS, OAK]);
     expect(s.scopes()).toBe(0);
-    // A cursor below the first id starts at the first id.
     expect(await page(gw, { after: "plant:" })).toEqual(["plant:aaa", MOSS, OAK]);
     await agreeOn(gw, ["plant:aaa", MOSS, OAK]);
     await gw.close();
@@ -204,8 +166,8 @@ describe("the maintained candidate set — a warm page does not scan the ground"
     const gw = await governedGarden();
     const names = Array.from({ length: 40 }, (_, i) => `plant:w${String(i).padStart(2, "0")}`);
     await gw.append(names.map((n, i) => observed(n, "height", i, 1000 + i, GARDENER_SEED)));
-    await page(gw); // build
-    const cold = slow(gw); // the whole set, once, before the spies — the walk must match its slices
+    await page(gw);
+    const cold = slow(gw);
     const s = scans(gw);
     const walked: string[] = [];
     let after: string | undefined;
@@ -220,7 +182,6 @@ describe("the maintained candidate set — a warm page does not scan the ground"
     expect(walked).toEqual(names);
     expect(s.snapshots()).toBe(0);
     expect(s.scopes()).toBe(0);
-    // Exclusive cursor, past the end, and between two ids: the same three answers a cold read gives.
     expect(await page(gw, { limit: 3, after: names[39]! })).toEqual([]);
     expect(await page(gw, { limit: 3, after: "plant:w05!" })).toEqual(names.slice(6, 9));
     expect(await served(gw, { limit: 3, after: "plant:w05!" })).toEqual(names.slice(6, 9));
@@ -236,15 +197,12 @@ describe("the maintained candidate set — every path that changes membership re
     await agreeOn(gw, [FERN, MOSS]);
     const s = scans(gw);
     await gw.append([signClaims(makeNegationClaims(GARDENER, 2000, mossTag.id), GARDENER_SEED)]);
-    // Delta level: the struck claim is out of the scope; the index rebuilt from that scope, once.
     expect(gw.containerScope({ containers: [CONTAINER] }).some((d) => d.id === mossTag.id)).toBe(
       false,
     );
     s.reset();
     expect(await page(gw)).toEqual([FERN]);
     expect(s.scopes()).toBe(1);
-    // The failure that matters most: a plain append after the strike takes the O(1) path, and the
-    // struck member must NOT come back with it.
     await gw.append([observed(OAK, "height", 900, 3000, GARDENER_SEED)]);
     s.reset();
     expect(await page(gw)).toEqual([FERN, OAK]);
@@ -272,7 +230,6 @@ describe("the maintained candidate set — every path that changes membership re
     const mossTag = observed(MOSS, "tag", "soft", 1100, GARDENER_SEED);
     await gw.append([signClaims(makeNegationClaims(GARDENER, 2000, mossTag.id), GARDENER_SEED)]);
     expect(await page(gw)).toEqual([FERN]);
-    // The claim lands already struck: not plain, so it must not be folded in as a member.
     await gw.append([mossTag]);
     await agreeOn(gw, [FERN]);
     await gw.close();
@@ -283,8 +240,6 @@ describe("the maintained candidate set — every path that changes membership re
     await gw.append([observed(FERN, "height", 30, 1000, GARDENER_SEED)]);
     await agreeOn(gw, [FERN]);
     const s = scans(gw);
-    // Data signed by the operator: no delta pointer, no container context. It is a member like
-    // anyone's claim, and it must not cost the store a scan (the ~/.loam case: the operator writes).
     const opClaim = observed(MOSS, "tag", "op", 1100, OPERATOR_SEED);
     await gw.append([opClaim]);
     s.reset();
@@ -292,7 +247,6 @@ describe("the maintained candidate set — every path that changes membership re
     expect(s.scopes()).toBe(0);
     expect(s.snapshots()).toBe(0);
     await agreeOn(gw, [FERN, MOSS]);
-    // Law: a container declaration (a container context) — rebuilds.
     await gw.append([
       signClaims(
         containerClaims(
@@ -311,7 +265,6 @@ describe("the maintained candidate set — every path that changes membership re
     s.reset();
     expect(await page(gw)).toEqual([FERN, MOSS]);
     expect(s.scopes()).toBe(1);
-    // Law: the operator's strike of their own data (a delta pointer) — rebuilds, and moss leaves.
     await gw.append([signClaims(makeNegationClaims(OPERATOR, 1300, opClaim.id), OPERATOR_SEED)]);
     s.reset();
     expect(await page(gw)).toEqual([FERN]);
@@ -330,7 +283,6 @@ describe("the maintained candidate set — every path that changes membership re
     const exclusion = signClaims(exclusionClaims(CONTAINER, OPERATOR, 3000), OPERATOR_SEED);
     await gw.append([exclusion]);
     await agreeOn(gw, []);
-    // While the exclusion stands, a plain append must not be folded in as if the set were plain.
     await gw.append([observed("plant:excluded-era", "height", 1, 3050, GARDENER_SEED)]);
     await agreeOn(gw, []);
     await gw.append([signClaims(makeNegationClaims(OPERATOR, 3100, exclusion.id), OPERATOR_SEED)]);
@@ -338,8 +290,7 @@ describe("the maintained candidate set — every path that changes membership re
     const s = scans(gw);
     s.reset();
     expect(await page(gw)).toEqual(["plant:excluded-era", FERN, MOSS]);
-    expect(s.scopes()).toBe(0); // plain again, and warm again
-    // A DIFFERENT container, excluded: its members subtract from every scope, this one included.
+    expect(s.scopes()).toBe(0);
     await gw.append([
       signClaims(
         containerClaims(
@@ -361,8 +312,6 @@ describe("the maintained candidate set — every path that changes membership re
       signClaims(exclusionClaims("container:mossy", OPERATOR, 3300), OPERATOR_SEED),
     ]);
     await agreeOn(gw, ["plant:excluded-era", FERN]);
-    // And a plain append while that exclusion stands still lists correctly (the slow path): oak
-    // lists, and a fresh claim about moss — a member of the excluded container — does not.
     await gw.append([
       observed(OAK, "height", 900, 3400, GARDENER_SEED),
       observed(MOSS, "height", 2, 3500, GARDENER_SEED),
@@ -384,7 +333,7 @@ describe("the maintained candidate set — every path that changes membership re
     );
     const sketch = (g: Gateway) => listingPageImpl(g, "Sketch", { limit: 25 });
     expect(await sketch(gw)).toEqual([FERN, MOSS]);
-    expect(await sketch(gw)).toEqual([FERN, MOSS]); // warm
+    expect(await sketch(gw)).toEqual([FERN, MOSS]);
     await gw.publishRegistration(
       PLANT,
       { name: "Sketch", props: new Map([["watered", pickLatest]]), default: pickLatest },
@@ -403,22 +352,16 @@ describe("the maintained candidate set — every path that changes membership re
     await gw.erase(mossTag.id, { reason: "asked to be forgotten" });
     expect(gw.reactor.get(mossTag.id)).toBeUndefined();
     await agreeOn(gw, [FERN]);
-    // And the fresh reactor's index keeps following: a plain append after the purge lists.
     await gw.append([observed(OAK, "height", 900, 3000, GARDENER_SEED)]);
     await agreeOn(gw, [FERN, OAK]);
     await gw.close();
   });
 });
 
-// A TRUST mask decides who counts as a striker by reading the ground, so a delta that is no strike
-// and no law can still change membership: it can make a dormant strike bind. The index must see
-// that coming or rebuild — a stranger's claim must never be folded in as if it changed nothing.
 describe("the maintained candidate set — under a trust mask that reads the ground", () => {
   const MALLORY_SEED = "ee".repeat(32);
   const MALLORY = authorForSeed(MALLORY_SEED);
   const GUARDED: HyperSchema = { name: "Guarded", alg: 1, body: governedGatherBody(OPERATOR) };
-  // Anyone who has ever carried a `deputize` pointer is a trusted striker — deliberately fed by
-  // strangers' plain claims, the shape the governed body's operator-minted grants never take.
   const DEPUTIZED: HyperSchema = {
     name: "Deputized",
     alg: 1,
@@ -476,29 +419,23 @@ describe("the maintained candidate set — under a trust mask that reads the gro
 
   it("the governed body: a stranger's claim stays O(1), and a late grant binds the dormant strike", async () => {
     const { gw } = await heckled(GUARDED);
-    expect(await ids(gw, "Guarded")).toEqual([FERN, MOSS]); // mallory's strike is inert
+    expect(await ids(gw, "Guarded")).toEqual([FERN, MOSS]);
     const s = scans(gw);
-    // A stranger's plain claim cannot feed the operator-minted grants the mask reads: no rebuild.
     await gw.federate([observed(OAK, "height", 1, 3100, MALLORY_SEED)]);
     s.reset();
     expect(await ids(gw, "Guarded")).toEqual([FERN, MOSS, OAK]);
     expect(s.scopes()).toBe(0);
-    // The operator grants mallory standing: the strike that was inert now binds, and moss must
-    // leave the page at both levels while fern and oak stay.
     await gw.append([
       signClaims(grantClaims(STORE_ENTITY, MALLORY, "write", OPERATOR, 3200), OPERATOR_SEED),
     ]);
     s.reset();
     expect(await ids(gw, "Guarded")).toEqual([FERN, OAK]);
-    expect(s.scopes()).toBe(1); // a grant feeds the governed mask's trust set: law to this index
+    expect(s.scopes()).toBe(1);
     expect(await listed(gw, "Guarded")).toEqual([FERN, OAK]);
     await gw.close();
   });
 
   it("a mask this door cannot bound: every moved read rebuilds, and every page is still right", async () => {
-    // An aliased closure expands against the ground, so no delta is provably plain here — and it
-    // sits under an `and` inside the sub-view and an `or` at the trust level, so a walk that lets
-    // one bounded side vouch for the pair would wrongly call the whole mask bounded.
     const ALIASED: HyperSchema = {
       name: "Aliased",
       alg: 1,
@@ -532,11 +469,11 @@ describe("the maintained candidate set — under a trust mask that reads the gro
     expect(await ids(gw, "Aliased")).toEqual([FERN, MOSS]);
     const s = scans(gw);
     expect(await ids(gw, "Aliased")).toEqual([FERN, MOSS]);
-    expect(s.scopes()).toBe(0); // nothing moved: the index stands
+    expect(s.scopes()).toBe(0);
     await gw.federate([observed(OAK, "height", 1, 3100, MALLORY_SEED)]);
     s.reset();
     expect(await ids(gw, "Aliased")).toEqual([FERN, MOSS, OAK]);
-    expect(s.scopes()).toBe(1); // moved: rebuilt, not folded
+    expect(s.scopes()).toBe(1);
     expect(await listed(gw, "Aliased")).toEqual([FERN, MOSS, OAK]);
     await gw.close();
   });
@@ -545,13 +482,10 @@ describe("the maintained candidate set — under a trust mask that reads the gro
     const { gw } = await heckled(DEPUTIZED);
     expect(await ids(gw, "Deputized")).toEqual([FERN, MOSS]);
     const s = scans(gw);
-    // A plain claim that does NOT carry the deputizing role: folded in without a scan.
     await gw.federate([observed(OAK, "height", 1, 3100, MALLORY_SEED)]);
     s.reset();
     expect(await ids(gw, "Deputized")).toEqual([FERN, MOSS, OAK]);
     expect(s.scopes()).toBe(0);
-    // Mallory deputizes herself with an ordinary claim — no strike, no law. Her earlier strike now
-    // binds: the page must drop moss, at both levels, and the index must have rebuilt to know it.
     await gw.federate([
       signClaims(
         {
@@ -571,9 +505,6 @@ describe("the maintained candidate set — under a trust mask that reads the gro
   });
 });
 
-// An inbox pool bound to the listing container composes its members into the scope from a reactor
-// the index does not follow (SPEC §39). The door must not fold on the primary log as if that were
-// the whole ground: while an active inbox stands it reads the scope, and every level agrees.
 describe("the maintained candidate set — an inbox pool composes in from another reactor", () => {
   const CONN_SEED = "c3".repeat(32);
   it("a claim written into the inbox lists without ever touching the primary log", async () => {
@@ -586,17 +517,13 @@ describe("the maintained candidate set — an inbox pool composes in from anothe
       ownerSeed: OPERATOR_SEED,
     });
     await inbox.gateway!.append([observed(MOSS, "tag", "inbox", 1100, CONN_SEED)]);
-    // Delta level: the scope holds the inbox claim; the page holds moss; the door serves it.
     expect(slow(gw)).toEqual([FERN, MOSS]);
     expect(await page(gw)).toEqual([FERN, MOSS]);
     expect(await served(gw)).toEqual([FERN, MOSS]);
     expect(await door(gw)).toEqual([FERN, MOSS]);
-    // A plain append to the primary while the inbox stands still lists, beside the inbox's member.
     await gw.append([observed(OAK, "height", 900, 1200, GARDENER_SEED)]);
     expect(await page(gw)).toEqual([FERN, MOSS, OAK]);
     expect(await served(gw)).toEqual([FERN, MOSS, OAK]);
-    // A SECOND inbox write, with the primary log standing still: nothing on the primary marks the
-    // move, so a door reading a maintained index here would serve a stale page. It must not.
     await inbox.gateway!.append([observed("plant:pond", "tag", "inbox", 1300, CONN_SEED)]);
     expect(await page(gw)).toEqual([FERN, MOSS, OAK, "plant:pond"]);
     expect(await door(gw)).toEqual([FERN, MOSS, OAK, "plant:pond"]);

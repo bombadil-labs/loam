@@ -1,8 +1,3 @@
-// §47 criterion 4 — under `conflicts` the contested name is NOT served, and the refusal names both
-// candidates. The reader that carries the refusal is `readContestedBindings`: the name is absent
-// from the surface, and this is where a person learns why and between whom — never a silent gap a
-// caller mistakes for "no such lens".
-
 import { describe, expect, it } from "vitest";
 import { signClaims, type Schema } from "@bombadil/rhizomatic";
 import { bindingPolicyClaims } from "../../src/gateway/binding-policy.js";
@@ -37,7 +32,7 @@ describe("§47 — conflicts serves neither and names both", () => {
         undefined,
         "hyperschema:One",
       );
-      expect(first.bound).toBe(true); // one candidate is no contest
+      expect(first.bound).toBe(true);
 
       const second = await gw.publishRegistration(
         { name: "Two", alg: 1, body: PLANT.body },
@@ -46,14 +41,10 @@ describe("§47 — conflicts serves neither and names both", () => {
         undefined,
         "hyperschema:Two",
       );
-      // Persisted, and NEITHER serves: the second publish reports unbound...
       expect(second.persisted).toBe(true);
       expect(second.bound).toBe(false);
-      // ...and the first stopped serving too — a contest has no incumbent advantage under
-      // `conflicts`, or the mode would be first-writer-wins in a hat.
       expect(() => gw.def("Shared")).toThrow();
 
-      // THE REFUSAL NAMES BOTH (criterion 4's exact words).
       const contested = readContestedBindings(gw.reactor, gw.validityNow(), gw.operatorAuthor);
       const entities = (contested.get("Shared") ?? []).map((c) => c.entity).sort();
       expect(entities).toEqual(["hyperschema:One", "hyperschema:Two"]);
@@ -89,7 +80,6 @@ describe("§47 — conflicts serves neither and names both", () => {
         undefined,
         "hyperschema:Calm",
       );
-      // Two-sided: a mode that withheld everything would pass the rail above and be a dead store.
       expect(gw.def("Calm")).toBeDefined();
       expect(
         readContestedBindings(gw.reactor, gw.validityNow(), gw.operatorAuthor).has("Calm"),

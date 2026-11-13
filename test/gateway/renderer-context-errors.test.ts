@@ -1,5 +1,3 @@
-// T287 mutation follow-up: malformed fields must fail independently of later inbox equality,
-// and a bound resolution fault must not disclose the root door's diagnostic.
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";

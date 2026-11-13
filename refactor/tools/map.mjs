@@ -1,13 +1,9 @@
-// Draws refactor/map.svg, the picture at the top of refactor/MAP.md. Edit ROWS and KEEPS below, then
-// run `node refactor/tools/map.mjs`. The rows run in plan-step order; a status names its color.
-
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const UPDATED = "2026-09-30";
 
-// done | doing | next | planned | retired
 const ROWS = [
   {
     step: "3",

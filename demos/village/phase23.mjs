@@ -1,10 +1,3 @@
-// Phase 23 — PUSH DELTAS, GET SOFTWARE (SPEC §23, v1). A Loam store already carries its schema, its
-// doors, and its law; §23 gives it its own FACE. This act pushes a renderer — a UI unit, as deltas,
-// bound to a schema and a route — and then GETs the route over plain HTTP and receives HTML rendered
-// from the store's live view. No build, no deploy: the database is the deployment. Then the two beats
-// that make it real: the anonymous door serves the face only once the operator declares the lens public
-// (§17 read discipline at the screen), and re-pushing the renderer EVOLVES the face live.
-
 import { parseSchema, parseTerm, signClaims, makeNegationClaims } from "@bombadil/rhizomatic";
 import { publicClaims } from "../../dist/index.js";
 import { check, openStore, opToken, summary } from "./harness.mjs";
@@ -22,8 +15,6 @@ const PICK = { pick: { order: { byTimestamp: "desc" } } };
 const CARD = { name: "Card23", alg: 1, body: parseTerm(GATHER) };
 const SCHEMA = parseSchema({ props: { title: PICK, body: PICK }, default: PICK });
 
-// A renderer: a resolved node in, HTML out. It bundles its own markup and knows nothing of Loam —
-// for all it knows it is a component against a service that happens to be bundled with it (§23.2).
 const CARD_V1 =
   'export default (n) => `<article class="card"><h1>${n.view.title}</h1><p>${n.view.body}</p></article>`;';
 const CARD_V2 =
@@ -38,7 +29,6 @@ try {
       headers: token === undefined ? {} : { authorization: `Bearer ${token}` },
     });
 
-  // Clear the stage: strike every surviving Card23 renderer and registration (the home persists).
   for (const stale of almanac.gateway.renderers().filter((r) => r.route === "card23")) {
     await almanac.gateway.append([
       signClaims(makeNegationClaims(operator, Date.now(), stale.deltaId, "phase 23 clears its stage"), almanac.seed),
@@ -52,7 +42,6 @@ try {
     ]);
   }
 
-  // Register the lens, lay one card's worth of facts, and push the renderer.
   await almanac.gateway.publishRegistration(CARD, SCHEMA, ["card:almanac"], undefined, undefined, undefined, [
     "title",
     "body",
@@ -77,7 +66,6 @@ try {
     bundle: CARD_V1,
   });
 
-  // 23.1 — GET the route over HTTP and receive HTML rendered from the store's live view.
   const res = await app("card23", "card:almanac", opToken("almanac"));
   const html = await res.text();
   check(
@@ -90,7 +78,6 @@ try {
     `${res.status} — ${html.slice(0, 46)}…`,
   );
 
-  // 23.2 — the anonymous door serves the face only once the operator declares the lens public (§17).
   const anonBefore = await app("card23", "card:almanac");
   await almanac.gateway.append([signClaims(publicClaims(["Card23"], operator, Date.now()), almanac.seed)]);
   const anonAfter = await app("card23", "card:almanac");
@@ -102,7 +89,6 @@ try {
     `anon ${anonBefore.status} → ${anonAfter.status}`,
   );
 
-  // 23.3 — re-push the renderer and the face EVOLVES live, same ground, new pixels.
   await almanac.gateway.publishRenderer({
     route: "card23",
     schema: "Card23",
@@ -117,8 +103,6 @@ try {
     evolved.slice(0, 52) + "…",
   );
 
-  // 23.4 — an app never outlives its source (§23.6): strike every surviving binding for the route
-  // (latest-per-route falls back to the prior survivor as each is struck, §23.5) and it goes dark.
   let guard = 0;
   while (almanac.gateway.renderers().some((r) => r.route === "card23") && guard++ < 8) {
     const b = almanac.gateway.renderers().find((r) => r.route === "card23");

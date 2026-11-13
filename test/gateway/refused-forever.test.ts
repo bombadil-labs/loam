@@ -1,13 +1,3 @@
-// An erasure is eternal: the store refuses an erased id forever, even after its erasure is
-// negated, and even when the erasure and its target arrive in one batch. Asked at the append path,
-// the federate path and the offer. Every case names a bystander that must still land.
-//
-// Append is atomic, so a batch that carries a refused id lands nothing. Federate admits per delta,
-// so only the refused id is dropped.
-//
-// Deliberately not asserted here: receipts and as-of reads. A negated erasure stops being standing
-// testimony there, which `test/gateway/erase.test.ts` covers.
-
 import { describe, expect, it } from "vitest";
 import { makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import {
@@ -42,8 +32,8 @@ describe("an erased id is refused forever", () => {
     const [tomb] = standingErasures(gw.reactor, gw.validityNow(), gw.operatorAuthor);
     await gw.append([signClaims(makeNegationClaims(gw.operatorAuthor!, 5000, tomb!.id), OP_SEED)]);
 
-    expect(standingErasures(gw.reactor, gw.validityNow(), gw.operatorAuthor)).toEqual([]); // no longer standing
-    expect(refusedIds(gw.reactor, gw.operatorAuthor).has(fact.id)).toBe(true); // still refused
+    expect(standingErasures(gw.reactor, gw.validityNow(), gw.operatorAuthor)).toEqual([]);
+    expect(refusedIds(gw.reactor, gw.operatorAuthor).has(fact.id)).toBe(true);
 
     await expect(gw.append([fact])).rejects.toThrow(/erased/);
     await gw.federate([fact, bystander]);
@@ -61,11 +51,11 @@ describe("an erased id is refused forever", () => {
     const target = observed(FERN, "height", 30, 1000, OP_SEED);
     const tomb = erasureOf(gw, target, 2000);
     await expect(gw.append(tombFirst ? [tomb, target] : [target, tomb])).rejects.toThrow(/erased/);
-    expect(held(gw, tomb)).toBe(false); // atomic: nothing in the refused batch lands
+    expect(held(gw, tomb)).toBe(false);
     expect(held(gw, target)).toBe(false);
 
     const bystander = observed(FERN, "tag", "shade", 1100, OP_SEED);
-    await gw.append([tomb, bystander]); // unrelated work still lands
+    await gw.append([tomb, bystander]);
     expect(held(gw, bystander)).toBe(true);
     await expect(gw.append([target])).rejects.toThrow(/erased/);
     expect(held(gw, target)).toBe(false);
@@ -98,11 +88,9 @@ describe("an erased id is refused forever", () => {
     await gw.close();
   });
 
-  // Only an erasure the federate path actually admits can refuse its target in the same offer.
   it("a forged erasure in the offer does not suppress its target", async () => {
     const gw = await boot();
     const target = observed(FERN, "height", 30, 1000, OP_SEED);
-    // A real erasure carrying another delta's signature: operator-shaped, and not verified.
     const genuine = erasureOf(gw, target, 2000);
     const forged: Delta = { ...genuine, sig: erasureOf(gw, target, 2001).sig! };
     await gw.federate([forged, target]);
@@ -140,8 +128,6 @@ describe("an erased id is refused forever", () => {
     await gw.close();
   });
 
-  // An erasure is never itself erased (§11). Otherwise a chain in one offer could drop the erasure that
-  // refuses D, and D could come back later.
   it("an erasure that erases an erasure cannot undo the erasure, in one offer or later", async () => {
     const gw = await boot();
     const d = observed(FERN, "height", 30, 1000, OP_SEED);

@@ -1,8 +1,3 @@
-// The browser client (SPEC §12), exercised against a real listening server. Non-custodial by
-// construction: the seed is minted client-side, every delta is signed client-side, and the
-// bearer token authenticates TRANSPORT only — the delta's own verified author is the
-// authority the door asks about. Public reads ride with no token at all.
-
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   authorForSeed as serverAuthorForSeed,
@@ -24,7 +19,7 @@ import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = serverAuthorForSeed(OPERATOR_SEED);
-const TRANSPORT_SEED = "a1".repeat(32); // the token's actor — NOT the client's identity
+const TRANSPORT_SEED = "a1".repeat(32);
 
 let gateway: Gateway;
 let handle: ServerHandle;
@@ -54,7 +49,6 @@ describe("keygen in the page", () => {
     expect(a).toMatch(/^[0-9a-f]{64}$/);
     expect(b).toMatch(/^[0-9a-f]{64}$/);
     expect(a).not.toBe(b);
-    // The client derives the same author the server would — one identity, both sides.
     expect(authorForSeed(a)).toBe(serverAuthorForSeed(a));
   });
 });

@@ -1,21 +1,3 @@
-// The last step-4 readers. Each case reads on both sides of a validity boundary.
-//
-//   - receive-policy: the receiver's decisions are a governed read. A decision counts only inside
-//     its own window at `now`; a withdrawal by the receiver counts only inside its own window.
-//   - erasure history: a graveyard or an erasure record keeps counting after its own `validUntil`
-//     (erasure is eternal). `readGraveyards`, the cut's graveyard lookup, the completeness check's
-//     strike report, `refusedIds` and `standingErasures` all read it that way. A record the
-//     operator struck stays struck: the history read does not revive it.
-//   - the channel drop: a record negated only for a window gets a new untimed strike, so it stays
-//     severed after the window ends. A bystander channel keeps its record.
-//   - `survivalOver`: a shipper's strike counts only inside its own window at `now`.
-//   - the connections panel's grant label names the true state of a write grant.
-//   - the revoke selection names every unnegated operator grant, timed or not (a control).
-//
-// Named gaps: the grant label is asserted at `connectionGrantState`, not at a served panel;
-// `test/server/admin-connections.test.ts` drives the served panel for "revoked" and "active".
-// The receive projection has no door; it is asserted at its function.
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   Reactor,
@@ -55,14 +37,11 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** Re-sign `claims` by `seed` with the validity window `window`. */
 const within = (
   claims: Claims,
   seed: string,
   window: { validFrom: number; validUntil?: number },
 ): Delta => signClaims({ ...claims, ...window }, seed);
-
-// --- receive-policy.ts: the receiver's decisions are a governed read ----------------------------
 
 describe("receive policy reads the receiver's decisions at `now`", () => {
   const R = "11".repeat(32);
@@ -129,7 +108,6 @@ describe("receive policy reads the receiver's decisions at `now`", () => {
   it("a curse valid over [T1, T2) curses only inside its window", () => {
     const binding = decision(bindingBody, R, { validFrom: 1 });
     const curse = decision(curseBody, R, { validFrom: T1, validUntil: T2 });
-    // Delta level: the curse is the receiver's own, so only its window can set it aside.
     expect(curse.claims.author).toBe(receiver);
     expect(statusAt([binding, curse], T1 - 1)).toEqual(["media-to-alice:selected"]);
     expect(statusAt([binding, curse], T1)).toEqual(["media-to-alice:cursed"]);
@@ -152,13 +130,10 @@ describe("receive policy reads the receiver's decisions at `now`", () => {
     );
     expect(statusAt([binding], T2 - 1)).toEqual(["media-to-alice:selected"]);
     expect(statusAt([binding], T2)).toEqual([]);
-    // Inside the window the pause pins the binding (unavailable); after it the pause is inert,
-    // not a refusal of the relationship.
     expect(statusAt([binding, pause], T2 - 1)).toEqual(["media-to-alice:unavailable"]);
     expect(statusAt([binding, pause], T2)).toEqual([]);
   });
 
-  // A CONTROL for the governed read: it passes on the base, where `negatedAt` already read validity.
   it("a timed withdrawal by the receiver counts only in its window; a stranger's never does", () => {
     const binding = decision(bindingBody, R, { validFrom: 1 });
     const curse = decision(curseBody, R, { validFrom: 1 });
@@ -174,13 +149,6 @@ describe("receive policy reads the receiver's decisions at `now`", () => {
   });
 });
 
-// --- slate.ts and erase.ts: erasure and graveyard records are history ---------------------------
-
-/**
- * A real cut over two members, then the same ground re-built with the graveyard and both erasures
- * re-signed with `validUntil` U. Member A's erasure is also struck by the operator (untimed). A
- * second graveyard copy, struck by the operator, is the bystander a history read must not revive.
- */
 async function timedErasureGround(): Promise<{
   r: Reactor;
   grave: Delta;
@@ -246,7 +214,6 @@ async function timedErasureGround(): Promise<{
 describe("erasure and graveyard records keep counting after their own validUntil", () => {
   it("readGraveyards finds a graveyard after its window; a struck one stays out", async () => {
     const { r, grave, struckGrave, U } = await timedErasureGround();
-    // Delta level: both graveyards are held; the timed one's window has ended at U.
     expect(r.get(grave.id)?.claims.validUntil).toBe(U);
     expect(r.get(struckGrave.id)).toBeDefined();
     for (const now of [U - 1, U, U + 1_000_000]) {
@@ -260,7 +227,6 @@ describe("erasure and graveyard records keep counting after their own validUntil
       const check = graveyardCompleteness(r, now, SLATE_OP, grave.id);
       expect(check.readable).toBe(true);
       expect(check.members).toEqual([a.id, b.id].sort());
-      // Two-sided: A is reported with its strike, and B, the bystander member, is not missing.
       expect(check.negated).toEqual([{ member: a.id, negation: strikeA.id }]);
       expect(check.missing).toEqual([]);
       expect(check.cutCompleted).toBe(true);
@@ -269,11 +235,9 @@ describe("erasure and graveyard records keep counting after their own validUntil
 
   it("refusedIds and standingErasures ignore an erasure's own window", async () => {
     const { r, a, b, bystander, eraseB, U } = await timedErasureGround();
-    // Read after every window has ended, so a reader that consulted the clock would drop them.
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(U + 1_000_000);
     const refused = refusedIds(r, SLATE_OP);
-    // An erased id is refused forever, struck erasure or not; the live bystander is not refused.
     expect(refused.has(a.id)).toBe(true);
     expect(refused.has(b.id)).toBe(true);
     expect(refused.has(bystander.id)).toBe(false);
@@ -288,7 +252,6 @@ describe("erasure and graveyard records keep counting after their own validUntil
     const bystander = observed(FERN, "tag", "shade", 1100, SLATE_SEED);
     await gw.append([member, bystander]);
     const stood = await standSlate(gw, { members: [member], closes: ["egress"] });
-    // A graveyard for this slate from an earlier, interrupted cut. Its window ended long ago.
     const earlier = within(
       graveyardClaims(
         {
@@ -313,14 +276,11 @@ describe("erasure and graveyard records keep counting after their own validUntil
     const report = await gw.cut(stood.container, { now: BEFORE_DEADLINE });
     expect(report.graveyard).toBe(earlier.id);
     expect(gw.graveyards().map((g) => g.id)).toEqual([earlier.id]);
-    // Two-sided at the bytes: the member is gone, the bystander is held.
     expect(await gw.backend.holds(member.id)).toBe(false);
     expect(await gw.backend.holds(bystander.id)).toBe(true);
     await gw.close();
   });
 });
-
-// --- channel.ts: a drop severs for good ---------------------------------------------------------
 
 describe("a channel drop strikes a record whose only negation is timed", () => {
   it("a record negated only over [T1, T2) stays severed after T2; a bystander channel stays", async () => {
@@ -360,7 +320,6 @@ describe("a channel drop strikes a record whose only negation is timed", () => {
       await me.dropChannel(alice.name);
 
       vi.setSystemTime(T2 + 10);
-      // Delta level: every alice record now holds an untimed operator strike.
       for (const d of aliceRecords) {
         const untimed = me.reactor
           .negationsOf(d.id)
@@ -368,7 +327,6 @@ describe("a channel drop strikes a record whose only negation is timed", () => {
           .filter((n) => n.claims.author === OPR && n.claims.validUntil === undefined);
         expect(untimed.length).toBeGreaterThan(0);
       }
-      // Object level: alice stays severed after the timed strikes end; bram still reads.
       expect(me.channelStatus(alice.name)).toEqual([]);
       expect(me.channelsEver(alice.name)).toHaveLength(1);
       expect(me.channelStatus(bram.name)).toHaveLength(1);
@@ -380,8 +338,6 @@ describe("a channel drop strikes a record whose only negation is timed", () => {
     }
   });
 });
-
-// --- adopt-law.ts: survivalOver reads a strike inside its window -------------------------------
 
 describe("survivalOver counts a shipper's strike only inside its window", () => {
   const S = "5e".repeat(32);
@@ -417,8 +373,6 @@ describe("survivalOver counts a shipper's strike only inside its window", () => 
     expect(aliases(T2)).toEqual(["app:stranger", "app:timed"]);
   });
 });
-
-// --- admin-federation.ts: the grant label and the revoke selection ------------------------------
 
 describe("the connections panel names the true state of a write grant", () => {
   const OP_SEED = "7a".repeat(32);
@@ -456,13 +410,11 @@ describe("the connections panel names the true state of a write grant", () => {
     expect(state(FUTURE!)).toBe("not yet valid");
     expect(state(STRUCK!)).toBe("revoked");
     expect(state(NONE!)).toBe("ungranted");
-    // Across the boundaries: the future grant is active once it starts; the expired one was active.
     expect(connectionGrantState(gw.reactor, NOW + 1, OP, FUTURE!)).toBe("active");
     expect(connectionGrantState(gw.reactor, NOW - 2, OP, EXPIRED!)).toBe("active");
     await gw.close();
   });
 
-  // A CONTROL: this selection was already wider than the door on the base. It pins the name's claim.
   it("the revoke selection names every unnegated operator grant, timed or not", async () => {
     const { gw, grants } = await ground();
     const select = (k: string) => unnegatedOperatorGrantIds(gw.reactor, NOW, OP, k);

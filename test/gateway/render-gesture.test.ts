@@ -1,30 +1,3 @@
-// The FLOOR a renderer stands on, and the read GESTURE that reaches it — proven on the host that
-// exists today, which is the only place it can be proven at all.
-//
-// The floor is small, precise, and it is what makes one content address honestly one app: a `RenderFn`
-// that is pure and synchronous; a `RenderNode` of `{ entity, view, hex, reads, state }`; `_view` as the
-// projection on every read; `data-loam-read` / `<form>` gestures that name a lens and an entity; a
-// host-neutral four-code refusal vocabulary; and the app's SCHEMA as the request surface. A bundle that
-// stays on the floor runs anywhere.
-//
-// WHY THE SERVER-RENDERED HOST IS THE ONE THAT PROVES IT: because a request is MARKUP rather than a call,
-// the same gesture is a plain `?read=<lens>:<entity>` navigation here — resolved in the gateway, under the
-// door's own discipline. So an unenhanced link works with no JavaScript at all, and the floor is provable
-// across two hosts inside this ticket rather than promised for a third. The artifact half of the
-// comparison is `test/site/artifact-shell.test.ts`.
-//
-// TWO CONSTRAINTS, both inherited from `serveRouteImpl`'s existing discipline rather than invented here.
-// (a) `?read=` is FULL-DOOR only: the anonymous door's whole posture is that every refusal is a uniform
-// 404 leaking nothing about what exists (§17), so a per-lens "this store does not serve that lens" there
-// would be exactly the lens-existence oracle that door closed. (b) each honored `?read=` costs a
-// RESOLUTION, and `maxPublicRenders` caps worker renders rather than resolutions — a repeatable parameter
-// is precisely the shape that turns a cap into a suggestion, so the count is bounded.
-//
-// WHAT IS DELIBERATELY NOT ASSERTED: "a gesture naming a field the lens does not serve is refused." A
-// gesture names a lens and an entity and never a field, and the projection is `_view`, so there is no
-// per-field gesture to refuse; asserting it would mean hand-composing a document — testing `/graphql`
-// rather than the mediated channel.
-
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
@@ -41,8 +14,6 @@ const OP_SEED = "0e".repeat(32);
 const OP = authorForSeed(OP_SEED);
 const MOSS = "moss";
 
-// A floor bundle that DRAWS both new members, so a host that handed it the wrong shape would render
-// differently rather than silently agreeing.
 const FLOOR = `export default function (node) {
   var keys = Object.keys(node.reads).sort();
   var lines = keys.map(function (k) {
@@ -73,8 +44,6 @@ beforeAll(async () => {
     consumes: ["height"],
     bundle: FLOOR,
   });
-  // The anonymous door needs a declaration to serve the route at all — constraint (a) below is about
-  // what it does with a `?read=` once it is serving.
   await gateway.append([signClaims(publicClaims(["Plant"], OP, 9_100), OP_SEED)]);
   handle = await serve({
     mounts: { garden: gateway },
@@ -113,25 +82,17 @@ describe("§30 criterion 35a: the host route honors the same gesture, and fills 
   });
 
   it("state rides the query string, echoed verbatim — UI state has nowhere else to live", async () => {
-    // A per-render realm gives a page index no home: module scope dies with the realm, the worker has
-    // no `document` to read the previous paint from, and `reads` is keyed by lens and entity and holds
-    // answers. So the floor carries `state`, and `RenderFn` stays a pure function of its argument.
     const res = await app(`?page=3&sort=asc`, "op-token");
     const body = await res.text();
     expect(body).toContain("state=page:3,sort:asc");
   });
 
   it("BOTH members are present and EMPTY on a bare first paint — never absent", async () => {
-    // An optional member is the one-address/two-envelopes bug in miniature: a bundle that draws it
-    // throws or paints nothing on the host where it is missing.
     const body = await (await app("", "op-token")).text();
     expect(body).toContain("|reads=|state=");
   });
 
   it("a read at an entity the store has nothing for is a SUCCESS carrying an empty view", async () => {
-    // Absence is an answer, not an error — so a search box driven at a nonexistent key gets an empty
-    // view and the renderer draws its own "nothing here". The shell cannot do it for them: an empty
-    // view and an unfetched one are different states, and only the app knows what its emptiness is.
     const body = await (await app("?read=Plant:no-such-plant", "op-token")).text();
     expect(body).toContain(`${readKey("Plant", "no-such-plant")}=undefined`);
     expect(body).not.toContain("!not_served");
@@ -141,9 +102,6 @@ describe("§30 criterion 35a: the host route honors the same gesture, and fills 
 
 describe("§30 criterion 35b: the refusal is the FLOOR's enum, identical across hosts", () => {
   it("a lens this store does not serve yields not_served — the host-neutral code", async () => {
-    // The MCP broker's codes cannot exist here (there is no broker), which is exactly why the floor
-    // owns its own four-code vocabulary and each host maps its failures onto it at its own seam. A
-    // bundle branching on `needs_reauth` would behave differently on one host behind one address.
     const body = await (await app("?read=NoSuchLens:x", "op-token")).text();
     expect(body).toContain(`${readKey("NoSuchLens", "x")}!not_served`);
   });
@@ -152,7 +110,6 @@ describe("§30 criterion 35b: the refusal is the FLOOR's enum, identical across 
     expect(parseReadGesture("Plant")).toBeUndefined();
     expect(parseReadGesture(":x")).toBeUndefined();
     expect(parseReadGesture("Plant:")).toBeUndefined();
-    // An entity id may carry its own colon: the split is on the FIRST one.
     expect(parseReadGesture("Plant:urn:x:1")).toEqual({ lens: "Plant", entity: "urn:x:1" });
     const body = await (await app("?read=Plant", "op-token")).text();
     expect(body).toContain("|reads=|");
@@ -163,18 +120,11 @@ describe("§30 criterion 35c: on the PUBLIC door a ?read= is ignored", () => {
   it("over HTTP the route renders exactly as it does today, with no per-lens refusal", async () => {
     const bare = await (await app("")).text();
     const gestured = await (await app("?read=NoSuchLens:x&page=9")).text();
-    // Byte-identical: no `not_served`, no state echo, no oracle. A per-lens refusal here would be
-    // precisely the lens-existence oracle §17's uniform 404 closed.
     expect(gestured).toBe(bare);
     expect(gestured).toContain("|reads=|state=");
   });
 
   it("and serveRoute REFUSES a gesture handed to it directly on the public door", async () => {
-    // The HTTP leg above cannot see this guard: `http.ts` only calls `gestureOf` on the full-door
-    // branch, so a gesture never reaches `serveRoute("…","public")` through the server at all. Two
-    // independent guards is the right shape — and a rail that only drives the outer one goes green
-    // when the inner one is deleted, which is exactly the hollow-rail failure. So this drives the
-    // inner one, at the seam, with a gesture no HTTP request could deliver.
     const out = await gateway.serveRoute("plant", FERN, "public", {
       reads: [{ lens: "Plant", entity: MOSS }],
       state: { page: "9" },
@@ -183,8 +133,6 @@ describe("§30 criterion 35c: on the PUBLIC door a ?read= is ignored", () => {
     expect(out.body).toContain("|reads=|state=");
     expect(out.body).not.toContain("Plant@");
     expect(out.body).not.toContain("page:9");
-    // …and the FULL door with the same gesture DOES serve it, so this is not a rail that passes by
-    // everything being ignored.
     const full = await gateway.serveRoute("plant", FERN, "full", {
       reads: [{ lens: "Plant", entity: MOSS }],
       state: { page: "9" },
@@ -196,8 +144,6 @@ describe("§30 criterion 35c: on the PUBLIC door a ?read= is ignored", () => {
 
 describe("§30 criterion 35: the resolution count per request is BOUNDED", () => {
   it("honors at most the cap, so a repeatable parameter cannot multiply resolutions freely", async () => {
-    // `maxPublicRenders` caps worker RENDERS, not resolutions — H8's full-scan cost, N times, on one
-    // GET. Twelve gestures, eight honored.
     const many = Array.from({ length: 12 }, (_, i) => `read=Plant:p${i}`).join("&");
     const body = await (await app(`?${many}`, "op-token")).text();
     expect(body.match(/Plant@p\d+/g)).toHaveLength(8);
@@ -206,22 +152,14 @@ describe("§30 criterion 35: the resolution count per request is BOUNDED", () =>
 
 describe("§30 criterion 28: the SCHEMA is the request surface, and the boundary is the store's", () => {
   it("a gesture at a REGISTERED lens is served; the identical gesture at an unregistered one is refused", async () => {
-    // (b). The shell — and the host route — adjudicate nothing: the STORE answers from the
-    // registration the viewer installed. That refusal is more accurate than anything the page could
-    // have decided, because the page is not where the law lives.
     const served = await (await app(`?read=Plant:${encodeURIComponent(MOSS)}`, "op-token")).text();
     expect(served).toContain(`${readKey("Plant", MOSS)}=7`);
     const refused = await (await app("?read=Ledger:whatever", "op-token")).text();
     expect(refused).toContain("!not_served");
-    // Zero fabricated or partial data: no view value rides a refusal.
     expect(refused).not.toMatch(/Ledger@whatever=/);
   });
 
   it("two mounts whose registered lens sets DIFFER serve different sets for the same gesture", async () => {
-    // (c), the positive form of the boundary claim. What bounds an app is the pair (the schemas this
-    // viewer installed, the MOUNT their connector points at) — two existing boundaries, neither
-    // invented here. Note which the second is NOT: a per-token read filter, which does not exist —
-    // `hooks.resolve` carries no identity.
     const other = await Gateway.open(new MemoryBackend(), {
       seed: OP_SEED,
       renderTimeoutMs: 10_000,
@@ -248,11 +186,6 @@ describe("§30 criterion 28: the SCHEMA is the request surface, and the boundary
   });
 
   it("a token individuates WRITE standing, not reads — so the same mount answers identically", async () => {
-    // The correction criterion 8 records too, asserted from the other side: `SurfaceHooks.resolve`
-    // takes no identity and every query field resolves through it without a context value, so two
-    // distinct tokens on ONE mount get byte-identical readings. §7's isolation unit for reads is the
-    // MOUNT. Asserting a per-token read difference would have been satisfiable only by a stubbed
-    // harness inventing two answers — a green rail over a false claim.
     handle.addMount("shared", gateway);
     const asOperator = await (
       await app(`?read=Plant:${encodeURIComponent(MOSS)}`, "op-token")

@@ -1,18 +1,3 @@
-// The §14 write verbs (ticket T19: the Gateway's mutation bodies, in their own module). Mutation is
-// the DUAL of resolution: assert writes one signed property-claim per provided field; retraction
-// negates the caller's OWN surviving contributions and lets the read side re-resolve (the pick falls
-// to the next survivor, an `all` list loses your value, a field only you spoke for goes absent). The
-// verbs — mutate, clear, remove, link, sever, claim — are all sugar over two motions: sign-and-append
-// a claim, or sign-and-append negations of your own claims. Nothing here bypasses a door: every write
-// runs through a gateway's `append` (authorize, budgets, validators) — this store's, or a bound
-// connection's inbox pool (`sinkFor`, SPEC §58) — and writability is checked at THIS seam
-// (`assertWritable` — §14's immutable-by-default) before a delta is ever minted.
-//
-// These are the implementations behind `Gateway.mutateEntity` and the private clear/remove/link/
-// sever/claim hooks — thin delegating methods on the class, bodies here. They reach the gateway only
-// through its declared internals seam (the `@internal` members on the class — see the seam note in
-// gateway.ts).
-
 import type { Peer } from "./peer.js";
 import { seedSigner } from "./signer.js";
 import { makeNegationClaims } from "@bombadil/rhizomatic";
@@ -27,11 +12,6 @@ import { assertChannelSourceLegible } from "./reads.js";
 import { declaredInboxes, readContainerTable } from "./container-law.js";
 import { withStamp } from "./stamp.js";
 
-// Where a write LANDS (SPEC §58): a bound connection's deltas go into its inbox pool — the pool's
-// own door authorizes them on the pool's own grant chain, so the primary never has to grant the key
-// anything — and everyone else's into this store. A binding names a connection, so a request that
-// carries one and no actor is malformed and refused BEFORE any seed is resolved: the operator's
-// seed must never sign into a connection's pool.
 function sinkFor(
   gw: Gateway,
   actorSeed: string | undefined,
@@ -47,9 +27,6 @@ function sinkFor(
   return bindingPeer(gw, binding);
 }
 
-// One signed property-claim delta per provided property, signed as the ACTOR (or the
-// operator when no actor is named), appended through the same validated, capability-enforced
-// path as everything else.
 export async function mutateEntityImpl(
   gw: Gateway,
   name: string,
@@ -68,14 +45,9 @@ export async function mutateEntityImpl(
   if (entries.length === 0) {
     throw new Error(`mutation of ${entity} names no properties to claim`);
   }
-  // Reference first, THEN writability: a refs-declared prop draws the reference refusal even
-  // when `writable` never opened it — "read-only: name it in writable" would coach the caller
-  // into re-opening the exact fossil path the declaration closed.
   assertNotReference(gw, name, Object.keys(props), binding);
   assertWritable(gw, name, Object.keys(props), binding);
   const author = signer.author;
-  // Strictly monotonic per author: two mutations never tie on timestamp, and a restart with the
-  // clock set back cannot sort a later write before an earlier one under `byTimestamp`.
   const stamp = gw.stamp(author);
   const deltas = entries.map(([prop, value]) =>
     signer.sign({
@@ -91,21 +63,6 @@ export async function mutateEntityImpl(
   return gw.resolvedNode(name, entity, undefined, undefined, binding);
 }
 
-// Retraction, the DUAL of resolution (SPEC §14): negate the caller's OWN surviving contributions
-// that `keep` selects, and re-resolve — one mechanism, correct across every Policy because the
-// read side already does the Policy work (the pick falls to the next survivor, an `all` list loses
-// your value, a `merge` withdraws your addend, a field only you spoke for goes ABSENT, rendered
-// per its own absentAs). The negations sign and append through the same standing-checked path as
-// every write.
-//
-// The `mine.has(claims.author)` filter is the SINGLE load-bearing check of the retract-your-own
-// invariant (Myk, 2026-07-12): `append` only proves the negation's author holds write standing,
-// NOT that the target is theirs — so a future refactor must never loosen this into negating a
-// foreign delta. (`claims.author` is signature-bound by verifyDelta at append, not self-assertable.
-// To keep OTHERS' claims out of a view you narrow the schema Policy, not the ground.) The `keep`
-// predicate stays lens-agnostic: each DOOR refuses an unknown field against the version it
-// addressed, so this never throws on a field an older version named that the latest lens dropped —
-// its contributions are still real on the ground; a field with no bucket simply retracts nothing.
 async function retract(
   gw: Gateway,
   name: string,
@@ -119,16 +76,11 @@ async function retract(
   if (signer === undefined) {
     throw new Error("this gateway holds no signing seed and cannot write");
   }
-  gw.def(name, binding); // refuses an unknown schema
+  gw.def(name, binding);
   const author = signer.author;
-  // The owner's clear reaches her connections' writes in her inbox pools (README ruling 8, M2):
-  // for an unbound call, or a bound one signed by that pool's owner. Checked before anything is
-  // signed, so a refusal here leaves nothing behind.
   const ownerCall = binding === undefined || ownerOf(bindingPeer(gw, binding)) === author;
   const pools =
     ownerCall && !channelUsesUnboundGround(gw, name, binding) ? ownedPools(gw, author) : [];
-  // Validate every fanout source before signing in any ground. A scoped candidate keeps the
-  // existing owner/delegate reach; incompatible foreign operands never report a silent no-op.
   for (const pool of pools) {
     if (channelUsesUnboundGround(gw, name, { container: pool.parent, inbox: pool.name })) {
       throw new Error(
@@ -136,12 +88,7 @@ async function retract(
       );
     }
   }
-  // UNNARROWED (SPEC §29.3): a read-closing slate must not turn this strike into a silent no-op —
-  // the member would be absent from a narrowed hview, so nothing would be targeted and nothing signed.
-  // A bound connection gathers ITS scope: its own claims live in its pool, and a strike it signs
-  // lands beside them there.
   const hview = gw.gatherForRetraction(name, entity, binding);
-  // "Your own" is every key of the caller's principal, not only the key signing this retraction.
   const mine = keysEverOf(gw.reactor, gw.validityNow(), { root: author }, gw.operatorAuthor);
   const targets = new Set<string>();
   for (const [field, entries] of hview.props) {
@@ -158,9 +105,6 @@ async function retract(
     );
     await sink.append(negations);
   }
-  // The fan-out: in each pool she owns, what she or a key she ever delegated to there wrote. Only
-  // her current root signs (M5). Grounds are not atomic together, so a failure is reported by
-  // ground; a rerun skips what is already struck and finishes the rest.
   const landed: string[] = [];
   const failed: string[] = [];
   for (const pool of pools) {
@@ -176,9 +120,6 @@ async function retract(
     for (const [field, entries] of view.props) {
       for (const entry of entries) {
         const d = entry.delta;
-        // Judged per ground: the same signed delta may be held in several, and a strike counts only
-        // where it lands. This pool is gathered after the first strike, so one struck here reads as
-        // negated and is not struck twice.
         if (pool.ground.reactor.get(d.id) === undefined) continue;
         if (own.has(d.claims.author) && !entry.negated && keep(field, entry)) ids.add(d.id);
       }
@@ -201,16 +142,11 @@ async function retract(
   return gw.resolvedNode(name, entity, undefined, undefined, binding);
 }
 
-// The key that owns inbox pool `pool`, or undefined when it has none readable.
 function ownerOf(pool: Peer): string | undefined {
   const owner = poolOwner(pool);
   return "refusal" in owner ? undefined : owner.key;
 }
 
-// The inbox pools `author` owns now, attached. Any declared inbox this store cannot read (not
-// attached, or no readable owner) refuses the whole call before a signature: it might be hers, and
-// a clear that skipped it would report a completeness it does not have (H7). This over-refuses when
-// such a pool is someone else's; the refusal names it.
 function ownedPools(
   gw: Gateway,
   author: string,
@@ -243,7 +179,6 @@ function ownedPools(
   return out;
 }
 
-// Clear whole fields: retract every one of the caller's contributions to each named field.
 export function clearEntityImpl(
   gw: Gateway,
   name: string,
@@ -259,9 +194,6 @@ export function clearEntityImpl(
   return retract(gw, name, entity, actorSeed, binding, (field) => set.has(field));
 }
 
-// Remove ONE value (SPEC §14 amendment): retract only the caller's own contribution(s) to `field`
-// whose claimed value is one of `values` — withdraw the single tag you added, a specific `merge`
-// addend. The rest of the field, yours and everyone's, stands.
 export function removeEntityImpl(
   gw: Gateway,
   name: string,
@@ -294,18 +226,9 @@ export function removeEntityImpl(
   );
 }
 
-// The single role the §14 verbs would mint for `field`, or undefined: one expand role covers a
-// byTargetContext gather's fields; a body with several distinct edge roles disambiguates by the
-// field's own name. Shared by `edgeRoleFor` (which turns undefined into a refusal) and the §14
-// link authorization below (which must ask the SAME question without throwing) — one selection,
-// so the two can never drift into authorizing one role and minting another.
 const mintedRole = (roles: readonly string[], field: string): string | undefined =>
   roles.length === 1 ? roles[0] : roles.includes(field) ? field : undefined;
 
-// The edge role a gather declares for `field` (SPEC §14 edge verbs): the pointer role an edge
-// write must carry so the body's `expand` follows it into the child's view. Read from the
-// PUBLISHED hyperschema gather, never the resolution Schema. A gather with no `expand` resolves no
-// edges — link/sever are meaningless there and refuse.
 function edgeRoleFor(
   gw: Gateway,
   name: string,
@@ -329,10 +252,6 @@ function edgeRoleFor(
   return role;
 }
 
-// Link an edge (SPEC §14 edge verbs): assert ONE edge delta — the same per-prop write shape, its
-// value pointer made an ENTITY target the gather's `expand` follows. Pure sugar over assert: no
-// new delta shape, nothing new on the wire. The subject pointer files the edge into the `field`
-// bucket (byTargetContext); the edge-role pointer is what `expand` resolves into the child view.
 export async function linkEntityImpl(
   gw: Gateway,
   name: string,
@@ -353,17 +272,6 @@ export async function linkEntityImpl(
   if (!def.schema.props.has(field)) {
     throw new Error(`schema ${name} has no field "${field}" to link`);
   }
-  // A refs-declared field is authorized by the declaration itself (SPEC §52, §51.5's rule carried
-  // to the §14 verb): a reference prop leaves `writable` — its primitive path is closed — and its
-  // edge writes must not die with it. Non-refs fields keep the writable requirement exactly.
-  //
-  // But ONLY where the declaration and the gather AGREE: the ref mints a pair (`links`) and its
-  // declared role is exactly the role this verb would mint. The agreement is load-bearing — a
-  // mismatched declaration (a role no expand matches, a prefix/inSet family) bypassing here would
-  // mint an edge under some OTHER expand's role, folding into this prop's bucket while the §51
-  // unlink matches only the DECLARED role and sever/clear/remove refuse the unwritable prop: a
-  // delta writable through exactly one door and retractable through none. Fail closed instead:
-  // the mismatch falls back to the writable gate, which refuses in §14's own read-only voice.
   const ref = referenceProps(def.hyperschema.body, def.refs).get(field);
   if (
     ref === undefined ||
@@ -389,10 +297,6 @@ export async function linkEntityImpl(
   return gw.resolvedNode(name, entity, undefined, undefined, binding);
 }
 
-// Sever an edge (SPEC §14 edge verbs): retract YOUR OWN edge deltas in `field` — the dual of link,
-// the same retract-your-own reach clear/remove already have. With `targets`, only edges whose
-// edge-role pointer lands on one of them are withdrawn (value-scoped, like remove); without,
-// every edge you authored in the field. Never touches another author's edge.
 export function severEntityImpl(
   gw: Gateway,
   name: string,
@@ -426,11 +330,6 @@ export function severEntityImpl(
   );
 }
 
-// A REFERENCE PROP refuses a primitive write at the mutate seam (SPEC §51.5): a prop is a
-// reference or a primitive, never both. The GraphQL door already drops the argument, but this
-// seam is what REST and direct callers reach — an unguarded seam keeps the string-fossil path
-// alive on every door that never saw the surface. The refusal names the typed door that exists
-// instead, in the caller's own dialect (the generated mutation's mangled name).
 function assertNotReference(
   gw: Gateway,
   name: string,
@@ -453,11 +352,6 @@ function assertNotReference(
   }
 }
 
-// The declared reference prop behind a generated link/unlink mutation (SPEC §51), or a refusal.
-// The classification is re-derived from the def on every call — the same `referenceProps` walk the
-// surface generated the mutation from, so the write can never author a shape the surface did not
-// advertise. `links: false` (a prefix/inSet role family) refuses too: the surface minted no
-// mutation for it, and a door reaching here by hand gets the same answer.
 function referencePropFor(
   gw: Gateway,
   name: string,
@@ -475,15 +369,6 @@ function referencePropFor(
   return ref;
 }
 
-// Link a declared reference (SPEC §51.3): assert ONE symmetric two-pointer delta —
-// { role R, at target, context C_reciprocal } + { role R_reverse, at entity, context P }.
-// The root-side context is always P: that is what folds the delta into the prop. With no
-// reciprocal declared, the target-side pointer carries NO context (nothing folds on the far
-// side — registration already warned, loudly) and the root-side pointer falls back to the
-// store-wide `subject` role every per-prop write carries.
-//
-// The `refs` declaration IS the write opening for its prop — `writable` is not consulted:
-// a prop is a reference or a primitive, never both, and refs wins the overlap (§51.5).
 export async function linkRefEntityImpl(
   gw: Gateway,
   name: string,
@@ -525,17 +410,6 @@ export async function linkRefEntityImpl(
   return gw.resolvedNode(name, entity, undefined, undefined, binding);
 }
 
-// Unlink a declared reference (SPEC §51.2): retract the caller's OWN link claim(s) for the
-// (entity, target) pair — the remove*/clear family's semantics: retraction is a claim, history
-// survives, another author's edge stands. Matches on the prop's bucket and the edge role's
-// pointer at the target, so a hand-authored _claim of the same shape retracts identically.
-//
-// THE CHANGED-ROLE STRAND (documented, not decided): the match reads the CURRENT declared role,
-// so after an operator republishes `refs` with a different role, the caller's own OLD-role edges
-// still fold (the context carries the fold) but no longer match here — and clear/remove refuse a
-// refs prop — leaving them unretractable through every typed door. Raw `_claim` plus a manual
-// retraction remains the escape hatch. Widening this match to previously-declared roles is a
-// behavior decision, not a repair; it goes to review, not into a fixup.
 export async function unlinkRefEntityImpl(
   gw: Gateway,
   name: string,
@@ -561,13 +435,6 @@ export async function unlinkRefEntityImpl(
   );
 }
 
-// Writability is front-door discipline (SPEC §14, immutable-by-default): a registration names its
-// `writable` fields, and ONLY those accept a surface write — assert, clear, remove, link, AND
-// sever refuse the rest with a reason. Silence (no `writable`) now means "you may not": absent a
-// list, NOTHING is writable (§21's wave flipped the old permissive default, so every registration
-// Loam mints names its writable fields explicitly). It disciplines the SURFACE, never the ground:
-// a hand-signed or federated delta may still assert into a "read-only" context, and a reader who
-// wants the guarantee enforces it with a lens.
 function assertWritable(
   gw: Gateway,
   name: string,
@@ -585,9 +452,6 @@ function assertWritable(
   }
 }
 
-// One signed MULTI-POINTER delta from an explicit pointer list — what every claim template
-// is sugar for. The actor signs (or the operator, when none is named); standing is asked by
-// append like everywhere else. Returns the receipt: the delta id.
 export async function claimEntityImpl(
   gw: Gateway,
   pointers: readonly ClaimPointerSpec[],

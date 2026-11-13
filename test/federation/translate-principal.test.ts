@@ -1,10 +1,3 @@
-// The translator's reconciliation retracts only renderings its principal OWNS (`keysEverOf`). A
-// SPEC-14 binding is association evidence that any writer can sign about anyone's key, so a
-// translator binding a stranger's key must not make that stranger's renderings its own: they stay
-// live and are counted as stranded. An earlier key becomes the translator's own only through an
-// operator-governed recovery record (step 5, PR 3e). Asserted at the delta level (a surviving
-// strike, or none) and in the pass's own report; the object level is translate-suppression.test.ts.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Delta, type Pointer } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
@@ -16,11 +9,11 @@ import { isSuppressed, retraction } from "../gateway/narrowing.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
-const R_SEED = "1b".repeat(32); // the translator's principal root
+const R_SEED = "1b".repeat(32);
 const R = authorForSeed(R_SEED);
-const K_SEED = "4e".repeat(32); // R's old key, which ran the pass before
+const K_SEED = "4e".repeat(32);
 const K = authorForSeed(K_SEED);
-const Y_SEED = "5f".repeat(32); // a bystander translator
+const Y_SEED = "5f".repeat(32);
 const Y = authorForSeed(Y_SEED);
 const SOURCE_SEED = "ab".repeat(32);
 const SOURCE = authorForSeed(SOURCE_SEED);

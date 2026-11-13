@@ -1,21 +1,3 @@
-// `POST /session/token` reports `expiresIn`. This file asks whether that number is TRUE.
-//
-// It lives beside test/server/session-token.test.ts rather than inside it because that suite is
-// T128's frozen rail set: §36 phase 7's contract, landed and closed. This is a different question
-// — not what the bearer bridge promises, but whether the door's own arithmetic about time can
-// lie — and it arrived from a P5 lens rather than from a phase.
-//
-// BOTH LEVELS, and the disagreement between them IS the bug. The response's `expiresIn` is the
-// CLAIM. The row in the token table (`sessionTokens` in http.ts) is the FACT. A door that dates
-// the lifetime from its own clock read, rather than from the deadline `mint` recorded, advertises
-// a window that outlives the row: the token is refused inside the life the response promised. A
-// rail that only read the response body could never see that, which is why the assertion here is
-// a real request to a real data door.
-//
-// THE BEHAVIOUR IS ALREADY CORRECT — phase 8 made `mint` hand back the deadline it recorded. What
-// was missing is a test that can tell. The only prior assertion on the field was that it exceeded
-// zero, which the wrong answer satisfies too. This is the rail, arriving after the fix.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,7 +12,7 @@ import { PRESESSION_COOKIE, SESSION_COOKIE } from "../../src/server/session.js";
 import { writeUserSeed } from "../../src/cli/config.js";
 
 const OPERATOR_SEED = "0e".repeat(32);
-const MYK_SEED = "11".repeat(32); // phase 8: a session signs as its user, so the user needs a key
+const MYK_SEED = "11".repeat(32);
 const OPERATOR = authorForSeed(OPERATOR_SEED);
 const CHEAP: ScryptParams = { N: 1024, r: 8, p: 1, keylen: 32 };
 const PASSWORD = "correct horse";
@@ -46,7 +28,6 @@ afterEach(async () => {
 const valueOf = (header: string): string =>
   header.slice(header.indexOf("=") + 1, header.indexOf(";"));
 
-/** One operator user, no garden: `{ __typename }` needs no registered schema. */
 async function tokenServer(doorOptions: Record<string, unknown>): Promise<string> {
   const gateway = await Gateway.open(new MemoryBackend(), { seed: OPERATOR_SEED });
   await gateway.append([
@@ -104,10 +85,6 @@ const gql = (base: string, token: string): Promise<Response> =>
 
 describe("the lifetime /session/token advertises", () => {
   it("never outruns the deadline the token table recorded", async () => {
-    // The clock STEPS on every read. That makes the gap deterministic rather than a race on real
-    // request latency: the moment `mint` recorded is now strictly earlier than any moment the
-    // door can read after it, so a door dating the lifetime from after the mint overshoots by a
-    // fixed, visible amount instead of by however long the process happened to take.
     const STEP = 2000;
     let clockMs = 0;
     let stepMs = STEP;
@@ -117,7 +94,7 @@ describe("the lifetime /session/token advertises", () => {
         return clockMs;
       },
       tokenTtlMs: 100_000,
-      idleMs: 100_000_000, // the SESSION must not be what expires here
+      idleMs: 100_000_000,
     });
     const session = await signIn(base);
     const res = await fetch(`${base}/session/token`, {
@@ -132,27 +109,14 @@ describe("the lifetime /session/token advertises", () => {
     expect(res.status).toBe(200);
     const minted = (await res.json()) as { token: string; expiresIn: number };
 
-    // Freeze the clock. From here the test drives it by hand, and `sent` is the moment the
-    // response left — the anchor the advertised lifetime counts from.
     stepMs = 0;
     const sent = clockMs;
     expect(minted.expiresIn).toBeGreaterThan(0);
-    expect(minted.expiresIn).toBeLessThanOrEqual(100); // never more than the configured TTL
+    expect(minted.expiresIn).toBeLessThanOrEqual(100);
 
-    // Inside the promised window, by HALF a step. The margin has to be smaller than the smallest
-    // overshoot a wrong answer can carry, and the smallest is one STEP: a door that dates the
-    // lifetime from its own next clock read is exactly one read late. A margin of a full step or
-    // more would swallow that and pass on the bug — this rail did, before it was measured.
-    //
-    // The cost of a margin that tight: `sent` is the last clock the SERVER read, and the rail
-    // assumes that read is the one `expiresIn` was measured against. A future door that reads the
-    // clock again between computing `expiresIn` and writing the response turns this red. That red
-    // is not noise — it means the response's own arithmetic moved — but the fix is there, not here.
     clockMs = sent + minted.expiresIn * 1000 - STEP / 2;
     expect((await gql(base, minted.token)).status).toBe(200);
 
-    // The other side, so the assertion above cannot be satisfied by a token that never dies:
-    // past the advertised expiry the same token is refused.
     clockMs = sent + minted.expiresIn * 1000 + STEP;
     expect((await gql(base, minted.token)).status).toBe(401);
   });

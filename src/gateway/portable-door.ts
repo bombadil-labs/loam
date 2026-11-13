@@ -1,8 +1,3 @@
-// The ordinary PRIMARY read door, routed (SPEC-16 M5 trial). Each read is classified BEFORE any
-// dispatch: an eligible read runs the package's batch gather then resolve over Loam's own signed
-// source; every other read takes the native branch, with its reason named. Once a portable read is
-// dispatched, its errors surface: there is no retry and no fallback to native.
-
 import {
   anchorAnalysis,
   collectReadingRefs,
@@ -37,7 +32,6 @@ import { readClosedIds } from "./slate-law.js";
 import { lensOf } from "./registration.js";
 import type { Signer } from "./signer.js";
 
-/** Why a read stays native. Each is decided before dispatch, from state this read is frozen at. */
 export type NativeReason =
   | "bound-connection"
   | "channel"
@@ -63,23 +57,16 @@ const textAt = (d: Delta, role: string): string | undefined => {
   return t?.kind === "primitive" && typeof t.value === "string" ? t.value : undefined;
 };
 
-/**
- * Readable law at `now`, judged as native law judges it: the act is signed by a law author, stands
- * in its own window, and no lawful strike that holds at `now` retires it. A strike counts only from a law author and
- * only while it survives itself, so a struck strike revives its target. A stranger's strike
- * retires nothing.
- */
 function readableLaw(gw: Gateway, now: number, closed: ReadonlySet<string>): Admits {
   const authors = new Set(gw.lawAuthors("registrations"));
   const lawful = (d: Delta): boolean => authors.size === 0 || authors.has(d.claims.author);
-  // Every act in the chain is judged at `now`: a strike outside its own window binds nothing.
   const holds = (d: Delta): boolean =>
     d.claims.validFrom <= now && (d.claims.validUntil === undefined || now < d.claims.validUntil);
   const memo = new Map<string, boolean>();
   const retired = (id: string): boolean => {
     const known = memo.get(id);
     if (known !== undefined) return known;
-    memo.set(id, false); // content addressing keeps the chain acyclic
+    memo.set(id, false);
     const verdict = gw.reactor.negationsOf(id).some((n) => {
       const strike = gw.reactor.get(n);
       return (
@@ -92,7 +79,6 @@ function readableLaw(gw: Gateway, now: number, closed: ReadonlySet<string>): Adm
   return (d) => !closed.has(d.id) && lawful(d) && holds(d) && !retired(d.id);
 }
 
-/** The exact original act for one definition body, chosen by act identity among standing copies. */
 function actFor(
   candidates: readonly Delta[],
   termRole: string,
@@ -105,19 +91,12 @@ function actFor(
     .sort((a, b) => (a.id < b.id ? -1 : 1))[0];
 }
 
-/**
- * The readable law at one entity, from the index. A definition act points at its own entity
- * (`hyperschema:<name>`, `schema:<lens>`), so program selection reads only those entities and
- * never the whole store. Law published under any other entity is not found, and its read stays
- * native as `unpublished-law`.
- */
 const lawAt = (gw: Gateway, admits: Admits, entity: string): Delta[] =>
   gw.reactor
     .byTarget(entity)
     .map((id) => gw.reactor.get(id))
     .filter((d): d is Delta => d !== undefined && admits(d));
 
-/** Whether a lens was published: a lawful registration binding stands at its entity. */
 const bound = (gw: Gateway, admits: Admits, hyperschemaName: string): boolean =>
   lawAt(gw, admits, `registration:hyperschema:${hyperschemaName}`).length > 0;
 
@@ -134,11 +113,6 @@ type Selection =
   | { readonly status: "unpublished" }
   | { readonly status: "reading-predicate" };
 
-/**
- * The selected program's original signed acts under current law. A registration with no published
- * top acts is a native-only bystander. A published one whose closure has a missing act is an error:
- * its promised law is gone, and the receiver never re-signs it.
- */
 function selectProgram(gw: Gateway, name: string, now: number, admits: Admits): Selection {
   const def = gw.def(name);
   const top = def.hyperschema;
@@ -160,8 +134,6 @@ function selectProgram(gw: Gateway, name: string, now: number, admits: Admits): 
   if (hyperAct === undefined || schemaAct === undefined) return { status: "unpublished" };
   if (usesPredicateOrder(topReading)) return { status: "reading-predicate" };
   const extra = new Map<string, Delta>();
-  // A missing act is a broken promise when its lens was published (its binding stands in law), and
-  // native-only law otherwise: a `register()` lens never had acts, so the read stays native.
   const broken: string[] = [];
   let nativeOnly = false,
     predicate = false;
@@ -191,7 +163,6 @@ function selectProgram(gw: Gateway, name: string, now: number, admits: Admits): 
       else if (act.id !== hyperAct.id) extra.set(act.id, act);
       visit(hs.body);
     }
-    // A reading is named or pinned by hash; the registry resolves both as native evaluation does.
     for (const ref of collectReadingRefs(body)) {
       const readingName = gw.registry.resolveReading(ref)?.name;
       const reading = gw.registered.find((r) => lensOf(r) === readingName);
@@ -243,10 +214,6 @@ const bootFor = (signer: Signer): PortableBoot => {
   return boot;
 };
 
-/**
- * Classify one read, and freeze it. `now` is the host observation, sampled once by the caller:
- * the operand instant of a present read, and the serving time of every read.
- */
 export function classifyPortableRead(
   gw: Gateway,
   name: string,
@@ -261,17 +228,12 @@ export function classifyPortableRead(
   if (signer === undefined) return { route: "native", reason: "no-signer" };
   if (needsLowering(gw.def(name).hyperschema.body, gw.registry))
     return { route: "native", reason: "governed-lowering" };
-  // A store that cannot report other handles' commits cannot attest the source a capture names.
   if (gw.backend.revision === undefined) return { route: "native", reason: "unattested-source" };
-  // Law is selected from the present readable law, whatever moment the operands are read at.
   const closed = readClosedIds(gw, now);
   const selection = selectProgram(gw, name, now, readableLaw(gw, now, closed));
   if (selection.status === "unpublished") return { route: "native", reason: "unpublished-law" };
   if (selection.status === "reading-predicate")
     return { route: "native", reason: "reading-predicate" };
-  // The read's scope comes from an anchored read over the reactor's index (SPEC-17 §6): its root,
-  // its constant anchors and every expanded child. The capture carries exactly S(scope) under the
-  // read closure and, for an as-of read, the cut; never the whole store.
   const term = gw.def(name).hyperschema.body;
   if (!anchorAnalysis(term, gw.registry).anchored) return { route: "native", reason: "unanchored" };
   const selected =
@@ -303,7 +265,6 @@ export function classifyPortableRead(
       },
     });
   } catch (err) {
-    // The producer applies the source limits before the input preflight runs.
     if (err instanceof MaterializationSourceError && err.code === "resource-limit")
       return { route: "native", reason: "input-capacity" };
     throw err;
@@ -315,7 +276,6 @@ export function classifyPortableRead(
   return { route: "portable", prepared, signer };
 }
 
-/** One ordinary read through its route. One attempt; a dispatched read never falls back. */
 export async function readNodeImpl(
   gw: Gateway,
   name: string,
@@ -337,8 +297,6 @@ export async function readNodeImpl(
     ...(route.route === "native" ? { reason: route.reason } : {}),
   });
   if (route.route === "native") return resolvedNodeImpl(gw, name, entity, now, asOf, binding);
-  // The capture was built from memory. It names the durable source only while no other handle has
-  // committed since this gateway read the store.
   if (!(await gw.durableCurrent()))
     throw new Error(
       `portable read of ${name} at ${entity}: gather source-unavailable: ${STORE_MOVED}`,

@@ -1,9 +1,3 @@
-// Immutable-by-default (SPEC §14 wave B / §21) and the hyperschema-entity rename, at the live
-// surface. Two coupled posture changes: a hyperschema definition now lives at `hyperschema:<Name>`,
-// and a registration's SILENCE about writability now means "you may not" — only the fields a
-// registration explicitly opens accept a surface write. A registration that names none is wholly
-// read-only; every registration Loam mints names its writable fields.
-
 import { describe, expect, it } from "vitest";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -14,8 +8,6 @@ import { FERN } from "../spike/garden.js";
 
 const OP_SEED = "d4".repeat(32);
 
-// An operator-governed gateway with Plant registered; the operator roots the capability chain, so
-// its own writes need no grant — the only gate they meet is writability.
 async function operatorGateway(writable?: readonly string[]): Promise<Gateway> {
   const g = await Gateway.open(new MemoryBackend(), { seed: OP_SEED });
   g.register(PLANT, PLANT_POLICY, [FERN], undefined, writable);
@@ -46,7 +38,7 @@ describe("the hyperschema-entity rename", () => {
 
 describe("immutable-by-default writability", () => {
   it("a registration with no writable list accepts NO surface write", async () => {
-    const g = await operatorGateway(); // silence: nothing writable
+    const g = await operatorGateway();
     const res = await g.query(
       `mutation { clearPlant(entity: "${FERN}", fields: ["height"]) { height } }`,
     );
@@ -55,7 +47,7 @@ describe("immutable-by-default writability", () => {
   });
 
   it("a field absent from writable is refused; a listed field is allowed", async () => {
-    const g = await operatorGateway(["height"]); // only height opens
+    const g = await operatorGateway(["height"]);
     const listed = await g.query(
       `mutation { clearPlant(entity: "${FERN}", fields: ["height"]) { height } }`,
     );
@@ -77,8 +69,7 @@ describe("immutable-by-default writability", () => {
   });
 
   it("with no writable, GraphQL offers a bare mutate field (no per-prop args)", async () => {
-    const g = await operatorGateway(); // nothing writable
-    // `height` is not offered as a mutation argument at all, so naming it is a GraphQL error.
+    const g = await operatorGateway();
     const res = await g.query(`mutation { plant(entity: "${FERN}", height: 5) { height } }`);
     expect(res.errors?.join(" ")).toMatch(/height/i);
     await g.close();

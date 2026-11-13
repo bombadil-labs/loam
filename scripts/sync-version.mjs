@@ -1,7 +1,3 @@
-// Keep the in-source version constants agreeing with package.json. Runs as the `version`
-// lifecycle hook of `npm version` (after the bump, before the release commit), so the synced
-// files ride the same commit as the version change.
-
 import { readFileSync, writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 

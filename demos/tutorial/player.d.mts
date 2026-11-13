@@ -1,6 +1,3 @@
-// Types for demos/tutorial/player.mjs — the engine stays plain JS (it is bundled into the page);
-// this declaration keeps the headless suite that drives it typed.
-
 import type { Delta } from "@bombadil/rhizomatic";
 import type { StorageLike } from "../../src/store/local-storage.js";
 import type { Lesson, LessonCtx, LessonStep, Quiz } from "./lessons.mjs";
@@ -17,8 +14,6 @@ export declare const TUTORIAL_CONTEXTS: {
   readonly glossary: string;
 };
 
-/** The tutorial's own vocabulary and ONLY that: no constitutional context, no delta ref, no
- * `rhizomatic.*` role. The badge, the Ground filter and the progress reading all ask this. */
 export declare function isOnlyTutorial(delta: Delta): boolean;
 
 export interface QuizResult {
@@ -49,7 +44,6 @@ export interface ResumePoint {
 
 export declare function readProgress(ctx: LessonCtx): Progress;
 export declare function readGlossary(ctx: LessonCtx): GlossaryEntry[];
-/** The furthest lesson entered, and the first step in it not yet banked. */
 export declare function resumeState(arc: readonly Lesson[], progress: Progress): ResumePoint;
 
 export declare function enterLesson(loam: unknown, ctx: LessonCtx, lesson: Lesson): Promise<void>;
@@ -100,7 +94,6 @@ export interface CheckpointBlob {
 export declare function takeCheckpoint(
   storage: StorageLike,
   lesson: number,
-  /** `holds`: the ids the store itself vouches for — a blob copies nothing else. */
   opts?: { label?: string; holds?: readonly string[] },
 ): CheckpointOutcome;
 
@@ -119,7 +112,6 @@ export declare function checkpointLessons(storage: StorageLike): number[];
 export declare function restoreCheckpoint(
   storage: StorageLike,
   lesson: number,
-  /** The ids an erasure condemned: proof, at the moment of the write, never an inference. */
   opts?: { erasedIds?: readonly string[] },
 ):
   | { ok: true; restored: number; refused: string[]; keptOrders: string[] }
@@ -127,7 +119,6 @@ export declare function restoreCheckpoint(
 export declare function clearCheckpoints(storage: StorageLike): void;
 
 export interface SweepReport {
-  /** The checkpoint's key SUFFIX, verbatim — the sweep never re-derives a name it read. */
   readonly destroyed: { lesson: string; ids: string[]; reason: string }[];
   readonly kept: { lesson: string }[];
 }

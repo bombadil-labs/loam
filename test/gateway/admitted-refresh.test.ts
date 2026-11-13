@@ -60,7 +60,6 @@ describe("refresh reconciles the admitted set", () => {
       expect(JSON.stringify((await stream.next()).value)).toContain(p.target.id);
       const count = p.reader.reactor.size;
       await p.writer.erase(p.target.id, { reason: "refresh must forget" });
-      // A tombstone replaces its target. A size-only freshness check cannot see this change.
       expect(p.writer.reactor.size).toBe(count);
       await p.reader.refresh();
       expect(p.reader.reactor.size).toBe(count);

@@ -1,9 +1,3 @@
-// Step 7's function substrate, deployed. Function DEFINITIONS live in the store as data; a
-// Runner — a peer client, not a tier — reads them, installs each into a DerivationHost over the
-// gateway's reactor with an implementation it holds, and routes ingest through the host so the
-// bindings fire. Passive (definitions sit inert) vs animate (a runner computes them) is one
-// attach call. What a binding emits persists like any other delta.
-
 import { describe, expect, it } from "vitest";
 import type { DerivedFn, HView, Pointer } from "@bombadil/rhizomatic";
 import {
@@ -21,7 +15,6 @@ import { plant } from "../helpers/plant.js";
 const RUNNER_SEED = "0d".repeat(32);
 const RUNNER = authorForSeed(RUNNER_SEED);
 
-// The implementation the runner holds for fn:avgHeight — the definition in the store names it.
 const avgHeight: DerivedFn = (view: HView, root: string): Pointer[][] => {
   const heights = (view.props.get("height") ?? [])
     .flatMap((e) => e.delta.claims.pointers)
@@ -52,12 +45,10 @@ const SPEC = {
   emit: "supersede" as const,
 };
 
-// An ungoverned store keeps the demo about the runner, not about grants.
 async function plantStore(): Promise<{ gateway: Gateway; backend: MemoryBackend }> {
   const backend = new MemoryBackend();
   const gateway = await Gateway.open(backend);
   gateway.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
-  // The function definition, planted in the store as data.
   await gateway.append([signClaims(bindingDefinitionClaims(SPEC, RUNNER, 1), RUNNER_SEED)]);
   return { gateway, backend };
 }
@@ -70,13 +61,12 @@ const avgAt = (gateway: Gateway) =>
 describe("the runner: definitions in the store, execution in a peer client", () => {
   it("passive: a definition IS present in the store, yet without a runner computes nothing", async () => {
     const { gateway } = await plantStore();
-    // the definition is really there — inert, not absent
     expect(
       readBindingDefinitions(gateway.reactor, gateway.validityNow()).map((s) => s.name),
     ).toEqual(["binding:avgHeight"]);
     await gateway.append([observed(FERN, "height", 30, 1000, GARDENER_SEED)]);
     await gateway.append([observed(FERN, "height", 34, 2000, SURVEYOR_SEED)]);
-    expect(avgAt(gateway)).toHaveLength(0); // present but unrun
+    expect(avgAt(gateway)).toHaveLength(0);
     await gateway.close();
   });
 
@@ -84,7 +74,6 @@ describe("the runner: definitions in the store, execution in a peer client", () 
     const OPERATOR_SEED = "0e".repeat(32);
     const backend = new MemoryBackend();
     const gateway = await Gateway.open(backend, { seed: OPERATOR_SEED });
-    // a binding definition files on ungoverned ground: only the operator may plant one
     await expect(
       gateway.append([signClaims(bindingDefinitionClaims(SPEC, RUNNER, 1), RUNNER_SEED)]),
     ).rejects.toThrow(/not permitted/);
@@ -109,8 +98,6 @@ describe("the runner: definitions in the store, execution in a peer client", () 
       ),
     ]);
 
-    // alice (write standing, no admin) strikes the definition: her negation LANDS — and the
-    // definition still installs, because a writer's strike retires nothing constitutional
     await gateway.append([
       signClaims(makeNegationClaims(authorForSeed(ALICE_SEED), 3, definition.id), ALICE_SEED),
     ]);
@@ -118,7 +105,6 @@ describe("the runner: definitions in the store, execution in a peer client", () 
       readBindingDefinitions(gateway.reactor, gateway.validityNow(), OPERATOR).map((s) => s.name),
     ).toEqual(["binding:avgHeight"]);
 
-    // the operator's strike, by contrast, retires it
     await gateway.append([
       signClaims(makeNegationClaims(OPERATOR, 4, definition.id), OPERATOR_SEED),
     ]);
@@ -129,21 +115,19 @@ describe("the runner: definitions in the store, execution in a peer client", () 
   it("defense in depth: a definition planted around the door does not install once governed", async () => {
     const OPERATOR_SEED = "0e".repeat(32);
     const backend = new MemoryBackend();
-    // planted around the door, as rows from ungoverned days would arrive: no operator blessed it
     await plant(
       backend,
       [signClaims(bindingDefinitionClaims(SPEC, RUNNER, 1), RUNNER_SEED)],
       authorForSeed(OPERATOR_SEED),
     );
 
-    // an operator opens the same store and attaches a runner: the poison does not install
     const governed = await Gateway.open(backend, { seed: OPERATOR_SEED });
     governed.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     const runner = Runner.attach(governed, {
       seed: RUNNER_SEED,
       implementations: { "fn:avgHeight": avgHeight },
     });
-    expect(runner.installed).toEqual([]); // the operator blessed nothing
+    expect(runner.installed).toEqual([]);
     await governed.close();
   });
 
@@ -170,7 +154,6 @@ describe("the runner: definitions in the store, execution in a peer client", () 
     await gateway.append([observed(FERN, "height", 30, 1000, GARDENER_SEED)]);
     await gateway.flush();
 
-    // reopen WITHOUT a runner: the emission is durable ground, not recomputed
     const reopened = await Gateway.open(backend);
     reopened.register(PLANT, PLANT_POLICY, [FERN], undefined, PLANT_WRITABLE);
     const entries = reopened.reactor
@@ -182,18 +165,14 @@ describe("the runner: definitions in the store, execution in a peer client", () 
   });
 
   it("a re-blessed recipe supersedes: the latest definition per binding wins, attach installs once", async () => {
-    const { gateway } = await plantStore(); // holds SPEC (budget 10) at ts 1
-    // the recipe evolves: same binding name, new budget, LATER timestamp — appended between
-    // two older strays, so timestamp order and ingestion order disagree and latest-by-
-    // timestamp is what's actually pinned (not last-delta-seen)
+    const { gateway } = await plantStore();
     await gateway.append([
       signClaims(bindingDefinitionClaims({ ...SPEC, budget: 99 }, RUNNER, 5), RUNNER_SEED),
       signClaims(bindingDefinitionClaims({ ...SPEC, budget: 7 }, RUNNER, 3), RUNNER_SEED),
     ]);
     const specs = readBindingDefinitions(gateway.reactor, gateway.validityNow());
-    expect(specs).toHaveLength(1); // one binding, not two definitions of it
-    expect(specs[0]!.budget).toBe(99); // the later blessing is the law
-    // and attach does not die on a duplicate install
+    expect(specs).toHaveLength(1);
+    expect(specs[0]!.budget).toBe(99);
     const runner = Runner.attach(gateway, {
       seed: RUNNER_SEED,
       implementations: { "fn:avgHeight": avgHeight },
@@ -218,8 +197,8 @@ describe("the runner: definitions in the store, execution in a peer client", () 
       seed: RUNNER_SEED,
       implementations: { "fn:avgHeight": avgHeight },
     });
-    expect(runner.installed).toEqual(["binding:avgHeight"]); // the one it can run
-    expect(runner.skipped).toEqual(["binding:unknown"]); // the one it cannot
+    expect(runner.installed).toEqual(["binding:avgHeight"]);
+    expect(runner.skipped).toEqual(["binding:unknown"]);
     await gateway.close();
   });
 });

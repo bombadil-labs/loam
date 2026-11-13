@@ -1,5 +1,3 @@
-﻿// The Village harness — shared machinery for every phase. Ephemeral, never committed.
-
 import { copyFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,16 +23,13 @@ export const ROOT = dirname(fileURLToPath(import.meta.url));
 export const HOMES = join(ROOT, "homes");
 export const SCHEMAS = join(ROOT, "schemas");
 
-// ---- the cast ---------------------------------------------------------------------------------
 export const SEEDS = {
   wren: "11".repeat(32),
   miles: "22".repeat(32),
   odile: "33".repeat(32),
   petra: "44".repeat(32),
-  sasha: "55".repeat(32), // the stranger: cinelog's only resident
-  miller: "77".repeat(32), // the runner identity: grinds the almanac's ground into flour
-  // the palisade gate: a TRANSPORT identity only (Unit 3b) — its token may sit in a public
-  // page because a token lends no authority; it signs nothing and holds no standing
+  sasha: "55".repeat(32),
+  miller: "77".repeat(32),
   gate: "99".repeat(32),
   mallory: "ee".repeat(32),
 };
@@ -43,8 +38,6 @@ export const AUTHORS = Object.fromEntries(
 );
 export const PEOPLE = ["person:wren", "person:miles", "person:odile", "person:petra"];
 
-// ---- the stores -------------------------------------------------------------------------------
-// The hive publishes everything EXCEPT Odile's frank grumbles — the offered lens.
 const GRUMBLE_LENS = parseTerm({
   op: "select",
   pred: { not: { hasPointer: { context: { exact: "grumbles" } } } },
@@ -60,8 +53,8 @@ export const STORES = {
   commons: { port: 4401 },
   reel: { port: 4402 },
   hive: { port: 4403, lens: GRUMBLE_LENS },
-  almanac: { port: 4404, archive: true }, // the aggregator keeps a seed vault — cold copies of every delta
-  cinelog: { port: 4405 }, // the stranger's app — an alien dialect, normalized by translation
+  almanac: { port: 4404, archive: true },
+  cinelog: { port: 4405 },
 };
 
 export const opToken = (store) => `op-${store}`;
@@ -75,16 +68,12 @@ export function operatorOf(store) {
   return readConfig(homeOf(store)).operator;
 }
 
-// Open a store from its home (idempotent boot: genesis re-lands the same marker), serve it.
-// The gateway is in-process (so tests may introspect); the HTTP surface is real.
 export async function openStore(name, opts = {}) {
   const cfg = STORES[name];
   const home = homeOf(name);
   initHome(home);
   const seed = readSeed(home);
   let backend = new SqliteBackend(join(home, "store.sqlite"));
-  // A store with a vault mirrors every append into cold files and heals BEFORE the gateway
-  // reads — so a lost sqlite is replanted from the vault's memory (the crash act relies on it).
   const vault = cfg.archive ? join(home, "vault") : undefined;
   let healed = { toMirror: 0, toPrimary: 0 };
   if (vault !== undefined) {
@@ -92,7 +81,6 @@ export async function openStore(name, opts = {}) {
     backend = new MirrorBackend(backend, archive, {
       onLag: (err) => console.log(`  ${name}'s vault is lagging: ${err}`),
     });
-    // the law reaches the vault: erased ids are never replanted by a heal (SPEC §11)
     const dead = erasuresIn(
       [...(await backend.deltasSince(new Set())), ...(await archive.deltasSince(new Set()))],
       Date.now(),
@@ -103,10 +91,7 @@ export async function openStore(name, opts = {}) {
   const gateway = await Gateway.open(backend, {
     seed,
     ...(cfg.lens === undefined ? {} : { offeredLens: cfg.lens }),
-    // Provisioned renderer-pen seeds (SPEC §23.3) — custody in config, so a write-enabled renderer act
-    // can sign form-submits as a granted author. Passed by the act, never persisted to the ground.
     ...(opts.pens === undefined ? {} : { pens: opts.pens }),
-    // The §23.9 anonymous-render cap, when an act wants a small one to demonstrate the refusal.
     ...(opts.maxPublicRenders === undefined ? {} : { maxPublicRenders: opts.maxPublicRenders }),
   });
   await gateway.append(assembleGenesis({ operatorSeed: seed }).deltas);
@@ -131,7 +116,6 @@ export async function openStore(name, opts = {}) {
   };
 }
 
-// The crash: drop a store's sqlite files (the vault, if any, is untouched).
 export function dropStore(name) {
   const home = homeOf(name);
   for (const f of ["store.sqlite", "store.sqlite-wal", "store.sqlite-shm"]) {
@@ -139,10 +123,6 @@ export function dropStore(name) {
   }
 }
 
-// ---- HTTP helpers -----------------------------------------------------------------------------
-// Stores restart within a phase (close → copy → reopen on the same port), and undici's
-// keep-alive pool will happily hand back a socket the old server closed. Short requests say
-// connection: close; everything retries a reset once or twice.
 async function fetchRetry(url, opts, tries = 3) {
   for (let i = 0; ; i++) {
     try {
@@ -194,15 +174,9 @@ export async function mcp(base, token, method, params) {
   return { status: res.status, body: await res.json().catch(() => undefined) };
 }
 
-// The GuardedDossier register body, built at runtime (its trust mask embeds the almanac's
-// operator): rhizomatic 0.2.0's governed lens — negations bind only from the operator and the
-// operator's grantees, so a federated stranger's strike is inert here.
 export function guardedDossierSpec(operator) {
   const PICK = { pick: { order: { byTimestamp: "desc" } } };
   const ALL = { all: { order: { byTimestamp: "asc" } } };
-  // Both 0.2.0 lenses at once — they guard DIFFERENT attacks: the trust MASK makes a
-  // stranger's strike inert (erasure), the chain ORDER outranks a stranger's forgery
-  // (fabrication). A dossier wants both.
   const TRUSTED_LATEST = {
     pick: {
       order: {
@@ -223,12 +197,10 @@ export function guardedDossierSpec(operator) {
   };
 }
 
-// A register file IS the register-request shape now ({ hyperschema, schema, roots }) — load it.
 export function loadSpec(file) {
   return JSON.parse(readFileSync(join(SCHEMAS, file), "utf8"));
 }
 
-// ---- SSE --------------------------------------------------------------------------------------
 export async function sseOpen(base, token, subscription) {
   const res = await fetchRetry(`${base}/subscribe?query=${encodeURIComponent(subscription)}`, {
     headers: { authorization: `Bearer ${token}` },
@@ -280,9 +252,6 @@ export async function sseOpen(base, token, subscription) {
   };
 }
 
-// ---- writes beyond primitives: signed multi-pointer edges -------------------------------------
-// GraphQL mutations write primitive property claims; RELATIONS are entity-pointer deltas an app
-// crafts and appends itself. Each edge files at BOTH ends — one delta, two views.
 const entityPtr = (role, id, context) => ({
   role,
   target: { kind: "entity", entity: { id, context } },
@@ -324,9 +293,6 @@ export async function appendAs(gateway, who, claimsList) {
   return gateway.append(deltas);
 }
 
-// Operator-signed standing for a store's residents (authors, not owners: entities are unowned;
-// the only write gate is the author's standing at loam:store). FIXED timestamps so re-runs
-// dedup by content address.
 export async function constitute(store, authors, baseTs) {
   const deltas = authors.map((who, i) =>
     signClaims(
@@ -337,7 +303,6 @@ export async function constitute(store, authors, baseTs) {
   await store.gateway.append(deltas);
 }
 
-// Standing for an author the cast never knew — a browser-minted villager, say (phase 13).
 export async function grantAuthor(store, author, timestamp) {
   await store.gateway.append([
     signClaims(grantClaims("loam:store", author, "write", store.operator, timestamp), store.seed),
@@ -346,7 +311,6 @@ export async function grantAuthor(store, author, timestamp) {
 
 export { pullFrom, signClaims, authorForSeed, parseTerm };
 
-// ---- the tally --------------------------------------------------------------------------------
 const results = [];
 export function check(id, label, ok, detail = "") {
   results.push({ id, ok });

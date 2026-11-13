@@ -1,21 +1,3 @@
-// §58 S1b (T262, criteria c and the exchange half of a): the token exchange honors the binding
-// consent recorded. A code that carries a container redeems into a key minted for THIS (client,
-// user) pair, spawns — or resumes — the connection's inbox pool inside that container, and mints a
-// token that names the person; a code that carries no container mints nothing. One client consented
-// by two people holds two keys, each pooled under its own person's container. The inbox is
-// forward-only: a delta the key authored in the primary before the binding is not the pool's, at the
-// bytes. A token or grant minted before §58 names no user and fails closed.
-//
-// What this file deliberately does NOT assert, and where each gap closes:
-//   - Where a bound connection's WRITES land (the pool, never the primary), through every door —
-//     `test/server/connection-writes.test.ts` (S1b-ii). No store-wide write grant lands for a §58
-//     key; the pool's own chain is its standing, and this file asserts that at the ground.
-//   - Reads scoped to the binding — `test/server/read-scope.test.ts` (S1c).
-//   - The exchange's pre-§58 behaviour (burn-first, PKCE, generation, the eviction pin) — the frozen
-//     phase-15 rail (`oauth-token.test.ts`), revised only where its consents now name a container.
-//
-// Erasure standing rule: every store here is this file's own mkdtemp/memory fixture.
-
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -67,17 +49,11 @@ afterEach(async () => {
   while (homes.length > 0) rmSync(homes.pop()!, { recursive: true, force: true });
 });
 
-/**
- * A served store with two login users, ada and bea, neither with a container or a seed yet, one
- * registered connector, and the token exchange OPEN (the connectors' home holds the operator seed).
- * The connectors' home and the users' home are distinct on purpose, as in the consent rail.
- */
 async function exchangeServer(
   opts: {
     preWritten?: Partial<OAuthFile>;
     primary?: MemoryBackend;
     pools?: Map<string, MemoryBackend>;
-    /** Pools whose bytes survive every purge, so a drop is refused. */
     sticky?: boolean;
   } = {},
 ): Promise<{
@@ -90,8 +66,8 @@ async function exchangeServer(
   const primary = opts.primary ?? new MemoryBackend();
   const gateway = await Gateway.open(primary, {
     seed: OPERATOR_SEED,
-    peerStore: primary.journalStore(), // a host, as `boot` opens one: a later boot reopens it
-    poolKeys: memoryPoolKeysFor(primary), // where `boot` keeps this store's pool keys
+    peerStore: primary.journalStore(),
+    poolKeys: memoryPoolKeysFor(primary),
     ...(opts.sticky === true
       ? { channelBackend: (): MemoryBackend => new StickyBackend() }
       : opts.pools === undefined
@@ -142,14 +118,12 @@ async function exchangeServer(
   return { base: handle.url, usersHome, connectorsHome, gateway, faults };
 }
 
-/** A backend whose bytes never leave: a purge removes nothing, so the honest `holds` refuses the drop. */
 class StickyBackend extends MemoryBackend {
   override purge(): Promise<number> {
     return Promise.resolve(0);
   }
 }
 
-/** A backend that can be told to refuse its next appends — a pool's store failing mid-act. */
 class RefusingBackend extends FaultableBackend {
   refuse = false;
   override checkWrite(): Promise<void> {
@@ -158,7 +132,6 @@ class RefusingBackend extends FaultableBackend {
   }
 }
 
-/** A pool backend factory over a test-owned map: what a durable store hands its pools. */
 const poolFactory =
   (pools: Map<string, MemoryBackend>) =>
   (name: string): MemoryBackend => {
@@ -172,7 +145,6 @@ const poolFactory =
 const fieldOf = (html: string, name: string): string =>
   new RegExp(`name="${name}" value="([^"]*)"`).exec(html)?.[1] ?? "";
 
-/** Sign in as `user`, approve the connector with `bind` (or nothing), and return the code. */
 async function consent(
   base: string,
   user: string,
@@ -231,7 +203,6 @@ async function redeem(base: string, code: string, verifier: string): Promise<Res
   });
 }
 
-/** The whole path for one person into one leaf: consent, redeem, and the bearer token. */
 async function connect(base: string, user: string, leaf: string): Promise<string> {
   const p = pkce();
   const { code, status } = await consent(base, user, p.challenge, { bind_new: leaf });
@@ -241,8 +212,6 @@ async function connect(base: string, user: string, leaf: string): Promise<string
   return ((await res.json()) as { access_token: string }).access_token;
 }
 
-// A page with its hex keys masked. Every disclosure assertion in this file asks about PROSE — a
-// person's name, a connector's name — and a key rendered on the page is neither, however it reads.
 const withoutKeys = (html: string): string => html.replace(/[0-9a-f]{16,}/g, "<key>");
 
 const noteClaims = (author: string, id: string, text: string, timestamp: number): Claims => ({
@@ -280,7 +249,6 @@ const formTokenOf = (html: string): string =>
   /name="form_token" value="([^"]+)"/.exec(html)?.[1] ?? "";
 const confirmTokenOf = (html: string): string =>
   /name="confirm_token" value="([^"]+)"/.exec(html)?.[1] ?? "";
-/** The admin page's two-step revoke of one inbox, as a person does it: both pages come back. */
 async function revokeViaPanel(
   base: string,
   sessionId: string,
@@ -328,8 +296,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(file.tokens[0]).toMatchObject({ clientId: CLIENT_ID, user: "ada" });
     expect(file.tokens[0]!.digest).toBe(digestHex(token));
 
-    // The pool stands in the tree, receiving into the bound container, and its own ground holds
-    // the connection's write standing through the owner — ada's key, provisioned at consent.
     const table = gateway.containers().containers;
     expect(table.get(inbox)?.inboxOf).toBe("ada:journal");
     const pool = gateway.connectionInboxes.get(inbox)?.gateway;
@@ -344,15 +310,12 @@ describe("§58 S1b — the exchange honors the binding", () => {
         pool!.operatorAuthor,
       ),
     ).toBe(true);
-    // The token acts — the door knows who it is.
     expect((await whoami(base, token)).status).toBe(200);
   });
 
   it("a code that carries no container mints nothing: no token, no key, no pool", async () => {
     const { base, connectorsHome, gateway } = await exchangeServer();
     const p = pkce();
-    // A hand-built consent POST that sends no binding field mints an unbound code (the consent
-    // rail pins that shape); here is where it is refused.
     const { code, status } = await consent(base, "ada", p.challenge, {});
     expect(status).toBe(302);
     const res = await redeem(base, code, p.verifier);
@@ -363,7 +326,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
     const file = readOAuthFile(connectorsHome);
     expect(file.grants).toHaveLength(0);
     expect(file.tokens).toHaveLength(0);
-    expect(file.codes ?? []).toHaveLength(0); // burnt: a code is single-use on any attempt
+    expect(file.codes ?? []).toHaveLength(0);
     expect(gateway.connectionInboxes.size).toBe(0);
   });
 
@@ -389,8 +352,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(table.get(ada.inbox!)?.inboxOf).toBe("ada:journal");
     expect(table.get(bea.inbox!)?.inboxOf).toBe("bea:notes");
 
-    // Neither pool gathers the other's work: a note written through each pool lives in that pool's
-    // ground and in no other — at the bytes.
     const adaPool = gateway.connectionInboxes.get(ada.inbox!)!.gateway!;
     const beaPool = gateway.connectionInboxes.get(bea.inbox!)!.gateway!;
     const adaNote = signClaims(
@@ -413,7 +374,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(beaPool.reactor.get(adaNote.id)).toBeUndefined();
     expect(gateway.reactor.get(adaNote.id)).toBeUndefined();
     expect(gateway.reactor.get(beaNote.id)).toBeUndefined();
-    // And at the CONTAINERS: each person's gather holds its own connection's note, not the other's.
     const adaScope = gateway.containerScope({ containers: ["ada:journal"] }).map((d) => d.id);
     const beaScope = gateway.containerScope({ containers: ["bea:notes"] }).map((d) => d.id);
     expect(adaScope).toContain(adaNote.id);
@@ -427,7 +387,7 @@ describe("§58 S1b — the exchange honors the binding", () => {
     const first = await connect(base, "ada", "journal");
     const before = readOAuthFile(connectorsHome).grants[0]!;
     const second = await connect(base, "ada", "journal");
-    expect(second).not.toBe(first); // a fresh bearer each time
+    expect(second).not.toBe(first);
     const file = readOAuthFile(connectorsHome);
     expect(file.grants).toHaveLength(1);
     expect(file.grants[0]).toMatchObject({ actor: before.actor, inbox: before.inbox });
@@ -441,8 +401,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
     const { base, connectorsHome, gateway } = await exchangeServer();
     await connect(base, "ada", "journal");
     const grant = readOAuthFile(connectorsHome).grants[0]!;
-    // The key holds NO store-wide grant (§58), so a delta of its reaches the primary only by
-    // federation — the shape a pre-§58 store's history takes. Appended, it is refused.
     const early = signClaims(
       withStamp(gateway.stamp(grant.actor), (t) =>
         noteClaims(grant.actor, "note:early", "before the second binding", t),
@@ -453,27 +411,19 @@ describe("§58 S1b — the exchange honors the binding", () => {
     await gateway.federate([early], { admit: () => true });
     expect(gateway.reactor.get(early.id)).toBeDefined();
 
-    // ada binds the SAME connector into a second container: a second pool, same key.
     await connect(base, "ada", "other");
     const after = readOAuthFile(connectorsHome).grants[0]!;
     expect(after.actor).toBe(grant.actor);
     expect(after.container).toBe("ada:other");
     const otherInbox = inboxName("ada:other", grant.actor);
     expect(after.inbox).toBe(otherInbox);
-    expect(gateway.connectionInboxes.size).toBe(2); // the first pool stands; nothing is dropped
+    expect(gateway.connectionInboxes.size).toBe(2);
 
-    // The second pool seeded from the primary AFTER `early` stood there, and its membership — the
-    // key AND a timestamp after its own binding — leaves `early` out, at the bytes, and keeps it
-    // out under a fresh pulse. That clause is what this asserts: without it the pool would carry
-    // the delta.
     const second = gateway.connectionInboxes.get(otherInbox)!;
     await second.reseed();
     const ids = (await second.gateway!.backend.deltasSince(new Set())).map((d) => d.id);
     expect(ids).not.toContain(early.id);
     expect(second.gateway!.reactor.get(early.id)).toBeUndefined();
-    // And the scope's POSITIVE side, so a scope that admits nothing cannot pass: a delta of the
-    // key's that reaches the primary AFTER the second binding (federated, as above) is inside the
-    // second pool's scope on the next pulse.
     const later = signClaims(
       withStamp(gateway.stamp(grant.actor), (t) =>
         noteClaims(grant.actor, "note:later", "after the second binding", t),
@@ -488,8 +438,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
   });
 
   it("a token or a grant minted before §58 names no user and fails closed", async () => {
-    // Written BEFORE boot, so the door's token index holds the digest and the refusal is the
-    // token naming no user — never the unknown-token miss, which would pin nothing.
     const seed = "ab".repeat(32);
     const preSection58 = "pre-58-bearer";
     const { base } = await exchangeServer({
@@ -538,16 +486,12 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(faults.join("\n")).toContain(userSeedPath(usersHome, "zed"));
     const file = readOAuthFile(connectorsHome);
     expect(file.tokens).toHaveLength(0);
-    // The seed was written first; the pool never stood, so the grant carries no inbox, is not
-    // standing, and the resolver would confer nothing on it.
     expect(file.grants).toHaveLength(1);
     expect(file.grants[0]!.inbox).toBeUndefined();
     expect(file.grants[0]!.standing).toBe(false);
   });
 
   it("a grant whose pool never stood confers nothing, even on a token that names its person", async () => {
-    // Boot-written, so the digest is in the door's index: the 401 is the resolver refusing a
-    // grant without an inbox, not an unknown-token miss.
     const seed = "cd".repeat(32);
     const tokenNeverStood = "pool-never-stood";
     const { base } = await exchangeServer({
@@ -581,8 +525,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
     const { base, connectorsHome, faults } = await exchangeServer();
     const adaToken = await connect(base, "ada", "journal");
     const beaToken = await connect(base, "bea", "notes");
-    // A code ada consented but never redeemed: the revoke burns it too, or it would re-key and
-    // re-bind her without a new consent — the window the whole-client path closes by generation.
     const pending = pkce();
     const { code: pendingCode } = await consent(base, "ada", pending.challenge, {
       bind_new: "journal",
@@ -598,8 +540,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
       (m) => faults.push(m),
       { kind: "pair", user: "ada" },
     );
-    // No generation bump — that is the client's, and would kill bea too. ada's grant, token and
-    // key go by name; bea's stand; the door agrees on the very next request.
     expect(outcome).toMatchObject({ kind: "revoked", clientId: CLIENT_ID, generation: 1 });
     const file = readOAuthFile(connectorsHome);
     expect(file.grants.map((g) => g.user)).toEqual(["bea"]);
@@ -614,7 +554,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
   });
 
   it("a binding outlives the process that made it: the pool re-attaches at the next boot", async () => {
-    // The same ground and the same pool bytes, opened by a second gateway — the next process.
     const primary = new MemoryBackend();
     const pools = new Map<string, MemoryBackend>();
     const { base, connectorsHome, gateway } = await exchangeServer({ primary, pools });
@@ -629,15 +568,12 @@ describe("§58 S1b — the exchange honors the binding", () => {
     );
     await pool.append([note]);
 
-    // `boot` is a served store's path (the CLI's): it is where standing pools re-attach.
     const reopened = await Gateway.boot(
       primary,
       { operatorSeed: OPERATOR_SEED, deltas: [] },
       { channelBackend: poolFactory(pools) },
     );
     expect(reopened.connectionInboxes.has(grant.inbox!)).toBe(true);
-    // The bound container answers — no unattached-pool refusal — and gathers what the connection
-    // wrote before the restart; the pool's own ground still holds the connection's standing.
     const scope = reopened.containerScope({ containers: ["ada:journal"] }).map((d) => d.id);
     expect(scope).toContain(note.id);
     const reattached = reopened.connectionInboxes.get(grant.inbox!)!.gateway!;
@@ -651,9 +587,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
         reattached.operatorAuthor,
       ),
     ).toBe(true);
-    // A re-attached handle is the inbox kind, not a bare container: it refuses detach, and a drop
-    // through it clears the durable entry so a later bind spawns fresh rather than resuming a
-    // purged pool.
     const handle = reopened.connectionInboxes.get(grant.inbox!)!;
     await expect(handle.detach()).rejects.toThrow(/durable/);
     await handle.drop();
@@ -666,8 +599,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
     const first = readOAuthFile(connectorsHome).grants[0]!;
     await gateway.connectionInboxes.get(first.inbox!)!.drop();
     expect(gateway.containers().containers.has(first.inbox!)).toBe(false);
-    // The record still names the dropped pool; the next redemption binds again and a pool stands
-    // — declared, attached, and holding the connection's standing — under the same key.
     const token = await connect(base, "ada", "journal");
     const again = readOAuthFile(connectorsHome).grants[0]!;
     expect(again.actor).toBe(first.actor);
@@ -721,10 +652,8 @@ describe("§58 S1b — the exchange honors the binding", () => {
 
     const session = await signIn(base, "ada", PASSWORD);
     const { dashboard, confirmHtml, done } = await revokeViaPanel(base, session, journalInbox);
-    // Before the act: ada's rows count HER pair's tokens (two), never the connector's (three).
     expect(dashboard).toContain("2 live tokens");
     expect(dashboard).not.toContain("3 live tokens");
-    // The confirm page names the person and the sibling pool before anything happens.
     expect(confirmHtml).toContain("for <code>ada</code>");
     expect(confirmHtml).toContain(`<code>${otherInbox}</code>`);
     expect(confirmHtml).toContain("negated with this one");
@@ -734,7 +663,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(doneHtml).toContain("Other people's bindings of this connector stand");
     expect(doneHtml).toContain(`<code>${otherInbox}</code>`);
     expect(doneHtml).not.toContain("every other connection is untouched");
-    // Two-sided: bea's inbox is named on neither page, and her pool's grant stands.
     expect(confirmHtml).not.toContain(`<code>${bea.inbox!}</code>`);
     expect(doneHtml).not.toContain(`<code>${bea.inbox!}</code>`);
     expect(
@@ -747,8 +675,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
         poolOf(bea.inbox!).operatorAuthor,
       ),
     ).toBe(true);
-    // And at the GROUND: neither key ever held a store-wide grant (§58) — the pools are the whole
-    // of their standing.
     expect(
       holdsGrant(
         gateway.reactor,
@@ -769,7 +695,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
         gateway.operatorAuthor,
       ),
     ).toBe(false);
-    // Both of the key's pools are struck; bea's binding and token stand.
     expect(
       holdsGrant(
         poolOf(journalInbox).reactor,
@@ -802,9 +727,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
     const grant = readOAuthFile(connectorsHome).grants[0]!;
     const handle = gateway.connectionInboxes.get(grant.inbox!)!;
     await expect(handle.drop()).rejects.toThrow(/drop refused/);
-    // Refused means nothing changed: the pool is still open over its bytes (a closed pool's
-    // backend refuses this read), attached, its handle held, its standing intact — and a bind
-    // resumes it rather than colliding with a pool the store still holds open.
     expect((await handle.gateway!.backend.deltasSince(new Set())).length).toBeGreaterThan(0);
     expect(gateway.connectionInboxes.get(grant.inbox!)).toBe(handle);
     expect(gateway.attachedContainers.has(grant.inbox!)).toBe(true);
@@ -835,11 +757,9 @@ describe("§58 S1b — the exchange honors the binding", () => {
         tokens: [{ digest: digestHex(oldToken), clientId: CLIENT_ID, issuedAt: 1, generation: 1 }],
       },
     });
-    const adaToken = await connect(base, "ada", "journal"); // provisions ada's key and home
+    const adaToken = await connect(base, "ada", "journal");
     const owner = readUserSeed(usersHome, "ada");
     expect(owner.kind).toBe("present");
-    // The old key's inbox, bound through the §39 library door into ada's home, as a pre-§58 store
-    // would hold it.
     await gateway.bindConnection({
       container: "ada",
       connectionKey: oldKey,
@@ -850,7 +770,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
     const { confirmHtml, done } = await revokeViaPanel(base, session, oldInbox);
     expect(confirmHtml).toContain("before §58");
     expect(done.status).toBe(200);
-    // The pair that names nobody went; ada's own pair — and the connector's generation — stand.
     const file = readOAuthFile(connectorsHome);
     expect(file.clients[0]!.generation).toBe(1);
     expect(file.grants.map((g) => g.user)).toEqual(["ada"]);
@@ -890,8 +809,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
   });
 
   it("a sibling pool of the same key under ANOTHER person is neither named nor negated from this page", async () => {
-    // Reachable only through the library door — one key per (client, user) rules it out for a
-    // connector — but the page's fence is the person's reach, and it must hold here too.
     const { base, connectorsHome, gateway, usersHome } = await exchangeServer();
     await connect(base, "bea", "notes");
     await connect(base, "ada", "journal");
@@ -940,8 +857,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
     const ada = readOAuthFile(connectorsHome).grants.find((g) => g.user === "ada")!;
     const journalInbox = inboxName("ada:journal", ada.actor);
     const otherInbox = inboxName("ada:other", ada.actor);
-    // Stage what a failed re-attach at boot leaves: the declaration stands, the pool is not
-    // attached here, no handle is held.
     gateway.attachedContainers.delete(journalInbox);
     gateway.connectionInboxes.delete(journalInbox);
 
@@ -956,7 +871,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(text).toContain("not attached here");
     expect(text).toContain(otherInbox);
     expect(text).toContain("Nothing was revoked");
-    // Nothing was: the sibling's grant stands, and ada's token still acts.
     const otherPool = gateway.connectionInboxes.get(otherInbox)!.gateway!;
     expect(
       holdsGrant(
@@ -987,7 +901,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
     });
     expect(confirm.status).toBe(200);
     const confirmToken = confirmTokenOf(await confirm.text());
-    // The pool goes away between the two steps; the act re-plans and refuses.
     gateway.attachedContainers.delete(journalInbox);
     gateway.connectionInboxes.delete(journalInbox);
     const done = await postAdmin(base, "/admin/revoke-confirm", session, {
@@ -997,7 +910,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
     });
     expect(done.status).toBe(409);
     expect(await done.text()).toContain("not attached here");
-    // Nothing was struck: the sibling's grant, ada's pair and her token all stand.
     const otherPool = gateway.connectionInboxes.get(otherInbox)!.gateway!;
     expect(
       holdsGrant(
@@ -1030,8 +942,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(text).toContain(otherInbox);
     expect(text).toContain("incomplete");
     expect(faults.join("\n")).toContain(otherInbox);
-    // The row's pool is struck and the connector half ran first (the token is dead); the sibling's
-    // grant stands, which is exactly what the page said.
     const journalPool = gateway.connectionInboxes.get(journalInbox)!.gateway!;
     const otherPool = gateway.connectionInboxes.get(otherInbox)!.gateway!;
     expect(
@@ -1062,7 +972,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
     await connect(base, "ada", "journal");
     const grant = readOAuthFile(connectorsHome).grants[0]!;
     const handle = gateway.connectionInboxes.get(grant.inbox!)!;
-    // The width of a drop's own awaits: unregistered, handle not yet cleared.
     gateway.attachedContainers.delete(grant.inbox!);
     const owner = readUserSeed(usersHome, "ada") as { seed: string };
     await expect(
@@ -1076,8 +985,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
   });
 
   it("a person revoking a foreign key's inbox in their own reach negates that pool alone: the other person's pair stands", async () => {
-    // The mirror of the foreign-owner case: ada's connector key bound into bea:notes through the
-    // library door; BEA revokes from that row. The pool half is hers; the connector pair is ada's.
     const { base, connectorsHome, gateway, usersHome } = await exchangeServer();
     await connect(base, "bea", "notes");
     const adaToken = await connect(base, "ada", "journal");
@@ -1094,17 +1001,10 @@ describe("§58 S1b — the exchange honors the binding", () => {
     const { dashboard, confirmHtml, done } = await revokeViaPanel(base, session, foreign);
     expect(done.status).toBe(200);
     const doneHtml = await done.text();
-    // THE PAGE LEGITIMATELY RENDERS THE INBOX NAME, which carries the other person's KEY in hex —
-    // and hex spells words. A 64-character key contains "ada" about 1.6% of the time (measured),
-    // so asking this of the raw HTML made the rail fail roughly one CI run in sixty, forever. The
-    // question the rail asks is whether the PERSON is disclosed, so it asks it of the prose with
-    // the keys masked; masking a key can never hide a name the page actually printed.
     for (const html of [confirmHtml, doneHtml]) {
       expect(html).toContain("another person's");
       expect(withoutKeys(html)).not.toContain("ada");
     }
-    // The panel row above the pages withholds the same: no client name, generation or token
-    // count of another person's pair — only that the key's connector binding is someone else's.
     const panel = dashboard.split("<h2>Connections.</h2>")[1]?.split("<h2>")[0] ?? "";
     const row = panel.split("<li>").find((part) => part.includes(foreign.slice(0, 40))) ?? "";
     expect(row, dashboard).not.toBe("");
@@ -1112,8 +1012,6 @@ describe("§58 S1b — the exchange honors the binding", () => {
     expect(withoutKeys(row)).not.toContain("Example Connector");
     expect(row).not.toContain("live token");
     expect(withoutKeys(row)).not.toContain("ada");
-    // Bea's pool is struck; ada's pair, token and own pool all stand — and no store-wide grant
-    // ever stood for her key.
     const foreignPool = gateway.connectionInboxes.get(foreign)!.gateway!;
     expect(
       holdsGrant(

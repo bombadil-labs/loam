@@ -1,15 +1,3 @@
-// §47 criterion 9 — A PEER'S TWO READINGS OVER ONE HYPERSCHEMA ENTITY ARRIVE AS TWO BINDINGS.
-//
-// T197's measured collapse: bindArrived derived one manifest alias per ENTITY, and classify picked
-// among an entity's bindings by `.at(-1)` — so a peer publishing sibling lenses (§21.7 coexistence,
-// two readings sharing one definition) federated as ONE lens, the other not parked, not refused,
-// simply invisible. H6 one layer down: the alias, and so the name a reader could ask by, was
-// derived from the PROGRAM's address rather than from the READING.
-//
-// Now the manifest is minted per LENS — read from each binding's own `schema:<name>` bytes, the
-// same read every other H6-correct site uses — and classify selects the binding whose lens matches
-// the row's alias, falling back to latest for a module whose alias is not a lens name.
-
 import { describe, expect, it } from "vitest";
 import type { Schema } from "@bombadil/rhizomatic";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
@@ -27,9 +15,6 @@ describe("§47 — sibling lenses federate as siblings", () => {
     const alice = await S("a1".repeat(32));
     const me = await S("cc".repeat(32));
     try {
-      // §21.7 coexistence: one definition, two readings with DIFFERENT resolution — the latest
-      // height, and every height. Distinct policies are what make the two names distinguishable at
-      // the door, so a collapse cannot hide behind identical answers.
       const latest: Schema = {
         props: new Map([["height", pickLatest]]),
         default: pickLatest,
@@ -50,12 +35,9 @@ describe("§47 — sibling lenses federate as siblings", () => {
       const ch = await me.openChannel({ into: "friends", prefix: "alice", source: feed(alice) });
       const report = await ch.sync();
 
-      // BOTH names bind — the collapse left the second invisible, neither parked nor refused.
       expect(report.bound).toContain("alice:Plant");
       expect(report.bound).toContain("alice:AllPlant");
 
-      // And each serves ITS reading over the same pool: the latest height through one name, every
-      // height through the other. Same law, same data, two lenses — §21.7 across a channel.
       const one = await me.query(`{ alice_Plant(entity: "${FERN}") { height } }`);
       const all = await me.query(`{ alice_AllPlant(entity: "${FERN}") { height } }`);
       expect(one.errors, JSON.stringify(one)).toBeUndefined();
@@ -71,7 +53,6 @@ describe("§47 — sibling lenses federate as siblings", () => {
   });
 
   it("two-sided: a peer with ONE lens at one entity still binds exactly one, under today's name", async () => {
-    // The fix must not multiply the ordinary case — one lens, one binding, the same name as before.
     const alice = await S("a1".repeat(32));
     const me = await S("cc".repeat(32));
     try {

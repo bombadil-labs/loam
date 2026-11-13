@@ -1,9 +1,3 @@
-// One rail, in its own file because it mocks the filesystem seam and the mock is file-wide: a
-// failed rename in `ArchiveBackend.append` must unlink its temp file (the write path is async
-// since T155, so the mocked seam is fs/promises). Left behind, the orphan is
-// a FULL delta at a name no read returns — the byte-at-rest shape §11 hunts — and wherever the
-// write landed, the next `git add -A` offers it to history, where no purge reaches.
-
 import { describe, expect, it, vi } from "vitest";
 import { mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,7 +15,6 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   };
 });
 
-// Imported AFTER the mock so the driver binds the throwing rename.
 const { ArchiveBackend } = await import("../../src/store/archive.js");
 
 describe("ArchiveBackend.append never strands its temp file", () => {

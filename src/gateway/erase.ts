@@ -16,25 +16,6 @@ import {
   orderForPool,
   sameVerifiedDelta,
 } from "./erase-law.js";
-// Erasure — degrees of forgetting (SPEC §11). The store remembers THAT it forgot — who asked,
-// when, which id — never what. A ERASURE is an append-only claim at `loam:erasure` naming
-// the erased delta; the bytes themselves are purged from every tier (the seam's purge, PR
-// #34); and admission composes the erasure set so the id is refused re-entry forever.
-// Content addressing is what makes this honest: retaining a hash retains zero content.
-//
-// ONE erasure authority, nobody else: the INSTANCE OPERATOR. Erasure is destructive, so the
-// store is deliberately unforgiving about it — only the operator's own signature orders a
-// record removed, and every door (append AND federation) refuses an erasure the operator did
-// not sign, so an unauthorized removal-order is never even stored. This is the GDPR shape: a
-// data subject asks; the operator, as the controller, executes; and the erasure records the
-// target's author (`spoken-by`) as the compliance log, verified against the live target while
-// it can still be seen.
-//
-// Degrees of forgetting are compositions the operator performs, never new mutation machinery:
-// anonymous reassertion = erase + append the content in another voice (with NO on-record link —
-// the old id would otherwise let anyone re-identify the author by trial); sealed authorship = a
-// `hash(salt‖author)` commitment pointer on the reassertion, reclaimable by revealing the
-// preimage; partial redaction = reassert with values replaced.
 
 import { sha256 } from "@noble/hashes/sha2.js";
 import { storeHoldsAny } from "./custody.js";
@@ -75,16 +56,10 @@ import {
   eraseDefect,
 } from "./erase-law.js";
 
-/** The slate an erasure was minted BY, when it was one member of a cut (SPEC §29.6's join). */
 export function erasureSlate(claims: Claims): string | undefined {
   return erasureParts(claims).slate;
 }
 
-// The same answer for a delta list assembled across several peers (a container scope over its
-// pools): the ids the list's own lawful erasures hide, and the targets their held negations hold
-// down. A pool can hold an erasure its parent has not seen yet. A pool can also own a channel, and
-// so hold its own local-control erasures; binding one needs a reactor, so when the list holds any,
-// a throwaway reactor over the list decides it. That cost is paid only in that case.
 export function erasedInDeltas(
   deltas: readonly Delta[],
   operator: string | undefined,
@@ -92,7 +67,6 @@ export function erasedInDeltas(
   const hidden = new Set<string>();
   if (operator === undefined) return hidden;
   const byId = new Map(deltas.map((d) => [d.id, d]));
-  // Only a local-control erasure whose target is in the list can hide anything here.
   const localControls = deltas.filter((d) => {
     if (!isErasure(d.claims) || !inLocalContext(d, LOCAL_CONTROL)) return false;
     const target = erasureTarget(d.claims);
@@ -112,17 +86,13 @@ export function erasedInDeltas(
     const { targetId, spokenBy, count } = erasureParts(d.claims);
     if (targetId === undefined || count.erases !== 1 || count.spokenBy !== 1) continue;
     const target = byId.get(targetId);
-    if (target === undefined || isErasure(target.claims)) continue; // an erasure is never erased
-    if (target.claims.author !== spokenBy) continue; // the order must name its target's real author
+    if (target === undefined || isErasure(target.claims)) continue;
+    if (target.claims.author !== spokenBy) continue;
     hidden.add(targetId);
   }
   return withHeldDownTargets(hidden, (id) => byId.get(id));
 }
 
-// What a reading over a COMPOSED scope (a container over its pools) must not show: every id this
-// store refuses that appears anywhere in the scope, even when this store does not hold those bytes
-// itself; the scope's own lawful erasures; and the targets their held negations hold down. A pool
-// under its own key signs its own erasures, so `pools` names those keys (`poolGovernors`).
 export function erasedInScope(
   reactor: Reactor,
   operator: string | undefined,
@@ -138,7 +108,6 @@ export function erasedInScope(
   return withHeldDownTargets(hidden, (id) => byId.get(id));
 }
 
-/** The governing key of every pool attached beneath `gw`, at any depth. */
 export function poolGovernors(gw: Gateway): string[] {
   const keys = new Set<string>();
   const seen = new Set<Peer>();
@@ -154,114 +123,42 @@ export function poolGovernors(gw: Gateway): string[] {
   return [...keys];
 }
 
-/**
- * The instrument behind the revival warning: a reading to be taken TWICE, once before a removal and
- * once after, because that is the only way to learn what a removal brought back without deriving it.
- *
- * Deriving it is what fails. Walking the removed delta's own `negates` pointers answers ONE hop, and
- * the readers are transitive: a strike on a strike is two, a strike on that is three, and erasing
- * the last link in a chain frees a claim the walk never names. It is wrong in the other direction
- * too — a claim carrying TWO strikes stays withdrawn when one of them goes, so the walk announces a
- * revival that never happened and sends an operator to destroy a record that was never exposed. A
- * before/after diff observes the answer at the same reader every door uses, at any depth, and cannot
- * claim a revival the ground did not perform.
- *
- * Replicas are included because §11 reaches them: `eraseImpl` fans the purge into every attached
- * pool, so a strike inside one is removed by the same order and frees the same way.
- */
-/** One mask a reader of this store actually runs under, and who runs under it. */
 export interface MaskReading {
-  /** The mask itself, kept beside the key now that the key also carries the ground. */
   readonly policy: unknown;
-  /** Which ground this mask is evaluated over — see `ExtraReading.ground`. */
   readonly ground: "closed" | "raw";
-  /**
-   * The readings that mask this way. ONE array of pairs, never two parallel arrays: an identity and
-   * the label a person reads are different strings with different collision rules — two entities
-   * can bind one lens name — so deduping them separately let `identities` grow while `readings`
-   * did not, and every index after the first collision named a different door than it addressed.
-   */
+
   readonly readings: { readonly identity: string; readonly label: string }[];
-  /** Canonical form of the mask policy, so two readings that mask alike share one live set. */
   readonly key: string;
-  /** Of the ids present, the ones a reader under this mask resolves. */
   readonly live: Set<string>;
 }
 
-/** One GROUND's reading. Kept per-store on purpose — see `revivedAcross`. */
 export interface GroundReading {
   readonly ground: Peer;
-  /** Every id this store holds, whatever its suppression state. */
   readonly present: Set<string>;
-  /** One entry per DISTINCT mask any reader of this store can hold. */
   readonly masks: MaskReading[];
-  /**
-   * Reading name → the mask key it read under. The diff asks about readings BY NAME and never by
-   * mask novelty: `drop` is `entityGatherBody`'s DEFAULT, so an ordinary registration that names
-   * no mask shares the floor's key, and a key-novelty test cannot see it arrive or leave. It also
-   * mistakes a reading whose MASK CHANGED for one that came back.
-   */
+
   readonly byReading: Map<string, string>;
-  /**
-   * Readings whose mask could not be assembled, so they were NOT consulted. Carried out to the
-   * screen rather than dropped here: a reader this check never asked about is a hole in the check,
-   * and the sibling login-door path already says as much when its own mask fails to assemble.
-   */
+
   readonly unreadable: { readonly identity: string; readonly label: string }[];
 }
 
-/** A reading named on a boundary line, and the ground whose door it is. */
 export interface ReadingAt {
   readonly reading: string;
   readonly ground: Peer;
 }
 
-/** One claim that came back, in one ground, and the readings that can see it there. */
 export interface Revival {
   readonly id: string;
   readonly ground: Peer;
-  /** Names a person can act on: lens names, and/or the floor's own label. */
   readonly readings: string[];
 }
 
-/** The label the `drop` floor carries — every negation binds, whoever signed it. */
 export const UNGOVERNED_READING = "a reading with no trust mask (the stock shelf's `drop`)";
 
-/**
- * THE MASKS THIS STORE'S READERS ACTUALLY HOLD, enumerated from its own registered readings.
- *
- * Hardcoding the mask was this bug twice. First `lawfulNegated`, the constitutional predicate, which
- * counts only the operator's strike and so cannot see a grantee's retraction at all. Then TWO
- * hardcoded masks — trust and `drop` — which is closer and still not what a store has: a Schema
- * declares its OWN mask, and the shipped ones already disagree with both. `LoamUser` masks
- * `{author eq operator}` and is live at every served login door; `tenantSchemaFor` masks
- * admins-only and is the recommended audit reading; `loam register <file>` admits any `{trust: P}`
- * an operator writes. A revival visible only at one of those is invisible to a two-mask reading —
- * and a revoked role binding coming back at the login door is exactly the event this warning exists
- * for. `listing.ts` records the same lesson in its own header: a hardcoded `drop` was this bug at
- * the listing door.
- *
- * `drop` is kept as a FLOOR rather than as one of the two: it is the widest suppression any reader
- * can perform, so a claim it frees is free at the most permissive door a store can have, and an
- * unregistered or ungoverned store reads exactly that way.
- *
- * A body that masks two ways has no single reading and `programMaskJson` refuses it; such a
- * hyperschema is skipped here and named in `unreadable`, because guessing which of its masks to
- * apply would be inventing a reader.
- */
 export interface ExtraReading {
   readonly reading: string;
   readonly policy: unknown;
-  /**
-   * WHICH GROUND this door evaluates over, because a reading is a mask AND a ground.
-   *
-   * "closed" is the ordinary answer: `resolvedNode`, the public door and every registered Schema
-   * read `readGround`, so §29 read closure hides a condemned member from them. §36's login door
-   * does NOT — `resolveUserView` runs its hyperschema over `reactor.snapshot()` directly. Modelled
-   * as closed, a role binding inside a standing slate's condemned set is filtered out of BOTH
-   * readings, no row is emitted, and the strike that hid it can be destroyed with the screen
-   * silent while the user holds the role again at the door this reading was added for.
-   */
+
   readonly ground?: "closed" | "raw";
 }
 
@@ -273,18 +170,7 @@ export function maskReadings(
   unreadable: { identity: string; label: string }[];
 } {
   const masks = new Map<string, MaskReading>();
-  // IDENTITY AND LABEL, like every other reading here. Carrying the bare name let two doors that
-  // share a lens name collapse into one row — under-counting the readings this check never asked,
-  // which is the one number a boundary line exists to get right.
   const unreadable: { identity: string; label: string }[] = [];
-  // `reading` is the IDENTITY a diff keys on, and a lens NAME is not one: `readRegistrations`
-  // resolves latest-wins per (entity, lens name), so two entities can both bind `Film` when no
-  // §47 binding policy is declared. Keyed on the name alone, one of them silently overwrote the
-  // other in `byReading` — and whether a reopened door was then reported at all turned on which
-  // registration happened to carry the later timestamp. The label a person reads stays the name.
-  // THE KEY IS THE MASK AND THE GROUND TOGETHER. Two doors that suppress by the same rule but read
-  // different grounds are different readings, and merging them under one key would give both the
-  // live set of whichever was computed.
   const remember = (
     policy: unknown,
     identity: string,
@@ -309,43 +195,13 @@ export function maskReadings(
     try {
       remember(programMaskJson(reg.hyperschema.body), identity, name);
     } catch {
-      unreadable.push({ identity, label: name }); // masks two ways: no single reading to speak for
+      unreadable.push({ identity, label: name });
     }
   }
-  // Readings the CALLER knows about that the registration table does not hold. The login door's is
-  // the shipped example: `resolveUserView` runs its hyperschema directly, so no enumeration of
-  // registered Schemas can find it, and it is live on every served home.
-  //
-  // A PINNED VERSION IS NOT IN THIS SET EITHER. `readRegistrations` answers latest-per-(entity,
-  // lens name), while §17's doors admit every surviving version and §23.8's public pin resolves
-  // through `reg.hyperschema.body` — its OWN mask, which can differ from the live one. A claim
-  // freed only under a pinned version's mask is served at that door and named by no row here.
-  //
-  // AND A DOOR THE CALLER DOES NOT NAME IS NOT REPORTED ON. The set above is read from the
-  // REGISTRATION DELTAS rather than from `gw.registered`, deliberately: the in-process set is the
-  // last bind, and the after-reading has to see the law as it stands once the erasure lands. The
-  // cost is that a Schema an embedder mounted in process, with no registration delta naming it, is
-  // invisible here — the revival report neither compares it nor counts it among the readings it
-  // could not consult. Embedders pass such a door as `extra`; the CLI's only one is §36's.
   for (const one of extra) remember(one.policy, one.reading, one.reading, one.ground ?? "closed");
   return { masks, unreadable };
 }
 
-/**
- * The reading of this store and of every replica in reach, ONE ENTRY PER GROUND, and within each
- * ground one live set per distinct mask.
- *
- * Asked TWICE — before a removal and after — because that is the only way to learn what a removal
- * brought back without deriving it. Deriving it is what fails: walking the removed delta's own
- * `negates` pointers answers ONE hop, while the readers are transitive, so a strike three deep frees
- * a claim the walk never names; and it is wrong the other way too, since a claim carrying two
- * strikes stays withdrawn when one goes, so the walk announces a revival that never happened.
- *
- * Replicas are included because §11 reaches them: `eraseImpl` fans the purge into every attached
- * pool, so a strike inside one is removed by the same order and frees the same way. Each pool
- * enumerates its OWN readings — a pool is a separate container with its own ground and its own
- * registrations, and borrowing the host's would describe a reader that store does not have.
- */
 export function readGrounds(
   gw: Peer,
   extra: readonly ExtraReading[] = [],
@@ -358,19 +214,6 @@ export function readGrounds(
   const snapshot = gw.reactor.snapshot();
   const present = new Set<string>();
   for (const delta of snapshot) present.add(delta.id);
-  // THE GROUND A DOOR READS, not the raw one. §29's READ CLOSURE is a second suppression, and it
-  // is not a mask: `readGround` is what every gather answering a read door evaluates over, and a
-  // condemned set inside a standing slate is withheld there while sitting untouched in the
-  // reactor. Diffing the raw snapshot models the mask alone, so it is wrong in both directions —
-  // erasing a slate's RECORD lifts the closure over its whole condemned set at every door and
-  // shows here as nothing at all, and a claim freed under a mask while still read-closed shows
-  // here as live again when no door will serve it.
-  //
-  // ONE MOMENT FOR BOTH READINGS. A deadline that passes between the before and the after would
-  // otherwise read as a change this erasure caused; `now` is taken once by the caller.
-  // NARROWED FROM THE SNAPSHOT ALREADY IN HAND. `readGround` takes its own, and this function
-  // takes two readings per erase across every ground — so the hashing that costs the most on a
-  // large store was being paid twice for one answer (H8).
   const closed = readClosedIds(gw, now);
   const doorGround =
     closed.size === 0 ? snapshot : DeltaSet.from([...snapshot].filter((d) => !closed.has(d.id)));
@@ -379,7 +222,6 @@ export function readGrounds(
   for (const mask of masks.values()) {
     const over = mask.ground === "raw" ? snapshot : doorGround;
     const live = mask.ground === "raw" ? present : servable;
-    // A body that masks NOTHING suppresses nothing: every id its own door would serve is live to it.
     if (mask.policy === null) {
       for (const id of live) mask.live.add(id);
       continue;
@@ -396,60 +238,18 @@ export function readGrounds(
   const out: GroundReading[] = [
     { ground: gw, present, masks: [...masks.values()], byReading, unreadable },
   ];
-  // NOT `extra` — a pool enumerates its OWN readings. The caller's extras describe doors onto the
-  // ground the CALLER named, and `loam serve` always mounts the host, so labelling a pool's rows
-  // with them would name a reader that does not look there. NOT a general truth about pools: an
-  // embedder can `serve({ users: { mount: "<container>" } })` and put §36's login door on a pool's
-  // ground, and this reading would then miss a revival at it. The CLI cannot reach that shape.
   for (const pool of gw.store.pools(gw)) out.push(...readGrounds(pool, [], now, seen));
   return out;
 }
 
-/**
- * What a removal brought BACK, asked PER GROUND AND PER MASK, and never merged across either.
- *
- * A pool is a separate container with its own reactor, and `resolvedNode` and the public door read
- * THIS store's — so "live somewhere in reach" is not the question. Merging grounds also loses the
- * one fact an operator acts on: WHERE the claim is readable again. A row is emitted per ground, so a
- * claim that came back at the store AND in a pool says so twice rather than being attributed to
- * whichever ground the loop happened to visit last.
- *
- * Masks are kept apart for the same reason one layer down. OR-ing "visible under mask A" from one
- * ground with "visible under mask B" from another produces a label describing no reader of any
- * store — a sentence assembled from two places, true nowhere.
- *
- * All three conditions on a revival carry weight. "Now live" alone would report the erasure's own
- * ERASURE, a delta this order added, live the moment it lands and back from nowhere. Requiring it
- * to have been PRESENT in that same ground before is what separates a claim returning from the
- * ordinary arrival of new law.
- */
 export interface RevivalReport {
   readonly revived: Revival[];
-  /**
-   * Readings that were there before this removal and are not there now — a door it CLOSED.
-   *
-   * Nothing resurfaces at a door that no longer exists, so this is not a revival. It is the
-   * boundary block's own denominator: `readRegistrations` drops a registration whose definition no
-   * longer loads, so erasing a hyperschema body silently removes a whole reading, and every "and
-   * nothing came back" sentence below then speaks for one reader fewer without saying so.
-   */
+
   readonly withdrawn: ReadingAt[];
-  /**
-   * Readings whose MASK moved between the two readings — the door was never withdrawn, its
-   * suppression rule changed under it. Erasing a term delta can do this, and the claims it now
-   * resolves differently were compared against a rule that no longer applies, so they are not
-   * diffed. A different fact from `reopened`, and a louder one: a door that quietly stopped
-   * honouring a stranger's strikes un-suppresses wholesale.
-   */
+
   readonly remasked: ReadingAt[];
-  /**
-   * Readings that exist only in the AFTER reading — this removal brought the reading itself back.
-   * Erasing the negation that withdrew a REGISTRATION reopens its door, and what that door now
-   * serves has no before to compare against. Named rather than diffed: the honest answer is that
-   * this check did not look, and a silent skip would read as "nothing came back there".
-   */
+
   readonly reopened: ReadingAt[];
-  /** Readings that could not be consulted at all, in either reading, in any ground. */
   readonly unconsulted: ReadingAt[];
 }
 
@@ -461,17 +261,11 @@ export function revivedAcross(
   const reopened: ReadingAt[] = [];
   const remasked: ReadingAt[] = [];
   const unconsulted: ReadingAt[] = [];
-  // KEYED ON THE GROUND ITSELF. A derived string was not an identity: a channel pool attaches
-  // nothing of its own, so every pool's component was the empty string and two pools that reopened
-  // the same reading name collapsed into one row — under-counting the doors this run could not
-  // speak for, which is the exact opposite of what a boundary line is for.
   const withdrawn: ReadingAt[] = [];
   const seenAt = new Map<Peer, Set<string>>();
   const once = (into: ReadingAt[], reading: string, ground: Peer, tag: string): void => {
     const here = seenAt.get(ground) ?? new Set<string>();
     seenAt.set(ground, here);
-    // The TAG carries the identity where the caller has one, so two doors that share a label are
-    // two rows. `reading` is only what gets printed.
     const key = tag.includes("\u0000") ? tag : `${tag}\u0000${reading}`;
     if (here.has(key)) return;
     here.add(key);
@@ -480,13 +274,9 @@ export function revivedAcross(
   const now = new Map(after.map((reading) => [reading.ground, reading]));
   for (const was of before) {
     const then = now.get(was.ground);
-    if (then === undefined) continue; // a ground that left the reading answers for nothing
+    if (then === undefined) continue;
     const byId = new Map<string, string[]>();
-    // BY NAME FIRST. A reading absent before and present now is one this removal brought back; a
-    // reading present in both whose MASK moved has a before that no longer describes it. Neither
-    // can be diffed, and the two are different sentences.
     const undiffable = new Set<string>();
-    // Identity in, the name a person reads out. Read off the PAIR, so no index has to line up.
     const labels = new Map<string, string>();
     for (const mask of then.masks) {
       for (const reading of mask.readings) labels.set(reading.identity, reading.label);
@@ -502,9 +292,6 @@ export function revivedAcross(
         undiffable.add(identity);
       }
     }
-    // AND THE OTHER DIRECTION. The loop above reads the AFTER set, so a reading that LEFT appears
-    // in none of its branches — no row, no boundary, and its ids gone from `then.masks` as well.
-    // The labels come from the BEFORE reading, which is the only one that still has them.
     const wasLabels = new Map<string, string>();
     for (const mask of was.masks)
       for (const reading of mask.readings) wasLabels.set(reading.identity, reading.label);
@@ -519,7 +306,6 @@ export function revivedAcross(
     }
     for (const mask of then.masks) {
       const wasMask = was.masks.find((m) => m.key === mask.key);
-      // Every reading under this mask is undiffable, so the mask itself has nothing to compare.
       if (wasMask === undefined || mask.readings.every((r) => undiffable.has(r.identity))) {
         continue;
       }
@@ -549,51 +335,22 @@ export function revivedAcross(
   };
 }
 
-/** One receipt, as a reader sees it: THAT an id was forgotten, by whose order, when, and why. */
 export interface ErasureReceipt {
-  /** The receipt's own content address — what an erase prints and what a reader can look up. */
   readonly erasure: string;
-  /** The id it forgot. Retaining a hash retains zero content, which is what makes this honest. */
   readonly erased: string;
-  /**
-   * The erased delta's author, recorded while the target could still be seen. ABSENT rather than
-   * blank when the erasure carries none: `eraseDefect` requires it at the DOOR, and replay ingests
-   * straight into the reactor, so a receipt replanted from an archive or written by an older version
-   * can survive without one. A blank cell reads as an oversight; an absence has to be stated.
-   */
+
   readonly spokenBy?: string;
-  /** Who signed the removal order. §11 admits exactly one signer, so this is always the operator. */
   readonly orderedBy: string;
   readonly at: number;
-  /** Why, in the operator's own words. EMPTY when the erasure carries none — never invented. */
   readonly reasons: readonly string[];
-  /** The §29.6 cut this was one member of. Absent on an ordinary single-delta erase, forever. */
   readonly slate?: string;
 }
 
-/**
- * The receipts this ground still stands behind, oldest first — read through `standingErasures`,
- * so no surface can print a receipt the admission door does not honour, or hide one it does.
- *
- * `inert` is the other half, and it is not decoration. A struck erasure is NEGATION: the
- * erasure is negated (the id stays refused), so the receipt leaves the surviving set. On a
- * screen that merely drops the row, an omission and a revocation look identical — and this listing
- * is read on the morning that difference decides a case. So the count is disclosed.
- *
- * It counts OPERATOR-AUTHORED erasure-shaped deltas that are not in the surviving set: struck, or
- * malformed in a way the surviving reader refuses. An erasure signed by anyone else was never a
- * receipt here — the door refuses one at admission — so it is not counted as one lost.
- */
 export function receiptLedger(
   reactor: Reactor,
   now: number,
   operator: string | undefined,
 ): { receipts: ErasureReceipt[]; inert: number } {
-  // ONE walk, not two. `reactor.snapshot()` re-derives every delta's content address on the way in
-  // — a full claim validation and a hash each — so a second pass to count the shaped set would pay
-  // the whole store twice. `byTarget(ERASE_ENTITY)` narrows it to the erasures: the index is
-  // written beside the set it indexes, so it cannot go stale against a snapshot taken in the same
-  // breath, and a row the driver set aside is invisible to both.
   let shaped = 0;
   if (operator !== undefined) {
     for (const id of reactor.byTarget(ERASE_ENTITY)) {
@@ -609,7 +366,7 @@ export function receiptLedger(
       const parts = erasureParts(d.claims);
       return {
         erasure: d.id,
-        erased: parts.targetId!, // standingErasures proved it well-shaped
+        erased: parts.targetId!,
         ...(parts.spokenBy === undefined ? {} : { spokenBy: parts.spokenBy }),
         orderedBy: d.claims.author,
         at: d.claims.timestamp,
@@ -621,14 +378,6 @@ export function receiptLedger(
   return { receipts, inert: shaped - receipts.length };
 }
 
-// The erasure annotation (SPEC §26): the moments at which this ground lawfully forgot something
-// SINCE a moment T. An as-of read reconstructs the SURVIVING ground at T; an erasure spoken after T
-// may have redacted a fact that stood at T, so the read confesses each discontinuity's TIMESTAMP —
-// never the content, for an erasure keeps only THAT it forgot and WHEN. Erasures spoken at or
-// before T are already baked into the moment's honest absence (the fact was gone by T) and need no
-// mark; a present read needs none at all. Store-wide by necessity: a purged delta's entity is
-// unknowable, so the honest signal is temporal — the sorted moments an erasure fell in the window
-// since T (their length is the count), never scoped to this view.
 export function forgottenSince(
   reactor: Reactor,
   now: number,
@@ -641,26 +390,10 @@ export function forgottenSince(
     .sort((a, b) => a - b);
 }
 
-// Sealed authorship (degree 3): a commitment carried on an anonymous reassertion. Anonymous
-// today; reveal (salt, author) and anyone can recompute the hash — provably yours whenever
-// you choose, no new cryptography.
 export function sealCommitment(salt: string, author: string): string {
   return bytesToHex(sha256(new TextEncoder().encode(`${salt}\u0000${author}`)));
 }
 
-// --- the Gateway's erasure behaviors (ticket T19: the body lives beside its vocabulary) ---------
-// These are the implementations behind `Gateway.erase` / `Gateway.eraseReplica` — thin delegating
-// methods on the class, bodies here where the erasure vocabulary and its readers already live.
-// They reach the gateway only through its declared internals seam (the `@internal` members on the
-// class — see the seam note in gateway.ts).
-
-// Erase one delta (the body of `Gateway.erase`): verify authority WHILE THE TARGET EXISTS, show the
-// blast radius, land the erasure (through authorize — the door validates it against the live
-// target), purge every tier, and re-seat the gateway on the post-purge ground. The store remembers
-// THAT it forgot — never what. Live subscriptions re-attach exactly as they do after a schema
-// evolution or a crash; an animated gateway's runner must be re-attached (the host holds the old
-// reactor).
-/** Why an opening is still live and the road out of it, or undefined when its pool is gone. */
 async function liveOpening(
   gw: Gateway,
   o: { channel: string; poolDeclaration: string },
@@ -668,13 +401,9 @@ async function liveOpening(
   const drop =
     `Drop the channel first (dropChannel "${o.channel}"); its pool's deltas can be read or ` +
     `extracted until then.`;
-  // The same staleness test the drop applies: a handle whose pool was dropped or detached through
-  // the container is a mirror of nothing, and reads as no handle.
   const cached = gw.store.channels(gw).get(o.channel);
   const named =
     cached?.gateway !== undefined && gw.store.holds(gw, cached.gateway) ? cached : undefined;
-  // A container attached BY HAND under the name (openContainer) is not the channel pool, but its
-  // bytes are under the name all the same, and the drop cannot attach past it.
   const byHand = gw.store.namedPools(gw).get(o.channel);
   if (byHand !== undefined && byHand !== named?.gateway && byHand.reactor.size !== 0)
     return (
@@ -684,34 +413,16 @@ async function liveOpening(
   const negated = negatedAt(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   if (gw.reactor.get(o.poolDeclaration) !== undefined && !negated(o.poolDeclaration))
     return `its pool's declaration still stands. ${drop}`;
-  // The pool under this NAME may be a later incarnation, in which case its bytes are that
-  // incarnation's and its opening carries their lineage. It is another incarnation only when an
-  // opening NAMES its declaration; otherwise it is an orphan the operator declared by hand, and
-  // its bytes still count against this opening, which is the only lineage they have.
   const another =
     named !== undefined &&
     named.declarationId !== o.poolDeclaration &&
     !orphanedDeclaration(gw, named.declarationId!);
   const attached = named !== undefined && !another ? named.gateway : undefined;
-  // The reactor mirrors one tier's read; the bytes question is the backend's, on every tier.
   if (attached !== undefined && (attached.reactor.size !== 0 || (await attached.probe("any"))))
     return named!.declarationId === o.poolDeclaration
       ? `its pool is still attached and holds bytes. ${drop}`
       : `a pool no opening names is attached under its name and holds bytes. ${drop}`;
-  // A later incarnation under the same name owns only what its receipts name, plus what the seed
-  // copied in from the root (a separate pool is seeded from the primary at attach, so the root's
-  // own peer bytes ride along). The store is keyed by name, so a peer byte in that pool that no
-  // receipt names and the root does not hold was left there by an earlier incarnation, and this
-  // opening is the only lineage it has (spec 64).
   if (another) {
-    // ACCOUNT FOR EVERY BYTE under the name, on every tier: the store's inventory, not a read
-    // (a read answers from one tier, and a mirror can keep what a partial purge left). A byte is
-    // the later incarnation's when one of its receipts names it; the root's when the root holds
-    // it (the seed copies the root's own bytes into every pool); the pool's own when the pool
-    // resolves it as operator-authored (its marker). Anything else has this opening as its only
-    // lineage, whether or not a receipt of this incarnation still names it: a receipt can be
-    // erased by hand, and the bytes it named do not go with it. A store that cannot be listed
-    // cannot be accounted for, and that refuses too (H9).
     const owned = receiptsNaming(gw, named.declarationId!);
     const pool = named.gateway!;
     const inventory = await pool.probe("inventory");
@@ -724,7 +435,6 @@ async function liveOpening(
     let stray = 0;
     for (const id of inventory) {
       if (owned.has(id) || gw.reactor.get(id) !== undefined) continue;
-      // The pool's own law, or the host's (an order the host signed for this pool as receiver).
       const author = pool.reactor.get(id)?.claims.author;
       if (author !== undefined && (author === pool.operatorAuthor || author === gw.operatorAuthor))
         continue;
@@ -741,9 +451,6 @@ async function liveOpening(
       );
   }
   if (named === undefined) {
-    // A declaration can stand with no handle in memory: the pool detached on the record, or its
-    // store unreadable when this process booted. Attached again, that incarnation's own bytes are
-    // its own and the erase proceeds; a drop would purge them, so it is not the road named.
     const standing = currentContainerDeclarationId(
       gw.reactor,
       gw.validityNow(),
@@ -760,14 +467,10 @@ async function liveOpening(
   if (named === undefined && gw.options.channelBackend !== undefined) {
     const backend = gw.options.channelBackend(o.channel);
     try {
-      // At the bytes, on every tier: a read answers from one tier and a mirror can keep what a
-      // partial purge left. A store that cannot answer is not proven empty.
       if (await storeHoldsAny(backend))
         return (
           "its pool's store still holds bytes although its declaration was negated, and no " +
           "declaration names that store for a drop to reach: " +
-          // With its status standing, an open RESUMES and needs the declaration; only a fresh
-          // open (status gone) attaches a store no declaration names.
           (gw.channelStatus(o.channel).length > 0
             ? "re-declare the name by hand, then drop the channel, or remove the store by hand."
             : "open the channel again under this name, which attaches the store, then drop it, " +
@@ -781,7 +484,6 @@ async function liveOpening(
   }
   return undefined;
 }
-/** The received and close events that reference one opening and still stand. */
 async function incarnationMembers(gw: Gateway, openingId: string): Promise<string[]> {
   const out = new Set<string>();
   const take = (d: Delta): void => {
@@ -792,8 +494,6 @@ async function incarnationMembers(gw: Gateway, openingId: string): Promise<strin
   };
   const snapshot = gw.reactor.snapshot();
   for (const d of snapshot) take(d);
-  // On the journal path the reading drops a target when its order is admitted, before its bytes
-  // go. A member whose purge faulted is then held but not served, and must still be found here.
   if (gw.peer !== undefined) {
     for (const d of await gw.backend.deltasSince(new Set(snapshot.ids()))) take(d);
   }
@@ -813,20 +513,10 @@ export async function eraseImpl(
   reasons: string[];
   spokenBy?: string;
 }> {
-  // Erasure is the operator's alone (SPEC §11): destructive, so the only signer is the store's
-  // own operator. A data subject's request is honored BY the operator, never by the subject
-  // directly — there is no actor override here on purpose.
   const signer = gw.signer;
   if (signer === undefined || gw.operatorAuthor === undefined) {
     throw new Error("erasure is the instance operator's alone, and this store has no operator");
   }
-  // The completeness guard (SPEC §27.7, T32), BEFORE any work: the mint made containers
-  // enumerable AT REST while this fan-out walks only the ATTACHED set — after a restart those
-  // can differ. A declared SEPARATE-posture container (bytes follow posture, so curated and
-  // untrusted alike) that is neither attached nor covered by a surviving detach record could
-  // hold this byte outside the sweep, so the erase refuses UP FRONT — nothing half-done, no
-  // erasure standing over an unreported gap. A covered store is returned in `kept`, on the
-  // record; erasing a detach record out of order re-arms this guard for the NEXT erase.
   const stores = unreachableStoreReport(gw);
   if (stores.faults.length > 0) {
     throw new Error(
@@ -836,33 +526,16 @@ export async function eraseImpl(
         `Attach the container(s) (openContainer), or detach() them onto the record, then re-run.`,
     );
   }
-  // Retry anchors on the ERASURE, read before the `nothing to erase` guard: a partial attempt
-  // can leave the target gone from the reactor while a tier still holds the bytes, and a re-run
-  // must not mint a second erasure (a fresh timestamp is a new content address).
-  // Anchor only on an erasure that is SURVIVING (a negated one is a negated erasure, and the
-  // id stays refused) and that ERASES this id (a pointer merely mentioning it is not an erasure of it).
-  // `standingErasures` owns both rules, so the anchor and the dead set cannot drift.
   const already = standingErasures(gw.reactor, gw.validityNow(), gw.operatorAuthor).find(
     (d) => erasureParts(d.claims).targetId === id,
   );
   const target = gw.reactor.get(id);
-  // Bypass the guard only for an OUTSTANDING erasure — an id erased cleanly long ago also has a
-  // surviving erasure, and resolving `{ erased }` for it would report work never done.
-  // Outstanding is asked of this ground AND its pools; the local backend alone would strand the
-  // pool-retention retry. (A struck erasure lands here too, correctly: negation withdraws
-  // the erasure, so a fresh one must be spoken rather than the old one silently reused.)
   if (target === undefined && (already === undefined || !(await erasureOutstanding(gw, id)))) {
     throw new Error(`nothing to erase: ${id} is not held here`);
   }
   if (target !== undefined && isErasure(target.claims)) {
-    // The erasure log is the record of what was forgotten; it stays append-only. Un-erasure
-    // is striking the erasure (negation), never erasing it.
     throw new Error("the erasure log is append-only: an erasure cannot itself be erased");
   }
-  // A STANDING SLATE'S PINNED MEMBERSHIP TERM is not an ordinary delta (SPEC §29.2): erasing it leaves
-  // that slate unable to read its own condemned set, so every door it closed silently stops enforcing
-  // while the slate still reports itself standing. Refused here rather than tolerated, which is what
-  // keeps that state unreachable through a door at all — the cut refuses the same delta as a member.
   const pinning = readSlates(gw.reactor, gw.validityNow(), gw.operatorAuthor, Date.now()).find(
     (s) => s.membershipAt === id,
   );
@@ -876,10 +549,6 @@ export async function eraseImpl(
     );
   }
   const protectedTarget = target !== undefined && inLocalContext(target, LOCAL_EVENT);
-  // SPEC 64: A LIVE OPENING CANNOT BE ERASED. Erasing it would leave the pool's bytes with no
-  // lineage, and a random erasure must not be able to nuke a subset of the store. Live means the
-  // pool declaration survives, attached or not, or the pool still holds bytes. The refusal names
-  // the pool and the road: drop it first; read or extract its deltas until then.
   const erasedEvent =
     target !== undefined && protectedTarget
       ? parseLocalEvent(target, gw.operatorAuthor)
@@ -893,12 +562,6 @@ export async function eraseImpl(
           `Nothing was removed.`,
       );
     }
-    // A DROPPED incarnation's opening takes its receipts and close with it, receipts and close
-    // FIRST under the channel commit and the opening LAST, below: a crash before the opening's
-    // erasure leaves every surviving receipt resolvable, and a re-run finishes. No receipt can
-    // land in between: a receipt needs a sync under a surviving declaration, and this one is
-    // struck. SETTLED members are skipped: erased AND held by no tier. A member whose purge
-    // faulted has an erasure and must be erased again; that erase anchors on it.
     if (opts.cascade !== false)
       await withChannelCommit(gw, o.channel, async () => {
         for (const member of await incarnationMembers(gw, id)) {
@@ -910,9 +573,6 @@ export async function eraseImpl(
         }
       });
   }
-  // The marker names the CHANNEL the erased event belonged to. Once the bytes are gone the marker
-  // is all that separates an erased opening from a channel that never had one; without the name,
-  // an erased history reads as plain legacy history and a resumed handle runs unprotected.
   const erasedChannel = target?.claims.pointers.find(
     (p) =>
       p.role === "event" && p.target.kind === "entity" && p.target.entity.context === LOCAL_EVENT,
@@ -946,29 +606,13 @@ export async function eraseImpl(
         ),
       ),
     );
-  // The manifest: every delta citing the id (negations, provenance links) — the holes the
-  // cut will leave, enumerated before it is made, across every WALKABLE tier the byte verdict walks
-  // (T216, `reachableTiers`): the primary AND each directly-attached pool, so a pool-resident citation
-  // (a T207 arrival stamp echoing the target) is named rather than omitted. A wall the verdict names
-  // `unproven` cannot be reached to enumerate, so it carries no entry. Cascade is the caller's choice.
-  // Excluded BY IDENTITY: only the erasure this erasure mints or reuses. A shape filter would
-  // both catch it on retry (a manifest that varies between attempts, a cascading caller sent to
-  // erase the cut itself) and wrongly drop a struck erasure from a negated earlier erasure —
-  // a surviving delta dangling at the hole, which the manifest exists to enumerate.
   const { citations, citationTiers } = danglingCitations(gw, id, (dId) => dId === erasure.id);
   if (already === undefined) {
     if (inLocalContext(erasure, LOCAL_CONTROL)) await appendLocalErasure(gw, erasure);
-    else await appendImpl(gw, [erasure], { settle: false }); // this erase pays its own purge, below
-    await gw.flush(); // the erasure must be ground before the target stops being ground
+    else await appendImpl(gw, [erasure], { settle: false });
+    await gw.flush();
   }
-  // The purge count is evidence of work, never the verdict: 0 means "never held" as often as
-  // "refused to remove", and a mirror returns the max of its two sides, hiding a retaining tier.
-  // Only byte-presence (`holds`) answers §11, asked at the end after re-seat and pool fan-out.
-  // A local refusal is a fault to COLLECT, never an abort: thrown here it would deny the
-  // erasure and the sweep to every attached pool — one tier's fault becoming every replica's leak.
   let localPurge: unknown;
-  // On the journal path the frame that admitted the target still carries it: rebase first, so the
-  // purge and its WAL truncation reach the old frames too.
   if (gw.peer !== undefined) {
     try {
       await rebaseHostPeer(gw.peer);
@@ -981,8 +625,6 @@ export async function eraseImpl(
   } catch (err) {
     localPurge = localPurge ?? err;
   }
-  // On the journal path the purge obligation is the journal's: "removed" settles only where the
-  // store proves the bytes gone; anything else is reported failed and stays owed.
   if (gw.peer !== undefined) {
     try {
       const gone = localPurge === undefined && !(await gw.backend.holds(id));
@@ -1006,28 +648,14 @@ export async function eraseImpl(
   try {
     await gw.reseat();
   } catch (err) {
-    // Same backend the purge just used — same fault class, same collection; aborting here
-    // would deny the pools their sweep.
     localPurge = localPurge ?? err;
   }
-  // §24.8 — the erasure reaches every attached QUARANTINE POOL (the operator's own replicas of this
-  // ground): the same erasure lands there and the byte is purged there too, so a forgotten record can
-  // never live on in a staging area inside the operator's own walls. §11 reaches through the one-way
-  // glass unconditionally; a quarantine that could hide a purged byte would be an erasure-evasion channel.
-  // SETTLE the whole fan-out, then report: a sequential walk aborts at the first refusing pool
-  // and starves every replica behind it of both erasure and purge — one replica's fault must
-  // not become every other replica's leak (`MirrorBackend.purge`/`close` compose the same way).
-  // `seen` membership is claimed synchronously at dispatch: a pool attached beneath two parents
-  // is reachable, and a claim recorded only after the child's awaits could dispatch it twice.
   const seen = new Set<Peer>([gw]);
   const targets = [...gw.store.pools(gw)].filter((pool) => !seen.has(pool));
   for (const pool of targets) seen.add(pool);
   const fanned = await Promise.allSettled(
     targets.map((pool) => pool.eraseReplica(orderForPool(gw, erasure, pool), id, seen)),
   );
-  // The verdict is asked of the BYTES, unconditionally — a purge count proves some tier removed
-  // something, never that every tier did. Every fault lands in ONE report: the remedy is
-  // "resolve and re-run", and one fault per round trip would cost a re-run per replica.
   const faults = await incompleteErasureFaults(gw, id, fanned);
   if (localPurge !== undefined) {
     faults.unshift({
@@ -1044,15 +672,6 @@ export async function eraseImpl(
       { cause: faults[0]?.cause },
     );
   }
-  // `kept` is the guard's entry-time reading — the container stores a surviving detach record
-  // deliberately holds outside this sweep, reported rather than silent. The erasure's id and the
-  // target's author ride out too: a cut collects them per member (§29.5) rather than re-deriving them
-  // from a ground the purge just moved.
-  // WHAT THE RECEIPT ACTUALLY SAYS, never what the caller asked for. On a retry the erasure is
-  // REUSED (`already`), and `opts.reason` is dropped on the floor — a second run with a corrected
-  // sentence records nothing, so a caller that echoed its own argument would print one reason while
-  // `erasures show` printed another. `minted` says which of the two runs this was, because
-  // "safe to re-run" and "your new reason was kept" are different promises.
   const parts = erasureParts(erasure.claims);
   return {
     erased: id,
@@ -1066,10 +685,6 @@ export async function eraseImpl(
   };
 }
 
-// Is this erasure still OUTSTANDING anywhere in reach — this ground or any replica of it? Its
-// fault model must be the verdict's, or the two drift: outstanding means bytes held (or
-// unprovable — a tier that cannot answer has proven nothing; H9), OR a reachable replica that
-// does not yet carry the operator's erasure for the id.
 export async function erasureOutstanding(
   gw: Gateway,
   id: string,
@@ -1078,33 +693,8 @@ export async function erasureOutstanding(
   return (await erasureStanding(gw, id, seen)) !== "settled";
 }
 
-/**
- * What a standing receipt is worth, keeping the difference a boolean throws away.
- *
- * "Could not be asked" and "still holds it" are both reasons not to call an erasure done, and they
- * are not the same sentence to whoever reads the screen: one is a measurement, the other is a
- * refusal to guess. Collapsed into `true`, a screen built on this reports a fact it never
- * established (H9).
- */
-export type ErasureStanding =
-  /** A tier still has the bytes at rest. */
-  | "held"
-  /** A tier refused the question. Nothing was proven in either direction. */
-  | "unasked"
-  /** No receipt in some ground in reach: the delivery is still owed there. */
-  | "owed"
-  /** Asked everywhere in reach, and clean. */
-  | "settled";
+export type ErasureStanding = "held" | "unasked" | "owed" | "settled";
 
-// STRONGEST WINS, and "unasked" outranks "owed" deliberately: a tier that refused the question is
-// the fact that most limits what any sentence below may claim, and a screen that said "no receipt
-// yet" would be reporting the half it could measure while burying the half it could not.
-//
-// A RANK CANNOT CARRY A REFUSAL, though, which is why `unasked` is ALSO returned as its own set.
-// "Held here" is a stronger true sentence than "unasked there", so it wins the cell — and if that
-// were the only record, a store whose primary refused a purge while a pool's file was locked would
-// report `unproven: false` and settle-in-progress over a tier that had answered nothing. The rank
-// decides what a screen SAYS; the set decides what the store may claim to have established.
 const STANDING_RANK: Record<ErasureStanding, number> = {
   held: 3,
   unasked: 2,
@@ -1112,7 +702,6 @@ const STANDING_RANK: Record<ErasureStanding, number> = {
   settled: 0,
 };
 
-/** Per-id verdicts, and — independently — every id some ground could not be asked about. */
 export interface StandingReport {
   readonly standings: ReadonlyMap<string, ErasureStanding>;
   readonly unasked: ReadonlySet<string>;
@@ -1126,20 +715,6 @@ export async function erasureStanding(
   return (await erasureStandings(gw, [id], seen)).standings.get(id) ?? "settled";
 }
 
-/**
- * THE ONE WALK, for one id or a thousand.
- *
- * An id is outstanding where bytes are held, where a tier cannot answer (H9 — unprovable is not
- * clean), or where a reachable replica does not yet carry the erasure. This is the ONLY place
- * that model lives: the erase door, the health door and the receipt readers all read it from here,
- * because three copies of one fault model in one file is three chances for the screens to disagree
- * about a single store.
- *
- * Batched because the cost is not per id: `readErasures` walks a whole ground, and
- * `ArchiveBackend.holds` pays a full sweep for every ABSENT id. The erasure set is read once per
- * ground, and the backend is asked through `heldAmong` — one pass for the whole set — wherever the
- * driver offers it.
- */
 export async function erasureStandings(
   gw: Peer,
   ids: readonly string[],
@@ -1148,7 +723,7 @@ export async function erasureStandings(
   const standings = new Map<string, ErasureStanding>(ids.map((id) => [id, "settled"]));
   const unasked = new Set<string>();
   const note = (id: string, verdict: ErasureStanding): void => {
-    if (verdict === "unasked") unasked.add(id); // recorded whatever a louder ground says
+    if (verdict === "unasked") unasked.add(id);
     if (STANDING_RANK[verdict] > STANDING_RANK[standings.get(id) ?? "settled"]) {
       standings.set(id, verdict);
     }
@@ -1158,21 +733,16 @@ export async function erasureStandings(
   const physical = await gw.probe({ retention: ids });
   for (const id of physical.held) note(id, "held");
   for (const id of physical.unasked) note(id, "unasked");
-  // ASKED EVEN WHERE THE BYTES COULD NOT BE. The reactor is a separate question from the tier, and
-  // a ground with no receipt still owes the delivery whatever its disk would have said.
   const tombs = readErasures(gw.reactor, gw.validityNow(), gw.operatorAuthor);
   for (const id of ids) if (!tombs.has(id)) note(id, "owed");
   for (const pool of gw.store.pools(gw)) {
     const sub = await erasureStandings(pool, ids, seen);
     for (const [id, verdict] of sub.standings) note(id, verdict);
-    for (const id of sub.unasked) unasked.add(id); // a refusal one ground down is still a refusal
+    for (const id of sub.unasked) unasked.add(id);
   }
   return { standings, unasked };
 }
 
-// Everything standing between this call and a completed erasure, collected rather than raced:
-// this ground's retained bytes (or a tier that could not be asked), plus every replica refusal.
-// Shared by both fan-out layers so the two halves cannot drift on how faults compose.
 async function incompleteErasureFaults(
   gw: Gateway,
   id: string,
@@ -1184,7 +754,6 @@ async function incompleteErasureFaults(
       faults.push({ what: `this store STILL HOLDS the content at rest` });
     }
   } catch (err) {
-    // Could not be asked is not clean — a tier that cannot answer has proven nothing (H9).
     faults.push({
       what: `this store could not be proven clean: ${err instanceof Error ? err.message : String(err)}`,
       cause: err,
@@ -1203,27 +772,6 @@ async function incompleteErasureFaults(
   return faults;
 }
 
-// Honor an erasure DECIDED by the primary operator (the body of `Gateway.eraseReplica`, SPEC §24.8),
-// called on a pool by the primary's fan-out: land the operator's erasure (so the pool remembers the
-// hole and refuses re-entry — the federation door already enforces that, §11), purge the byte, re-seat,
-// and fan the same order into any pools of THIS pool (the law is transitive — a nested replica is still
-// the operator's replica). No local target need exist; the erasure was decided upstream, and the shared
-// operator makes the erasure lawful here. This is what keeps a pool from becoming a place a forgotten
-// byte can hide.
-//
-// A FAN-OUT MUST RE-DERIVE ITS OWN REACH. The purge re-checks the erasure's lawfulness itself
-// (eraseDefect — the authorization gate, checked FIRST and explicitly); the erasure crosses the
-// federation door past the pool's own TRUST policy (an explicit admit — trust is admission
-// configuration, whose data do I want; erasure is LAW, §11 through the one-way glass
-// unconditionally, and a `closed` pool is still the operator's own replica); and if the lawful
-// erasure STILL did not land, the only remaining cause is the store itself failing — so it
-// THROWS, and the primary's `erase` rejects. Best-effort-and-loud, never a silent success.
-/**
- * May a replica admit this local-control order? Only when a container above it holds the very same
- * order, or its NEAREST parent holds a binding local-control erasure of `id` and signed this order
- * naming the replica (`receiver`) as its receiver. `chain` is the verified chain above the replica,
- * nearest first (`Store.chainAbove`). An order re-signed further up does not reach past the parent.
- */
 export function localOrderAuthorized(
   chain: readonly Pick<Peer, "reactor" | "operatorAuthor">[],
   erasure: Delta,
@@ -1258,9 +806,6 @@ export async function eraseReplicaImpl(
   id: string,
   seen: Set<Peer>,
 ): Promise<void> {
-  // Authorization first, on its own: a forged or foreign removal-order is refused WITHOUT purging
-  // — loudly, since only a hostile direct caller can reach this branch (the primary's fan-out only
-  // ever hands over the erasure its own erase door just validated).
   const defect = eraseDefect(erasure, gw.reactor, gw.operatorAuthor);
   if (defect !== undefined) {
     throw new Error(`a replica purge is the operator's alone: ${defect}`);
@@ -1285,31 +830,20 @@ export async function eraseReplicaImpl(
   try {
     await gw.backend.purge([id]);
   } catch (err) {
-    localPurge = err; // collected below — a pool tier's fault must not starve its own children
+    localPurge = err;
   }
-  // A pool under its own key is a journal peer: its obligation settles only after a rebase takes
-  // the admitting frame, and only where the store proves the bytes gone.
   await settleOwedPurges(gw);
   try {
     await gw.reseat();
   } catch (err) {
-    localPurge = localPurge ?? err; // same fault class, same collection — see eraseImpl
+    localPurge = localPurge ?? err;
   }
-  // Transitive FIRST, verdict LAST (the order `eraseImpl` keeps): a verdict thrown before the
-  // walk would starve every pool behind and beneath this one of both erasure and purge —
-  // trading one silent leak for a blocking leak across all the others. `seen` guards the walk
-  // against a cycle; the whole walk is settled, then reported, so one unprovable replica cannot
-  // hide another.
   seen.add(gw);
   const nested = [...gw.store.pools(gw)].filter((pool) => !seen.has(pool));
-  for (const pool of nested) seen.add(pool); // claimed at dispatch — see the eraseImpl note
+  for (const pool of nested) seen.add(pool);
   const walked = await Promise.allSettled(
     nested.map((pool) => pool.eraseReplica(orderForPool(gw, erasure, pool), id, seen)),
   );
-  // This tier's own bytes AND every nested refusal, in ONE report, via the collector shared with
-  // `eraseImpl`. A pool is where §11 is easiest to evade — a silently-retaining replica must not
-  // read as clean outward, and a store that cannot be ASKED is a fault beside the others, never
-  // an escape hatch that drops the nested refusals already in hand.
   const faults = await incompleteErasureFaults(gw, id, walked);
   if (localPurge !== undefined) {
     faults.unshift({
@@ -1328,54 +862,23 @@ export async function eraseReplicaImpl(
   }
 }
 
-// --- health: the settling report (T70; Myk, 2026-07-24) --------------------------------------------
-//
-// This store is eventually consistent about FORGETTING: an erasure is decided the moment its
-// erasure lands, but the bytes leave each tier on that tier's own time — a lagging mirror, a
-// locked WAL, a pool that was offline. That gap is a HEALTH state, not a fault: serve keeps
-// serving, and health() answers, live, whether every erasure this ground has promised has settled
-// to bytes. Live means computed NOW, from the reactor's surviving erasures and a byte probe over
-// the backend AND every attached quarantine pool — never a boot-time snapshot that goes stale as
-// erasures land or bytes resurface. (Scope, honestly: the promise SET reads through the reactor,
-// which seeds from the primary's deltasSince — a primary that lost its erasures mid-run while a
-// mirror kept a forgotten byte is out of this instrument's sight until the next boot heal.)
-
 export interface ErasureHealth {
-  readonly settled: boolean; // every promise is bytes-gone on every tier owned AND every attached pool
-  readonly promised: number; // ids promised forgotten (targets of surviving operator erasures)
-  readonly pending: number; // of those, ids not yet settled everywhere in reach
-  readonly outstanding: readonly string[]; // the ids themselves — operator-only surface
-  readonly unproven: boolean; // some tier could not be examined: not settled, not failed (H9)
+  readonly settled: boolean;
+  readonly promised: number;
+  readonly pending: number;
+  readonly outstanding: readonly string[];
+  readonly unproven: boolean;
 }
 
 export interface StoreHealth {
-  // "ok"       — every promise settled, nothing lagging.
-  // "settling" — converging, not broken: erasure debt outstanding somewhere in reach, or a mirror
-  //              behind on DURABILITY (lag is missing copies, not retained bytes — a different debt
-  //              folded into the same "not yet ok").
-  // "unproven" — a tier could not answer; treat as settling at best, never as ok (H9).
-  //
-  // A LAPSED SLATE MOVES NONE OF THESE (SPEC §29.4). `settling` means a promise already MADE has not
-  // reached the bytes; a lapsed slate means a promise has not been KEPT, and the remedies differ —
-  // wait or repair a tier, versus CUT. Conflating them teaches whoever watches `status` that
-  // `settling` sometimes just means someone filed a slate, which is how a field earns the right to
-  // be ignored. So the compliance clock lives in `slates`, and `status` keeps its meaning exactly.
   readonly status: "ok" | "settling" | "unproven";
   readonly erasure: ErasureHealth;
   readonly slates: SlateHealth;
   readonly negated: NegatedHealth;
-  readonly lagging?: boolean; // present when the backend exposes mirror lag (MirrorBackend)
-  // The surfaces erasure does NOT reach, disclosed unconditionally: the two §36 home files
-  // (T131, out of scope by design) and the ESM registry (T105 a, in scope but unprovable) — so
-  // the report is honest about its own edges whatever the erasure state. A top-level field, never a
-  // field of `ErasureHealth`: that interface is pinned by a `toEqual` rail (T70), and this fact is
-  // about the report's scope rather than any one promise's settling.
+  readonly lagging?: boolean;
   readonly nonSwept: readonly string[];
 }
 
-// The health door's reading of `erasureStandings` — the SAME walk the erase door and the receipt
-// readers use, so the three cannot drift on what "outstanding" means. Everything but `settled` is
-// outstanding; `unasked` is also what `unproven` means, which is why the walk keeps them apart.
 async function outstandingAmong(
   gw: Gateway,
   ids: readonly string[],
@@ -1384,8 +887,6 @@ async function outstandingAmong(
   const report = await erasureStandings(gw, ids, seen);
   const outstanding = new Set<string>();
   for (const [id, verdict] of report.standings) if (verdict !== "settled") outstanding.add(id);
-  // FROM THE SET, NEVER FROM THE CELLS. A tier that refused is not visible in a verdict another
-  // ground answered louder, and `unproven` is the one field that must not miss it.
   for (const id of report.unasked) outstanding.add(id);
   return { outstanding, unproven: report.unasked.size > 0 };
 }
@@ -1407,10 +908,6 @@ export async function healthImpl(gw: Gateway, now = Date.now()): Promise<StoreHe
     };
   }
   const lagging = (gw.backend as { lagging?: unknown }).lagging;
-  // T105 (a), deliberate: the ESM disclosure in nonSwept names an unprovable tier but does NOT
-  // move the top-level verdict — the byte probes answered every tier they can ask, and an
-  // unaskable tier reads as UNPROVEN beside them rather than as a failing probe. Moving the
-  // verdict itself is the teardown half's decision (T105 b).
   const status = erasure.unproven
     ? "unproven"
     : erasure.settled && lagging !== true
@@ -1419,17 +916,9 @@ export async function healthImpl(gw: Gateway, now = Date.now()): Promise<StoreHe
   return {
     status,
     erasure,
-    // Both sections are LAWFUL facts rather than debt, so neither moves `status` — but without them
-    // a lapsed compliance window and an id whose erasure was negated are invisible to every
-    // instrument the store has (a negated erasure leaves `readErasures`, and therefore `promised`,
-    // though its id stays refused forever).
     slates: slateHealth(gw, now),
     negated: negatedHealth(gw),
     ...(typeof lagging === "boolean" && { lagging }),
-    // The unswept-surface disclosures, unconditional: the home files (T131) are outside erasure's
-    // reach by design, and the ESM registry (T105 a) is in scope but unprovable to the tier probes.
-    // Both stay listed whether the store has forgotten nothing, something, or is mid-settle. The
-    // receipt reads the SAME constants, so the two surfaces cannot drift.
     nonSwept: [...UNSWEPT_AUTH_SURFACES, ...ESM_RESIDENCY_DISCLOSURE],
   };
 }

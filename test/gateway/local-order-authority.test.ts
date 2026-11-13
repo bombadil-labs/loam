@@ -1,10 +1,3 @@
-// Who may hand a pool a local-control erasure order (the channel-event erasures). A pool admits one
-// only when a container above it holds that very order, or when its NEAREST parent holds a binding
-// local-control erasure of the target and re-signed the order naming the pool as its receiver. A
-// re-signed order from further up does not reach past the parent. The chain is the verified chain
-// above the pool, nearest first (Store.chainAbove, railed in store.test.ts); these cases hand the
-// rule real signed deltas in real reactors.
-
 import { Reactor, type Delta } from "@bombadil/rhizomatic";
 import { describe, expect, it } from "vitest";
 import { localOrderAuthorized } from "../../src/gateway/erase.js";
@@ -18,7 +11,6 @@ const POOL = seedSigner("a3".repeat(32));
 const OTHER = seedSigner("a4".repeat(32));
 const TARGET = observed(FERN, "height", 5, 1000, "a5".repeat(32));
 
-// A container's own local-control erasure of TARGET, in the shape the channel-event erase mints.
 const localErasure = (by: Signer): Delta => {
   const claims = eraseClaims(TARGET.id, TARGET.claims.author, by.author, 10_000);
   const primitive = (role: string, value: string | number) => ({

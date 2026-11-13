@@ -1,7 +1,3 @@
-// The recovery barrier as `loam user recover` runs it (refactor/audit/recovery-history.md, H3-H5,
-// H8; H6 is in user-recover.test.ts). Each case reads both levels: the cut and outcome records each
-// store holds, and what the door and the pause make of them.
-
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -67,7 +63,6 @@ async function ground<T>(fn: (gw: Gateway, op: string) => T | Promise<T>): Promi
   }
 }
 
-// ada with a key file and one connection inbox under home:ada. Returns K1 and the pool's name.
 async function world(): Promise<{ k1: string; pool: string }> {
   expect(await run(["init", "--home", home], io)).toBe(0);
   expect(await run(["user", "create", "ada", "--operator", "--home", home], io, password)).toBe(0);
@@ -116,8 +111,6 @@ const direct = (extra: Partial<RecoverOptions> = {}): RecoverOptions => ({
   ...extra,
 });
 
-// What one store says about the cuts for `key`: each cut's state and whether it has an outcome.
-// Each store reads its own law, signed by its own governing key.
 function cutsOf(g: Gateway, key: string) {
   const op = g.operatorAuthor!;
   const erased = refusedIds(g.reactor, op);
@@ -161,7 +154,7 @@ describe("the recovery barrier", () => {
     await ground((gw) => {
       expect(cutsOf(pool(gw, p), k1)).toEqual([{ state: "prepared", outcome: "none" }]);
       expect(paused(pool(gw, p)).has(k1)).toBe(true);
-      expect(cutsOf(gw, k1)).toEqual([]); // the host cut rides in the commit, which never ran
+      expect(cutsOf(gw, k1)).toEqual([]);
     });
     expect(await recoverUser(direct())).toBe(1);
     expect(err.join("\n")).toMatch(/did not land/);
@@ -178,7 +171,6 @@ describe("the recovery barrier", () => {
 
   it("H4: a crash after the commit and before the outcomes: the pool reads its cut committed, and the rerun writes the outcome", async () => {
     const { k1, pool: p } = await world();
-    // The pool attaches for the recovery and not for its own resume: the outcome cannot land.
     const real = channelBackendFor(home, io);
     let opens = 0;
     const once = (name: string): StoreBackend =>
@@ -292,7 +284,7 @@ describe("the recovery barrier", () => {
     let opens = 0;
     const once = (name: string): StoreBackend =>
       (opens++ === 0 ? real(name) : undefined) as unknown as StoreBackend;
-    expect(await recoverUser(direct({ channelBackend: once }))).toBe(1); // the pool's outcome waits
+    expect(await recoverUser(direct({ channelBackend: once }))).toBe(1);
     await ground(async (gw) => {
       const g = pool(gw, p);
       const op = g.operatorAuthor!;
@@ -305,7 +297,7 @@ describe("the recovery barrier", () => {
     err.length = 0;
     expect(await recoverUser(direct())).toBe(1);
     expect(err.join("\n")).toMatch(/a conflict in .*reads aborted, not committed/);
-    expect(out.join("\n")).toMatch(/now signs with/); // the landing is reported, never completion
+    expect(out.join("\n")).toMatch(/now signs with/);
     expect(existsSync(journal())).toBe(true);
     await ground((gw) => {
       expect(cutsOf(pool(gw, p), k1)).toEqual([{ state: "aborted", outcome: "aborted" }]);
@@ -343,7 +335,6 @@ describe("other writers during a recovery", () => {
     const k1Seed = readUserSeed(home, "ada");
     if (k1Seed.kind !== "present") throw new Error("ada has a key file");
     const seed = readSeed(home);
-    // Booted before the recovery, this handle still reads k1 as ada's root.
     const stale = await Gateway.boot(
       new SqliteBackend(storePath(home)),
       assembleGenesis({ operatorSeed: seed }),
@@ -355,8 +346,6 @@ describe("other writers during a recovery", () => {
       await stale.append([before]);
       expect(await recoverUser(direct())).toBe(0);
       after = observed(FERN, "height", 2, stale.stamp(k1).timestamp, k1Seed.seed);
-      // The stale handle's journal head moved, so it takes in the recovery before it admits, and
-      // the old key's write is refused.
       await expect(stale.append([after])).rejects.toThrow(/not permitted/);
     } finally {
       await stale.close();
@@ -392,16 +381,12 @@ describe("other writers during a recovery", () => {
         await other.close();
       }
     };
-    // The host journal moved under the command, so it takes in the new pool before it admits.
-    // The door then sees a pool with no cut and refuses the record; nothing lands.
     expect(await recoverUser(direct({ afterCuts: declareElsewhere }))).toBe(1);
     expect(err.join("\n")).toMatch(new RegExp(`${late}.*holds no live cut`));
     expect(seedKey()).toBe(k1);
-    // A rerun cuts every pool, the late one included, and lands.
     expect(await recoverUser(direct())).toBe(0);
     await ground((gw) => {
       expect(cutsOf(pool(gw, late), k1)).toEqual([{ state: "committed", outcome: "committed" }]);
-      // The refused attempt's cut in the first pool is aborted; the rerun's is committed.
       expect(cutsOf(pool(gw, p), k1).sort((a, b) => a.state.localeCompare(b.state))).toEqual([
         { state: "aborted", outcome: "aborted" },
         { state: "committed", outcome: "committed" },

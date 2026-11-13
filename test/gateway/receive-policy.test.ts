@@ -1,61 +1,3 @@
-// T281: internal LIVE projection proof; real signed law and literal resolved values.
-//
-// RAILS-RED on origin/main, this file copied in: the suite does not LOAD there. It imports
-// src/gateway/receive-policy.js and src/gateway/receive-snapshot.js, both of which this slice adds,
-// so vitest reports one failed suite rather than per-case failures. That measures the import graph;
-// the revert probes below are the instrument for the cases.
-//
-// REVERT PROBES, MEASURED against the four receiving rails together (49 cases). Each probe deletes
-// one guard in the projection and records how many cases go red.
-//   two surviving bindings for one relationship no longer refuse   → 2 red, 47 green
-//   programs carrying expand/fix/resolve are no longer refused      → 2 red, 47 green
-//   a stranger's decision deltas acquire recipient policy authority → 2 red, 47 green
-//   a manifest with duplicate memberIds is admitted                 → 1 red, 48 green
-//   a manifest carrying extra keys is admitted                      → 1 red, 48 green
-// Measured again at 56 cases, one guard deleted per probe:
-//   the registrationId guard is removed                             → 1 red, 55 green
-//   two candidates for one lens count as one                        → 1 red, 55 green
-//   two registration rows for one lens are served, not a conflict   → 1 red, 55 green
-//   only fix programs are refused, not expand or resolve            → 1 red, 55 green
-//   a struck malformed decision is parsed before its strike is read → 1 red, 55 green
-//   a pause on a one-time binding is ignored instead of refused     → 1 red, 55 green
-//   NUL is accepted inside a decision identity                      → 1 red, 55 green
-//   a selection is admitted on a live binding                       → 1 red, 55 green
-// Measured again at 60 cases:
-//   a curse under a sibling reading curses this reading too          → 1 red, 59 green
-//   a pause on a binding the receiver struck is refused, not inert   → 1 red, 59 green
-//   any delta the policy holds counts as a binding for a pause       → 1 red, 59 green
-// Measured again at 61 cases:
-//   any struck receiver delta makes a pause inert, not only a binding → 1 red, 60 green
-//   a pause naming another relationship's binding leaves it serving  → 1 red, 60 green
-//   a pause under a relationship with no binding is ignored          → 1 red, 60 green
-//   a pause naming any receiver binding is honoured                  → 2 red, 59 green
-// Measured again at 61 cases:
-//   a struck binding of any relationship makes a pause inert          → 1 red, 60 green
-//   a stray relationship with no row for this destination is silent   → 1 red, 60 green
-// Measured again at 62 cases:
-//   a dependency nested inside another term is not walked             → 1 red, 61 green
-//   pause keys keep memberIds order, so permutations conflict         → 1 red, 61 green
-//   result rows keep arrival order instead of relationship order      → 1 red, 61 green
-//   a pause naming no binding of the receiver is ignored            → 1 red, 59 green
-//   the snapshot path drops its lens-name filter                    → 1 red, 59 green
-//   the live path drops its hyperschema-entity filter               → 1 red, 59 green
-//   an empty receiver or destination projects [] instead of refusing → 1 red, 59 green
-// HOLLOW-TEST SURVIVORS (uncapped run, 175 mutants) that are equivalent, and why:
-//   receive-policy.ts parse: `return undefined` → `return null` yields a decision with no kind,
-//     which every kind filter drops; no output changes.
-//   receive-policy.ts pause pre-check: the `paused` flag passed to selectReceivingSnapshot; only
-//     the invalid-selection status is read there, and that status does not depend on the flag.
-//   receive-policy.ts pause keys: `JSON.stringify(value)` for a non-object selection → null; the
-//     only non-object selection is null, so every such pause still shares one key.
-//   receive-snapshot.ts manifest: dropping one field from the nonempty check; the same field is
-//     compared against the binding, the registration, or the version address two lines later and
-//     refuses with the same status.
-//   receive-snapshot.ts definitionId: the id tie-break; the substrate hands definition rows in id
-//     order already, so the comparator's tie branch is never the deciding read. The case
-//     "equal-timestamp definitions pin the lower id" pins the observable order either way.
-//   receive-snapshot.ts author clause: readRegistrations already filtered to the source author, so
-//     the clause cannot fail; it stays for the type narrowing it provides.
 import { describe, expect, it } from "vitest";
 import {
   authorForSeed,
@@ -264,7 +206,6 @@ describe("experimental live receiving projection", () => {
       S,
     );
     expect(run([...ds, dependent])[0]!.status).toBe("unsupported");
-    // A dependency nested inside another term is refused the same way.
     const nested = signClaims(
       publishHyperSchemaClaims(
         {
@@ -312,7 +253,6 @@ describe("experimental live receiving projection", () => {
   });
   it("a curse under a sibling reading leaves this reading alone; a pause must name one of the receiver's bindings", () => {
     const ds = law();
-    // Spec 60: the curse key is (relationship, served reading); it is not a content-global ban.
     const sibling = decision(
       { kind: "curse", relationship: body.relationship, reading: "Other" },
       R,
@@ -325,8 +265,6 @@ describe("experimental live receiving projection", () => {
       32,
     );
     expect(run(ds, [binding, sibling, own])[0]!.status).toBe("cursed");
-    // A pause naming a stranger's binding, the receiver's curse on another relationship, or an id
-    // never held: refused, never ignored.
     const strangers = decision(body, X, 33);
     const elsewhere = decision({ kind: "curse", relationship: "other", reading: "Plant" }, R, 32);
     for (const named of [strangers.id, elsewhere.id, "ff".repeat(32)])
@@ -369,8 +307,6 @@ describe("experimental live receiving projection", () => {
         R,
         ts,
       );
-    // A struck curse and a struck malformed decision are receiver-authored and withdrawn, but they
-    // were never bindings: a pause naming either is refused, not inert.
     const curse = decision(
       { kind: "curse", relationship: body.relationship, reading: "Plant" },
       R,
@@ -381,14 +317,11 @@ describe("experimental live receiving projection", () => {
       expect(run(ds, [binding, struck, strike(struck, R), pauseOn(struck.id)])[0]!.status).toBe(
         "invalid-selection",
       );
-    // A pause that claims relationship A but names B's binding refuses both relationships.
     const other = decision({ ...body, relationship: "zz-other" }, R, 3);
     expect(run(ds, [binding, other, pauseOn(other.id)]).map((r) => r.status)).toEqual([
       "invalid-selection",
       "invalid-selection",
     ]);
-    // A pause under a relationship with no binding earns its own refusal row; the binding it
-    // does not touch still serves.
     expect(
       run(ds, [binding, pauseOn("ff".repeat(32), "no-such-rel")]).map((r) => [
         r.relationship,
@@ -398,8 +331,6 @@ describe("experimental live receiving projection", () => {
       [body.relationship, "selected"],
       ["no-such-rel", "invalid-selection"],
     ]);
-    // The inert branch asks the same question: a struck binding of ANOTHER relationship does not
-    // make a pause inert, and the pause's claimed relationship still refuses.
     expect(
       run(ds, [binding, other, strike(other, R), pauseOn(other.id)]).map((r) => [
         r.relationship,
@@ -409,7 +340,6 @@ describe("experimental live receiving projection", () => {
       [body.relationship, "invalid-selection"],
       ["zz-other", "invalid-selection"],
     ]);
-    // A stray relationship whose only binding serves another destination is still reported here.
     const elsewhere = decision(
       { ...body, relationship: "zz-other", destination: "bob_outbox", reading: "Plant2" },
       R,
@@ -424,7 +354,6 @@ describe("experimental live receiving projection", () => {
       [body.relationship, "selected"],
       ["zz-other", "invalid-selection"],
     ]);
-    // Rows are ordered by relationship, not by the order decisions arrived.
     expect(
       run(ds, [binding, pauseOn("ff".repeat(32), "aaa-stray")]).map((r) => [
         r.relationship,
@@ -434,7 +363,6 @@ describe("experimental live receiving projection", () => {
       ["aaa-stray", "invalid-selection"],
       [body.relationship, "selected"],
     ]);
-    // Control: a pause naming the binding under its own relationship is honoured.
     expect(run(ds, [binding, pauseOn(binding.id)])[0]!.status).toBe("unavailable");
   });
   it("refuses an empty receiver or destination as invalid input, not as an empty projection", () => {

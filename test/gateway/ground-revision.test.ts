@@ -1,17 +1,3 @@
-// The ground's revision, and the two caches keyed on it: the erased set a reading hides
-// (`erasedFromReading`) and the public door's open set.
-//
-// The revision cases assert the count itself: one per admitted batch that adds to the held set,
-// none for a batch of duplicates, one per reseat, one per declaration of erasure pins.
-//
-// The erased-set cases are two-sided, at both levels. Each one first reads, so a cached answer
-// exists. Then one event moves the answer. After it the bytes of the target are still held (delta
-// level), a reading through the Schema hides the target, and the same reading still serves a
-// named bystander (object level). A cache that missed the event keeps serving the target.
-//
-// Not asserted here: that a purge removes bytes (test/gateway/erase.test.ts), and the law-level pin
-// case on a bare reactor (test/gateway/erasure-governor-pin.test.ts).
-
 import { describe, expect, it } from "vitest";
 import { Reactor, authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { eraseClaims, erasedFromReading } from "../../src/gateway/erase-law.js";
@@ -61,18 +47,17 @@ describe("the ground's revision", () => {
     const gw = await boot();
     const { claim, bystander } = claimAndBystander();
     const r0 = gw.revision;
-    await gw.append([claim, bystander]); // two deltas, one batch
+    await gw.append([claim, bystander]);
     expect(gw.revision).toBe(r0 + 1);
     await gw.append([claim, bystander]);
     expect(gw.revision).toBe(r0 + 1);
 
     const other = observed(FERN, "tag", "moss", 1200, OP_SEED);
-    await gw.federate([other, claim]); // one new member
+    await gw.federate([other, claim]);
     expect(gw.revision).toBe(r0 + 2);
     await gw.federate([other, claim]);
     expect(gw.revision).toBe(r0 + 2);
 
-    // Unread between them, two batches are still two revisions.
     expect(gw.reactor.ingest(observed(FERN, "tag", "fog", 1300, OP_SEED)).status).toBe("accepted");
     expect(gw.reactor.ingest(observed(FERN, "tag", "dew", 1400, OP_SEED)).status).toBe("accepted");
     expect(gw.revision).toBe(r0 + 4);
@@ -90,9 +75,8 @@ describe("the ground's revision", () => {
     expect(gw.revision).toBe(r0 + 1);
     gw.pinErasureGovernors([HOST]);
     expect(gw.revision).toBe(r0 + 2);
-    await gw.reseat(); // the pins are declared again on the new reactor: still one revision
+    await gw.reseat();
     expect(gw.revision).toBe(r0 + 3);
-    // An erase stores an order, purges and reseats: the revision only rises.
     await gw.erase(claim.id);
     expect(gw.revision).toBeGreaterThan(r0 + 3);
     await gw.close();
@@ -113,7 +97,7 @@ describe("the ground's revision", () => {
 
     const b = new Reactor();
     b.ingest(claim);
-    raiseGroundRevision(b); // `b` stands at 1, below `a`: the successor is one above `a`
+    raiseGroundRevision(b);
     continueGroundRevision(a, b);
     expect(groundRevision(b)).toBe(3);
   });
@@ -135,11 +119,11 @@ describe("the erased set a reading hides follows every event that moves it", () 
     const gw = await boot();
     const { claim, bystander } = claimAndBystander();
     await gw.append([claim, bystander]);
-    expect(await fern(gw)).toEqual({ height: 30, tag: ["shade"] }); // the cached answer: nothing
+    expect(await fern(gw)).toEqual({ height: 30, tag: ["shade"] });
     expect(erasedFromReading(gw.reactor, OP).size).toBe(0);
 
     await admit(gw, signClaims(eraseClaims(claim.id, OP, OP, 2000), OP_SEED));
-    expect(gw.reactor.get(claim.id)).toBeDefined(); // the bytes are still held
+    expect(gw.reactor.get(claim.id)).toBeDefined();
     expect(gw.reactor.get(bystander.id)).toBeDefined();
 
     expect(erasedFromReading(gw.reactor, OP).has(claim.id)).toBe(true);
@@ -148,18 +132,13 @@ describe("the erased set a reading hides follows every event that moves it", () 
     await gw.close();
   });
 
-  // A reseat reads the admitted set again, and an order admitted through a door has taken its
-  // target out of that set. So the reseat moves the answer: the target's bytes leave the reactor,
-  // and nothing is left to hide. The cached entry is still stored beside the reactor object, so
-  // this case passes with the revision left out of the key: it is a control for the day one
-  // reactor outlives a reseat, not a gate today. The pin case below holds a target across a reseat.
   it("a reseat drops the ordered target's bytes: the hidden set empties, the bystander stays (a control)", async () => {
     const gw = await boot();
     const { claim, bystander } = claimAndBystander();
     await gw.append([claim, bystander]);
     await gw.append([signClaims(eraseClaims(claim.id, OP, OP, 2000), OP_SEED)]);
     expect(gw.reactor.get(claim.id)).toBeDefined();
-    expect([...erasedFromReading(gw.reactor, OP)]).toEqual([claim.id]); // the cached answer
+    expect([...erasedFromReading(gw.reactor, OP)]).toEqual([claim.id]);
     expect(await fern(gw)).toEqual({ height: null, tag: ["shade"] });
 
     const before = gw.reactor;
@@ -177,7 +156,6 @@ describe("the erased set a reading hides follows every event that moves it", () 
     const gw = await boot();
     const { claim, bystander } = claimAndBystander();
     await gw.append([claim, bystander]);
-    // The host orders the erasure and names this ground as the receiver. Unpinned, it is testimony.
     const order = signClaims(
       eraseClaims(claim.id, OP, HOST, 2000, undefined, undefined, OP),
       HOST_SEED,
@@ -193,16 +171,12 @@ describe("the erased set a reading hides follows every event that moves it", () 
     expect(erasedFromReading(gw.reactor, OP).has(bystander.id)).toBe(false);
     expect(await fern(gw)).toEqual({ height: null, tag: ["shade"] });
 
-    // The pins and the hiding both survive a reseat.
     await gw.reseat();
     expect(gw.reactor.get(claim.id)).toBeDefined();
     expect(await fern(gw)).toEqual({ height: null, tag: ["shade"] });
     await gw.close();
   });
 
-  // A successor that was read before it was seated already has a cached answer and a revision.
-  // Here that revision is 1, and the predecessor stands at 0: a count set to "predecessor + 1"
-  // would land on 1 again and keep serving the answer from before the pins were seated.
   it("a successor read before it is seated recomputes after: the pinned order's target is hidden", () => {
     const from = new Reactor();
     expect(groundRevision(from)).toBe(0);
@@ -215,7 +189,7 @@ describe("the erased set a reading hides follows every event that moves it", () 
     for (const d of [claim, bystander, order]) expect(to.ingest(d).status).toBe("accepted");
     raiseGroundRevision(to);
     expect(groundRevision(to)).toBe(1);
-    expect(erasedFromReading(to, OP).size).toBe(0); // cached at 1: unpinned, the order is testimony
+    expect(erasedFromReading(to, OP).size).toBe(0);
 
     seatDeclarations(to, { erasureGovernors: [HOST] });
     continueGroundRevision(from, to);
@@ -232,7 +206,7 @@ describe("the erased set a reading hides follows every event that moves it", () 
     const order = signClaims(eraseClaims(claim.id, OP, OP, 2000), OP_SEED);
     for (const d of [claim, bystander, order]) expect(reactor.ingest(d).status).toBe("accepted");
 
-    expect(erasedFromReading(reactor, HOST).size).toBe(0); // OP's order is testimony to HOST
+    expect(erasedFromReading(reactor, HOST).size).toBe(0);
     const asOp = erasedFromReading(reactor, OP);
     expect(asOp.has(claim.id)).toBe(true);
     expect(asOp.has(bystander.id)).toBe(false);
@@ -245,7 +219,7 @@ describe("the public door's open set follows the revision", () => {
   it("a reseat that brings in a declaration another writer stored opens the door", async () => {
     const backend = new MemoryBackend();
     const gw = await boot(backend);
-    expect(gw.hasPublicSurface()).toBe(false); // the cached answer: nothing is open
+    expect(gw.hasPublicSurface()).toBe(false);
     const at = gw.validityNow() - 1000;
     await plant(backend, [signClaims(publicClaims([PLANT.name], OP, at), OP_SEED)]);
     await gw.reseat();

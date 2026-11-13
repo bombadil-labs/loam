@@ -1,10 +1,3 @@
-// Revoking a connection whose owner grant names a user whose record the operator has struck. The
-// user's root cannot be read, so the owner's voice cannot find everything that lets the connection
-// write, and refuses. The operator's voice binds on every delegation, so it strikes every delegation
-// to the connection held in the inbox, whoever signed it, and the revoke holds even if the record
-// comes back or the user is re-pointed. Each case asks the delta (what is struck) and the door (who
-// writes), with a bystander connection that must keep writing once its owner can.
-
 import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
@@ -33,7 +26,6 @@ afterEach(async () => {
   for (const gw of open.splice(0)) await gw.close();
 });
 
-// ada (root: the gardener's key) owns home:ada; CONN and OTHER are bound by her name.
 async function world(): Promise<{
   gw: Gateway;
   record: Delta;
@@ -116,18 +108,14 @@ describe("revoke after the operator strikes the owner's user record", () => {
     const { gw, record, conn, connInbox, other } = await world();
     const strike = op(makeNegationClaims(OP, 700, record.id));
     await gw.append([strike]);
-    // With ada's record struck, nothing names her key: no connection of hers writes.
     expect(await door(conn, observed(FERN, "height", 1, 1000, CONN_SEED))).toBe("refused");
 
     await gw.revokeConnection({ inbox: connInbox, connectionKey: CONN, asPool: true });
-    // delta: the gardener's delegation to CONN is struck
     const [d] = delegationsTo(conn, CONN);
     expect(conn.reactor.negationsOf(d!.id).length).toBeGreaterThan(0);
 
-    // The operator restores ada's record by striking the strike.
     await gw.append([op(makeNegationClaims(OP, 800, strike.id))]);
     expect(await door(conn, observed(FERN, "height", 2, 1001, CONN_SEED))).toBe("refused");
-    // bystander: OTHER, never revoked, writes again once ada is back
     expect(await door(other, observed(FERN, "height", 3, 1002, OTHER_SEED))).toBe("admitted");
     expect(
       delegationsTo(other, OTHER).every((x) => other.reactor.negationsOf(x.id).length === 0),
@@ -146,13 +134,11 @@ describe("revoke after the operator strikes the owner's user record", () => {
 
   it("a delegation from a key no one names yet is struck too, so a later re-point does not revive it", async () => {
     const { gw, record, conn, connInbox } = await world();
-    // K3 signed a delegation to CONN in the inbox; K3 is nobody's root yet.
     const k3 = signClaims(delegationClaims(K3, CONN, connInbox.entity!, 650), K3_SEED);
     await conn.federate([k3]);
     await gw.append([op(makeNegationClaims(OP, 700, record.id))]);
     await gw.revokeConnection({ inbox: connInbox, connectionKey: CONN, asPool: true });
     expect(conn.reactor.negationsOf(k3.id).length).toBeGreaterThan(0);
-    // The operator gives ada a new record, rooted at K3.
     await gw.append([op(userClaims("ada", OP, 900)), op(rootClaims("ada", K3, OP, 900))]);
     expect(await door(conn, observed(FERN, "height", 4, 1003, CONN_SEED))).toBe("refused");
   });

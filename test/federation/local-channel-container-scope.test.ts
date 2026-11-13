@@ -1,15 +1,3 @@
-// T289 (spec 64): every protected lifecycle event names its parent container at a pinned position,
-// in the event vocabulary. The pointer scopes reads: a bound connection's lineage read and the
-// operator's read by container. It is never container law, never slated, and the doors still
-// refuse the event.
-//
-// RAILS-RED on the T288 tip (4e3b8b52), this file copied in: 4 red, 0 green. REVERT PROBES on this
-// tree, one guard deleted per probe: a slate may condemn a lifecycle record → 1 red; an open's
-// `into` need not match its parent pointer → 1 red; the marker reads the first event-context
-// pointer instead of the `event` role → 0 red, EQUIVALENT today (the parser pins `event` first), kept
-// as a role read on purpose. The cascade probe in local-channel-live-opening.test.ts also reds the
-// first case here. Measured again after review round 1: a closed incarnation is still listed →
-// 1 red. After review round 2: standing ignores the pool declaration → 2 red.
 import { afterEach, describe, expect, it } from "vitest";
 import { authorForSeed, signClaims, type Delta } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -102,12 +90,10 @@ describe("spec 64: lifecycle events name their parent container", () => {
         role: PARENT_CONTAINER,
         target: { kind: "entity", entity: { id: "friends", context: LOCAL_EVENT } },
       });
-      // The container table never reads an event as a declaration of "friends".
       expect(survivingDeclarationIds(gw.reactor, gw.validityNow(), OP, "friends")).not.toContain(
         d.id,
       );
     }
-    // The erasure marker names the channel from the event pointer, not from the parent pointer.
     const opening = seen.find(
       (d) =>
         d.claims.pointers[2]?.target.kind === "primitive" &&
@@ -140,9 +126,6 @@ describe("spec 64: lifecycle events name their parent container", () => {
       SEED,
     );
     expect(parseLocalEvent(swapped, OP)).toBeUndefined();
-    // The marker's channel comes from the `event` pointer by role. The parser pins that pointer
-    // first, so a first-match read is equivalent today; the role read stays so a later position
-    // change cannot silently name the container as the channel.
     await gw.dropChannel(ch.name);
     await gw.erase(opening.id);
     const marks = [...gw.reactor.snapshot()].filter((d) => inLocalContext(d, LOCAL_CONTROL));
@@ -158,7 +141,6 @@ describe("spec 64: lifecycle events name their parent container", () => {
     await expect(gw.append([copy])).rejects.toThrow(/protected local channel event/);
     const report = await gw.federate([copy], { admit: () => true });
     expect(report.accepted).toBe(0);
-    // A slate over the opening: the pinned term is published, then the record is appended.
     const term = frozenMembershipTerm([opening.id]);
     const published = signClaims(
       withStamp(gw.stamp(OP), (t) => termClaims(term, OP, t)),
@@ -212,7 +194,6 @@ describe("spec 64: lifecycle events name their parent container", () => {
     const { ch, offering } = await open(gw, "friends", "friends:peer");
     offering.push(fact(1));
     await ch.sync();
-    // Refused drop: the close lands first, the purge refuses, the declaration and the pool stand.
     const pool = gatewayOf(ch.pool).backend as MemoryBackend & { failPurge?: boolean };
     const purge = pool.purge.bind(pool);
     pool.purge = () => Promise.reject(new Error("fixture purge failure"));
@@ -222,8 +203,6 @@ describe("spec 64: lifecycle events name their parent container", () => {
     pool.purge = purge;
     await gw.dropChannel(ch.name);
     expect(localChannelsInContainer(gw, "friends")).toEqual([]);
-    // Now erase the dropped opening with the close's purge faulting: the close is erased and
-    // gone from the reactor, the opening stays; the channel must still read as dropped.
     const opening = eventsOf(gw, ch.name).find(
       (d) =>
         d.claims.pointers[2]?.target.kind === "primitive" &&
@@ -251,8 +230,6 @@ describe("spec 64: lifecycle events name their parent container", () => {
     const declaration = opened(gw, ch.name).opening.poolDeclaration;
     const erased = await gw.erase(declaration).catch((e: Error) => e.message);
     if (typeof erased === "string") {
-      // The declaration of an attached pool cannot be erased; the door refuses. Then the presence
-      // clause is unreachable by any road, and this case records that rather than a wish.
       expect(erased).toMatch(/refused|cannot|not/);
       expect(localChannelsInContainer(gw, "friends")).toEqual([ch.name]);
     } else {
@@ -305,8 +282,6 @@ describe("spec 64: lifecycle events name their parent container", () => {
     expect(localChannelsInContainer(gw, "bea:notes")).toEqual([b.ch.name]);
     expect(localChannelsInContainer(gw, "friends")).toEqual([root.ch.name]);
     expect(localChannelsInContainer(gw, "nobody")).toEqual([]);
-    // A dropped incarnation is no longer listed, erased or not; its sibling still is. Standing is
-    // the surviving pool declaration, the erase door's own liveness test, never a close event.
     const aOpening = opened(gw, a.ch.name).opening.id;
     await gw.dropChannel(a.ch.name);
     expect(localChannelsInContainer(gw, "ada:journal")).toEqual([]);

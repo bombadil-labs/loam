@@ -1,7 +1,3 @@
-// T150 item 1 — the register door names a malformed Policy's prop path and the accepted shapes,
-// so a registry author can act without reading rhizomatic's parser. This file is the rail: the
-// message must stay verbatim enough to go red on regression.
-
 import { describe, expect, it } from "vitest";
 import { parseRegistrationInput } from "../../src/gateway/registration.js";
 

@@ -1,45 +1,3 @@
-// T140 — a hyperschema's `alg` is its ALGEBRA VERSION, and it is load-bearing at rest.
-//
-// WHAT `alg` IS (rhizomatic, frozen): `HyperSchema.alg` is the L2 algebra version the gather body
-// is written against (`schema.ts`, "L2 algebra version"). It is NOT an input to resolution — no
-// View ever changes because of it — and it is NOT in rhizomatic's registry index, which keys on
-// `termHash(s.body)` alone. It is IDENTITY METADATA, and it becomes load-bearing in exactly two
-// places, which are the two levels this file asserts:
-//
-//   DELTA LEVEL — `publishHyperSchemaClaims` emits it as a `rhizomatic.hyperschema.alg` pointer, so
-//   it is in the definition delta's bytes and therefore in that delta's content address.
-//   `loadHyperSchema` reads it back out.
-//
-//   OBJECT LEVEL — Loam folds it into BOTH law addresses adopt-law does arithmetic on, and they sit
-//   on different roads through the same door. `hyperschemaAddress` (`loam.law.hyperschema`) is what
-//   the entity-capture guard compares, so `alg` decides whether a blessing at one of the operator's
-//   own definition entities is refused as a capture. `schemaLawAddress` (`loam.law.schema`) is what
-//   `boundElsewhere` compares, so `alg` decides whether law shipped at an entity the operator does
-//   NOT use is already bound here — a silent witness — or a publish. Both are asserted below.
-//
-// WHY THIS FILE EXISTS: the mutation gate flipped `TENANT.alg` 1 → 2 (accounts.ts:91) and the whole
-// suite stayed green — `alg` was round-tripped everywhere and compared nowhere. `gather.test.ts`
-// named that gap and correctly declined to close it with `expect(TENANT.alg).toBe(1)`, which
-// asserts a constant against itself. The rails below go the other way: they publish the shipped
-// constants into a real store and read the algebra version back out of the DELTAS, then make a door
-// decide on it. `tenantSchemaFor`'s `alg` (accounts.ts:183) is pinned at the delta and reader levels;
-// the door legs run on `TENANT`, since the two share an entity and a door cannot hold both at once.
-//
-// NAMED GAP — no door SERVES `alg` to a client. `POST /schemas` accepts it (http.ts) and nothing
-// reads it back out over the wire, so "what a reader resolves through a Schema" is genuinely
-// out of scope here: `alg` never reaches a View by construction. The object level is therefore the
-// LAW door (adoptLaw), which is the surface that does read it. The rail that would close the
-// remaining gap is a schema-describe endpoint that reports a lens's algebra version; nothing needs
-// one yet.
-//
-// NAMED GAP — `src/server/users.ts:131` ships a third `alg: 1` constant that nothing observes. It is
-// the next mutant of this family and is out of scope here; the rail that closes it is this one's
-// shape pointed at the users lens.
-//
-// NAMED GAP — the entity-capture refusal says "with a DIFFERENT gather body" while the bodies here
-// are byte-identical and only `alg` differs. The guard is right to refuse; its sentence is narrower
-// than its rule. Asserted below on the parts of the message that are true in both cases.
-
 import { describe, expect, it } from "vitest";
 import {
   VOCAB_PREFIX,
@@ -68,9 +26,6 @@ const OP = authorForSeed(OP_SEED);
 const STRANGER_SEED = "5d".repeat(32);
 const STRANGER = authorForSeed(STRANGER_SEED);
 
-// The algebra version this store ships, written out as its own literal. Every observation below is
-// read from DELTAS; this is the only place the expected number appears, so changing `accounts.ts`
-// moves the observation and leaves the expectation where it is.
 const SHIPPED_ALG = 1;
 
 const boot = (hyperschema: HyperSchema): Promise<Gateway> =>
@@ -82,7 +37,6 @@ const boot = (hyperschema: HyperSchema): Promise<Gateway> =>
     }),
   );
 
-// The definition delta the store actually holds at an entity — the bytes, not the constant.
 const definitionAt = (gw: Gateway, entity: string): Delta => {
   const hit = [...gw.reactor.snapshot()].filter((d) =>
     d.claims.pointers.some(
@@ -112,9 +66,6 @@ describe("the algebra version reaches the bytes", () => {
     expect(algPointerOf(definitionAt(gw, TENANT_ENTITY))).toBe(SHIPPED_ALG);
   });
 
-  // The half that is NOT a restatement of the constant: `alg` is inside the content address, so a
-  // definition published at a different algebra version is a different delta — same author, same
-  // timestamp, same entity, same body. This is the claim that makes the pins above meaningful.
   it("mints a different definition delta when only alg changes", () => {
     const at = (alg: number): Delta =>
       signClaims(publishHyperSchemaClaims({ ...TENANT, alg }, TENANT_ENTITY, OP, 7_000), OP_SEED);
@@ -152,17 +103,6 @@ describe("a reader resolves the algebra version back", () => {
   });
 });
 
-// --- the object level: a door decides on the algebra version --------------------------------------
-//
-// A stranger ships a module whose manifest exports a hyperschema at the OPERATOR's own
-// `hyperschema:Tenant` entity, with the operator's own gather body. The only thing that can differ
-// is `alg`. adopt-law's entity-capture guard compares `loam.law.hyperschema` addresses, and `alg`
-// is one of that address's four fields — so the SAME bytes at a DIFFERENT algebra version is a
-// capture, and the door must refuse it.
-
-// `at` defaults to the operator's OWN definition entity and lens, which is the capture case. Point
-// it elsewhere and the capture guard has nothing to compare, so the SECOND address decides instead:
-// `boundElsewhere`'s `loam.law.schema`. `alg` is the only value that varies on either road.
 async function moduleShipping(
   gw: Gateway,
   alg: number,
@@ -220,8 +160,6 @@ describe("the law door refuses a capture that differs only in algebra version", 
     );
   });
 
-  // The control that makes the refusal above attributable to `alg` and nothing else: the identical
-  // module at the SHIPPED algebra version is the idempotent case and passes the guard untouched.
   it("passes the same module at the shipped alg", async () => {
     const gw = await boot(TENANT);
     const version = await moduleShipping(gw, SHIPPED_ALG);
@@ -230,11 +168,6 @@ describe("the law door refuses a capture that differs only in algebra version", 
   });
 });
 
-// The OTHER law address. `schemaLawAddress` ("loam.law.schema") carries `alg` too, and it is a
-// different function on a different road: `boundElsewhere` asks it whether this exact law is
-// ALREADY BOUND here under any name. The capture guard runs first and would short-circuit both legs
-// below, so these ship at an entity the operator does not use — and then the algebra version is the
-// only thing left that can decide bound from unbound.
 const ELSEWHERE = { entity: "hyperschema:TenantMirror", lens: "TenantMirror" };
 
 describe("the already-bound address carries the algebra version too", () => {

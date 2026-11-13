@@ -1,5 +1,3 @@
-// T288: the newly authored declaration's exact ID must cross asynchronous attachment.
-// A latest-row scan can accidentally attribute a fresh local opening to a concurrent declaration.
 import { describe, expect, it } from "vitest";
 import { signClaims, type Delta } from "@bombadil/rhizomatic";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -44,7 +42,6 @@ function signal() {
   });
   return { promise, resolve };
 }
-// The pool writes through its peer journal, so the delay sits on the write hook both paths share.
 class DelayedSeedBackend extends FaultableBackend {
   readonly entered = signal();
   readonly release = signal();
@@ -98,7 +95,6 @@ describe("T288 exact freshly authored declaration across async pool attachment",
       { channelBackend: () => delayed },
     );
     const name = "channel:friends:peer";
-    // Observe either allowed partial outcome without turning rejection into an unhandled promise.
     const pending = gw
       .openChannel({
         into: "friends",
@@ -116,8 +112,6 @@ describe("T288 exact freshly authored declaration across async pool attachment",
       const original = authored[0]!;
       expect(await gw.backend.holds(original.id)).toBe(true);
       expect(opens(gw, name)).toEqual([]);
-      // The race is an ordinary operator append on this same gateway while channel creation
-      // awaits a real backend. No raw reactor writes, event writer mocks or clock sleeps.
       const replacement = signClaims({ ...original.claims, ...gw.stamp() }, SEED);
       expect(replacement.id).not.toBe(original.id);
       await gw.append([replacement]);
@@ -128,8 +122,6 @@ describe("T288 exact freshly authored declaration across async pool attachment",
       const issued = opens(gw, name);
       expect(issued.map(declarationRef)).not.toContain(replacement.id);
       for (const event of issued) expect(declarationRef(event)).toBe(original.id);
-      // No stronger rollback promise: a rejected open or a retained partial legacy attachment
-      // is allowed. Superseded exact D1 evidence must not claim to be a current protected open.
       expect(localChannelEvidence(gw, name).state).not.toBe("open");
       expect(await gw.backend.holds(original.id)).toBe(true);
       expect(await gw.backend.holds(replacement.id)).toBe(true);

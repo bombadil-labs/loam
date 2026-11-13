@@ -1,13 +1,3 @@
-// SPEC §55 criterion (c) — the container detail page carries the census (T254; the working
-// spec at .adlc/specs/55-container-census.md). The page a person reads: physical, linked,
-// dark, and the vocabulary bucket, each with its data-census marker; the dark count's
-// safe-direction approximation named in the page's own words; and the DASHBOARD tree
-// census-free (asserted as the proxy it is: no data-census markup anywhere on it — byte
-// identity is not assertable without a snapshot) — the census lives where the scope read is
-// already paid (§55 position 4, H8).
-//
-// Erasure standing rule: every store here is this file's own memory/mkdtemp fixture.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -60,7 +50,6 @@ async function seededDoor(): Promise<{ base: string; gateway: Gateway }> {
     ),
   );
   await op(grantClaims(STORE_ENTITY, OPAL, "write", OPERATOR, ts++));
-  // One dark member: opal writes data no registered lens reads.
   await gateway.append([
     signClaims(
       {
@@ -85,8 +74,6 @@ async function seededDoor(): Promise<{ base: string; gateway: Gateway }> {
   homes.push(home);
   writeCredentials(home, { version: 1, users: { opal: await hashPassword(PASSWORD, CHEAP) } });
   writeUserSeed(home, "opal", OPAL_SEED);
-  // An inbox pool under opal, with one resident: the detail page's physical-elsewhere row
-  // must RENDER, not merely compute — the row was deletable whole before this fixture.
   await op(
     containerClaims(
       { container: "opal-in", trust: "untrusted", posture: "separate", inboxOf: "opal" },
@@ -140,28 +127,16 @@ describe("§55(c) — the detail page carries the census; the dashboard tree doe
     const html = await pageOf(base, session, "/admin/container?name=opal");
 
     expect(html).toContain("Census.");
-    // A shared root composing one inbox pool: the primary's stray is linked (the pool's seeded
-    // COPY of it does not steal it — a delta the primary holds is the primary's); the pool-only
-    // scrap is physical elsewhere; both strays are dark across the whole gather.
     expect(html).toContain('data-census-physical="0"');
-    // Seven linked: opal's stray plus the six primary law rows the pool's seeded copies compose
-    // back into the gather — primary-held, so the primary's bucket, never stolen by the copy. The
-    // sixth is the host's record of the pool's own key.
     expect(html).toContain('data-census-linked="7"');
     expect(html).toContain('data-census-dark="2"');
-    // Seven: the six law rows, plus the inbox pool's own incarnation marker (recovery-history.md).
     expect(html).toContain('data-census-vocabulary="7"');
-    // The full opening tags, not only the attributes: a mangled bracket inside the template
-    // still carries the attribute text, and a person reads tags, not substrings.
     expect(html).toContain("<li data-census-physical=");
     expect(html).toContain("<li data-census-linked=");
     expect(html).toContain("<li data-census-dark=");
     expect(html).toContain("<li data-census-vocabulary=");
     expect(html).toContain("<h2>Census.</h2>");
-    // The physical-elsewhere row RENDERS: the pool named in a real tag, with its count.
     expect(html).toContain("held in <code>opal-in</code>");
-    // The safe-direction sentence, in the page's own words — a dark count rendered bare would
-    // overclaim exactly what the metric cannot know.
     expect(html).toContain("undercount by design");
   });
 

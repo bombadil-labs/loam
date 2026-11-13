@@ -1,8 +1,3 @@
-// `dataStruck` and the gather's trust mask read one rule: the operator, plus the subject of every
-// surviving operator grant. This rail asks both on the same store and requires the same answer,
-// including for subjects the mask's `inView` extract treats specially: a NUMBER primitive names no
-// author, and an ENTITY subject names its id.
-
 import { describe, expect, it } from "vitest";
 import {
   evalTerm,

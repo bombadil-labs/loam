@@ -1,17 +1,3 @@
-// §46 criterion 3 — the RECEIVER assigns a peer's namespace prefix, and a prefix that would collide
-// at the GraphQL door is refused AT ASSIGNMENT TIME, while a person is present to choose another.
-//
-// The hazard is already documented at accounts.ts: `legalNameFor` maps every non-alphanumeric to
-// `_`, so distinct entity namespaces can serve at ONE field. Measured, not assumed — `al:ice` and
-// `al_ice` both flatten to `al_ice`, while `alice` and `alice_` do NOT collide. (An earlier draft of
-// this rail asserted the second pair and would have driven a check that refused the wrong thing.)
-// With federation the peer no longer picks any part of that name — the receiver does — which is what
-// makes injectivity LOCALLY CHECKABLE: this store knows every prefix it has assigned, so it refuses
-// the collision instead of discovering it at publish time.
-//
-// Two-sided: a prefix that does NOT collide is accepted, so the check cannot pass by refusing
-// everything.
-
 import { describe, expect, it } from "vitest";
 import { assembleGenesis } from "../../src/gateway/genesis.js";
 import { Gateway } from "../../src/gateway/gateway.js";
@@ -32,7 +18,6 @@ describe("§46 — a receiver-assigned prefix is checked for injectivity when it
     const gw = await store();
     try {
       await gw.openChannel({ into: "friends", prefix: "al:ice", source: nothing });
-      // `al:ice` and `al_ice` are disjoint namespaces that both flatten to the field lead `al_ice`.
       await expect(
         gw.openChannel({ into: "friends", prefix: "al_ice", source: nothing }),
       ).rejects.toThrow(/al:ice/);
@@ -50,7 +35,7 @@ describe("§46 — a receiver-assigned prefix is checked for injectivity when it
         .then(() => undefined)
         .catch((e: unknown) => (e instanceof Error ? e.message : String(e)));
       expect(err).toBeDefined();
-      expect(err).toContain("al:ice"); // the standing prefix, so the operator can choose around it
+      expect(err).toContain("al:ice");
     } finally {
       await gw.close();
     }

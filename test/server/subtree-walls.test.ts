@@ -1,52 +1,3 @@
-// T263 — THE WALLS (SPEC §58 position 3: "full leeway inside the subtree; the walls are the edge";
-// criterion 4). A bound connection cannot cross its edge upward, cannot exceed its envelope, and is
-// told so in words. The decision this slice makes is THE ENVELOPE BINDS: a container's leeway names
-// an envelope SIZE, and every pool opened inside that container renders under it — never above the
-// operator's own ceiling, which nothing below the operator can widen (§24.5).
-//
-// The other walls here already stood when this slice arrived; their cases are CONTROLS that pin the
-// sentence a person reads, and each says so: nothing a bound connection writes lands in `ada` or the
-// primary ground (S1's sink, railed at the delta level there; the object level and the sibling are
-// here); the rendered route and the byte door refuse a bound bearer (connection-writes.test.ts:205
-// owns the door rail; here the sentence is pinned once more beside its siblings); a binding above
-// the root — the person's home, the store itself, another person's subtree — is refused at consent.
-//
-// NOT HERE, and said so: a resolver arriving on the connection's channel stays inert and its bless
-// attempt refuses, and a renderer it blesses serves behind glass — those need the `bless-renderer`
-// verb of the roster slice; offering above the root is the offer token's (T264); declaring above the
-// root is the `declare` verb's; a child leeway that does not FIT its parent's terms is the cascade
-// slice. Each of those slices owes this file's successor a case. The pool tokens `inbox:` and
-// `channel:` are not reserved from the names a person may declare; no door writes an `inboxOf`
-// today, so no name can borrow the hop, and the roster slice should reserve the tokens at its
-// doors. And the envelope cases assert the
-// ceiling a pool's REPORT resolves, not a render bounded at it: a render refused at the size's
-// slot count and not the operator's is owed by the slice that mounts a renderer behind glass.
-//
-// RAILS-RED on origin/main, this file copied in: 5 red, 4 green — 9 cases. Three greens are the
-// CONTROLS named above. The fourth is the case parenting a container under another person's: on
-// main the receive door climbed by the colon and never met the edge, so it is green there too; it
-// pins the no-oracle half against the walk this slice adds, and the parent-edge probe reds it.
-//
-// REVERT PROBES, MEASURED against this file as it stands — 9 cases. Re-measure when you add one.
-//   no size clamp at all                                    → 4 red, 5 green
-//   the size composes OVER the operator's ceiling           → 1 red, 8 green
-//   whether a size governs decided ONCE, at open            → 3 red, 6 green
-//   the walk follows a declared parent edge                 → 2 red, 7 green
-//   no hop from a pool to its host                          → 3 red, 6 green
-//   a self-hosted pool reads nothing, not sealed            → 1 red, 8 green
-//   any name with an inboxOf hops, not only a pool          → 1 red, 8 green
-//   the table read from the OPENER's copy, not the root's   → 1 red, 8 green
-// Every size is asserted by number under a wide ceiling; a mutant that moved medium's slots by
-// one survived until it was. An earlier walk followed declared edges and kept a memory of names
-// visited; a probe that removed the memory hung the run, since the walk is synchronous and no
-// test timeout can catch it. The walk climbs by name now and takes a pool's host edge once, so
-// no cycle can trap it and the memory is gone. The non-pool hop probe was green until the
-// ordinary container's `inboxOf` pointed OUTSIDE its own name's subtree; inside it, both roads
-// land on the same ancestor. A fifth probe once measured a clause DEAD and it was deleted rather
-// than kept: metering a pool because a size governs it changed nothing any case could see, since
-// a channel pool is untrusted and metered already. The shared walk (`governingLeeway`) also
-// serves the receive door; that file's two walk probes were re-measured against the shared walk
-// and each reds one case.
 import { describe, expect, it } from "vitest";
 import { signClaims } from "@bombadil/rhizomatic";
 import {
@@ -109,7 +60,6 @@ const closePeers = async (): Promise<void> => {
   while (peers.length > 0) await new Promise<void>((r) => peers.pop()!.server.close(() => r()));
 };
 
-/** Re-declare a standing container with a leeway, copying its record, as the admin page would. */
 const declare = (gw: Gateway, container: string, leeway: Leeway): Promise<unknown> => {
   const standing = readContainerTable(
     gw.reactor,
@@ -169,7 +119,6 @@ const receive = (base: string, bearer: string, into: string, from: string) =>
     token: PEER_TOKEN,
   });
 
-/** The envelope a pool renders under, by its container name. */
 const envelopeOf = (gw: Gateway, container: string) =>
   gw.envelopeReports().find((r) => r.container === container)?.envelope;
 
@@ -189,13 +138,9 @@ describe("§58 — the walls", () => {
           OPERATOR_SEED,
         ),
       ]);
-    // With no operator envelope declared, the operator's ceiling IS the floor, and a size can only
-    // sit under it: small and large alike render at the floor.
     expect(envelopeOf(gateway, pool), "small under the floor").toEqual(DEFAULT_QUARANTINE_ENVELOPE);
     await declare(gateway, "ada:journal", { ...SEALED_LEEWAY, receive: true, envelope: "large" });
     expect(envelopeOf(gateway, pool), "large under the floor").toEqual(DEFAULT_QUARANTINE_ENVELOPE);
-    // The operator raises the ceiling: now the size is what binds, and it is a delta the next
-    // render obeys.
     await operators({ maxConcurrentRenders: 32, renderTimeoutMs: 4000, maxMemoryMb: 1024 });
     expect(envelopeOf(gateway, pool), "large under a wide ceiling").toEqual({
       maxConcurrentRenders: 16,
@@ -212,15 +157,12 @@ describe("§58 — the walls", () => {
     expect(envelopeOf(gateway, pool), "small under a wide ceiling").toEqual(
       DEFAULT_QUARANTINE_ENVELOPE,
     );
-    // The operator tightens below the size: the operator's numbers win, every dimension.
     await operators({ maxConcurrentRenders: 2, renderTimeoutMs: 250, maxMemoryMb: 64 });
     expect(envelopeOf(gateway, pool), "the operator's ceiling wins").toEqual({
       maxConcurrentRenders: 2,
       renderTimeoutMs: 250,
       maxMemoryMb: 64,
     });
-    // Two-sided: a pool the person opens at the root carries no size and keeps the operator's
-    // ceiling alone.
     await gateway.openChannel({
       into: "friends",
       prefix: "friends:carol",
@@ -236,10 +178,6 @@ describe("§58 — the walls", () => {
   });
 
   it("a size declared AFTER the pool opened binds it, and one withdrawn releases it", async () => {
-    // Whether a size governs is asked on every resolve, never fixed at open. A pool opened
-    // before its container declared any leeway renders under the operator's ceiling; declaring
-    // the size binds it; re-declaring the container without a pointer (a pure namespace again)
-    // releases it to the operator's ceiling.
     const { base, gateway } = await connectionServer();
     const ada = await connect(base, "ada", "journal");
     await declare(gateway, "ada:journal", { ...SEALED_LEEWAY, receive: true });
@@ -259,7 +197,6 @@ describe("§58 — the walls", () => {
     const peer = await peerStore();
     expect((await receive(base, ada, "ada:journal:inbox", peer)).isError).toBe(false);
     const pool = "channel:ada:journal:inbox:ada:journal:inbox:peer";
-    // `ada:journal` declared a leeway with the default size: small binds from the start.
     expect(envelopeOf(gateway, pool)).toEqual(DEFAULT_QUARANTINE_ENVELOPE);
     await declare(gateway, "ada:journal", { ...SEALED_LEEWAY, receive: true, envelope: "medium" });
     expect(envelopeOf(gateway, pool), "declared after").toEqual({
@@ -267,7 +204,6 @@ describe("§58 — the walls", () => {
       renderTimeoutMs: 1000,
       maxMemoryMb: 256,
     });
-    // Withdrawn: the container re-declared with no pointer inherits, and nothing above it spoke.
     const standing = readContainerTable(
       gateway.reactor,
       gateway.validityNow(),
@@ -301,9 +237,6 @@ describe("§58 — the walls", () => {
   });
 
   it("the governing walk ends on a cycle the door admits, and reads it as sealed", async () => {
-    // The table restores a forest over parent edges only; an `inboxOf` edge can point a
-    // container at itself and the door admits it. A walk that followed edges hung the event
-    // loop on one lawful delta; this one climbs by name and takes a pool's host edge once.
     const { gateway } = await connectionServer();
     await gateway.append([
       signClaims(
@@ -328,16 +261,11 @@ describe("§58 — the walls", () => {
       gateway.operatorAuthor,
     );
     expect(table.containers.get("inbox:loop")?.inboxOf).toBe("inbox:loop");
-    // A name that cannot be placed reads SEALED: the floor, never the operator's wider ceiling,
-    // so nothing that cannot be placed can widen anything.
     expect(governingLeeway(table, "inbox:loop")).toEqual({
       at: "inbox:loop",
       leeway: SEALED_LEEWAY,
     });
     expect(governingLeeway(table, "inbox:loop:child")).toBeUndefined();
-    // Only a POOL hops to its host. An ordinary container carrying an `inboxOf` — an
-    // operator-signed shape the door admits — is placed by its name like any other: `ada:plain`
-    // points at `bea:elsewhere`, under a `bea` that sealed itself, and is governed by `ada`.
     await gateway.append([
       signClaims(
         withStamp(gateway.stamp(), (t) =>
@@ -394,8 +322,6 @@ describe("§58 — the walls", () => {
   });
 
   it("a pool nested in a pool renders under the size too: the walk reads the root's table", async () => {
-    // A pool's own reactor is a seeded copy that never saw the leeway; read from it, a nested
-    // pool escaped the size. The table is the root's, on every resolve.
     const { base, gateway } = await connectionServer();
     const ada = await connect(base, "ada", "journal");
     await declare(gateway, "ada:journal", { ...SEALED_LEEWAY, receive: true });
@@ -414,15 +340,8 @@ describe("§58 — the walls", () => {
     ]);
     const peer = await peerStore();
     expect((await receive(base, ada, "ada:journal:inbox", peer)).isError).toBe(false);
-    // The size is declared AFTER the channel pool opened, so the pool's seeded copy never sees it:
-    // only the root's table can govern what is opened inside the pool from here on.
     await declare(gateway, "ada:journal", { ...SEALED_LEEWAY, receive: true, envelope: "medium" });
     const outer = gateway.channelPools.get("channel:ada:journal:inbox:ada:journal:inbox:peer")!;
-    // Declared IN THE POOL: a pool's reactor is a seeded copy the root's later deltas never reach,
-    // and the nested pool's declaration lives where it is opened. The root's table never sees it,
-    // so the walk climbs by the name's own colon — one step to `ada:journal:inbox`, one more to
-    // `ada:journal`, which declared the size.
-    // The pool governs itself under its own key, so the declaration is in the pool's voice.
     const pool = outer.gateway!;
     await pool.append([
       pool.signer!.sign(
@@ -460,11 +379,6 @@ describe("§58 — the walls", () => {
   });
 
   it("a container named under the binding but PARENTED elsewhere is governed by its name", async () => {
-    // The admin page admits a parent anywhere in the person's reach under any deeper name. A walk
-    // that followed that edge carried `ada:journal:x` out to `ada` (receive on, envelope large)
-    // past its own binding (receive off, small), and carried `ada:journal:y` to another person's
-    // container and named it in the refusal. Names are paths: the name governs, and no refusal
-    // names a container outside the binding.
     const { base, gateway } = await connectionServer();
     const ada = await connect(base, "ada", "journal");
     await connect(base, "bea", "notes");
@@ -491,8 +405,6 @@ describe("§58 — the walls", () => {
     expect(x.isError, "the name's own binding says receive off").toBe(true);
     expect(x.text).toMatch(/ada:journal does not receive/);
     expect(x.text).not.toMatch(/\bada does not receive|bea:notes/);
-    // The envelope reads the name too: opened under `ada:journal` (small), a pool named under
-    // `ada:journal:x` is small, whatever `x`'s declared parent says.
     await declare(gateway, "ada:journal", { ...SEALED_LEEWAY, receive: true, envelope: "small" });
     await gateway.append([
       signClaims(
@@ -516,8 +428,6 @@ describe("§58 — the walls", () => {
   });
 
   it("a container parented under ANOTHER PERSON'S container is governed by its name, and no refusal names them", async () => {
-    // Measured apart from its sibling case so the oracle half stands on its own: with the edge
-    // followed, the refusal named `bea:notes`, another person's container.
     const { base, gateway } = await connectionServer();
     const ada = await connect(base, "ada", "journal");
     await connect(base, "bea", "notes");
@@ -550,7 +460,6 @@ describe("§58 — the walls", () => {
   });
 
   it("nothing a bound connection writes lands in `ada` or the primary ground — the object level and the sibling", async () => {
-    // CONTROL at the delta level (S1 railed the sink); the object level and the sibling are new.
     const server = await connectionServer();
     const { base, gateway } = server;
     const ada = await connect(base, "ada", "journal");
@@ -571,7 +480,6 @@ describe("§58 — the walls", () => {
   });
 
   it("the rendered route and the byte door refuse a bound bearer in the words that name the wall", async () => {
-    // CONTROL: connection-writes.test.ts:205 owns this rail; the sentence is pinned here beside its siblings.
     const { base } = await connectionServer();
     const ada = await connect(base, "ada", "journal");
     for (const path of [
@@ -585,7 +493,6 @@ describe("§58 — the walls", () => {
   });
 
   it("a binding above the root is refused at consent: the home, the store, another person's subtree", async () => {
-    // CONTROL: the consent door already refuses; the sentences are pinned here.
     const { base } = await connectionServer();
     const p = pkce();
     const home = await consent(base, "ada", p.challenge, { bind: "ada" });

@@ -1,11 +1,3 @@
-﻿// The Village, running: all four stores up, the pulse beating, small lives being lived, and a
-// viewer at http://127.0.0.1:4400 that watches the almanac's dossiers change in real time.
-//
-// The browser talks ONLY to the viewer (same-origin SSE, no tokens in the page); the viewer
-// subscribes to the almanac over its real authed HTTP surface and re-broadcasts. Every
-// simulated write goes through the stores' real surfaces too — GraphQL mutations for
-// properties, hand-signed deltas for relations — then federates in on the next pulse.
-
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import {
@@ -32,14 +24,10 @@ const VIEWER_PORT = 4400;
 const stores = {};
 for (const name of ["commons", "reel", "hive", "almanac", "cinelog"]) stores[name] = await openStore(name);
 const { commons, reel, hive, cinelog } = stores;
-// `let`, not destructured: the crash act closes the almanac, drops its sqlite, and rebinds a
-// fresh one healed from the vault — every closure below reads this binding at call time.
 let almanac = stores.almanac;
 if (almanac.healed.toPrimary > 0) {
   console.log(`the seed vault replanted the almanac: ${almanac.healed.toPrimary} deltas restored`);
 }
-// The living village is self-sufficient: the whole cast holds standing from boot (fixed
-// timestamps — content addressing makes re-runs free).
 const { constitute } = await import("./harness.mjs");
 await constitute(commons, ["wren", "miles", "odile", "petra"], 1_000_000);
 await constitute(reel, ["miles"], 1_000_000);
@@ -48,18 +36,12 @@ await constitute(cinelog, ["sasha"], 1_000_000);
 await constitute(almanac, ["wren", "miles", "odile", "petra", "miller"], 1_000_000);
 console.log("the village is up: commons 4401, reel 4402, hive 4403, almanac 4404");
 
-// THE MILL (phase 11): the almanac becomes the village's first ANIMATE store. The operator
-// blesses the grind recipe, the dossier learns the presence field (schema evolution), and the
-// MILLER attaches a Runner — from here, village life grinds into flour on every ingest.
 const { attachMill, ensurePresence, plantMill } = await import("./mill.mjs");
 await ensurePresence(almanac.base, opToken("almanac"));
 await plantMill(almanac);
 await attachMill(almanac);
 console.log("the mill wheel turns: the almanac is animate (fn:grind, signed by the miller)");
 
-// THE OPEN DOOR (Unit 2, SPEC §12): one operator-signed declaration at loam:public, and the
-// dossier lenses answer any browser, tokenless — the dashboard reads the almanac DIRECTLY
-// from here on (no token in the page, no proxy for the data). Idempotent: fixed timestamp.
 const { publicClaims } = await import("../../dist/index.js");
 await almanac.gateway.append([
   signClaims(
@@ -69,10 +51,6 @@ await almanac.gateway.append([
 ]);
 console.log("the almanac's door stands open: dossiers readable tokenless, three lenses public");
 
-// ---- the broadcast ----------------------------------------------------------------------------
-// Theater only, from here on: events, the pulse, the trust duel, the mill's flour. Dossier
-// DATA no longer rides this channel — the page reads it straight from the almanac's open
-// door (Unit 2), and the viewer keeps no copy to replay.
 const clients = new Set();
 let lastTrust;
 function broadcast(obj) {
@@ -86,8 +64,6 @@ function broadcast(obj) {
     }
   }
 }
-// The theater reads WHO and WHERE from each line so a sprite can walk there before the words
-// land (Unit 3a). Inferred here, server-side, so the acts stay untouched.
 const CAST = ["wren", "miles", "odile", "petra", "sasha", "mallory"];
 const inferActor = (t) => CAST.find((c) => t.toLowerCase().includes(c));
 const inferPlace = (t) => {
@@ -128,16 +104,10 @@ const tell = (text, tone = "write") => {
   broadcast({ kind: "event", text, tone, actor: inferActor(text), place: inferPlace(text) });
 };
 
-// ---- the palisade gate (Unit 3b) ---------------------------------------------------------------
-// The welcome flow is the constitution as gameplay. A stranger's browser mints its own key,
-// signs a PETITION, and knocks here. The gate verifies the signature and the shape, and the
-// operator — in the demo, immediately; in life, at the operator's judgment — grants write
-// standing, THEN appends the petition itself as the record of asking (the grant must come
-// first: an unstanding author's delta is refused at the door, which is exactly the point).
 const { fromWire, grantClaims } = await import("../../dist/index.js");
 const { verifyDelta } = await import("@bombadil/rhizomatic");
 const { loadSpec, registerHttp } = await import("./harness.mjs");
-const players = new Set(); // person ids the gate has admitted this run (roots survive as data)
+const players = new Set();
 const petitionShape = (delta) => {
   const knocks = delta.claims.pointers.some(
     (p) =>
@@ -154,7 +124,7 @@ async function handlePetition(req, res) {
   let body = "";
   for await (const c of req) body += c;
   try {
-    const delta = fromWire(JSON.parse(body).delta); // recomputes the id — forgeries stop here
+    const delta = fromWire(JSON.parse(body).delta);
     if (verifyDelta(delta) !== "verified") throw new Error("the petition is unsigned");
     const name = petitionShape(delta);
     if (name === undefined) throw new Error("a petition names its bearer and knocks at loam:gate");
@@ -166,10 +136,7 @@ async function handlePetition(req, res) {
         almanac.seed,
       ),
     ]);
-    await almanac.gateway.append([delta]); // the record of asking, lawful now that standing holds
-    // Joining is constitutional twice over: standing at the door, AND a place on the dossier
-    // roll — evolve the Dossier registration's roots (one append; it survives as data) and
-    // rehang the wheel on the new generation, so the mill grinds the newcomer too.
+    await almanac.gateway.append([delta]);
     players.add(`person:${name.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 16)}`);
     const spec = loadSpec("dossier.json");
     await registerHttp(almanac.base, opToken("almanac"), {
@@ -186,11 +153,6 @@ async function handlePetition(req, res) {
   }
 }
 
-// ---- the viewer -------------------------------------------------------------------------------
-// The page learns the open door's address and the gate's TRANSPORT token at serve time; its
-// dossier subscriptions go straight to the almanac's public surface (native EventSource —
-// tokenless, CORS-served, reconnects itself through the crash act), and its writes ride the
-// gate token through /append, signed by the page's own key.
 const page = readFileSync(join(ROOT, "dashboard.html"), "utf8")
   .replace("__ALMANAC_PUBLIC_DOOR__", almanac.base)
   .replace("__GATE_TOKEN__", tok("gate", "almanac"));
@@ -209,7 +171,6 @@ const viewer = createServer((req, res) => {
     return;
   }
   if (req.url === "/client.js") {
-    // the SHIPPED browser client, served to the page that plays the villager
     res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
     res.end(clientJs);
     return;
@@ -224,8 +185,6 @@ const viewer = createServer((req, res) => {
 await new Promise((r) => viewer.listen(VIEWER_PORT, "127.0.0.1", r));
 console.log(`the almanac is readable at http://127.0.0.1:${VIEWER_PORT}`);
 
-// ---- the pulse --------------------------------------------------------------------------------
-// The almanac publishes the cinelog translation ONCE (idempotent: fixed timestamp).
 const { translate, translationClaims } = await import("../../dist/index.js");
 await almanac.gateway.append([
   signClaims(
@@ -252,17 +211,13 @@ await almanac.gateway.append([
   ),
 ]);
 
-// The confluence is open-ended (demo item 7): homes/peers.json names EXTRA stores to pull —
-// a store grown mid-meeting (grow.mjs) adds itself there, and the next beat federates it in,
-// first contact narrated. Re-read every beat: joining the village is editing a file, not
-// restarting it.
 const seenPeers = new Set();
 async function pullPeers() {
   let peers = [];
   try {
     peers = JSON.parse(readFileSync(join(ROOT, "homes", "peers.json"), "utf8"));
   } catch {
-    return 0; // no newcomers yet
+    return 0;
   }
   let accepted = 0;
   for (const peer of peers) {
@@ -278,7 +233,6 @@ async function pullPeers() {
         );
       }
     } catch {
-      // a grown store may be mid-boot or gone — the confluence keeps its beat
     }
   }
   return accepted;
@@ -293,7 +247,6 @@ async function pulse() {
       const d = await pullFrom(almanac.gateway, hive.base, opToken("hive"));
       const e = await pullFrom(almanac.gateway, cinelog.base, opToken("cinelog"));
       const f = await pullPeers();
-      // every pulse ends with a translation pass: the stranger's tongue becomes the village's
       const rendered = await translate(almanac.gateway, { seed: almanac.seed });
       if (rendered.emitted > 0) {
         tell(
@@ -305,7 +258,6 @@ async function pulse() {
         kind: "pulse",
         accepted: a.accepted + b.accepted + c.accepted + d.accepted + e.accepted + f,
       });
-      // the trust duel, sampled each beat — three lenses over one ground
       const plain = (
         await gql(almanac.base, opToken("almanac"), `{ dossier(entity: "person:wren") { bio } }`)
       ).body?.data?.dossier?.bio;
@@ -324,8 +276,6 @@ async function pulse() {
         )
       ).body?.data?.guardedDossier?.bio;
       broadcast({ kind: "trust", plain, trusted, guarded });
-      // the mill's flour, sampled each beat: presence per villager (the .value beside the
-      // host's provenance pointers — the evidence hex stays server-side, off the wire)
       const milled = (
         await gql(
           almanac.base,
@@ -349,7 +299,6 @@ async function pulse() {
 }
 void pulse();
 
-// ---- village life -----------------------------------------------------------------------------
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const BIOS = {
   wren: [
@@ -421,8 +370,6 @@ const acts = [
     );
   },
   async () => {
-    // Sasha's app knows nothing of the village — it logs a watch in its own dialect, and the
-    // pulse's translation pass renders it into Wren's (or a friend's) dossier.
     const films = ["film:stalker", "film:solaris", "film:mirror", "film:nostalghia"];
     const viewers = ["person:wren", "person:miles", "person:odile", "person:sasha"];
     const film = pick(films);
@@ -490,8 +437,6 @@ const acts = [
       return;
     }
     if (forgeryOut === "healing") {
-      // TRUST IS DATA (step 13): the almanac's operator declares a roster — the villagers, no
-      // one else. One delta; the very next federate obeys it.
       const { trustClaims } = await import("../../dist/index.js");
       await almanac.gateway.append([
         signClaims(
@@ -534,7 +479,6 @@ const acts = [
       return;
     }
     if (forgeryOut === true) {
-      // escalate: Mallory negates Wren's latest surviving bio delta (suppression, not fabrication)
       const latest = [...almanac.gateway.reactor.snapshot()]
         .filter(
           (d) =>
@@ -597,11 +541,6 @@ const acts = [
   },
 ];
 
-// ---- the unsaying -----------------------------------------------------------------------------
-// ERASURE (SPEC §11): Wren speaks in haste and asks the almanac to unsay it. Erasure is the
-// OPERATOR's alone — so the almanac's operator, as the controller, honors the request: the bytes
-// are cleared from every tier (the vault forgets too), the signed hole remains, and the door
-// refuses its return. The erase re-seats the almanac's reactor, so the mill wheel is rehung after.
 async function theUnsaying() {
   const regret = signClaims(
     {
@@ -626,11 +565,6 @@ async function theUnsaying() {
   );
 }
 
-// ---- the crash ---------------------------------------------------------------------------------
-// COLD STORAGE (PR #22): the almanac keeps a seed vault — every append lands hot and cold in
-// one motion. Every so often the sqlite is lost mid-story, and the reopen heals
-// from the vault BEFORE the gateway reads. The dashboard barely blinks: the dossier watchers
-// resubscribe, the pulse resumes, and every word is where it was.
 async function theCrash() {
   const before = [...almanac.gateway.reactor.snapshot()].length;
   tell(`💥 the almanac's disk fails — ${before} deltas of hot store, gone in an instant`, "forgery");
@@ -642,8 +576,6 @@ async function theCrash() {
     `🌱 the seed vault replants the almanac — ${almanac.healed.toPrimary} deltas restored, every dossier intact`,
     "patch",
   );
-  // a Runner is process machinery, not ground: the flour survived in the vault, but the
-  // wheel must be rehung on the reborn gateway
   const { attachMill } = await import("./mill.mjs");
   await attachMill(stores.almanac);
   tell(`🌾 the mill wheel is rehung — the reborn almanac grinds on`, "patch");
@@ -654,7 +586,6 @@ async function life() {
   let i = 0;
   for (;;) {
     try {
-      // mostly the small stuff; the imposter drama every 8th act; the crash every 24th
       const act =
         i % 24 === 15
           ? theCrash
@@ -673,7 +604,6 @@ async function life() {
 }
 void life();
 
-// ---- a tidy end -------------------------------------------------------------------------------
 async function shutdown() {
   console.log("\nthe village sleeps.");
   viewer.close();

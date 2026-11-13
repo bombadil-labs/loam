@@ -1,21 +1,3 @@
-// The tutorial's browser harness (§48): build the real site, serve it, and drive the real page
-// over CDP. A NEW file beside the frozen `cdp.ts` — the human-doors pattern; it imports that
-// driver and edits nothing in it.
-//
-// TWO STRUCTURAL DECISIONS LIVE HERE.
-//
-// 1. THE BUILD GETS ITS OWN DIRECTORY. `scripts/build-site.mjs` rmSyncs its output before
-//    writing it, and `test/site/build.test.ts` runs that build against the repo's `site-dist/`.
-//    Two suites sharing one mutable path is a race that deletes a page out from under a live
-//    server. `--out <dir>` sends this suite's build into its own temp directory instead, so the
-//    two runs cannot see each other at all. A lock would serialize the race; a separate path
-//    removes it.
-// 2. THE PAGE IS ADDRESSED THROUGH MARKERS, NEVER THROUGH LESSON COPY. Every helper below
-//    reads `data-*` attributes the player renders: `data-lesson`, `data-role`, `data-step`,
-//    `data-state`, `data-ckpt`, `data-term`, `data-kind`. That contract is what lets this file
-//    freeze at its landing while a whole new arc lands beneath it (T227). A helper that matched
-//    a lesson title would freeze the CONTENT, which is exactly what must stay free to change.
-
 import { execFileSync } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -30,14 +12,6 @@ const TYPES: Record<string, string> = {
   ".json": "application/json",
 };
 
-/**
- * Build the shipped site into a throwaway directory. Returns that directory.
- *
- * `GOMAXPROCS=1` holds esbuild to one thread. This build runs inside a suite that is itself one
- * of ~270 running in parallel, and several of the gateway's rails time a Worker's SPAWN against
- * a hard ceiling — a bundler briefly taking every core is exactly the contention that makes a
- * thread miss it. One thread costs this build a second or two and takes the spike away.
- */
 export function buildSiteInto(): string {
   const dir = mkdtempSync(join(tmpdir(), "loam-tutorial-site-"));
   execFileSync(process.execPath, [join("scripts", "build-site.mjs"), "--out", dir], {
@@ -53,7 +27,6 @@ export interface SiteHandle {
   close(): Promise<void>;
 }
 
-/** Serve a directory on loopback, port 0 — the deployed page's own file layout, no server API. */
 export async function serveSite(dir: string): Promise<SiteHandle> {
   const root = resolve(dir);
   const server: Server = createServer((req, res) => {
@@ -108,7 +81,6 @@ export interface Position {
 
 const json = <T>(v: unknown): T => v as T;
 
-/** One tutorial page, addressed through the player's marker contract. */
 export class TutorialPage {
   private constructor(
     readonly tab: Tab,
@@ -123,9 +95,8 @@ export class TutorialPage {
     return page;
   }
 
-  /** The page's boot is async (genesis, first render); every navigation waits for it. */
   async ready(): Promise<void> {
-    const deadline = Date.now() + 20_000; // a hang guard: the page's boot is genesis + one render
+    const deadline = Date.now() + 20_000;
     for (;;) {
       const up = await this.tab.eval(
         `Boolean(window.tutorial && window.tutorial.ready) ? "yes" : (window.__tutorialError ?? "no")`,
@@ -142,13 +113,11 @@ export class TutorialPage {
     await this.ready();
   }
 
-  /** Case isolation: wipe this origin and boot a fresh store. Not the page's own start-over. */
   async reset(): Promise<void> {
     await this.tab.eval(`localStorage.clear()`);
     await this.reload();
   }
 
-  /** Wait for the action the last click started. The page keeps one in-flight chain. */
   async idle(): Promise<void> {
     await this.tab.eval(`window.tutorial.idle()`);
   }
@@ -162,7 +131,6 @@ export class TutorialPage {
     await this.idle();
   }
 
-  /** Click something that reloads the page (revert, start over), and wait out the reload. */
   async clickAndReload(selector: string): Promise<void> {
     const done = this.tab.loaded(`the reload after ${selector}`);
     const hit = await this.tab.eval(
@@ -183,7 +151,6 @@ export class TutorialPage {
       .then((v) => String(v));
   }
 
-  /** Type into a field the way a person does — the value, then the input event the page hears. */
   async fill(selector: string, value: string): Promise<void> {
     const hit = await this.tab.eval(
       `(() => { const el = document.querySelector(${JSON.stringify(selector)});
@@ -210,7 +177,6 @@ export class TutorialPage {
       .then((v) => json<string[]>(v));
   }
 
-  /** The arc the page actually loaded — shape only, never its prose. */
   arc(): Promise<ArcLesson[]> {
     return this.tab
       .eval(
@@ -225,7 +191,6 @@ export class TutorialPage {
       .then((v) => json<ArcLesson[]>(v));
   }
 
-  /** The order the three framing sentences are laid out in, as a person reads them. */
   frameOrder(step: string): Promise<string[]> {
     return this.tab
       .eval(
@@ -236,17 +201,14 @@ export class TutorialPage {
       .then((v) => json<string[]>(v));
   }
 
-  /** The lenses this store holds a registration for, asked of the live gateway. */
   lensNames(): Promise<string[]> {
     return this.tab.eval(`window.tutorial.lensNames()`).then((v) => json<string[]>(v));
   }
 
-  /** Every pending step the page is showing — the count matters, not only the first one. */
   pendingSteps(): Promise<string[]> {
     return this.attrs('[data-step][data-state="pending"]', "data-step");
   }
 
-  /** Where the student stands, read from the rendered page — never from page memory. */
   async position(): Promise<Position> {
     const lesson = Number(
       await this.tab.eval(`document.querySelector("#lesson-pane").dataset.lesson`),
@@ -260,12 +222,10 @@ export class TutorialPage {
     return { lesson, pending, banked, quiz };
   }
 
-  /** Run the one live step button and let its work settle. */
   async runPending(): Promise<void> {
     await this.click("button[data-step-run]");
   }
 
-  /** The page's own evaluation of a step's two observe predicates, over the live ctx. */
   observes(lesson: number, step: string): Promise<{ page: boolean; store: boolean }> {
     return this.tab
       .eval(
@@ -279,7 +239,6 @@ export class TutorialPage {
       .then((v) => json<{ page: boolean; store: boolean }>(v));
   }
 
-  /** Does the pending step EARN its observable — is its store predicate false right now? */
   private pendingEarns(): Promise<{ lesson: number; step: string } | null> {
     return this.tab
       .eval(
@@ -296,13 +255,6 @@ export class TutorialPage {
       .then((v) => json<{ lesson: number; step: string } | null>(v));
   }
 
-  /**
-   * Walk forward until the pending step EARNS its observable — its store predicate is false
-   * before it runs — and stop there. That is the only kind of step a red-probe may target: a
-   * look-step ("notice the record boot already made") is legitimately true before its run, so
-   * neutralizing one would prove nothing at all. Look-steps met on the way are simply played.
-   * Chosen by position in whatever arc is loaded, so a new arc needs no edit here.
-   */
   async advanceToEarningStep(): Promise<{ lesson: number; step: string } | null> {
     const arc = await this.arc();
     const budget = arc.reduce((n, l) => n + l.steps.length, 0) + arc.length;
@@ -320,7 +272,6 @@ export class TutorialPage {
     return null;
   }
 
-  /** What the Ground pane calls these records — with the tutorial's own revealed, so it can. */
   async kindsOf(ids: readonly string[]): Promise<string[]> {
     if (!(await this.tab.eval(`document.querySelector("#ground-show-tutorial").checked`))) {
       await this.click("#ground-show-tutorial");
@@ -335,11 +286,6 @@ export class TutorialPage {
       .then((v) => json<string[]>(v));
   }
 
-  /**
-   * Answer the first unanswered question in the open quiz card, right or wrong ON PURPOSE. The
-   * choice index is computed from the arc the page loaded, so no marker in the page has to name
-   * which answer is which — and a new arc's quizzes work here unchanged.
-   */
   async answerFirstQuestion(kind: "right" | "wrong"): Promise<string> {
     const pick = (await this.tab.eval(
       `(() => {
@@ -363,14 +309,6 @@ export class TutorialPage {
     return pick.key;
   }
 
-  /**
-   * Fixture mutation, the other half: blind a step's PAGE observable. The step's real work
-   * still runs, so only an honest page predicate can refuse — the half a store-only probe
-   * cannot reach. Two modes, because a page predicate can be dishonest in two ways:
-   *   "selector" — look for an element this page does not have;
-   *   "text"     — look at an element it DOES have, for words it will never say.
-   * Returns the string the refusal must name.
-   */
   async blindPageObserve(lesson: number, step: string, mode: "selector" | "text"): Promise<string> {
     const selector = mode === "selector" ? "#nothing-on-this-page-matches-this" : "#lesson-pane";
     const contains = mode === "selector" ? "never" : "a-sentence-this-page-will-never-say";
@@ -387,7 +325,6 @@ export class TutorialPage {
     return mode === "selector" ? selector : contains;
   }
 
-  /** Fixture mutation: replace a step's real work with a no-op, in the loaded arc. */
   async neutralize(lesson: number, step: string): Promise<void> {
     const done = await this.tab.eval(
       `(() => {
@@ -401,11 +338,6 @@ export class TutorialPage {
     if (done !== true) throw new Error(`no step ${step} in lesson ${lesson} to neutralize`);
   }
 
-  /**
-   * Land a STRANGER's claim in the tutorial's own vocabulary, through the page's real
-   * federation door, and re-render. Returns its delta id. The store does not burn mail: it
-   * lands — the question every caller asks is what the page then does with it.
-   */
   async plantForeignTutorialClaim(): Promise<string> {
     const id = await this.tab.eval(
       `(async () => {
@@ -424,15 +356,10 @@ export class TutorialPage {
          return claim.id;
        })()`,
     );
-    await this.tab.eval(`window.tutorial.refresh()`); // the panes are readings; ask again
+    await this.tab.eval(`window.tutorial.refresh()`);
     return String(id);
   }
 
-  /**
-   * Land a claim signed by the STUDENT'S OWN key that wears the tutorial's vocabulary AND a
-   * constitutional context. It is not the tutorial's bookkeeping, so the pane must not hide it.
-   * Returns its delta id.
-   */
   async plantHybridTutorialClaim(): Promise<string> {
     const id = await this.tab.eval(
       `(async () => {
@@ -455,7 +382,6 @@ export class TutorialPage {
     return String(id);
   }
 
-  /** Drop every checkpoint blob, the way a partial site-data clear or a full quota would. */
   async dropCheckpoints(): Promise<number> {
     const gone = await this.tab.eval(
       `(() => {
@@ -468,11 +394,6 @@ export class TutorialPage {
     return Number(gone);
   }
 
-  /**
-   * Drop every checkpoint blob AND every claim that one was taken — the state of a student who
-   * has never reached a boundary, or whose origin was cleared between sessions. The caller
-   * reloads: the claims live in the store, so the page must re-read them to forget them.
-   */
   async dropCheckpointRecords(): Promise<number> {
     const gone = await this.tab.eval(
       `(() => {
@@ -492,17 +413,14 @@ export class TutorialPage {
     return Number(gone);
   }
 
-  /** The quizzes the student's own store records as SKIPPED. */
   skippedQuizzes(): Promise<string[]> {
     return this.tab.eval(`window.tutorial.skipped()`).then((v) => json<string[]>(v));
   }
 
-  /** Every localStorage key this origin holds, straight from the browser. */
   keys(): Promise<string[]> {
     return this.tab.eval(`Object.keys(localStorage).sort()`).then((v) => json<string[]>(v));
   }
 
-  /** The store's delta ids, read from the rows themselves — the byte level. */
   async storeIds(): Promise<string[]> {
     const keys = await this.keys();
     return keys
@@ -511,7 +429,6 @@ export class TutorialPage {
       .sort();
   }
 
-  /** Every record the ground holds right now, as id → the wire text of its claims. */
   groundText(): Promise<Record<string, string>> {
     return this.tab
       .eval(
@@ -526,11 +443,6 @@ export class TutorialPage {
       .then((v) => json<Record<string, string>>(v));
   }
 
-  /**
-   * Does a checkpoint blob carry these bytes ANYWHERE in it — in a row's own text, not merely
-   * under a key that names it? The row values are JSON strings inside the blob's JSON, so the
-   * search runs over the parsed values rather than the escaped envelope.
-   */
   checkpointHolds(lesson: number, words: string): Promise<boolean> {
     return this.tab
       .eval(
@@ -544,10 +456,6 @@ export class TutorialPage {
       .then((v) => v === true);
   }
 
-  /**
-   * The ids of the erasure receipts the store holds, read from the ROWS — in the canonical wire
-   * profile they are stored in, where an entity target is a bare `{id, context}`.
-   */
   erasureOrderIds(): Promise<string[]> {
     return this.tab
       .eval(
@@ -574,7 +482,6 @@ export class TutorialPage {
       .sort((a, b) => a - b);
   }
 
-  /** The delta ids a checkpoint blob holds — read out of localStorage, not out of the player. */
   checkpointIds(lesson: number): Promise<string[]> {
     return this.tab
       .eval(
@@ -592,7 +499,6 @@ export class TutorialPage {
       });
   }
 
-  /** Every key that is not a store row and not the seed, deleted — the resume falsifier. */
   async deleteNonStoreKeys(): Promise<number> {
     const gone = await this.tab.eval(
       `(() => {

@@ -1,23 +1,3 @@
-// T70 — heal answers with a BYTE verdict, not a count. `MirrorBackend.heal` sweeps every dead id
-// off each tier, but a `purge` that returns a count and does not throw was taken as done. That is
-// the §11 conflation T40 caught at the store's front door (the API said forgotten while the bytes
-// sat legible): a purge can report success while a freelist page, a `.tmp` straggler, or a WAL image
-// still holds the plaintext. `erase` was converted to a `holds`-based verdict; heal was not — the one
-// completeness path T67 left reporting COUNTS. These rails drive the two shapes a heal sweep fails in
-// and assert heal reports each through `purgeFailures` (the channel cli.ts already surfaces loudly),
-// so a boot heal can never call an unfinished erasure clean.
-//
-// Object level, not count: every assertion turns on `holds(id)` — what the bytes say — and on what
-// heal REPORTS, never on `purgedPrimary`/`purgedMirror`, which are evidence of work and not the
-// verdict. A count-only rail is exactly what let this survive T67.
-//
-// Coverage seams named deliberately (each half is railed, the composition is trivial): heal's PREFER
-// -the-batch-probe logic is bound with a hand-rolled double, and `ArchiveBackend.heldAmong`'s reach
-// is bound against a real on-disk archive — but no single test mounts a real ArchiveBackend inside a
-// MirrorBackend and heals it on the boot path. And `heldAmong` does not propagate through a nested
-// `Mirror(Mirror(_, archive), _)`, so that non-standard topology would revive per-id `holds` on the
-// archive (pre-existing; T70 did not introduce it). Both are coverage gaps, not hollow rails.
-
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,18 +14,14 @@ const other = observed(FERN, "height", 34, 2000, GARDENER_SEED);
 const tmp = mkdtempSync(join(tmpdir(), "loam-heal-verdict-"));
 afterAll(() => rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
 
-// A tier that LIES: its `purge` reports it removed the ids, but removes nothing — so the bytes
-// remain and `holds` stays true. The shape T40 found: success reported, plaintext retained.
 const purgeLies = (inner: StoreBackend): StoreBackend => ({
   append: (d) => inner.append(d),
   deltasSince: (k) => inner.deltasSince(k),
-  purge: (ids) => Promise.resolve([...ids].length), // "removed them all" — a lie; nothing is deleted
+  purge: (ids) => Promise.resolve([...ids].length),
   holds: (id) => inner.holds(id),
   close: () => inner.close(),
 });
 
-// A tier whose `purge` REFUSES (throws) — the read-only mount or the WAL a concurrent reader will
-// not release. heal must not abort, and must report the refusal rather than swallow it.
 const purgeThrows = (inner: StoreBackend): StoreBackend => ({
   append: (d) => inner.append(d),
   deltasSince: (k) => inner.deltasSince(k),
@@ -64,9 +40,7 @@ describe("T70: heal reports a byte verdict, never trusts a purge's count", () =>
 
     const report = await store.heal(new Set([dead.id]));
 
-    // The mirror still holds the byte — the ground truth the count hid.
     expect(await mirrorInner.holds(dead.id)).toBe(true);
-    // ...and heal SAYS SO: purgeFailures names the surviving id, though no purge threw.
     expect(report.purgeFailures.length).toBeGreaterThan(0);
     expect(report.purgeFailures.some((m) => m.includes(dead.id))).toBe(true);
   });
@@ -80,10 +54,7 @@ describe("T70: heal reports a byte verdict, never trusts a purge's count", () =>
 
     const report = await store.heal(new Set([dead.id]));
 
-    // heal did not abort — a refused sweep is best-effort-and-loud, not an outage.
     expect(report.toMirror).toBeGreaterThanOrEqual(0);
-    // The refusal reason is carried, and the surviving byte is named: both the throw and the
-    // holds-verdict route to purgeFailures, so the operator learns the erasure did not finish.
     expect(report.purgeFailures.some((m) => m.includes("refused"))).toBe(true);
     expect(await mirrorInner.holds(dead.id)).toBe(true);
     expect(report.purgeFailures.some((m) => m.includes(dead.id))).toBe(true);
@@ -98,33 +69,26 @@ describe("T70: heal reports a byte verdict, never trusts a purge's count", () =>
 
     const report = await store.heal(new Set([dead.id]));
 
-    // Both tiers really forgot: holds is false, so the byte verdict adds nothing.
     expect(await primary.holds(dead.id)).toBe(false);
     expect(await mirror.holds(dead.id)).toBe(false);
     expect(report.purgeFailures).toEqual([]);
   });
 });
 
-// The verdict's fast path: on the archive, per-id `holds` is a full sweep on absence, so heal asks a
-// single-pass `heldAmong` instead (avoiding the O(dead × files) boot cliff). These rail the primitive
-// at the DRIVER level — against a real on-disk straggler, not a combinator-level simulated lie — and
-// prove heal actually prefers it and honours its refusal.
 describe("T70: ArchiveBackend.heldAmong — one pass over the bytes, holds's reach", () => {
   it("finds a canonical byte AND a misfiled straggler; an absent id is not reported held", async () => {
     const root = join(tmp, "archive-heldamong");
     const archive = new ArchiveBackend(root);
-    await archive.append([dead]); // canonical <fan>/<dead.id>.json
-    // A crash-left straggler for `other`, MISFILED into a foreign fan — the bytes §11 must still see
-    // (a plain file any backup sweeps up), and the reach `deltasSince` skips by design.
+    await archive.append([dead]);
     const alienFan = join(root, "zz");
     mkdirSync(alienFan, { recursive: true });
     writeFileSync(join(alienFan, `${other.id}.json.99999.tmp`), "{}");
 
     const held = await archive.heldAmong([dead.id, other.id, "de".repeat(32)]);
-    expect(held.has(dead.id)).toBe(true); // canonical
-    expect(held.has(other.id)).toBe(true); // misfiled straggler
-    expect(held.size).toBe(2); // the absent id is not held
-    expect(await archive.heldAmong([])).toEqual(new Set()); // asks nothing, walks nothing
+    expect(held.has(dead.id)).toBe(true);
+    expect(held.has(other.id)).toBe(true);
+    expect(held.size).toBe(2);
+    expect(await archive.heldAmong([])).toEqual(new Set());
     await archive.close();
   });
 });
@@ -140,7 +104,7 @@ describe("T70: heal prefers the batch probe and honours its refusal", () => {
       deltasSince: (k) => inner.deltasSince(k),
       purge: (batch) => inner.purge(batch),
       holds: (id) => {
-        holdsCalled.value = true; // heal must NOT fall back here when heldAmong exists
+        holdsCalled.value = true;
         return inner.holds(id);
       },
       heldAmong,
@@ -155,8 +119,8 @@ describe("T70: heal prefers the batch probe and honours its refusal", () => {
 
     const report = await store.heal(new Set([dead.id]));
 
-    expect(report.purgeFailures.some((m) => m.includes(dead.id))).toBe(true); // survivor from the batch
-    expect(holdsCalled.value).toBe(false); // per-id holds never consulted on that tier
+    expect(report.purgeFailures.some((m) => m.includes(dead.id))).toBe(true);
+    expect(holdsCalled.value).toBe(false);
     await store.close();
   });
 

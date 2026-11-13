@@ -1,11 +1,3 @@
-// The served store the §58 door rails share: two login users (ada, bea) with no container or
-// seed yet, one registered connector, the token exchange OPEN, and the Plant lens registered so
-// the typed doors have something to write. The shape `consent-exchange.test.ts` stands up — that
-// file is frozen; this module is the common ground for the rails that came after it.
-//
-// Erasure standing rule: every store here is the caller's own mkdtemp/memory fixture; `closeAll`
-// tears down what `connectionServer` made and nothing else.
-
 import { createHash, randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -49,7 +41,6 @@ export const pkce = (): { verifier: string; challenge: string } => {
 
 const homes: string[] = [];
 const handles: ServerHandle[] = [];
-/** For a rail's afterEach: close every server and remove every home this module made. */
 export async function closeAll(): Promise<void> {
   while (handles.length > 0) await handles.pop()!.close();
   while (homes.length > 0) rmSync(homes.pop()!, { recursive: true, force: true });
@@ -74,7 +65,6 @@ export async function connectionServer(
     await op(userClaims(name, OPERATOR, ts++));
     await op(roleClaims(name, "actor", OPERATOR, ts++));
   }
-  // PUBLISHED, not merely registered in memory: the REST door serves declared versions only.
   await gateway.publishRegistration(PLANT, PLANT_POLICY, [FERN], undefined, undefined, undefined, [
     ...PLANT_WRITABLE,
   ]);
@@ -117,7 +107,6 @@ export async function connectionServer(
 const fieldOf = (html: string, name: string): string =>
   new RegExp(`name="${name}" value="([^"]*)"`).exec(html)?.[1] ?? "";
 
-/** Sign in as `user`, approve the connector with `bind`, and return the code. */
 export async function consent(
   base: string,
   user: string,
@@ -176,7 +165,6 @@ export async function redeem(base: string, code: string, verifier: string): Prom
   });
 }
 
-/** The whole path for one person into one leaf: consent, redeem, and the bearer token. */
 export async function connect(base: string, user: string, leaf: string): Promise<string> {
   const p = pkce();
   const { code, status } = await consent(base, user, p.challenge, { bind_new: leaf });
@@ -186,14 +174,12 @@ export async function connect(base: string, user: string, leaf: string): Promise
   return ((await res.json()) as { access_token: string }).access_token;
 }
 
-/** The pair's grant record, as the exchange left it. */
 export const grantOf = (connectorsHome: string, user: string): OAuthGrant => {
   const grant = readOAuthFile(connectorsHome).grants.find((g) => g.user === user);
   if (grant === undefined) throw new Error(`no grant for ${user}`);
   return grant;
 };
 
-/** The live inbox pool behind a grant — throws when it is not attached, which is its own finding. */
 export const poolOf = (gateway: Gateway, inbox: string): Gateway => {
   const pool = gateway.connectionInboxes.get(inbox)?.gateway;
   if (pool === undefined) throw new Error(`the inbox ${inbox} is not attached`);
@@ -217,7 +203,6 @@ export const graphql = (
 export const mutateHeight = (base: string, token: string, height: number): Promise<Response> =>
   graphql(base, token, `mutation { plant(entity: "${FERN}", height: ${height}) { height } }`);
 
-/** What a reader through the door resolves for the fern's height: a number, null, or an error. */
 export async function heightVia(base: string, token: string | undefined): Promise<unknown> {
   const res = await graphql(base, token, `{ plant(entity: "${FERN}") { height } }`);
   const body = (await res.json()) as { data?: { plant?: { height?: unknown } }; errors?: string[] };
@@ -225,7 +210,6 @@ export async function heightVia(base: string, token: string | undefined): Promis
   return body.data?.plant?.height ?? null;
 }
 
-/** Every height claim of `height` a reactor holds — the delta level. */
 export const heightDeltas = (gw: Gateway, height: number): Delta[] =>
   [...gw.reactor.snapshot()].filter(
     (d) =>
@@ -237,8 +221,6 @@ export const heightDeltas = (gw: Gateway, height: number): Delta[] =>
       ),
   );
 
-/** A signed Plant height claim by `seed`, the shape the typed door mints. */
-/** `at` is one time for both fields, or a gateway's `stamp()`. */
 export const heightClaim = (seed: string, height: number, at: number | Stamp): Delta =>
   signClaims(
     {

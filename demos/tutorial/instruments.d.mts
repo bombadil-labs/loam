@@ -1,6 +1,3 @@
-// Types for demos/tutorial/instruments.mjs — the module stays plain JS (bundled into the
-// page); this declaration keeps the classifier's CI pin typed.
-
 import type { Delta } from "@bombadil/rhizomatic";
 
 export interface DeltaClass {

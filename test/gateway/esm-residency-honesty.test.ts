@@ -1,10 +1,3 @@
-// T105 (a) — the ESM residency disclosure: health() AND the compliance receipt name the tier
-// the byte probes cannot ask. This is the honesty half of §32's one standing R1 violation — a
-// compiled module stays executable in this process's ESM registry after its source delta is
-// erased, and no tier probe can see it — so the settled verdict must not read as exhaustive.
-// Both surfaces spread ONE constant (ESM_RESIDENCY_DISCLOSURE), the T131 one-source doctrine,
-// so they cannot drift; these rails assert each surface LIVE. The teardown half is T105 (b).
-
 import { describe, expect, it } from "vitest";
 import { Gateway } from "../../src/gateway/gateway.js";
 import { MemoryBackend } from "../../src/store/memory.js";

@@ -1,13 +1,3 @@
-// SPEC §49 criterion (e) — the soup meter (T212; .adlc/specs/49-legibility.md, settled
-// 2026-08-28). Two-sided by construction: a metronomic writer is NAMED, an organic writer is
-// NOT, and the meter never gates — the flagged writer's next append still lands, asserted at
-// the door, because a heuristic that blocks writes will one day block a true fact.
-//
-// STATED, NOT ASSERTED: the metronome detector reads `claims.timestamp`, the author's own
-// clock. A pulse-writer that jitters its stamps on purpose evades the meter; the meter reports
-// probable violations for a human to ticket, and an adversarial writer is out of its scope by
-// design (the spec's word: it reports, tickets follow).
-
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { describe, expect, it } from "vitest";
 import { grantClaims } from "../../src/gateway/accounts.js";
@@ -65,7 +55,6 @@ async function store(member: string): Promise<Gateway> {
 describe("§49(e) — the soup meter names the metronome and spares the organic", () => {
   it("a same-author same-entity stream on a fixed interval is named as periodic-shaped", async () => {
     const gw = await store(PULSE);
-    // Twelve claims, exactly one hour apart, same author, same entity: the pulse-law shape.
     for (let i = 0; i < 12; i++) {
       await gw.append([claim(PULSE, PULSE_SEED, "probe:health", 10_000 + i * 3_600_000)]);
     }
@@ -81,9 +70,6 @@ describe("§49(e) — the soup meter names the metronome and spares the organic"
 
   it("an organic writer — bursts and gaps — is NOT named; a clean result is the valid result", async () => {
     const gw = await store(ORGANIC);
-    // Twelve claims in human rhythm: a morning burst, an afternoon straggler, two days of
-    // silence, an evening burst. Same author, same entity — only the CLOCK separates this
-    // from the metronome, which is exactly the discriminator under test.
     const moments = [
       10_000, 12_000, 13_500, 610_000, 14_400_000, 187_200_000, 187_205_000, 187_206_100,
       190_800_000, 350_000_000, 350_000_400, 353_600_000,
@@ -103,7 +89,6 @@ describe("§49(e) — the soup meter names the metronome and spares the organic"
       await gw.append([claim(PULSE, PULSE_SEED, "probe:health", 10_000 + i * 3_600_000)]);
     }
     expect(soupMeterImpl(gw).get("inbox")!.periodic.length).toBeGreaterThan(0);
-    // The flagged author writes again, straight through the ordinary governed door.
     const sizeBefore = gw.reactor.size;
     await gw.append([claim(PULSE, PULSE_SEED, "probe:health", 13 * 3_600_000 + 10_000)]);
     expect(gw.reactor.size).toBe(sizeBefore + 1);
@@ -117,7 +102,6 @@ describe("§49(e) — the soup meter names the metronome and spares the organic"
     const under = soupMeterImpl(gw).get("inbox");
     expect(under!.total).toBe(PERIODIC_MIN - 1);
     expect(under!.periodic).toEqual([]);
-    // One more metronomic tick reaches the minimum, and the stream is named at the boundary.
     await gw.append([
       claim(PULSE, PULSE_SEED, "probe:health", 10_000 + (PERIODIC_MIN - 1) * 3_600_000),
     ]);

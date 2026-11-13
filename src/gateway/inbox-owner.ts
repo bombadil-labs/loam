@@ -1,5 +1,3 @@
-// An inbox owns the authority filter on the rows it contributes. Kept separate from the
-// container opener so serving contributions do not import the tree's runtime machinery.
 import { effectiveGrantsAt } from "./accounts.js";
 import { subjectKeyAt, USER_PREFIX } from "./user-root.js";
 import { memberOf } from "./member-of.js";
@@ -7,18 +5,11 @@ import { keysActingFor } from "./principal.js";
 import type { Gateway } from "./gateway.js";
 import type { Peer } from "./peer.js";
 
-/** The one owner an inbox pool's effective admin grants name: a user, or a key. */
 export interface PoolOwner {
   readonly key: string;
   readonly user?: string;
 }
 
-/**
- * The owner of the inbox pool `pool`: the one principal its effective admin grants name. Grants are
- * counted by the owner they RESOLVE to, so two grants for one owner name one owner. None, several,
- * or a user subject that resolves to no key is a refusal: a pool must never compose as if its owner
- * were someone.
- */
 export function poolOwner(
   pool: Peer,
   now: number = pool.validityNow(),
@@ -52,10 +43,6 @@ export function poolOwner(
   return [...owners.values()][0]!;
 }
 
-// What an inbox pool contributes for `owner`: a user's present authority and history in this pool
-// (`loam.memberOf`, lowered by the pool's select), or a key and the keys acting for it here. The
-// pool operator's own claims compose too: they are its law (erasures, strikes, grants), never data
-// written for the owner, and a parent read must keep binding them (H1).
 export function ownerTerm(
   pool: Gateway,
   owner: PoolOwner,

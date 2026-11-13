@@ -1,10 +1,3 @@
-// The portable batch read (SPEC-16 M2, through the published package): Loam testifies to one
-// frozen PRIMARY source, the package endpoint gathers then resolves it, and Loam decodes the
-// receiver-signed answer. This module builds the signed descriptions and runs one attempt; it
-// decides nothing about which reads take it (that is the classifier's job) and never falls back.
-//
-// In this trial one key plays receiver, caller and capturer: the peer's own signer.
-
 import {
   array,
   bstr,
@@ -52,7 +45,6 @@ function describe(
   return signer.sign(materializationDescriptionClaims(signer.author, at, kind, fields));
 }
 
-/** The boot descriptions of one peer's batch endpoint: gather and resolve, one PRIMARY binding. */
 export interface PortableBoot {
   readonly configuration: Delta;
   readonly declarations: readonly Delta[];
@@ -60,7 +52,6 @@ export interface PortableBoot {
   readonly authority: Delta;
 }
 
-// Each capture covers one read's scope, never the whole store (SPEC-16 §4a).
 const SELECTION = map([
   ["profile", tstr(SCOPED_SNAPSHOT_PROFILE)],
   ["parameters", bstr(encode(map([])))],
@@ -119,7 +110,6 @@ export function portableBoot(signer: Signer, at = 0): PortableBoot {
   return { configuration, declarations, binding, authority };
 }
 
-/** One frozen source: the whole authorized PRIMARY ground at one observation, as signed testimony. */
 export interface PortableSource {
   readonly capture: Delta;
   readonly snapshot: Delta;
@@ -134,8 +124,6 @@ export function portableSource(
   scope: readonly string[],
   historicalCutoff?: number,
 ): PortableSource {
-  // The library owns the snapshot format, its digests and its revision (SPEC-16 MR-10c). Loam
-  // supplies what it selected: the read's scope S(E) under its own read closure and cut.
   const ids = deltas.map((d) => d.id).sort();
   const produced = produceMaterializationSnapshot({
     binding: boot.binding.id,
@@ -161,31 +149,23 @@ export function portableSource(
   };
 }
 
-/** The selected program: the exact original signed acts and their pins. */
 export interface PortableProgram {
   readonly hyperschema: Delta;
   readonly hyperschemaPin: string;
   readonly schema: Delta;
   readonly schemaPin: string;
-  /** Every other act the selected closure needs, besides the two top acts. */
   readonly definitions: readonly Delta[];
   readonly definitionAt: number;
 }
 
-/** One frozen invocation: route, source, program and times are fixed before dispatch. */
 export interface PortableInvocation {
   readonly root: string;
-  /** The operand instant: the host's observed now, or the as-of cutoff. */
   readonly at: number;
-  /** The host observation, sampled once. Signed serving-at must equal it. */
   readonly receivedAt: number;
   readonly historicalCutoff?: number;
   readonly program: PortableProgram;
-  /** The read's scope E: its root, its constant anchors and every expanded child (SPEC-17 §6). */
   readonly scope: readonly string[];
-  /** S(scope) under this read's selection: the only deltas the read can depend on. */
   readonly source: readonly Delta[];
-  /** S(scope) as it stands now, read from the index, for the final check. Rejects when unavailable. */
   readonly currentSource: () => Promise<readonly Delta[]>;
 }
 
@@ -212,7 +192,6 @@ const textOf = (v: CborValue | undefined): string => {
 const codeOf = (body: CborValue): string =>
   field(body, "code")?.t === "tstr" ? textOf(field(body, "code")) : "unknown";
 
-/** A built invocation: the exact gather request and delivery that will be dispatched. */
 export interface PreparedPortableRead {
   readonly boot: PortableBoot;
   readonly invocation: PortableInvocation;
@@ -221,7 +200,6 @@ export interface PreparedPortableRead {
   readonly delivery: readonly Delta[];
 }
 
-/** Build the signed source, request and delivery for one invocation. Nothing is dispatched. */
 export function preparePortableRead(
   signer: Signer,
   boot: PortableBoot,
@@ -269,7 +247,6 @@ export function preparePortableRead(
   return { boot, invocation: inv, source: src, request, delivery };
 }
 
-/** The package's own input preflight over exactly what would be dispatched. */
 export function preflightPortableRead(prepared: PreparedPortableRead) {
   const { boot } = prepared;
   return preflightMaterializationInput(
@@ -284,7 +261,6 @@ export function preflightPortableRead(prepared: PreparedPortableRead) {
   );
 }
 
-/** Run one gather then one resolve through the package endpoint. One attempt; no retry. */
 export async function runPortableRead(
   signer: Signer,
   prepared: PreparedPortableRead,
@@ -292,13 +268,11 @@ export async function runPortableRead(
   const { boot, invocation: inv, request, delivery } = prepared;
   const src = prepared.source;
   const grant: MaterializationSourceCapability = {
-    // Batch reads never recapture or restore: the captured source is the whole invocation.
     capture: () => Promise.resolve({ status: "source-unavailable" }),
     reacquireSnapshot: () => Promise.resolve({ status: "source-unavailable" }),
     async checkCurrent(binding, revision, authority) {
       if (binding !== boot.binding.id || authority !== boot.authority.id)
         return { status: "unauthorized" };
-      // A present source that cannot be read is unavailable: a typed refusal, never a stale pass.
       let current: readonly Delta[];
       try {
         current = await inv.currentSource();
@@ -385,7 +359,6 @@ function byTargetRef(a: Target, b: Target): number {
   return x < y ? -1 : x > y ? 1 : 0;
 }
 
-/** Prepare and run in one step, for callers that already chose the portable route. */
 export async function portableRead(
   signer: Signer,
   boot: PortableBoot,

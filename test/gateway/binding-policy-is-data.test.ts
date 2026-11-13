@@ -1,8 +1,3 @@
-// §47 criteria 11, 12 and 13, in one file because they are three faces of one promise: the policy
-// is DATA. Changing it is a delta and the next read obeys it (11); a store that declares nothing
-// keeps today's behavior whole, refusal included (12); and the declaration accepts a container
-// qualifier now so per-container policy is a later delta rather than a migration (13).
-
 import { describe, expect, it } from "vitest";
 import { signClaims, type Schema } from "@bombadil/rhizomatic";
 import { bindingPolicyClaims, readBindingPolicy } from "../../src/gateway/binding-policy.js";
@@ -24,7 +19,6 @@ describe("§47 — the policy is data", () => {
     const gw = await store();
     try {
       await gw.publishRegistration(PLANT, named("Shared"), [FERN], undefined, "hyperschema:One");
-      // No declaration: the second publish is REFUSED at the trial build, today's behavior whole.
       await expect(
         gw.publishRegistration(
           { name: "Two", alg: 1, body: PLANT.body },
@@ -44,14 +38,12 @@ describe("§47 — the policy is data", () => {
     const gw = await store();
     try {
       await gw.publishRegistration(PLANT, named("Shared"), [FERN], undefined, "hyperschema:One");
-      // Same live gateway; the declaration lands as an ordinary append...
       await gw.append([
         signClaims(
           withStamp(gw.stamp(), (t) => bindingPolicyClaims("byTimestamp", gw.operatorAuthor!, t)),
           OP_SEED,
         ),
       ]);
-      // ...and the publish that was a refusal a moment ago is now a resolved contest.
       const second = await gw.publishRegistration(
         { name: "Two", alg: 1, body: PLANT.body },
         named("Shared"),
@@ -77,9 +69,7 @@ describe("§47 — the policy is data", () => {
           OP_SEED,
         ),
       ]);
-      // Qualified for "friends": the ROOT reads undeclared, so root behavior is unchanged...
       expect(readBindingPolicy(gw.reactor, gw.validityNow(), gw.operatorAuthor)).toBeUndefined();
-      // ...and the qualified reading answers — the later per-container delta, already expressible.
       expect(readBindingPolicy(gw.reactor, gw.validityNow(), gw.operatorAuthor, "friends")).toBe(
         "conflicts",
       );
@@ -89,9 +79,6 @@ describe("§47 — the policy is data", () => {
   });
 
   it("a malformed declaration is refused at the door, not read as something else", async () => {
-    // The trust idiom's posture: a predicate sees pointers, so the DOOR owns shape. A mode outside
-    // the vocabulary must refuse — read as "undeclared" it would silently keep old behavior while
-    // sitting in the audit looking like law.
     const gw = await store();
     try {
       await expect(
@@ -147,9 +134,6 @@ describe("§47 — a struck declaration stops governing (H1)", () => {
           OP_SEED,
         ),
       ]);
-      // The strike binds: withdrawn law governs nothing. Before this rail, the reader picked the
-      // latest declaration by timestamp WITHOUT consulting negation — so a struck declaration kept
-      // silently evicting contest losers from every door, under law the operator withdrew.
       expect(readBindingPolicy(gw.reactor, gw.validityNow(), gw.operatorAuthor)).toBeUndefined();
     } finally {
       await gw.close();
@@ -187,7 +171,6 @@ describe("§47 — a struck declaration stops governing (H1)", () => {
           OP_SEED,
         ),
       ]);
-      // The corpse must not shadow the living: t1's byTimestamp is the latest SURVIVOR.
       expect(readBindingPolicy(gw.reactor, gw.validityNow(), gw.operatorAuthor)).toBe(
         "byTimestamp",
       );

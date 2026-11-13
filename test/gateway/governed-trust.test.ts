@@ -1,9 +1,3 @@
-// Governed trust lowering (governed-trust.ts), asked below the door: what the lowered predicate
-// trusts, over the same deltas the canonical predicate reflects. A grant naming `user:<name>` must
-// trust that user's ROOT key, never the subject's text; a key-named grant must trust exactly what
-// it trusted before lowering existed. The door and the served View are asked in
-// governed-user-trust.test.ts.
-
 import { describe, expect, it } from "vitest";
 import {
   authorForSeed,
@@ -63,7 +57,6 @@ const reactorOf = (deltas: readonly Delta[]): Reactor => {
 const MASK = (flag = false): Term =>
   parseTerm({ op: "mask", policy: { trust: lawfulStrikersJson(OP, flag) }, in: "input" });
 
-// The ids a mask keeps, evaluated as written (`lowered: false`) or lowered first.
 function kept(r: Reactor, read: TrustRead, lowered: boolean, term: Term = MASK()): Set<string> {
   const input = r.snapshot();
   const program = lowered
@@ -75,7 +68,6 @@ function kept(r: Reactor, read: TrustRead, lowered: boolean, term: Term = MASK()
   return new Set([...out.set].map((d) => d.id));
 }
 
-// ada, whose root is K1, recorded by the operator.
 const ada = (t = 1): Delta[] => [op(userClaims("ada", OP, t)), op(rootClaims("ada", K1, OP, t))];
 
 describe("R1: key-named grants trust what they trusted before lowering (a control)", () => {
@@ -124,7 +116,6 @@ describe("R10: a grant naming a user trusts that user's root, in dataStruck and 
       strike(K1_SEED, byRoot, 200),
       strike(X_SEED, byStranger, 201),
     ]);
-    // No delta can be signed by the text "user:ada", so the lowered set itself is asked below.
     const live = kept(r, { now: NOW }, true);
     const struck = dataStruck(r, NOW, OP);
     expect([live.has(byRoot.id), struck(byRoot.id)]).toEqual([false, true]);
@@ -134,7 +125,6 @@ describe("R10: a grant naming a user trusts that user's root, in dataStruck and 
     );
     expect(lowered).toContain(K1);
     expect(lowered).not.toContain("user:ada");
-    // Written, the mask reflects the text: ada's root is NOT trusted. This is the gap lowering closes.
     expect(kept(r, { now: NOW }, false).has(byRoot.id)).toBe(true);
   });
 
@@ -224,7 +214,6 @@ describe("R14: raw mode never narrows what the raw machinery trusts (a control)"
     const r = reactorOf([grant(K1, 1, 50), target, strike(K1_SEED, target, 200)]);
     expect(kept(r, { raw: true }, false).has(target.id)).toBe(false);
     expect(kept(r, { raw: true }, true).has(target.id)).toBe(false);
-    // and present evaluation, where the grant has lapsed, keeps it
     expect(kept(r, { now: NOW }, true).has(target.id)).toBe(true);
   });
 });
@@ -245,10 +234,8 @@ describe("R14b: raw mode expands a user to every root", () => {
     ]);
     const raw = kept(r, { raw: true }, true);
     expect([raw.has(byK1.id), raw.has(byK2.id)]).toEqual([false, false]);
-    // present at NOW (after 3000) is K2 alone
     const present = kept(r, { now: NOW }, true);
     expect([present.has(byK1.id), present.has(byK2.id)]).toEqual([true, false]);
-    // a root claim the operator struck is gone from raw too
     const r2 = reactorOf([
       ...ada(),
       later,
@@ -305,7 +292,6 @@ describe("R17: a governed body reached through the registry is lowered too", () 
     const ids = new Set([...out.hview.props.values()].flat().map((e) => e.delta.id));
     expect(ids.has(target.id)).toBe(false);
     expect(ids.has(stranger.id)).toBe(true);
-    // the registry's signed body is untouched
     expect(
       JSON.stringify(termToJson(registry.resolve({ kind: "name", name: "Gov" })!.body)),
     ).toContain("inView");

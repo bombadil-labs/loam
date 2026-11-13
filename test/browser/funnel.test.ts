@@ -1,20 +1,3 @@
-// T145 (b) — the funnel-fixture story rail. REAL Chrome, over CDP, drives the login form through
-// a local forwarding proxy in front of the store — the funnel shape (~/.loam's rehearsed recipe
-// puts a TLS terminator here). Two-sided by construction:
-//   - --public-url names the PROXY address: login through the proxy succeeds.
-//   - --public-url names the store's own address instead: the POST through the proxy refuses,
-//     and the operator's channel says once that --public-url likely disagrees with the address
-//     the browser used, naming both origins (the T145 near-miss fault).
-//
-// WHY PLAIN HTTP, NOT TLS: the frozen driver (cdp.ts) accepts no extra Chrome flags, so a
-// self-signed terminator would need --ignore-certificate-errors and with it a second, hand-rolled
-// Chrome spawn beside the frozen one. The mechanism under test is ORIGIN disagreement in scheme
-// or port with the host equal, and an http-to-http proxy on its own port exercises exactly that
-// class: Chrome sends the proxy's origin, ownOrigins holds another port. What this file therefore
-// deliberately does NOT cover: the scheme-only disagreement under a real browser (the unit rail
-// in test/server/funnel-fault.test.ts covers scheme at the header level), and certificate
-// handling itself, which no Loam code implements.
-
 import { createServer, request as httpRequest, type Server } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -41,14 +24,6 @@ let gateway: Gateway;
 const handles: ServerHandle[] = [];
 const proxies: Server[] = [];
 
-/**
- * A minimal forwarding proxy: every request to it is replayed against the store byte-for-byte
- * (method, path, headers, body) and the store's answer streamed back. The browser's Origin header
- * passes through untouched — a real terminator forwards it the same way, and that untouched
- * header IS the disagreement under test. Listening on port 0 FIRST is what lets --public-url
- * name the proxy before the store exists, with no reserve-then-reuse race: the proxy learns the
- * store's port later, at first request.
- */
 async function openProxy(): Promise<{ origin: string; aim: (storePort: number) => void }> {
   let target: number | undefined;
   const proxy = createServer((req, res) => {
@@ -77,14 +52,11 @@ async function openProxy(): Promise<{ origin: string; aim: (storePort: number) =
   return { origin: `http://127.0.0.1:${port}`, aim: (storePort) => void (target = storePort) };
 }
 
-/** A store behind a fresh proxy, its --public-url set by the caller. */
 async function funnel(
   faults: string[],
   publicUrlOf: (proxyOrigin: string, storeOrigin: string) => string,
 ): Promise<{ proxyOrigin: string; storeOrigin: string }> {
   const proxy = await openProxy();
-  // The mismatch side must name the STORE's address before the store listens, so the port is
-  // reserved first (the same reserve-then-reuse trade door-smoke.test.ts documents).
   const probe = createServer();
   await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
   const storePort = (probe.address() as { port: number }).port;
@@ -126,7 +98,6 @@ afterAll(async () => {
 const fill = (tab: Tab, name: string, value: string): Promise<unknown> =>
   tab.eval(`document.querySelector('input[name="${name}"]').value = ${JSON.stringify(value)}`);
 
-/** Submit the login form and wait for the navigation it causes. */
 const submitLogin = async (tab: Tab): Promise<void> => {
   const done = tab.loaded("the navigation after submitting /login");
   await tab.eval(`document.querySelector('form[action="/login"]').submit()`);
@@ -135,7 +106,6 @@ const submitLogin = async (tab: Tab): Promise<void> => {
 
 const bodyText = (tab: Tab): Promise<string> => tab.eval("document.body.textContent").then(String);
 
-/** Drive the real login form through the given origin; leaves the tab on the response. */
 async function loginThrough(tab: Tab, origin: string): Promise<void> {
   await tab.navigate(`${origin}/login`);
   await fill(tab, "user", "myk");
@@ -155,7 +125,7 @@ describe("T145 — login through a funnel, driven by a real browser", () => {
     const page = await bodyText(tab);
     expect(page).toContain("Signed in.");
     expect(page).toContain("myk");
-    expect(nearMiss(faults).length).toBe(0); // agreement holds; the fault has nothing to say
+    expect(nearMiss(faults).length).toBe(0);
     tab.close();
   });
 
@@ -164,18 +134,15 @@ describe("T145 — login through a funnel, driven by a real browser", () => {
     const { proxyOrigin, storeOrigin } = await funnel(faults, (_proxy, store) => store);
     const tab = await browser.tab();
     await loginThrough(tab, proxyOrigin);
-    // The caller-visible refusal is the ordinary provenance 403 — cure, no diagnosis.
     const refusal = await bodyText(tab);
     expect(refusal).toContain("did not come from this store's own page");
     expect(refusal).toContain("reload");
     expect(refusal).not.toContain("--public-url");
-    // The operator's channel carries the diagnosis exactly once, naming both origins.
     const lines = nearMiss(faults);
     expect(lines.length).toBe(1);
     expect(lines[0]).toContain(`"${proxyOrigin}"`);
     expect(lines[0]).toContain(`"${storeOrigin}"`);
     expect(lines[0]).toContain("port");
-    // Transition-deduped under the browser too: a second attempt adds no second line.
     await loginThrough(tab, proxyOrigin);
     expect(nearMiss(faults).length).toBe(1);
     tab.close();

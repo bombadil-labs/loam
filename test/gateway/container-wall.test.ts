@@ -1,11 +1,3 @@
-// T32 — a wall is real bytes, and untrusted must be one (criteria 5 and 14). Trust decides which
-// postures are LAWFUL (§28.3: untrusted+property is delegated admission over shared ground —
-// REFUSED, at the door and at the runtime opener alike); posture decides where bytes are PAID: a
-// wall's members live in a genuinely separate store, asserted for both the untrusted wall (the
-// quarantine's shape) and the curated wall (tenant isolation's default shape, §28.4). And §24.8's
-// erasure law reaches the GENERALIZED wall: a container opened through the Container surface —
-// not the quarantine preset — receives the erasure + purge fan-out, byte-verified.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -93,11 +85,7 @@ describe("T32 criterion 5 — untrusted must be a wall, and a wall is real bytes
     expect(c.trust).toBe(trust);
     expect(c.gateway).toBeDefined();
 
-    // Real bytes: the wall's OWN store holds a copy of the member — discard-with-zero-trace is
-    // the one thing sharing cannot provide, so the copy is the point, not an overhead.
     expect(await wallStore.holds(h.id)).toBe(true);
-    // And the primary's ground is unchanged by the wall's existence, save the one record of the
-    // key the wall governs itself under.
     expect(recordedPoolKey(gw.reactor, OP, `container:${trust}-wall`)).toBe(
       c.gateway!.operatorAuthor,
     );
@@ -138,12 +126,10 @@ describe("T32 criterion 14 — erasure reaches the generalized wall", () => {
     ]);
     const wallStore = new MemoryBackend();
     const c = await gw.openContainer({ name: "container:reach", backend: wallStore });
-    expect(await wallStore.holds(secret.id)).toBe(true); // seeded through the glass
+    expect(await wallStore.holds(secret.id)).toBe(true);
 
     await gw.erase(secret.id, { reason: "the fan-out crosses the generalized wall" });
 
-    // Byte-verified on the wall's own tier, and the erasure landed there (the wall remembers
-    // the hole and refuses re-entry, exactly as the preset always has).
     expect(await wallStore.holds(secret.id)).toBe(false);
     const wall = c.gateway!;
     expect(readErasures(wall.reactor, wall.validityNow(), wall.operatorAuthor).has(secret.id)).toBe(
@@ -154,31 +140,21 @@ describe("T32 criterion 14 — erasure reaches the generalized wall", () => {
   });
 
   it("drop verifies the §25 pen at the bytes — a discardRow that lies is refused (H7)", async () => {
-    // P5 fold: the pen sweep's only proof used to be discardRow's boolean, which is evidence,
-    // never the verdict. A repairable store whose pen row survives every discard must refuse
-    // the drop — success over set-aside legible bytes is the erasure-evasion shape.
     const gw = await boot();
     const inner = new MemoryBackend();
     const stuckRow = { key: "corrupt-row-1", reason: "unparseable" as const, preview: "…" };
-    // Every other probe is the memory store's own, its journal included: a pool is always its
-    // own journal peer.
     const lying = overlay(inner, {
-      quarantine: () => Promise.resolve([stuckRow]), // the origin's bytes keep the row, every walk
-      discardRow: () => Promise.resolve(true), // "removed it", removing nothing
+      quarantine: () => Promise.resolve([stuckRow]),
+      discardRow: () => Promise.resolve(true),
     });
     const pool = await gw.openQuarantine({ backend: lying });
     await expect(pool.drop()).rejects.toThrow(/pen still holds/);
-    expect(gw.quarantinePools.has(pool.gateway)).toBe(true); // refused = still in erasure reach
+    expect(gw.quarantinePools.has(pool.gateway)).toBe(true);
     await pool.detach();
     await gw.close();
   });
 
   it("the guard survives a struck-declaration posture flip — §28.4 has no survival-algebra door", async () => {
-    // P5 fold (the erasure lens's finding): land a federated property re-declaration (a named
-    // defect, not binding), then strike the EARLIEST declaration — the binding posture would
-    // flip wall→property and dissolve the guard while the wall's bytes sit on disk. The guard
-    // remembers the struck wall lineage; only a cover, or forgetting the container WHOLE,
-    // clears it.
     const gw = await boot();
     const fact = observed(FERN, "height", 30, 1000, OP_SEED);
     await gw.append([fact]);
@@ -204,12 +180,11 @@ describe("T32 criterion 14 — erasure reaches the generalized wall", () => {
       ),
       OP_SEED,
     );
-    await gw.federate([d2], { admit: () => true }); // the flip lands as data, defect named
-    await gw.append([retraction(d1.id, OP, OP_SEED, 9600)]); // the earliest falls; d2 would bind
+    await gw.federate([d2], { admit: () => true });
+    await gw.append([retraction(d1.id, OP, OP_SEED, 9600)]);
     expect(gw.containers().containers.get("container:flip")?.posture).toBe("shared");
 
-    await expect(gw.erase(fact.id)).rejects.toThrow(/container:flip/); // lineage remembered
-    // Forgetting the container WHOLE is still the honest exit.
+    await expect(gw.erase(fact.id)).rejects.toThrow(/container:flip/);
     await gw.append([retraction(d2.id, OP, OP_SEED, 9700)]);
     await expect(gw.erase(fact.id)).resolves.toMatchObject({ erased: fact.id });
     await gw.close();
@@ -229,8 +204,6 @@ describe("T32 criterion 14 — erasure reaches the generalized wall", () => {
     ]);
     const c = await gw.openContainer({ name: "container:gone", backend: new MemoryBackend() });
     await c.drop();
-    // The drop verified the bytes gone; leaving the declaration standing would turn every future
-    // erase into a refusal over a store that provably no longer exists.
     expect(gw.containers().containers.has("container:gone")).toBe(false);
     const fact = observed(FERN, "height", 7, 2000, OP_SEED);
     await gw.append([fact]);

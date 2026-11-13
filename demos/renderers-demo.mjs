@@ -1,23 +1,10 @@
-// A little §23 demo you can poke at in a browser. It boots ONE governed Loam store, registers a
-// `Profile` schema, seeds a couple of people as deltas, PUSHES two renderers (a full page and a compact
-// card) as deltas, opens the lens to anonymous reads, and serves it all over HTTP. Every page you load
-// is HTML rendered live from the store's own ground — no build step, no framework on the server, no
-// files: push a delta, get software.
-//
-//   node demos/renderers-demo.mjs      →  open the URLs it prints
-//
-// Try, while it runs:
-//   • edit a fact through the GraphQL door and refresh the page — it re-renders live
-//   • push a new renderer at the same route and refresh — the face changes with no restart
-
 import { authorForSeed, parseSchema, parseTerm, signClaims } from "@bombadil/rhizomatic";
 import { Gateway, MemoryBackend, assembleGenesis, publicClaims, serve } from "../dist/index.js";
 
-const SEED = "de".repeat(32); // the store operator's seed (demo only)
+const SEED = "de".repeat(32);
 const PORT = 4500;
 const MOUNT = "demo";
 
-// The lens: a Profile is name + bio + mood + avatar, each latest-wins.
 const PICK = { pick: { order: { byTimestamp: "desc" } } };
 const GATHER = {
   op: "group",
@@ -34,8 +21,6 @@ const SCHEMA = parseSchema({
   default: PICK,
 });
 
-// A full-page renderer — a resolved node in, a whole styled HTML page out. It bundles its own markup and
-// CSS and knows nothing of Loam; for all it knows it is a component against a service bundled with it.
 const PAGE = `
 export default (n) => {
   const v = n.view;
@@ -67,7 +52,6 @@ export default (n) => {
   </main></body></html>\`;
 };`;
 
-// A compact card renderer — a different FACE over the SAME schema, at a different route (§23.5).
 const CARD = `
 export default (n) => {
   const v = n.view, esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;" }[c]));
@@ -90,7 +74,6 @@ const gw = await Gateway.boot(
 );
 const operator = authorForSeed(SEED);
 
-// Seed a couple of people, as signed deltas.
 const fact = (entity, ctx, value, ts) =>
   signClaims(
     {
@@ -125,7 +108,6 @@ await gw.append([
   ),
 ]);
 
-// Push the renderers, and open the lens to anonymous reads.
 await gw.publishRenderer({
   route: "page",
   schema: "Profile",

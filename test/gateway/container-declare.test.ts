@@ -1,12 +1,3 @@
-// T32 — declarations resolve live, and the two §28.4 knobs are immutable (criteria 3 and 12).
-// A knob change is a delta, never a restart — for the MUTABLE knobs (membership, version, parent):
-// re-declaring updates the RUNNING gateway's table with no reopen, and a reopened store resolves
-// the same table from the ground alone. Trust and posture are NOT flags (§28.4 proved neither
-// transition is a flip): a re-declaration changing either — or moving a container under a parent
-// of different trust — refuses at the door naming §28.4. Criterion 12's type-level rail rides
-// here too: the preset's options remain assignment-compatible with QuarantineOptions, so no
-// openQuarantine call site can have moved.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, signClaims } from "@bombadil/rhizomatic";
 import { MemoryBackend } from "../../src/store/memory.js";
@@ -63,8 +54,6 @@ describe("T32 criterion 3 — a knob change is a delta, not a restart", () => {
     ]);
     expect(gw.containerScope({ containers: ["container:live"] }).map((d) => d.id)).toContain(h.id);
 
-    // The knob change: a fresh declaration, latest-wins, NO reopen — the running gateway's next
-    // read resolves the new membership.
     await gw.append([
       declare(
         {
@@ -80,7 +69,6 @@ describe("T32 criterion 3 — a knob change is a delta, not a restart", () => {
     expect(after).toContain(m.id);
     expect(after).not.toContain(h.id);
 
-    // And the table is DATA: a second gateway over the same ground resolves identically.
     const reopened = await Gateway.open(backend, { seed: OP_SEED });
     const table = reopened.containers();
     expect(table.containers.get("container:live")?.trust).toBe("curated");
@@ -88,7 +76,7 @@ describe("T32 criterion 3 — a knob change is a delta, not a restart", () => {
     expect(reopened.containerScope({ containers: ["container:live"] }).map((d) => d.id)).toContain(
       m.id,
     );
-    await gw.close(); // closes the shared backend; reopened shares it, so close only once
+    await gw.close();
   });
 
   it("a re-declaration changing trust refuses at the door naming §28.4", async () => {
@@ -174,11 +162,6 @@ describe("T32 criterion 3 — a knob change is a delta, not a restart", () => {
 
 describe("T32 criterion 12 — the preset options stay assignment-compatible", () => {
   it("every QuarantineOptions value is a lawful ContainerOptions value, knob for knob", () => {
-    // Compile-time rail: if the lifting narrowed the preset's options, this file stops building.
-    // The Required<Pick<...>> form is the load-bearing half (P5 fold): a plain variable
-    // assignment tolerates source-side excess properties, so it would still compile if
-    // ContainerOptions silently LOST `admit` or `backend` — precisely the divergence this
-    // criterion exists to prevent. Pick fails to typecheck the moment a key disappears.
     const q: Required<QuarantineOptions> = {
       backend: new MemoryBackend(),
       admit: () => true,

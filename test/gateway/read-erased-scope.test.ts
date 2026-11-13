@@ -1,8 +1,3 @@
-// The serving reads outside the store's own gathers never show an erased delta either: the
-// user and role records behind login and admin checks, a bound connection's scope when only a pool
-// holds the erasure, and the entity listing. Each case keeps the erased bytes held, and names a
-// bystander that must still show. A last case pins that a duplicate erasure ends no stream.
-
 import { describe, expect, it } from "vitest";
 import { authorForSeed, Reactor, signClaims } from "@bombadil/rhizomatic";
 import { grantClaims } from "../../src/gateway/accounts.js";
@@ -31,7 +26,6 @@ const boot = (): Promise<Gateway> =>
     }),
   );
 
-/** A store with one shared container `home:ada`, and `n` bound connection pools inside it. */
 async function homeWithPools(n: number): Promise<{
   gw: Gateway;
   pools: { gw: Gateway; binding: { container: string; inbox: string } }[];
@@ -85,10 +79,10 @@ describe("serving reads outside the gathers never show an erased delta", () => {
     const operatorRole = signClaims(roleClaims("ada", "operator", OP, 2), OP_SEED);
     const viewerRole = signClaims(roleClaims("ada", "actor", OP, 3), OP_SEED);
     for (const d of [user, operatorRole, viewerRole]) reactor.ingest(d);
-    expect(rolesOf(reactor, OP, Date.now(), "ada")).toEqual(new Set(["operator", "actor"])); // control
+    expect(rolesOf(reactor, OP, Date.now(), "ada")).toEqual(new Set(["operator", "actor"]));
 
     reactor.ingest(signClaims(eraseClaims(operatorRole.id, OP, OP, 4), OP_SEED));
-    expect(reactor.get(operatorRole.id)).toBeDefined(); // bytes still held
+    expect(reactor.get(operatorRole.id)).toBeDefined();
     expect(rolesOf(reactor, OP, Date.now(), "ada")).toEqual(new Set(["actor"]));
   });
 
@@ -127,14 +121,13 @@ describe("serving reads outside the gathers never show an erased delta", () => {
     await pool.append([claim, bystander]);
     const binding = { container: "home:ada", inbox };
     const before = boundGroundFor(gw, binding, Date.now());
-    expect(before.has(claim.id)).toBe(true); // control
+    expect(before.has(claim.id)).toBe(true);
 
-    // The pool's own erasure, signed by the pool's key.
     await pool.append([
       pool.signer!.sign(eraseClaims(claim.id, GARDENER, pool.operatorAuthor!, 2000)),
     ]);
-    expect(pool.reactor.get(claim.id)).toBeDefined(); // still held in the pool
-    expect(gw.reactor.get(claim.id)).toBeUndefined(); // the parent never saw either
+    expect(pool.reactor.get(claim.id)).toBeDefined();
+    expect(gw.reactor.get(claim.id)).toBeUndefined();
     const after = boundGroundFor(gw, binding, Date.now());
     expect(after.has(claim.id)).toBe(false);
     expect(after.has(bystander.id)).toBe(true);
@@ -148,14 +141,13 @@ describe("serving reads outside the gathers never show an erased delta", () => {
     const bystander = observed(FERN, "tag", "shade", 1100, GARDENER_SEED);
     await pool.gw.append([claim, bystander]);
     await gw.append([signClaims(eraseClaims(claim.id, GARDENER, OP, 2000), OP_SEED)]);
-    expect(gw.reactor.get(claim.id)).toBeUndefined(); // the parent never held the claim
-    expect(pool.gw.reactor.get(claim.id)).toBeDefined(); // the pool still does
+    expect(gw.reactor.get(claim.id)).toBeUndefined();
+    expect(pool.gw.reactor.get(claim.id)).toBeDefined();
 
     const ground = boundGroundFor(gw, pool.binding, Date.now());
     expect(ground.has(claim.id)).toBe(false);
     expect(ground.has(bystander.id)).toBe(true);
 
-    // The bound listing enumerates the same composed scope.
     const ROSE = "plant:rose";
     const rose = observed(ROSE, "height", 12, 1200, GARDENER_SEED);
     await pool.gw.append([rose]);
@@ -169,7 +161,6 @@ describe("serving reads outside the gathers never show an erased delta", () => {
   it("a pool's erasure naming the wrong author does not hide a sibling pool's claim (a control: passes on the base; fails without the author check)", async () => {
     const { gw, pools } = await homeWithPools(2);
     const claim = observed(FERN, "height", 30, 1000, GARDENER_SEED);
-    // Lawful at the first pool's door, because the target is absent there.
     const first = pools[0]!.gw;
     await first.append([
       first.signer!.sign(eraseClaims(claim.id, OP, first.operatorAuthor!, 2000)),
@@ -186,7 +177,7 @@ describe("serving reads outside the gathers never show an erased delta", () => {
     const fernClaim = observed(FERN, "height", 30, 1100, OP_SEED);
     await gw.append([roseClaim, fernClaim]);
     const listed = async () => (await gw.list("Plant")).map((n) => n.entity);
-    expect(await listed()).toEqual(expect.arrayContaining([ROSE, FERN])); // control
+    expect(await listed()).toEqual(expect.arrayContaining([ROSE, FERN]));
 
     await gw.append([signClaims(eraseClaims(roseClaim.id, OP, OP, 2000), OP_SEED)]);
     expect(gw.reactor.get(roseClaim.id)).toBeDefined();
@@ -206,11 +197,11 @@ describe("serving reads outside the gathers never show an erased delta", () => {
 
     const stream = await gw.subscribe(`subscription { plant(entity: "${FERN}") { height tag } }`);
     await stream.next();
-    await gw.federate([erasure]); // a repeated pull of the same erasure
+    await gw.federate([erasure]);
     await gw.append([erasure]);
     await gw.query(`mutation { plant(entity: "${FERN}", tag: "sun") { tag } }`);
     const next = await stream.next();
-    expect(next.done).toBe(false); // still live: it received the mutation
+    expect(next.done).toBe(false);
     await stream.return(undefined);
     await gw.close();
   });

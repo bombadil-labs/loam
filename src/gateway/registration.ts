@@ -1,17 +1,3 @@
-// A registration is a REFERENCE, not a carrier. The HYPERSCHEMA itself is DEFINED by schema-schema
-// deltas — rhizomatic's `publishHyperSchemaClaims` shape — filed at a hyperschema entity
-// (`hyperschema:<Name>` by default); the registration delta, under the constitutional context `loam.registration`,
-// holds only a pointer to that entity, the resolution schema as canonical JSON, and the roots. The GraphQL
-// surface is therefore GENERATED: `readRegistrations` meta-resolves each referenced entity via
-// `loadHyperSchema` over the store's surviving definitions, so evolution is append (republish at the
-// same entity) and deprecation is negation (a definition with no survivor binds nothing).
-//
-// Schema carries no schema-schema and needs none: it is the reader's lens, not the entity's
-// shape, and travels as canonical JSON (rhizomatic's own profile, so parse∘serialize is
-// identity). In a governed store only the operator's law binds — definitions, registrations,
-// and the negations that retire them are all read from the operator-authored slice, so a
-// federated foreign delta merges as data but reshapes nothing.
-
 import {
   contentAddress,
   loadHyperSchema,
@@ -36,12 +22,6 @@ export { lawfulNegated } from "./negation.js";
 
 export const CTX_REGISTRATION = "loam.registration";
 
-// The edge roles a gather DECLARES (SPEC §14 edge verbs). An `expand` in the HYPERSCHEMA's gather
-// body — never the resolution Schema — is what turns a field's entity pointers into a nested child
-// view; its `role` names the pointer an edge write must carry to be followed. Walking the body for
-// those roles is how the surface learns a schema HAS edges (and which role links them): a gather
-// with no `expand` resolves no edges, so it is offered no entity-pointer write. Only concrete
-// (`exact`) roles are collected — a wildcard expand marks no single writable relation.
 export function edgeRoles(body: Term): string[] {
   const roles = new Set<string>();
   const walk = (t: Term): void => {
@@ -63,19 +43,13 @@ export function edgeRoles(body: Term): string[] {
         break;
       case "input":
       case "fix":
-        break; // input gathers nothing; fix invokes another schema, walked via the registry
+        break;
     }
   };
   walk(body);
   return [...roles];
 }
 
-// A reference declaration (SPEC §51): the envelope's `refs` field marks a prop as a REFERENCE —
-// written by generated link/unlink mutations, never a primitive argument. `role` names the edge
-// role the link delta carries (the body's `expand` follows it into the child view); `reciprocal`
-// says how the same delta speaks on the TARGET's side — the role the target's own expand would
-// follow back, and the context that folds the delta into the target's prop. Names only, no code:
-// this field rides a scoped registration exactly as `roots`/`writable` do.
 export interface RefReciprocal {
   readonly role: string;
   readonly context: string;
@@ -86,17 +60,12 @@ export interface RefSpec {
 }
 export type RefSpecs = Readonly<Record<string, RefSpec>>;
 
-// Parse and validate the refs' JSON profile. Throws on anything malformed — loud at publish, quiet
-// on replay (the schema still binds; the surface just lacks the derived mutations), the same split
-// every envelope passenger follows.
 export function parseRefs(raw: unknown): RefSpecs {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error("refs must be an object of per-prop reference declarations");
   }
   const out: Record<string, RefSpec> = {};
   for (const [prop, spec] of Object.entries(raw as Record<string, unknown>)) {
-    // "__proto__" would vanish into a plain object's prototype setter — and could never be a
-    // servable prop anyway (buildGqlSchema refuses it as a field).
     if (prop === "__proto__") throw new Error(`refs: "${prop}" is not a usable prop name`);
     const s = spec as {
       role?: unknown;
@@ -129,13 +98,6 @@ export function parseRefs(raw: unknown): RefSpecs {
   return out;
 }
 
-// One declared reference prop, classified against the body (SPEC §51.1). `links` is whether the
-// mutation pair generates: an exact-role expand (or no matching expand at all — the declaration
-// stands on its own) mints link/unlink; a prefix/inSet match marks the prop as a reference for
-// TYPING only, because a role family has no single canonical role to author. `target` is the
-// matched expand's child READING when it declares one, else its schema ref — the name a reader
-// would look for the fold under, which is what the undeclared-reciprocal warning points at (H6:
-// naming the program where a reading is meant sends the reader to a name sibling lenses share).
 export interface ReferenceProp {
   readonly prop: string;
   readonly role: string;
@@ -144,14 +106,9 @@ export interface ReferenceProp {
   readonly target?: string;
 }
 
-// The DETECTION walk (SPEC §51.1): classify each declared reference prop against the body's
-// `expand` nodes. This is the one derivation the surface, the publish-time warnings, and the
-// write path all read, so the three can never disagree about what a prop's edge delta looks like.
 export function referenceProps(body: Term, refs: RefSpecs | undefined): Map<string, ReferenceProp> {
   const out = new Map<string, ReferenceProp>();
   if (refs === undefined) return out;
-  // Every expand in the body, by its role matcher — the same traversal edgeRoles runs, plus the
-  // set operators it predates (`intersect`/`difference` gather nothing extra but must be walked).
   const found: { matcher: { kind: string }; target: string }[] = [];
   const refName = (r: { kind: "name"; name: string } | { kind: "pinned"; hash: string }): string =>
     r.kind === "name" ? r.name : r.hash;
@@ -182,12 +139,10 @@ export function referenceProps(body: Term, refs: RefSpecs | undefined): Map<stri
         break;
       case "input":
       case "fix":
-        break; // input gathers nothing; fix invokes another schema, classified on its own
+        break;
     }
   };
   walk(body);
-  // A matcher's verdict on the declared role. `aliased` never matches here: it resolves against
-  // the ambient input at read time, so nothing static can say which roles it admits.
   const matches = (m: { kind: string }, role: string): boolean => {
     const sm = m as { kind: string; value?: string; values?: readonly string[] };
     if (sm.kind === "exact") return sm.value === role;
@@ -202,8 +157,6 @@ export function referenceProps(body: Term, refs: RefSpecs | undefined): Map<stri
       prop,
       role: spec.role,
       ...(spec.reciprocal === undefined ? {} : { reciprocal: spec.reciprocal }),
-      // Exact → the canonical statement, mint the pair. No matching expand → the declaration
-      // still marks the prop and generates (§51.4). A prefix/inSet family → typing only.
       links: family === undefined || family === exact,
       ...(family === undefined ? {} : { target: family.target }),
     });
@@ -211,10 +164,6 @@ export function referenceProps(body: Term, refs: RefSpecs | undefined): Map<stri
   return out;
 }
 
-// The first `expand` in a gather that names NO `reading` (rhizomatic 0.8 / issue #23), reported by its
-// role so the refusal can point at it — or undefined when every expansion names the child's reading.
-// Shares `edgeRoles`' traversal exactly, including `union`'s two arms, so no branch of a body escapes
-// the check. A wildcard role has no single name; it prints as `*`.
 export function readinglessExpandRole(body: Term): string | undefined {
   const walk = (t: Term): string | undefined => {
     switch (t.kind) {
@@ -231,16 +180,12 @@ export function readinglessExpandRole(body: Term): string | undefined {
         return walk(t.left) ?? walk(t.right);
       case "input":
       case "fix":
-        return undefined; // input gathers nothing; fix invokes another schema, checked on its own
+        return undefined;
     }
   };
   return walk(body);
 }
 
-// The write discipline (step 12): a claim template is a pointer skeleton with argument holes.
-// `at` + `context` make an entity pointer (the hole takes an id; `each` takes a list of them);
-// `value` takes a primitive hole or a fixed literal. One template call emits ONE delta shaped
-// exactly as declared — the guarantee that makes a published schema a PROTOCOL.
 export interface ClaimPointerTemplate {
   readonly role: string;
   readonly at?: { readonly arg: string };
@@ -253,22 +198,8 @@ export interface ClaimTemplate {
 }
 export type ClaimTemplates = Readonly<Record<string, ClaimTemplate>>;
 
-// A custom resolver (SPEC §22): the last, optional step of a lens — `resolve(bucket) → value`,
-// downstream of the Policy. The Policy keeps the epistemics (WHICH claims survive, in what order);
-// the resolver overrides only the semantics (what the gathered claims MEAN as a value in this lens (SPEC §22.9: the bucket is what the Policy is given)). It
-// travels on the BINDING, per field, so changing a resolver mints a new registration version (SPEC
-// §22.4 at the version-delta level; folding it into the `name@hash` VersionedSchema waits for §23's
-// renderer pin, exactly as §21 deferred `VersionedHyperSchema`).
-//
-// v1 admits RUNG (a) ONLY — bucket-pure, a function of the field's gathered deltas alone: cacheable,
-// deterministic, reproducible on any peer. The higher rungs (b hyperview-scoped, c store-querying, d
-// effectful) and (e) synthetics are described by SPEC §22 but not built; a resolver declaring any of
-// them is refused, so a reader trusts exactly the purity the signed definition names.
 export type ResolverRung = "a";
 
-// The field's declared output TYPE (SPEC §22.6): what the doors advertise once a resolver changes
-// what the value IS. The signed definition carries it so GraphQL/OpenAPI speak the field they serve —
-// a resolver turning a `pick` string into a histogram must not leave the door advertising `String`.
 export type ResolverOutputType = "string" | "number" | "boolean" | "list" | "object" | "bytes";
 const RESOLVER_TYPES: ReadonlySet<string> = new Set([
   "string",
@@ -282,17 +213,10 @@ const RESOLVER_TYPES: ReadonlySet<string> = new Set([
 export interface ResolverSpec {
   readonly rung: ResolverRung;
   readonly type: ResolverOutputType;
-  // Directly-runnable ESM (SPEC §22.3): `export default (bucket) => value`. What is audited IS what
-  // runs — one hash, no signed-vs-executed gap. Inline for v1 (the snapshot doctrine's first rung).
   readonly code: string;
 }
 export type ResolverSpecs = Readonly<Record<string, ResolverSpec>>;
 
-// Parse and validate the resolvers' JSON profile. Every entry must name rung (a) — the only rung v1
-// builds — a known output type, and non-empty ESM. Throws on anything malformed; the caller decides
-// loud (a publish refusal) vs quiet (drop from a replayed registration — the schema still binds, the
-// field simply falls back to its Policy value). Field-EXISTENCE is checked by the publisher, which
-// holds the schema; this validates shape alone.
 export function parseResolvers(raw: unknown): ResolverSpecs {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error("resolvers must be an object of per-field resolver specs");
@@ -320,17 +244,6 @@ export function parseResolvers(raw: unknown): ResolverSpecs {
   return out;
 }
 
-// The serving key (§21.7): the LENS name when the binding carries one, the hyperschema name in
-// the degenerate case. Every door keys on this — never on the hyperschema name, which sibling
-// lenses share.
-//
-// LensName and ProgramName are BRANDS, not runtime values — `string & {unique symbol}` erases to
-// `string` at compile time, so this costs nothing and changes no bytes. Their whole job is to make
-// the confusion behind hazard H6 a TYPE ERROR: `LensName === ProgramName` has no overlap, so the
-// compiler refuses it. Read a program name through `programOf`, a lens name through `lensOf`, and
-// type every door parameter that keys on a lens as `LensName` — then a door that gates on the
-// program cannot type-check. The one residual hole is raw `r.hyperschema.name` (rhizomatic types it
-// as bare `string`), which is why `programOf` exists: route through it and the brand is restored.
 export type LensName = string & { readonly __lens: unique symbol };
 export type ProgramName = string & { readonly __program: unique symbol };
 
@@ -339,11 +252,8 @@ export const lensOf = (r: { lensName?: string; hyperschema: { name: string } }):
 
 type Lensed = { lensName?: string; hyperschema: { name: string } };
 
-// One index per registration list. A list is replaced, never edited, when law changes, so the index
-// needs no invalidation, and a lookup costs one map read instead of a scan of every registration.
 const lensIndexes = new WeakMap<readonly Lensed[], ReadonlyMap<string, Lensed>>();
 
-/** The registration whose lens is `name`, or undefined: the first one in list order, as `find` gives. */
 export function byLens<T extends Lensed>(rows: readonly T[], name: string): T | undefined {
   let index = lensIndexes.get(rows);
   if (index === undefined) {
@@ -354,26 +264,9 @@ export function byLens<T extends Lensed>(rows: readonly T[], name: string): T | 
   return index.get(name) as T | undefined;
 }
 
-// The reading a REGISTRATION INPUT is, before anything is bound: the Schema's own name when it
-// carries one, else the program's. This is what decides the living Schema entity `schema:<lens>`
-// and the GraphQL field the surface answers at, so any door deciding what an input may PUBLISH must
-// ask it — `hyperschema.name` answers a different question (H6).
-//
-// Exported so the two MINT paths and the door that gates them read one derivation: a second copy
-// beside the deciding one is free to drift, and could only drift toward admitting a reading the
-// gate never saw. `publishRegistrationImpl` and `registerImpl` both call it.
-//
-// `assembleGenesis` does NOT — it must additionally honour an explicit `Registration.lensName`,
-// which a wire input cannot carry, so it derives `reg.lensName ?? reg.schema.name ?? ...` itself.
-// That path is operator-only and unreachable from any fenced door, so nothing escapes through the
-// difference; but the claim "one derivation" is true of the two mint paths, not of all three.
 export const lensNameFor = (hyperschema: HyperSchema, schema: Schema): LensName =>
   (schema.name ?? hyperschema.name) as LensName;
 
-// The PROGRAM name (the hyperschema's own name) — the thing sibling lenses SHARE and doors must
-// never gate on. Reading it through here rather than raw `r.hyperschema.name` restores the brand, so
-// comparing it to a lens name is caught. Materializations are per-program, so this is the right key
-// there and the wrong key at every door.
 export const programOf = (r: { hyperschema: { name: string } }): ProgramName =>
   r.hyperschema.name as ProgramName;
 
@@ -381,67 +274,29 @@ export interface Registration {
   readonly hyperschema: HyperSchema;
   readonly schema: Schema;
   readonly roots: readonly string[];
-  // The LENS name (§21.7 coexistence): the resolution Schema's own semantic name, read from the
-  // binding's bytes (the `schema` pointer's target minus the `schema:` prefix). Defaults to the
-  // hyperschema's name — today's 1:1 reading, forever the degenerate case. Serving keys on THIS
-  // (GraphQL family, REST path segment, loam.public admission, the §17 ladder), never on the
-  // hyperschema name, which many sibling lenses share.
   readonly lensName?: string;
-  // The hyperschema entity the definition lives at (`hyperschema:<Name>` by default). Identity is
-  // the ENTITY, not the name: republishing here evolves; a different entity is a different schema.
   readonly entity?: string;
-  // The BINDING delta's stamp and id — what a declared policy resolves cross-origin contests on
-  // when this row meets a channel pool's row for one name (§47 slice 3). Optional: a manual
-  // registration has no binding delta.
   readonly boundAt?: number;
-  /**
-   * When this entity FIRST bound this lens name, across every surviving binding of it — the
-   * moment a claim to the name was staked. `boundAt` is the latest binding's time and moves on
-   * every republish; a contest keyed on it would hand a name to a rival the moment its holder
-   * evolved. Contests key on this instead (§58 position 2, the bound fold).
-   */
+
   readonly firstBoundAt?: number;
   readonly boundId?: string;
-  // Who SIGNED the binding delta. Deliberately NOT the origin a policy ranks by: a channel's
-  // blessing is the receiving operator's own act wherever it lands, so the signing key cannot tell
-  // a root row from a pool row (T202's warning). A contested-name report names both, separately.
   readonly boundBy?: string;
-  // The write discipline, traveling with the read program.
   readonly mutations?: ClaimTemplates;
-  // Why `mutations` is absent although the binding's bytes carry a payload: the payload could not
-  // be read. Present ONLY on a stored registration whose templates were dropped at parse, so the
-  // replay can report the loss instead of serving a surface quietly missing its declared door.
   readonly mutationsDefect?: string;
-  // Front-door writability (SPEC §14, immutable-by-default): when present, ONLY these fields accept
-  // a surface write; the rest are read-only. Absent → NO field is writable (silence means "you may
-  // not" — the deny-by-default posture §21's wave flipped in). Every registration Loam mints names
-  // its writable fields explicitly.
   readonly writable?: readonly string[];
-  // Custom resolvers (SPEC §22), per field — the optional last step of the lens.
   readonly resolvers?: ResolverSpecs;
-  // Reference declarations (SPEC §51), per prop — the write side of an edge field, derived.
   readonly refs?: RefSpecs;
-  // Why `refs` is absent although the binding's bytes carry a payload: the payload could not be
-  // read. Present ONLY on a stored registration whose declaration was dropped at parse — without
-  // it the drop is silent, and a prop also named in `writable` gets its PrimitiveValue argument
-  // back: the fossil surface, resurrected with nobody told.
   readonly refsDefect?: string;
 }
 
 const isPrimitive = (v: unknown): v is Primitive =>
   typeof v === "string" || typeof v === "number" || typeof v === "boolean";
 
-// Parse and validate the templates' JSON profile. Throws on anything malformed — the caller
-// decides whether that refuses a publish (loud) or drops the templates from a stored
-// registration (quiet: the schema still binds; the surface just lacks the mutation).
 export function parseClaimTemplates(raw: unknown): ClaimTemplates {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error("mutations must be an object of named claim templates");
   }
   const out: Record<string, ClaimTemplate> = {};
-  // GraphQL's own grammar for names, minus a leading underscore for templates (built-ins own
-  // that space) and minus double-underscore anywhere it leads for ARGS (introspection's, and
-  // "__proto__" would vanish into a plain object's prototype setter).
   const argOk = (a: string): boolean => /^[A-Za-z_][A-Za-z0-9_]*$/.test(a) && !a.startsWith("__");
   for (const [name, tpl] of Object.entries(raw as Record<string, unknown>)) {
     if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name)) {
@@ -494,10 +349,6 @@ export function parseClaimTemplates(raw: unknown): ClaimTemplates {
       if (o["each"] === true) {
         throw new Error(`template "${name}" pointer ${i}: each belongs to entity pointers only`);
       }
-      // A `context` beside a literal value is inert, not malformed: nothing downstream reads it
-      // (gql.ts consults `context` only on an `at` pointer), so such a template has always bound
-      // and served. Refusing it here would delete a working mutation door from every store that
-      // already holds one, with no migration — so the key is dropped, as it always was.
       const value = o["value"];
       const hole = value as { arg?: unknown };
       if (typeof hole === "object" && hole !== null) {
@@ -518,21 +369,11 @@ export function parseClaimTemplates(raw: unknown): ClaimTemplates {
   return out;
 }
 
-// The at-rest entity a hyperschema DEFINITION lives at. `hyperschema:<Name>` by default (§21): the
-// prefix names what the entity holds — the gather program — and `schema:` is left for the resolution
-// Schema's own entities. An explicit `entity` always overrides the default.
 export const schemaEntityFor = (hyperschema: HyperSchema, entity?: string): string =>
   entity ?? `hyperschema:${hyperschema.name}`;
 
-// The living resolution Schema's own entity (SPEC §21): `schema:<name>`. Single-lens for now — the
-// name is the hyperschema's, so one lens per gather program.
 export const schemaLivingEntityFor = (name: string): string => `schema:${name}`;
 
-// A VersionedSchema's true name (SPEC §21 — `name@hash`): the content address of the FROZEN bytes.
-// `schemaCanonicalHex` is the canonical CBOR of `props`+`default` only (name/alg are identity
-// metadata, excluded), so renaming a lens never moves the version and two peers computing it agree;
-// `contentAddress` bounds it to one BLAKE3 multihash — the same addressing discipline §17's version
-// door already runs one rung down. The frozen bytes cannot be unsaid, so a snapshot is grow-only.
 const hexToBytes = (hex: string): Uint8Array => {
   const out = new Uint8Array(hex.length >> 1);
   for (let i = 0; i < out.length; i += 1) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
@@ -544,24 +385,10 @@ export const versionedSchemaHash = (schema: Schema): string =>
 export const versionedSchemaEntityFor = (name: string, schema: Schema): string =>
   `${schemaLivingEntityFor(name)}@${versionedSchemaHash(schema)}`;
 
-// The registration entity for a hyperschema entity — one registration per hyperschema entity,
-// latest wins. Keys off the (now `hyperschema:`-prefixed) entity, so the registration files under
-// `registration:hyperschema:<Name>`.
 const registrationEntity = (schemaEntity: string): string => `registration:${schemaEntity}`;
 
-// The pointer context every registration-internal entity pointer wears (the hyperschema definition,
-// the living Schema, the frozen snapshot). It is NOT `CTX_REGISTRATION` on purpose — that context is
-// the `registers` key alone, the one pointer `survivingCandidates` groups on. `loadHyperSchema` /
-// `loadSchema` re-gather at the pointed-at entity id under `definition` context, so this tag is only
-// a namespace marker keeping the definition bucket clear of a registration masquerading in it.
 const CTX_POINTER = "registration";
 
-// The claims a registration BINDING carries (SPEC §21 — registration demoted to a binding). It names
-// three entities and no definitions: the hyperschema gather program, the LIVING resolution Schema
-// (`schema:<name>` — what the latest lens resolves and evolves against), and this version's FROZEN
-// VersionedSchema snapshot (`schema:<name>@<hash>` — what §17's version door resolves an old version
-// against, so v1 keeps its reading forever). Roots, mutations, and writability still ride the binding
-// inline: they are serving discipline, local to a deployment, never part of the reading (§21).
 export function registrationClaims(
   schemaEntity: string,
   livingEntity: string,
@@ -595,8 +422,6 @@ export function registrationClaims(
               target: { kind: "primitive" as const, value: JSON.stringify(writable) },
             },
           ]),
-      // Custom resolvers ride the binding (SPEC §22): per-field runnable ESM + rung + output type,
-      // so changing a resolver mints a new version. Inline JSON, the snapshot doctrine's first rung.
       ...(resolvers === undefined
         ? []
         : [
@@ -605,7 +430,6 @@ export function registrationClaims(
               target: { kind: "primitive" as const, value: JSON.stringify(resolvers) },
             },
           ]),
-      // Reference declarations ride the binding too (SPEC §51): serving discipline, like writable.
       ...(refs === undefined
         ? []
         : [
@@ -621,9 +445,6 @@ export function registrationClaims(
           entity: { id: registrationEntity(schemaEntity), context: CTX_REGISTRATION },
         },
       },
-      // `hyperschema` names the gather program's entity (the definition read by loadHyperSchema);
-      // `schema` names the LIVING resolution Schema entity (read by loadSchema, the latest lens);
-      // `schemaVersion` names this binding's FROZEN VersionedSchema snapshot (the §17 version freeze).
       {
         role: "hyperschema",
         target: { kind: "entity", entity: { id: schemaEntity, context: CTX_POINTER } },
@@ -641,15 +462,6 @@ export function registrationClaims(
   };
 }
 
-// Everything a registration plants beyond the hyperschema definition (SPEC §21). The Schema, once a
-// passenger quoted inline in the binding, is now a first-class entity in its own right: published
-// twice — as the LIVING `schema:<name>` (which evolves on republish) and as an immutable
-// VersionedSchema SNAPSHOT at its content address (which never supersedes) — and then REFERENCED by
-// the binding. rhizomatic requires a published Schema to carry name+alg, so the single-lens name is
-// stamped here. All four deltas (definition aside) go down together: `loadSchema` needs the entities
-// present before the binding that points at them can resolve. Timestamps come from the caller's own
-// monotonic clock so genesis stays idempotent and a live publish stays ordered. A bare number from
-// the clock is both times; a Stamp gives each its own.
 export interface RegistrationDeltaClaims {
   readonly living: Claims;
   readonly snapshot: Claims;
@@ -695,14 +507,6 @@ export function registrationDeltaClaims(
   return { living, snapshot, binding, livingEntity, snapshotEntity };
 }
 
-// The ONE shape every registration surface accepts — the `loam register` file, POST
-// /:mount/register, and the MCP `loam_register` tool — identical to the `Registration` it yields:
-//
-//   { hyperschema: { name, alg?, body }, schema, roots, entity?, mutations? }
-//
-// The body and schema travel as rhizomatic's own JSON profiles (parse∘serialize is identity).
-// Anything malformed throws a plain-English reason; each caller renders it (a CLI exit code, an
-// HTTP 400, an MCP error) — so the three doors can never drift on what a registration looks like.
 export interface RegistrationInput {
   readonly hyperschema: HyperSchema;
   readonly schema: Schema;
@@ -714,9 +518,6 @@ export interface RegistrationInput {
   readonly refs?: RefSpecs;
 }
 
-// A Policy JSON shape carries only its own kind's fields. Naming both the failing prop path and
-// the accepted shapes turns rhizomatic's bare parse error (`expected object for order`) into a
-// message a registry author can act on.
 const POLICY_SHAPES =
   "a prop takes one of { pick: { order }, all: { order }, conflicts: { order }, merge: <fn>, " +
   "absentAs: { const, then } } — every order is { byTimestamp: 'desc' | 'asc' }, " +
@@ -735,8 +536,6 @@ function parseSchemaNamed(input: unknown): Schema {
   }
 }
 
-// Find the first Policy rhizomatic refuses, so the door can name it. Per-prop probing via
-// `parseSchema({ default: policy })` is exact — a Policy parses standalone or not at all.
 function locateSchemaFailure(input: unknown): string {
   if (typeof input !== "object" || input === null) return "schema";
   const o = input as { props?: unknown; default?: unknown };
@@ -816,8 +615,6 @@ const primitive = (claims: Claims, role: string): string | number | boolean | un
 
 interface Candidate {
   schemaEntity: string;
-  // The living lens and this version's frozen snapshot — resolved to a Schema lazily by the reader
-  // (latest → living, a version → snapshot), each against the lawful ground it already holds.
   livingEntity: string;
   snapshotEntity: string;
   roots: readonly string[];
@@ -829,23 +626,14 @@ interface Candidate {
   refsDefect?: string;
   timestamp: number;
   id: string;
-  /** The BINDING delta's author — what a declared byAuthorRank policy ranks on (§47). */
   author: string;
 }
 
-// The entity a registration pointer names, by role — the living `schema` and the frozen
-// `schemaVersion`. An entity target under this role, or undefined (a malformed binding binds nothing).
 const entityRef = (claims: Claims, role: string): string | undefined => {
   const p = claims.pointers.find((x) => x.role === role);
   return p?.target.kind === "entity" ? p.target.entity.id : undefined;
 };
 
-// The shared walk both readers stand on: every SURVIVING (lawful, non-negated) registration
-// delta, grouped by the registration entity it files under, each group ascending in ground
-// order — (timestamp, id), the same tie-break everywhere. readRegistrations takes the last of
-// each group (the live lens); readRegistrationVersions takes them all (§17: publishing is
-// append-only, and every survivor is an answerable version).
-/** Collects the earliest moment after `now` at which a registration claim starts or stops. */
 export type Boundary = { next?: number };
 
 function survivingCandidates(
@@ -856,21 +644,15 @@ function survivingCandidates(
   boundary?: Boundary,
   alsoStruckBy?: string,
 ): Map<string, Candidate[]> {
-  // History, not the snapshot: a claim that starts or stops later must still be seen, so that
-  // `boundary` can name when to read again. Validity is applied per delta below.
   const lawful = lawfulHistory(reactor, operator);
-  // A ground that holds another governor's copy may retire it in its own reading (ruling 11): a
-  // copy counts as struck under its author's strikes or under the holding ground's.
   const byAuthor = negatedAt(reactor, now, operator);
   const byHolder = alsoStruckBy === undefined ? undefined : negatedAt(reactor, now, alsoStruckBy);
   const negated = (id: string): boolean => byAuthor(id) || (byHolder?.(id) ?? false);
   const groups = new Map<string, Candidate[]>();
   for (const delta of lawful) {
-    // Valid over [validFrom, validUntil). A binding outside its interval binds nothing now, and
-    // `boundary` tells the gateway when to read again.
     const { validFrom, validUntil } = delta.claims;
     const valid = validFrom <= now && (validUntil === undefined || now < validUntil);
-    let key: string | undefined; // the registration entity this delta files under
+    let key: string | undefined;
     for (const p of delta.claims.pointers) {
       if (p.target.kind === "entity" && p.target.entity.context === CTX_REGISTRATION) {
         key = p.target.entity.id;
@@ -879,8 +661,6 @@ function survivingCandidates(
     }
     if (key === undefined) continue;
     if (boundary !== undefined) {
-      // The registration's own interval, and the interval of every negation in its chain: a
-      // timed strike changes what is bound at its own boundary, with nothing written.
       const times: (number | undefined)[] = [validFrom, validUntil];
       const chain = [...reactor.negationsOf(delta.id)];
       for (const negId of chain) {
@@ -896,18 +676,12 @@ function survivingCandidates(
       }
     }
     if (!valid) continue;
-    // A lawfully struck registration is WITHDRAWN, not unparseable: the caller who asked for
-    // the withdrawn list still gets its parsed shape (the 410 door needs the schema it named);
-    // everyone else skips it exactly as before.
     const struck = negated(delta.id);
     if (struck && withdrawn === undefined) continue;
 
     const schemaRef = delta.claims.pointers.find(
       (p) => p.role === "hyperschema" && p.target.kind === "entity",
     );
-    // The Schema no longer travels inline (SPEC §21): the binding NAMES its living entity and its
-    // frozen snapshot, and the reader resolves the right one via loadSchema. A binding missing any
-    // of the three references — hyperschema, living schema, snapshot — binds nothing.
     const livingEntity = entityRef(delta.claims, "schema");
     const snapshotEntity = entityRef(delta.claims, "schemaVersion");
     const rootsJson = primitive(delta.claims, "roots");
@@ -917,7 +691,7 @@ function survivingCandidates(
       snapshotEntity === undefined ||
       typeof rootsJson !== "string"
     ) {
-      continue; // a malformed registration binds nothing
+      continue;
     }
     let roots: string[];
     try {
@@ -925,10 +699,6 @@ function survivingCandidates(
     } catch {
       continue;
     }
-    // A malformed template payload does not refuse the binding (the schema still binds; the
-    // surface just lacks the mutation) — the loud refusal belongs to publish, not replay. But the
-    // drop is NOT silent: the defect rides along so the replay can report it, exactly as a
-    // bind-time shed is reported. A surface quietly missing its declared door is T96.
     let mutations: ClaimTemplates | undefined;
     let mutationsDefect: string | undefined;
     const mutationsJson = primitive(delta.claims, "mutations");
@@ -940,8 +710,6 @@ function survivingCandidates(
         mutationsDefect = err instanceof Error ? err.message : String(err);
       }
     }
-    // Writability is a plain string[] — a malformed payload is likewise dropped quietly, leaving
-    // the schema permissive rather than refusing to bind.
     let writable: readonly string[] | undefined;
     const writableJson = primitive(delta.claims, "writable");
     if (typeof writableJson === "string") {
@@ -954,8 +722,6 @@ function survivingCandidates(
         writable = undefined;
       }
     }
-    // Resolvers (SPEC §22) are dropped QUIETLY on a malformed or unadmitted-rung payload — the schema
-    // still binds, the field just falls back to its Policy value. The loud refusal belongs to publish.
     let resolvers: ResolverSpecs | undefined;
     const resolversJson = primitive(delta.claims, "resolvers");
     if (typeof resolversJson === "string") {
@@ -965,10 +731,6 @@ function survivingCandidates(
         resolvers = undefined;
       }
     }
-    // Reference declarations (SPEC §51): the drop is quiet for the BIND (the schema still
-    // serves) and NOT silent for the reader — the defect rides along exactly as a template
-    // defect does, because losing refs can resurrect a writable prop's PrimitiveValue argument,
-    // and a fossil surface nobody was told about is the failure this feature exists to close.
     let refs: RefSpecs | undefined;
     let refsDefect: string | undefined;
     const refsJson = primitive(delta.claims, "refs");
@@ -1004,31 +766,19 @@ function survivingCandidates(
     if (group === undefined) groups.set(key, [candidate]);
     else group.push(candidate);
   }
-  // Ground order within each group: (timestamp, id) ascending — the same tie-break the
-  // latest-wins reader has always used, so "last of the group" IS the historical answer.
   for (const group of groups.values()) {
     group.sort((a, b) => a.timestamp - b.timestamp || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   }
   return groups;
 }
 
-// The gateway's NUL alphabet, restated locally (this module must not import gateway.ts).
 const NUL_SEP = String.fromCharCode(0);
 
-// The lens name a binding carries in its own bytes: the living `schema:<name>` pointer's target,
-// minus the prefix (slice 2prime put it there). A binding predating the prefix convention falls
-// back to the whole id — one name per entity, the conservative pre-coexistence regrouping.
 const lensNameOf = (cand: Candidate): LensName =>
   (cand.livingEntity.startsWith("schema:")
     ? cand.livingEntity.slice("schema:".length)
     : cand.livingEntity) as LensName;
 
-/**
- * One contender for a withheld name, as its own binding delta records it: which definition, who
- * signed the binding, when, and the binding's id. The stamp is what lets a reader tell an old
- * registration from a fresh challenger — the contest names both, and says nothing about which
- * deserves the name.
- */
 export interface ContestedBinding {
   readonly entity: string;
   readonly author: string;
@@ -1036,15 +786,6 @@ export interface ContestedBinding {
   readonly deltaId: string;
 }
 
-/**
- * The names a `conflicts` policy is withholding, each with EVERY candidate named (§47 criterion 4).
- * This is the refusal a person can act on: the name is absent from the surface, and this reader
- * says why and between whom — never a silent gap a caller mistakes for "no such lens".
- *
- * ONE reactor, deliberately: this module must not import gateway.ts, so a store that also serves
- * blessed law from channel pools reads its cross-origin contests through the gateway's own
- * `contestedNames` (lifecycle.ts), which composes this reader over every ground replay folds.
- */
 export function readContestedBindings(
   reactor: Reactor,
   now: number,
@@ -1084,11 +825,6 @@ export function readContestedBindings(
   return out;
 }
 
-/**
- * Contested names under several governors, nearest first, with the same reservation as
- * `readLawfulRegistrations`: a governor's contest counts only for names no nearer governor claimed.
- * A contest a selected host's policy withholds is reported where the child serves that name.
- */
 export function readLawfulContested(
   reactor: Reactor,
   now: number,
@@ -1117,12 +853,6 @@ export function readLawfulContested(
   return out;
 }
 
-/**
- * Registrations read under several governors, nearest first (a pool's own key, then the hosts it
- * selects; step6-pool-keys.md, stage 1b-ii). Each governor's own rules resolve its own names,
- * binding policy included. A name a nearer governor CLAIMS is reserved for it, even where its policy
- * withheld the name: a farther copy fills only a name no nearer governor claimed.
- */
 export function readLawfulRegistrations(
   reactor: Reactor,
   now: number,
@@ -1160,28 +890,18 @@ export function readRegistrations(
   alsoStruckBy?: string,
 ): Registration[] {
   const groups = survivingCandidates(reactor, now, operator, undefined, boundary, alsoStruckBy);
-  // Latest-wins narrows to latest-PER-LENS (§21.7): within one registration entity's group, each
-  // lens name (the living `schema:<name>` pointer, in the bytes since slice 2prime) keeps its own
-  // latest survivor — registering FilmClassic no longer evicts Film. A pre-coexistence store's
-  // bindings all carry one lens name per entity, so this reads exactly as the old latest-wins did.
   const latest = new Map<string, Candidate>();
   const first = new Map<string, number>();
   for (const [key, group] of groups) {
     for (const cand of group) {
       const at = [key, lensNameOf(cand)].join(NUL_SEP);
-      latest.set(at, cand); // ground order: last write wins
-      if (!first.has(at)) first.set(at, cand.timestamp); // ...and the first is remembered
+      latest.set(at, cand);
+      if (!first.has(at)) first.set(at, cand.timestamp);
     }
   }
-  // The survivor carries the moment its entity FIRST claimed the lens, read back by identity so
-  // the emit below, which iterates survivors and not groups, need not rebuild the key.
   const firstOf = new Map<Candidate, number>();
   for (const [at, survivor] of latest) firstOf.set(survivor, first.get(at) ?? survivor.timestamp);
 
-  // §47 — A DECLARED POLICY RESOLVES CONTESTED NAMES; an undeclared store keeps today's behavior
-  // whole (criterion 12), including its build-time collision when two entities want one lens. The
-  // production loop above stays the fast path; `interpretBindingPolicy` is the spec as code, and
-  // the equivalence rail holds this block to its answers so the two can never drift silently.
   const mode = readBindingPolicy(reactor, now, operator);
   const resolvedAway = new Set<string>();
   if (mode !== undefined) {
@@ -1199,36 +919,18 @@ export function readRegistrations(
     for (const c of latest.values()) {
       const lens = lensNameOf(c) as string;
       const winner = resolved.winners.get(lens);
-      // Shadowed by the policy, or withheld under `conflicts`: either way this candidate does not
-      // reach the surface, and under `conflicts` the reader below names every contender.
       if (winner !== c.id) resolvedAway.add(c.id);
     }
   }
 
-  // Loosely dependency-ordered by timestamp so refs tend to resolve on replay; the gateway's
-  // fixpoint handles what order cannot (ties, forward refs).
   const out: Registration[] = [];
   for (const cand of [...latest.values()].sort((a, b) => a.timestamp - b.timestamp)) {
     if (resolvedAway.has(cand.id)) continue;
-    // Each loader reads one entity and the negation chains of what is filed there, so each is
-    // handed that scope. Read outside the `try`: a ground that disagrees with its own index
-    // refuses, it does not read as an unbound registration.
     const definition = lawfulScopeAt(reactor, now, cand.schemaEntity, operator);
     const reading = lawfulScopeAt(reactor, now, cand.snapshotEntity, operator);
     try {
       const hyperschema = loadHyperSchema(definition, cand.schemaEntity, now);
-      // NUL is the gateway's own alphabet (internal materialization names): a definition whose
-      // name carries it — plantable only by hand, never through publishRegistration — binds
-      // nothing rather than colliding with that namespace.
       if (hyperschema.name.includes("\u0000")) continue;
-      // The LIVE lens resolves against the latest SURVIVING binding's own frozen snapshot (SPEC §21) —
-      // NOT the living `schema:<name>` entity. The distinction bites under withdrawal: striking the
-      // latest registration must revert the live surface to the prior version, but the struck binding's
-      // living-entity publish is not itself negated, so the living entity would stay ahead of the
-      // surviving binding and keep serving a withdrawn shape. Resolving each surviving binding against
-      // ITS snapshot keeps the live reading and the version door in lockstep — the snapshot of the
-      // latest survivor IS the current reading, and it recedes exactly when its binding is withdrawn.
-      // (The living entity remains a first-class, directly-loadable node; it just is not the read path.)
       const schema = loadSchema(reading, cand.snapshotEntity, now);
       out.push({
         hyperschema,
@@ -1247,27 +949,17 @@ export function readRegistrations(
         ...(cand.refs === undefined ? {} : { refs: cand.refs }),
         ...(cand.refsDefect === undefined ? {} : { refsDefect: cand.refsDefect }),
       });
-    } catch {
-      // no surviving (or a malformed) definition/schema: the registration is unbound, not fatal
-    }
+    } catch {}
   }
   return out;
 }
 
-// One answerable version of a registration (SPEC §17): the Nth surviving registration for its
-// entity, in ground order. `deltaId` is the version's TRUE NAME — the registration delta's
-// content address; the `version` number is the derived, human-friendly alias, and it SHIFTS
-// when an earlier version is withdrawn (struck): aliases are conveniences, the hash never lies.
 export interface RegistrationVersion extends Registration {
   readonly version: number;
   readonly deltaId: string;
   readonly timestamp: number;
 }
 
-// Every answerable version of every registration, ascending per entity. A version pins the
-// REGISTRATION — policy and roots, the lens's resolution discipline. The schema definition
-// resolves as currently defined: its identity is the ENTITY (see Registration), and evolving
-// a definition in place is the same append-only story one level down.
 export function readRegistrationVersions(
   reactor: Reactor,
   now: number,
@@ -1282,17 +974,11 @@ export function readRegistrationVersions(
       const definition = lawfulScopeAt(reactor, now, cand.schemaEntity, operator);
       const reading = lawfulScopeAt(reactor, now, cand.snapshotEntity, operator);
       try {
-        // The SCHEMA entity the candidate references, not the registration entity it files
-        // under — the same resolution readRegistrations performs.
         hyperschema = loadHyperSchema(definition, cand.schemaEntity, now);
-        // NUL is the gateway's own alphabet (see readRegistrations) — it binds nothing.
         if (hyperschema.name.includes(String.fromCharCode(0))) continue;
-        // A VERSION freezes against ITS OWN snapshot (SPEC §21/§17) — never the living entity — so
-        // v1 keeps resolving an evolved field with its old reading long after the living Schema has
-        // moved on. This IS §17's per-version freezing, now a named, content-addressed entity.
         schema = loadSchema(reading, cand.snapshotEntity, now);
       } catch {
-        continue; // no surviving definition/snapshot: this candidate is unbound, not fatal
+        continue;
       }
       n += 1;
       out.push({
@@ -1314,22 +1000,14 @@ export function readRegistrationVersions(
       });
     }
   }
-  // Total order: (timestamp, deltaId) — boot-stable even when timestamps tie across entities,
-  // so vN aliasing downstream never rides Map iteration order.
   return out.sort(
     (a, b) =>
       a.timestamp - b.timestamp || (a.deltaId < b.deltaId ? -1 : a.deltaId > b.deltaId ? 1 : 0),
   );
 }
 
-// A WITHDRAWN registration: it was lawful, the operator struck it, the ground remembers. The
-// 410 door (SPEC §17) answers from this list and ONLY this list — a hash that was never a
-// lawful registration here is a plain 404, whatever bytes it names.
 export interface WithdrawnRegistration {
   readonly deltaId: string;
-  // The LENS name of the struck registration — the same key the §17 door compares against a URL
-  // segment. Named `lensName`, not `schemaName`, so the next reader cannot take it from the
-  // hyperschema (the PROGRAM), which sibling lenses share (hazard H6).
   readonly lensName: LensName;
 }
 
@@ -1344,15 +1022,9 @@ export function readWithdrawnRegistrations(
   for (const cand of withdrawn) {
     const definition = lawfulScopeAt(reactor, now, cand.schemaEntity, operator);
     try {
-      // The `loadHyperSchema` call is the loadability guard only — "nothing nameable remains" if the
-      // definition is gone. The NAME comes from `lensNameOf`, the lens the door will compare, never
-      // from the hyperschema (the program). This is the same reader the sibling latest-per-lens and
-      // version readers use above.
       loadHyperSchema(definition, cand.schemaEntity, now);
       out.push({ deltaId: cand.id, lensName: lensNameOf(cand) });
-    } catch {
-      // its definition is gone too: nothing nameable remains to say "withdrawn" about
-    }
+    } catch {}
   }
   return out;
 }

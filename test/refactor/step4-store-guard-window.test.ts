@@ -1,19 +1,3 @@
-// The erase completeness guard reads a SEPARATE declaration's negation at the present read time.
-// This file checks that a present read loses no case. A separate declaration whose negation has
-// not begun, or has expired, is live, so the live container table names the container and the
-// guard fires through the live path. Inside the negation's window, a later shared declaration
-// keeps the entity alive and the guard fires through the struck-lineage path.
-//
-// Each case asserts both levels: the report (`faultEntities`, and which path named the entity by
-// the posture the table resolves) and the door (`erase` refuses before any work, and the target
-// stays held). Each case also carries a bystander: a shared container that never had its own
-// store, which must never be named.
-//
-// The negation-window cases are CONTROLS: they pass on the code that reads the negation at the
-// present time, and they pin that reading. The expiry cases are GATES: an expiry is not a forget,
-// so a separate declaration whose own validity has ended keeps naming its store until a detach
-// record covers it. Negating every declaration (the explicit forget) still clears the guard.
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { authorForSeed, makeNegationClaims, signClaims } from "@bombadil/rhizomatic";
 import { unreachableStoreReport } from "../../src/gateway/container.js";
@@ -26,8 +10,8 @@ import { PLANT, PLANT_POLICY, PLANT_WRITABLE } from "../gateway/fixtures.js";
 
 const OP_SEED = "6d".repeat(32);
 const OP = authorForSeed(OP_SEED);
-const T1 = 3_000_000; // the negation begins
-const T2 = 3_010_000; // the negation ends
+const T1 = 3_000_000;
+const T2 = 3_010_000;
 const WALL = "container:wall";
 const BYSTANDER = "container:bystander";
 
@@ -75,9 +59,6 @@ const declare = (
 const strike = (id: string, ts: number, window: { validFrom: number; validUntil?: number }) =>
   signClaims({ ...makeNegationClaims(OP, ts, id), ...window }, OP_SEED);
 
-// What the guard says now, and which path named the wall: "live" when the table resolves the wall
-// as separate, "lineage" when it resolves shared and only the struck declaration names a store.
-// "ended" when the table no longer names the wall at all.
 function guard(gw: Gateway): { faults: string[]; path?: "live" | "lineage" | "ended" } {
   const faults = unreachableStoreReport(gw).faultEntities;
   const posture = gw.containers().containers.get(WALL)?.posture;
@@ -107,10 +88,9 @@ describe("the store guard's present-time read of a separate declaration's negati
       strike(separate.id, T1 - 80, { validFrom: T1, validUntil: T2 }),
     ]);
 
-    vi.setSystemTime(T1 - 1); // before the window: the separate declaration is live
+    vi.setSystemTime(T1 - 1);
     expect(guard(gw)).toEqual({ faults: [WALL], path: "live" });
 
-    // Inside the window the name does not stand, so the door admits a shared declaration of it.
     vi.setSystemTime(T1 + 10);
     expect(gw.containers().containers.has(WALL)).toBe(false);
     await gw.append([declare(WALL, "shared", T1 + 10)]);
@@ -118,7 +98,7 @@ describe("the store guard's present-time read of a separate declaration's negati
     expect(guard(gw)).toEqual({ faults: [WALL], path: "lineage" });
     await expectEraseRefused(gw, fact.id);
 
-    vi.setSystemTime(T2); // the negation has expired: the earliest declaration is separate again
+    vi.setSystemTime(T2);
     expect(gw.containers().containers.get(WALL)?.posture).toBe("separate");
     expect(guard(gw)).toEqual({ faults: [WALL], path: "live" });
     await expectEraseRefused(gw, fact.id);
@@ -163,7 +143,6 @@ describe("the store guard's present-time read of a separate declaration's negati
       vi.setSystemTime(at);
       expect(guard(gw)).toEqual({ faults: [] });
     }
-    // The door agrees: with no separate store named, erase does its work.
     const report = await gw.erase(fact.id);
     expect(report.erased).toMatch(/^[0-9a-f]+$/);
     expect(gw.reactor.get(fact.id)).toBeUndefined();
@@ -183,7 +162,7 @@ describe("the store guard's present-time read of a separate declaration's negati
     vi.setSystemTime(T1 - 50);
     expect(guard(gw)).toEqual({ faults: [WALL], path: "live" });
 
-    vi.setSystemTime(T1 + 10); // expired, not negated: the name does not stand, so it re-declares
+    vi.setSystemTime(T1 + 10);
     await gw.append([declare(WALL, "shared", T1 + 10)]);
     expect(gw.containers().containers.get(WALL)?.posture).toBe("shared");
     expect(guard(gw)).toEqual({ faults: [WALL], path: "lineage" });
@@ -229,7 +208,7 @@ describe("the store guard's present-time read of a separate declaration's negati
     const report = await gw.erase(fact.id);
     expect(report.kept).toEqual([WALL]);
     expect(gw.reactor.get(fact.id)).toBeUndefined();
-    expect(gw.reactor.get(bystanderFact.id)).toBeDefined(); // the erase removed only its target
+    expect(gw.reactor.get(bystanderFact.id)).toBeDefined();
     await gw.close();
   });
 
@@ -244,12 +223,12 @@ describe("the store guard's present-time read of a separate declaration's negati
     vi.setSystemTime(T1 + 10);
     const T2 = T1 + 500;
     await gw.append([strike(separate.id, T1 + 5, { validFrom: T1 + 5 })]);
-    await gw.append([declare(WALL, "shared", T2)]); // held and not negated, but not started
-    expect(gw.containers().containers.has(WALL)).toBe(false); // the live table is empty
-    expect(guard(gw).faults).toEqual([WALL]); // not every declaration is negated: no forget
+    await gw.append([declare(WALL, "shared", T2)]);
+    expect(gw.containers().containers.has(WALL)).toBe(false);
+    expect(guard(gw).faults).toEqual([WALL]);
     await expectEraseRefused(gw, fact.id);
 
-    vi.setSystemTime(T2 + 10); // the successor is live, shared: the lineage path names it
+    vi.setSystemTime(T2 + 10);
     expect(guard(gw)).toEqual({ faults: [WALL], path: "lineage" });
     await gw.close();
   });
@@ -266,7 +245,7 @@ describe("the store guard's present-time read of a separate declaration's negati
 
     await gw.append([strike(separate.id, T1 - 80, { validFrom: T1 - 80 })]);
     expect(guard(gw)).toEqual({ faults: [] });
-    vi.setSystemTime(T1 + 10); // and after the declaration's own window ends, still cleared
+    vi.setSystemTime(T1 + 10);
     expect(guard(gw)).toEqual({ faults: [] });
     const report = await gw.erase(fact.id);
     expect(report.kept).toEqual([]);

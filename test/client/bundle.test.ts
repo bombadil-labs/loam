@@ -1,9 +1,3 @@
-// The shipped client artifact, pinned (SPEC §12): `dist/client/index.js` is a self-contained
-// browser-safe ESM bundle — rhizomatic's crypto inlined, zero `node:` specifiers, zero bare
-// imports for a bundler to trip on. The build aliases rhizomatic's peer transport
-// (`node:http`) to a throwing stub; this suite proves the stub left no trace and the bundle
-// actually signs.
-
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -50,7 +44,7 @@ describe("the browser bundle", () => {
       { role: "subject", at: "plant:fern", context: "note" },
       { role: "value", value: "signed in the bundle's world" },
     ]);
-    const delta = fromWire(wire); // recomputes the id — a mismatch would throw
+    const delta = fromWire(wire);
     expect(verifyDelta(delta)).toBe("verified");
     expect(delta.claims.author).toBe(author);
   });

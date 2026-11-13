@@ -1,17 +1,3 @@
-// The capabilities book, as data. `page.mjs` renders it; `test/site/capabilities.test.ts` asserts
-// against it. One text, two readers — the tutorial's anti-rot trick (`test/site/arc.test.ts`)
-// pointed at prose instead of lessons.
-//
-// The contract, in three lines:
-//   · chapters PARTITION `spec/` — every section belongs to exactly one, so a new landing that
-//     nobody writes up turns the suite red;
-//   · every claim names a TEST that fails if the claim stops being true, or states its `gap`;
-//   · every `[[term]]` is glossed, and each gloss says whether the word is the code's or ours.
-//
-// Write for someone deciding whether Loam is for them. Say what a person can DO. The test of a
-// paragraph is whether it reads aloud.
-
-/** @type {import("./chapters.d.mts").Term[]} */
 export const TERMS = [
   {
     word: "delta",
@@ -203,14 +189,11 @@ export const TERMS = [
   },
 ];
 
-/** @returns {Map<string, import("./chapters.d.mts").Term>} */
 export function termIndex() {
   return new Map(TERMS.map((t) => [t.word, t]));
 }
 
-/** @type {import("./chapters.d.mts").Chapter[]} */
 export const CHAPTERS = [
-  // ─────────────────────────────────────────────────────────────────────────
   {
     n: 1,
     slug: "the-ground",
@@ -268,7 +251,6 @@ export const CHAPTERS = [
     ],
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
   {
     n: 2,
     slug: "objects-nobody-creates",
@@ -326,7 +308,6 @@ export const CHAPTERS = [
     ],
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
   {
     n: 3,
     slug: "reading",
@@ -429,7 +410,6 @@ export const CHAPTERS = [
     ],
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
   {
     n: 4,
     slug: "saying-less",
@@ -498,7 +478,6 @@ export const CHAPTERS = [
     ],
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
   {
     n: 5,
     slug: "one-surface",
@@ -643,7 +622,6 @@ export const CHAPTERS = [
     ],
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
   {
     n: 6,
     slug: "standing",
@@ -742,7 +720,6 @@ export const CHAPTERS = [
     ],
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
   {
     n: 7,
     slug: "containers",
@@ -900,7 +877,6 @@ export const CHAPTERS = [
     ],
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
   {
     n: 8,
     slug: "forgetting",
@@ -1028,7 +1004,6 @@ export const CHAPTERS = [
     ],
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
   {
     n: 9,
     slug: "federation",
@@ -1086,7 +1061,6 @@ export const CHAPTERS = [
     ],
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
   {
     n: 10,
     slug: "apps-are-deltas",
@@ -1197,7 +1171,6 @@ export const CHAPTERS = [
     ],
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
   {
     n: 11,
     slug: "running-one",
@@ -1336,7 +1309,6 @@ export const CHAPTERS = [
     ],
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
   {
     n: 12,
     slug: "refusals",
@@ -1412,7 +1384,6 @@ export const CHAPTERS = [
     ],
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
   {
     n: 13,
     slug: "users-and-sessions",

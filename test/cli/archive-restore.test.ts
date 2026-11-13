@@ -1,8 +1,3 @@
-// A lost primary is restored from its archive through a new peer journal (`loam serve --archive`).
-// The restore never admits an id the door refuses forever: the target of an erasure that ever
-// bound stays out even when that erasure was later negated. Both levels: the store's bytes and
-// journal, and what a reopened gateway serves. A bystander proves the restore still runs.
-
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -60,14 +55,12 @@ describe("the archive restore", () => {
       SEED,
     );
     expect(restored).toBe(3);
-    // delta level: the target is neither held nor admitted; the rest are admitted
     expect(await primary.holds(target.id)).toBe(false);
     const opened = await OrdinaryJournalPeer.open(primary.journalStore(), OP);
     if (opened.status !== "open") throw new Error(opened.status);
     const admitted = opened.peer.snapshot().base.admitted;
     expect(admitted.has(target.id)).toBe(false);
     for (const d of [bystander, order, unErase]) expect(admitted.has(d.id)).toBe(true);
-    // object level: a reopened gateway serves the bystander and never the target
     const gw = await Gateway.open(primary, { seed: SEED });
     expect(gw.reactor.get(bystander.id)).toBeDefined();
     expect(gw.reactor.get(target.id)).toBeUndefined();
@@ -93,7 +86,7 @@ describe("the archive restore", () => {
     await expect(restoreIntoJournal(primary, archive, dead, SEED, marker)).rejects.toThrow(
       /hiccupped/,
     );
-    expect(existsSync(marker)).toBe(true); // the store holds a partial restore, and says so
+    expect(existsSync(marker)).toBe(true);
     expect(await restoreIntoJournal(primary, archive, dead, SEED, marker)).toBe(2);
     expect(existsSync(marker)).toBe(false);
     const gw = await Gateway.open(primary, { seed: SEED });
@@ -128,7 +121,7 @@ describe("the archive restore", () => {
     const io = { out: (l: string) => lines.push(l), err: (l: string) => lines.push(l) };
     expect(await run(["init", "--home", home, "--seed", SEED], io)).toBe(0);
     const marker = `${storePath(home)}.restoring`;
-    writeFileSync(marker, ""); // what a restore a fault interrupted leaves behind
+    writeFileSync(marker, "");
     lines.length = 0;
     const refused = await run(
       ["serve", "--http", "--home", home, "--port", "0", "--token", "t"],
@@ -139,8 +132,6 @@ describe("the archive restore", () => {
     );
     expect(refused, lines.join("\n")).toBe(1);
     expect(lines.join("\n")).toMatch(/did not finish.*--archive/s);
-    // Two-sided: named, the archive resumes the restore (nothing living is left here), and the
-    // store is served.
     const vault = join(home, "vault");
     mkdirSync(vault, { recursive: true });
     const served = await run(

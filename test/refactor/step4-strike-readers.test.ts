@@ -1,16 +1,3 @@
-// Readers that name or count a strike must count it only inside its own validity window. Each case
-// holds a strike whose window starts or ends at a boundary T, and reads on both sides of T (or with
-// a strike wholly outside its window beside one inside it). Each reader was a raw walk over
-// `negationsOf`, which counts a strike whatever its window.
-//
-// Asserted at both levels where the reader has a door: what the store holds (the strike is there)
-// and what a door or command answers. Named gaps:
-//   - `unnegatedOperatorGrantIds` is asserted at the reader only. The panel that calls it needs the
-//     whole connector consent flow (`test/server/admin-connections.test.ts` has that fixture); a
-//     served rail there would drive `/admin/revoke-confirm` with a strike planted first.
-//   - Grant survival at the door (`struck` in accounts.ts) is railed in
-//     `test/refactor/grant-strike-window.test.ts`.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -51,21 +38,18 @@ import { inPoolVoice } from "../helpers/pool-voice.js";
 
 const OP_SEED = "4d".repeat(32);
 const OP = authorForSeed(OP_SEED);
-const T = 3_000_000; // the boundary, in fake time
+const T = 3_000_000;
 
 afterEach(() => {
   vi.useRealTimers();
 });
 
-/** A negation of `target` by `seed`, ordered at `ts`, valid over `window`. */
 const timedStrike = (
   seed: string,
   target: string,
   ts: number,
   window: { validFrom: number; validUntil?: number },
 ): Delta => signClaims({ ...makeNegationClaims(authorForSeed(seed), ts, target), ...window }, seed);
-
-// --- adopt.ts: the promotion door's two refusals ------------------------------------------------
 
 const pick: Policy = { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } };
 const MESSAGE_SCHEMA: Schema = {
@@ -93,7 +77,6 @@ const refusalOf = async (gw: Gateway, from: Gateway, id: string): Promise<string
   }
 };
 
-/** Promote `fact`, whose author struck it over `window`, at read time `at`. */
 async function promoteAt(
   window: { validFrom: number; validUntil?: number },
   at: number,
@@ -105,7 +88,7 @@ async function promoteAt(
   const fact = observed(FERN, "message", "the app said this", T - 500, GARDENER_SEED);
   const strike = timedStrike(GARDENER_SEED, fact.id, T - 400, window);
   await pool.gateway.federate([fact, strike]);
-  expect(pool.gateway.reactor.get(strike.id)).toBeDefined(); // the strike is held at the source
+  expect(pool.gateway.reactor.get(strike.id)).toBeDefined();
   vi.setSystemTime(at);
   const refusal = await refusalOf(primary, pool.gateway, fact.id);
   const adopted = primary.adoptions().length;
@@ -141,7 +124,6 @@ describe("the source's data strike: the refusal names only strikes that hold now
     const pool = await primary.openQuarantine();
     const now = Date.now();
     const fact = observed(FERN, "message", "the reviewer said no", now - 5000, GARDENER_SEED);
-    // The operator strikes in the pool through the pool's own key.
     const expired = inPoolVoice(
       pool.gateway,
       timedStrike(OP_SEED, fact.id, now - 4000, { validFrom: now - 4000, validUntil: now - 3000 }),
@@ -166,8 +148,6 @@ describe("the source's data strike: the refusal names only strikes that hold now
   });
 });
 
-// --- slate.ts strikeOf: the receipt names the strike that holds ---------------------------------
-
 describe("an erasure's negation is reported only while it holds", () => {
   it("the receipt and the completeness check name the strike inside its window", async () => {
     const gw = await bootSlateStore();
@@ -179,8 +159,6 @@ describe("an erasure's negation is reported only while it holds", () => {
     const erasure = report.members[0]!.erasure;
 
     const holding = slateStrike(erasure, 80_000);
-    // An operator strike whose window ended, chosen so its id sorts BEFORE the holding one: a reader
-    // that takes the first operator strike in id order, whatever its window, names this one.
     let expired: Delta | undefined;
     for (let ts = 60_000; expired === undefined; ts += 1) {
       const candidate = signClaims(
@@ -199,13 +177,10 @@ describe("an erasure's negation is reported only while it holds", () => {
     expect(check.negated).toEqual([{ member: member.id, negation: holding.id }]);
     const receipt = await gw.receipt(report.graveyard, { now: BEFORE_DEADLINE + 1 });
     expect(receipt.members[0]!.negated).toBe(holding.id);
-    // Both strikes are held: the reader chose, the store did not lose one.
     expect(gw.reactor.get(expired.id)).toBeDefined();
     await gw.close();
   });
 });
-
-// --- reads.ts: a pool-scoped read honours a strike in the primary only inside its window --------
 
 async function homeWithPool(): Promise<{
   gw: Gateway;
@@ -264,8 +239,7 @@ describe("a bound connection's ground counts the primary's strike only inside it
     const bystander = observed(FERN, "tag", "shade", T - 90, GARDENER_SEED);
     await pool.append([claim, bystander]);
     await gw.append([timedStrike(OP_SEED, claim.id, T - 80, { validFrom: T })]);
-    expect(gw.reactor.get(claim.id)).toBeUndefined(); // the claim lives only in the pool
-    // What a bound reader resolves through the Plant Schema.
+    expect(gw.reactor.get(claim.id)).toBeUndefined();
     const served = () => gw.resolvedNode("Plant", FERN, undefined, undefined, binding).view;
 
     vi.setSystemTime(T - 1);
@@ -296,8 +270,6 @@ describe("a bound connection's ground counts the primary's strike only inside it
     await gw.close();
   });
 });
-
-// --- admin-federation.ts: which grants a connector revoke strikes -------------------------------
 
 describe("the revoke selection: every unnegated operator grant, which the panel strikes", () => {
   const SUBJECT_SEED = "e7".repeat(32);
@@ -338,8 +310,6 @@ describe("the revoke selection: every unnegated operator grant, which the panel 
   });
 });
 
-// --- channel.ts: lifting a curse -----------------------------------------------------------------
-
 describe("lifting a curse ignores a counter-negation whose window ended", () => {
   it("the lift strikes the curse again, and the lens serves", async () => {
     const SPROUT = { name: "Sprout", alg: 1, body: PLANT.body } as typeof PLANT;
@@ -360,8 +330,6 @@ describe("lifting a curse ignores a counter-negation whose window ended", () => 
       await me.curseChannelLaw(ch.name, "alice:Plant");
       expect(() => me.def("alice:Plant")).toThrow();
 
-      // Every curse strike, wherever it landed, gets a counter-negation whose window has ended: an
-      // earlier lift that no longer holds. Each ground's curse and counter are its own key's.
       const now = Date.now();
       const grounds = [me.channelPools.get(ch.name)?.gateway, me].filter(
         (g): g is Gateway => g !== undefined,
@@ -386,19 +354,17 @@ describe("lifting a curse ignores a counter-negation whose window ended", () => 
         }
       }
       expect(planted).toBeGreaterThan(0);
-      expect(() => me.def("alice:Plant")).toThrow(); // the expired lift revives nothing
+      expect(() => me.def("alice:Plant")).toThrow();
 
       await me.curseChannelLaw(ch.name, "alice:Plant", { lift: true });
       expect(me.def("alice:Plant")).toBeDefined();
-      expect(me.def("alice:Sprout")).toBeDefined(); // the channel-mate is untouched
+      expect(me.def("alice:Sprout")).toBeDefined();
     } finally {
       await alice.close();
       await me.close();
     }
   });
 });
-
-// --- cli.ts: removing a role whose earlier strike expired ----------------------------------------
 
 describe("loam user remove-role strikes a role whose earlier strike expired", () => {
   const CHEAP: ScryptParams = { N: 16, r: 1, p: 1, keylen: 16 };
@@ -433,7 +399,6 @@ describe("loam user remove-role strikes a role whose earlier strike expired", ()
       }
     };
 
-    // An operator strike on ivy's role claim whose window has ended: the role reads live again.
     const gw = await open();
     const roleClaim = [...gw.reactor.snapshot()].find(
       (d) =>

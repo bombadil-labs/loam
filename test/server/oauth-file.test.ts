@@ -1,19 +1,3 @@
-// §37 phase 11 (T132): `oauth.json` at rest — read, validate, write atomically, and the
-// cross-process lock. NO DOOR AND NO CLI EXIST YET (that is later phases): every rail here talks
-// to the module directly through a temp home, never through HTTP or a spawned CLI.
-//
-// The working spec is `.adlc/specs/37-11-connector-records-at-rest.md`; each `describe` below
-// names the criterion letter(s) it proves.
-//
-// THREE MUTANTS `adlc hollow-test` FINDS ARE NOT RAILED. Two cannot be: one is a numeral inside a
-// COMMENT (`// 64 hex chars` beside `actorSeed`), which compiles to nothing a test can observe; the
-// other is `OAuthFile["version"]`'s literal TYPE `1`, which TypeScript erases before any test runs
-// — mutating it to `2` produces byte-identical JavaScript. The third IS observable (the digit in
-// `checkGrant`'s "not 32 hex bytes" error message) but no rail here pins the exact wording of a
-// diagnostic string, only that a bad seed refuses — named rather than chased with a message-content
-// assertion that would test prose, not behavior. Per the same "state the gap" convention as the
-// fsync note below.
-
 import {
   chmodSync,
   existsSync,
@@ -53,14 +37,6 @@ import {
 
 vi.setConfig({ testTimeout: 30000 });
 
-// The toggle the "a lock the filesystem cannot take at all" describe reads. `vi.hoisted` because
-// `vi.mock` below is hoisted above every import in this file, `src/server/oauth-file.ts` included.
-//
-// WHY MOCKING node:fs FOR THE WHOLE FILE IS SAFE: the override is PASS-THROUGH unless a test
-// toggles it (asserted directly below), and `src/server/oauth-file.ts` holds the only `linkSync`
-// call in `src/` or `test/` — so for every OTHER rail in this file, the mocked module is
-// indistinguishable from the real one. The toggle is cleared in `afterEach`, so a throwing test
-// cannot leave it on for a later one.
 const lockFsControl = vi.hoisted(() => ({
   failLinkWith: undefined as string | undefined,
   failFsyncOnce: false,
@@ -76,8 +52,6 @@ vi.mock("node:fs", async (importOriginal) => {
     }
     return actual.linkSync(existing, next);
   };
-  // Fires ONCE per toggle: the write path's own temp fsync, not the directory fsync or the lock's
-  // claim path, so the rail that uses this can pin exactly which cleanup it is testing.
   const fsyncSync: typeof actual.fsyncSync = (fd) => {
     if (lockFsControl.failFsyncOnce) {
       lockFsControl.failFsyncOnce = false;
@@ -85,9 +59,6 @@ vi.mock("node:fs", async (importOriginal) => {
     }
     return actual.fsyncSync(fd);
   };
-  // The DEFAULT export is overridden too, in case a future caller ever switches to
-  // `import fs from "node:fs"; fs.linkSync(...)` — nothing does today, and a trap that costs one
-  // line to close is worth closing.
   const asRecord = actual as unknown as Record<string, unknown>;
   return {
     ...actual,
@@ -103,14 +74,12 @@ beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "loam-oauth-file-"));
 });
 afterEach(() => {
-  // maxRetries rides out a Windows EBUSY if a just-closed handle has not been released yet.
   rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 const SEED = "11".repeat(32);
 const SEED_AUTHOR = authorForSeed(SEED);
 
-/** A minimal valid file, used as the base for a corruption or a lock rail. */
 const soundFile = (): OAuthFile => ({
   version: 1,
   clients: [
@@ -176,7 +145,6 @@ describe("(b)+(c) a file this reader cannot read", () => {
         '"registeredAt":1,"generation":0}],"grants":[],"tokens":[]}',
     },
     {
-      // A file edited by hand must not be able to smuggle a forged row into a future `grant list`.
       label: "a client whose name carries a newline",
       bytes:
         '{"version":1,"clients":[{"clientId":"a","clientName":"x\\n    client   forged",' +
@@ -242,15 +210,11 @@ describe("(b)+(c) a file this reader cannot read", () => {
   });
 
   it("a sound file with none of the above defects reads back whole", () => {
-    // The positive control for the whole table above: every corruption case refuses, and this
-    // proves the checker is not simply refusing everything.
     writeOAuthFile(home, soundFile());
     expect(readOAuthFile(home)).toEqual(soundFile());
   });
 
   it("a hex field containing a literal '0' digit is accepted — not just [1-9a-f]", () => {
-    // HEX64 is a character class; a fixture built entirely from non-zero digits (as SEED and the
-    // digests above are) cannot tell `[0-9a-f]` from `[1-9a-f]`.
     const zeroSeed = "0".repeat(64);
     const zeroAuthor = authorForSeed(zeroSeed);
     const file: OAuthFile = {
@@ -264,9 +228,6 @@ describe("(b)+(c) a file this reader cannot read", () => {
   });
 
   it("a non-finite numeric field refuses even though it can only arrive via an in-memory caller", () => {
-    // JSON's grammar has no NaN/Infinity token, so this path is unreachable from a file on disk —
-    // it is reachable only through `writeOAuthFile`'s validation (criterion (q)) of a caller-built
-    // object, which is exactly the bug class (q) exists to catch.
     const file: OAuthFile = {
       ...soundFile(),
       clients: [{ ...soundFile().clients[0]!, registeredAt: NaN }],
@@ -276,12 +237,6 @@ describe("(b)+(c) a file this reader cannot read", () => {
 });
 
 describe("the exported text-defect helpers, directly", () => {
-  // `checkClient` reaches `clientNameDefect` only after `str()` has already refused an empty
-  // string, which would mask a defect in `clientNameDefect`'s OWN empty-length branch. These
-  // helpers are exported for a future door to call directly (a client name is meant to reach an
-  // operator's terminal), so they earn direct rails rather than only the ones checkClient exercises
-  // secondhand.
-
   it("clientNameDefect refuses empty, refuses over MAX_CLIENT_NAME, accepts the boundary", () => {
     expect(clientNameDefect("")).toMatch(/1\.\.200/);
     expect(clientNameDefect("a".repeat(MAX_CLIENT_NAME))).toBeUndefined();
@@ -302,8 +257,6 @@ describe("the exported text-defect helpers, directly", () => {
 
 describe("(d)+(d2)+(e) the write is atomic, 0600 from birth, and leaves no residue", () => {
   it("a SECOND write over a 0644 file still ends at 0600", () => {
-    // The failure this catches: an open that truncates in place inherits whatever mode the file
-    // already had.
     writeOAuthFile(home, soundFile());
     chmodSync(oauthPath(home), 0o644);
     if (process.platform !== "win32") {
@@ -316,8 +269,6 @@ describe("(d)+(d2)+(e) the write is atomic, 0600 from birth, and leaves no resid
   });
 
   it("a FIRST write on a fresh path lands at 0600 with no prior file to inherit a mode from", () => {
-    // This is what pins the temp being created at 0600 from birth (d2), not merely fixed up after:
-    // there is no pre-existing 0644 file for a chmod-only implementation to correct.
     expect(existsSync(oauthPath(home))).toBe(false);
     writeOAuthFile(home, soundFile());
     if (process.platform !== "win32") {
@@ -326,8 +277,6 @@ describe("(d)+(d2)+(e) the write is atomic, 0600 from birth, and leaves no resid
   });
 
   it("the write REPLACES the file rather than truncating it, and leaves no temp", () => {
-    // `rename` puts a NEW inode at the path; truncate-in-place keeps the old one. The inode moving
-    // is what proves the temp-then-rename, from outside, with no timing at all.
     writeOAuthFile(home, soundFile());
     const first = statSync(oauthPath(home));
     writeOAuthFile(home, soundFile());
@@ -346,9 +295,6 @@ describe("(d)+(d2)+(e) the write is atomic, 0600 from birth, and leaves no resid
   });
 
   it("(f) does not assert the fsync — nothing observable from a test distinguishes a synced write from an unsynced one without a power cut", () => {
-    // Named rather than silently absent: the write DOES call fsync on the temp and on the
-    // directory (src/server/oauth-file.ts), and this rail records that no assertion here can see
-    // that. A filesystem fault injector would close this gap; this suite does not have one.
     writeOAuthFile(home, soundFile());
     expect(readOAuthFile(home)).toEqual(soundFile());
   });
@@ -361,8 +307,6 @@ describe("(d)+(d2)+(e) the write is atomic, 0600 from birth, and leaves no resid
 
 describe("the lock primitive", () => {
   it("(g)+(n) one rail takes the lock successfully and completes a write under it", () => {
-    // The positive control the rest of this file depends on: without this, a `linkSync` that
-    // always throws would satisfy every negative rail below.
     const result = withOAuthFile(home, (file) => ({
       next: { ...file, clients: [...file.clients, soundFile().clients[0]!] },
       result: "ok" as const,
@@ -383,14 +327,10 @@ describe("the lock primitive", () => {
           result: undefined,
         })),
       ).toThrow(OAuthFileBusy);
-      // And it wrote NOTHING while it waited — a lock that threw after writing would be worse
-      // than none.
       expect(readOAuthFile(home)).toEqual(before);
     } finally {
       rmSync(oauthLockPath(home), { force: true });
     }
-    // With the lock gone the same call succeeds, so the refusal above was the lock and not the
-    // payload.
     expect(() => withOAuthFile(home, (file) => ({ next: file, result: undefined }))).not.toThrow();
   });
 
@@ -400,7 +340,6 @@ describe("the lock primitive", () => {
     utimesSync(oauthLockPath(home), new Date(past), new Date(past));
     const seen = withOAuthFile(home, (file) => ({ result: file.clients.length }));
     expect(seen).toBe(0);
-    // And the lock is released rather than left behind by the writer that broke it.
     expect(existsSync(oauthLockPath(home))).toBe(false);
   });
 
@@ -410,7 +349,6 @@ describe("the lock primitive", () => {
     expect(() => withOAuthFile(home, (file) => ({ next: file, result: undefined }))).toThrow(
       OAuthFileBusy,
     );
-    // Bounded by LOCK_WAIT_MS (2s) plus polling slack, never unbounded.
     expect(Date.now() - start).toBeLessThan(10_000);
     rmSync(oauthLockPath(home), { force: true });
   });
@@ -422,7 +360,6 @@ describe("the lock primitive", () => {
       }),
     ).toThrow("the work failed");
     expect(existsSync(oauthLockPath(home))).toBe(false);
-    // The next writer is not blocked by the failed one.
     expect(() => withOAuthFile(home, (file) => ({ next: file, result: 0 }))).not.toThrow();
   });
 
@@ -438,7 +375,6 @@ describe("the lock primitive", () => {
         }),
       ).toThrow(OAuthFileBusy);
       expect(entered).toBe(false);
-      // The holder's lock is untouched: a writer that never had it must not release it.
       expect(readFileSync(oauthLockPath(home), "utf8")).toBe("someone-else\n");
     } finally {
       rmSync(oauthLockPath(home), { force: true });
@@ -446,15 +382,10 @@ describe("the lock primitive", () => {
   });
 
   it("(g)+(i) a writer whose lock is STOLEN refuses rather than writing over the thief", () => {
-    // Breaking a stale lock by PATH cannot be made race-free: two writers can both decide the same
-    // lock is stale, and the second removal deletes the FIRST one's fresh lock. So ownership is
-    // proven by the nonce in the file rather than assumed from a successful create — the
-    // write-time check reads the lock's bytes back and refuses on any mismatch, with no re-claim.
     writeOAuthFile(home, readOAuthFile(home));
     const before = readOAuthFile(home);
     expect(() =>
       withOAuthFile<undefined>(home, (file) => {
-        // Simulate the theft: another writer broke this lock and took it, mid-callback.
         writeFileSync(oauthLockPath(home), "someone-else\n");
         return {
           next: { ...file, clients: [soundFile().clients[0]!] },
@@ -462,20 +393,12 @@ describe("the lock primitive", () => {
         };
       }),
     ).toThrow(OAuthFileBusy);
-    // NOTHING was written, and the thief's lock is still there — this writer must not delete it.
     expect(readOAuthFile(home)).toEqual(before);
     expect(readFileSync(oauthLockPath(home), "utf8")).toBe("someone-else\n");
     rmSync(oauthLockPath(home), { force: true });
   });
 
   it("(m)+(o) TWO PROCESSES contending both land their write", async () => {
-    // A REAL PROCESS BOUNDARY. `withOAuthFile`'s callback is synchronous by design, so two calls
-    // on one thread cannot interleave — an in-process version of this rail would pass whether or
-    // not anything locked at all.
-    //
-    // The child is BUNDLED with esbuild: nothing among this repo's dependencies is a TypeScript
-    // loader a spawned `node` could use — vitest transforms in its own process and cannot lend
-    // that to a child — esbuild is already a dependency, and the output runs on plain node.
     const entry = fileURLToPath(new URL("./oauth-lock-child.mts", import.meta.url));
     const bundle = join(home, "lock-child.mjs");
     await esbuild.build({
@@ -488,10 +411,6 @@ describe("the lock primitive", () => {
     });
     writeOAuthFile(home, readOAuthFile(home));
 
-    // The child takes the lock and HOLDS it for 400ms inside its locked section. The hold is
-    // generous on purpose: the parent's acquire is a synchronous `Atomics.wait`, unaffected by
-    // event-loop load, but the parent's ability to OBSERVE the lock before the child releases it
-    // runs on the event loop — so a long hold is the safe direction.
     const spawned = new Promise<void>((resolve, reject) => {
       const proc = spawn(process.execPath, [bundle, home, "child-one", "400"], {
         stdio: ["ignore", "ignore", "pipe"],
@@ -505,9 +424,6 @@ describe("the lock primitive", () => {
       );
     });
 
-    // Wait until the child actually holds it, so the parent's acquire genuinely contends. Raced
-    // against the child's own exit so a child that dies before ever locking fails THIS test
-    // directly rather than surfacing as an unhandled rejection blamed on a later one.
     let held = false;
     await Promise.race([
       spawned.then(() => {
@@ -526,14 +442,6 @@ describe("the lock primitive", () => {
     ]);
     expect(held).toBe(true);
 
-    // The parent's write, issued while the child holds the lock. It must WAIT, not overwrite.
-    //
-    // NO TIMING FLOOR (o): "the acquire took at least one poll interval" is unsound, because the
-    // lock is observed on the event loop and claimed after it, so a stall spanning the child's
-    // whole hold could leave the child released before the parent's first claim — succeeding with
-    // no pause at all, through no fault of the lock. What replaces it is an observation from
-    // INSIDE the callback: serialization means the LATER writer reads the earlier one's finished
-    // work, so a parent that genuinely waited must find `child-one` already in the file.
     let sawChildAlready = false;
     withOAuthFile<undefined>(home, (file) => {
       sawChildAlready = file.clients.some((c) => c.clientId === "child-one");
@@ -557,10 +465,7 @@ describe("the lock primitive", () => {
     });
     await spawned;
 
-    // THE PARENT REALLY WAITED: its callback read a file the child had already finished writing.
     expect(sawChildAlready).toBe(true);
-    // And BOTH writes survived. Without the lock the child writes last and spreads a snapshot
-    // taken before the parent's write, so `parent-one` would be the row that disappears.
     const ids = readOAuthFile(home).clients.map((c) => c.clientId);
     expect(ids).toContain("child-one");
     expect(ids).toContain("parent-one");
@@ -569,9 +474,6 @@ describe("the lock primitive", () => {
 });
 
 describe("a lock the filesystem cannot take at all", () => {
-  // Uses the module-level `node:fs` mock declared at the top of this file — a mock of a builtin
-  // must not reach a rail that did not ask for one, and the top-of-file comment states why every
-  // OTHER rail in this file is unaffected by its presence.
   afterEach(() => {
     lockFsControl.failLinkWith = undefined;
   });
@@ -625,11 +527,7 @@ describe("a lock the filesystem cannot take at all", () => {
     ).toThrow(OAuthFileUnlockable);
     lockFsControl.failLinkWith = undefined;
     expect(readOAuthFile(home).clients).toEqual([]);
-    // No `.claim` temp left behind — a leaked handle is invisible on POSIX, and on Windows an open
-    // handle would make the home unremovable. This suite runs on POSIX CI and checks the visible
-    // residue instead; it does not claim to exercise the Windows leg directly.
     expect(readdirSync(home).filter((f) => f.includes(".claim"))).toEqual([]);
-    // And no lock is left at the path either: nothing ever created one.
     expect(readdirSync(home).filter((f) => f === "oauth.json.lock")).toEqual([]);
   });
 });
@@ -651,7 +549,6 @@ describe("(q) writeOAuthFile validates before it serializes", () => {
       ],
     };
     expect(() => writeOAuthFile(home, badActor)).toThrow(OAuthFileUnreadable);
-    // The file on disk is untouched — the temp-then-rename never got the chance to run.
     expect(readFileSync(oauthPath(home), "utf8")).toBe(before);
   });
 
@@ -665,13 +562,9 @@ describe("(q) writeOAuthFile validates before it serializes", () => {
   });
 
   it("refuses a SPARSE array — a hole must not validate as though it were not there", () => {
-    // `.map()` skips a hole silently; `Array.from` does not. This pins the difference: a caller
-    // that builds `clients` with a hole (e.g. `delete arr[0]`) must not have that hole validate
-    // clean and reach disk, where JSON.stringify would turn it into a `null` no read-time check
-    // was ever run against.
     const sparse: OAuthClient[] = [];
     sparse[1] = soundFile().clients[0]!;
-    expect(sparse.length).toBe(2); // index 0 is a genuine hole, not `undefined` at an index
+    expect(sparse.length).toBe(2);
     const file: OAuthFile = { ...EMPTY_OAUTH, clients: sparse };
     expect(() => writeOAuthFile(home, file)).toThrow(OAuthFileUnreadable);
     expect(existsSync(oauthPath(home))).toBe(false);
@@ -735,9 +628,6 @@ describe("(r) a repeated key across a collection is refused, on read and on writ
 });
 
 describe("(s) a write that fails mid-flight leaks no temp", () => {
-  // Uses the module-level `node:fs` mock's `fsyncSync` toggle. Before this rail, a throw between
-  // `openSync` and `closeSync` skipped the cleanup that runs only around the LATER ownership-check
-  // and rename steps — orphaning a temp file holding a plaintext actor seed.
   afterEach(() => {
     lockFsControl.failFsyncOnce = false;
   });
@@ -747,7 +637,6 @@ describe("(s) a write that fails mid-flight leaks no temp", () => {
     expect(() => writeOAuthFile(home, soundFile())).toThrow("simulated ENOSPC");
     const leftovers = readdirSync(home).filter((f) => f.includes(".tmp"));
     expect(leftovers).toEqual([]);
-    // And the store is untouched — no half-write landed at the real path.
     expect(existsSync(oauthPath(home))).toBe(false);
   });
 });

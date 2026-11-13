@@ -1,36 +1,3 @@
-// Records Loam's answers to "which key is this principal" before step 5 moves roots, key binding,
-// succession and delegation into signed data. Today a principal IS a key: nothing in the ground
-// links two keys, and the operator is whoever holds the seed the process was opened with.
-//
-// Cast: `operator` is the store seed. `writer` is ada's first key and `peer` is ada's rotated key
-// (the rotation is a revoke plus a re-mint, the only form Loam has). `stranger` asserts names and
-// roles it has no standing for. `subadmin` holds a grant minted by ada's first key.
-//
-// Recorded:
-// - `principal.ids`: content addresses of the corpus, including each seed's operator marker and
-//   bare genesis. "Same operator" rests on these ids being stable.
-// - `principal.gateway-operator`: the gateway's operator comes from the seed option, and the
-//   ground's operator markers do not change it.
-// - `principal.users`: `resolveUserView` and `rolesOf` for names asserted by the store seed and by
-//   another key, read with the original operator, a rotated operator, and no operator.
-// - `principal.grants-rotation`: `grantsHeldBy`, `authorize`, `honoredStrikeOn` and
-//   `survivingWriteGrantIds` across a key rotation, for a writer and for an admin whose grants and
-//   strikes were made under the old key.
-// - `principal.container`: a container owned by membership `authoredBy(<key>)`, which of a rotated
-//   user's writes its scope gathers, and `subtreeOf` reach by name.
-// - `principal.retract`: the retract-your-own check (`mutate.ts`) after a rotation.
-// - `principal.recovery`: ada's first key (`writer`) is lost and the operator re-points her to a
-//   new key (`peer`). Today that is a new write grant for the new key, which is what
-//   `ensureUserKey` appends when the seed file is gone; nothing links the two keys. `subadmin` is
-//   a connection the first key bound to her container. Recorded with the first key's store grant
-//   kept (the file that named it is gone, so `remove-role` cannot find it) and struck.
-//
-// Deliberately not recorded: admission (see `admission.recording.test.ts`); the token door's
-// `resolve`/`describe` and `resolveClientBearer`, which read `oauth.json` and `clients.json` rather
-// than signed data and need a home directory; `openerStands` and bound inbox pools, which need a
-// pool backend factory. The users and grants readers run over raw-ingest reactors, so no door ran
-// on their corpus. Order dependence is checked forward and reverse only.
-
 import { afterEach, describe, it, vi } from "vitest";
 import {
   makeNegationClaims,
@@ -69,7 +36,6 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-// A strike with a printed name, so a golden says whose strike retired what.
 const strikeOf = (target: Delta, by: Who, t: number, label: string): Delta =>
   signed(makeNegationClaims(KEY[by], t, target.id), by, label);
 
@@ -88,12 +54,8 @@ const note = (by: Who, t: number, label: string): Delta =>
     label,
   );
 
-// --- markers ------------------------------------------------------------------------------------
-
 const markerOf = (who: Who): Delta => signed(operatorMarkerClaims(KEY[who]), who, `marker:${who}`);
 const MARKERS = [markerOf("operator"), markerOf("stranger")];
-
-// --- users --------------------------------------------------------------------------------------
 
 const user = (name: string, by: Who, t: number) =>
   signed(userClaims(name, KEY[by], t), by, `user:${name} by ${by}@${t}`);
@@ -103,29 +65,21 @@ const role = (name: string, r: "operator" | "actor", by: Who, t: number) =>
 const adaActor = role("ada", "actor", "operator", 12);
 const deeActor = role("dee", "actor", "operator", 41);
 const USERS: readonly Delta[] = [
-  // ada: operator-signed user and roles, then the actor role struck by the operator.
   user("ada", "operator", 10),
   role("ada", "operator", "operator", 11),
   adaActor,
   strikeOf(adaActor, "operator", 13, "operator strikes ada=actor"),
-  // ada again, asserted by a second key: the same user entity, a different author.
   user("ada", "stranger", 14),
   role("ada", "actor", "stranger", 15),
-  // ada's record repeated by the operator at a later time.
   user("ada", "operator", 16),
-  // bob: asserted by the stranger alone.
   user("bob", "stranger", 20),
   role("bob", "operator", "stranger", 21),
-  // cy: operator-signed user, stranger-signed operator role.
   user("cy", "operator", 30),
   role("cy", "operator", "stranger", 31),
-  // dee: operator-signed user and role; the stranger strikes the role.
   user("dee", "operator", 40),
   deeActor,
   strikeOf(deeActor, "stranger", 42, "stranger strikes dee=actor"),
 ];
-
-// --- grants across a rotation -------------------------------------------------------------------
 
 const grant = (by: Who, subject: Who, verb: Verb, t: number) =>
   signed(
@@ -134,12 +88,10 @@ const grant = (by: Who, subject: Who, verb: Verb, t: number) =>
     `${by}→${subject}:${verb}@${t}`,
   );
 
-// A writer rotates: ada's first key holds write, then her second key is granted write.
 const oldWrite = grant("operator", "writer", "write", 10);
 const newWrite = grant("operator", "peer", "write", 20);
 const oldWriteStruck = strikeOf(oldWrite, "operator", 21, "operator strikes writer:write");
 
-// An admin rotates: ada's first key holds admin, mints a write grant, and strikes another grant.
 const strangerWrite = grant("operator", "stranger", "write", 9);
 const oldAdmin = grant("operator", "writer", "admin", 10);
 const delegated = grant("writer", "subadmin", "write", 11);
@@ -178,8 +130,6 @@ const GRANT_DELTAS: readonly Delta[] = [
 const STRIKES: readonly Delta[] = [oldWriteStruck, adminStrike, oldAdminStruck];
 const SUBJECTS: readonly Who[] = ["writer", "peer", "subadmin", "stranger"];
 
-// --- a gateway over a note lens -----------------------------------------------------------------
-
 const pickLatest = { kind: "pick", order: { kind: "byTimestamp", dir: "desc" } } as const;
 const NOTE_SCHEMA: Schema = {
   props: new Map([["tag", { kind: "all", order: { kind: "byTimestamp", dir: "asc" } }]]),
@@ -192,7 +142,6 @@ const NOTE_REG = {
   writable: ["tag"],
 };
 
-// A gateway whose operator is the store seed, with ada's first and rotated keys both granted write.
 async function bootAda(backend = new MemoryBackend()): Promise<Gateway> {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
@@ -359,7 +308,6 @@ describe("recordings: principals", () => {
       "stranger",
     );
     const strangerDeclared = await outcome(gw, strangerDecl);
-    // Refused at the door or not, the declaration is put in the ground so the reader weighs it.
     gw.reactor.ingest(strangerDecl);
     const writes = [
       note("writer", NOW + 60, "ada's write, first key"),
@@ -367,8 +315,6 @@ describe("recordings: principals", () => {
     ];
     await gw.append(writes);
     const writeIds = new Set(writes.map((d) => d.id));
-    // One read time for the table and the scopes: the declarations are valid from their
-    // `nextTimestamp`, which runs ahead of the clock set at boot.
     vi.setSystemTime(NOW + 100);
     const table = readContainerTable(gw.reactor, NOW + 100, KEY.operator);
     const labelsIn = (containers: string[]) =>
@@ -413,7 +359,6 @@ describe("recordings: principals", () => {
       const tick = () => vi.setSystemTime((at += 1_000));
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(at);
-      // Only the first key holds write before the recovery.
       const gw = await Gateway.boot(
         new MemoryBackend(),
         assembleGenesis({
@@ -424,7 +369,6 @@ describe("recordings: principals", () => {
       );
       const hooks = gw.gqlHooks();
       const tags = () => gw.resolvedNode("Note", "note:ada").view["tag"] ?? null;
-      // Her container, owned by membership on the first key, as `declareOwned` writes it.
       tick();
       await gw.append([
         signed(
@@ -456,7 +400,6 @@ describe("recordings: principals", () => {
       tick();
       await hooks.mutate("Note", "note:ada", { tag: "first-key" }, SEEDS.writer);
       const before = tags();
-      // The recovery: the first key is lost; the operator grants the new key write.
       tick();
       const recovery = [
         signed(
@@ -482,8 +425,6 @@ describe("recordings: principals", () => {
       }
       await gw.append(recovery);
       tick();
-      // A standing in a ground: a surviving grant by the ground's own key, or by a host it selects
-      // for grants (either governor's grant counts).
       const holds = (r: Gateway, who: Who, verb: Verb) =>
         r
           .lawAuthors("grants")
@@ -508,7 +449,6 @@ describe("recordings: principals", () => {
       };
       tick();
       const container = {
-        // Ada's own deltas the container gathers, by signing key: her tag write and her notes.
         membershipGathers: containerScopeImpl(gw, { containers: ["ada"] })
           .filter((d) => d.claims.author === KEY.writer || d.claims.author === KEY.peer)
           .map((d) => {

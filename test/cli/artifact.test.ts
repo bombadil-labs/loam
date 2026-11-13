@@ -1,11 +1,3 @@
-// `loam artifact pack` is a THIN CLIENT of the door, and nothing more.
-//
-// The point is one shape for every door: what the CLI writes is byte-identical to the door's body, and it
-// refuses with the door's own message on every refusal. A CLI that rephrased a refusal — or worse, that
-// read a file and decided for itself — would be a second source of truth about what a renderer may be
-// published as, and it would keep approving a route whose binding, schema version, or declaration had
-// been struck. Withdrawal must be live, so the verdict is re-derived from `readRenderers` on every call.
-
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,7 +21,6 @@ let base: string;
 let gateway: Gateway;
 let dir: string;
 
-// The CLI's IO: two arrays, and the functions that fill them.
 const io = (): { io: IO; out: string[]; err: string[] } => {
   const out: string[] = [];
   const err: string[] = [];
@@ -111,9 +102,6 @@ describe("§30 criterion 17: the CLI is a thin client of the door", () => {
     ]);
     expect(err).toEqual([]);
     expect(code).toBe(0);
-    // `--out page.html` writes the PAGE, not the envelope carrying it — and the page it writes is the
-    // door's own, byte for byte. A CLI that re-rendered would be a second source of truth about what
-    // gets published.
     const served = JSON.parse(await doorBody("?connector=My+Loam")) as { page: string };
     expect(readFileSync(out, "utf8")).toBe(served.page);
     expect(readFileSync(out, "utf8")).toContain("<!doctype html>");
@@ -155,7 +143,6 @@ describe("§30 criterion 17: the CLI is a thin client of the door", () => {
   });
 
   it("refuses with the door's IDENTICAL message on every refusal", async () => {
-    // Each refusal is compared against the DOOR's own words rather than a rephrasing of them.
     const cases: ReadonlyArray<readonly [string, readonly string[], string]> = [
       ["an empty connector", [`garden/plant/${FERN}`, "--connector", ""], "?connector="],
       [
@@ -219,8 +206,6 @@ describe("§30 criterion 17: the CLI is a thin client of the door", () => {
   });
 
   it("a NON-OPERATOR token gets the door's nonexistence, relayed as a refusal", async () => {
-    // The CLI cannot soften this: to a token-bearing stranger the door is byte-identical to an
-    // unknown verb, so what comes back is "no such surface" and the CLI says exactly that.
     const { code, err } = await cli([
       "artifact",
       "pack",
@@ -250,10 +235,6 @@ describe("§30 criterion 17: the CLI is a thin client of the door", () => {
   });
 
   it("carries BOTH acknowledgement flags as booleans, and they reach the door", async () => {
-    // A boolean flag missing from the parser's `booleans` set eats the next argument as its value,
-    // which turns `--acknowledge-writable --connector X` into a silent refusal about a missing
-    // connector. Both flags are driven here, and the door's own acknowledgement is what proves they
-    // arrived: without them the narrowed-writable pack refuses.
     await gateway.publishRenderer({
       route: "narrow",
       schema: "Plant",
@@ -292,7 +273,6 @@ describe("§30 criterion 17: the CLI is a thin client of the door", () => {
     expect(packed.err).toEqual([]);
     expect(packed.code).toBe(0);
     expect(packed.out.join("\n")).toContain("tools: loam_query");
-    // …and dropping just ONE of them still refuses, so neither flag is doing the other's work.
     const half = await cli([
       "artifact",
       "pack",

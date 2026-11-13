@@ -1,16 +1,3 @@
-// THE FIVE CONTROLS AS A PERSON MEETS THEM (SPEC §58 position 4, criterion 4). One renderer and
-// one parser, used by the consent page where a container is created and by the container's own
-// page where its leeway changes later. Two copies of this markup would be two promises.
-//
-// NATIVE CONTROLS, and nothing else: a checkbox is a checkbox and a select is a select, each with
-// a real `<label for=…>` and its risk sentence bound by `aria-describedby`, so a screen reader and
-// a phone read what a sighted reader reads. Nothing is signalled by colour, and no script runs —
-// Delegate's terms unfold with a `:has()` rule, and where that rule is not understood the terms
-// are simply visible, which is the safe way to be wrong about a disclosure.
-//
-// EVERY SWITCH STARTS OFF. The rendered default is unchecked and `small`, so a person who reads
-// nothing and clicks through creates the private journal.
-
 import {
   DELEGATE_CONTROL,
   ENVELOPE_CONTROL,
@@ -47,11 +34,6 @@ const envelopeField = (field: string, size: EnvelopeSize, label: string, risk: s
   ).join("\n") +
   `\n</select>\n<p class="risk" id="${field}_risk">${escapeHtml(risk)}</p>`;
 
-/**
- * The five, rendered from one container's leeway — or from none at all, which is every switch off.
- * `note` is the sentence that says where these apply, which differs between the two pages and is
- * the one thing a person must not have to guess.
- */
 export function leewayFields(leeway: Leeway | undefined, note: string): string {
   const now = leeway ?? SEALED_LEEWAY;
   const terms: Terms | undefined = now.delegate === "off" ? undefined : now.delegate;
@@ -103,12 +85,6 @@ const sizeOf = (
   return (ENVELOPE_SIZES as readonly string[]).includes(raw) ? (raw as EnvelopeSize) : "small";
 };
 
-/**
- * What the person checked, as a leeway. An unchecked box is absent from a form post, so every
- * switch reads off unless it was turned on — the same default the markup renders, arrived at from
- * the other side. A form that carries none of these fields yields the sealed leeway, so a caller
- * that renders no controls declares nothing wider by accident.
- */
 export function leewayFromFields(fields: { get(name: string): string | null | undefined }): Leeway {
   const terms: Terms = {
     receive: on(fields, "terms_receive"),

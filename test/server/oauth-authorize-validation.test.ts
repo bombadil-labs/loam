@@ -1,29 +1,3 @@
-// T148 (validation half) — the authorize door refuses a doomed request at the door. A caller that
-// NAMES an unsupported `response_type` or `code_challenge_method` asks for a flow the token door
-// can never finish; before this rail the person approved, a code minted, and the failure arrived
-// at the token endpoint wearing `invalid_grant`. Now the GET (and a hand-built POST) refuses on the
-// consent door's own no-Location page, naming the parameter.
-//
-// Two-sided, per CLAUDE.md: every doomed shape refuses at the GET with the parameter named AND
-// mints nothing, and the fully-explicit correct request (`response_type=code`,
-// `code_challenge_method=S256`, a real S256 challenge) still renders consent and completes the
-// WHOLE flow through the token exchange — the door and the redeemer agree.
-//
-// What this file deliberately does NOT assert, and why:
-//   - An ABSENT `response_type` stays accepted: the register door only ever advertises `code`,
-//     so omission is unambiguous. An absent method is judged by what rides beside it: with a
-//     challenge it refuses (the T167 bullet below); with no challenge at all — the whole-PKCE-absent spelling still passes this gate.
-//   - An ABSENT `code_challenge` still renders consent and still mints (T167's named remaining
-//     case): the frozen oauth-consent suite asserts exactly that behaviour, and such a code still
-//     dies at redemption as issued-without-PKCE. Closing it is a further decision, not this one.
-//   - CLOSED (T167). An ABSENT method beside a PRESENT challenge is, per RFC 7636 §4.3, a `plain` declaration, and the door
-//     now honours it the only honest way an S256-only verifier can: it refuses, naming the
-//     parameter, where it used to mint a code that died late as `invalid_grant` — the late failure this
-//     ticket existed to remove. The refusal's rails live in test/server/oauth-pkce-method.test.ts
-//     (new with T167, so unfrozen there); the fixtures HERE declare `S256` beside every challenge
-//     because this file's subject is the OTHER refusals, and a fixture must not trip the rule
-//     it is not testing.
-
 import { createHash, randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -59,7 +33,6 @@ afterEach(async () => {
   while (homes.length > 0) rmSync(homes.pop()!, { recursive: true, force: true });
 });
 
-/** A fresh PKCE pair: a 43-char verifier and its real S256 challenge (RFC 7636). */
 const pkce = (): { verifier: string; challenge: string } => {
   const verifier = randomBytes(32).toString("base64url");
   const challenge = createHash("sha256").update(verifier).digest("base64url");
@@ -77,7 +50,6 @@ async function authorizeServer(): Promise<{ base: string; home: string }> {
 
   const home = mkdtempSync(join(tmpdir(), "loam-authz-valid-"));
   homes.push(home);
-  // The token door signs the connector's write grant with <home>/operator.seed at redemption.
   initHome(home, OPERATOR_SEED);
   writeCredentials(home, { version: 1, users: { myk: await hashPassword(PASSWORD, CHEAP) } });
   writeOAuthFile(home, {
@@ -200,7 +172,6 @@ describe("T148 — the authorize door refuses a doomed request at the door", () 
     const { base, home } = await authorizeServer();
     const sessionId = await signIn(base, "myk", PASSWORD);
     const { challenge } = pkce();
-    // A REAL form token, read from the consent page the ordinary way.
     const page = await getAuthorize(base, sessionId, {
       client_id: CLIENT_ID,
       redirect_uri: REDIRECT,
@@ -227,9 +198,6 @@ describe("T148 — the authorize door refuses a doomed request at the door", () 
     }
   });
 
-  // The POSITIVE control for the POST gate. The end-to-end approval below copies the form's hidden
-  // fields, which carry NEITHER parameter, so it could not tell an inverted POST condition from a
-  // correct one. This POST names both supported values explicitly and must still mint.
   it("a hand-built POST naming the SUPPORTED values still mints: the POST gate refuses only the doomed", async () => {
     const { base, home } = await authorizeServer();
     const sessionId = await signIn(base, "myk", PASSWORD);
@@ -250,8 +218,7 @@ describe("T148 — the authorize door refuses a doomed request at the door", () 
       code_challenge: challenge,
       code_challenge_method: "S256",
       response_type: "code",
-      bind_new: "journal", // §58: a connection lives in one container under the person's name
-      // the method rides the code_challenge line since T167 (one declaration, not two)
+      bind_new: "journal",
     });
     expect(res.status).toBe(302);
     expect(new URL(res.headers.get("location")!).searchParams.get("code")).not.toBe("");
@@ -263,7 +230,6 @@ describe("T148 — the authorize door refuses a doomed request at the door", () 
     const sessionId = await signIn(base, "myk", PASSWORD);
     const { verifier, challenge } = pkce();
 
-    // The GET, with every parameter this door validates spelled out and correct.
     const page = await getAuthorize(base, sessionId, {
       client_id: CLIENT_ID,
       redirect_uri: REDIRECT,
@@ -271,13 +237,11 @@ describe("T148 — the authorize door refuses a doomed request at the door", () 
       code_challenge: challenge,
       code_challenge_method: "S256",
       response_type: "code",
-      // the method rides the code_challenge line since T167 (one declaration, not two)
     });
     expect(page.status).toBe(200);
     const html = await page.text();
     expect(html).toContain("Approve a connector?");
 
-    // The approval, from the page's own hidden fields.
     const approve = await postApprove(base, sessionId, {
       form_token: formTokenOf(html),
       client_id: fieldOf(html, "client_id"),
@@ -285,7 +249,7 @@ describe("T148 — the authorize door refuses a doomed request at the door", () 
       state: fieldOf(html, "state"),
       code_challenge: fieldOf(html, "code_challenge"),
       code_challenge_method: fieldOf(html, "code_challenge_method"),
-      bind_new: "journal", // §58: a connection lives in one container under the person's name
+      bind_new: "journal",
     });
     expect(approve.status).toBe(302);
     const location = new URL(approve.headers.get("location")!);
@@ -295,7 +259,6 @@ describe("T148 — the authorize door refuses a doomed request at the door", () 
     expect(code).not.toBe("");
     expect(codeCount(home)).toBe(1);
 
-    // The redemption: the code the door minted is one the token door redeems — the agreement.
     const redeemed = await fetch(`${base}/oauth/token`, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -320,7 +283,6 @@ describe("T148 — the authorize door refuses a doomed request at the door", () 
     expect(authorizeRequestDefect("", "S256")).toBeUndefined();
     expect(authorizeRequestDefect("token", "")).toContain("response_type");
     expect(authorizeRequestDefect("", "plain")).toContain("code_challenge_method");
-    // response_type is judged first: a request wrong both ways names the flow before the hash.
     expect(authorizeRequestDefect("token", "plain")).toContain("response_type");
   });
 });

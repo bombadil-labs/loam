@@ -1,7 +1,3 @@
-// The Channel's protocol promises, pinned: FIFO service for concurrent readers, rejection (not
-// silence) for a failed stream even while parked, immediate leave-ability, and coalescence for
-// the undrained.
-
 import { describe, expect, it } from "vitest";
 import { Channel } from "../../src/gateway/channel.js";
 
@@ -27,8 +23,8 @@ describe("Channel", () => {
     ch.fail(new Error("the ground gave way"));
     await expect(parkedA).rejects.toThrow(/ground gave way/);
     await expect(parkedB).rejects.toThrow(/ground gave way/);
-    expect((await ch.next()).done).toBe(true); // after the error, simply done
-    expect(closed).toBe(1); // onClose fired exactly once
+    expect((await ch.next()).done).toBe(true);
+    expect(closed).toBe(1);
   });
 
   it("fail() with nobody parked rejects the next read once, then is done", async () => {
@@ -51,10 +47,10 @@ describe("Channel", () => {
     const ch = new Channel<number>(undefined, (pending, incoming) => pending + incoming);
     ch.push(1);
     ch.push(2);
-    ch.push(3); // 1+2+3 coalesce: nobody was reading
+    ch.push(3);
     expect(await ch.next()).toEqual({ value: 6, done: false });
     const parked = ch.next();
-    ch.push(4); // a parked reader is served directly, no coalescing detour
+    ch.push(4);
     expect(await parked).toEqual({ value: 4, done: false });
     await ch.return();
   });

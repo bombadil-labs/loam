@@ -1,27 +1,3 @@
-// The credential file (§36 phase 1, T122): the one part of a user that is NOT a delta.
-//
-// A password hash must never enter the ground, because the ground REPLICATES — a federated peer
-// would receive it, and an offer file would carry it off the box. So it lives in the Loam store's
-// home directory (the `<home>` a caller passes to `loam serve --home <dir>`, never the operating
-// system user's home), mode 0600, beside the operator seed it is a sibling to.
-//
-// Two rules govern every read here, and both are H7 at a future login door:
-//
-//   1. A file this module cannot fully parse means it CANNOT DETERMINE whether a password matches.
-//      "Cannot determine" is never "matched" — it throws, and a caller must refuse.
-//   2. Validation covers the WHOLE file, not one entry. A damaged neighbour means the file's shape
-//      is unknown, and an unknown shape is not a shape to authenticate against (SUBSTRATE-HAZARDS
-//      H9: a swallowed fault must not read as "no fault").
-//
-// The write is temp-then-rename-then-fsync, in the same directory as the target so the rename is
-// atomic, because a half-written credential file locks the operator out of their own store. 0600 is
-// applied to the temp file BEFORE any byte reaches it, and the descriptor is closed before the
-// rename — an open descriptor held across a rename fails on Windows.
-//
-// This phase adds no door and no CLI command. Nothing calls `writeCredentials` yet, so it has no
-// caller to serialize against a concurrent one; a cross-process lock is the first caller's problem,
-// not this primitive's (see the working spec's "No cross-process write lock").
-
 import {
   chmodSync,
   closeSync,
@@ -36,19 +12,18 @@ import { join } from "node:path";
 import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 
 export interface ScryptParams {
-  readonly N: number; // CPU/memory cost, a power of two
-  readonly r: number; // block size
-  readonly p: number; // parallelism
-  readonly keylen: number; // derived key bytes — the hash's own length
+  readonly N: number;
+  readonly r: number;
+  readonly p: number;
+  readonly keylen: number;
 }
 
-// The 2017 interactive-login floor, which is still the floor: ~16 MiB and ~100ms per hash.
 export const DEFAULT_SCRYPT: ScryptParams = { N: 16384, r: 8, p: 1, keylen: 64 };
 
 export interface CredentialEntry {
   readonly kind: "scrypt";
-  readonly salt: string; // hex, at least 16 bytes
-  readonly hash: string; // hex, exactly params.keylen bytes
+  readonly salt: string;
+  readonly hash: string;
   readonly params: ScryptParams;
 }
 
@@ -57,28 +32,17 @@ export interface CredentialsFile {
   readonly users: Record<string, CredentialEntry>;
 }
 
-/** The door could not decide. Never a licence to admit anyone. */
 export class CredentialsUnreadable extends Error {}
 
 export const credentialsPath = (home: string): string => join(home, "credentials.json");
 
 const HEX = /^[0-9a-f]+$/;
-const MIN_SALT_HEX_LEN = 16; // 8 bytes — hashPassword mints 16 bytes; anything shorter is damage.
+const MIN_SALT_HEX_LEN = 16;
 
-// Bounded above as well as below: the bitwise test coerces to int32, so a huge N would wrap and pass.
 const isPowerOfTwo = (n: number): boolean =>
   Number.isInteger(n) && n >= 2 && n <= 2 ** 30 && (n & (n - 1)) === 0;
 
-// Both axes of scrypt's cost are bounded, and independently: N*r bounds the MEMORY a derivation may
-// claim, and N*r*p bounds the CPU work. Neither implies the other — a large p can multiply CPU time
-// past the bound while N*r alone still sits under the memory bound, so a corrupted or hostile
-// parameter set cannot buy CPU time back that the memory bound denied it.
-// NAMED GAP: `r` is capped at 16 and `N` is a power of two, so the achievable N*r values jump in
-// steps no finer than N itself near this boundary — no combination lands strictly between this
-// constant and one ~1.5% larger. A test cannot pin this exact byte value without loosening the `r`
-// cap or the power-of-two constraint; it can only pin that a value AT the boundary is admitted and a
-// value well past it is refused, which test/server/credentials.test.ts does.
-const MAX_MEMORY_BYTES = 64 * 1024 * 1024; // 64 MiB
+const MAX_MEMORY_BYTES = 64 * 1024 * 1024;
 const DEFAULT_COST = DEFAULT_SCRYPT.N * DEFAULT_SCRYPT.r * DEFAULT_SCRYPT.p;
 const MAX_CPU_COST = DEFAULT_COST * 8;
 
@@ -111,12 +75,6 @@ function checkParams(raw: unknown, where: string): ScryptParams {
   return params;
 }
 
-/**
- * One entry, checked to the byte. The hash's LENGTH is checked against `keylen` on purpose: a
- * truncated file is the shape that leaves a short hash behind, and a short hash is exactly what a
- * length-blind compare would accept a prefix against. A too-short salt is refused too, so a mismatch
- * never reaches `timingSafeEqual`, which throws on unequal-length buffers rather than comparing them.
- */
 export function checkEntry(raw: unknown, where: string): CredentialEntry {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
     throw new CredentialsUnreadable(`${where} is not a credential entry`);
@@ -129,22 +87,12 @@ export function checkEntry(raw: unknown, where: string): CredentialEntry {
   }
   const params = checkParams(entry["params"], where);
   const { salt, hash } = entry;
-  // HEX (`+`, one or more) already refuses an empty string, so an explicit `.length === 0` check
-  // beside it is dead code that only adds an unkillable mutant — HEX.test("") is false on its own.
-  // NAMED GAP: swapping this line's first `||` to `&&` is a real mutant no JSON-parseable value can
-  // reach — `salt.length % 2 !== 0` is true for every non-string JSON.parse can produce (a number or
-  // boolean has no `.length`, so it reads as `NaN !== 0`), so the swap is only visible through a
-  // hand-built object with a custom `.length` and `.toString()` that JSON.parse never yields.
   if (typeof salt !== "string" || !HEX.test(salt) || salt.length % 2 !== 0) {
     throw new CredentialsUnreadable(`${where} has no hex salt`);
   }
   if (salt.length < MIN_SALT_HEX_LEN) {
     throw new CredentialsUnreadable(`${where} has a salt shorter than the entropy floor`);
   }
-  // NAMED GAP, the same shape as the salt check above: swapping this `||` to `&&` is unreachable
-  // via JSON.parse output — a non-string hash always has `.length !== params.keylen * 2` on the
-  // next line (a non-string's `.length` is `undefined`, which is never `===` a number), so the
-  // hash-length check below refuses it regardless of whether this line's own logic is intact.
   if (typeof hash !== "string" || !HEX.test(hash)) {
     throw new CredentialsUnreadable(`${where} has no hex hash`);
   }
@@ -156,11 +104,6 @@ export function checkEntry(raw: unknown, where: string): CredentialEntry {
   return { kind: "scrypt", salt, hash, params };
 }
 
-/**
- * The whole file, checked. An ABSENT file (`ENOENT`) is an empty one — a home with no users yet is
- * not damaged. Any other read fault (permission denied, a directory where the file should be, and so
- * on) is a real fault and must not be folded into "empty." Anything present but unparseable throws.
- */
 export function readCredentials(home: string): CredentialsFile {
   const path = credentialsPath(home);
   let raw: string;
@@ -193,9 +136,6 @@ export function readCredentials(home: string): CredentialsFile {
   if (users === null || typeof users !== "object" || Array.isArray(users)) {
     throw new CredentialsUnreadable(`${path} carries no users object`);
   }
-  // A null prototype, so a user literally named `__proto__` is a key and never a prototype write —
-  // `JSON.parse`'s own object still inherits from `Object.prototype`, so copying into a fresh
-  // null-prototype object is what makes the lookup below safe against a shadowed built-in.
   const checked: Record<string, CredentialEntry> = Object.create(null) as Record<
     string,
     CredentialEntry
@@ -206,26 +146,13 @@ export function readCredentials(home: string): CredentialsFile {
   return { version: 1, users: checked };
 }
 
-/** The entry for `name`, or undefined — prototype members are not entries. */
 export const entryFor = (file: CredentialsFile, name: string): CredentialEntry | undefined =>
   Object.hasOwn(file.users, name) ? file.users[name] : undefined;
 
-/**
- * Write the file whole: a fresh 0600 temp beside it, fsync, close, rename, fsync the directory. The
- * temp lives in the SAME directory as the target — a rename across filesystems is not atomic and can
- * fail with `EXDEV` — and its name carries the pid and random bytes so two writers never collide on
- * it and a crashed writer's leftover cannot block the next write. The descriptor is closed before the
- * rename, because an open handle held across a rename fails on Windows.
- */
-/** Run a cleanup step that must never be allowed to replace a real error already in flight. */
 const cleanupQuietly = (step: () => void): void => {
   try {
     step();
-  } catch {
-    // A cleanup failure here (the temp file already gone, a close on an already-broken fd) is
-    // never more informative than the fault that triggered the cleanup, and letting it throw
-    // would overwrite that fault's stack trace with a confusing, unrelated one.
-  }
+  } catch {}
 };
 
 export function writeCredentials(home: string, file: CredentialsFile): void {
@@ -235,10 +162,6 @@ export function writeCredentials(home: string, file: CredentialsFile): void {
   try {
     const fd = openSync(temp, "wx", 0o600);
     try {
-      // `writeSync` returns the bytes actually written and does not guarantee the whole string
-      // lands in one call (a full disk can return a short write with no error). `writeFileSync`
-      // loops internally until every byte is written; a raw `writeSync` here would risk a
-      // truncated temp file getting renamed over a good one.
       writeFileSync(fd, body);
       fsyncSync(fd);
     } finally {
@@ -246,27 +169,18 @@ export function writeCredentials(home: string, file: CredentialsFile): void {
     }
     renameSync(temp, target);
   } catch (err) {
-    // Covers every failure from `openSync` through `renameSync` — a short write, a failed fsync, a
-    // failed rename — so a fault never leaves the uniquely named temp file behind to accumulate.
-    // The cleanup itself must not mask the real fault (`err`) with a cleanup-time error of its own.
     cleanupQuietly(() => rmSync(temp, { force: true }));
     throw err;
   }
-  // The rename carries the temp's own mode, so an old 0644 file cannot leave its mode behind. Said
-  // again explicitly, because a future writer that stops using a temp would otherwise inherit it.
   chmodSync(target, 0o600);
   try {
     const dir = openSync(home, "r");
     try {
-      fsyncSync(dir); // the rename itself is only durable once the directory entry is
+      fsyncSync(dir);
     } finally {
       cleanupQuietly(() => closeSync(dir));
     }
   } catch (err) {
-    // Windows refuses ANY fsync of a directory handle (ENOSYS/EPERM/EINVAL, depending on version) —
-    // the rename is still atomic there, only the directory entry's durability across a power cut is
-    // weaker, and that gap is not ours to fix. A POSIX fault here (EIO, a real disk error) is a
-    // different thing entirely and must not be swallowed the same way.
     if (process.platform !== "win32") throw err;
   }
 }
@@ -294,11 +208,6 @@ export async function hashPassword(
   return { kind: "scrypt", salt: salt.toString("hex"), hash: hash.toString("hex"), params };
 }
 
-/**
- * Does `password` match `entry`? Throws `CredentialsUnreadable` when the entry cannot be trusted to
- * answer — never `false`, because a caller that treats a fault as a mismatch is right by accident and
- * a caller that treats it as a match is a hole. Compared timing-safely.
- */
 export async function verifyPassword(entry: unknown, password: string): Promise<boolean> {
   const checked = checkEntry(entry, "this credential entry");
   const computed = await derive(password, Buffer.from(checked.salt, "hex"), checked.params);
@@ -306,24 +215,6 @@ export async function verifyPassword(entry: unknown, password: string): Promise<
   return computed.length === expected.length && timingSafeEqual(computed, expected);
 }
 
-/**
- * WHICH COST a decoy hash should pay: the cost a REAL verify on this file would pay.
- *
- * `verifyPassword` derives at the parameters the ENTRY carries. So a decoy at the DOOR's configured
- * cost would take a different time from a real miss the moment those two differ — and that
- * difference is a username oracle measured with a stopwatch instead of a status code. The decoy
- * therefore borrows an existing entry's parameters, and falls back to the door's own only when there
- * is no entry to imitate, in which case no name exists and there is nothing to tell apart.
- *
- * WHAT THIS DOES NOT CLOSE, stated rather than implied: it borrows ONE entry's parameters, so if the
- * entries in a file disagree, every name whose cost differs from the borrowed one is still
- * distinguishable by time. Uniform parameters across the file are the invariant the no-oracle
- * property rests on — which the shipped write path maintains, since `loam user create` always writes
- * `DEFAULT_SCRYPT`. A file that has been edited by hand, or written by a caller passing its own
- * `scrypt`, can break it; `paramsDisagree` below is how the door notices and says so. Closing it
- * properly wants a constant-time floor on the response, or a re-hash on login when an entry's cost
- * is stale. Both are their own ticket.
- */
 export function decoyParamsFor(file: CredentialsFile, fallback: ScryptParams): ScryptParams {
   const names = Object.keys(file.users).sort();
   return names.length === 0 ? fallback : (file.users[names[0]!] as CredentialEntry).params;
@@ -332,22 +223,13 @@ export function decoyParamsFor(file: CredentialsFile, fallback: ScryptParams): S
 const sameParams = (a: ScryptParams, b: ScryptParams): boolean =>
   a.N === b.N && a.r === b.r && a.p === b.p && a.keylen === b.keylen;
 
-/**
- * Do this file's entries disagree about scrypt cost? A `true` here means the decoy hash can only
- * imitate one of them, so the login door's timing tells an attacker which names cost something else —
- * see `decoyParamsFor`. Reported rather than repaired, because repairing it means re-hashing a
- * password the door does not have.
- */
 export function paramsDisagree(file: CredentialsFile): boolean {
   const entries = Object.values(file.users);
   return entries.some((entry) => !sameParams(entry.params, entries[0]!.params));
 }
 
-// A decoy the door hashes against when no entry exists, so an unknown user costs the same time as a
-// wrong password. Its salt is random per process: nothing ever verifies against it successfully.
 const DECOY_SALT = randomBytes(16);
 
-/** Spend one hash and return false — the unknown-user path, kept indistinguishable from a miss. */
 export async function spendDecoyHash(
   password: string,
   params: ScryptParams = DEFAULT_SCRYPT,

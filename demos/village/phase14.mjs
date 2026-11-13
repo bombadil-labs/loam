@@ -1,10 +1,3 @@
-// Phase 14 (Unit 3b) — THE PLAYER: the welcome flow is the constitution as gameplay. A
-// stranger's page mints its own key, and the FIRST thing the door says is no — the knock is a
-// real refusal, because a transport token lends no authority. Then the petition (a delta the
-// stranger signs), the operator's grant, and from there the newcomer writes under their own
-// name, is readable back through the open door, and the mill grinds their presence like
-// anyone else's. The client is the SHIPPED bundle (dist/client), the same file the page loads.
-
 import { publicClaims } from "../../dist/index.js";
 import { authorForSeed, loamClient, mintSeed } from "../../dist/client/index.js";
 import {
@@ -43,20 +36,16 @@ try {
     ),
   ]);
 
-  // THE MILL turns for this phase too — the newcomer's presence must grind like anyone's.
   const { attachMill, ensurePresence, plantMill } = await import("./mill.mjs");
   await ensurePresence(almanac.base, opToken("almanac"));
   await plantMill(almanac);
   await attachMill(almanac);
 
-  // The player: a key minted where it will live, an author derived from it, no standing yet.
   const seed = mintSeed();
   const player = authorForSeed(seed);
   const person = `person:visitor-${ts % 100000}`;
   const client = loamClient({ url: almanac.base, token: tok("gate", "almanac"), seed });
 
-  // 14.1 — the knock is a real refusal: the gate token carries the request, but the author
-  // holds no standing, so the door says no
   let refusal = "";
   try {
     await client.claim([
@@ -73,9 +62,6 @@ try {
     refusal.slice(0, 60),
   );
 
-  // 14.2 — the petition is a delta the stranger signs; the operator grants standing FIRST
-  // (an unstanding author's delta is refused, which is the point), then lands the record of
-  // asking. This is what village.mjs's /petition endpoint does, in-process here.
   const petition = client.sign([
     { role: "petitions", at: "loam:gate", context: "loam.petition" },
     { role: "name", value: "Visitor" },
@@ -88,10 +74,6 @@ try {
     landed.accepted === 1,
   );
 
-  // Joining is constitutional twice over: standing at the door, AND a place on the dossier
-  // roll — the operator evolves the Dossier registration's roots (registration is data;
-  // evolution is one append) and the mill re-attaches to the new generation, so the wheel
-  // turns for the newcomer exactly as it does for the founders.
   const spec = loadSpec("dossier.json");
   const evolved = await registerHttp(almanac.base, opToken("almanac"), {
     ...spec,
@@ -100,7 +82,6 @@ try {
   if (evolved.status !== 200) throw new Error(`roll evolution refused: ${JSON.stringify(evolved.body)}`);
   await attachMill(almanac);
 
-  // 14.3 — the newcomer writes under their own name; the open door reads it back tokenless
   const receipt = await client.claim([
     { role: "subject", at: person, context: "bio" },
     { role: "value", value: "new in the village; signs for himself" },
@@ -118,9 +99,7 @@ try {
       JSON.stringify(readBack.body?.data?.dossier?.attended ?? []).includes("harvest-2"),
   );
 
-  // 14.4 — the mill grinds the newcomer like anyone else: presence appears, derived and
-  // signed by the miller, without the newcomer asking for it
-  await sleep(400); // the runner drains derivations on ingest; give the write-through a beat
+  await sleep(400);
   const milled = await anonGql(almanac.base, `{ dossier(entity: "${person}") { presence } }`);
   const presence = milled.body?.data?.dossier?.presence;
   check(
@@ -130,8 +109,6 @@ try {
     JSON.stringify(presence?.value ?? presence).slice(0, 60),
   );
 
-  // 14.5 — the dossier is watchable through the open door as a LAZY public watch (the
-  // newcomer is no registered root — this is exactly what Unit 2's public budget carries)
   const sse = await fetch(
     `${almanac.base}/subscribe?query=${encodeURIComponent(
       `subscription { dossier(entity: "${person}") { bio } }`,

@@ -1,8 +1,3 @@
-// An owner's clear reaches what her connections wrote (step 5 PR 3i; README ruling 8, M2 and M5).
-// Delta level: which strikes land in which ground, signed by whom. Object level: what the bound
-// read of the entity resolves. Keys a root ever delegated to in a pool count as hers there; only her
-// current root signs the strikes.
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   authorForSeed,
@@ -35,7 +30,6 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-// ada and bea, each with a home and connections bound by name.
 async function world() {
   const gw = await Gateway.boot(
     new MemoryBackend(),
@@ -118,7 +112,6 @@ describe("an owner's clear fans out to her connections' writes", () => {
       connectionKey: key("conn"),
       ownerSeed: seed("ada"),
     });
-    // conn2's only delegation is replaced by one that has already ended.
     const [open2] = two.pool.reactor
       .arrivalLog()
       .filter(
@@ -141,7 +134,7 @@ describe("an owner's clear fans out to her connections' writes", () => {
     const { gw, bind } = await world();
     const one = await bind("ada", "conn");
     const stray = observed(FERN, "height", 5, 50, seed("stray"));
-    expect(one.pool.reactor.ingest(stray).status).toBe("accepted"); // planted past the door
+    expect(one.pool.reactor.ingest(stray).status).toBe("accepted");
     const t = 60;
     const wrongScope = signClaims(delegationClaims(key("ada"), key("stray"), "*", t), seed("ada"));
     const extraPointer = signClaims(

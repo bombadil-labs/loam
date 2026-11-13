@@ -1,19 +1,3 @@
-// T257 — the staged channel sever completes in the browser. SPEC §46 and `loam_federate_drop`
-// promise that an agent STAGES a sever and a person finishes it on the admin container page; the
-// page's plan must therefore reach a channel's pool and run the channel's own sever, the same
-// byte-verified act `loam federate drop` runs. Asserted TWO-SIDED at the bytes and at the
-// reading, as every sever rail is: the target's pool is purged (the spy sees its write), its
-// channel stops being listed, AND a named bystander channel's bytes and gather survive.
-//
-// What this file deliberately does NOT assert, and which rail closes each gap:
-//   - dropChannel's own purge, law retirement, and refusals — the frozen §46 rails
-//     (`test/federation/drop-two-sided.test.ts`, `drop-cli.test.ts`).
-//   - The staging tool's fence and preview — the frozen T188 rail (`federate-mcp.test.ts`).
-//   - The confirm door's token discipline (forged, replayed) — the frozen A2 rail
-//     (`admin-containers.test.ts`), exercised once here only to prove the channel path shares it.
-//
-// Erasure standing rule: every store here is this file's own mkdtemp/memory fixture.
-
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -66,12 +50,6 @@ const note = (text: string, seed: string, timestamp: number): Delta =>
     seed,
   );
 
-/**
- * A served store where the session user ada owns a root and a child container, and two channels
- * receive into that child — alice's and carol's, each pool on its own backend so the bytes can be
- * asked. Alice's backend carries a purge spy: the byte witness is the purge call itself, because
- * drop() closes the store it purged and the handle cannot be re-asked afterwards.
- */
 async function channelServer(): Promise<{
   base: string;
   gateway: Gateway;
@@ -238,24 +216,18 @@ describe("T257 (a)+(b) — a channel severs through the page, two-sided at the b
     const ada = await signIn(base);
     const token = tokenOf(await (await getPage(base, ada)).text());
 
-    // The premise, asserted: both pools hold their peer's bytes and the child gathers both.
     expect(await alice.backend.holds(alice.note.id)).toBe(true);
     expect(await carol.backend.holds(carol.note.id)).toBe(true);
     const before = gateway.containerScope({ containers: [INTO] }).map((d) => d.id);
     expect(before).toContain(alice.note.id);
     expect(before).toContain(carol.note.id);
 
-    // (b) Step 1: the confirm page, where an unreached plan used to answer 409.
     const confirm = await post(base, "/admin/drop", ada, { form_token: token, name: alice.name });
     expect(confirm.status).toBe(200);
     const confirmBody = await confirm.text();
     expect(confirmBody).toContain(alice.name);
-    // The count is the pool's own members, said as a whole tag so a broken markup mutant fails.
     const held = gateway.channelPools.get(alice.name)!.members().length;
     expect(confirmBody).toContain(`<p>It holds ${held} deltas.</p>`);
-    // The page names the act truthfully: a channel sever, its law retired with it — never "one
-    // connection's inbox", which is a different act on a different kind of pool. Asserted with
-    // the tags around the words, so the sentence must arrive as well-formed HTML.
     expect(confirmBody).toContain("<p>This is the pool of a federation channel receiving into");
     expect(confirmBody).toContain(`<code>${INTO}</code>. Dropping it severs that channel whole`);
     expect(confirmBody).toContain("law the channel blessed");
@@ -264,15 +236,10 @@ describe("T257 (a)+(b) — a channel severs through the page, two-sided at the b
     const confirmToken = confirmTokenOf(confirmBody);
     expect(confirmToken).toBeDefined();
 
-    // The SHARED receiving container's own confirm page still counts — a plan that is neither an
-    // inbox nor a channel has no handle, and the count must not fall over into "could not be
-    // counted" because of the way the two handle-bearing acts are told apart.
     const sharedConfirm = await post(base, "/admin/drop", ada, { form_token: token, name: INTO });
     expect(sharedConfirm.status).toBe(200);
     expect(await sharedConfirm.text()).toMatch(/<p>It holds \d+ deltas?\.<\/p>/);
 
-    // (a) Step 2: the confirmed POST severs. Byte level: the spy saw alice's write purged.
-    // Reading level: her channel is no longer listed and the child no longer gathers her word.
     const done = await post(base, "/admin/drop-confirm", ada, {
       form_token: token,
       name: alice.name,
@@ -284,7 +251,6 @@ describe("T257 (a)+(b) — a channel severs through the page, two-sided at the b
     const after = gateway.containerScope({ containers: [INTO] }).map((d) => d.id);
     expect(after).not.toContain(alice.note.id);
 
-    // THE BYSTANDER SURVIVES, named, at the bytes and at the reading.
     expect(await carol.backend.holds(carol.note.id)).toBe(true);
     expect(after).toContain(carol.note.id);
     expect(gateway.channelStatus(carol.name)).toHaveLength(1);
@@ -303,14 +269,9 @@ describe("T257 (c) — the link the agent hands back leads to this page", () => 
     const page = await getPage(base, ada, staged.confirmAt);
     expect(page.status).toBe(200);
     const html = await page.text();
-    // The page is ALICE'S POOL's — its drop form carries her pool's name, not merely a link to
-    // it from some other container's page.
     expect(html).toContain(`<input type="hidden" name="name" value="${alice.name}">`);
     expect(html).toContain('action="/admin/drop"');
 
-    // And the form on that page leads somewhere: the drop it offers reaches the confirm step
-    // rather than refusing — the link is a path a person can actually walk to the end. The name
-    // posted is the one the page carried.
     const posted = /<input type="hidden" name="name" value="([^"]+)">/.exec(html)![1]!;
     const confirm = await post(base, "/admin/drop", ada, {
       form_token: tokenOf(html),
@@ -318,13 +279,10 @@ describe("T257 (c) — the link the agent hands back leads to this page", () => 
     });
     expect(confirm.status).toBe(200);
     expect(confirmTokenOf(await confirm.text())).toBeDefined();
-    expect(gateway.channelStatus(alice.name)).toHaveLength(1); // still nothing removed
+    expect(gateway.channelStatus(alice.name)).toHaveLength(1);
 
-    // The reply also names the path that ALWAYS works — the command line — and says plainly
-    // which containers the page reaches, so the link is never a promise the page cannot keep.
     expect(staged.cliAt).toBe(`loam federate drop --channel ${alice.name} --yes`);
     expect(staged.note).toContain("under the signed-in person's own name");
-    // The reversible alternative is named with the right value — an agent reads this literally.
     expect(staged.note).toContain("`loam_federate_set` with receiving false");
   });
 });
@@ -332,9 +290,6 @@ describe("T257 (c) — the link the agent hands back leads to this page", () => 
 describe("T257 (d2) — a sever the store cannot complete answers 503 honestly, claiming neither direction", () => {
   it("when the purge itself refuses, the page says the sever did not complete and the channel still stands", async () => {
     const { base, gateway, alice, carol } = await channelServer();
-    // The pool's own backend refuses to purge: drop() refuses over doubt, and the page must relay
-    // that as "did not complete" — not "nothing was forgotten" (which a post-purge throw could
-    // make false) and not success.
     alice.backend.purge = (): Promise<number> => Promise.reject(new Error("the disk said no"));
     const ada = await signIn(base);
     const token = tokenOf(await (await getPage(base, ada)).text());
@@ -349,7 +304,6 @@ describe("T257 (d2) — a sever the store cannot complete answers 503 honestly, 
     const body = await done.text();
     expect(body).toContain("The sever did not complete.");
     expect(body).not.toContain("nothing was forgotten");
-    // Two-sided: the channel is still listed, its bytes are still held, and the bystander is whole.
     expect(gateway.channelStatus(alice.name)).toHaveLength(1);
     expect(await carol.backend.holds(carol.note.id)).toBe(true);
     expect(gateway.channelStatus(carol.name)).toHaveLength(1);
@@ -367,9 +321,6 @@ describe("T257 (d) — a sever the store cannot prove refuses on the page, and r
     expect(res.status).toBe(409);
     const body = await res.text();
     expect(confirmTokenOf(body)).toBeUndefined();
-    // Nothing removed, on both halves: no purge reached the bytes (detach closed the pool's
-    // store, and the spy records ids before delegating, so even an attempt would be witnessed),
-    // and the channel's record still stands.
     expect(alice.purged).toEqual([]);
     expect(gateway.channelStatus(alice.name)).toHaveLength(1);
     expect(gateway.containers().detached.has(alice.name)).toBe(true);

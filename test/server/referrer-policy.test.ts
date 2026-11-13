@@ -1,17 +1,3 @@
-// T143 — criteria 1–3 of .adlc/specs/36-06-origin-null-repair.md. A `no-referrer` policy on a
-// page that hosts a form makes Chrome serialize the form POST's Origin as the string `null`, and
-// `fromThisPage` refuses null outright — so the policy on the store's own HTML is load-bearing
-// for every session-gated POST. This rail pins it at both levels: what a live response actually
-// sends (object level), and a source floor so the NEXT page cannot ship with the old header
-// (a hand-enumerated page list narrows in lockstep with what its author remembered; the scan
-// does not).
-//
-// The scan is textual, not semantic: it slices each `writeHead(` call's first 800 characters and
-// matches the exact prettier-stable spelling `"referrer-policy": "no-referrer"`. A header object
-// assembled far from its writeHead, or a `setHeader` call, would evade all three scan tests —
-// today neither exists in `src/`, and the live-response assertions above are the level that
-// cannot be evaded, only narrowed.
-
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -55,8 +41,6 @@ async function doorServer(): Promise<{ base: string }> {
   await gateway.append([signClaims(roleClaims("myk", "operator", OPERATOR, ts++), OPERATOR_SEED)]);
   const home = mkdtempSync(join(tmpdir(), "loam-referrer-"));
   homes.push(home);
-  // The token door signs with <home>/operator.seed and fails closed without it — and a fallen-
-  // through /oauth/token would answer from the mount layer, without the header this rail pins.
   initHome(home, OPERATOR_SEED);
   writeCredentials(home, { version: 1, users: { myk: await hashPassword(PASSWORD, CHEAP) } });
   const client: OAuthClient = {
@@ -153,12 +137,6 @@ describe("criterion 1 — form-hosting pages send the policy that keeps a real O
     });
     expect(consent.status).toBe(200);
     expect(policyOf(consent)).toBe("origin");
-    // T143's second finding: Chrome enforces form-action against the POST's redirect target, so
-    // the consent page must name the registered redirect ORIGIN — and only there. Two-sided: the
-    // refusal page below keeps the unwidened CSP. This literal is LOAD-BEARING: the
-    // implementation widens via CSP.replace, which no-ops silently if the constant is ever
-    // reworded, and oauth-consent's frozen expectation computes with the same replace — this
-    // hand-written string is the one assertion that goes red on that silent no-op.
     expect(consent.headers.get("content-security-policy")).toContain(
       `form-action 'self' ${ALLOW_ORIGIN}`,
     );
@@ -171,7 +149,6 @@ describe("criterion 1 — form-hosting pages send the policy that keeps a real O
     expect(refused.status).toBe(400);
     expect(policyOf(refused)).toBe("origin");
     expect(refused.headers.get("content-security-policy")).toContain("form-action 'self';");
-    // No session: the consent door renders the login form through ITS OWN html helper.
     const anon = await fetch(`${base}/oauth/authorize`, { redirect: "manual" });
     expect(policyOf(anon)).toBe("origin");
   });
@@ -246,7 +223,6 @@ describe("criterion 3 — the source floor", () => {
     }
     return out;
   };
-  /** The first 800 chars after each `writeHead(` — room for every header object in src/ today. */
   const headerBlocks = (content: string): string[] =>
     content
       .split("writeHead(")
@@ -284,7 +260,6 @@ describe("criterion 3 — the source floor", () => {
   });
 
   it("every remaining no-referrer DECLARATION in src/ is a named non-document — a new page copied from an old header block goes red", () => {
-    // Count declarations, not prose: the fix's own comments name the banned policy by name.
     const DECLARATION = '"referrer-policy": "no-referrer"';
     const counts = new Map<string, number>();
     for (const file of sources(join(root, "src"))) {
@@ -292,9 +267,9 @@ describe("criterion 3 — the source floor", () => {
       if (n > 0) counts.set(file.slice(root.length + 1).replaceAll("\\", "/"), n);
     }
     expect(Object.fromEntries([...counts.entries()].sort())).toEqual({
-      "src/server/admin.ts": 1, // the 303 after an admin POST — a redirect, not a document
-      "src/server/oauth.ts": 3, // register JSON, token JSON, and the authorize 302
-      "src/server/session.ts": 1, // the JSON helper (refusals) — no form ever renders from JSON
+      "src/server/admin.ts": 1,
+      "src/server/oauth.ts": 3,
+      "src/server/session.ts": 1,
     });
   });
 });

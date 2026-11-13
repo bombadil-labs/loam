@@ -1,9 +1,3 @@
-// Step 2's contract: persistence is a seam, and every driver is an interchangeable witness to
-// it. A backend holds a grow-only set of deltas, deduped by id — append is idempotent,
-// deltasSince(known) is the exact complement, and what comes back is byte-for-byte what went
-// in, signatures and all. Durable drivers additionally survive close/reopen and let a second
-// handle see the union.
-
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,11 +20,6 @@ import { SqliteBackend } from "../../src/store/sqlite.js";
 import { MemStorage } from "./mem-storage.js";
 import { FERN, GARDENER, GARDENER_SEED, SURVEYOR_SEED, observed } from "../spike/garden.js";
 
-// The durable harnesses do real filesystem and sqlite work — one file per delta for the
-// archive — and under a loaded CI runner (a build plus a dozen parallel workers) a single
-// batch can blow vitest's 5s default. The same generous hang-guard the other heavy suites
-// carry (see pack.test.ts, which learned this first): it only ever matters when something
-// is genuinely stuck.
 vi.setConfig({ testTimeout: 20_000 });
 
 const signed1 = observed(FERN, "height", 30, 1000, GARDENER_SEED);
@@ -41,7 +30,6 @@ const unsigned = makeDelta({
   author: "did:key:zAnon",
   pointers: [{ role: "note", target: { kind: "primitive", value: "unsigned but true" } }],
 });
-// The shapes step 3 will persist: a delta-ref (negation), an entity-ref with context, a boolean.
 const negation = makeDelta(makeNegationClaims(GARDENER, 3500, signed2.id, "remeasured"));
 const mixed = makeDelta({
   timestamp: 4000,
@@ -59,22 +47,13 @@ const ids = (deltas: readonly Delta[]) => deltas.map((d) => d.id).sort();
 interface Harness {
   readonly name: string;
   open(): StoreBackend;
-  // Durable drivers only: a fresh handle over the same underlying storage.
   reopen?(): StoreBackend;
-  // Durable drivers only: reach BEHIND the seam and damage a stored row, so the contract can
-  // assert that reads never launder corruption. Each driver knows its own storage; the contract
-  // only knows the promise.
   corruptSig?(id: string): void;
   corruptClaims?(id: string, claims: unknown): void;
-  // The key-owning boot-path drivers (sqlite, localStorage, and a mirror fronting one) QUARANTINE
-  // a bad row and read on (SPEC §25); the archive vault, restored only through the loud `heal`,
-  // still REFUSES it. Either way the row is never handed onward as health — the difference is
-  // whether the read survives it.
   quarantines?: boolean;
 }
 
 const tmp = mkdtempSync(join(tmpdir(), "loam-store-"));
-// maxRetries rides out a Windows EBUSY if the OS hasn't released a just-closed sqlite handle.
 afterAll(() => rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
 
 let dbCount = 0;
@@ -90,7 +69,6 @@ function sqliteHarness(): Harness {
     open: () => new SqliteBackend(path),
     reopen: () => new SqliteBackend(path),
     quarantines: true,
-    // a well-shaped signature that verifies nothing / another delta's well-formed claims
     corruptSig: (id) => raw("UPDATE deltas SET sig = ? WHERE id = ?", "ab".repeat(64), id),
     corruptClaims: (id, claims) =>
       raw("UPDATE deltas SET claims = ? WHERE id = ?", JSON.stringify(claims), id),
@@ -115,9 +93,6 @@ function archiveHarness(): Harness {
   };
 }
 
-// The combinator faces the same contract as the drivers it composes: once over ephemeral
-// sides, once over durable sides (where reads answer from the primary — so corrupting the
-// primary must refuse through the mirror too).
 function mirrorMemoryHarness(): Harness {
   return {
     name: "mirror(memory, memory)",
@@ -133,15 +108,12 @@ function mirrorDurableHarness(): Harness {
     name: "mirror(sqlite, archive)",
     open,
     reopen: () => new MirrorBackend(sqlite.reopen!(), archive.reopen!()),
-    quarantines: true, // reads answer from the sqlite primary, so its quarantine is the store's
+    quarantines: true,
     corruptSig: sqlite.corruptSig!.bind(sqlite),
     corruptClaims: sqlite.corruptClaims!.bind(sqlite),
   };
 }
 
-// The browser driver: durable exactly as far as its Storage is. The shim IS the origin — a
-// reopen is a second handle on the same storage, and corruption is an edited row, exactly as a
-// devtools edit would be.
 function localStorageHarness(): Harness {
   const origin = new MemStorage();
   const keyFor = (id: string) => `loam:contract:${id}`;
@@ -180,8 +152,8 @@ for (const makeHarness of harnesses) {
       const h = makeHarness();
       const store = h.open();
       expect(await store.append([signed1, signed2])).toBe(2);
-      expect(await store.append([signed1])).toBe(0); // idempotent by id
-      expect(await store.append([unsigned, unsigned])).toBe(1); // deduped within one batch too
+      expect(await store.append([signed1])).toBe(0);
+      expect(await store.append([unsigned, unsigned])).toBe(1);
       await store.close();
     });
 
@@ -218,7 +190,7 @@ for (const makeHarness of harnesses) {
       const store = h.open();
       await store.append([minusZero]);
       const [back] = await store.deltasSince(new Set());
-      expect(back!.id).toBe(minusZero.id); // canonical CBOR never saw a -0 to begin with
+      expect(back!.id).toBe(minusZero.id);
       const value = back!.claims.pointers[0]!.target;
       expect(value.kind === "primitive" && Object.is(value.value, 0)).toBe(true);
       await store.close();
@@ -237,9 +209,8 @@ for (const makeHarness of harnesses) {
       const h = makeHarness();
       const store = h.open();
       await store.append([signed1]);
-      const wolf: Delta = { id: signed1.id, claims: signed2.claims }; // familiar face, wrong soul
+      const wolf: Delta = { id: signed1.id, claims: signed2.claims };
       await expect(store.append([wolf])).rejects.toThrow(/does not match its claims/);
-      // and within one batch, riding behind its own honest original:
       await expect(
         store.append([signed2, { id: signed2.id, claims: signed1.claims }]),
       ).rejects.toThrow(/does not match its claims/);
@@ -251,13 +222,11 @@ for (const makeHarness of harnesses) {
       const store = h.open();
       const forged: Delta = { ...signed2, id: `1e20${"00".repeat(32)}` };
       await expect(store.append([signed1, forged])).rejects.toThrow(/does not match its claims/);
-      expect(await store.deltasSince(new Set())).toEqual([]); // signed1 did not slip in first
+      expect(await store.deltasSince(new Set())).toEqual([]);
       await store.close();
     });
 
     it("a lone surrogate is refused: its bytes and its identity disagree", async () => {
-      // Since rhizomatic 0.11.0-next.6 the substrate refuses it when the delta is made, before any
-      // store sees it; the store is left untouched either way.
       expect(() =>
         makeDelta({
           timestamp: 6000,
@@ -278,39 +247,31 @@ for (const makeHarness of harnesses) {
       await store.append(all);
       expect(await store.purge([signed1.id, unsigned.id, "1e20" + "77".repeat(32)])).toBe(2);
       expect(ids(await store.deltasSince(new Set()))).toEqual(ids([signed2, negation, mixed]));
-      expect(await store.purge([signed1.id])).toBe(0); // already gone — idempotent
+      expect(await store.purge([signed1.id])).toBe(0);
       await store.close();
     });
 
     it("holds answers byte-presence: absent, then held, then absent again (ticket T67)", async () => {
-      // The question §11 actually asks, asked of every driver rather than inferred from a read.
-      // `deltasSince` cannot stand in for this — it is DEFINED to skip what `purge` exists to find
-      // (an archive `.tmp` straggler), so a read that sees nothing proves nothing about the bytes.
       const h = makeHarness();
       const store = h.open();
-      expect(await store.holds(signed1.id)).toBe(false); // never appended here
+      expect(await store.holds(signed1.id)).toBe(false);
       await store.append(all);
       expect(await store.holds(signed1.id)).toBe(true);
       await store.purge([signed1.id]);
       expect(await store.holds(signed1.id)).toBe(false);
-      expect(await store.holds(signed2.id)).toBe(true); // ...and only the named id went
+      expect(await store.holds(signed2.id)).toBe(true);
       await store.close();
     });
 
     if (sample.reopen !== undefined) {
       it("holds asks the STORE, not this handle's bookkeeping", async () => {
-        // Append through one handle, probe through another. Without this, a `holds` implemented as
-        // `this.onDisk.has(id)` passes every other test in this file — `append` adds to that index
-        // and `purge` deletes from it, so the symmetry holds while the answer comes from a cache of
-        // what this handle DID rather than from the bytes. A second handle's row is still a row
-        // this store holds, and the byte a crash left behind was never in anyone's index (H8).
         const h = makeHarness();
         const writer = h.open();
         await writer.append([signed1]);
         await writer.close();
 
         const reader = h.reopen!();
-        expect(await reader.holds(signed1.id)).toBe(true); // never written by THIS handle
+        expect(await reader.holds(signed1.id)).toBe(true);
         expect(await reader.purge([signed1.id])).toBe(1);
         expect(await reader.holds(signed1.id)).toBe(false);
         await reader.close();
@@ -318,8 +279,6 @@ for (const makeHarness of harnesses) {
     }
 
     it("holds sees at least what purge reaches: a positive count is never a surprise", async () => {
-      // The governing invariant. A driver whose `purge` can remove bytes its `holds` cannot see
-      // would report a completion the store never delivered — H7 with the evidence inverted.
       const h = makeHarness();
       const store = h.open();
       await store.append(all);
@@ -330,13 +289,11 @@ for (const makeHarness of harnesses) {
     });
 
     it("purge is mechanical, not law: the purged delta may be appended again", async () => {
-      // Refusal-of-return is the GATEWAY's job (erasures at admission); a backend keeps
-      // "a set of deltas" and no memory of grudges.
       const h = makeHarness();
       const store = h.open();
       await store.append([signed1]);
       await store.purge([signed1.id]);
-      expect(await store.append([signed1])).toBe(1); // stored anew, counted anew
+      expect(await store.append([signed1])).toBe(1);
       expect(ids(await store.deltasSince(new Set()))).toEqual(ids([signed1]));
       await store.close();
     });
@@ -373,7 +330,6 @@ for (const makeHarness of harnesses) {
         await store.close();
         const again = h.reopen!();
         expect(ids(await again.deltasSince(new Set()))).toEqual(ids(all));
-        // and the reopened handle still dedups against what the first one wrote
         expect(await again.append([signed1])).toBe(0);
         await again.close();
       });
@@ -384,11 +340,9 @@ for (const makeHarness of harnesses) {
           const store = h.open();
           await store.append([signed1]);
           await store.close();
-          h.corruptSig!(signed1.id); // a well-shaped signature that verifies nothing
+          h.corruptSig!(signed1.id);
           const again = h.reopen!();
           if (sample.quarantines === true) {
-            // §25: the bad row is set aside, the read PROCEEDS — signed1 was the only delta, so
-            // the ground is now empty, and the pen names WHY the row was set aside.
             expect(await again.deltasSince(new Set())).toEqual([]);
             expect(isRepairable(again)).toBe(true);
             const pen = isRepairable(again) ? await again.quarantine() : [];
@@ -404,8 +358,6 @@ for (const makeHarness of harnesses) {
           const store = h.open();
           await store.append([signed1]);
           await store.close();
-          // Swap in ANOTHER delta's (well-formed) claims behind the store's back — the row is
-          // valid in shape but no longer recomputes to its own id.
           h.corruptClaims!(signed1.id, claimsToJson(signed2.claims));
           const again = h.reopen!();
           if (sample.quarantines === true) {
@@ -427,7 +379,6 @@ for (const makeHarness of harnesses) {
         await b.append([signed2]);
         expect(ids(await a.deltasSince(new Set()))).toEqual(ids([signed1, signed2]));
         expect(ids(await b.deltasSince(new Set()))).toEqual(ids([signed1, signed2]));
-        // appending what the OTHER handle already stored is still a no-op
         expect(await a.append([signed2])).toBe(0);
         await a.close();
         await b.close();

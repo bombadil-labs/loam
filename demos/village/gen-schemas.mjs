@@ -1,5 +1,3 @@
-// Generate every register-file in demos/village/schemas/. Deterministic; safe to re-run.
-
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { AUTHORS, PEOPLE, SCHEMAS } from "./harness.mjs";
@@ -9,7 +7,6 @@ mkdirSync(SCHEMAS, { recursive: true });
 const PICK = { pick: { order: { byTimestamp: "desc" } } };
 const ALL = { all: { order: { byTimestamp: "asc" } } };
 
-// The canonical gather: everything pointing at the root, bucketed by target context.
 const GATHER = {
   op: "group",
   key: "byTargetContext",
@@ -20,7 +17,6 @@ const GATHER = {
   },
 };
 
-// A gather that EXCLUDES a context — the Screening v2 evolution drops `note`.
 const gatherWithout = (context) => ({
   op: "group",
   key: "byTargetContext",
@@ -35,10 +31,6 @@ const gatherWithout = (context) => ({
   },
 });
 
-// Since rhizomatic 0.8 / issue #23, an `expand` names BOTH halves of the child's lens: `schema`
-// (how the child gathers) and `reading` (the resolution Schema it resolves through). The village
-// names every resolution Schema after its hyperschema (see `write`), so the child's reading name
-// coincides with the child hyperschema name — hence `reading` defaults to `schema`.
 const expandThrough = (role, schema, reading = schema) => ({
   op: "expand",
   role: { exact: role },
@@ -47,17 +39,9 @@ const expandThrough = (role, schema, reading = schema) => ({
   in: GATHER,
 });
 
-// The specs are authored flat for brevity; the register format is the nested shape every door
-// takes — { hyperschema: { name, alg, body }, schema, roots, writable? } — so emit that.
-// `writable` is the §14/§21 immutable-by-default knob: NAME the fields the phases actually write
-// through mutations, and only those — silence means "you may look, not touch". A lens whose writes
-// all arrive as signed relation deltas (appendAs) or derived emissions (the mill) names nothing.
 const write = (file, { name, alg, body, policy, roots, entity, writable }) => {
   const spec = {
     hyperschema: { name, alg: alg ?? 1, body },
-    // Name the resolution Schema after its hyperschema (issue #23): a named reading is referenceable
-    // as an `expand`'s `reading`, and — since lensName is `schema.name ?? hyperschema.name` — naming
-    // it the hyperschema's own name leaves lens identity (and thus §21.7 grouping) exactly as it was.
     schema: { name, alg: alg ?? 1, ...policy },
     roots,
     ...(entity ? { entity } : {}),
@@ -73,7 +57,6 @@ const GATHERINGS = ["gathering:harvest-1", "gathering:harvest-2"];
 
 const PERSON_POLICY = { props: { name: PICK, bio: PICK, follows: ALL }, default: PICK };
 
-// -- commons ------------------------------------------------------------------------------------
 write("person.json", {
   name: "Person",
   alg: 1,
@@ -90,7 +73,6 @@ write("circle.json", {
   roots: PEOPLE,
 });
 
-// -- reel ---------------------------------------------------------------------------------------
 write("film.json", {
   name: "Film",
   alg: 1,
@@ -114,10 +96,10 @@ write("screening-v1.json", {
 write("screening-v2.json", {
   name: "Screening",
   alg: 1,
-  body: gatherWithout("note"), // evolution: the gather itself drops the note context...
+  body: gatherWithout("note"),
   policy: {
     props: { film: PICK, date: PICK, venue: PICK, rating: PICK, rewatch: PICK, with: ALL },
-    default: PICK, // ...and the policy trades `note` for `rewatch`
+    default: PICK,
   },
   roots: SCREENINGS,
   writable: ["date", "venue", "rating", "rewatch"],
@@ -128,9 +110,6 @@ write("screening-classic.json", {
   body: GATHER,
   policy: SCREENING_V1_POLICY,
   roots: SCREENINGS,
-  // Its own name IS its own entity (hyperschema:ScreeningClassic by default): old law,
-  // concurrently served. The former explicit `entity: "schema:ScreeningClassic"` predated §21's
-  // rename — `schema:<name>` now belongs to the living resolution Schema, not the hyperschema.
   writable: ["date", "venue", "rating", "note"],
 });
 write("reel-person.json", {
@@ -149,7 +128,6 @@ write("film-night.json", {
   roots: SCREENINGS,
 });
 
-// -- hive ---------------------------------------------------------------------------------------
 write("colony.json", {
   name: "Colony",
   alg: 1,
@@ -167,9 +145,6 @@ write("gathering.json", {
   writable: ["date", "honey"],
 });
 
-// -- almanac ------------------------------------------------------------------------------------
-// One body, three lenses. Dossier: a person's whole village life. Presence: the bare minimum.
-// TrustedDossier: bio resolved by WHO SAID IT — villagers outrank the world.
 const DOSSIER_PROPS = {
   name: PICK,
   bio: PICK,
@@ -177,8 +152,6 @@ const DOSSIER_PROPS = {
   circle: ALL,
   companioned: ALL,
   attended: ALL,
-  // The mill's flour (phase 11): ensurePresence re-registers THIS file to evolve the dossier,
-  // so the generator must know the field the evolution promises — regeneration is not regression.
   presence: PICK,
 };
 write("dossier.json", {
@@ -203,9 +176,6 @@ write("trusted-dossier.json", {
   policy: {
     props: {
       ...DOSSIER_PROPS,
-      // rhizomatic 0.2.0: "trusted, then latest" — the founding saga's field-note bug, fixed
-      // by the substrate change it motivated (rhizomatic#1). The villagers outrank the world,
-      // and among a villager's own words the NEWEST wins (no more lexById surprise).
       bio: {
         pick: {
           order: {
