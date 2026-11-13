@@ -41,7 +41,8 @@ Rails are declared at P3, once these tests exist and are red.
    header prose, and the collapsed phrasing ("the half of a user that IS a delta") does not
    recur. Verified by `test/server/users-ground.test.ts` (a rail reads the source file's header and
    asserts the vocabulary) and `grep -c "half of a user that IS a delta" src/server/users.ts`
-   returning `0`.
+   returning `0`. The header prose was removed on 2026-11-12; the behavior test in
+   `test/server/users-ground.test.ts` (criterion 1) verifies it now.
 2. "Operator-signed" is enforced on the READ, not asserted on the write: an ordinary author with no
    special standing signs a user or role claim, and the ground accepts it (the delta is admitted),
    because `userHyperSchema`'s select is what excludes it, not the append door. Verified by

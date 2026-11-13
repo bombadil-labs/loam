@@ -83,18 +83,7 @@ any upgrade: `npm run adlc:patch`, then `adlc init` (idempotent — it owns `.gi
 a gate you expect to FAIL actually fails. A gate you have never seen red has proven nothing, and
 that applies to the toolchain as much as to a rail.
 
-**The rail backstop runs in CI** (`scripts/rails-guard-ci.mjs`, wired in `.github/workflows/ci.yml`).
-ADLC's PreToolUse hook is only the in-session layer and explicitly does **not** gate Bash — a shell
-cannot be reliably parsed — so a rail edited through a shell command is caught by the CI diff gate or
-by nothing. The wrapper exists because the bare gate will not scan the store and treats an ADDED file
-as an edit, which would fail the very PR that first writes a ticket's rails; it therefore guards only
-rails that already exist on the base. First-authoring is invisible, everything after it is frozen.
-**The ONE exemption is an authorized vocabulary rename** (Myk, 2026-07-26): declared in
-`scripts/rail-renames.json`, read from the BASE tree only — a branch cannot self-authorize — and
-exempting a frozen-rail edit iff base + the declared substitution is byte-identical to the branch's
-file (directly or after the repo's own prettier). Two PRs, mechanically enforced: land the
-declaration, then land the rename. A red gate always means stop; no future context window needs
-lore about which red was blessed.
+**CI runs `npm run check` only.** No CI job guards frozen tests during the refactor.
 
 **THREE adlc gates run via LOCAL PATCHES — re-apply after any adlc upgrade with `npm run
 adlc:patch`.** They patch a GLOBAL package, so `npm i -g @adlc/cli` wipes them; that is why they are

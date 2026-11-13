@@ -5,21 +5,14 @@ import { relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
 
-export const SCOPE = [
-  "src",
-  "test",
-  "scripts",
-  "demos",
-  "refactor",
-  "eslint.config.js",
-  "vitest.config.mjs",
-];
+export const SCOPE = ["."];
 
 const EXTENSIONS = /\.(ts|mts|cts|tsx|mjs|cjs|js|jsx)$/;
 const EXCLUDED = [
   /(^|\/)node_modules\//,
   /^demos\/village\/homes\//,
   /^test\/gateway\/fixtures\/.*\.bundle\.mjs$/,
+  /^(dist|site-dist)\//,
 ];
 
 const DIRECTIVES = [
@@ -47,13 +40,18 @@ function isJsDocNode(n) {
 export function codeSpans(text, file = "x.ts") {
   const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, scriptKind(file));
   const spans = [];
+  let prevEnd = 0;
   const walk = (n) => {
     if (isJsDocNode(n)) return;
     const kids = n.getChildren(sf);
     if (kids.length > 0) return kids.forEach(walk);
     if (n.kind === ts.SyntaxKind.JsxText) throw new Error(`${file}: JSX text is not supported`);
     const start = n.getStart(sf);
-    if (n.end > start) spans.push({ start, end: n.end, kind: n.kind });
+    if (n.end > start) {
+      const nl = spans.length > 0 && /[\n\r\u2028\u2029]/.test(text.slice(prevEnd, start));
+      spans.push({ start, end: n.end, kind: n.kind, nl });
+      prevEnd = n.end;
+    }
   };
   walk(sf);
   return { sf, spans };
@@ -113,7 +111,10 @@ function bodyOf(text, c) {
 
 export function directiveOf(text, c) {
   const raw = text.slice(c.pos, c.end);
-  if (!c.block && /^\/\/\/\s*<(reference|amd-module|amd-dependency)\b/.test(raw)) return raw.trim();
+  if (!c.block && /^\/\/\/\s*<(reference|amd-module|amd-dependency)\b/.test(raw)) {
+    const close = raw.indexOf("/>");
+    return close < 0 ? raw.trim() : raw.slice(0, close + 2);
+  }
   const body = bodyOf(text, c);
   const first = body.split("\n")[0].trim();
   if (!DIRECTIVES.some((re) => re.test(first))) return null;
@@ -123,6 +124,18 @@ export function directiveOf(text, c) {
     kept = full.split(" -- ")[0].replace(/\s--$/, "").trim();
   } else if (/^@ts-/.test(first)) {
     kept = first.split(/\s/)[0];
+  } else if (/^prettier-ignore/.test(first)) {
+    kept = "prettier-ignore";
+  } else if (/^(c8|v8|istanbul) ignore/.test(first)) {
+    const words = first.split(/\s+/);
+    const args = [];
+    for (const w of words.slice(2)) {
+      const arg = /^(next|start|stop|if|else|file|\d+)(:?)$/.exec(w);
+      if (arg === null) break;
+      args.push(arg[1]);
+      if (arg[2] === ":") break;
+    }
+    kept = [...words.slice(0, 2), ...args].join(" ");
   } else if (/^@vitest-environment/.test(first)) {
     kept = first.split(/\s+/).slice(0, 2).join(" ");
   }
@@ -222,7 +235,7 @@ export function strip(text, file = "x.ts") {
 
 export function tokenStream(text, file = "x.ts") {
   const { spans } = codeSpans(text, file);
-  return spans.map((s) => `${s.kind}:${text.slice(s.start, s.end)}`);
+  return spans.map((s) => `${s.kind}${s.nl ? "+nl" : ""}:${text.slice(s.start, s.end)}`);
 }
 
 export function listFiles(root, args) {
@@ -271,7 +284,10 @@ async function main() {
     const a = tokenStream(text, f);
     const b = tokenStream(r.text, f);
     if (a.length !== b.length || a.some((t, i) => t !== b[i])) {
-      throw new Error(`${f}: the token stream changed; refusing to write`);
+      throw new Error(
+        `${f}: a token or a line break before a token changed (line breaks decide automatic ` +
+          `semicolon insertion); refusing to write`,
+      );
     }
     writeFileSync(abs, r.text);
   }

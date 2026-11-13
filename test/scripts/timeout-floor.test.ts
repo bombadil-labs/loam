@@ -76,8 +76,9 @@ describe("no test file lowers its file-level timeout below the repo's own defaul
     expect(
       offenders,
       `These files ask for LESS room than ${CONFIG} grants every test file. Raise each to the ` +
-        `config's own value, or delete the override and inherit it. Do not lower the config: its ` +
-        `comment records the Windows fsync measurement that set it. A deliberately short clock ` +
+        `config's own value, or delete the override and inherit it. Do not lower the config: a ` +
+        `Windows fsync measurement set it, and \`git log -p vitest.config.mjs\` shows that ` +
+        `measurement. A deliberately short clock ` +
         `belongs on the ONE test that needs it, as a per-test budget.\n  ${offenders.join("\n  ")}`,
     ).toEqual([]);
   });

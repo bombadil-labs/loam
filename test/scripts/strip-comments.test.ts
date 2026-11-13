@@ -122,6 +122,31 @@ describe("strip-comments removes comments and nothing else", () => {
     );
   });
 
+  it.each([
+    ["// prettier-ignore because the table reads better aligned", "// prettier-ignore"],
+    ["// prettier-ignore -- a reason", "// prettier-ignore"],
+    ["/* c8 ignore next 3 -- a reason */", "/* c8 ignore next 3 */"],
+    ["/* c8 ignore start: the platform branch */", "/* c8 ignore start */"],
+    ["/* c8 ignore stop because we are done */", "/* c8 ignore stop */"],
+    ["/* v8 ignore next: a reason */", "/* v8 ignore next */"],
+    ["/* istanbul ignore else because it cannot happen */", "/* istanbul ignore else */"],
+    ['/// <reference types="node" /> the node types', '/// <reference types="node" />'],
+  ])("drops the prose after a directive: %s", (directive, kept) => {
+    const source = `${directive}\nconst x = 1;\n`;
+    const result = strip(source, "fixture.ts");
+    expect(result.text).toBe(`${kept}\nconst x = 1;\n`);
+    expect(result.removed, "--check flags the prose").toHaveLength(1);
+  });
+
+  it("sees a line break that decides automatic semicolon insertion", () => {
+    const broken = "function f() {\n  return /* a\n  b */ x;\n}\n";
+    const joined = "function f() {\n  return x;\n}\n";
+    expect(tokenStream(broken, "fixture.ts")).not.toEqual(tokenStream(joined, "fixture.ts"));
+    const out = stripped(broken);
+    expect(tokenStream(out, "fixture.ts")).toEqual(tokenStream(broken, "fixture.ts"));
+    expect(out).not.toBe(joined);
+  });
+
   it("does not mistake prose that MENTIONS a directive for the directive", () => {
     const source =
       "// The `// @vitest-environment happy-dom` line above sets the DOM.\nconst x = 1;\n";

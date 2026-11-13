@@ -64,7 +64,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "comments:check": "node scripts/strip-comments.mjs --check src test scripts demos refactor eslint.config.js vitest.config.mjs",
+    "comments:check": "node scripts/strip-comments.mjs --check",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "npm run format:check && npm run lint && npm run comments:check && npm run census && npm run peer-probe && npm run typecheck && npm run build && node scripts/gen-packets.mjs --check && npm test",
