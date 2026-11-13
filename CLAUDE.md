@@ -30,6 +30,7 @@ Read these first:
 
 - A change that widens what erasure purges.
 - A stable npm release of Loam or rhizomatic.
+- A change to what the system promises, outside the refactor and the store arc.
 - Hermetic: ask Myk before you depend on it.
 
 ## The bar
