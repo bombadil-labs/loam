@@ -12,7 +12,8 @@ itself gets a new version of its algorithm. Rhizomatic becomes a monorepo of tie
 split below and the four threads are set aside until Myk restores them. A fresh-context reviewer
 that did not write the diff reviews each head. Where this file says "ask Sol", Claude does the
 rhizomatic work in a rhizomatic PR, under that repo's `AGENTS.md`. Claude prepares rhizomatic
-releases and prereleases. Publishing a release to npm stays Myk's button. Myk delegated open
+releases and prereleases. Publishing to npm stays Myk's button, for a release and for a `-next`
+prerelease, until Myk says otherwise. Myk delegated open
 decisions for the store arc to Claude on 2026-11-12. Claude records each decision in the PR that
 makes it. The active work is the store arc: `spec/18-store.PROPOSAL.md` in rhizomatic, six
 slices, all before step 7.
@@ -128,7 +129,8 @@ Design:
    the store arc to Claude. Claude records each decision in the PR that makes it. Myk's words of
    2026-09-29: "make the best choices you can that maintain the spirit of the project, and we will
    do a big audit after this migration to identify issues on a layer-by-layer basis ... just use
-   your collective judgment." Each such decision is recorded below, so the audit can find it.
+   your collective judgment." Decisions before 2026-11-09 are recorded below. Later decisions are
+   in the PR that makes each one. The audit reads both.
    A change that widens what gets PURGED still goes to Myk.
    - **`user:ada` is an entity id, read per peer, with no global uniqueness.** Myk corrected an
      earlier draft (random ids): claims are just claims, and meaning belongs to the governing
