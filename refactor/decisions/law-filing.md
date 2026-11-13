@@ -1,17 +1,31 @@
 # Decision: how Loam files its law for the store
 
-Status: open. Owner: Myk. Written 2026-11-09 against Loam `4161f883` and rhizomatic `fdd5bd1`.
+Status: decided. Written 2026-11-09 against Loam `4161f883` and rhizomatic `fdd5bd1`. Line numbers
+and counts are checked again against Loam `b31773b7` (main, 2026-11-12).
 Marks: **V** = verified in the code. **I** = inferred.
 
-## 1. The decision
+## Decision
+
+**Option A: Loam files each law kind at one fixed `loam:` entity.**
+
+- Decided 2026-11-12 by Claude, under Myk's delegation of store-arc decisions.
+- The rule: one fixed entity per kind. The pointer at that entity carries the record's own context.
+- A reader calls `lawfulHistoryAt` at the kind's entity, once for each context it reads.
+- Container law is the one kind with three contexts. See "Container law" in section 4.A.
+- The wire change is PR 6 of section 7. Its body states: "nothing that survived before can now be
+  deleted".
+- Section 8 holds the erasure analysis. Section 7 holds the build stack.
+
+## 1. The question
 
 Loam must stop reading law with a scan of the whole delta set.
-Choose how a reader finds "all law of one kind": a fixed entity (A), or a context index (B).
+The question was how a reader finds "all law of one kind": a fixed entity (A), or a context index
+(B).
 
 ## 2. Why now
 
 - SPEC-18 forbids a whole-set scan on a serving path (§3 rule 2, §6.6). **V**
-- `lawfulSnapshot` and `lawfulHistory` scan the whole set. They have 22 call sites. **V** (`src/gateway/lawful.ts:12-30`)
+- `lawfulSnapshot` and `lawfulHistory` scan the whole set. They have 16 call sites. **V** (`src/gateway/lawful.ts:12-30`)
 - SPEC-18 §12 lists this gap as open for slice 5 or 6. Loam moves in slice 5. **V**
 - The greenfield rule makes a wire change cheap today. It will cost more after a release.
 
@@ -38,15 +52,39 @@ Counts are orders of magnitude. **I** for every count.
 - A blessing publishes again under the operator's key, through the ordinary door. **V** (`adopt-law.ts:1-18`)
 - Rhizomatic loads a definition from its root entity. It does not scan by context. **V** (rhizomatic `schema-deltas.ts:26-38`)
 
-### The 22 call sites
+### Precedent: 13 kinds already file at one fixed entity
+
+Each entity below is a constant on main. **V**
+
+| Entity | Declared in |
+|---|---|
+| `loam:store` | `genesis.ts:36` |
+| `loam:public` | `public.ts:22` |
+| `loam:trust` | `trust.ts:26` |
+| `loam:budget` | `budget.ts:34` |
+| `loam:envelope` | `envelope.ts:56` |
+| `loam:artifact` | `artifact.ts:44` |
+| `loam:manifest` | `adopt-vocab.ts:18` |
+| `loam:binding-policy` | `binding-policy.ts:20` |
+| `loam:adoption` | `adopt.ts:16` |
+| `loam:erasure` | `erase-law.ts:14` |
+| `loam:slate` | `slate-law.ts:34` |
+| `loam:poolkeys` | `pool-keys.ts:10` |
+| `loam:recoveries` | `user-root.ts:82` |
+
+All paths are under `src/gateway/`.
+
+### The 16 call sites
 
 | Need | Sites | Count |
 |---|---|---|
 | Whole kind, no anchor today | `registration.ts:861`; `renderers.ts:312,326,424`; `translate.ts:168`; `channel.ts:517,518`; `container-law.ts:534`; `container.ts:1638` | 9 |
 | Whole kind, a fixed entity exists today | `slate-law.ts:803`; `slate.ts:853,975`; `adopt-law.ts:637,638` | 5 |
-| Name is known, an entity anchor exists today | `registration.ts:1162,1272,1336`; `channel.ts:2320,2744`; `adopt-law.ts:878`; `lifecycle.ts:1070`; `receive-snapshot.ts:52` | 8 |
+| Name is known, an entity anchor exists today | `channel.ts:2320,2744` | 2 |
 
-- Thirteen sites need no decision. They can move to the target index now.
+- #699 moved six name-known sites to `lawfulScopeAt`: `registration.ts` three, `adopt-law.ts` one,
+  `lifecycle.ts` one, `receive-snapshot.ts` one. **V**
+- Seven sites need no decision. They can move to the target index now.
 - Four more whole-set law scans do not use the two helpers. **V**
   - `runner.ts:139` and `renderers.ts:457` need a whole kind.
   - `adopt.ts:145` has `loam:adoption`. `channel.ts:2570,2661` know the lens, so `schema:<lens>` serves.
@@ -67,11 +105,23 @@ Counts are orders of magnitude. **I** for every count.
   `{role: "declares", target: {entity: {id: "loam:<kind>", context: <the kind's context>}}}`.
   - Entities: `loam:registration`, `loam:renderer`, `loam:translation`, `loam:channel`, `loam:container`, `loam:binding`.
   - Readers call `lawfulHistoryAt` with that entity. The index only narrows.
-  - The author filter and the context filter still run after the index read. **V** (`lawful.ts:98-105`)
+  - The author filter and the context filter still run after the index read. **V** (`lawful.ts:82-96`)
 - **Cost.** A Loam wire change. Every law delta id changes. Old stores are refused. No rhizomatic change.
 - **What can go wrong.**
-  - Three readers take the first pointer in the context as the key. **V** (`registration.ts:877-882`, `translate.ts:170-175`, `channel.ts:520-522`)
-    The new pointer shares that context. These readers must select by role.
+  - Seven readers find the key by context alone. The new pointer shares that context. Each reader
+    must select by ROLE, not by first pointer or by count. **V**
+
+    | Reader | Where | How it breaks |
+    |---|---|---|
+    | `survivingCandidates` | `registration.ts:874-879` | Takes the first pointer in the context. |
+    | `readTranslations` | `translate.ts:170-175` | Takes the first pointer in the context. |
+    | `readChannels` | `channel.ts:520-522` | Takes the first pointer in the context. |
+    | `bindArrived` | `channel.ts:652-655` | Takes the first pointer in the context. |
+    | `dropChannelCommit` (sever) | `channel.ts:2321-2325` | Takes the first pointer in the context. |
+    | `rendererBindingOf` | `renderers.ts:337-341` | Takes the first pointer in the context. |
+    | `readOnlyRenderer` | `renderer-selection.ts:90-95` | Refuses unless exactly one pointer is in the context. This is a hard break, whatever the pointer order. |
+
+    A first-pointer reader breaks only when the new pointer comes first. Do not rely on order.
   - Any author can point a delta at a `loam:` id. The door does not refuse it. **V** (`repair.ts:28-35`)
     Such a delta binds nothing, but it makes the read larger. SPEC-18 pushdown has no author field. **V**
   - The read grows with the law history of the kind, not with live law. Struck records and old versions stay.
@@ -83,7 +133,15 @@ Counts are orders of magnitude. **I** for every count.
   - A container's law stays a name filter over the peer's set (SPEC-18 §5.2 accepts this cost).
   - A purge removes index rows with the delta. A two-sided rail per kind must prove this.
   - A membership Term that selects `loam:<kind>` now matches every record of the kind. Only the operator writes such Terms. **I**
+    Section 8 adds a door refusal for such a Term.
 - **Leaves open.** A door rule that refuses a non-operator pointer at a `loam:` id.
+- **Container law.** It spans three contexts: `loam.container`, `loam.container.excluded` and
+  `loam.container.detached` (`container-law.ts:26-30`). **V**
+  - Every container-law record points at the one entity `loam:container`.
+  - The pointer carries the record's own context.
+  - `lawfulHistoryAt` reads one context per call (`lawful.ts:82-96`). **V**
+  - So the container table reads `loam:container` three times, once for each context.
+  - The general rule: one fixed entity per kind; the pointer's context is the record's context.
 
 ### B. A context anchor in the store
 
@@ -128,14 +186,12 @@ Counts are orders of magnitude. **I** for every count.
 | Read cost | Law history of the kind | Law history of the kind | Law history of the kind |
 | Index cost on user data | None | One entry per pointer | One predicate check per write |
 | A stranger can enlarge the read | Yes | Yes | Yes |
-| Precedent in Loam | Five kinds | None | None |
-| Sites that still need it | 9 of 22, plus 2 outside | 9 of 22, plus 2 outside | the same |
+| Precedent in Loam | 13 kinds | None | None |
+| Sites that still need it | 9 of 16, plus 2 outside | 9 of 16, plus 2 outside | the same |
 
-## 6. Recommendation
+## 6. Why Option A
 
-**Take Option A.**
-
-1. Loam already does it. Erasures, slates, graveyards, adoptions and the binding policy use a fixed entity. **V**
+1. Loam already does it. 13 kinds file at one fixed entity (section 3). **V**
 2. It needs no rhizomatic work. Law becomes an ordinary entity-anchored scope, closed under negations.
 3. B and C make every store pay for a need that only Loam has. Rhizomatic's own schema vocabulary is root-anchored. **V**
 4. The greenfield rule removes the migration cost now.
@@ -145,20 +201,40 @@ What I am unsure of:
 - I did not measure record counts. The channel history size is a guess.
 - I did not check each federation egress path for law records.
 - I did not read the Rust witness. The cost of B there is an estimate.
-- Pens (`loam.pen`) and arrivals (`loam.arrival`) are not in the 22 sites. I did not classify their readers.
+- Pens (`loam.pen`) and arrivals (`loam.arrival`) are not in the 16 sites. I did not classify their readers.
 - `lawfulSnapshot` is a public export (`src/index.ts:243`). Removal changes the package surface.
 
-## 7. The PR stack if A is taken
+## 7. The PR stack
 
 | # | PR | Wire change | Merge |
 |---|---|---|---|
 | 1 | Five sites with a fixed entity today read the target index. `adopt.ts:145` too. | No | On evidence |
-| 2 | Eight name-known sites read their entity anchor. `channel.ts:2570,2661` too. | No | On evidence |
+| 2 | **Mostly done (#699): six of eight sites moved.** `channel.ts:2320,2744` remain, and `channel.ts:2570,2661`. | No | On evidence |
 | 3 | `readChannels` takes the (timestamp, id) tie rule. | No | On evidence |
-| 4 | The three "first pointer in context" readers select by role. | No | On evidence |
-| 5 | **Writers add the `declares` pointer for all six kinds. One format marker. Old stores are refused at boot.** | **Yes** | **Myk** |
-| 6-11 | One PR per kind: the reader moves to `lawfulHistoryAt`. Each has a two-sided rail and a stranger-delta rail. | No | On evidence |
-| 12 | Delete `lawfulSnapshot` and `lawfulHistory`. Update the public export. | No (API) | On evidence |
-| 13 | Optional: the door refuses a non-operator pointer at a `loam:` id. | No (new refusal) | Myk |
+| 4 | The seven readers of section 4.A select by role. | No | On evidence |
+| 5 | The door refuses a membership Term that targets a reserved `loam:` law entity. Two-sided rail. See section 8. | No (new refusal) | On evidence |
+| 6 | **Writers add the `declares` pointer for all six kinds. One format marker. Old stores are refused at boot.** | **Yes** | Claude, under the delegation |
+| 7-12 | One PR per kind: the reader moves to `lawfulHistoryAt`. Each has a two-sided rail and a stranger-delta rail. | No | On evidence |
+| 13 | Delete `lawfulSnapshot` and `lawfulHistory`. Update the public export. | No (API) | On evidence |
+| 14 | Optional: the door refuses a non-operator pointer at a `loam:` id. | No (new refusal) | On evidence |
 
-PR 5 is the only wire change. Keep it small: writers and the format marker only.
+PR 6 is the only wire change. Keep it small: writers and the format marker only.
+PR 5 lands before PR 6.
+
+## 8. Erasure
+
+- **A purge leaves nothing at the fixed entity.** The entity is not a stored object. Every store
+  keeps deltas by id: SQLite has a `deltas` table and journal tables, and no entity table
+  (`src/store/sqlite.ts:157-186`). The target index lives in the reactor and is rebuilt without the
+  purged id. **V**
+- **No purge path widens.** No erase or cut path reads `byTarget` over a caller-supplied entity.
+  The erase and cut paths read `byTarget` only at `ERASE_ENTITY` (`erase.ts:599,1240`,
+  `erase-law.ts:356`) and at the slate entity (`slate-law.ts:485`). `erase.ts:694` reads a
+  `channel:<name>` entity through `orphanedDeclaration`. It gates a refusal and does not choose the
+  purge set. **V**
+- **One risk: a membership Term.** An operator can write a membership Term that selects the deltas
+  that point at `loam:<kind>`. After the wire change, that Term matches every record of that kind.
+  A cut erases the members of its Term. So the stack adds a refusal (PR 5): the door refuses a
+  membership Term that targets a reserved `loam:` law entity. Its rail is two-sided: the Term is
+  refused, and a Term over a named user entity still admits.
+- **The wire-change PR body** must state: "nothing that survived before can now be deleted".
