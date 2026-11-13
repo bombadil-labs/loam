@@ -20,8 +20,9 @@ WSL sessions in the desktop app do not load **plugins**. That is the whole ADLC 
 
 Two consequences worth naming before you start:
 
-1. **CLAUDE.md carries a fallback phase index** for exactly this reason. It is deliberately thin;
-   the skill is authoritative whenever it loads.
+1. **`docs/process/adlc.md` carries a fallback phase index** for exactly this reason (ADLC is
+   suspended for the refactor). It is deliberately thin; the skill is authoritative whenever it
+   loads.
 2. **P5's independent reviewer gets BETTER, not worse.** The prosecutor panel is the plugin's and
    goes dark — but `adversarial-review` is a CLI, so it survives. **It has two tiers and only the
    first is free; do not conflate them.**

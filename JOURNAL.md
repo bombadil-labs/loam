@@ -2,7 +2,7 @@
 
 _Append-only record: one entry per completed step (or notable event) — what was done, why it went that way, and any novel learning. Newest last._
 
-_Note (2026-07-09): existing entries had their register softened for content-classifier hygiene — security review notes reworded from an opponent-role framing into a neutral correctness one. Every fact is preserved; only the phrasing changed. Future entries: keep the neutral register (see CLAUDE.md, loop stage 5)._
+_Note (2026-07-09): existing entries had their register softened for content-classifier hygiene — security review notes reworded from an opponent-role framing into a neutral correctness one. Every fact is preserved; only the phrasing changed. Future entries: keep the neutral register (see `.claude/skills/review-a-diff`)._
 
 Entries live in **[`journal/`](journal/)**, one file each, named `<date>-<slug>.md` — so a new
 entry is a NEW FILE and two concurrent landings never touch anything shared (the same reason

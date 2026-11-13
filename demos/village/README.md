@@ -3,8 +3,8 @@
 Four (and counting) federated Loam stores, a cast of villagers, and a browser dashboard —
 a small society that exercises everything Loam claims, end to end, over real HTTP. It began
 as an ephemeral field test; it graduated (Myk, 2026-07-09) into a **living demonstration
-that grows with every PR**: the loop's stage 7 (see `../../CLAUDE.md`) extends the village to
-exercise each new behavior, and logs it in the ledger below.
+that grew with every PR**: each PR extended the village to exercise its new behavior, and
+logged it in the ledger below. The village is now parked (see `../../CLAUDE.md`).
 
 Nothing here is product, and nothing here gates the build. `homes/` (sqlite stores and
 operator seeds) is untracked and disposable — delete it and the phases rebuild the world.
