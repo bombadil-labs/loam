@@ -11,8 +11,9 @@ import {
 import { freezeMembers } from "./container-identity.js";
 import { withNegationClosure } from "./negation-closure.js";
 import { lensOf, readRegistrations, type Registration } from "./registration.js";
-import { lawfulSnapshot } from "./lawful.js";
+import { lawfulScopeAt } from "./lawful.js";
 import { negatedAt } from "./negation.js";
+import type { Ground } from "./ground.js";
 interface Selection {
   source: string;
   registrationId: string;
@@ -48,7 +49,8 @@ function fromMembers(members: readonly Delta[]): Reactor {
   return r;
 }
 function definitionId(r: Reactor, author: string, entity: string, body: Term, now: number): string {
-  const rows = evalTerm(body, lawfulSnapshot(r, now, author), now, entity);
+  // Both bootstrap bodies select the deltas at `entity` and mask them, which is what the scope holds.
+  const rows = evalTerm(body, lawfulScopeAt(r, now, entity, author), now, entity);
   if (rows.sort !== "hview") throw new Error("bootstrap sort");
   const definitions = rows.hview.props.get("definition") ?? [];
   const selected = [...definitions].sort(
@@ -60,7 +62,7 @@ function definitionId(r: Reactor, author: string, entity: string, body: Term, no
   return selected.delta.id;
 }
 export function selectReceivingSnapshot(
-  source: Reactor,
+  source: Ground,
   binding: Binding,
   value: unknown,
   paused: boolean,

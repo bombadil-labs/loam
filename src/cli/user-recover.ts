@@ -75,6 +75,7 @@ import {
 import { rootClaims, resolveUserView } from "../server/users.js";
 import type { StoreBackend } from "../store/backend.js";
 import { readSeed, readUserSeed, userSeedPath } from "./config.js";
+import type { Ground } from "../gateway/ground.js";
 
 export interface RecoverIO {
   out(line: string): void;
@@ -186,7 +187,7 @@ function moveNoClobber(from: string, to: string): void {
 // Is `id` struck for good by the operator at `now`: a strike already in force, with no end, itself
 // unstruck? A strike that starts later is not yet one.
 function struckForGood(
-  reactor: Reactor,
+  reactor: Ground,
   operator: string,
   id: string,
   now: number,
@@ -228,7 +229,7 @@ function standingOf(reactor: Reactor, key: string): string[] {
 }
 
 // Every held operator root claim for `name` that names a key other than `keep`.
-function otherRootClaims(reactor: Reactor, operator: string, name: string, keep: string): string[] {
+function otherRootClaims(reactor: Ground, operator: string, name: string, keep: string): string[] {
   const entity = userEntity(name);
   const out: string[] = [];
   for (const id of reactor.byTarget(entity)) {

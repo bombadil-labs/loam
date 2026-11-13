@@ -5,12 +5,13 @@
 //
 // Browser-safe: no node imports. A file-backed store keeps its pools' keys itself (`poolKeys()`).
 
-import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
+import type { Claims, Delta } from "@bombadil/rhizomatic";
 
 export const POOL_KEYS_ENTITY = "loam:poolkeys";
 export const CTX_POOL_KEY = "loam.poolkey";
 
 import type { PoolKeySource } from "../store/peer-image.js";
+import type { Ground } from "./ground.js";
 export type { PoolKeySource } from "../store/peer-image.js";
 
 /** A key source that lives only as long as the process (a memory store, and tests). */
@@ -56,7 +57,7 @@ const field = (d: Delta, role: string): string | undefined => {
 
 /** The key the host recorded for `pool`: its operator's earliest record, or undefined. */
 export function recordedPoolKey(
-  reactor: Reactor,
+  reactor: Ground,
   operator: string | undefined,
   pool: string,
 ): string | undefined {

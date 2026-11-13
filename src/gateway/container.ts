@@ -29,13 +29,7 @@ import { seedSigner } from "./signer.js";
 import { hostChain, inboxLaw, seededLaw } from "./child-law.js";
 import { memoryPoolKeys, PoolKeyMissing, poolKeyClaims, recordedPoolKey } from "./pool-keys.js";
 import { holdsJournals, type JournalBackend } from "../store/peer-image.js";
-import {
-  authorForSeed,
-  signClaims,
-  type Claims,
-  type Delta,
-  type Reactor,
-} from "@bombadil/rhizomatic";
+import { authorForSeed, signClaims, type Claims, type Delta } from "@bombadil/rhizomatic";
 import type { StoreBackend } from "../store/backend.js";
 import { MemoryBackend } from "../store/memory.js";
 import { isRepairable } from "../store/quarantine.js";
@@ -85,6 +79,7 @@ import {
   survivingDeclarationIds,
   survivingWriteGrantIds,
 } from "./container-law.js";
+import type { Ground } from "./ground.js";
 
 const retractionOf = (targetId: string, author: string, timestamp: number): Claims => ({
   timestamp,
@@ -1169,7 +1164,7 @@ function bindingPoolOf(gw: Gateway, binding: ConnectionBinding): Gateway {
  * force, with no end, and nothing held against that negation? (principalSuppression honors only those two.)
  */
 function delegationStruckForGood(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   operator: string | undefined,
   d: Delta,

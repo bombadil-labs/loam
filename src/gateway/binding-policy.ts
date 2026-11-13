@@ -12,9 +12,10 @@
 // A store that declares NOTHING behaves exactly as it always has (§47 criterion 12): contested
 // names stay a build-time collision, and no reader's surface changes shape by upgrading.
 
-import type { Claims, Reactor } from "@bombadil/rhizomatic";
+import type { Claims } from "@bombadil/rhizomatic";
 import { lawfulDeltasAt } from "./lawful.js";
 import { negatedAt } from "./negation.js";
+import type { Ground } from "./ground.js";
 
 export const BINDING_POLICY_ENTITY = "loam:binding-policy";
 export const CTX_BINDING_POLICY = "loam.binding-policy";
@@ -95,7 +96,7 @@ export function bindingPolicyDefect(claims: Claims): string | undefined {
  * its build-time collision on contested names.
  */
 export function readBindingPolicy(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   operator?: string,
   container?: string,

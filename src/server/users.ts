@@ -45,6 +45,7 @@ import {
 import { CTX_GRANTS } from "../gateway/governed-trust.js";
 import { membershipForValidation, namesMemberOf } from "../gateway/member-of.js";
 import { containerDeclarationName } from "../gateway/container-law.js";
+import type { Ground } from "../gateway/ground.js";
 export { CTX_ROLE, CTX_ROOT, userEntity };
 
 const AUTHOR = /^ed25519:[0-9a-f]{64}$/;
@@ -334,7 +335,7 @@ function membershipNames(text: string, user: string): boolean {
  * valid, erased but not yet purged)? A name with none is bound to no key here. A user record alone
  * binds no key: a user keyed before root claims has only a record and a key file.
  */
-export function keyEvidenceHeld(reactor: Reactor, operator: string, name: string): boolean {
+export function keyEvidenceHeld(reactor: Ground, operator: string, name: string): boolean {
   const entity = userEntity(name);
   const BINDS = new Set([CTX_ROOT, CTX_RECOVERY, CTX_LINEAGE]);
   for (const id of reactor.byTarget(entity)) {

@@ -150,6 +150,7 @@ import {
   writePenSeed,
   writeUserSeed,
 } from "./config.js";
+import type { Ground } from "../gateway/ground.js";
 
 export interface IO {
   out(line: string): void;
@@ -2973,7 +2974,7 @@ interface ClaimStanding {
 }
 
 function claimIdsBySurvival(
-  reactor: Reactor,
+  reactor: Ground,
   operator: string,
   entity: string,
   context: string,
@@ -3002,7 +3003,7 @@ function claimIdsBySurvival(
 }
 
 const survivingClaimIds = (
-  reactor: Reactor,
+  reactor: Ground,
   operator: string,
   entity: string,
   context: string,
@@ -3010,7 +3011,7 @@ const survivingClaimIds = (
 ): string[] => claimIdsBySurvival(reactor, operator, entity, context, matches).surviving;
 
 const survivingRoleClaimIds = (
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   operator: string,
   name: string,
@@ -3039,7 +3040,7 @@ const survivingRoleClaimIds = (
 // the door counts a grant only inside it. So "surviving" here means "the operator has not struck
 // it", which is the selection a revoke strikes; it is not a claim that the door honours it.
 const grantStanding = (
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   operator: string,
   subject: string,
@@ -3063,7 +3064,7 @@ const grantStanding = (
   );
 
 const survivingGrantClaimIds = (
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   operator: string,
   subject: string,
@@ -3073,7 +3074,7 @@ const survivingGrantClaimIds = (
 // A record whose author no longer matches the seed file on disk is the whole point: that is a
 // RE-KEY, and the author it names is the standing that must be struck.
 function penRecordsFor(
-  reactor: Reactor,
+  reactor: Ground,
   operator: string,
   name: string,
 ): readonly { readonly id: string; readonly author: string }[] {

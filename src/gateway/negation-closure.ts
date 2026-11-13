@@ -2,7 +2,8 @@
 // those negations, as a ground holds them. Pure over reactors, so every reader can import it
 // without joining the gateway's import cycle.
 
-import { type Delta, type Reactor } from "@bombadil/rhizomatic";
+import { type Delta } from "@bombadil/rhizomatic";
+import type { Ground } from "./ground.js";
 
 // A filter narrows what you SEE; it must never resurrect what was STRUCK (SPEC §28.4, ticket T38).
 //
@@ -37,7 +38,7 @@ import { type Delta, type Reactor } from "@bombadil/rhizomatic";
 // narrowing reaching the membership machinery (SPEC §29.3) — share this one closure instead of
 // growing a second copy of it.
 export function withNegationClosure(
-  ground: { readonly reactor: Reactor },
+  ground: { readonly reactor: Ground },
   admitted: readonly Delta[],
 ): Delta[] {
   const out = new Map(admitted.map((d) => [d.id, d]));
@@ -66,7 +67,7 @@ export function withNegationClosure(
 // means more suppression). Terminates for the same reason — the output set only grows and is bounded
 // by the union of the grounds.
 export function withNegationClosureAcross(
-  grounds: readonly { readonly reactor: Reactor }[],
+  grounds: readonly { readonly reactor: Ground }[],
   admitted: readonly Delta[],
 ): Delta[] {
   const out = new Map(admitted.map((d) => [d.id, d]));

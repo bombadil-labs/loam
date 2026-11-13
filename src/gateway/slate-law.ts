@@ -19,6 +19,7 @@ import { governedProgram } from "./governed-trust.js";
 import { userGroundOf } from "./user-root.js";
 import { hasMemberOf } from "./member-of.js";
 import { CTX_SLATE } from "./slate-vocab.js";
+import type { Ground } from "./ground.js";
 
 /**
  * The entity both new records DECLARE — the marker that tells a slate record and a graveyard apart
@@ -327,7 +328,7 @@ export type FrozenTerm =
   | { readonly ok: true; readonly term: unknown; readonly ids: ReadonlySet<string> }
   | { readonly ok: false; readonly why: string };
 
-export function readFrozenTerm(reactor: Reactor, membershipAt: string): FrozenTerm {
+export function readFrozenTerm(reactor: Ground, membershipAt: string): FrozenTerm {
   const published = reactor.get(membershipAt);
   if (published === undefined) {
     return {
@@ -704,7 +705,7 @@ export function slateHealth(ground: SlateGround, now: number): SlateHealth {
  * direction: over-withholding cannot disclose, un-slating is FREE (§29.8), and a revocable act must
  * not have an irrevocable effect.
  */
-export function condemnedClosure(reactor: Reactor, seed: Iterable<string>): Set<string> {
+export function condemnedClosure(reactor: Ground, seed: Iterable<string>): Set<string> {
   const out = new Set(seed);
   const pending = [...out];
   while (pending.length > 0) {
@@ -722,11 +723,7 @@ export function condemnedClosure(reactor: Reactor, seed: Iterable<string>): Set<
   return out;
 }
 
-const closureIds = (
-  reactor: Reactor,
-  slates: readonly Slate[],
-  door: SlateClosure,
-): Set<string> => {
+const closureIds = (reactor: Ground, slates: readonly Slate[], door: SlateClosure): Set<string> => {
   const seed = new Set<string>();
   for (const s of slates) {
     if (!s.closes.has(door)) continue;

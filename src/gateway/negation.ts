@@ -1,4 +1,4 @@
-import type { Reactor } from "@bombadil/rhizomatic";
+import type { Ground } from "./ground.js";
 
 /**
  * Whether a delta is negated at `now`, counting only negations signed by `author` (any author
@@ -7,7 +7,7 @@ import type { Reactor } from "@bombadil/rhizomatic";
  * hold answers false. The reader clears its memo after an accepted ingest.
  */
 export function negatedAt(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   author: string | undefined,
 ): (id: string) => boolean {
@@ -22,7 +22,7 @@ export function negatedAt(
 // target only while it survives itself (negating the negation revives), and only LAWFUL
 // negations count — a write-granted author's strike, or a federated stranger's, retires
 // nothing the operator planted. Content addressing keeps the chain acyclic; memoized anyway.
-export function lawfulNegated(reactor: Reactor, operator?: string): (id: string) => boolean {
+export function lawfulNegated(reactor: Ground, operator?: string): (id: string) => boolean {
   const memo = new Map<string, boolean>();
   const negated = (id: string): boolean => {
     const memoed = memo.get(id);
@@ -44,7 +44,7 @@ export function lawfulNegated(reactor: Reactor, operator?: string): (id: string)
 //
 // It is not a stored index and cannot go stale: there is no state here to fall behind the ground.
 // Every answer is read from the reactor at the moment it is asked.
-function isLawful(reactor: Reactor, id: string, operator?: string): boolean {
+function isLawful(reactor: Ground, id: string, operator?: string): boolean {
   const delta = reactor.get(id);
   if (delta === undefined) return false; // gone is gone — a purged strike retires nothing (§11)
   return operator === undefined || delta.claims.author === operator;

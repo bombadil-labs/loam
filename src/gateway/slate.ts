@@ -70,6 +70,7 @@ import {
 } from "./slate-law.js";
 import { CTX_SLATE, entityPtr } from "./slate-vocab.js";
 import { type CitationTier, reachableTiers, danglingCitations } from "./tiers.js";
+import type { Ground } from "./ground.js";
 
 // The whole mint, enumerable — the vocabulary rail asserts the prefix discipline over this list.
 export const SLATE_CONTEXTS = [CTX_SLATE, CTX_GRAVEYARD] as const;
@@ -265,7 +266,7 @@ export function slateReportsImpl(gw: Gateway, now: number): SlateReport[] {
 
 // If a member is a NEGATION, cutting it REVIVES its target (§11's own consequence) — so the review
 // lists it BEFORE the cut, which no single-act erasure could ever show.
-function resurfacingOf(reactor: Reactor, members: ReadonlySet<string>): string[] {
+function resurfacingOf(reactor: Ground, members: ReadonlySet<string>): string[] {
   const out = new Set<string>();
   for (const id of members) {
     const d = reactor.get(id);
@@ -800,7 +801,7 @@ export async function cutImpl(
 // A wall's at-rest membership Term, for the `kept`-wall intersection. A wall's scope is an ORDINARY
 // live Term, so the extensional requirement a slate's own membership carries does not apply — only
 // "did it resolve at all", and an unresolved one is refused by the caller (H9, never assumed empty).
-const readTermAt = (reactor: Reactor, membershipAt: string | undefined): unknown => {
+const readTermAt = (reactor: Ground, membershipAt: string | undefined): unknown => {
   if (membershipAt === undefined) return undefined;
   const published = reactor.get(membershipAt);
   if (published === undefined) return undefined;
@@ -979,7 +980,7 @@ function strikeOf(
   return undefined;
 }
 
-const operatorStrikes = (reactor: Reactor, now: number, operator: string) =>
+const operatorStrikes = (reactor: Ground, now: number, operator: string) =>
   reactor.negationWitnesses(now, (n) => n.claims.author === operator);
 
 // Every tier a sweep did NOT examine — covered walls and unreachable ones alike. One reader, so the

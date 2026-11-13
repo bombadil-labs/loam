@@ -15,6 +15,8 @@ import {
   type Delta,
   type Reactor,
 } from "@bombadil/rhizomatic";
+import { declarationsOf } from "./ground-declarations.js";
+import type { Ground } from "./ground.js";
 
 export const CTX_USER = "loam.user";
 export const CTX_ROLE = "loam.role";
@@ -173,7 +175,7 @@ function filedFor(d: Delta, context: string): string | undefined {
 // Every held operator claim that is recovery evidence for `name` in `context`, signed by the cut and
 // not erased. Validity and negations are not asked: recovery is durable history.
 function heldAt(
-  reactor: Reactor,
+  reactor: Ground,
   operator: string,
   name: string,
   context: string,
@@ -261,7 +263,7 @@ export type RecoveryChain =
 
 /** Read `name`'s recovery history as it stood at `cut`, with `erased` counted as gone. */
 export function recoveryChain(
-  reactor: Reactor,
+  reactor: Ground,
   operator: string | undefined,
   name: string,
   erased: ReadonlySet<string> = NONE,
@@ -310,7 +312,7 @@ export function recoveryChain(
  */
 export function recoveryDefect(
   delta: Delta,
-  reactor: Reactor,
+  reactor: Ground,
   operator: string | undefined,
   batch: readonly Delta[] = [],
   gone: () => ReadonlySet<string> = () => NONE,
@@ -366,7 +368,7 @@ export function recoveryDefect(
  * of each user's chain, and every key a broken history implicates.
  */
 export function retiredKeysOf(
-  reactor: Reactor,
+  reactor: Ground,
   operator: string | undefined,
   erased: ReadonlySet<string> = NONE,
   cut = Infinity,
@@ -396,7 +398,7 @@ export function retiredKeysOf(
  * `root`: the keys `root` recovered from. The history `keysEverOf` follows.
  */
 export function recoveredFrom(
-  reactor: Reactor,
+  reactor: Ground,
   operator: string | undefined,
   root: string,
   erased: ReadonlySet<string> = NONE,
@@ -423,7 +425,7 @@ export function recoveredFrom(
  * may share a root, and one's recoveries are not the other's history.
  */
 export function recoveriesOf(
-  reactor: Reactor,
+  reactor: Ground,
   operator: string | undefined,
   user: string,
   root: string,
@@ -451,7 +453,7 @@ export function recoveriesOf(
 // the operator (as of `cut`), not erased, signed by the cut? The chain decides WHICH key may be the
 // root; this decides whether the operator's own root claim for it stands.
 function standingRootClaim(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   operator: string,
   name: string,
@@ -498,7 +500,7 @@ function standingRootClaim(
  * the indexed reader here and the View reader (`rootOf`), so the two cannot differ.
  */
 export function chainRoot(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   operator: string | undefined,
   name: string,
@@ -522,7 +524,7 @@ export function chainRoot(
  * rather than letting an older one through.
  */
 function latestValues(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   operator: string,
   name: string,
@@ -586,7 +588,7 @@ function latestValues(
  * it stood at an as-of instant: only deltas signed by then, claims and strikes alike.
  */
 export function userRootAt(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   operator: string | undefined,
   name: string,
@@ -604,8 +606,8 @@ export function userRootAt(
 }
 
 // Where a ground reads its users, and which of their claims are erased but still held. A pool
-// holds no user records; it reads its host's. The Gateway declares this for every reactor it sets,
-// because the erasure reader lives above this module.
+// holds no user records; it reads its host's. The Gateway declares this for its ground, because
+// the erasure reader lives above this module.
 export interface UserGround {
   readonly reactor: Reactor;
   /**
@@ -618,11 +620,9 @@ export interface UserGround {
   /** An as-of read's instant: the ground holds only what was signed by then. */
   readonly cut?: number;
 }
-const userGrounds = new WeakMap<Reactor, () => UserGround>();
-
 /** Declare where `reactor`'s grants naming users read those users. */
 export function declareUserGround(reactor: Reactor, ground: () => UserGround): void {
-  userGrounds.set(reactor, ground);
+  declarationsOf(reactor).users = ground;
 }
 
 /** Whose user records bind in `ground`: its governor, else the caller's own key. */
@@ -631,7 +631,7 @@ export const usersGovernor = (ground: UserGround, operator: string | undefined) 
 
 /** Where `reactor` reads its users: the declared ground, else itself. */
 export function userGroundOf(reactor: Reactor): UserGround {
-  return userGrounds.get(reactor)?.() ?? { reactor, erased: () => NONE };
+  return declarationsOf(reactor).users?.() ?? { reactor, erased: () => NONE };
 }
 
 /**
