@@ -12,8 +12,8 @@ itself gets a new version of its algorithm. Rhizomatic becomes a monorepo of tie
 split below and the four threads are set aside until Myk restores them. A fresh-context reviewer
 that did not write the diff reviews each head. Where this file says "ask Sol", Claude does the
 rhizomatic work in a rhizomatic PR, under that repo's `AGENTS.md`. Claude prepares rhizomatic
-releases and prereleases. Publishing to npm stays Myk's button, for a release and for a `-next`
-prerelease, until Myk says otherwise. Myk delegated open
+releases and prereleases. Claude publishes `-next` prereleases, because the two repos
+coordinate through them (Myk, 2026-11-12). Publishing a stable release to npm stays Myk's button. Myk delegated open
 decisions for the store arc to Claude on 2026-11-12. Claude records each decision in the PR that
 makes it. The active work is the store arc: `spec/18-store.PROPOSAL.md` in rhizomatic, six
 slices, all before step 7.
