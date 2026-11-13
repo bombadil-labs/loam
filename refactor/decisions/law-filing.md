@@ -227,11 +227,18 @@ PR 5 lands before PR 6.
   keeps deltas by id: SQLite has a `deltas` table and journal tables, and no entity table
   (`src/store/sqlite.ts:157-186`). The target index lives in the reactor and is rebuilt without the
   purged id. **V**
-- **No purge path widens.** No erase or cut path reads `byTarget` over a caller-supplied entity.
-  The erase and cut paths read `byTarget` only at `ERASE_ENTITY` (`erase.ts:599,1240`,
-  `erase-law.ts:356`) and at the slate entity (`slate-law.ts:485`). `erase.ts:694` reads a
-  `channel:<name>` entity through `orphanedDeclaration`. It gates a refusal and does not choose the
-  purge set. **V**
+- **No purge path widens.** No erase or cut path chooses a purge set from `byTarget` over a
+  caller-supplied entity. The purge paths read `byTarget` only at `ERASE_ENTITY`
+  (`erase.ts:599,1240`, `erase-law.ts:356`) and at the slate entity (`slate-law.ts:485`).
+  `erase.ts:694` reads a `channel:<name>` entity through `orphanedDeclaration`. It gates a refusal
+  and does not choose the purge set. **V**
+- **Two paths read a caller-named container, and they strike; they do not purge.** The cut's last
+  act (`slate.ts:769`) and the container drop (`container.ts:1052`) call
+  `survivingDeclarationIds` (`container-law.ts:790`). It reads `byTarget` at the named container.
+  It keeps only records where `containerRef` selects role `container` (`container-law.ts:153-158`).
+  The new `declares` pointer at `loam:container` has a different role, so it cannot match.
+  **Invariant:** a `declares` pointer never feeds `containerRef`. The wire-change PR pins this with
+  a rail. **V**
 - **One risk: a membership Term.** An operator can write a membership Term that selects the deltas
   that point at `loam:<kind>`. After the wire change, that Term matches every record of that kind.
   A cut erases the members of its Term. So the stack adds a refusal (PR 5): the door refuses a
