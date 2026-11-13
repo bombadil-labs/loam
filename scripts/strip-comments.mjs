@@ -15,14 +15,29 @@ const EXCLUDED = [
   /^(dist|site-dist)\//,
 ];
 
-const DIRECTIVES = [
-  /^eslint-disable(-next-line|-line)?(\s|$)/,
-  /^eslint-enable(\s|$)/,
-  /^@ts-(expect-error|ignore|nocheck|check)(\s|:|$)/,
-  /^(c8|v8|istanbul) ignore(\s|$)/,
-  /^@vitest-environment\s/,
-  /^[#@]__(PURE|NO_SIDE_EFFECTS)__$/,
+const RULES = String.raw`[@\w/-]+(?:\s*,\s*[@\w/-]+)*`;
+
+const ALLOWED = [
+  /^\/\/ @ts-(expect-error|ignore|nocheck|check)$/,
+  new RegExp(String.raw`^// eslint-disable-(next-)?line ${RULES}$`),
+  new RegExp(String.raw`^/\* eslint-(disable|enable)( ${RULES})? \*/$`),
+  /^\/\/ prettier-ignore$/,
+  /^\/\* (c8|v8|istanbul) ignore (next|start|stop|if|else|file)( \d+)?( -- @preserve)? \*\/$/,
+  /^\/\/\/ <reference (path|types|lib|no-default-lib)="[^"]*" \/>$/,
+  /^\/\/ @vitest-environment [\w-]+$/,
+  /^\/\* [@#]__PURE__ \*\/$/,
 ];
+
+const DIRECTIVE_LIKE = [
+  /@ts-|eslint|prettier-ignore|c8 ignore|v8 ignore|istanbul ignore|<reference|@vitest-environment|__PURE__/,
+  /^\/\*\*?\s*(globals?|exported)\s/,
+];
+
+export function classify(raw) {
+  if (ALLOWED.some((re) => re.test(raw))) return "keep";
+  if (DIRECTIVE_LIKE.some((re) => re.test(raw))) return "refuse";
+  return "prose";
+}
 
 const MARK = "\uE000";
 
@@ -96,53 +111,6 @@ export function findComments(text, file = "x.ts") {
   return comments;
 }
 
-function bodyOf(text, c) {
-  const raw = text.slice(c.pos, c.end);
-  if (!c.block) return raw.replace(/^\/\/\/?/, "").trim();
-  return raw
-    .slice(2, -2)
-    .replace(/^\*+/, "")
-    .split("\n")
-    .map((l) => l.replace(/^\s*\*?\s?/, ""))
-    .join("\n")
-    .trim();
-}
-
-export function directiveOf(text, c) {
-  const raw = text.slice(c.pos, c.end);
-  if (!c.block && /^\/\/\/\s*<(reference|amd-module|amd-dependency)\b/.test(raw)) {
-    const close = raw.indexOf("/>");
-    return close < 0 ? raw.trim() : raw.slice(0, close + 2);
-  }
-  const body = bodyOf(text, c);
-  const first = body.split("\n")[0].trim();
-  if (body === "prettier-ignore") return c.block ? "/* prettier-ignore */" : "// prettier-ignore";
-  if (!DIRECTIVES.some((re) => re.test(first))) return null;
-  let kept = first;
-  if (/^eslint-(disable|enable)/.test(first)) {
-    const full = body.replace(/\s+/g, " ");
-    kept = full.split(" -- ")[0].replace(/\s--$/, "").trim();
-  } else if (/^@ts-/.test(first)) {
-    kept = /^@ts-[a-z-]+/.exec(first)[0];
-  } else if (/^(c8|v8|istanbul) ignore/.test(first)) {
-    const words = first.split(/\s+/);
-    const args = [];
-    for (const w of words.slice(2)) {
-      const arg = /^(next|start|stop|if|else|file|\d+)(:?)$/.exec(w);
-      if (arg === null) break;
-      args.push(arg[1]);
-      if (arg[2] === ":") break;
-    }
-    kept = [...words.slice(0, 2), ...args].join(" ");
-    if (/\s--\s*@preserve$/.test(body)) kept += " -- @preserve";
-  } else if (/^@vitest-environment/.test(first)) {
-    kept = first.split(/\s+/).slice(0, 2).join(" ");
-  }
-  const rewritten = c.block ? `/* ${kept} */` : `// ${kept}`;
-  if (/^[#@]__/.test(first)) return raw;
-  return rewritten;
-}
-
 const WORD = /[A-Za-z0-9_$\u0080-￿]/;
 const OP = /[+\-*/&|<>=!?.:%^~]/;
 
@@ -197,19 +165,20 @@ export function strip(text, file = "x.ts") {
   if (text.includes(MARK)) throw new Error(`${file}: holds the private-use marker U+E000`);
   const comments = findComments(text, file);
   const removed = [];
+  const refused = [];
   let kept = 0;
   let result = "";
   let at = 0;
   for (const c of comments) {
     const raw = text.slice(c.pos, c.end);
-    const directive = directiveOf(text, c);
+    const kind = classify(raw);
     const from = at;
     result += text.slice(at, c.pos);
     at = c.end;
-    if (directive !== null) {
-      kept++;
-      result += directive;
-      if (directive !== raw) removed.push(c);
+    if (kind !== "prose") {
+      if (kind === "keep") kept++;
+      else refused.push(c);
+      result += raw;
       continue;
     }
     removed.push(c);
@@ -229,8 +198,8 @@ export function strip(text, file = "x.ts") {
     result += MARK + joiner(text[c.pos - 1], text[c.end], raw);
   }
   result += text.slice(at);
-  const out = removed.length === 0 ? text : tidy(result);
-  return { text: out, removed, kept, comments };
+  const out = removed.length === 0 || refused.length > 0 ? text : tidy(result);
+  return { text: out, removed, refused, kept, comments };
 }
 
 export function tokenStream(text, file = "x.ts") {
@@ -269,11 +238,13 @@ async function main() {
   let removedTotal = 0;
   let keptTotal = 0;
   const findings = [];
+  const refusals = [];
   for (const f of files) {
     const abs = resolve(root, f);
     const text = readFileSync(abs, "utf8");
     const r = strip(text, f);
     keptTotal += r.kept;
+    for (const c of r.refused) refusals.push(`${f}:${lineOf(text, c.pos)}`);
     if (r.removed.length === 0) continue;
     dirty++;
     removedTotal += r.removed.length;
@@ -281,6 +252,7 @@ async function main() {
       for (const c of r.removed) findings.push(`${f}:${lineOf(text, c.pos)}`);
       continue;
     }
+    if (r.refused.length > 0) continue;
     const a = tokenStream(text, f);
     const b = tokenStream(r.text, f);
     if (a.length !== b.length || a.some((t, i) => t !== b[i])) {
@@ -291,8 +263,17 @@ async function main() {
     }
     writeFileSync(abs, r.text);
   }
+  if (refusals.length > 0) {
+    for (const line of refusals) {
+      console.error(
+        `${line}: this comment looks like a tool directive but is not in an allowed exact form. ` +
+          `Write this directive in an allowed exact form by hand, or delete it.`,
+      );
+    }
+    console.error(`comments: refused ${refusals.length} comment(s); those files were not written.`);
+  }
   if (check) {
-    if (findings.length > 0) {
+    if (findings.length > 0 || refusals.length > 0) {
       for (const line of findings) console.error(line);
       console.error(
         `comments: ${findings.length} comment(s) in ${dirty} file(s). The code carries no comments; ` +
@@ -306,6 +287,7 @@ async function main() {
   console.log(
     `comments: removed ${removedTotal} from ${dirty} of ${files.length} files; ${keptTotal} tool directives kept`,
   );
+  if (refusals.length > 0) process.exit(2);
 }
 
 if (

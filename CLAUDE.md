@@ -597,7 +597,9 @@ busy.
   The register is a maintenance manual, not an essay — and the same holds for the board brief.
 - **The code carries no comments** (Myk, 2026-11-12). `npm run check` refuses one
   (`npm run comments:check`). Only tool directives stay: `eslint-disable`, `@ts-expect-error`,
-  `prettier-ignore`, coverage hints, `@vitest-environment`, and their kin. A hazard lives in
+  `prettier-ignore`, coverage hints, `@vitest-environment`, and their kin. The script keeps a tool
+  directive only in an exact allowed form and refuses any other comment that looks like a directive.
+  A hazard lives in
   `src/gateway/SUBSTRATE-HAZARDS.md`. History lives in the journal and in commit messages. A test
   title says what the rail asserts. A known gap goes in the title or in SUBSTRATE-HAZARDS.md. If a
   missing comment causes a real defect, record the defect in the journal first. Then propose a

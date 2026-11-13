@@ -15,6 +15,8 @@
 - `scripts/strip-comments.mjs` removed every comment in one mechanical commit.
 - Only tool directives stay: `eslint-disable`, `@ts-expect-error`, `prettier-ignore`, coverage
   hints, `@vitest-environment`, `#__PURE__` and triple-slash references.
+- The script keeps a tool directive only in an exact allowed form and refuses any other comment that
+  looks like a directive.
 - `npm run check` now runs `npm run comments:check`. A new comment fails the bar.
 - A hazard lives in `src/gateway/SUBSTRATE-HAZARDS.md`. History lives here and in commit messages.
 - A known gap in a rail goes in the test title, for example `[gap: no door-level assertion]`.
