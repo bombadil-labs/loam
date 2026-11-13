@@ -11,7 +11,9 @@ description: Use when you are about to merge a Loam PR, when a PR adds a spec/ s
 2. The PR has a posted review from a fresh-context reviewer at the current head SHA.
 3. Every finding is fixed and reviewed again, or answered on the PR.
 4. CI is green on ubuntu and windows. Read the run conclusion: `gh pr checks <n>`.
-5. The PR does not widen what erasure purges. If it does, Myk merges it.
+5. The PR needs none of Myk's merges. Myk merges a PR that widens what erasure purges, ships a
+   stable release, adds a dependency on hermetic, or changes what the system promises outside the
+   refactor and the store arc.
 6. The PR body is in STE, in the shape that `CLAUDE.md` gives.
 
 Then merge with `gh pr merge <n> --squash`. If the harness blocks a merge, stack the next PRs on

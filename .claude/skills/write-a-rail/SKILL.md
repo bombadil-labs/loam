@@ -64,7 +64,8 @@ A flaky test is fixed now (Myk, 2026-07-23). It outranks the task in hand.
    - A spec bug: the promise is weaker than the test states.
 3. Fix that bug.
 - Never widen the assertion. Never add a retry loop.
-- If you cannot fix it the same day, use `it.skip`. Put the reason in the title.
+- If you cannot fix it the same day, use `it.skip`. Put the reason and a tracking id (an issue or PR
+  number) in the title.
 
 ## Periodic writers
 

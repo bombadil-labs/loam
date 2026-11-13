@@ -15,6 +15,8 @@ Climb in order. Each rung is cheaper than the next one.
 1. `npm run lint`. It is part of `npm run check`. ESLint flags the common H6 case.
 2. Mutation, with no model. Run
    `adlc hollow-test --base origin/main --target <file> --test-cmd "npx vitest run <test files>"`.
+   - `adlc` is a global install (`npm i -g @adlc/cli`), not a repo dependency. ADLC's gates are
+     suspended; this one tool is still useful as a mutation runner.
    - Repeat `--target` for each changed source file. Point it at source, not at JSON or docs.
    - It needs a clean tree and a green baseline. Run one at a time in a checkout.
    - The default `--max` is 20. If Total equals `--max`, the run is under-sampled. Raise `--max`.
@@ -66,3 +68,8 @@ The merge bar needs one review by a reviewer that did not build the diff.
 - Cap the findings per angle. Run no separate verify stage. The fixer verifies while fixing.
 - A hazard that recurs earns a lens in `.claude/agents/`. Delete a lens whose hazard is now
   impossible.
+
+## Standing checks
+
+- A diff that adds a periodic writer owes a quiet-cycle test. Check that it exists and can fail.
+- A diff that touches erasure states what can now be deleted. Check that sentence against the code.

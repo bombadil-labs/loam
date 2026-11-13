@@ -5,7 +5,7 @@ also just tighten it up". The pull request carries the mechanics.*
 
 ## Sizes
 
-- `CLAUDE.md` fell from 49,625 bytes to 6796 bytes.
+- `CLAUDE.md` fell from 49,625 bytes to about 7,400 bytes.
 - Every session and every subagent loads `CLAUDE.md`. The cut saves those bytes on every run.
 - Three project skills hold the procedures. A skill loads only when its task starts.
 - `docs/process/adlc.md` holds the suspended ADLC process.

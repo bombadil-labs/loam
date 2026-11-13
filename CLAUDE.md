@@ -32,10 +32,13 @@ Read these first:
 - A stable npm release of Loam or rhizomatic.
 - A change to what the system promises, outside the refactor and the store arc.
 - Hermetic: ask Myk before you depend on it.
+- For these, get Myk's word in chat. Do not infer it, however obvious it looks.
 
 ## The bar
 
 - `npm run check` is the local bar. Capture its exit code. Do not trust a grep of its output.
+- Trust the check over your sense that the work is done.
+- A check that you have never seen red has proven nothing. Break the code once and watch it fail.
 - CI runs `npm run check` on ubuntu and windows. Green CI is the merge bar.
 - Main requires both CI checks. Confirm the run conclusion is success before every merge.
 - A merge also needs a review posted on the PR by a fresh-context reviewer.
@@ -57,6 +60,8 @@ Erasure keeps its full provable guarantee (Myk, 2026-07-25). Do not reopen that 
   where it used to claim, fail closed where it used to assume, or name a gap it cannot close.
 - A change that widens what gets purged is Myk's merge, every time. Examples: a new tier in the
   sweep, a bigger condemned set, a wider fan-out.
+- The test: could this change remove a delta that would have survived before? Then it widens.
+- No such change is obviously fine. A wrong purge cannot be undone.
 - That PR states in one line what can now be deleted that could not be deleted before.
 - Every erasure test is two-sided. The target is gone, and a named live bystander survives.
 - Never erase data that you did not create in your own temp dir (`mkdtempSync`).
@@ -72,7 +77,8 @@ Erasure keeps its full provable guarantee (Myk, 2026-07-25). Do not reopen that 
 - If a missing comment causes a real defect, record it in the journal. Then propose a rule change.
 - Assert at both levels: the deltas in the store, and what a View or an endpoint answers.
 - A flaky test is fixed now. It outranks the task in hand. The `write-a-rail` skill has the method.
-- A pulse is not a fact (SPEC §49.1). A periodic writer writes nothing on a no-op cycle.
+- A pulse is not a fact (SPEC §49.1). A periodic writer supersedes one standing record in place,
+  or it writes nothing on a no-op cycle.
 - Each periodic writer owes a quiet-cycle test. `test/federation/pulse-law-audit.test.ts` is the
   shape.
 - Use the plain words in `refactor/GLOSSARY.md`. Fix the words in every file you touch.
@@ -85,8 +91,9 @@ Erasure keeps its full provable guarantee (Myk, 2026-07-25). Do not reopen that 
 
 ## Writing
 
-- Text for Myk uses STE style (ASD-STE100). This covers chat, PR bodies, commit messages and
-  journal entries.
+- Text for Myk uses STE style (ASD-STE100). This covers chat, open questions, PR bodies, commit
+  messages, journal entries and the board.
+- Technical names (delta, schema, rail, door, operator) are permitted as domain terms.
 - Write one instruction per sentence. Use 20 words or fewer. Use active voice and simple tenses.
 - Use no metaphor. Give each word one meaning. Prefer a list to a paragraph.
 - A PR body has this shape: one sentence of what it does; WHAT CHANGED as a list; WHY, one reason
