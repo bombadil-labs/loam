@@ -11,12 +11,13 @@
 // explicit grant, never a default.
 
 import { seedSigner } from "./signer.js";
-import type { Claims, Reactor } from "@bombadil/rhizomatic";
+import type { Claims } from "@bombadil/rhizomatic";
 import type { Gateway, RequestContext } from "./gateway.js";
 import { lensOf, type LensName } from "./registration.js";
 import { lawfulDeltasAt } from "./lawful.js";
 import { negatedAt } from "./negation.js";
 import { withStamp } from "./stamp.js";
+import type { Ground } from "./ground.js";
 
 export const PUBLIC_ENTITY = "loam:public";
 export const CTX_PUBLIC = "loam.public";
@@ -79,7 +80,7 @@ export function publicDefect(claims: Claims): string | undefined {
 // selects for public law): the set is the union of each one's declarations, each read under that
 // author's own strikes.
 export function readPublicSchemas(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   operator?: string | readonly string[],
 ): ReadonlySet<string> {

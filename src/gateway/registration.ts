@@ -30,7 +30,7 @@ import {
 import { negatedAt } from "./negation.js";
 import { interpretBindingPolicy, readBindingPolicy } from "./binding-policy.js";
 import { stamped, withStamp, type Stamp } from "./stamp.js";
-import { lawfulHistory, lawfulSnapshot } from "./lawful.js";
+import { lawfulHistory, lawfulScopeAt } from "./lawful.js";
 
 export { lawfulNegated } from "./negation.js";
 
@@ -1159,7 +1159,6 @@ export function readRegistrations(
   boundary?: Boundary,
   alsoStruckBy?: string,
 ): Registration[] {
-  const lawful = lawfulSnapshot(reactor, now, operator);
   const groups = survivingCandidates(reactor, now, operator, undefined, boundary, alsoStruckBy);
   // Latest-wins narrows to latest-PER-LENS (§21.7): within one registration entity's group, each
   // lens name (the living `schema:<name>` pointer, in the bytes since slice 2prime) keeps its own
@@ -1211,8 +1210,13 @@ export function readRegistrations(
   const out: Registration[] = [];
   for (const cand of [...latest.values()].sort((a, b) => a.timestamp - b.timestamp)) {
     if (resolvedAway.has(cand.id)) continue;
+    // Each loader reads one entity and the negation chains of what is filed there, so each is
+    // handed that scope. Read outside the `try`: a ground that disagrees with its own index
+    // refuses, it does not read as an unbound registration.
+    const definition = lawfulScopeAt(reactor, now, cand.schemaEntity, operator);
+    const reading = lawfulScopeAt(reactor, now, cand.snapshotEntity, operator);
     try {
-      const hyperschema = loadHyperSchema(lawful, cand.schemaEntity, now);
+      const hyperschema = loadHyperSchema(definition, cand.schemaEntity, now);
       // NUL is the gateway's own alphabet (internal materialization names): a definition whose
       // name carries it — plantable only by hand, never through publishRegistration — binds
       // nothing rather than colliding with that namespace.
@@ -1225,7 +1229,7 @@ export function readRegistrations(
       // ITS snapshot keeps the live reading and the version door in lockstep — the snapshot of the
       // latest survivor IS the current reading, and it recedes exactly when its binding is withdrawn.
       // (The living entity remains a first-class, directly-loadable node; it just is not the read path.)
-      const schema = loadSchema(lawful, cand.snapshotEntity, now);
+      const schema = loadSchema(reading, cand.snapshotEntity, now);
       out.push({
         hyperschema,
         schema,
@@ -1269,23 +1273,24 @@ export function readRegistrationVersions(
   now: number,
   operator?: string,
 ): RegistrationVersion[] {
-  const lawful = lawfulSnapshot(reactor, now, operator);
   const out: RegistrationVersion[] = [];
   for (const group of survivingCandidates(reactor, now, operator).values()) {
     let n = 0;
     for (const cand of group) {
       let hyperschema: HyperSchema;
       let schema: Schema;
+      const definition = lawfulScopeAt(reactor, now, cand.schemaEntity, operator);
+      const reading = lawfulScopeAt(reactor, now, cand.snapshotEntity, operator);
       try {
         // The SCHEMA entity the candidate references, not the registration entity it files
         // under — the same resolution readRegistrations performs.
-        hyperschema = loadHyperSchema(lawful, cand.schemaEntity, now);
+        hyperschema = loadHyperSchema(definition, cand.schemaEntity, now);
         // NUL is the gateway's own alphabet (see readRegistrations) — it binds nothing.
         if (hyperschema.name.includes(String.fromCharCode(0))) continue;
         // A VERSION freezes against ITS OWN snapshot (SPEC §21/§17) — never the living entity — so
         // v1 keeps resolving an evolved field with its old reading long after the living Schema has
         // moved on. This IS §17's per-version freezing, now a named, content-addressed entity.
-        schema = loadSchema(lawful, cand.snapshotEntity, now);
+        schema = loadSchema(reading, cand.snapshotEntity, now);
       } catch {
         continue; // no surviving definition/snapshot: this candidate is unbound, not fatal
       }
@@ -1333,17 +1338,17 @@ export function readWithdrawnRegistrations(
   now: number,
   operator?: string,
 ): WithdrawnRegistration[] {
-  const lawful = lawfulSnapshot(reactor, now, operator);
   const withdrawn: Candidate[] = [];
   survivingCandidates(reactor, now, operator, withdrawn);
   const out: WithdrawnRegistration[] = [];
   for (const cand of withdrawn) {
+    const definition = lawfulScopeAt(reactor, now, cand.schemaEntity, operator);
     try {
       // The `loadHyperSchema` call is the loadability guard only — "nothing nameable remains" if the
       // definition is gone. The NAME comes from `lensNameOf`, the lens the door will compare, never
       // from the hyperschema (the program). This is the same reader the sibling latest-per-lens and
       // version readers use above.
-      loadHyperSchema(lawful, cand.schemaEntity, now);
+      loadHyperSchema(definition, cand.schemaEntity, now);
       out.push({ deltaId: cand.id, lensName: lensNameOf(cand) });
     } catch {
       // its definition is gone too: nothing nameable remains to say "withdrawn" about

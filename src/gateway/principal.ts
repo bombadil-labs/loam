@@ -9,7 +9,9 @@ import {
   type Reactor,
   type Suppression,
 } from "@bombadil/rhizomatic";
+import { declarationsOf } from "./ground-declarations.js";
 import { recoveredFrom, userGroundOf, usersGovernor } from "./user-root.js";
+import type { Ground } from "./ground.js";
 
 /**
  * A Loam principal: the root key it is pinned to. A user's root is their own key (README ruling
@@ -79,7 +81,7 @@ const readOptions = (now: number, scope: string, operator: string | undefined) =
   }) as const;
 
 // Is `id` a delegation that says it cannot be passed on? Its bytes are held: the path came from them.
-const sealed = (reactor: Reactor, id: string): boolean =>
+const sealed = (reactor: Ground, id: string): boolean =>
   reactor
     .get(id)
     ?.claims.pointers.some(
@@ -194,18 +196,17 @@ export function bindingHeld(
 
 // The scope a ground's write door asks delegations about. Only a ground that declares one honors a
 // delegate at all: an inbox pool declares its own name, and the root store declares none, so a
-// delegation record copied anywhere else grants nothing. Keyed by reactor because every road into a
-// ground reaches it through its reactor; a gateway that replaces its reactor declares again.
-const declaredScopes = new WeakMap<Reactor, string>();
+// delegation record copied anywhere else grants nothing. Found through the reactor, because every
+// road into a ground reaches it through its reactor.
 
 /** Declare `scope` as the one scope `reactor`'s ground honors delegations for. */
 export function declarePrincipalScope(reactor: Reactor, scope: string): void {
-  declaredScopes.set(reactor, scope);
+  declarationsOf(reactor).principalScope = scope;
 }
 
 /** The scope `reactor`'s ground honors delegations for, or undefined: it honors none. */
 export function principalScopeOf(reactor: Reactor): string | undefined {
-  return declaredScopes.get(reactor);
+  return declarationsOf(reactor).principalScope;
 }
 
 const prim = (role: string, value: string | boolean) =>
@@ -261,7 +262,7 @@ export function standingDelegationIds(
  * "standing" otherwise. A label reads the record only; it does not say its signer could delegate.
  */
 export function delegationStatesFor(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   roots: Iterable<string>,
   key: string,
@@ -304,7 +305,7 @@ export function standingDelegationIdsFor(
  * `delegable: false`, nothing else. A loose or universal-scope row makes no key the root's.
  */
 export function delegatesEverOf(
-  reactor: Reactor,
+  reactor: Ground,
   roots: Iterable<string>,
   scope: string,
 ): ReadonlySet<string> {
@@ -363,7 +364,7 @@ export function delegationRootsTo(reactor: Reactor, key: string): string[] {
  * that holds a grant here, so the grant subjects are the roots worth asking about.
  */
 export function delegationRecordsFor(
-  reactor: Reactor,
+  reactor: Ground,
   roots: Iterable<string>,
   key: string,
 ): Delta[] {

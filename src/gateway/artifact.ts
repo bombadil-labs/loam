@@ -28,7 +28,7 @@
 // before mounting, which is a new disclosure decision and not this door's.
 
 import { seedSigner } from "./signer.js";
-import type { Claims, Reactor } from "@bombadil/rhizomatic";
+import type { Claims } from "@bombadil/rhizomatic";
 import { ARTIFACT_SPAWN_TIMEOUT_MS, artifactPage } from "./artifact-page.js";
 import { HOST_GLOBALS, scanHostReferences } from "./artifact-scan.js";
 import type { Gateway, RequestContext } from "./gateway.js";
@@ -39,6 +39,7 @@ import { negatedAt } from "./negation.js";
 import type { Registered } from "../surface/surface.js";
 import type { RendererBinding } from "./renderers.js";
 import { withStamp } from "./stamp.js";
+import type { Ground } from "./ground.js";
 
 export const ARTIFACT_ENTITY = "loam:artifact";
 export const CTX_ARTIFACT = "loam.artifact";
@@ -126,7 +127,7 @@ export function artifactDefect(claims: Claims): string | undefined {
 // The routes currently publishable as artifacts: the union of `route` pointers across ALL surviving
 // lawful declarations. Governed stores only — with no operator there is no lawful voice to publish with.
 export function readArtifactRoutes(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   operator?: string,
 ): ReadonlySet<string> {

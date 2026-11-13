@@ -21,6 +21,7 @@
 
 import type { Claims, Delta, Reactor } from "@bombadil/rhizomatic";
 import { RECOVERIES, userGroundOf, usersGovernor, verified } from "./user-root.js";
+import type { Ground } from "./ground.js";
 
 export const CTX_INCARNATION = "loam.incarnation";
 export const CTX_CUT = "loam.cut";
@@ -124,7 +125,7 @@ const inContext = (d: Delta, context: string): boolean =>
 // record is gone to every reader at once, though its bytes wait for the purge. `erased` is this
 // store's refused set (erase.ts `refusedIds`), passed in because erase.ts imports this module.
 function held(
-  reactor: Reactor,
+  reactor: Ground,
   operator: string,
   context: string,
   erased: ReadonlySet<string>,
@@ -179,7 +180,7 @@ export function incarnationId(
 
 /** The outcomes held here for `cut`, as written (none, one, or contradictory). */
 export function outcomesOf(
-  reactor: Reactor,
+  reactor: Ground,
   operator: string,
   cut: string,
   erased: ReadonlySet<string>,
@@ -433,7 +434,7 @@ export const isCutManifest = (d: Delta): boolean => inContext(d, CTX_CUT_MANIFES
  * covers every store qualifies, so an earlier, narrower manifest cannot block a later, complete one.
  */
 export function manifestsFor(
-  reactor: Reactor,
+  reactor: Ground,
   operator: string,
   record: Delta,
   erased: ReadonlySet<string>,
@@ -449,7 +450,7 @@ export function manifestsFor(
  * cut that arrives after it. Its record comes in a later append.
  */
 export function manifestDefect(
-  reactor: Reactor,
+  reactor: Ground,
   operator: string | undefined,
   batch: readonly Delta[],
   heldElsewhere: (id: string) => boolean,

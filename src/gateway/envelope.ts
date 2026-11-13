@@ -46,11 +46,12 @@
 // answer, and it is the timeout's), and §22 resolvers, which are not confined at all (`esm.ts`).
 
 import type { Peer } from "./peer.js";
-import type { Claims, Reactor } from "@bombadil/rhizomatic";
+import type { Claims } from "@bombadil/rhizomatic";
 import type { Gateway } from "./gateway.js";
 import { lawfulDeltasAt } from "./lawful.js";
 import { negatedAt } from "./negation.js";
 import type { EnvelopeSize } from "./leeway.js";
+import type { Ground } from "./ground.js";
 
 export const ENVELOPE_ENTITY = "loam:envelope";
 export const CTX_ENVELOPE = "loam.envelope";
@@ -155,7 +156,7 @@ export function envelopeDefect(claims: Claims): string | undefined {
 // including its lawful-voice discipline: in a governed store a federated stranger cannot meter
 // someone else's pool, nor widen their own.
 export function readEnvelopePolicy(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   operator?: string,
 ): ReadonlyMap<string, Partial<QuarantineEnvelope>> {
@@ -219,7 +220,7 @@ export function readEnvelopePolicy(
 // that names only the clock cannot silently reset the wildcard's slot count to the built-in default —
 // the tightening an operator writes must not widen something else behind their back.
 export function resolveEnvelope(
-  reactor: Reactor,
+  reactor: Ground,
   now: number,
   operator: string | undefined,
   pool?: string,

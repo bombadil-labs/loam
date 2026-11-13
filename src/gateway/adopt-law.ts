@@ -74,7 +74,7 @@ import {
   type ResolverSpecs,
   type ResolverSpec,
 } from "./registration.js";
-import { lawfulHistory, lawfulSnapshot } from "./lawful.js";
+import { lawfulHistory, lawfulScopeAt, lawfulSnapshot } from "./lawful.js";
 import { negatedAt } from "./negation.js";
 import { CTX_RENDERER, publishRendererImpl } from "./renderers.js";
 import {
@@ -873,12 +873,9 @@ function entityCaptureRefusal(gw: Gateway, ex: SchemaExport): string | undefined
 // mistaken for an incumbent (that would refuse honest blessings on a store that merely holds the
 // module's bytes).
 function boundHyperschemaAt(gw: Gateway, entity: string): HyperSchema | undefined {
+  const definition = lawfulScopeAt(gw.reactor, gw.validityNow(), entity, gw.operatorAuthor);
   try {
-    return loadHyperSchema(
-      lawfulSnapshot(gw.reactor, gw.validityNow(), gw.operatorAuthor),
-      entity,
-      gw.validityNow(),
-    );
+    return loadHyperSchema(definition, entity, gw.validityNow());
   } catch {
     return undefined;
   }
