@@ -3,6 +3,20 @@
 **Status:** analysis only. No source file changed. Written 2026-11-09 against Loam `main` at
 `6cce5a25`.
 
+**Base commit.** Every line number and count in this document refers to commit `6cce5a25`. Main
+has moved since. Section "Changed on main since" lists what moved.
+
+## Changed on main since
+
+These changes landed after `6cce5a25`. The tables below still show the `6cce5a25` state.
+
+- `ingest.ts:610` `deadSet` now reads the target index at `ERASE_ENTITY` (#695).
+- `local-channel-events.ts` `heldAt` now reads the target index (#695).
+- Caches C1 and C6 now key on the ground revision (#696). Plan item A4 is done.
+- Registries K1 to K4 are now one `WeakMap<Reactor, GroundDeclarations>` (#696).
+- The `Ground` read type exists, in `src/gateway/ground.ts` (#697).
+- The callers of the two `lawful.ts` helpers fell from 22 to 16 (#699).
+
 **Contract read:** rhizomatic `spec/18-store.PROPOSAL.md` (SPEC-18), all sections. Slice 5 of that
 proposal moves Loam onto the store. This document plans that move.
 
@@ -13,7 +27,8 @@ INFERRED means the class comes from the cited line and its function name only.
 
 - One site is one source line that calls the reactor or a `StoreBackend`.
 - The search covered `src/` only. Comment lines are not sites.
-- Each site has exactly one label.
+- Each site has exactly one label. One line carries two: `runner.ts:271` is a write site and a
+  view site, so it counts as two sites.
 
 The six classes from the brief cover reads:
 
@@ -76,14 +91,14 @@ them as INFERRED to within one or two.
 | `heldAmong` | 3 (`custody.ts:20`; `container.ts:701,974`) | 2 | No direct equivalent. Gap G5. |
 | `holdsAny` | 4 (`custody.ts:45`; `container.ts:617,1012`; `cli.ts:1184`) | 3 | No direct equivalent. Gap G5. |
 | `ids` | 2 (`custody.ts:35`; `gateway.ts:733`) | 2 | `Exporter.ids()`. |
-| `revision` | 4 (`gateway.ts:721,824,1697,1720`) | 0 | `Snapshot.revision`. |
+| `revision` | 5 (`gateway.ts:721,824,1697,1720`; `portable-door.ts:265` reads it as a property) | 0 | `Snapshot.revision`. |
 | `close` | 6 (`gateway.ts:2557`; `erase.ts:779`; `channel.ts:1273`; `cli.ts:1316,2392,2556`) | 1 | `Store.close`. |
 
 Side interfaces a driver may also implement (VERIFIED):
 
 | Interface | Where | Methods | Calls outside `src/store` |
 |---|---|---|---|
-| `JournalBackend` | `src/store/peer-image.ts:11-25` | `journalStore`, `journalPeers`, `journalRowIds`, `holdsAnyRow`, `discardJournals`, `setAside`, `keepsJournals` | `journalStore` 3, `journalPeers` 2, `holdsAnyRow` 1, `discardJournals` 1 |
+| `JournalBackend` | `src/store/peer-image.ts:11-25` | `journalStore`, `journalPeers`, `journalRowIds`, `holdsAnyRow`, `discardJournals`, `setAside`, `keepsJournals` | `journalStore` 5 (`gateway.ts:705,716,841`; `container.ts:739`; `cli.ts:1194`), `journalPeers` 2, `holdsAnyRow` 1, `discardJournals` 1 |
 | `RepairableBackend` | `src/store/quarantine.ts:115-140` | `quarantine`, `discardRow`, `restoreQuarantined` | `quarantine` 11, `discardRow` 2 |
 | `HoldsPoolKeys` | `src/store/peer-image.ts:40-45` | `poolKeys` | 1 |
 
@@ -145,9 +160,12 @@ Side interfaces a driver may also implement (VERIFIED):
 | 164,518 | `membersOf` | indexed | `get` of the published membership term (`membershipAt`). (2 sites) | VERIFIED |
 | 617 | `poolGovernor` | purge | `holdsAny` asks "is this pool store empty" before a new pool key is recorded. See section 4 (E-probe). (1 sites) | VERIFIED |
 | 701-709 | `openSeparate` | purge | Attach-time sweep of the erased set from a pool store. See section 4. (4 sites) | VERIFIED |
+| 739 | `openSeparate` | dies | `journalStore()` opens the pool's journal. The journal becomes a store capability (§4.7.3). (1 sites) | VERIFIED |
 | 922 | `openSeparate` | **whole-set, serving** | `Container.members()` returns the whole pool. Same site class as line 123. (1 sites) | VERIFIED |
 | 957-958,990 | `discardBytes` | admin | Drop of a whole pool: enumerate every id. Becomes `Exporter.ids()`. (3 sites) | VERIFIED |
+| 960-961,991 | `discardBytes` | purge | Drop of a whole pool: `quarantine()` lists the pen, `discardRow` removes each row, then `quarantine()` again as the pen's verdict. See section 4.3 item 3. (3 sites) | VERIFIED |
 | 969-977,1012 | `discardBytes` | purge | Drop of a whole pool: purge, then byte verdict. See section 4. (4 sites) | VERIFIED |
+| 1003,1011 | `discardBytes` | purge | `holdsAnyRow()` refuses the drop while any row remains. `discardJournals()` then deletes the journals. See section 4.3 item 4. (2 sites) | VERIFIED |
 | 1177-1184 | `delegationStruckForGood` | scope | Anchors: the delegation delta's negators (two levels). (3 sites) | VERIFIED |
 | 1477-1506 | `revokeConnectionImpl` | indexed | `get` of ids in the inbox pool to read their author. (3 sites) | INFERRED |
 
@@ -193,14 +211,16 @@ Side interfaces a driver may also implement (VERIFIED):
 
 | Lines | Function | Class | After the move | Status |
 |---|---|---|---|---|
-| 564 | `unreadableStoreMessage` | write | `reactor.ingest` behind the door. Becomes `PeerStore.append`. (1 sites) | VERIFIED |
+| 564 | `ingestVia` (field initializer) | write | `reactor.ingest` behind the door. Becomes `PeerStore.append`. (1 sites) | VERIFIED |
 | 603 | `constructor` | local | Trial evaluation of the offered lens over an empty ground. Needs no store. (1 sites) | VERIFIED |
 | 626 | `attachPersistence` | feed | Raw subscription: write-through and `publicOpen` invalidation. The write-through dies; the invalidation follows the feed. (1 sites) | VERIFIED |
 | 634 | `attachPersistence` | write | Write-through `backend.append`. The store append is the write; this queue dies. (1 sites) | VERIFIED |
 | 642 | `attachPersistence` | indexed | `get` of the emitted id after a conflict catch-up. (1 sites) | VERIFIED |
 | 686-744 | `open` | dies | Boot replay: read every row, ingest every row, count rows outside the journal. (5 sites) | VERIFIED |
+| 752,758 | `open` | admin | `quarantine()` at open: count unreadable rows, and refuse an unreadable operator marker. Becomes the integrity-fault report (gap G6). (2 sites) | VERIFIED |
 | 781-799 | `open` | write | The incarnation marker at open. Becomes one `append`. (3 sites) | VERIFIED |
 | 824 | `durableCurrent` | feed | `durableCurrent`: compares the SQLite `data_version` to notice another writer. Becomes a revision compare. (1 sites) | VERIFIED |
+| 841 | `boot` | dies | `journalStore()` opens the host's journal. The journal becomes a store capability (§4.7.3). (1 sites) | VERIFIED |
 | 1576 | `probe` | purge | `probe({holds})`. See section 4. (1 sites) | VERIFIED |
 | 1691-1738 | `reseatGround` | dies | `reseatGround`: rebuild the reactor from the store. (8 sites) | VERIFIED |
 | 1887,1920,2051 | `advanceToNow` | view | `advanceTime` and `refreshAll` refresh memory views. (3 sites) | VERIFIED |
@@ -304,6 +324,7 @@ Side interfaces a driver may also implement (VERIFIED):
 |---|---|---|---|---|
 | 83-84 | `retired` | scope | Anchors: negators of a law id. (2 sites) | INFERRED |
 | 116-117 | `lawAt` | scope | Anchor: the law entity. (2 sites) | INFERRED |
+| 265 | `classifyPortableRead` | feed | `gw.backend.revision === undefined` asks whether the store can report other writers' commits. Every snapshot has a revision after the move, so the check dies. (1 sites) | VERIFIED |
 | 281 | `classifyPortableRead` | scope | Anchors: the root entity and every expanded child. Already `evalAnchored`. (1 sites) | VERIFIED |
 | 289 | `classifyPortableRead` | indexed | Batch `get` of scope members. The scope result already carries the bytes. (1 sites) | VERIFIED |
 
@@ -339,7 +360,8 @@ Side interfaces a driver may also implement (VERIFIED):
 | 163 | `evalPrimary` | **whole-set, serving** | Fallback for a program the anchor check cannot scope. Becomes a flagged full-surface read. (1 sites) | VERIFIED |
 | 279-280,799,841 | `gatherImpl` | view | Reads and subscribes to a maintained view. (4 sites) | VERIFIED |
 | 478-479 | `negatedInGround` | scope | Anchors: negators of one id. (2 sites) | VERIFIED |
-| 528,576 | `gatherForRetractionImpl` | **whole-set, serving** | A retraction gather evaluates over a whole pool. Becomes a scope read in the pool at the same root. (2 sites) | VERIFIED |
+| 528 | `gatherForRetractionImpl` | **whole-set, serving** | A retraction gather evaluates over a whole pool. Becomes a scope read in the pool at the same root. (1 sites) | VERIFIED |
+| 576 | `gatherPoolForRetraction` | **whole-set, serving** | The same gather over one inbox pool's own ground. Becomes a scope read in the pool at the same root. (1 sites) | VERIFIED |
 
 ### `src/gateway/receive-policy.ts`
 
@@ -383,6 +405,7 @@ Side interfaces a driver may also implement (VERIFIED):
 | Lines | Function | Class | After the move | Status |
 |---|---|---|---|---|
 | 84 | `reAdmit` | admin | Repair re-reads every row. (1 sites) | VERIFIED |
+| 85 | `reAdmit` | admin | `quarantine()` asks whether the key is still in the pen. Becomes the integrity-fault report (gap G6). (1 sites) | VERIFIED |
 
 ### `src/gateway/slate-law.ts`
 
@@ -497,11 +520,15 @@ Side interfaces a driver may also implement (VERIFIED):
 | 1184-1195 | `restoreIntoJournal` | admin | Restore from the archive into a new journal. (3 sites) | VERIFIED |
 | 1304 | `cmdServe` | admin | Reads both tiers whole before boot to find erased ids for `heal`. (1 sites) | VERIFIED |
 | 1316 | `cmdServe` | write | `mirror.close()`. (1 sites) | VERIFIED |
-| 2389,2440-2540 | `cmdStore` | admin | `loam store` and `loam repair` read every row to fill the quarantine pen (gap G6). (4 sites) | VERIFIED |
+| 1406 | `cmdServe` | admin | `quarantine()` counts set-aside rows for a startup warning (gap G6). (1 sites) | VERIFIED |
+| 2389,2440-2540 | `cmdStore`, `cmdRepair` | admin | `loam store` and `loam repair` read every row to fill the quarantine pen (gap G6). (4 sites) | VERIFIED |
+| 2390,2441,2491,2541 | `cmdStore`, `cmdRepair` | admin | `quarantine()` reads the pen after the full read fills it (gap G6). (4 sites) | VERIFIED |
+| 2499 | `cmdRepair` | purge | `discardRow(key)` removes one penned row's bytes. See section 4.3 item 3. (1 sites) | VERIFIED |
 | 2392,2556 | `cmdStore` | write | `backend.close()`. (2 sites) | VERIFIED |
 | 2985-2998 | `claimIdsBySurvival` | scope | Anchor: the entity the command names. (3 sites) | INFERRED |
 | 3088 | `penRecordsFor` | indexed | `get` of one pen record. (1 sites) | VERIFIED |
 | 3838-3873 | `groundGrants` | scope | Anchor: `STORE_ENTITY`. (3 sites) | INFERRED |
+| 4639 | `setAsideWarning` | admin | `quarantine()` on the host and each quarantine pool, for the set-aside warning (gap G6). (1 sites) | VERIFIED |
 | 4486 | `cmdClientRevoke` | **whole-set, serving** | `client revoke` scans every delta for a `subject` value. Becomes a value lookup (slice 6); a CLI command, not a door. (1 sites) | VERIFIED |
 | 5007,5311 | `heldWhere` | purge | Byte probes for the erase command. See section 4. (2 sites) | VERIFIED |
 | 5275 | `cmdErase` | indexed | `get` of the erase target. (1 sites) | VERIFIED |
@@ -521,6 +548,8 @@ Side interfaces a driver may also implement (VERIFIED):
 | Lines | Function | Class | After the move | Status |
 |---|---|---|---|---|
 | 139 | `readBindingDefinitions` | **whole-set, serving** | Runner attach scans every delta for binding definitions. Needs a context anchor (gap G1). (1 sites) | VERIFIED |
+| 271 | `Runner.attach` | write | `new DerivationHost(gateway.reactor)`: the gateway's ingest then routes through the host. Becomes `PeerStore.append` plus the drain. (1 sites) | VERIFIED |
+| 271 | `Runner.attach` | view | The same host drains derivations into maintained views. A memory cache until slice 6. (1 sites) | VERIFIED |
 
 ### `src/store/mirror.ts`
 
@@ -534,19 +563,24 @@ Side interfaces a driver may also implement (VERIFIED):
 Sites the pattern search missed, found by reading (VERIFIED): `user-root.ts:746,761,793,803` call
 `ground.get(` where `ground` is a `Reactor`. They are inside the `745-809` row above.
 
+A second reading pass added sites that call side interfaces or read a backend field (VERIFIED):
+`gateway.ts:752,758,841`; `container.ts:739,960,961,991,1003,1011`; `repair.ts:85`;
+`portable-door.ts:265`; `cli.ts:1406,2390,2441,2491,2499,2541,4639`; `runner.ts:271`. Each has its
+own row above, and the counts in section 2.1 include them.
+
 ## 2. Summary
 
 ### 2.1 Counts per class per directory
 
 | Directory | scope | indexed | feed | admin | whole | dies | write | purge | view | local | cache | Total |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `src/gateway` | 92 | 56 | 7 | 6 | 27 | 17 | 11 | 26 | 13 | 7 | 10 | 272 |
+| `src/gateway` | 92 | 56 | 8 | 9 | 27 | 19 | 11 | 31 | 13 | 7 | 10 | 283 |
 | `src/federation` | 5 | 10 | 1 | 0 | 13 | 0 | 1 | 1 | 0 | 0 | 1 | 32 |
 | `src/server` | 12 | 6 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 19 |
-| `src/cli` | 11 | 7 | 0 | 8 | 2 | 0 | 3 | 2 | 0 | 0 | 0 | 33 |
-| `src/runner` | 0 | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 1 |
+| `src/cli` | 11 | 7 | 0 | 14 | 2 | 0 | 3 | 3 | 0 | 0 | 0 | 40 |
+| `src/runner` | 0 | 0 | 0 | 0 | 1 | 0 | 1 | 0 | 1 | 0 | 0 | 3 |
 | `src/store` | 0 | 0 | 0 | 5 | 0 | 1 | 5 | 10 | 0 | 0 | 0 | 21 |
-| **Total** | 120 | 79 | 8 | 19 | 44 | 18 | 20 | 39 | 13 | 7 | 11 | 378 |
+| **Total** | 120 | 79 | 9 | 28 | 44 | 20 | 21 | 45 | 14 | 7 | 11 | 398 |
 
 Empty classes: none. `src/surface`, `src/client`, `src/browser` and `src/stock` hold no site.
 
@@ -558,7 +592,7 @@ Empty classes: none. `src/surface`, `src/client`, `src/browser` and `src/stock` 
 | H2 | `container.ts:123,922`; `read-contribution.ts:32` | A separate container's members are its whole pool. Every scoped query copies each pool whole. | Push the query's anchors into each pool: one `scope` call per pool. Needs a read that spans peers (gap G7). |
 | H3 | `lawful.ts:17,27-28` | `lawfulSnapshot` and `lawfulHistory` filter the whole set by author. 22 callers read registrations, the container table, renderers, translations, channels and adoptions from it. | Law is filed under a fixed context at many entities, so no entity anchor exists. Gap G1. |
 | H4 | `channel.ts:641,695,1092,1107,1185` | A sync and a blessing read a whole pool and freeze it into a version address. | A pool-level digest that equals the version address, or a member list kept by the feed. Gap G3. |
-| H5 | `tiers.ts:69`; `slate.ts:356`; `erase.ts:726-728,793` | The erase door lists every delta that cites the target, on every tier. It also walks a pool's inventory. | A reference index. Gap G2. The inventory walk becomes an `Exporter` use on a serving door, which SPEC-18 §3 rule 3 forbids. |
+| H5 | `tiers.ts:69`; `slate.ts:356`; `erase.ts:726-728` | The erase door lists every delta that cites the target, on every tier. It also walks a pool's inventory. | A reference index. Gap G2. The inventory walk becomes an `Exporter` use on a serving door, which SPEC-18 §3 rule 3 forbids. |
 | H6 | `budget.ts:181` | The append door counts every held delta by author. | A count per author kept at append. Gap G3. |
 | H7 | `reads.ts:163` | The fallback for a program the anchor check cannot scope. | A flagged full-surface read (§6.6). Already named as a gap in the code. |
 | H8 | `principal.ts:350`; `users.ts:401`; `user-recover.ts:215`; `cli.ts:4486` | Each walks the log for a value in one role (`key`, `subject`). | Value lookups (§4.7.1). They wait for slice 6. All four are rare operator acts. |
