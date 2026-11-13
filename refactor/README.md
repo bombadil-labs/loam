@@ -11,8 +11,11 @@ itself gets a new version of its algorithm. Rhizomatic becomes a monorepo of tie
 **Superseded on 2026-11-09 (Myk): Claude is the steward of both repos and builds in both.** The
 split below and the four threads are set aside until Myk restores them. A fresh-context reviewer
 that did not write the diff reviews each head. Where this file says "ask Sol", Claude does the
-rhizomatic work in a rhizomatic PR, under that repo's `AGENTS.md`. The active work is the store
-arc: `spec/18-store.PROPOSAL.md` in rhizomatic, six slices, all before step 7.
+rhizomatic work in a rhizomatic PR, under that repo's `AGENTS.md`. Claude prepares rhizomatic
+releases and prereleases. Publishing a release to npm stays Myk's button. Myk delegated open
+decisions for the store arc to Claude on 2026-11-12. Claude records each decision in the PR that
+makes it. The active work is the store arc: `spec/18-store.PROPOSAL.md` in rhizomatic, six
+slices, all before step 7.
 
 The earlier arrangement, kept for the record:
 
@@ -37,8 +40,8 @@ Each repo has one WORK thread and one REVIEW thread in T3 Code:
 The two work threads message each other only for REQUESTS (a prerelease, an API question) and to
 NOTIFY that something is ready. Neither reviews the other's PRs. The old joint thread "Coordinate
 Loam Refactor Workflow" is retired.
-- Before a Loam PR that needs new rhizomatic code, ask Sol for a prerelease. Loam pins it, so CI
-  resolves it.
+- Before a Loam PR that needs new rhizomatic code, Claude prepares a rhizomatic prerelease. Loam
+  pins it, so CI resolves it.
 - `bombadil-labs/kyber-ng` is an Elixir app. It will consume the Elixir witness later, as Loam
   consumes the TypeScript one.
 
@@ -121,11 +124,12 @@ Design:
 
 ## Delegated decisions (Myk, 2026-09-29, in chat)
 
-9. **Claude and Sol decide open refactor questions together.** Myk: "make the best choices you can
-   that maintain the spirit of the project, and we will do a big audit after this migration to
-   identify issues on a layer-by-layer basis ... just use your collective judgment." Each such
-   decision is recorded below, so the audit can find it. A change that widens what gets PURGED
-   still goes to Myk.
+9. **Claude decides open refactor questions.** On 2026-11-12 Myk delegated the open decisions for
+   the store arc to Claude. Claude records each decision in the PR that makes it. Myk's words of
+   2026-09-29: "make the best choices you can that maintain the spirit of the project, and we will
+   do a big audit after this migration to identify issues on a layer-by-layer basis ... just use
+   your collective judgment." Each such decision is recorded below, so the audit can find it.
+   A change that widens what gets PURGED still goes to Myk.
    - **`user:ada` is an entity id, read per peer, with no global uniqueness.** Myk corrected an
      earlier draft (random ids): claims are just claims, and meaning belongs to the governing
      account of the peer being read, not to a global operator. Reuse is that account's choice;
@@ -189,13 +193,15 @@ Design:
 
 ## The plan
 
-1. **Audit, in parallel and independently.** Sol builds a matrix of rhizomatic's promises against
-   Loam's behavior, with counterexamples, and a real dependency graph of rhizomatic's code. Claude
-   inventories every place Loam built around rhizomatic, and records Loam's decision functions.
-   Neither sees the other's results until both are done.
+1. **Audit, in parallel and independently.** One Claude agent builds a matrix of rhizomatic's
+   promises against Loam's behavior, with counterexamples, and a real dependency graph of
+   rhizomatic's code.
+   A second Claude agent, in a separate context, inventories every place Loam built around
+   rhizomatic, and records Loam's decision functions. Neither agent sees the other's results until
+   both are done.
 2. **Reconcile** into one plan: the tier graph, the vNext semantic changes and the landing order.
 3. **Myk approves** the plan. No library code is written before that.
-4. **Sol lands the package boundaries** with no change in behavior. Then the time fields, which
+4. **Claude lands the package boundaries** with no change in behavior. Then the time fields, which
    change canonical bytes at the base. Then one tier at a time: spec, vectors, independent
    witnesses, parity, prerelease.
 5. **Loam consumes each prerelease.** Loam's recordings are compared against it. A recording is

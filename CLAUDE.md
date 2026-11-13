@@ -4,14 +4,16 @@
 
 **Read `refactor/README.md` first when you work on the refactor.** The refactor builds a new
 version of rhizomatic as a monorepo of tier libraries, with Loam as its testbed. **Claude is the
-steward of both repos (Myk, 2026-11-09)** and builds in both; the earlier split, with Sol as
-rhizomatic's owner, is set aside until Myk restores it. For Loam's refactor
-work, Myk suspended ADLC: ignore its gates, the rail freeze, the gate ledger and the ticket
-ceremony. Frozen tests may change. The work is greenfield: wire changes ship no migration.
-`npm run check` stays the green bar. **The builder never reviews its own diff:** each reviewable
-head goes to a reviewer in a fresh context, from another model family when one is available.
-**The active work is the store arc** (`spec/18-store.PROPOSAL.md` in rhizomatic); Loam moves onto
-the store in its slice 5. Everything
+steward of both repos (Myk, 2026-11-09)** and builds in both. Sol no longer owns rhizomatic. Myk
+can restore that split. Claude changes rhizomatic only through a PR in that repo, under its
+`AGENTS.md`. **Myk delegated store-arc decisions and merges to Claude on 2026-11-12.** Claude
+records each decision in the PR that makes it. A change that widens what erasure purges is still
+Myk's merge. **The merge bar:** a merge needs green CI and a posted review from a fresh-context
+reviewer that did not build the diff. Use a reviewer from another model family when one is
+available. For Loam's refactor work, Myk suspended ADLC: ignore its gates, the rail freeze, the
+gate ledger and the ticket ceremony. Frozen tests may change. The work is greenfield: wire changes
+ship no migration. `npm run check` stays the green bar. **The active work is the store arc**
+(`spec/18-store.PROPOSAL.md` in rhizomatic); Loam moves onto the store in its slice 5. Everything
 below still describes how Loam worked before the refactor; where it conflicts with
 `refactor/README.md`, the README wins for refactor work.
 
@@ -50,9 +52,10 @@ next.
 
 ## Hard limits
 
-- **rhizomatic is normative** — a change to it is a PR in that repo, under its own `AGENTS.md`,
-  never a local patch or a Loam workaround. (Before 2026-11-09 Claude did not edit it at all.) Most of Loam's core lives there
-  already (SPEC §2); a genuine substrate need is a PR in that repo + a conversation with Myk.
+- **rhizomatic is normative.** Claude changes rhizomatic through a PR in that repo, under its
+  `AGENTS.md`. Never patch it locally, and never work around it in Loam. Record a change to what
+  rhizomatic PROMISES as a decision in the PR body. Most of Loam's core lives there already
+  (SPEC §2).
 
 ## ADLC is the lifecycle
 
@@ -476,9 +479,8 @@ motion — author the finer tickets and wire `edges` (prerequisite → dependent
 - **"Opens at the design stage" is a deliverable, not a mood** — drafted SPEC prose + answered
   design questions, then STOP for Myk in chat before any implementation code.
 - **"(Myk)" / "Myk's call" marks a decision that needs his sentence in chat** — do not resolve it by
-  inference, however obvious. Likewise anything **blocked on a rhizomatic conversation**: rhizomatic
-  is frozen — no Loam workaround, no forked vocabulary, no edits to that repo. Note the wall, route
-  around it.
+  inference, however obvious. A rhizomatic need is a PR in that repo, under its `AGENTS.md`.
+  Write no Loam workaround and no forked vocabulary.
 - **Reserved section numbers are load-bearing** — tickets and SPEC sections cite each other by them.
   Never renumber.
 - **"Lens" is prose, not a type** — it names the reading-side assembly (a Schema over a hyperschema,
