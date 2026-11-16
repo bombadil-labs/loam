@@ -29,6 +29,8 @@ interface DeltaRow {
   readonly sig: string | null;
 }
 
+const MARK_REBUILT = "INSERT OR REPLACE INTO meta (key, value) VALUES ('pages-rebuilt', '1')";
+
 const ADMISSION = { parseClaims, computeId, makeDelta, verifyDelta };
 
 export interface SqliteOptions {
@@ -56,26 +58,10 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
     this.db.pragma("busy_timeout = 5000");
     this.db.pragma("synchronous = NORMAL");
     this.db.pragma("secure_delete = ON");
-    const freelist = this.db.pragma("freelist_count", { simple: true }) as number;
-    if (freelist > 0) {
-      try {
-        this.db.exec("VACUUM");
-        const [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
-        if (status === undefined || status.busy !== 0) {
-          this.deferScrub(
-            "the rebuilt pages could not be folded into the main file — a concurrent reader held " +
-              "the write-ahead log past busy_timeout. The rebuild COMMITTED, so `freelist_count` " +
-              "now reads 0 and a reopen will NOT retry this on its own; the pages remain in the " +
-              "`-wal` sidecar until a later checkpoint folds them.",
-          );
-        }
-      } catch (err) {
-        this.deferScrub(
-          `the rebuild was refused — ${err instanceof Error ? err.message : String(err)}. ` +
-            "`freelist_count` stays positive, so the next uncontended open retries this scrub.",
-        );
-      }
-    }
+    const fresh =
+      this.db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'deltas'")
+        .get() === undefined;
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS deltas (
         seq    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -107,17 +93,32 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
         PRIMARY KEY (peer, n)
       );
     `);
+    if (fresh) this.db.prepare(MARK_REBUILT).run();
+    const legacy =
+      !fresh &&
+      this.db.prepare("SELECT 1 FROM meta WHERE key = 'pages-rebuilt'").get() === undefined;
+    const freelist = this.db.pragma("freelist_count", { simple: true }) as number;
+    if (legacy || freelist > 0) {
+      const fault = this.rebuildPages();
+      if (fault === undefined) {
+        if (legacy) this.db.prepare(MARK_REBUILT).run();
+      } else if (legacy || !fault.rebuilt) {
+        this.deferScrub(`${fault.why}. The next uncontended open retries this scrub.`);
+      } else {
+        this.deferScrub(
+          `${fault.why}. The rebuild COMMITTED, so \`freelist_count\` now reads 0 and a reopen will ` +
+            "NOT retry this on its own; the pages remain in the `-wal` sidecar until a later " +
+            "checkpoint folds them.",
+        );
+      }
+    }
     this.insertDelta = this.db.prepare(
       "INSERT OR IGNORE INTO deltas (id, claims, sig) VALUES (?, ?, ?)",
     );
     this.selectAll = this.db.prepare("SELECT id, claims, sig FROM deltas ORDER BY seq");
-    let owed = this.db
+    const owed = this.db
       .prepare("SELECT value FROM meta WHERE key = 'truncation-outstanding'")
       .get() as { value: string } | undefined;
-    if (owed !== undefined && !existsSync(`${filePath}-wal`)) {
-      this.db.prepare("DELETE FROM meta WHERE key = 'truncation-outstanding'").run();
-      owed = undefined;
-    }
     if (owed !== undefined) {
       try {
         const ids = JSON.parse(owed.value) as unknown;
@@ -141,12 +142,59 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
 
   private deferScrub(reason: string): void {
     this.deferredScrub =
-      `sqlite: the one-time freelist scrub of ${this.filePath} is DEFERRED — ${reason} The store ` +
-      `is open and correct, but plaintext from erasures older than \`secure_delete\` may still be ` +
-      `legible in the file (§11).`;
+      `sqlite: the open scrub of ${this.filePath} is DEFERRED — ${reason} The store is open and ` +
+      `correct, but plaintext from earlier erasures may still be legible in the file (§11).`;
     try {
       this.opts.onScrubDeferred?.(this.deferredScrub);
     } catch {}
+  }
+
+  private rebuildPages(): { readonly rebuilt: boolean; readonly why: string } | undefined {
+    try {
+      this.db.exec("VACUUM");
+    } catch (err) {
+      return {
+        rebuilt: false,
+        why: `the page rebuild (VACUUM) was refused: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+    let status: { busy: number } | undefined;
+    try {
+      [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
+    } catch (err) {
+      return {
+        rebuilt: true,
+        why: `the pages were rebuilt, but the write-ahead log could not be truncated: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+    if (status === undefined || status.busy !== 0) {
+      return {
+        rebuilt: true,
+        why:
+          "the pages were rebuilt, but the write-ahead log could not be truncated (a concurrent " +
+          "reader held it past busy_timeout)",
+      };
+    }
+    return undefined;
+  }
+
+  private owesRebuild(): boolean {
+    return (
+      this.truncationOwed.size > 0 ||
+      this.truncationUnknown ||
+      this.db.prepare("SELECT 1 FROM meta WHERE key = 'rebase-wal-outstanding'").get() !== undefined
+    );
+  }
+
+  private settle(): string | undefined {
+    const fault = this.rebuildPages();
+    if (fault !== undefined) return fault.why;
+    this.truncationOwed.clear();
+    this.truncationUnknown = false;
+    this.db
+      .prepare("DELETE FROM meta WHERE key IN ('truncation-outstanding', 'rebase-wal-outstanding')")
+      .run();
+    return undefined;
   }
 
   private assertOpen(): void {
@@ -224,13 +272,9 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
 
   async discardRow(key: string): Promise<boolean> {
     this.assertOpen();
-    const info = this.db.prepare("DELETE FROM deltas WHERE id = ?").run(key);
-    if (info.changes > 0) {
-      this.onDisk.delete(key);
-      this.lastQuarantine = this.lastQuarantine.filter((r) => r.key !== key);
-      return true;
-    }
-    return false;
+    const removed = await this.purge([key]);
+    this.lastQuarantine = this.lastQuarantine.filter((r) => r.key !== key);
+    return removed > 0;
   }
 
   private admissible(id: string, claimsJson: string, sig: string | null): boolean {
@@ -302,34 +346,28 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
           .run(JSON.stringify([...this.truncationOwed]));
       }
       this.db.exec("COMMIT");
-      const [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
-      const busy = status === undefined || status.busy !== 0;
-      if (!busy) {
-        this.truncationOwed.clear();
-        this.truncationUnknown = false;
-        this.db.prepare("DELETE FROM meta WHERE key = 'truncation-outstanding'").run();
-      } else {
-        const owedHere =
-          deletedNow.length > 0 ||
-          this.truncationUnknown ||
-          batch.some((id) => this.truncationOwed.has(id));
-        if (owedHere) {
-          throw new Error(
-            `purge: the write-ahead log could not be truncated (a concurrent reader held it past ` +
-              `busy_timeout). ${
-                removed > 0
-                  ? "The rows are deleted, but their plaintext may remain in the -wal sidecar"
-                  : "No rows matched here — the outstanding work is an EARLIER purge's truncation, " +
-                    "whose plaintext may remain in the -wal sidecar"
-              }, so this erasure is INCOMPLETE (§11). Retry once the other handle is idle.`,
-          );
-        }
-      }
     } catch (err) {
       try {
         this.db.exec("ROLLBACK");
       } catch {}
       throw err;
+    }
+    if (!this.owesRebuild()) return removed;
+    const owedHere =
+      deletedNow.length > 0 ||
+      this.truncationUnknown ||
+      batch.some((id) => this.truncationOwed.has(id));
+    const fault = this.settle();
+    if (fault !== undefined && owedHere) {
+      throw new Error(
+        `purge: ${fault}. ${
+          removed > 0
+            ? "The rows are deleted, but their plaintext may remain in the database file or its " +
+              "-wal sidecar"
+            : "No rows matched here. The outstanding work is an EARLIER purge's rebuild, and its " +
+              "plaintext may remain in the database file or its -wal sidecar"
+        }, so this erasure is INCOMPLETE (§11). Retry the purge once the other handle is idle.`,
+      );
     }
     return removed;
   }
@@ -416,9 +454,12 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
       } catch {}
       throw err;
     }
-    const [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
-    if (status === undefined || status.busy !== 0) {
-      throw new Error("the journal was discarded, but its pages may still sit in the -wal sidecar");
+    const fault = this.settle();
+    if (fault !== undefined) {
+      throw new Error(
+        `the journal was discarded, but its bytes may remain in the database file or its -wal ` +
+          `sidecar: ${fault}. Drop again once the other handle is idle.`,
+      );
     }
   }
 
@@ -459,10 +500,7 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
       ) {
         return;
       }
-      const [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
-      if (status !== undefined && status.busy === 0) {
-        this.db.prepare("DELETE FROM meta WHERE key = 'rebase-wal-outstanding'").run();
-      }
+      this.settle();
     };
     const rollback = (): void => {
       try {
@@ -724,14 +762,9 @@ export class SqliteBackend implements StoreBackend, RepairableBackend {
   }
 
   async close(): Promise<void> {
-    if ((this.truncationOwed.size > 0 || this.truncationUnknown) && this.db.open) {
+    if (this.db.open) {
       try {
-        const [status] = this.db.pragma("wal_checkpoint(TRUNCATE)") as Array<{ busy: number }>;
-        if (status !== undefined && status.busy === 0) {
-          this.truncationOwed.clear();
-          this.truncationUnknown = false;
-          this.db.prepare("DELETE FROM meta WHERE key = 'truncation-outstanding'").run();
-        }
+        if (this.owesRebuild()) this.settle();
       } catch {}
     }
     this.db.close();
