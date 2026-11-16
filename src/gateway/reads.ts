@@ -466,7 +466,7 @@ export function finishNodeImpl(
       hviewHex: hviewDigest(hview),
     },
     asOf,
-    readClosedIds(gw, now).size,
+    asOf === undefined ? 0 : readClosedIds(gw, now).size,
   );
 }
 
