@@ -27,7 +27,7 @@ its content.
   work — a 0 means "never held" as often as "refused to remove", and a mirror's aggregate hides
   one tier behind another — so the verdict is `StoreBackend.holds(id)`: does any tier still hold
   bytes filed under the id, including bytes a read is defined to skip (a crash-left `.tmp`, a
-  misfiled copy, a WAL page image owed a truncation)? `holds` sees at least everything `purge`
+  misfiled copy, a page owed a rebuild and a truncation)? `holds` sees at least everything `purge`
   reaches, per driver, and a tier that cannot be ASKED answers held — unprovable never reads as
   gone. The same verdict runs in every attached quarantine pool (§24.8), transitively; a retry is
   anchored on the surviving tombstone and bounded by outstanding work, so a partial erasure can
@@ -90,5 +90,12 @@ the only shape: a removal that would invalidate data someone else relies on can 
 closes propagation over a frozen set of ids so the impact list is true by enforcement rather than by
 observation, and CUT second. The promise §11 makes is therefore a promise about the cut, and the visible
 intermediate state between the two is deliberate — see §29.
+
+**AMENDED 2026-11-15 — the sqlite driver rebuilds its pages before it reports a purge.**
+`secure_delete` and a truncated log do not prove absence. A b-tree rebalance can leave an old copy
+of a cell in a live page. So a purge, a journal rebase and a journal discard run `VACUUM`, then
+truncate the log. The truncation debt also covers the rebuild. It clears only when both succeed.
+A refused rebuild reports the erasure INCOMPLETE. A store that erased before this change rebuilds
+once at its next open, and then carries the `pages-rebuilt` marker in `meta`.
 
 **Provenance.** Landed — [#34](https://github.com/bombadil-labs/loam/pull/34) (the erase seam), [#36](https://github.com/bombadil-labs/loam/pull/36) (the law slice: authority → manifest → tombstone → purge), [#38](https://github.com/bombadil-labs/loam/pull/38) (operator-only gating + hardening). Lives in `src/gateway/erase.ts` (`Gateway.erase`, `eraseDefect`) and the tombstone readers (`readErasures`, honored at both the append and federation doors). Amended by [#183](https://github.com/bombadil-labs/loam/pull/183) (T67): the completeness verdict is `StoreBackend.holds` — byte-presence on every tier and every pool, with the id-scoped durable WAL-truncation debt in the sqlite driver. Key decision (Myk, 2026-07-10): erasure is the instance operator's alone — a data subject asks, the operator executes — and the signed tombstone refuses the exact bytes' return by id, so the store remembers THAT it forgot without keeping what.

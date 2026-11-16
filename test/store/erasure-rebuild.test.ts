@@ -308,3 +308,38 @@ describe("§11 at rest — the journal tables rebuild their pages too", () => {
     await backend.close();
   });
 });
+
+describe("§11 at rest — a quarantine discard rebuilds its pages", () => {
+  it("R5: a discard whose rebuild is refused reports INCOMPLETE and still owes the row, and a retry leaves no byte of it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "loam-rebuild-pen-"));
+    const file = join(dir, "store.db");
+    const all = rows().slice(0, 40);
+    const store = new SqliteBackend(file);
+    await store.append(all);
+    const broken = all[1] as Delta;
+    const raw = new Database(file);
+    raw.prepare("UPDATE deltas SET claims = ? WHERE id = ?").run(`{ROW-1-broken`, broken.id);
+    raw.close();
+    await store.deltasSince(new Set());
+    expect((await store.quarantine()).map((r) => r.key)).toEqual([broken.id]);
+
+    const db = handleOf(store);
+    const real = db.exec.bind(db);
+    db.exec = (sql: string) => {
+      if (sql === "VACUUM") throw new Error("database or disk is full");
+      return real(sql);
+    };
+    const refused = await failureOf(store.discardRow(broken.id));
+    expect(refused.message).toMatch(/page rebuild \(VACUUM\) was refused.*INCOMPLETE/s);
+    expect(await store.holds(broken.id)).toBe(true);
+
+    db.exec = real;
+    expect(await store.purge([broken.id])).toBe(0);
+    expect(await store.holds(broken.id)).toBe(false);
+    expect(residue(dir, (i) => i !== 1)).toEqual([]);
+    expect((await store.deltasSince(new Set())).map(bytesOf)).toEqual(
+      all.filter((d) => d.id !== broken.id).map(bytesOf),
+    );
+    await store.close();
+  });
+});

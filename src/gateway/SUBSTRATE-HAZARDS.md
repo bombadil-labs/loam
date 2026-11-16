@@ -213,6 +213,26 @@ with two outcomes should answer which one it was.
 does it today over a stale adoption trail (T46), permanently refusing to re-establish provenance the
 operator withdrew, while reporting success. Two occurrences is why this is a hazard and not a bugfix.
 
+**At the bytes: `secure_delete` plus a truncate does not prove absence (2026-11-15).** The sqlite
+driver reported a purge complete on two facts. `secure_delete = ON` zeroes a deleted cell. A clean
+`wal_checkpoint(TRUNCATE)` empties the log. Both facts were true, and the report was still false.
+
+- SQLite moves cells between pages when it rebalances a b-tree.
+- The rebuild of a page can leave the old copy of a moved cell in the page's free space.
+- A later delete zeroes only the live copy. The old copy stays in the file.
+- A table keyed by a random text id, 8,000 rows: 59 fragments of purged rows stayed.
+- The driver, 6,000 deltas, 55% churn, then a purge: two purged rows stayed.
+- The journal, three peers, 6,000 frames, two rebases: two frames stayed.
+- The old tests used few rows. No page rebalanced, so they passed.
+
+The rule: a rebuild (`VACUUM`) and then a truncate prove absence. The debt clears only when both
+succeed. Test erasure at a scale that rebalances pages. `test/store/erasure-rebuild.test.ts` holds
+the rails.
+
+A known gap: on Windows, SQLite deletes the `VACUUM` temp file at close, not at creation. A power
+loss during a rebuild can leave that file in the temp directory, with live deltas in it. A later
+purge of those deltas does not reach it.
+
 ---
 
 ## H8. A delta store invites the full scan — notice it, and pick the affordance carefully
