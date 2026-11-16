@@ -367,6 +367,7 @@ describe("T37 — the indexed answer equals the scanned answer, through every mu
     const purged = sign(makeNegationClaims(OP, 1100, trust.id));
     const stub = withSubstrateNegation({
       negationsOf: (id: string) => (id === trust.id ? [purged.id] : []),
+      negators: (id: string) => (id === trust.id ? [purged.id] : []),
       get: (id: string) => (id === trust.id ? trust : undefined),
       snapshot: () => new Set([trust]),
       byTarget: () => [trust.id],
@@ -380,6 +381,7 @@ describe("T37 — the indexed answer equals the scanned answer, through every mu
     const trust = sign(trustClaims("closed", [], OP, 1000));
     const stub = withSubstrateNegation({
       negationsOf: () => [],
+      negators: () => [],
       get: () => undefined,
       snapshot: () => new Set([trust]),
       byTarget: () => [trust.id],
