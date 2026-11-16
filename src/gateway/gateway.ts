@@ -16,6 +16,9 @@ import {
   type Primitive,
   type Term,
   type DurableOrdinaryJournalStore,
+  type PeerStore,
+  type Revision,
+  type StoreRoundReport,
 } from "@bombadil/rhizomatic";
 import { graphql, type GraphQLSchema } from "graphql";
 import type { StoreBackend } from "../store/backend.js";
@@ -236,11 +239,13 @@ const WRITE_THROUGH_RETRIES = 8;
 
 export interface GatewayOptions {
   readonly portableReads?: boolean;
+  readonly storeReads?: { readonly peer: PeerStore };
   readonly onReadRoute?: (read: {
     readonly lens: string;
     readonly entity: string;
-    readonly route: "portable" | "native";
+    readonly route: "portable" | "native" | "store";
     readonly reason?: string;
+    readonly store?: { readonly revision: Revision; readonly rounds: readonly StoreRoundReport[] };
   }) => void;
 
   readonly peerStore?: DurableOrdinaryJournalStore;
@@ -446,6 +451,11 @@ export class Gateway {
   }
 
   static async open(backend: StoreBackend, options: GatewayOptions = {}): Promise<Gateway> {
+    if (options.portableReads === true && options.storeReads !== undefined)
+      throw new Error(
+        "storeReads and portableReads cannot both be set: the portable read path reads this " +
+          "gateway's reactor, and the store read path reads only the store",
+      );
     const seed = options.seed;
     const reactor = new Reactor();
     let peer: HostPeer | undefined;

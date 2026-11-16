@@ -900,3 +900,69 @@ reactor.
 - The installed rhizomatic in the main checkout is `0.11.0-next.6`. `package.json:75` pins
   `0.11.0-next.10`. `evalAnchored` and `subset` were not checked against the pinned typings.
 - Test and demo call sites were counted, not classified.
+
+## 9. The first trial
+
+Written 2026-11-16 on rhizomatic `0.11.0-next.11`. The option `GatewayOptions.storeReads` gives a
+gateway a peer handle of a rhizomatic store. With it, the GraphQL point query reads that store. The
+code is `src/gateway/store-door.ts`. The tests are `test/refactor/store-trial-point-query.test.ts`.
+
+### 9.1 What the trial proved
+
+- A point query answers the exact view from a SQLite store (`rhizomatic-store-sqlite/3`) over HTTP.
+- The gateway's reactor holds no data delta and no law delta of the trial.
+- One snapshot serves the data read and the law read. The path calls `peer.read()` once, then
+  `fetchScope` for the law and `readAnchored` for the data on that snapshot.
+- Erasure orders and their held targets come from the store. Loam's own `erasedFromReading` decides
+  what is hidden. No rule is copied.
+- A negation in the store removes its claim. The answer equals the native answer over the same
+  deltas.
+- A new fact in the store changes the next answer, and the revision rises.
+- A reopened store file answers the same.
+- A metered memory store counts 0 scans for the read. The path holds no `Exporter`.
+- A store fault fails the read with an error. The native path does not answer.
+
+### 9.2 What the trial did not prove
+
+- The schema surface still comes from the reactor: `register`, `gw.registry`, `gw.def`.
+- Channel, governed and bound-connection reads decline. So do as-of reads.
+- A store with any delta at `loam:slate` declines. The container table that slate law needs is
+  read by a whole-set scan today.
+- A store with a local-control erasure order declines. `cutErasureDefect` reads the whole arrival
+  log.
+- Writes still go to the reactor. Nothing fills the store but the test fixture.
+- The store does not check signatures at append. The law probe checks them at read. The data read
+  does not.
+- `snapshot-moved` fails the read. The path does not retry.
+
+### 9.3 Friction list: what rhizomatic 0.11.0-next.11 lacked or made hard
+
+1. No helper builds an `Admission`. A host invents the heads, the arrival sequence, the transfer,
+   the sender and `at`.
+2. A snapshot does not expose the peer's last arrival sequence. A host cannot compute the next one
+   after a purge. The fixture uses `count + i + 1`.
+3. `StoreReactor` takes a new snapshot for each `read` and each `fetch`. A read that needs data and
+   law at one revision cannot use it. Ask for a public entry that runs several reads on one
+   snapshot, with the retry rule.
+4. Without `StoreReactor`, the host loses the `snapshot-moved` retry and the revision range check.
+   `revisionInRange` is not exported.
+5. A SQLite snapshot holds no read transaction across calls. One append between the law fetch and
+   the data read fails the read with `snapshot-moved`.
+6. `fetchScope` follows `negates` pointers only. The targets of an `erases` pointer need rounds of
+   `snapshot.get`, one round for each step of the chain.
+7. `Id`, `Entity`, `Head` and `ArrivalSeq` are not exported from the package root.
+8. `ScopeSource` names its readers `targets` and `negators`. `Ground` and `Reactor` name them
+   `byTarget` and `negationsOf`. The negation readers are free functions over a source, not
+   methods.
+9. The Loam side: Loam's erasure law takes a `Reactor`, not a `Ground`. It uses `arrivalLog`,
+   `size` and declarations keyed by the reactor. An adapter to `Ground` cannot carry it. The trial
+   puts the fetched law into a throwaway `Reactor`.
+10. Append checks the id and the shape of a signature, not the signature. A host that fills a
+    store outside its write path gets no signature check.
+11. `readAnchored` refuses a store's malformed member as `StoreError` `invalid-request`, not as
+    `StoreFaultError`. Only `checkFresh` and a feed cursor raise `StoreFaultError`. A host cannot
+    tell its own bad request from a bad store answer by the class.
+12. `pushdown.excludeIds` is a full list on every round. A host with many erased ids sends all of
+    them each time.
+13. The SQLite store is a subpath export, `@bombadil/rhizomatic/store/sqlite`. Its import
+    registers the `sqlite` scheme as a side effect.

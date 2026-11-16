@@ -29,6 +29,7 @@ import {
 } from "./portable-read.js";
 import { channelLens, finishNodeImpl, resolvedNodeImpl } from "./reads.js";
 import { readClosedIds } from "./slate-law.js";
+import { readThroughStore } from "./store-door.js";
 import { lensOf } from "./registration.js";
 import type { Signer } from "./signer.js";
 
@@ -285,6 +286,9 @@ export async function readNodeImpl(
   binding?: ConnectionBinding,
 ): Promise<ResolvedNode> {
   const report = gw.options.onReadRoute;
+  const store = gw.options.storeReads;
+  if (store !== undefined)
+    return readThroughStore(gw, store.peer, name, entity, now, asOf, binding);
   if (gw.options.portableReads !== true) {
     report?.({ lens: name, entity, route: "native", reason: "portable-reads-off" });
     return resolvedNodeImpl(gw, name, entity, now, asOf, binding);
